@@ -37,6 +37,7 @@ import pytest
 
 from conftest import binary
 from mosaica import Viewer
+from mosaica._reports import Declared
 
 pytest.importorskip("pyarrow")
 pd = pytest.importorskip("pandas")
@@ -325,6 +326,9 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
                     eval(compile(ast.Expression(last.value), str(GETTING_STARTED), "eval"), namespace)  # noqa: S307
                 )
         places = pq.read_table(namespace["geonames"] / "points.parquet")
+        # Every column of the frame is declared, the coordinates as details.
+        (declared,) = [value for value in shown if isinstance(value, Declared)]
+        assert [row.name for row in declared.columns] == places.column_names
         counts = [value for value in shown if isinstance(value, int)]
         tables = [value for value in shown if isinstance(value, pd.DataFrame)]
 

@@ -151,7 +151,6 @@ def _(db, places):
     db.declare_view("world", projection="web_mercator")
     db.declare_columns(
         places,
-        skip=["lon", "lat"],
         category=["feature_class", "country", "admin1"],
         render=["feature_class"],
         index=["name", "feature_class", "admin1", "population"],
@@ -167,12 +166,12 @@ def _(mo):
     drawn with the projection web maps use. Without it, a view takes plain x and y
     coordinates, such as the output of UMAP or t-SNE, and draws them as they are.
 
-    `declare_columns` reads the data frame's column types, not its values, and declares one
-    column for each. We skip `lon` and `lat`, because the view reads those. We name
+    `declare_columns` reads the data frame's column types, not its values, and declares every
+    column. A column is a detail unless `render`, `index` or `category` names it. We name
     `feature_class`, `country` and `admin1` as categories. Each holds a short list of values
     repeated across many rows, and a category is what the map colours by and counts by. The
-    other string columns are declared as text, and `geonameid` and `population` as 64-bit
-    integers.
+    other string columns are declared as text, `geonameid` and `population` as 64-bit
+    integers, and `lon` and `lat` as 64-bit floats.
 
     Every declared column is stored, and shown when someone opens a place. A column can also be
     **rendered**: its value is sent with every point drawn, so the map can colour or size
