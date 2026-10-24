@@ -709,7 +709,7 @@ paths:
                       },
                       "views": [
                         {
-                          "display_name": "topics",
+                          "display_name": "arXiv topic map",
                           "group": null,
                           "id": "topics",
                           "key": null,
@@ -726,7 +726,7 @@ paths:
                           "world_aspect": null
                         },
                         {
-                          "display_name": "topics-wide",
+                          "display_name": "arXiv topic map, wide neighbourhoods",
                           "group": null,
                           "id": "topics-wide",
                           "key": null,
