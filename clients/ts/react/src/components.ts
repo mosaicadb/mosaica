@@ -1,9 +1,8 @@
 /**
- * Every `mosaica-*` element except `<mosaica-filter>` and `<mosaica-cluster-filter>` as a React
- * component with typed props and event handlers, made with `@lit/react`. `MosaicaMap` wraps
- * `<mosaica-map>`, and so on. A prop that names an element property is set as that property, so
- * an object such as `store` reaches the element under React 18, which sets a custom element's
- * props as attributes. Each element's events are handler props, such as `onPick` for
+ * Every `mosaica-*` element as a React component with typed props and event handlers, made with
+ * `@lit/react`. `MosaicaMap` wraps `<mosaica-map>`, and so on. A prop that names an element
+ * property is set as that property, so an object such as `store` reaches the element under React
+ * 18, which sets a custom element's props as attributes. Each element's events are handler props, such as `onPick` for
  * `mosaica-pick`. The element classes are exported as types with an `Element` suffix, such as
  * `MapElement`, for typing a ref. Each element's attributes, properties, events, slots and parts
  * are on its page in the Components reference, which each wrapper's type links to.
@@ -21,10 +20,12 @@ import {createComponent, type EventName} from '@lit/react';
 import * as React from 'react';
 import {
   MosaicaArtifactCard as ArtifactCardElement,
+  MosaicaClusterFilter as ClusterFilterElement,
   MosaicaColourEditor as ColourEditorElement,
   MosaicaCount as CountElement,
   MosaicaExplorer as ExplorerElement,
   MosaicaFieldCard as FieldCardElement,
+  MosaicaFilter as FilterElement,
   MosaicaFilterPanel as FilterPanelElement,
   MosaicaHierarchy as HierarchyElement,
   MosaicaItemCard as ItemCardElement,
@@ -150,6 +151,10 @@ export const MosaicaFilterPanel = wrap('mosaica-filter-panel', FilterPanelElemen
   onClusterColour: ev('mosaica-clustercolour'),
   onFold: ev('mosaica-fold')
 });
+/** `<mosaica-filter>` as a React component. Event prop: `onFilterChange` (`mosaica-filterchange`). */
+export const MosaicaFilter = wrap('mosaica-filter', FilterElement, {onFilterChange: ev('mosaica-filterchange')});
+/** `<mosaica-cluster-filter>` as a React component. Event prop: `onClauseChange` (`mosaica-clausechange`). */
+export const MosaicaClusterFilter = wrap('mosaica-cluster-filter', ClusterFilterElement, {onClauseChange: ev('mosaica-clausechange')});
 /** `<mosaica-selection>` as a React component. Event prop: `onSelectChange` (`mosaica-selectchange`). */
 export const MosaicaSelection = wrap('mosaica-selection', SelectionElement, {onSelectChange: ev('mosaica-selectchange')});
 /** `<mosaica-layer-picker>` as a React component. Event prop: `onLayerChange` (`mosaica-layerchange`). */
@@ -199,10 +204,12 @@ export const MosaicaHierarchy = wrap('mosaica-hierarchy', HierarchyElement, {onC
 
 export type {
   ArtifactCardElement,
+  ClusterFilterElement,
   ColourEditorElement,
   CountElement,
   ExplorerElement,
   FieldCardElement,
+  FilterElement,
   FilterPanelElement,
   HierarchyElement,
   ItemCardElement,

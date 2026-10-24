@@ -11,8 +11,10 @@ const entries = {
   '@mosaicajs/deck/internal': ['MarkSlab'],
   '@mosaicajs/components': ['MosaicaExplorer', 'MosaicaMap', 'MosaicaStore', 'storeContext', 'tokens', 'PARTS'],
   '@mosaicajs/components/count': ['MosaicaCount'],
+  '@mosaicajs/components/filter': ['MosaicaFilter'],
+  '@mosaicajs/components/cluster-filter': ['MosaicaClusterFilter'],
   '@mosaicajs/react': ['useMosaicaStore', 'useProjection'],
-  '@mosaicajs/react/components': ['MosaicaExplorer', 'MosaicaMap']
+  '@mosaicajs/react/components': ['MosaicaExplorer', 'MosaicaMap', 'MosaicaFilter', 'MosaicaClusterFilter']
 };
 
 let failed = 0;

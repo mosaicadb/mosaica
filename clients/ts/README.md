@@ -8,8 +8,8 @@ This directory holds the browser side of Mosaica: the client library, a deck.gl 
 |---|---|---|
 | `core/` | `@mosaicajs/client` | The headless store (`createStore`), the viewer and session client (`MosaicaClient`), the control-plane client (`Control`) and the bulk reads. No DOM. Depends on `apache-arrow` and `fzstd`. |
 | `deck/` | `@mosaicajs/deck` | `MosaicaLayer`, a deck.gl layer that draws a store, for a host with its own `Deck`. deck.gl and luma.gl are peer dependencies. |
-| `components/` | `@mosaicajs/components` | The `mosaica-*` custom elements, built with Lit, drawing through `@mosaicajs/deck`. A subpath for each element except `mosaica-filter` and `mosaica-cluster-filter`, the search boxes that other elements render, and a single-file bundle. |
-| `react/` | `@mosaicajs/react` | `useMosaicaStore` and `useProjection`. `@mosaicajs/react/components` wraps every element except `mosaica-filter` and `mosaica-cluster-filter` as a React component, behind optional peer dependencies, so the hooks alone pull in neither Lit nor deck.gl. |
+| `components/` | `@mosaicajs/components` | The `mosaica-*` custom elements, built with Lit, drawing through `@mosaicajs/deck`. A subpath for each element, and a single-file bundle. |
+| `react/` | `@mosaicajs/react` | `useMosaicaStore` and `useProjection`. `@mosaicajs/react/components` wraps every element as a React component, behind optional peer dependencies, so the hooks alone pull in neither Lit nor deck.gl. |
 | `viewer/` | `@mosaicajs/viewer` | The demo: `<mosaica-explorer>` with dataset and principal pickers and measurement panels. Private. |
 | `examples/` | | Four host pages, described below. |
 | `harness/` | | Checks the elements' behaviour in a browser against a running page. |
@@ -131,7 +131,7 @@ The plain-HTML example's app server mints the tokens for all four, so start it a
 
 The elements are custom elements, so any framework can render them. Frameworks differ in how they set a property whose value is an object, and in whether they need telling that a tag is not one of their own components.
 
-Importing `@mosaicajs/components` defines every element. A subpath such as `@mosaicajs/components/count` defines one, and the elements it renders. `mosaica-filter` and `mosaica-cluster-filter` have no subpath: the field card, filter panel, colour editor and explorer subpaths define them. The map, the explorer, the field card, the filter panel and the colour editor import `@mosaicajs/deck` and so pull in deck.gl; the other subpaths do not. An element rendered before its module has loaded is an unknown element until it upgrades, which shows as blank space. Defining an element needs the browser's `customElements`, so a server-rendered app imports the package on the client only.
+Importing `@mosaicajs/components` defines every element. A subpath such as `@mosaicajs/components/count` defines one, and the elements it renders. The map, the explorer, the field card, the filter panel and the colour editor import `@mosaicajs/deck` and so pull in deck.gl; the other subpaths do not. An element rendered before its module has loaded is an unknown element until it upgrades, which shows as blank space. Defining an element needs the browser's `customElements`, so a server-rendered app imports the package on the client only.
 
 Every element except `<mosaica-count>` takes its store from its `store` property, or else from the nearest `<mosaica-store>` or `<mosaica-explorer>` above it in the page. `<mosaica-map>`, `<mosaica-explorer>` and `<mosaica-store>` can also build their own from a `viewer-url` and a `token`, or an `authorise` function in place of the token. The component reference lists each element's attributes, properties and events.
 

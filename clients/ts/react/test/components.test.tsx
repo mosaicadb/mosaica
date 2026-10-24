@@ -2,8 +2,8 @@ import {act, createElement, createRef} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {formatCount} from '@mosaicajs/client';
-import {deep, fakeStore, settle, status} from '../../components/test/fake-store.js';
-import {MosaicaCount, MosaicaExplorer, MosaicaHierarchy, MosaicaItemCard, MosaicaKeyPicker, MosaicaStatus, MosaicaStore, MosaicaViewPicker, type CountElement, type ExplorerElement, type ItemCardElement, type StoreElement, type ViewPickerElement} from '../src/components.js';
+import {deep, fakeStore, meta, scalar, settle, status} from '../../components/test/fake-store.js';
+import {MosaicaCount, MosaicaExplorer, MosaicaFilter, MosaicaHierarchy, MosaicaItemCard, MosaicaKeyPicker, MosaicaStatus, MosaicaStore, MosaicaViewPicker, type CountElement, type ExplorerElement, type ItemCardElement, type StoreElement, type ViewPickerElement} from '../src/components.js';
 
 /**
  * The wrappers: an object prop lands as a property (never an attribute), an `on*` prop receives
@@ -145,6 +145,27 @@ describe('@mosaicajs/react/components', () => {
     await settle(host);
     (deep(host, '[part="row"] [part="name"]') as HTMLButtonElement).click();
     expect(seen).toEqual([{id: '9223372036854775808', verb: 'highlight', on: true}]);
+  });
+
+  it('MosaicaFilter edits its column through the store and hands the change to onFilterChange', async () => {
+    const store = fakeStore({
+      meta: meta({
+        declaredScalars: [scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']})],
+        filterOperands: [{column: 'archive', family: 'category', operands: ['eq', 'in']}]
+      }),
+      status: status({}),
+      filters: {draft: {filter: {archive: {family: 'category', keys: []}}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0}
+    });
+    const seen: string[] = [];
+    await act(async () => root.render(createElement(MosaicaFilter, {store, column: 'archive', onFilterChange: (e) => seen.push(String(e.detail.column))})));
+    await settle(host);
+    const entry = deep(host, '[part="entry"]') as HTMLInputElement;
+    entry.value = 'c';
+    entry.dispatchEvent(new Event('input'));
+    store.set('filters', {...store.get('filters'), suggestions: {archive: {q: 'c', verb: 'filter', values: [{code: 1, key: 'cs', title: 'CS', match: {field: 'key', start: 0, len: 1}}], more: false, total: null}}});
+    await settle(host);
+    (deep(host, '[part~="tick"]') as HTMLElement).click();
+    expect(seen).toEqual(['archive']);
   });
 
   it('an inline authorise arrow does not rebuild the element’s own store on a re-render', async () => {

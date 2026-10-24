@@ -1,9 +1,8 @@
 /**
  * The `mosaica-*` custom elements. Importing the root entry defines every element. A host that
- * wants one element imports its subpath, such as `@mosaicajs/components/count`.
- * `mosaica-filter` and `mosaica-cluster-filter` have no subpath; the elements that render them
- * define them. The map, the explorer, the field card, the filter panel and the colour editor
- * import `@mosaicajs/deck`, which depends on deck.gl; the other elements do not.
+ * wants one element imports its subpath, such as `@mosaicajs/components/count`. The map, the
+ * explorer, the field card, the filter panel and the colour editor import `@mosaicajs/deck`, which
+ * depends on deck.gl; the other elements do not.
  *
  * @module @mosaicajs/components
  */
@@ -13,6 +12,8 @@ import './status.js';
 import './item-card.js';
 import './field-card.js';
 import './filter-panel.js';
+import './filter.js';
+import './cluster-filter.js';
 import './selection.js';
 import './layer-picker.js';
 import './view-picker.js';
@@ -29,6 +30,8 @@ export {MosaicaStatus} from './status.js';
 export {MosaicaItemCard} from './item-card.js';
 export {MosaicaFieldCard} from './field-card.js';
 export {MosaicaFilterPanel} from './filter-panel.js';
+export {MosaicaFilter} from './filter.js';
+export {MosaicaClusterFilter} from './cluster-filter.js';
 export {MosaicaSelection} from './selection.js';
 export {MosaicaLayerPicker} from './layer-picker.js';
 export {MosaicaViewPicker} from './view-picker.js';
