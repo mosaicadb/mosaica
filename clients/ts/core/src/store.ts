@@ -267,12 +267,12 @@ export type StatusProjection = {
   /** Whether `status` is `retrying`. */
   retrying: boolean;
   /**
-   * Whether the server cannot be reached: a request failed to connect, a proxy in front of it
-   * answered `502` or `504`, or `authorise` failed with anything but a `MosaicaError` with a `4xx`
-   * status. While it is set the store asks `/v1/meta` again, waiting 1 s, then twice as long each
-   * time up to 30 s. At the first answer it clears, the store asks `authorise` for a new token
-   * where it was given one and holds the token it had before, and asks again for what is drawn. A
-   * store given a `client` does not watch its requests, and this stays `false`.
+   * Whether the server cannot be reached: a request failed to connect, or a proxy in front of it
+   * answered `502`. While it is set the store asks `/v1/meta` again, waiting 1 s, then twice as
+   * long each time up to 30 s, and an outage within a minute of the last one goes on waiting as
+   * long. Any answer clears it, and the store asks again for what is drawn with the token it holds.
+   * The store asks `authorise` for a new token only where the server answers `401` to one that had
+   * worked. A store given a `client` does not watch its requests, and this stays `false`.
    */
   unreachable: boolean;
 };
@@ -940,7 +940,7 @@ export function createStore(options: StoreOptions): Store {
    */
   let awaitingSwitchFrame = false;
 
-  const tokens = new TokenSupply(watchedSupplier(options.authorise), options.token, clock, (changed) => {
+  const tokens = new TokenSupply(options.authorise, options.token, clock, (changed) => {
     // A renewal keeps what is held. Until an answer under the new token confirms a key held, `admit`
     // does not trust an answer on a view that holds no key, and one ask goes out at once so the key
     // is seen without waiting for the camera. A store holding `meta` and no key yet has nothing to
@@ -960,14 +960,14 @@ export function createStore(options: StoreOptions): Store {
   /** The next ask of `/v1/meta` while the server cannot be reached, and how many have gone before it. */
   let probe: unknown = null;
   let probes = 0;
-  /** The token a request last succeeded with: a `401` on it means the session ended, not that it was refused from the start. */
+  /** When the last outage ended, by the store's clock. An outage soon after it waits on as the last one did. */
+  let recoveredAt = -Infinity;
+  /** The token a request last succeeded with. A `401` on it means its session ended. */
   let confirmedToken: string | null = null;
-  /** The token held when the server stopped answering; one supplied since is kept on the way back. */
-  let heldAtLoss: string | null = null;
 
   /**
-   * `fetch` for the client the store builds, reporting each request's outcome: whether the server
-   * answered, and a `401` on a token that had worked.
+   * `fetch` for the client the store builds, reporting each request's outcome: a request that
+   * could not reach the server, and the status of one that did.
    */
   function watched(base: typeof fetch | undefined): typeof fetch {
     const send = base ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
@@ -980,71 +980,59 @@ export function createStore(options: StoreOptions): Store {
         if (!init?.signal?.aborted && !(error instanceof DOMException && error.name === 'AbortError')) lost();
         throw error;
       }
-      if (response.status === 502 || response.status === 504) lost();
+      if (response.status === 502) lost();
       else answered(response.status, token);
       return response;
     };
   }
 
-  /**
-   * `authorise`, reporting a failure other than a Mosaica refusal (a `MosaicaError` with a `4xx`
-   * status) as the server not being reached: a host's token route fails while the server it asks
-   * is down.
-   */
-  function watchedSupplier(supplier: TokenSupplier | undefined): TokenSupplier | undefined {
-    if (!supplier || !ownsClient) return supplier;
-    return async () => {
-      try {
-        return await supplier();
-      } catch (error) {
-        if (!(error instanceof MosaicaError && error.status >= 400 && error.status < 500)) lost();
-        throw error;
-      }
-    };
-  }
-
-  /** A request could not reach the server: say so, and start asking again. */
+  /** A request could not reach the server: say so, and ask `/v1/meta` again after a wait. */
   function lost(): void {
     if (disposed) return;
     if (!unreachable) {
       unreachable = true;
-      probes = 0;
-      heldAtLoss = tokens.current;
+      if (clock.now() - recoveredAt > 2 * PROBE_MAX_MS) probes = 0;
       replaceProjection('status', {...projections.status, unreachable: true});
     }
     if (probe === null) probe = clock.after(Math.min(PROBE_FIRST_MS * 2 ** probes, PROBE_MAX_MS), askAgain);
   }
 
+  /**
+   * Ask `/v1/meta` while the server cannot be reached, or read it where the store never has. Any
+   * answer ends the outage; a failure to reach the server again has {@link lost} wait longer.
+   */
   function askAgain(): void {
     probe = null;
     probes += 1;
     if (disposed || !unreachable) return;
-    // The outcome reaches `lost` or `answered` through the watched fetch and supplier. A store that
-    // never read `meta` reads it now, asking for a token first where it has none.
-    if (meta === null) void ready().catch(() => {});
-    else void client.meta(tokens.current ?? '').catch(() => {});
+    const asked: Promise<unknown> = meta === null ? ready() : client.meta(tokens.current ?? '');
+    asked.then(recover, () => {
+      if (probe === null) recover();
+    });
+  }
+
+  /** The server answers again: say so, and ask again for what is drawn. */
+  function recover(): void {
+    if (disposed || !unreachable) return;
+    unreachable = false;
+    recoveredAt = clock.now();
+    if (probe !== null) clock.cancel(probe);
+    probe = null;
+    replaceProjection('status', {...projections.status, unreachable: false});
+    if (meta !== null) refresh();
   }
 
   /**
-   * The server answered `status` to a request made with `token`. The first answer after it could
-   * not be reached ends the outage; a `401` on a token that had worked ends the session. Either way
-   * a store with `authorise` asks it for a new token, and the store asks again for what is drawn.
+   * The server answered `status` to a request made with `token`. A `401` on a token that had
+   * worked ends its session, as a restart that keeps no sessions does: a store with `authorise`
+   * asks it for a new token, once per token that had worked, and asks again for what is drawn.
    */
   function answered(status: number, token: string | null): void {
-    if (disposed) return;
-    const ended = status === 401 && token !== null && token === confirmedToken && options.authorise !== undefined && options.token === undefined;
-    if (status >= 200 && status < 300 && token !== null && token === tokens.current) confirmedToken = token;
-    if (!unreachable && !ended) return;
-    if (unreachable) {
-      unreachable = false;
-      if (probe !== null) clock.cancel(probe);
-      probe = null;
-      replaceProjection('status', {...projections.status, unreachable: false});
-    }
-    if (options.authorise !== undefined && options.token === undefined && (ended || tokens.current === heldAtLoss)) {
-      confirmedToken = null;
-      tokens.forget();
-    }
+    if (disposed || token === null) return;
+    if (status >= 200 && status < 300 && token === tokens.current) confirmedToken = token;
+    if (status !== 401 || token !== confirmedToken || options.authorise === undefined || options.token !== undefined) return;
+    confirmedToken = null;
+    tokens.forget();
     if (meta === null) void ready().catch(() => {});
     else refresh();
   }

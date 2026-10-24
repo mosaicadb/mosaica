@@ -13,8 +13,8 @@ describe('a server that goes away and comes back', () => {
 
   /** A server whose sessions are the tokens it issued since it last started, and which can be stopped. */
   function server() {
-    const s = {up: true, sessions: new Set<string>(), issued: 0, asked: [] as string[]};
-    const fetch = (async (url: string, init?: RequestInit) => {
+    const s = {up: true, sessions: new Set<string>(), issued: 0, asked: [] as string[], slow: null as typeof globalThis.fetch | null};
+    const answer = (async (url: string, init?: RequestInit) => {
       if (!s.up) throw new TypeError('fetch failed');
       const route = new URL(url).pathname;
       s.asked.push(route);
@@ -24,12 +24,14 @@ describe('a server that goes away and comes back', () => {
       if (route === '/v1/viewport') return new Response(VIEWPORT.slice(), {headers: {etag: '"ck"', 'x-mosaica-identity-key': 'ik'}});
       return new Response('{}', {status: 404});
     }) as typeof globalThis.fetch;
+    // A test may put another fetch in front of the server's answers.
+    const fetch = ((url: string, init?: RequestInit) => (s.slow ? s.slow(url, init) : answer(url, init))) as typeof globalThis.fetch;
     const authorise = vi.fn(async () => {
       const token = `t${++s.issued}`;
       s.sessions.add(token);
       return {token, expiresAt: Date.now() / 1000 + 3600};
     });
-    return {s, fetch, authorise, restart: () => ((s.up = true), s.sessions.clear())};
+    return {s, fetch, answer, authorise, restart: () => ((s.up = true), s.sessions.clear())};
   }
 
   async function drawing() {
@@ -94,15 +96,11 @@ describe('a server that goes away and comes back', () => {
     store.dispose();
   });
 
-  it('a store made while the server is down, whose token route fails with it, reads meta once it is back', async () => {
+  it('a store made while the server is down reads meta once it is back, with the token it was given', async () => {
     const srv = server();
     srv.s.up = false;
-    const authorise = vi.fn(async () => {
-      if (!srv.s.up) throw new Error('token route answered 502');
-      return srv.authorise();
-    });
     const clock = fakeClock();
-    const store = createStore({viewerUrl: 'http://viewer', authorise, clientOptions: {sessionUrl: '', fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
+    const store = createStore({viewerUrl: 'http://viewer', authorise: srv.authorise, clientOptions: {sessionUrl: '', fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
     await clock.advance(10);
     await settle();
     expect(store.get('status').unreachable).toBe(true);
@@ -112,6 +110,59 @@ describe('a server that goes away and comes back', () => {
     await settle();
     expect(store.get('status').unreachable).toBe(false);
     expect(store.get('meta')).not.toBeNull();
+    expect(srv.authorise).toHaveBeenCalledTimes(1);
+    store.dispose();
+  });
+
+  it('a supplier that refuses is a refusal: asked once, and the server is not called unreachable', async () => {
+    const srv = server();
+    const authorise = vi.fn(async (): Promise<{token: string; expiresAt: number}> => {
+      throw new Error('principal "eve" is not known');
+    });
+    const clock = fakeClock();
+    const store = createStore({viewerUrl: 'http://viewer', authorise, clientOptions: {sessionUrl: '', fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
+    for (let i = 0; i < 120; i++) {
+      await clock.advance(1_000);
+      await settle();
+    }
+    expect(authorise).toHaveBeenCalledTimes(1);
+    expect(store.get('status').unreachable).toBe(false);
+    expect(store.get('status').status).toBe('refused');
+    store.dispose();
+  });
+
+  it('one route timing out at a proxy is not an outage, and costs no new session', async () => {
+    const {srv, clock, scheduler, store} = await drawing();
+    const fetch = srv.answer;
+    srv.s.asked.length = 0;
+    const slow = (async (url: string, init?: RequestInit) => (new URL(url).pathname === '/v1/viewport' ? new Response('gateway timeout', {status: 504}) : fetch(url, init))) as typeof globalThis.fetch;
+    // The store's client reads the fetch it was given, so the server's own is swapped.
+    srv.s.slow = slow;
+    store.setView(camera({xMin: 0, xMax: 1000, yMin: 0, yMax: 1000}, [0, 0, 250, 250], 400, 400));
+    for (let i = 0; i < 60; i++) {
+      await clock.advance(1_000);
+      scheduler.flush();
+      await settle();
+    }
+    expect(srv.authorise).toHaveBeenCalledTimes(1);
+    expect(store.get('status').unreachable).toBe(false);
+    expect(srv.s.asked.filter((r) => r === '/v1/viewport').length).toBeLessThan(5);
+    store.dispose();
+  });
+
+  it('a route a proxy cannot reach while others answer waits longer each time, and costs no new session', async () => {
+    const {srv, clock, scheduler, store} = await drawing();
+    const fetch = srv.answer;
+    srv.s.asked.length = 0;
+    srv.s.slow = (async (url: string, init?: RequestInit) => (new URL(url).pathname === '/v1/viewport' ? new Response('bad gateway', {status: 502}) : fetch(url, init))) as typeof globalThis.fetch;
+    store.setView(camera({xMin: 0, xMax: 1000, yMin: 0, yMax: 1000}, [0, 0, 250, 250], 400, 400));
+    for (let i = 0; i < 300; i++) {
+      await clock.advance(1_000);
+      scheduler.flush();
+      await settle();
+    }
+    expect(srv.authorise).toHaveBeenCalledTimes(1);
+    expect(srv.s.asked.filter((r) => r === '/v1/viewport').length).toBeLessThan(20);
     store.dispose();
   });
 });
