@@ -148,48 +148,84 @@ A cursor is sealed, so it cannot be read or forged. It works only for the read i
 
 ## Aggregate
 
-`POST /v1/aggregate` is Mosaica's analytics query. It summarises the items a viewer may see, without returning them: how many papers each archive or topic holds, how many were published each year, the range and mean of their citation counts, where on the map they are densest, and which archives are over-represented in a selection compared with everything.
+`POST /v1/aggregate` computes figures over a set of items without returning the items: counts by group, histograms, a summary of a number field, and density grids. It is the query behind charts, facet counts and breakdowns beside a map.
 
-A request names a set of items, as a filter, and one or more groupings, and gets back one Arrow table for each. Every figure is computed from the items the viewer may see, in the same way as the map's counts, so a chart beside the map agrees with the map's own counts.
+### The request
 
-The figures are counts, apart from a summary's smallest, largest and mean. Not built yet: sums, means or other statistics per group. Read the items in [bulk](#bulk-read) to compute those.
+| Field | Required | What it does |
+|---|---|---|
+| `view` | Yes | The view to count in. An item with no position in it is not counted |
+| `filters` | No | Which items to count, in the same [filter](#filters) syntax every query takes. Without it, the set is every item the viewer may see in the view |
+| `groupings` | Yes | A list of groupings. Each produces one table, in the same order |
+| `reference` | No | A second set to compare with, also a filter. `{}` means every item the viewer may see in the view |
+
+For example, this request counts the papers from 2020 onwards, breaks them down by archive, and compares each archive's share with its share of all papers:
+
+```json
+{
+  "view": "map",
+  "filters": {"year": {"range": {"gte": 2020}}},
+  "groupings": [
+    {},
+    {"by": {"field": "archive", "top": 10}}
+  ],
+  "reference": {}
+}
+```
+
+It returns two tables. The first has one row, the number of papers from 2020 onwards. The second has a row for each of the ten largest archives, with its count in the set, its count in the reference, and the lift.
 
 ### Groupings
 
-| Grouping | The table |
-|---|---|
-| None | One row: how many items are in the set |
-| By a category's values | One row per value |
-| By the artifacts of one level of a layer | One row per artifact, such as per topic |
-| By bins of a number or date | A histogram |
-| A summary of a number or date | One row over everything the viewer may see in the view, ignoring the filter: the count, how many have no value, the smallest, the largest and the mean |
-| By cells of the view | One row per non-empty cell, a density grid |
-| Values or artifacts, then cells | A density grid for each group |
+| Grouping | Written as | One row for each | Needs |
+|---|---|---|---|
+| Size | `{}` | the whole set | |
+| Category values | `{"by": {"field": "archive", "top": 10}}`, or `"values": ["cs", "math"]` in place of `top` | value | a category that is indexed or rendered, or has a derived vocabulary |
+| Annotations | `{"by": {"layer": "topics", "level": 1, "top": 10}}`, or `"artifacts": [...]` in place of `top` | artifact | a layer the viewer may see. `level` on a layer with several levels |
+| Histogram | `{"by": {"field": "year", "bins": 20}}` | bin | a number or date that is indexed or rendered |
+| Summary | `{"by": {"field": "citations", "summary": true}}` | (one row only) | a number or date that is indexed or rendered |
+| Density grid | `{"cells": {"depth": 8}}` | non-empty cell of the view | |
+| Grid per group | `{"by": {...}, "cells": {...}}` | group and cell | as for the `by` part. Not with a histogram or a summary |
 
-Each grouping lists the `top` values by count, or the values you name. Two extra rows make the counts add up: `rest`, the items in any other group, and `none`, the items in no group at all. An item can belong to several artifacts, so a layer's rows can add up to more than the set.
+### What comes back
 
-A category can be grouped if it is indexed or rendered. A number or date can be binned or summarised under the same condition.
+Each table is an Arrow table. Its columns depend on the grouping:
 
-### Comparing with a reference
+- `count`: the items of the set in the row's group or cell.
+- `group`, `key` and `title`, for values and annotations. `group` is `listed` for a value or artifact you asked for, `rest` for the items in any other, and `none` for the items in none at all, so a table's counts add up to the size of the set. An item can be in several artifacts, so a layer's counts can add up to more.
+- `lower` and `upper`, for a histogram: each bin's edges.
+- `cell`, for a density grid: the cell's position code. At depth 16 or less it is the map tile at that zoom.
+- `reference_count` and `lift`, with a reference: the row's count in the reference set, and its share of the set divided by its share of the reference. A lift above 1 means the group is more common in the set than in the reference.
 
-A request can name a second set, the reference. Each row then also carries the reference's count and the lift: the group's share of the set divided by its share of the reference. With `{}` as the reference, which means everything the viewer may see, the lift shows which archives or topics are over-represented in a selection.
+Each table also carries a head with the size of the set, `total`, the size of the reference, and how many groups there are in all before `top` keeps the largest.
+
+A summary has its own columns: `items`, every item the viewer may see in the view; `count`, those with a finite value; `none`, those with no value; and `min`, `max` and `mean`.
+
+!!! note "A summary ignores the filter"
+    A summary describes everything the viewer may see in the view, whatever `filters` and `reference` say, so it can sit beside a histogram as a fixed description of the field. Not built yet: a summary over a filtered set.
 
 ### Histograms
 
-Without a range, the bins' edges are readable values around the smallest and largest value the viewer may see: multiples of 1, 2, 2.5 or 5 times a power of ten for numbers, and whole seconds, minutes, hours, days, weeks, months or years for dates. The edges ignore the filter, so a histogram of the filtered set lines up with one of everything, and the edges stay put as filters change. A bin holds values from its lower edge up to, but not including, its upper edge. The last bin also holds its upper edge.
+Give `bins` alone, and Mosaica picks readable edges around the smallest and largest value the viewer may see: multiples of 1, 2, 2.5 or 5 times a power of ten for numbers, and whole seconds, minutes, hours, days, weeks, months or years for dates, with no more bins than you asked for. The edges ignore the filter, so a histogram of a filtered set lines up with one of everything. Give `range` as well, and the range is cut into exactly `bins` equal bins.
 
-A histogram can be computed from a sample, for speed on a large set. Ask for a sample size, and Mosaica counts a uniform sample of about that many items and scales each count up. The response says whether it did.
+A bin holds values from its lower edge up to, but not including, its upper edge. The last bin also holds its upper edge.
 
-### Topic trees
+On a large set, `sample` speeds a histogram up: Mosaica counts a uniform sample of about that many items and scales each count to the whole set. The table head says whether it did.
 
-For a `nested` or `dag` layer, a breakdown can ask for the same cut the map is drawing, with `cut` and the map's zoom, area and budget, so a chart beside the map lists the topics the map shows.
+### Annotation trees
+
+On a `nested` or `dag` layer, which the map draws as a cut through the tree, `top` needs `cut`: the zoom, area and budget the map's own [annotations](#annotations-by-tile) request uses. The table then lists the topics the map is showing, so a chart beside the map matches it.
 
 ### Density grids
 
-A cell at depth `d` divides the view into a grid of 2^d by 2^d cells. Up to depth 16 a cell is a map tile. A density grid can be limited to an area, and a request for more than `selection.max_aggregate_cells` cells is refused with the deepest depth that fits. The whole view fits at depth 10.
+At depth `d`, the view is divided into a grid of 2^d by 2^d cells, and each row counts the items in one cell. `area` limits the grid to part of the view. A request for more cells than `selection.max_aggregate_cells` allows is refused, with the deepest depth that fits. The whole view fits at depth 10.
+
+### Large results
+
+A table longer than a page continues through a cursor, as a [bulk read](#bulk-read) does. The Python and TypeScript clients and `mosaica aggregate` follow the cursor for you.
 
 !!! note "Not built yet"
-    A summary over a filtered set; histograms within cells; breakdowns of keyword fields and of integer fields by value; one grouping of a kind inside another of the same kind, such as cells within cells; and counts across views. Read the items in bulk and compute these yourself.
+    Sums, means or other statistics per group; a summary over a filtered set; histograms within cells; breakdowns of keyword fields, and of integer fields by value; a grouping of one kind inside another of the same kind, such as cells within cells; and counts across views. Read the items in bulk and compute these yourself.
 
 ## Not built yet
 
