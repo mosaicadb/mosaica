@@ -82,7 +82,7 @@ points before the rest of the answer has been computed.
 | Frame | Carries | How many |
 |---|---|---|
 | counts | visible, matched, served and highlighted counts for each tile that has anything visible; a tile the request named with nothing visible carries no row | exactly one, sent first |
-| density | a count for each of a tile's [finer cells](queries.md#viewport), where a request asked for them | one, only when asked for |
+| density | a count for each of a tile's [finer cells](queries.md#drawing-the-map), where a request asked for them | one, only when asked for |
 | points | a chunk of the matched points from one or more tiles; where the request names layers, each point carries the `mosaica_id` of its artifact in each, or a null | zero or more |
 | trailer | how many points were served in total, marking the response complete | exactly one, sent last |
 
@@ -125,7 +125,7 @@ stays held until delivery ends, whichever of the four exits reaches it first.*
 ## Bulk reads
 
 The bulk reads, `POST /v1/items` and `POST /v1/artifacts`
-([queries](queries.md#bulk-read)), run under an admission limit of their
+([queries](queries.md#reading-records)), run under an admission limit of their
 own, `serve.bulk_admission`, so a long read takes no slot from the viewport and item routes, and
 those routes take none from it. A read past the limit is refused at once with the 429
 and one-second interval above, and a limit of 0 refuses every bulk read. An admitted read holds its
@@ -179,7 +179,7 @@ flowchart TD
 ## The artifacts of each tile
 
 `POST /v1/artifacts/viewport` answers which artifacts lie in each tile
-([queries](queries.md#annotations-by-tile)), framed as a viewport response is. A frame for
+([queries](queries.md#annotations-on-the-map)), framed as a viewport response is. A frame for
 the `nested` and `dag` layers the request names comes first, where it holds a row. Then comes
 exactly one frame for each tile, in the order the request named its tiles or the order the server
 derives from a bounding box, and then a trailer giving how many rows and frames were sent. A tile
