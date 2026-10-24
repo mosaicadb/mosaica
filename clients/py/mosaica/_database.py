@@ -1787,7 +1787,7 @@ class Database:
         report = ChangeReport(op=op, requested=len(rows), ignored_columns=ignored)
         control = self.control
         for start, answer in C.changes(control, rows, op, control.limits(), strict):
-            _fold_change(report, answer, start)
+            _fold_change(report, answer, start, rows)
         if rows and not report.accepted and report.refusals:
             raise Refusal(str(report), report)
         return report
@@ -1832,7 +1832,7 @@ class Database:
         answer = C.leave(self.control, layer, key, rows, list(table), rank, level, view, strict)
         if answer.ok:
             report.refused = [
-                {"row": int(one["row"]), "reason": one["reason"]}
+                {"row": int(one["row"]), "item": rows[int(one["row"])], "reason": one["reason"]}
                 for one in answer.body.get("refused", [])
             ]
             report.accepted = len(rows) - len(report.refused)
@@ -2083,16 +2083,17 @@ def _reason_first(what: str, output: str, log: str) -> str:
     return f"{head}\nThe whole log follows.\n{log}"
 
 
-def _fold_change(report: ChangeReport, answer, start: int) -> None:
+def _fold_change(report: ChangeReport, answer, start: int, rows: list[dict]) -> None:
     """One page of changes onto the report: its applied count, its refused rows, each by its
-    position in what the call was given, and the columns it ignored, or the refusal of the whole
-    page."""
+    position in what the call was given and as it was given, and the columns it ignored, or the
+    refusal of the whole page."""
     if not answer.ok:
         report.refusals.append({"status": answer.status, "detail": answer.detail[:1000]})
         return
     report.accepted += int(answer.body.get("accepted", 0))
     report.refused += [
-        {"row": start + int(one["row"]), "reason": one["reason"]}
+        {"row": start + int(one["row"]), "item": rows[start + int(one["row"])],
+         "reason": one["reason"]}
         for one in answer.body.get("refused", [])
     ]
     C.add_ignored(report.ignored_columns, answer.body)

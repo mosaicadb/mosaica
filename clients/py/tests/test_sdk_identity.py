@@ -195,7 +195,7 @@ def test_a_remove_naming_nothing_is_refused_by_row_and_strict_refuses_the_whole_
     db = served(string_ids)
     report = db.remove({"paper": ["nobody", "p5"]})
     assert report.ok and report.accepted == 1, report
-    assert report.refused == [{"row": 0, "reason": "names_no_item"}]
+    assert report.refused == [{"row": 0, "item": {"paper": "nobody"}, "reason": "names_no_item"}]
     assert report.refused_by_reason == {"names_no_item": 1}
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 19
 
@@ -257,6 +257,23 @@ def test_one_mosaica_id_given_alone_names_one_item(served, corpus):
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 20
 
 
+def test_a_change_report_names_each_refused_row_and_is_not_ok_when_nothing_applied(
+    served, corpus
+):
+    """Every refused row is listed with the item as it was given, and a report whose rows were
+    all refused does not end `ok`; the request was accepted, so the call does not raise."""
+    db = served(string_ids)
+    held = set(db.items("map", []).column("mosaica_id").to_pylist())
+    absent = [one for one in range(1, 100) if one not in held][:3]
+    report = db.suppress(absent)
+    assert report.accepted == 0
+    assert [one["item"] for one in report.refused] == [{"mosaica_id": str(one)} for one in absent]
+    lines = str(report).splitlines()
+    assert not lines[0].endswith("ok")
+    assert all(any(str(one) in line for line in lines[1:]) for one in absent)
+    assert viewport(db, "map", FRAME)["counts"]["visible"] == 20
+
+
 def test_a_none_in_a_list_names_no_item_and_is_refused_by_row(served, corpus):
     """A `None` among `mosaica_id`s is sent as a null, which names no item: the server refuses
     that row and applies the rest, whether it is the only row or not."""
@@ -264,7 +281,7 @@ def test_a_none_in_a_list_names_no_item_and_is_refused_by_row(served, corpus):
     [held] = db.lookup("map", "paper", ["p0"]).column("mosaica_id").to_pylist()
     report = db.remove([None, held])
     assert report.ok and report.accepted == 1, report
-    assert report.refused == [{"row": 0, "reason": "names_no_item"}]
+    assert report.refused == [{"row": 0, "item": {"mosaica_id": None}, "reason": "names_no_item"}]
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 19
 
     report = db.remove([None])
@@ -272,7 +289,8 @@ def test_a_none_in_a_list_names_no_item_and_is_refused_by_row(served, corpus):
 
     # A row whose cells are all null names no item the same way.
     report = db.remove({"paper": [None, "p1"]})
-    assert report.accepted == 1 and report.refused == [{"row": 0, "reason": "names_no_item"}]
+    assert report.accepted == 1
+    assert report.refused == [{"row": 0, "item": {"paper": None}, "reason": "names_no_item"}]
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 18
 
 

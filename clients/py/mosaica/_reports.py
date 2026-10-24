@@ -45,8 +45,27 @@ def _by_reason(refused: Sequence[dict]) -> dict:
     return counts
 
 
+#: Each reason the server gives for a refused row, as the words that follow its count.
+REASONS = {
+    "names_no_item": "naming no item",
+    "names_two_items": "naming two items",
+    "one_item_twice": "naming an item an earlier row names",
+    "one_value_twice": "holding a unique value an earlier row holds",
+    "unknown_mosaica_id": "naming a mosaica_id no item holds",
+    "value_held": "holding a unique value an item outside the writer's terms holds",
+    "label_not_held": "carrying a label the writer's terms do not satisfy",
+}
+
+#: How many refused rows a change report's summary lists one by one; `refused` holds them all.
+LISTED = 50
+
+
+def _reason(reason: str) -> str:
+    return REASONS.get(reason, reason.replace("_", " "))
+
+
 def _reasons_in_words(counts: dict) -> str:
-    return ", ".join(f"{reason.replace('_', ' ')} {n:,}" for reason, n in counts.items())
+    return ", ".join(f"{n:,} {_reason(reason)}" for reason, n in counts.items())
 
 
 @dataclass(repr=False)
@@ -361,9 +380,10 @@ class ChangeReport(Summarised):
     - `op`: which of them it was.
     - `requested`: how many rows were given.
     - `accepted`: how many were applied.
-    - `refused`: each row the identity rule refused, `{"row", "reason"}`, `row` being its
-      position in what was given, and `reason` one of `names_no_item`, `names_two_items` and
-      `unknown_mosaica_id`. The other rows were applied. `refused_by_reason` counts them.
+    - `refused`: each row the identity rule refused, `{"row", "item", "reason"}`, `row` being
+      its position in what was given, `item` the row as given, such as `{"mosaica_id": "17"}`,
+      and `reason` one of `names_no_item`, `names_two_items` and `unknown_mosaica_id`. The other
+      rows were applied. `refused_by_reason` counts them.
     - `ignored_columns`: the columns given that name no item, being neither `mosaica_id` nor a
       unique attribute's column: those not sent, and any the server says it ignored.
     - `refusals`: each refused request, with its status and the server's answer. `ok` is `True`
@@ -388,16 +408,24 @@ class ChangeReport(Summarised):
         return _by_reason(self.refused)
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows: the rows given and applied, the rows refused by reason, the
-        columns ignored, then every refused request."""
-        out = [
-            f"{self.op}: {_count(self.requested, 'row')}, {self.accepted:,} applied, "
-            f"{'ok' if self.ok else 'FAILED'}"
-        ]
-        if self.refused:
+        """The lines `print()` shows: the rows given and applied, each row refused with why, up
+        to fifty of them, the columns ignored, then every refused request. It ends `ok` only
+        where every row given was applied."""
+        if self.refusals:
+            outcome = "FAILED"
+        elif self.refused:
+            outcome = f"{len(self.refused):,} refused"
+        else:
+            outcome = "ok"
+        out = [f"{self.op}: {_count(self.requested, 'row')}, {self.accepted:,} applied, {outcome}"]
+        for one in self.refused[:LISTED]:
+            named = ", ".join(f"{name} {value}" for name, value in (one.get("item") or {}).items())
+            out.append(f"  row {one['row']}{f' ({named})' if named else ''}: refused, "
+                       f"{_reason(one['reason'])}")
+        if len(self.refused) > LISTED:
             out.append(
-                f"  {_count(len(self.refused), 'row')} refused: "
-                f"{_reasons_in_words(self.refused_by_reason)}"
+                f"  and {len(self.refused) - LISTED:,} more refused rows, each in `refused`: "
+                f"{_reasons_in_words(self.refused_by_reason)} in all"
             )
         if self.ignored_columns:
             out.append(
