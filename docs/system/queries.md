@@ -184,7 +184,7 @@ For example, this request counts the papers from 2020 onwards, breaks them down 
 }
 ```
 
-It returns two tables. The first has one row, the number of papers from 2020 onwards. The second has a row for each of the ten largest archives, with its count in the set, its count in the reference, and the lift.
+It returns two tables. The first has one row, the number of papers from 2020 onwards. The second has a row for each of the ten largest archives, then a `rest` row for the papers in every other archive and a `none` row for any with no archive. Each row of both tables carries its count in the set, its count in the reference, and the lift.
 
 ### Groupings
 
@@ -213,7 +213,8 @@ The field figures describe everything the viewer may see in the view. A grouping
 
 Each table is an Arrow table. Its columns depend on the grouping:
 
-- `group`, `key` and `title`, for values and annotations. `group` is `listed` for a value or artifact you asked for, `rest` for the items in any other, and `none` for the items in none at all, so a table's counts add up to the size of the set. An item can be in several artifacts, so a layer's counts can add up to more.
+- `group`, on any grouping with `by`. It is `listed` for a value or artifact you asked for and for each bin, `rest` for the items in any other, and `none` for the items with no value or in no artifact, so a table's counts add up to the size of the set. An item can be in several artifacts, so a layer's counts can add up to more.
+- `key` and `title`, for values and annotations: the value's key or the artifact's `mosaica_id`, and its name.
 - `lower` and `upper`, for a histogram: each bin's edges.
 - `cell`, for a density grid: the cell's position code. At depth 16 or less it is the map tile at that zoom.
 - `count`: the items of the set in the row's group or cell.
@@ -224,15 +225,15 @@ Each table also carries a head with the size of the set, `total`, the size of th
 
 ### Histograms
 
-Give `bins` alone, and Mosaica picks readable edges around the smallest and largest value the viewer may see: multiples of 1, 2, 2.5 or 5 times a power of ten for numbers, and whole seconds, minutes, hours, days, weeks, months or years for dates, with no more bins than you asked for. The edges ignore the filter, so a histogram of a filtered set lines up with one of everything. Give `range` as well, and the range is cut into exactly `bins` equal bins.
+Give `bins` alone, and Mosaica picks readable edges around the smallest and largest value the viewer may see: multiples of 1, 2, 2.5 or 5 times a power of ten for numbers, and whole seconds, minutes, hours, days, weeks, months or years for dates, or fractions of a second over a short span, with no more bins than you asked for. The edges ignore the filter, so a histogram of a filtered set lines up with one of everything. Give `range` as well, and the range is cut into exactly `bins` equal bins.
 
-A bin holds values from its lower edge up to, but not including, its upper edge. The last bin also holds its upper edge.
+A bin holds values from its lower edge up to, but not including, its upper edge. The last bin also holds its upper edge. After the bins come a `rest` row, for values outside them, such as those outside `range`, NaN and infinities, and a `none` row for items with no value. Both have no edges.
 
 On a large set, `sample` speeds a histogram up: Mosaica counts a uniform sample of about that many items and scales each count to the whole set. The table head says whether it did.
 
 ### Annotation trees
 
-On a `nested` or `dag` layer, which the map draws as a cut through the tree, `top` needs `cut`: the zoom, area and budget the map's own [annotations](#annotations-by-tile) request uses. The table then lists the topics the map is showing, so a chart beside the map matches it.
+On a `nested` or `dag` layer, which the map draws as a cut through the tree, `top` needs `cut`: the `zoom`, `bbox` and `budget` the map's own [annotations](#annotations-by-tile) request uses. The table then lists the topics the map is showing, so a chart beside the map matches it.
 
 ### Density grids
 
