@@ -173,6 +173,35 @@ def test_the_first_commit_reports_what_it_built_and_prints_nothing(tmp_path, cor
         db.close()
 
 
+def test_a_commit_counts_label_sets_apart_from_layers_and_rows_apart_from_memberships(
+    tmp_path, corpus
+):
+    """A label set is not a layer of its own in the report, and a row placing an item it leaves
+    as it was in an annotation is counted once as a row and once as a membership."""
+    ids = [f"p{i}" for i in range(6)]
+    db = create(tmp_path / "db")
+    try:
+        db.declare_view("map", extent={"x": [-5, 40], "y": [-5, 40]})
+        declare_the_id(db)
+        db.insert("map", papers(ids), x="x", y="y", access="labels")
+        db.declare_layer("clusters", kind="flat")
+        db.insert("clusters", pa.table({"id": ids, "c": ["a", "a", "a", "b", "b", "b"]}), key="c")
+        db.declare_labels("topics", of="clusters")
+        db.insert("topics", {"a": "one", "b": "two"})
+        first = db.commit()
+        assert first.ok, first.log
+        assert first.layers == ["clusters"] and first.labels == ["topics"]
+
+        db.declare_layer("halves", kind="flat")
+        db.insert("halves", pa.table({"id": ids, "h": ["x", "x", "x", "y", "y", "y"]}), key="h")
+        later = db.commit()
+        assert later.ok, later
+        assert later.memberships_joined == len(ids) and later.items_unchanged == len(ids)
+        assert later.parts_filled == 0 and later.already_present == 0
+    finally:
+        db.close()
+
+
 def test_a_later_check_and_commit_report_their_plan_findings_and_refusals(served, corpus, capsys):
     db = served(small)
     capsys.readouterr()

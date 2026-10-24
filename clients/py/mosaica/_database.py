@@ -1369,7 +1369,7 @@ class Database:
         for block in document.get("layer", []):
             report.layers.append(block["name"])
             if "labels" in block:
-                report.layers.append(block["labels"]["name"])
+                report.labels.append(block["labels"]["name"])
         built = _BUILT.search(build.stdout + build.stderr)
         if built is not None:
             report.items = int(built.group("items"))

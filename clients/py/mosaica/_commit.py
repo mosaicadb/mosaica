@@ -1376,7 +1376,7 @@ def _fold(report, page: Page, answer: Answer) -> None:
             body.get("created", 0)
         ) + int(body.get("added", 0))
         report.items_edited += int(body.get("edited", 0))
-        report.already_present += int(body.get("unchanged", 0))
+        report.items_unchanged += int(body.get("unchanged", 0))
         report.artifacts_minted += int(body.get("minted", 0))
         report.memberships_joined += int(body.get("joined", 0))
         report.mosaica_ids += body.get("mosaica_ids", [])
@@ -1384,12 +1384,12 @@ def _fold(report, page: Page, answer: Answer) -> None:
         report.clamped += int(body.get("clamped", 0))
     elif page.kind == "values":
         report.items_edited += int(body.get("edited", 0))
-        report.already_present += int(body.get("unchanged", 0))
+        report.items_unchanged += int(body.get("unchanged", 0))
         report.artifacts_minted += int(body.get("minted", 0))
         report.memberships_joined += int(body.get("joined", 0))
     elif page.kind == "publish":
         report.artifacts_minted += int(body.get("created", 0))
-        report.already_present += int(body.get("filled", 0))
+        report.parts_filled += int(body.get("filled", 0))
         report.memberships_joined += int(body.get("joined", 0))
         report.without_content += int(body.get("without_content", 0))
         minted = report.artifact_ids.setdefault(page.name, {})
@@ -1409,7 +1409,7 @@ def _fold(report, page: Page, answer: Answer) -> None:
     elif page.kind == "grow":
         for one in body.get("artifacts", []):
             report.memberships_joined += int(one.get("joined", 0))
-            report.already_present += int(one.get("filled", 0))
+            report.parts_filled += int(one.get("filled", 0))
 
 
 def add_ignored(ignored: list, body: dict) -> None:

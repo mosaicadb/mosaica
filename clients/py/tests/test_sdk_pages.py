@@ -230,7 +230,7 @@ def test_the_same_frame_inserted_again_is_sent_again_and_the_database_answers_fo
     assert len(plan.plan) == 2 and plan.plan[0].startswith("points"), plan
     again = db.commit()
     assert again.ok, again
-    assert again.rows_accepted == {"s0": 0} and again.already_present == len(NEW_IDS), again
+    assert again.rows_accepted == {"s0": 0} and again.items_unchanged == len(NEW_IDS), again
     assert not again.replayed, again
     assert viewport(db, "s0", whole_frame(db))["counts"]["visible"] == after
 

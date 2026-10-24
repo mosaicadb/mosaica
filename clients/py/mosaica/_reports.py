@@ -159,7 +159,8 @@ class CommitReport(Report):
     """What the first `commit()` did: a `Report`, and the database it built and started.
 
     - `views`: the views the database serves, each group's views counted under the group.
-    - `layers`: the annotation layers and label sets it declares.
+    - `layers`: the annotation layers it declares.
+    - `labels`: the label sets it declares, each over one of `layers`.
     - `items`, `minted`, `unclustered`: the build's own figures, read from its log: the items
       it built, the annotations it made from key columns, and the member rows in no annotation
       (a null key). Each is `None` where the log does not give it.
@@ -176,6 +177,7 @@ class CommitReport(Report):
 
     views: dict = field(default_factory=dict)
     layers: list[str] = field(default_factory=list)
+    labels: list[str] = field(default_factory=list)
     items: int | None = None
     minted: int | None = None
     unclustered: int | None = None
@@ -212,6 +214,8 @@ class CommitReport(Report):
             out.append(f"  {_count(len(views), 'view')}: {', '.join(views)}")
         if self.layers:
             out.append(f"  {_count(len(self.layers), 'layer')}: {', '.join(self.layers)}")
+        if self.labels:
+            out.append(f"  {_count(len(self.labels), 'label set')}: {', '.join(self.labels)}")
         took = "" if self.seconds is None else f"in {self.seconds:.1f} s; "
         out.append(f"  {took}serving at {self.viewer}" if self.viewer else f"  {took}not serving")
         return out + self._problems()
@@ -234,8 +238,13 @@ class PagedReport(Summarised):
     - `values_bound`, `titles_set`: vocabulary values added and titles replaced. A writer without
       `write-all` is not told which values of a `derived` vocabulary it added, and these count
       none of them.
-    - `already_present`: parts the database already held, which changed nothing, rows naming an
-      item they matched among them.
+    - `items_unchanged`: rows naming an item they left as it was. A row whose one change is
+      placing its item in an annotation is one of them, and its membership is counted in
+      `memberships_joined`.
+    - `parts_filled`: parts of annotations already held, such as content, that were absent and
+      are now held.
+    - `already_present`: declarations and vocabulary keys the database already held, which
+      changed nothing.
     - `without_content`: annotations added without the content they declare.
     - `clipped`: rows outside the range the view's projection can place, stored on the view's
       edge.
@@ -274,6 +283,8 @@ class PagedReport(Summarised):
     #: Memberships the pages added, to artifacts this commit minted and to artifacts already held.
     memberships_joined: int = 0
     items_edited: int = 0
+    items_unchanged: int = 0
+    parts_filled: int = 0
     values_bound: int = 0
     titles_set: int = 0
     already_present: int = 0
@@ -333,8 +344,21 @@ class PagedReport(Summarised):
             else:
                 line += f"; not visible after waiting {self.flush_wait:.2f} s{at}"
         out = [line]
+        if self.items_unchanged:
+            placed = ", besides any annotation it was placed in" if self.memberships_joined else ""
+            out.append(
+                f"  {_count(self.items_unchanged, 'row')} named an item and left it as it was"
+                f"{placed}"
+            )
+        if self.parts_filled:
+            out.append(
+                f"  {_count(self.parts_filled, 'part')} filled on annotations already held"
+            )
         if self.already_present:
-            out.append(f"  already present, changing nothing: {self.already_present:,}")
+            out.append(
+                f"  {_count(self.already_present, 'declaration or vocabulary key')} already "
+                f"held, changing nothing"
+            )
         if self.without_content:
             out.append(
                 f"  annotations published without their declared content: {self.without_content:,}"
