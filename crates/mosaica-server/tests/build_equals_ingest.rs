@@ -32,9 +32,7 @@ use common::*;
 use parquet::arrow::ArrowWriter;
 use serde_json::{json, Value};
 use tempfile::TempDir;
-use mosaica_build::config::Config;
 use mosaica_build::{build, BuildArgs, BuildReport};
-use mosaica_spatial::Bounds;
 
 /// Appends `line` to `build_equals_ingest.log` in the directory `MOSAICA_TEST_TRACE_DIR` names,
 /// and does nothing when it is unset. Each line is one write straight to the file, so the last
@@ -529,66 +527,11 @@ require_member_visibility = "any"
     }
 }
 
-/// Every build argument the declaration implies, each view's frame 0..100.
+/// Every build argument the declaration implies.
 fn args(dir: &Path, declaration: &str, out: &Path) -> BuildArgs {
     let path = dir.join("corpus.toml");
     std::fs::write(&path, declaration).unwrap();
-    let config = Config::parse(&path, &Default::default()).expect("the declaration parses");
-    let registry = config.build_views().expect("the views compile");
-    let anchor = config.anchor_view(&registry).expect("an anchor");
-    let acquired = config.acquire().expect("the files acquire");
-    let views: Vec<mosaica_build::ViewArgs> = registry
-        .iter()
-        .map(|view| {
-            let acquired = mosaica_build::config::acquire_view(view).expect("the view acquires");
-            mosaica_build::ViewArgs {
-                visibility: None,
-                view_id: view.id.clone(),
-                projection: view.projection,
-                extent: Bounds {
-                    x_min: 0.0,
-                    x_max: 100.0,
-                    y_min: 0.0,
-                    y_max: 100.0,
-                },
-                points: acquired.points,
-                point_fields: acquired.point_fields,
-                select: acquired.select,
-                access: acquired.access,
-            }
-        })
-        .collect();
-    let scoped_attributes = config
-        .scoped_attributes
-        .iter()
-        .map(|scoped| mosaica_build::ScopedColumnFamily {
-            attribute: scoped.attribute.clone(),
-            group: scoped.group.clone(),
-            views: registry
-                .iter()
-                .enumerate()
-                .filter(|(_, view)| view.group.as_ref().is_some_and(|g| g.group == scoped.group))
-                .map(|(index, _)| index)
-                .collect(),
-            source: scoped.source.clone(),
-        })
-        .collect();
-    let groups = config.group_registry(&registry, &views);
-    let mut layers = config.layers.clone();
-    for layer in &mut layers {
-        layer.views = Config::expand_layer_views(&registry, &layer.views);
-    }
-    BuildArgs {
-        anchor,
-        groups,
-        scoped_attributes,
-        attribute_sources: acquired.attribute_sources,
-        layers,
-        layer_inputs: acquired.layers,
-        schema: config.schema,
-        shard_size: config.shard_size,
-        ..build_args(out, views)
-    }
+    args_from_declaration(&path, out)
 }
 
 /// The rows the build refused from the block `object` reads, by reason.
