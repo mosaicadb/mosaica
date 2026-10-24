@@ -843,6 +843,9 @@ function cameraCentre(lo: number, hi: number, half: number): number {
 /** How long the camera rests before the counts in view are asked for. */
 const IN_VIEW_REST_MS = 250;
 
+/** How many of a colour column's commonest values the legend ranks by count: more than any category palette holds. */
+const RANKED_VALUES = 32;
+
 /**
  * How many marks a store aims to draw on screen where {@link StoreOptions.budget} names no number.
  *
@@ -949,7 +952,17 @@ export function createStore(options: StoreOptions): Store {
 
   const legend = new Legend(
     async (column, codes) => client.categories(await tokens.get(), column, {codes, view: views.id}),
-    (value) => replaceProjection('legend', value)
+    (value) => replaceProjection('legend', value),
+    async (column) => {
+      const asked = await viewed();
+      const {tables} = await client.aggregate(asked.token, {view: asked.view, groupings: [{by: {field: column, top: RANKED_VALUES}}]});
+      const rows = tables[0]?.rows;
+      const group = rows?.getChild('group');
+      const key = rows?.getChild('key');
+      const keys: string[] = [];
+      for (let i = 0; rows && group && key && i < rows.numRows; i++) if (group.get(i) === 'listed') keys.push(String(key.get(i)));
+      return keys;
+    }
   );
 
   const suggestions = new Suggestions(

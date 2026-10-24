@@ -50,6 +50,42 @@ describe('the category legend', () => {
   });
 });
 
+describe('the category ranks', () => {
+  const NAMES: Record<number, string> = {1: 'astro-ph', 2: 'cs', 3: 'math', 4: 'q-fin'};
+  const archiveFrame = (codes: number[]): Composition => ({...frameOf(), exact: [band(0, 0n, codes.length, {scalars: {archive: {arrowType: 'u16', values: Uint16Array.from(codes)}}})]});
+  const legendWith = (order: (column: string) => Promise<string[]>) => {
+    let published: LegendProjection | null = null;
+    const legend = new Legend(async (_, codes) => codes.map((code) => ({code, key: NAMES[code]!, title: null})), (value) => (published = value), order);
+    legend.setColourBy('archive');
+    return {legend, get: () => published!};
+  };
+
+  it('follow the server’s count over the viewer’s items, whichever marks arrive first', async () => {
+    const ranks = [];
+    for (const first of [[4, 4, 4, 1], [2, 3, 3]]) {
+      const {legend, get} = legendWith(async () => ['cs', 'math', 'astro-ph']);
+      legend.accumulate(archiveFrame(first), [ARCHIVE]);
+      await settle();
+      legend.accumulate(archiveFrame([1, 2, 3, 4]), [ARCHIVE]);
+      await settle();
+      ranks.push(get().ranks['archive']);
+    }
+    // A value outside the server's list is ranked after it.
+    expect(ranks[0]).toEqual({2: 0, 3: 1, 1: 2, 4: 3});
+    expect(ranks[1]).toEqual(ranks[0]);
+  });
+
+  it('follow the marks drawn where the count is refused', async () => {
+    const {legend, get} = legendWith(async () => {
+      throw new MosaicaError(422, 'unindexed', 'not counted');
+    });
+    legend.accumulate(archiveFrame([4, 4, 1]), [ARCHIVE]);
+    await settle();
+    legend.accumulate(archiveFrame([4, 4, 1]), [ARCHIVE]);
+    expect(get().ranks['archive']).toEqual({4: 0, 1: 1});
+  });
+});
+
 const CITATIONS = scalar('citations', 'u32', {render: true, homes: ['rendered']});
 
 /** A frame of one band per list, each point carrying the list's citation counts; `null` is no value. */

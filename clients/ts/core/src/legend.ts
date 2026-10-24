@@ -21,9 +21,12 @@ export const CLUSTER_PREFIX = 'cluster:';
  */
 export type LegendProjection = {
   /**
-   * Palette rank per category code, per column. Codes are ranked by how often they appear among the
-   * marks drawn, most frequent first, and a rank once given does not change, so panning does not
-   * recolour the map.
+   * Palette rank per category code, per column. Values are ranked by how many items carrying them
+   * this viewer may see in the view, most first and ties by key, as the server counts them once
+   * for the column, so a value takes the same colour on every load of the same data. Where that
+   * count is refused, codes are ranked by how often they appear among the marks drawn. A rank once
+   * given does not change, so panning does not recolour the map. A code waits for its name before
+   * it is ranked by the count, and draws in the unmapped colour until then.
    */
   ranks: Record<string, Ranks>;
   /** The numeric range per column, widened as marks arrive and never narrowed. */
@@ -58,14 +61,23 @@ export class Legend {
   private reservoir: ValueReservoir | null = null;
   /** The size column's bands already looked at for points with no value. */
   private scanned = new WeakSet<object>();
-  /** Moved by {@link clear}, so names asked for before it are not taken. */
+  /** Moved by {@link clear}, so names and orders asked for before it are not taken. */
   private epoch = 0;
+  /** Per category column, its values' order by count as {@link order} answered, by key, or whether it is still asked or was refused. */
+  private orders = new Map<string, Map<string, number> | 'asked' | 'refused'>();
+  /** Per category column, the codes whose names were asked for, so none is asked twice. */
+  private naming = new Map<string, Set<number>>();
   private disposed = false;
 
   constructor(
     /** Names for category codes, asked for when codes are first drawn. */
     private readonly resolve: (column: string, codes: number[]) => Promise<CategoryValue[]>,
-    private readonly publish: (legend: LegendProjection) => void
+    private readonly publish: (legend: LegendProjection) => void,
+    /**
+     * The keys of a category column's commonest values among the items this viewer may see, most
+     * first and ties by key. Without it, codes are ranked as the marks bring them.
+     */
+    private readonly order: ((column: string) => Promise<string[]>) | null = null
   ) {}
 
   get colourBy(): string | null {
@@ -112,11 +124,57 @@ export class Legend {
     // The stand-in pieces seed the ranks while this depth's own bands stream in.
     if (counts.size === 0) for (const piece of frame.standIn) countCodesInPiece(counts, piece, colourBy);
     if (counts.size === 0) return;
+    const order = this.orderOf(colourBy);
+    if (order !== 'refused' && !this.state.categoryErrors[colourBy]) {
+      void this.name(colourBy, counts);
+      return;
+    }
     const ranks = extendRanks(this.state.ranks[colourBy] ?? {}, counts);
     if (ranks !== this.state.ranks[colourBy]) {
       this.set({...this.state, ranks: {...this.state.ranks, [colourBy]: ranks}});
       void this.name(colourBy, counts);
     }
+  }
+
+  /** The column's order by count: asked for on first use, and `refused` where there is no way to ask. */
+  private orderOf(column: string): Map<string, number> | 'asked' | 'refused' {
+    const held = this.orders.get(column);
+    if (held) return held;
+    if (!this.order) {
+      this.orders.set(column, 'refused');
+      return 'refused';
+    }
+    this.orders.set(column, 'asked');
+    const epoch = this.epoch;
+    this.order(column).then(
+      (keys) => {
+        if (this.disposed || epoch !== this.epoch) return;
+        this.orders.set(column, new Map(keys.map((key, i) => [key, i])));
+        this.rankByOrder(column);
+      },
+      () => {
+        // The next frame ranks the codes as the marks bring them.
+        if (!this.disposed && epoch === this.epoch) this.orders.set(column, 'refused');
+      }
+    );
+    return 'asked';
+  }
+
+  /**
+   * Rank each named code of `column` that has no rank by its value's place in the column's order.
+   * A value outside the order is ranked after it, by key, which leaves it unmapped in any palette
+   * shorter than the order.
+   */
+  private rankByOrder(column: string): void {
+    const order = this.orders.get(column);
+    if (!(order instanceof Map)) return;
+    const held = this.state.ranks[column] ?? {};
+    const unranked = (this.state.categories[column] ?? []).filter((v) => held[v.code] === undefined);
+    if (unranked.length === 0) return;
+    const next = {...held};
+    let tail = Math.max(order.size, ...Object.values(held).map((r) => r + 1));
+    for (const v of unranked.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))) next[v.code] = order.get(v.key) ?? tail++;
+    this.set({...this.state, ranks: {...this.state.ranks, [column]: next}});
   }
 
   /** Widen a number column's domain over the frame's exact bands and stand-ins. */
@@ -163,6 +221,8 @@ export class Legend {
   /** Forget everything accumulated, keeping the colour and size columns. */
   clear(): void {
     this.epoch += 1;
+    this.orders.clear();
+    this.naming.clear();
     this.reservoir = this.state.sizeBy !== null && this.rank ? new ValueReservoir() : null;
     this.scanned = new WeakSet();
     this.set({...EMPTY_LEGEND, colourBy: this.state.colourBy, sizeBy: this.state.sizeBy});
@@ -181,8 +241,11 @@ export class Legend {
   private async name(column: string, counts: Map<number, number>): Promise<void> {
     if (this.state.categoryErrors[column]) return;
     const held = new Set((this.state.categories[column] ?? []).map((v) => v.code));
-    const wanted = [...counts.keys()].filter((code) => !held.has(code));
+    const asked = this.naming.get(column) ?? new Set<number>();
+    this.naming.set(column, asked);
+    const wanted = [...counts.keys()].filter((code) => !held.has(code) && !asked.has(code));
     if (wanted.length === 0) return;
+    for (const code of wanted) asked.add(code);
     const epoch = this.epoch;
     try {
       const resolved = await this.resolve(column, wanted);
@@ -190,6 +253,7 @@ export class Legend {
       const byCode = new Map((this.state.categories[column] ?? []).map((v) => [v.code, v]));
       for (const v of resolved) byCode.set(v.code, v);
       this.set({...this.state, categories: {...this.state.categories, [column]: [...byCode.values()]}});
+      this.rankByOrder(column);
     } catch (error) {
       if (this.disposed || epoch !== this.epoch) return;
       this.set({...this.state, categoryErrors: {...this.state.categoryErrors, [column]: refusalOf(error)}});
