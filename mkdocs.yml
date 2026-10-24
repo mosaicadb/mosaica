@@ -107,6 +107,16 @@ nav:
   - Start:
       - start/index.md
       - Your first map from files: start/first-map.md
+  - How it works:
+      - Overview: system/overview.md
+      - Data model: system/data-model.md
+      - Queries: system/queries.md
+      - Serving: system/serving.md
+      - Changing data: system/write-path.md
+      - Clients: system/clients.md
+      - Annotations: system/annotations.md
+      - Access control: system/access-control.md
+      - Security: system/security.md
   - Guides:
       - guides/index.md
       - Run Mosaica under systemd: guides/systemd.md
@@ -160,13 +170,3 @@ nav:
           - mosaica-hierarchy: reference/components/mosaica-hierarchy.md
           - Events: reference/components/events.md
           - Theme tokens: reference/components/tokens.md
-  - How it works:
-      - Overview: system/overview.md
-      - Data model: system/data-model.md
-      - Queries: system/queries.md
-      - Serving: system/serving.md
-      - Changing data: system/write-path.md
-      - Clients: system/clients.md
-      - Annotations: system/annotations.md
-      - Access control: system/access-control.md
-      - Security: system/security.md
