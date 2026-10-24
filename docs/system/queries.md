@@ -80,7 +80,7 @@ The points carry each one's topic, but not the topics themselves. A client reads
 
 - **The largest first.** On a layer with levels, such as `topics`, each tile returns a limited number of artifacts of each level, ranked by how many members the viewer may see. A small topic in a crowded area appears as the viewer zooms in.
 - **The same figures in every tile.** An artifact's count, centre and box cover all of its members the viewer may see, wherever they are, so a topic that spans several tiles can be drawn once.
-- **Trees are cut to fit the screen.** On a layer shaped as a free tree (`nested` or `dag`), the request can set a budget for the whole screen. Where too many fine topics would show, their parent is returned in their place, and zooming in moves the cut deeper.
+- **Trees are cut to fit the screen.** On a `nested` or `dag` layer, a tree of any depth, the request can set a budget for the whole screen. Where too many fine topics would show, their parent is returned in their place, and zooming in moves the cut deeper.
 - **A filter marks topics.** A filter does not change which artifacts are returned or their counts, so topics do not come and go as the viewer types. Each artifact carries a flag saying whether any of its members in the tile match the filter, and another for the highlight.
 
 To count each topic's matching members, use a [breakdown by the layer](#charts-and-breakdowns). The [annotations](annotations.md) chapter explains which artifacts a viewer may see at all.
@@ -112,7 +112,7 @@ An aggregate request computes figures without returning the items: the counts be
 | Histogram | bin | papers per year |
 | Density grid | cell of the map | a heat map of matching papers |
 
-A grouping by values or topics can also be divided into cells, such as a density grid for each archive. A breakdown by a free tree names the same cut the map uses, so the chart lists the topics on screen.
+A grouping by values or topics can also be divided into cells, such as a density grid for each archive. A breakdown by a `nested` or `dag` layer names the same cut the map uses, so the chart lists the topics on screen.
 
 The counts are over the items that match the filter. A second filter, the reference, adds each row's count in that set and the lift: how much more common the group is among the matches than in the reference. This request breaks the papers since 2020 down by archive, against all papers:
 
