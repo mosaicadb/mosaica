@@ -2,14 +2,55 @@
 
 A client builds everything it shows from a handful of requests: the points of the map, the topics over them, the values for a filter list, an item's card, a table of records, and the figures behind a chart. This chapter explains what each one returns and how filters work across them. The examples use the research papers of the [data model](data-model.md), laid out by abstract, with a layer of topics over them.
 
-| To show | Ask for | Route |
-|---|---|---|
-| [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | `POST /v1/viewport` |
-| [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | `POST /v1/artifacts/viewport` |
-| [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | `/v1/categories/{column}` |
-| [An item's card](#reading-records) | one item's fields | `POST /v1/items/{mosaica_id}` |
-| [A table or an export](#reading-records) | every matching item or artifact | `POST /v1/items`, `POST /v1/artifacts` |
-| [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `POST /v1/aggregate` |
+=== "HTTP"
+
+    | To show | Returns | Route |
+    |---|---|---|
+    | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | `POST /v1/viewport` |
+    | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | `POST /v1/artifacts/viewport` |
+    | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | `/v1/categories/{column}` |
+    | [An item's card](#reading-records) | one item's fields | `POST /v1/items/{mosaica_id}` |
+    | [A table or an export](#reading-records) | every matching item or artifact | `POST /v1/items`, `POST /v1/artifacts` |
+    | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `POST /v1/aggregate` |
+
+=== "Python"
+
+    `Database` reads a database the Python client runs itself, and `Viewer` reads from a server elsewhere.
+
+    | To show | Returns | Call |
+    |---|---|---|
+    | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | `Database.map`, `Viewer.map`, `Selection.sample` |
+    | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | `Database.viewport_artifacts`, `Viewer.viewport_artifacts` |
+    | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | `Database.categories`, `Viewer.categories` |
+    | [An item's card](#reading-records) | one item's fields | `Database.item`, `Viewer.item` |
+    | [A table or an export](#reading-records) | every matching item or artifact | `Database.items`, `Database.artifacts`, and the same on `Viewer` |
+    | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `Database.aggregate`, `Viewer.aggregate` |
+
+=== "TypeScript"
+
+    `Store` holds a map's state and sends the requests it needs. `MosaicaClient` sends one request.
+
+    | To show | Returns | Call |
+    |---|---|---|
+    | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | `Store.setView`, `MosaicaClient.viewport` |
+    | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | `Store.setLayers`, `MosaicaClient.viewportArtifacts` |
+    | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | `MosaicaClient.categories`, `Store.suggest` |
+    | [An item's card](#reading-records) | one item's fields | `Store.pick`, `MosaicaClient.item` |
+    | [A table or an export](#reading-records) | every matching item or artifact | `MosaicaClient.items`, `MosaicaClient.artifacts` |
+    | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `Store.setAggregate`, `MosaicaClient.aggregate` |
+
+=== "CLI"
+
+    The `mosaica` command reads from a running server with a session token.
+
+    | To show | Returns | Command |
+    |---|---|---|
+    | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | Not built yet |
+    | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | Not built yet |
+    | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | Not built yet |
+    | [An item's card](#reading-records) | one item's fields | `mosaica items` with a filter on a unique field |
+    | [A table or an export](#reading-records) | every matching item or artifact | `mosaica items`, `mosaica artifacts` |
+    | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `mosaica aggregate` |
 
 Every answer is computed from the items the viewer may see, as [access control](access-control.md) decides them. A count never includes a hidden item, and a filter can only narrow what the viewer sees. The Python and TypeScript clients wrap each route, and the [HTTP API reference](../reference/http.md) gives every field of every request, with worked examples.
 
