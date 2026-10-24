@@ -179,6 +179,9 @@ def test_an_item_hidden_from_the_reader_is_refused_as_one_that_does_not_exist(db
     assert str(seen_by_nobody.value).replace(str(missing), "<id>") == str(
         seen_by_others.value
     ).replace(str(hidden), "<id>")
+    # An id as a read's column holds it, a pyarrow scalar, names the item as its integer does.
+    ids = db.items("s0", []).column("mosaica_id")
+    assert db.item(ids[0]) == db.item(ids[0].as_py())
     # A malformed id is refused before a request is sent, so the server gives no status.
     for malformed in ("abc", -1, 2**64, 1.5):
         with pytest.raises(Refusal) as refused:

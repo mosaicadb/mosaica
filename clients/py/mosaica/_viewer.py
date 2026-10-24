@@ -13,6 +13,7 @@ import http.client
 import io
 import json
 import numbers
+import operator
 import re
 import struct
 import urllib.error
@@ -374,12 +375,19 @@ U64_MAX = 2**64 - 1
 
 
 def decimal_id(value: Any) -> Optional[str]:
-    """A `mosaica_id` as the decimal string of a `u64`, or `None` where `value` is not one: an
-    integer from 0 to 2^64 - 1, or its decimal digits."""
+    """A `mosaica_id` as the decimal string of a `u64`, or `None` where `value` is not one: a
+    whole number from 0 to 2^64 - 1, such as an `int`, a NumPy or pyarrow integer, or its
+    decimal digits. A float is not one, since one past 2^53 has lost its last digits."""
+    if hasattr(value, "as_py"):
+        value = value.as_py()
     if isinstance(value, bool):
         return None
-    if isinstance(value, numbers.Integral):
-        return str(int(value)) if 0 <= value <= U64_MAX else None
+    try:
+        whole = operator.index(value)
+    except TypeError:
+        whole = None
+    if whole is not None:
+        return str(whole) if 0 <= whole <= U64_MAX else None
     if isinstance(value, str) and value.isascii() and value.isdigit() and int(value) <= U64_MAX:
         return value
     return None
