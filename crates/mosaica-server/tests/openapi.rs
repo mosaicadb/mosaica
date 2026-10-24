@@ -17,9 +17,14 @@
 //! request yields no points frame; `layers: []` yields no artifacts frame) and validates the
 //! request body only. `POST /v1/items`, `POST /v1/artifacts` and `POST /v1/aggregate` are framed
 //! the same way, and their JSON frames are validated against their schemas.
+//!
+//! Every request example in the description is sent to a server over the arXiv example dataset
+//! (`examples/data/arxiv`) and must be answered with a success the description lists, and every
+//! response example must be valid against its schema.
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -41,21 +46,33 @@ fn description() -> Value {
     doc
 }
 
-/// A validator for one named schema under `components/schemas`. The whole `components` block
-/// rides along as the root document so `$ref: "#/components/schemas/…"` resolves exactly as it
-/// does in the file — a schema is validated in its own context, never copied out of it.
+/// A validator for one named schema under `components/schemas`.
 fn validator(doc: &Value, schema: &str) -> jsonschema::Validator {
-    let root = json!({
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$ref": format!("#/components/schemas/{schema}"),
-        "components": doc["components"].clone(),
-    });
+    schema_validator(doc, &json!({ "$ref": format!("#/components/schemas/{schema}") }))
+}
+
+/// A validator for a schema as the description writes it, inline or as a `$ref`. The whole
+/// `components` block rides along as the root document so `$ref: "#/components/schemas/…"`
+/// resolves exactly as it does in the file — a schema is validated in its own context, never
+/// copied out of it.
+fn schema_validator(doc: &Value, schema: &Value) -> jsonschema::Validator {
+    let mut root = schema.clone();
+    root["$schema"] = json!("https://json-schema.org/draft/2020-12/schema");
+    root["components"] = doc["components"].clone();
     jsonschema::draft202012::new(&root)
         .unwrap_or_else(|e| panic!("schema {schema} does not compile: {e}"))
 }
 
 fn assert_valid(doc: &Value, schema: &str, instance: &Value) {
-    let v = validator(doc, schema);
+    assert_valid_against(
+        doc,
+        &json!({ "$ref": format!("#/components/schemas/{schema}") }),
+        instance,
+    );
+}
+
+fn assert_valid_against(doc: &Value, schema: &Value, instance: &Value) {
+    let v = schema_validator(doc, schema);
     let errors: Vec<String> = v.iter_errors(instance).map(|e| e.to_string()).collect();
     assert!(
         errors.is_empty(),
@@ -3608,4 +3625,602 @@ async fn shape_reports_and_withdrawals_match_the_description() {
         .await
         .unwrap();
     assert_framework_refusal(&doc, &delete, resp, 400).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The examples. Every request example in the description is sent to a server over the arXiv
+// example dataset and answered with a success the description lists for its route, and every
+// response example is valid against its schema.
+// ---------------------------------------------------------------------------------------------
+
+/// The arXiv example dataset's declaration, which names its files relative to itself.
+const ARXIV: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../examples/data/arxiv/schema.toml"
+);
+
+/// The bundle `mosaica build` writes from [`ARXIV`], into `dir/bundle`: the build arguments the
+/// CLI derives from a declaration with no view group and nothing scoped, under the test identity
+/// key.
+fn build_arxiv(dir: &Path) {
+    use mosaica_build::config::{acquire_view, frame_of, Config, FrameSource};
+    let config =
+        Config::parse(Path::new(ARXIV), &Default::default()).expect("the arXiv declaration parses");
+    assert!(
+        config.scoped_attributes.is_empty() && config.scopes.layers.is_empty(),
+        "the arXiv declaration scopes a column or a layer, which this build does not pass on"
+    );
+    let registry = config.build_views().expect("its views compile");
+    let anchor = config
+        .anchor_view(&registry)
+        .expect("it names the view rows are ordered by");
+    let acquired = config.acquire().expect("its files are present");
+    let views: Vec<mosaica_build::ViewArgs> = registry
+        .iter()
+        .map(|view| {
+            assert!(
+                view.group.is_none(),
+                "the arXiv declaration has a view group"
+            );
+            let inputs = acquire_view(view).expect("the view's files are present");
+            let frame = frame_of(
+                &format!("view '{}'", view.id),
+                view.projection,
+                &view.extent,
+                &[FrameSource {
+                    points: &inputs.points,
+                    fields: &inputs.point_fields,
+                    select: inputs.select.as_ref(),
+                    kept: None,
+                }],
+            )
+            .expect("the view's frame fits");
+            mosaica_build::ViewArgs {
+                visibility: view.visibility.clone(),
+                view_id: view.id.clone(),
+                projection: view.projection,
+                extent: frame.extent,
+                points: inputs.points,
+                point_fields: inputs.point_fields,
+                select: inputs.select,
+                access: inputs.access,
+            }
+        })
+        .collect();
+    let mut layers = config.layers.clone();
+    for layer in &mut layers {
+        layer.views = Config::expand_layer_views(&registry, &layer.views);
+    }
+    mosaica_build::build(&mosaica_build::BuildArgs {
+        anchor,
+        attribute_sources: acquired.attribute_sources,
+        layers,
+        layer_inputs: acquired.layers,
+        shard_size: config.shard_size,
+        schema: config.schema,
+        ..build_args(&dir.join("bundle"), views)
+    })
+    .expect("the arXiv example dataset builds");
+}
+
+const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
+
+/// The value a `$ref` names, or `value` where it is not a reference.
+fn resolved<'a>(doc: &'a Value, value: &'a Value) -> &'a Value {
+    match value["$ref"].as_str() {
+        Some(pointer) => doc
+            .pointer(pointer.trim_start_matches('#'))
+            .unwrap_or_else(|| panic!("{pointer} names nothing in the description")),
+        None => value,
+    }
+}
+
+/// One request example: a named example of an operation's JSON body, or of its parameters, which
+/// share the name.
+struct RequestExample {
+    method: &'static str,
+    template: String,
+    operation: String,
+    name: String,
+    body: Option<Value>,
+    /// Where the example's placeholders are filled from: `x-mosaica-fill`, or null.
+    fill: Value,
+}
+
+/// Every request example in the description, in path order.
+fn request_examples(doc: &Value) -> Vec<RequestExample> {
+    let mut out = Vec::new();
+    for (template, item) in doc["paths"].as_object().unwrap() {
+        for method in METHODS {
+            let Some(operation) = item.get(method) else {
+                continue;
+            };
+            let operation_id = operation["operationId"].as_str().unwrap().to_string();
+            let bodies = &operation["requestBody"]["content"]["application/json"]["examples"];
+            let mut names: std::collections::BTreeSet<&String> = bodies
+                .as_object()
+                .into_iter()
+                .flat_map(|e| e.keys())
+                .collect();
+            for parameter in operation["parameters"].as_array().into_iter().flatten() {
+                let parameter = resolved(doc, parameter);
+                names.extend(
+                    parameter["examples"]
+                        .as_object()
+                        .into_iter()
+                        .flat_map(|e| e.keys()),
+                );
+            }
+            for name in names {
+                let example = &bodies[name];
+                let takes_body = operation["requestBody"].is_object();
+                assert_eq!(
+                    takes_body,
+                    example.is_object(),
+                    "{method} {template}: example {name} is on its parameters and not its body, or \
+                     on a body the operation does not take"
+                );
+                let summarised = example["summary"].as_str().is_some_and(|s| !s.is_empty())
+                    || operation["parameters"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|p| {
+                            resolved(doc, p)["examples"][name]["summary"]
+                                .as_str()
+                                .is_some_and(|s| !s.is_empty())
+                        });
+                assert!(
+                    summarised,
+                    "{method} {template}: example {name} has no summary"
+                );
+                let fill = example["x-mosaica-fill"].clone();
+                assert!(
+                    fill.is_null() || example["description"].is_string(),
+                    "{method} {template}: example {name} is filled from an earlier answer, which \
+                     its description must say"
+                );
+                out.push(RequestExample {
+                    method,
+                    template: template.clone(),
+                    operation: operation_id.clone(),
+                    name: name.clone(),
+                    body: takes_body.then(|| example["value"].clone()),
+                    fill,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// What the server answered one request with.
+struct Answer {
+    status: u16,
+    content_type: String,
+    headers: reqwest::header::HeaderMap,
+    body: Vec<u8>,
+}
+
+/// One request to send: the operation's method and route, its parameters' values and its body.
+struct Request<'a> {
+    method: &'static str,
+    template: &'a str,
+    path: BTreeMap<String, String>,
+    query: Vec<(String, String)>,
+    body: Option<Value>,
+}
+
+/// A parameter's value as it is written into a path or a query string.
+fn parameter_text(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Sends `request` with the credential its plane takes: none where the operation declares no
+/// security, the operator credential on the control plane, the integrator's key on the session
+/// plane and `token` on the viewer plane.
+async fn send_request(
+    server: &TestServer,
+    doc: &Value,
+    token: &str,
+    request: &Request<'_>,
+) -> Answer {
+    let operation = &doc["paths"][request.template][request.method];
+    let mut path = request.template.to_string();
+    for (name, value) in &request.path {
+        path = path.replace(&format!("{{{name}}}"), &value.replace('/', "%2F"));
+    }
+    assert!(!path.contains('{'), "{path} has a parameter with no value");
+    let url = if path.starts_with("/control/") {
+        server.control_url(&path)
+    } else if path.starts_with("/session/") {
+        server.session_url(&path)
+    } else {
+        server.viewer_url(&path)
+    };
+    let method =
+        reqwest::Method::from_bytes(request.method.to_ascii_uppercase().as_bytes()).unwrap();
+    let mut builder = server.client.request(method, url).query(&request.query);
+    let unauthenticated = operation["security"]
+        .as_array()
+        .is_some_and(|s| s.is_empty());
+    if !unauthenticated {
+        builder = builder.bearer_auth(if path.starts_with("/control/") {
+            OPERATOR_CREDENTIAL
+        } else if path.starts_with("/session/") {
+            server.integrator_key.as_str()
+        } else {
+            token
+        });
+    }
+    if let Some(body) = &request.body {
+        builder = builder.json(body);
+    }
+    let resp = builder.send().await.unwrap();
+    Answer {
+        status: resp.status().as_u16(),
+        content_type: resp
+            .headers()
+            .get("content-type")
+            .map(|v| v.to_str().unwrap().to_string())
+            .unwrap_or_default(),
+        headers: resp.headers().clone(),
+        body: resp.bytes().await.unwrap().to_vec(),
+    }
+}
+
+/// `answer` is a success the description lists for the operation, in a media type it lists, and
+/// its body is what that media type says: JSON valid against its schema, or a framed body that
+/// decodes, with its JSON frames valid against theirs.
+fn assert_described_success(doc: &Value, method: &str, template: &str, answer: &Answer) {
+    let operation = &doc["paths"][template][method];
+    let id = operation["operationId"].as_str().unwrap();
+    assert!(
+        (200..300).contains(&answer.status),
+        "{method} {template} answered {}: {}",
+        answer.status,
+        String::from_utf8_lossy(&answer.body)
+    );
+    let described = &operation["responses"][answer.status.to_string()];
+    assert!(
+        described.is_object(),
+        "{method} {template} answered {}, which the description does not list for it",
+        answer.status
+    );
+    let described = resolved(doc, described);
+    let media_type = answer.content_type.split(';').next().unwrap().trim();
+    let Some(content) = described["content"].as_object() else {
+        assert!(
+            answer.body.is_empty(),
+            "{method} {template}'s {} carries a body",
+            answer.status
+        );
+        return;
+    };
+    let media = content.get(media_type).unwrap_or_else(|| {
+        panic!("{method} {template} answered in {media_type}, which the description does not list")
+    });
+    match media_type {
+        "application/json" => {
+            let body: Value = serde_json::from_slice(&answer.body).unwrap();
+            assert_valid_against(doc, &media["schema"], &body);
+        }
+        "application/octet-stream" => match id {
+            "viewport" => {
+                decode_viewport_frames(&answer.body);
+            }
+            "viewportArtifacts" => {
+                decode_artifact_frames(&answer.body);
+            }
+            "items" | "artifacts" => {
+                let decoded = decode_records(&answer.body);
+                let head = if id == "items" {
+                    "ItemsHead"
+                } else {
+                    "ArtifactsHead"
+                };
+                assert_valid(doc, head, &decoded.head);
+                for (_, end) in &decoded.pages {
+                    assert_valid(doc, "PageEnd", end);
+                }
+                assert_valid(doc, "RecordsTrailer", &decoded.trailer);
+            }
+            "aggregate" => {
+                let decoded = decode_aggregate(&answer.body);
+                for (head, pages) in &decoded.tables {
+                    assert_valid(doc, "AggregateTableHead", head);
+                    for (_, end) in pages {
+                        assert_valid(doc, "PageEnd", end);
+                    }
+                }
+                assert_valid(doc, "RecordsTrailer", &decoded.trailer);
+            }
+            other => panic!("{other} answers a framed body this test does not decode"),
+        },
+        other => panic!("{method} {template} answered in {other}, which this test does not read"),
+    }
+}
+
+/// The value an `x-mosaica-fill` source's `read` names in `answer`: a field of the framed body's
+/// trailer, a header (as JSON where it parses as JSON), the first value, or the first `rows`
+/// values, of a `uint64` column of the first records frame as decimal strings, or a JSON
+/// pointer into a JSON body.
+fn read_answer(answer: &Answer, read: &Value) -> Value {
+    if let Some(field) = read["trailer"].as_str() {
+        let frames = mosaica_wire::split_frames(&answer.body).expect("a framed body");
+        let (kind, payload) = frames.last().expect("a trailer");
+        assert_eq!(*kind, mosaica_wire::FRAME_TRAILER);
+        let trailer: Value = serde_json::from_slice(payload).unwrap();
+        return trailer[field].clone();
+    }
+    if let Some(name) = read["header"].as_str() {
+        let text = answer.headers[name].to_str().unwrap();
+        return serde_json::from_str(text).unwrap_or_else(|_| json!(text));
+    }
+    if let Some(column) = read["column"].as_str() {
+        let decoded = decode_records(&answer.body);
+        let (batch, _) = decoded.pages.first().expect("a records frame");
+        let values: Vec<Value> = batch
+            .column_by_name(column)
+            .unwrap_or_else(|| panic!("the records frame has no column {column}"))
+            .as_any()
+            .downcast_ref::<arrow::array::UInt64Array>()
+            .unwrap_or_else(|| panic!("{column} is not uint64"))
+            .values()
+            .iter()
+            .map(|v| json!(v.to_string()))
+            .collect();
+        return match read["rows"].as_u64() {
+            Some(rows) => {
+                assert!(
+                    values.len() as u64 >= rows,
+                    "the records frame has fewer than {rows} rows"
+                );
+                Value::Array(values[..rows as usize].to_vec())
+            }
+            None => values.first().expect("the records frame has a row").clone(),
+        };
+    }
+    if let Some(pointer) = read["pointer"].as_str() {
+        let body: Value = serde_json::from_slice(&answer.body).unwrap();
+        return body
+            .pointer(pointer)
+            .unwrap_or_else(|| panic!("the answer has nothing at {pointer}: {body}"))
+            .clone();
+    }
+    panic!("an x-mosaica-fill read names one of trailer, header, column and pointer: {read}");
+}
+
+/// The method and route of the operation `id` names.
+fn operation_named<'a>(doc: &'a Value, id: &str) -> (&'static str, &'a str) {
+    for (template, item) in doc["paths"].as_object().unwrap() {
+        for method in METHODS {
+            if item[method]["operationId"] == id {
+                return (method, template.as_str());
+            }
+        }
+    }
+    panic!("no operation is named {id}");
+}
+
+/// Every request example, sent as the description gives it to a server over the arXiv example
+/// dataset. A value that has to come from an earlier answer is marked in the example's
+/// `x-mosaica-fill`: for each body location (a JSON pointer) or path parameter, an earlier
+/// request (another example, by operation and name, or a request written in the mark) and what to
+/// read from its answer. The example is valid against its schemas as written and as filled.
+///
+/// The viewer is a session for the principal the password login example names, holding `read`
+/// and `read-all`.
+#[tokio::test]
+async fn every_request_example_is_answered_with_a_success_the_description_lists() {
+    let doc = description();
+    let examples = request_examples(&doc);
+    let tmp = TempDir::new().unwrap();
+    static BUILT: OnceLock<TempDir> = OnceLock::new();
+    copy_built(&BUILT, tmp.path(), build_arxiv);
+    // The shipped defaults where a test server's differ, so an answer is the one a deployment
+    // that sets nothing gives.
+    let config = mosaica_engine::EngineConfig {
+        max_k: mosaica_config::defaults::DEFAULT_MAX_K,
+        k_max_marks: mosaica_config::defaults::DEFAULT_K_MAX_MARKS,
+        theta_target_marks: mosaica_config::defaults::DEFAULT_THETA_TARGET_MARKS,
+        ..default_engine_config()
+    };
+    let max_k = config.max_k;
+    let server = open_tuned(&tmp, config, |limits| {
+        *limits = mosaica_server::state::ServeLimits {
+            max_k,
+            ..Default::default()
+        }
+    })
+    .await;
+
+    let login = examples
+        .iter()
+        .position(|e| {
+            e.operation == "login" && e.body.as_ref().is_some_and(|b| b.get("password").is_some())
+        })
+        .expect("a login example with a password");
+    let credential = &examples[login].body.as_ref().unwrap()["password"];
+    let principal = credential["principal"].as_str().unwrap();
+    let catalogue = &server.state.catalogue;
+    catalogue
+        .create_principal(principal, mosaica_catalogue::PrincipalKind::Person)
+        .unwrap();
+    catalogue
+        .set_password(principal, credential["password"].as_str().unwrap())
+        .unwrap();
+    for permission in [
+        mosaica_catalogue::Permission::Read,
+        mosaica_catalogue::Permission::ReadAll,
+    ] {
+        catalogue
+            .grant_permission(mosaica_catalogue::Grantee::Principal(principal), permission)
+            .unwrap();
+    }
+
+    let mut pending: Vec<&RequestExample> = examples.iter().collect();
+    pending.swap(0, login);
+    let mut answers: BTreeMap<(String, String), Answer> = BTreeMap::new();
+    let mut token = String::new();
+    while !pending.is_empty() {
+        let before = pending.len();
+        let mut waiting = Vec::new();
+        for example in std::mem::take(&mut pending) {
+            let operation = &doc["paths"][&example.template][example.method];
+            let what = format!(
+                "{} {} example {}",
+                example.method, example.template, example.name
+            );
+            let mut request = Request {
+                method: example.method,
+                template: &example.template,
+                path: BTreeMap::new(),
+                query: Vec::new(),
+                body: example.body.clone(),
+            };
+            for parameter in operation["parameters"].as_array().into_iter().flatten() {
+                let parameter = resolved(&doc, parameter);
+                let name = parameter["name"].as_str().unwrap();
+                let value = match &parameter["examples"][&example.name]["value"] {
+                    Value::Null => &parameter["example"],
+                    value => value,
+                };
+                if value.is_null() {
+                    continue;
+                }
+                assert_valid_against(&doc, &parameter["schema"], value);
+                match parameter["in"].as_str().unwrap() {
+                    "path" => {
+                        request.path.insert(name.to_string(), parameter_text(value));
+                    }
+                    "query" => request
+                        .query
+                        .push((name.to_string(), parameter_text(value))),
+                    other => panic!("{what}: a parameter in {other}"),
+                }
+            }
+            let media = &operation["requestBody"]["content"]["application/json"];
+            if let Some(body) = &request.body {
+                assert_valid_against(&doc, &media["schema"], body);
+            }
+
+            let mut ready = true;
+            let fills = ["body", "path"].into_iter().flat_map(|target| {
+                example.fill[target]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(move |(at, source)| (target, at, source))
+            });
+            for (target, at, source) in fills {
+                let operation_id = source["operation"].as_str().unwrap();
+                let value = match source["example"].as_str() {
+                    Some(name) => {
+                        match answers.get(&(operation_id.to_string(), name.to_string())) {
+                            Some(answer) => read_answer(answer, &source["read"]),
+                            None => {
+                                ready = false;
+                                break;
+                            }
+                        }
+                    }
+                    None => {
+                        let (method, template) = operation_named(&doc, operation_id);
+                        let earlier = Request {
+                            method,
+                            template,
+                            path: source["path"]
+                                .as_object()
+                                .into_iter()
+                                .flatten()
+                                .map(|(k, v)| (k.clone(), parameter_text(v)))
+                                .collect(),
+                            query: Vec::new(),
+                            body: Some(source["body"].clone()).filter(|b| !b.is_null()),
+                        };
+                        let answer = send_request(&server, &doc, &token, &earlier).await;
+                        assert_described_success(&doc, method, template, &answer);
+                        read_answer(&answer, &source["read"])
+                    }
+                };
+                match target {
+                    "body" => {
+                        let body = request.body.as_mut().expect("a body to fill");
+                        *body.pointer_mut(at).unwrap_or_else(|| {
+                            panic!("{what} shows no value at {at} for its fill to replace")
+                        }) = value;
+                    }
+                    _ => {
+                        let declared = operation["parameters"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|p| {
+                                let p = resolved(&doc, p);
+                                p["in"] == "path" && p["name"] == at.as_str()
+                            });
+                        assert!(
+                            declared,
+                            "{what} fills a path parameter {at} it does not have"
+                        );
+                        request.path.insert(at.clone(), parameter_text(&value));
+                    }
+                }
+            }
+            if !ready {
+                waiting.push(example);
+                continue;
+            }
+            if let Some(body) = &request.body {
+                assert_valid_against(&doc, &media["schema"], body);
+            }
+            let answer = send_request(&server, &doc, &token, &request).await;
+            assert_described_success(&doc, example.method, &example.template, &answer);
+            if std::ptr::eq(example, &examples[login]) {
+                let session: Value = serde_json::from_slice(&answer.body).unwrap();
+                token = session["token"].as_str().unwrap().to_string();
+            }
+            answers.insert((example.operation.clone(), example.name.clone()), answer);
+        }
+        let names: Vec<&str> = waiting.iter().map(|e| e.name.as_str()).collect();
+        assert!(
+            waiting.len() < before,
+            "examples {names:?} are filled from examples that are never answered"
+        );
+        pending = waiting;
+    }
+    assert_eq!(answers.len(), examples.len());
+}
+
+/// Every response example is valid against the schema of the response and media type it is
+/// under.
+#[test]
+fn every_response_example_is_valid_against_its_schema() {
+    let doc = description();
+    let mut checked = 0;
+    for (template, item) in doc["paths"].as_object().unwrap() {
+        for method in METHODS {
+            let Some(operation) = item.get(method) else {
+                continue;
+            };
+            for (status, response) in operation["responses"].as_object().unwrap() {
+                let response = resolved(&doc, response);
+                for (media_type, media) in response["content"].as_object().into_iter().flatten() {
+                    for (name, example) in media["examples"].as_object().into_iter().flatten() {
+                        assert!(
+                            example["summary"].as_str().is_some_and(|s| !s.is_empty()),
+                            "{method} {template} {status} {media_type}: example {name} has no summary"
+                        );
+                        assert_valid_against(&doc, &media["schema"], &example["value"]);
+                        checked += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 0, "the description has no response example");
 }
