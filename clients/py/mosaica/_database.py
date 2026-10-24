@@ -1943,9 +1943,7 @@ class Database:
             return self.listening
         self._refuse_when_closed()
         binary, _ = _instance.find_binary()
-        self._held.child, self.listening = _instance.start(
-            binary, self.path / "mosaica.toml", remove_on_exit=self.temporary
-        )
+        self._held.child, self.listening = _instance.start(binary, self.path / "mosaica.toml")
         return self.listening
 
     @property

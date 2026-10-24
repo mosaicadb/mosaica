@@ -223,7 +223,6 @@ It refuses to start, and exits 1, when `mosaica.toml` is refused as `mosaica bui
 | --- | --- | --- | --- |
 | `--deployment` | `PATH` |  | Read this `mosaica.toml` instead of searching for one upward from the working directory. |
 | `--exit-on-stdin-close` |  |  | Stop, as SIGTERM stops it, when standard input reaches its end. A process that starts the server and holds a pipe to its standard input stops it by closing the pipe, and stops it too when that process ends in any way, a kill included. Standard input that is empty or `/dev/null` stops the server as soon as it starts. |
-| `--remove-on-exit` |  |  | Delete the deployment's directory, the one holding the `mosaica.toml` that `--deployment` names, with the bundle, the write-ahead log, the catalogue and every other file in it, when the server stops. It is for a temporary deployment the process that started the server made. It requires `--exit-on-stdin-close` and `--deployment`, and the server refuses to start where the file is not named `mosaica.toml`, or where the file or its directory is a symbolic link. A symbolic link inside the directory is removed without being followed. |
 
 ## `mosaica login`
 

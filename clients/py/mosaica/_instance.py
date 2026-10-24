@@ -13,9 +13,9 @@ The child is started with `--exit-on-stdin-close`, and this process holds the pi
 standard input. Closing the pipe stops it, which is how `close()`, a `Database` no longer
 referenced and the exit handler stop it. The pipe also closes however this process ends, so the
 child stops when a marimo kernel leaves through `os._exit` or a kernel is killed, which run no
-exit handler. A temporary database's child is also started with `--remove-on-exit`, so the server
-deletes the directory as it stops. Nothing is ever killed by process name, since a kill by name
-reaches every other server on the machine.
+exit handler. Nothing is ever killed by process name, since a kill by name reaches every other
+server on the machine. The server deletes nothing: a temporary database's directory is removed by
+this process, at `close()`, once the `Database` is unreferenced, and at exit.
 
 The child runs in a session of its own (a process group of its own on Windows). A kernel's signal
 to its own process group, and a Jupyter kernel's wait at shutdown for the children in its group to
@@ -182,18 +182,16 @@ def start(
     binary: str,
     deployment: Path,
     timeout: float | None = None,
-    remove_on_exit: bool = False,
 ) -> tuple[subprocess.Popen, Listening]:
     """Start `mosaica serve`, stopped when its standard input closes, and read the addresses it
-    bound. `remove_on_exit` has the server delete the deployment's directory as it stops."""
-    flags = ["--exit-on-stdin-close"] + (["--remove-on-exit"] if remove_on_exit else [])
+    bound."""
     apart = (
         {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
         if os.name == "nt"
         else {"start_new_session": True}
     )
     child = subprocess.Popen(
-        [binary, "serve", "--deployment", str(Path(deployment).absolute()), *flags],
+        [binary, "serve", "--deployment", str(Path(deployment).absolute()), "--exit-on-stdin-close"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
