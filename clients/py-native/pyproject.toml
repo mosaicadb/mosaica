@@ -40,9 +40,7 @@ packages = ["mosaica_native"]
 # as force-included: hatchling would otherwise drop them as untracked.
 artifacts = [
   "mosaica_native/mosaica",
-  "mosaica_native/mosaica.exe",
   "mosaica_native/_mosaica.abi3.so",
-  "mosaica_native/_mosaica.pyd",
 ]
 
 [tool.hatch.build.targets.wheel.hooks.custom]

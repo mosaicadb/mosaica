@@ -12,7 +12,7 @@ pip install -e clients/py-native     # the mosaica binary and the extension modu
 pip install -e 'clients/py[widget]'  # read, create, declare, insert, commit, and the notebook widget, Map
 ```
 
-The order matters. On an x86_64 or ARM64 machine (a `platform_machine` of `x86_64`, `AMD64`,
+The order matters. On Linux or macOS on x86_64 or ARM64 (a `platform_machine` of `x86_64`,
 `aarch64` or `arm64`), `mosaica` depends on `mosaica-native==0.1.0`, and pip can satisfy that
 only from the copy already installed. `mosaica-native`'s build hook runs cargo, so it needs a
 Rust toolchain. `mosaica`'s build hook (`hatch_build.py`) runs `npm ci` (when the install is
@@ -26,8 +26,9 @@ the bundle is inside it.
 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and macOS 10.12 or later on
 x86_64. There is no Windows build. Each serves every Python from 3.10 up, through the stable ABI.
 The workflow uploads them as build artifacts and publishes nothing. On a machine the dependency's
-marker leaves out, `mosaica` installs without `mosaica-native`, and making or serving a database
-needs a `mosaica` binary on `PATH` or named by `MOSAICA_BIN`.
+marker leaves out, Windows included, `mosaica` installs without `mosaica-native`. It still
+connects to a running server; making or serving a database needs a `mosaica` binary on `PATH`
+or named by `MOSAICA_BIN`.
 
 Every table the package returns is a pyarrow table; `.to_pandas()` on it gives a DataFrame where
 pandas is installed. `pip install --no-deps -e clients/py` installs neither pyarrow nor

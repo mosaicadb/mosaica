@@ -15,7 +15,7 @@
 # **One object per platform, not one per Python.** `mosaica-python` builds against the stable ABI
 # (`abi3-py310`), so a platform's wheel is `cp310-abi3` and serves every Python from 3.10 up. That
 # is why this is cargo and not cibuildwheel: cibuildwheel's value is a matrix over interpreter
-# versions, and there is no such matrix here. Seven cargo builds and seven `python -m build` calls
+# versions, and there is no such matrix here. Six cargo builds and six `python -m build` calls
 # are the whole job.
 #
 # **What the Linux tags claim.** Measured 2026-09-21 on a developer machine: the binary and the
