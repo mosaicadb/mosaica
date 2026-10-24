@@ -6,7 +6,7 @@ by kind of place and by population.
 
 This tutorial should take about 30 minutes to complete. You'll need Rust (installed with rustup), a
 C compiler and its build tools (`build-essential` on Debian and Ubuntu), `git`, `curl`, `unzip`,
-`openssl`, Python 3, Node.js 22.12 or later with npm, and a web browser. The C compiler builds the
+`openssl`, Python 3, Node.js 22.15 or later with npm, and a web browser. The C compiler builds the
 C libraries Mosaica links in, such as CRoaring, zstd and SQLite.
 
 ## What we'll do
