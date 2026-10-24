@@ -172,6 +172,7 @@ fn build_placed_fixture(out: &Path, tmp: &Path, n: u64, at: impl Fn(u64) -> (f64
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),
@@ -335,6 +336,7 @@ fn both_build_implementations_write_the_same_tail() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),
@@ -1062,6 +1064,7 @@ fn build_non_prefix_fixture(out: &Path, tmp: &Path, n: u64) {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),
@@ -1466,6 +1469,7 @@ fn build_record_fixture(out: &Path, tmp: &Path, n: u64) {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),

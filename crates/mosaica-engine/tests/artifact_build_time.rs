@@ -210,6 +210,7 @@ fn try_fixture(topics: fn(&Path)) -> Result<Fixture, mosaica_build::BuildError> 
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),

@@ -194,6 +194,7 @@ fn two_views_derived_files_do_not_collide() {
     let view = |name: &str, points: &str| ViewArgs {
         visibility: None,
         view_id: name.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: dir.join(points),

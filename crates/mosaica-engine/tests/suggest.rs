@@ -266,6 +266,7 @@ fn build_args(points: &Path, pairs: &Path, out: &Path, schema: Schema) -> BuildA
     let view = |view_id: &str, points: &Path| mosaica_build::ViewArgs {
         visibility: None,
         view_id: view_id.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.to_path_buf(),

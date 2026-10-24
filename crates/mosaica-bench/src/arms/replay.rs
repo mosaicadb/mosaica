@@ -876,6 +876,7 @@ mod tests {
             views: vec![mosaica_build::ViewArgs {
                 visibility: None,
                 view_id: "s0".to_string(),
+                title: None,
                 projection: mosaica_spatial::Projection::None,
                 extent: mosaica_spatial::Bounds {
                     x_min: 0.0,

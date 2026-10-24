@@ -1646,6 +1646,7 @@ fn authored() -> Authored {
     let view = |id: &str, visibility: Option<Vec<String>>| mosaica_build::ViewArgs {
         visibility,
         view_id: id.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.clone(),

@@ -107,6 +107,7 @@ fn build_fixture_with_sparse_term(out: &Path, points_path: &Path, pairs_path: &P
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points_path.to_path_buf(),

@@ -244,6 +244,7 @@ fn build_fixture(out: &Path, points: &Path, pairs: &Path) {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: VIEW.to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.to_path_buf(),

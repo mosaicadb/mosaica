@@ -442,3 +442,119 @@ fn the_whole_declaration_builds_and_verifies() {
         );
     }
 }
+
+const TITLED: &str = r#"
+[sources]
+world = "world.parquet"
+q1    = "q1.parquet"
+
+[defaults]
+allocation_view = "world"
+
+[[attribute]]
+name   = "id"
+type   = "u64"
+unique = true
+field  = "entity_id"
+source = "world"
+
+[[view]]
+name             = "world"
+title            = "The world"
+source           = "world"
+extent           = { x = [0.0, 100.0], y = [0.0, 100.0] }
+point_visibility = { field = "access", default = "public" }
+
+[[view]]
+name             = "untitled"
+source           = "q1"
+extent           = { x = [0.0, 100.0], y = [0.0, 100.0] }
+point_visibility = { field = "access", default = "public" }
+"#;
+
+const SERVED: &str = r#"
+[bundle]
+path  = "bundle"
+cache = "cache"
+wal   = "wal.log"
+
+[build]
+schema = "corpus.toml"
+
+[disclosure]
+token_max_lifetime = 3600
+
+[serve]
+viewer  = "127.0.0.1:0"
+session = "127.0.0.1:0"
+control = "127.0.0.1:0"
+operator_credential_file = "operator.cred"
+
+[catalogue]
+dir = "catalogue"
+"#;
+
+/// **A view's declared title is its display name, and a view without one is shown by its name**,
+/// read from `/v1/meta` on the bundle `mosaica build` wrote.
+#[test]
+fn a_built_view_is_served_under_its_declared_title() {
+    let dir = tempfile::tempdir().unwrap();
+    let at = |name: &str| dir.path().join(name);
+    write_points(&at("world.parquet"), "world", WORLD, false);
+    write_points(&at("q1.parquet"), "q1", Q1, false);
+    std::fs::write(at("corpus.toml"), TITLED).unwrap();
+    std::fs::write(at("mosaica.toml"), SERVED).unwrap();
+    std::fs::write(at("operator.cred"), common::OPERATOR_CREDENTIAL).unwrap();
+    let built = mosaica()
+        .current_dir(dir.path())
+        .arg("build")
+        .output()
+        .expect("the build runs");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+
+    let (_server, bound) = common::Server::announced(dir.path());
+    let post = |url: String, bearer: &str, body: serde_json::Value| -> serde_json::Value {
+        let response = reqwest::blocking::Client::new()
+            .post(&url)
+            .bearer_auth(bearer)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.to_string())
+            .send()
+            .unwrap();
+        assert!(response.status().is_success(), "{url}: {}", response.status());
+        serde_json::from_slice(&response.bytes().unwrap()).unwrap()
+    };
+    let control = |path: &str, body: serde_json::Value| {
+        post(format!("{}{path}", bound.control), common::OPERATOR_CREDENTIAL, body)
+    };
+    control("/control/principals", serde_json::json!({ "name": "reader", "kind": "service" }));
+    control(
+        "/control/grants",
+        serde_json::json!({ "principal": "reader", "permission": "read" }),
+    );
+    let key = control("/control/principals/reader/keys", serde_json::json!({}));
+    let login = post(
+        format!("{}/v1/login", bound.viewer),
+        "",
+        serde_json::json!({ "api_key": key["key"] }),
+    );
+    let meta = reqwest::blocking::Client::new()
+        .get(format!("{}/v1/meta", bound.viewer))
+        .bearer_auth(login["token"].as_str().unwrap())
+        .send()
+        .unwrap();
+    assert!(meta.status().is_success(), "/v1/meta: {}", meta.status());
+    let meta: serde_json::Value = serde_json::from_slice(&meta.bytes().unwrap()).unwrap();
+
+    let display_name = |id: &str| {
+        meta["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["id"] == id)
+            .unwrap_or_else(|| panic!("view {id} is served: {meta}"))["display_name"]
+            .clone()
+    };
+    assert_eq!(display_name("world"), "The world");
+    assert_eq!(display_name("untitled"), "untitled");
+}

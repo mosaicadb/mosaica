@@ -246,6 +246,9 @@ pub struct ViewArgs {
     /// The view this row space belongs to: a plain view's name, or a group's view as `group:key`.
     /// [`mosaica_store::ShardLayout::view_rel`] derives its path.
     pub view_id: String,
+    /// The view's declared title, served on `/v1/meta` as its `display_name`. `None` serves the
+    /// view id.
+    pub title: Option<String>,
     /// What turns each row's coordinates into a position in this view's frame, before anything is
     /// quantised (`projections.md` §3). [`mosaica_spatial::Projection::None`] — the default —
     /// transforms nothing, and is the exact identity.
@@ -2575,7 +2578,7 @@ fn write_manifests(
             .iter()
             .map(|view| ViewDescriptor {
                 id: view.view_id.clone(),
-                display_name: view.view_id.clone(),
+                display_name: ViewDescriptor::display_name_of(&view.view_id, view.title.as_deref()),
                 // **The declared incarnation** (decision 0115). A key a build declared and a
                 // running service later drops comes back at 1 or above, which is what keeps the
                 // build's own segments out of the view created under the reused name.

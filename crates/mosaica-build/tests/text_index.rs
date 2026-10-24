@@ -122,6 +122,7 @@ fn build_with(schema: Schema) -> tempfile::TempDir {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: Bounds {
                 x_min: 0.0,

@@ -173,6 +173,7 @@ fn args(points: &Path, pairs: &Path, out: PathBuf, schema: Schema) -> BuildArgs 
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.to_path_buf(),

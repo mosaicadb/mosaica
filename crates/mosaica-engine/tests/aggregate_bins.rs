@@ -338,6 +338,7 @@ fn build_gated_views(dir: &Path, items: &[Item], views: &[GatedView<'_>]) -> Pat
             mosaica_build::ViewArgs {
                 visibility: visibility.clone(),
                 view_id: view.to_string(),
+                title: None,
                 projection: mosaica_spatial::Projection::None,
                 extent: extent(),
                 points,

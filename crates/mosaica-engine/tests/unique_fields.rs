@@ -163,6 +163,7 @@ fn fixture_sized_of(unique: bool, views: &[&str], shard_size: Option<u64>) -> Fi
             .map(|view| mosaica_build::ViewArgs {
                 visibility: None,
                 view_id: view.to_string(),
+                title: None,
                 projection: mosaica_spatial::Projection::None,
                 extent: extent(),
                 points: points.clone(),

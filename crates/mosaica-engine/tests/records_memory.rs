@@ -184,6 +184,7 @@ fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
         views: vec![ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: Projection::None,
             extent: extent(),
             points: points.clone(),

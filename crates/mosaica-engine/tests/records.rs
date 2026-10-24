@@ -297,6 +297,7 @@ fn view_args(
     ViewArgs {
         visibility: None,
         view_id: view.to_string(),
+        title: None,
         projection,
         extent,
         points: points.to_path_buf(),

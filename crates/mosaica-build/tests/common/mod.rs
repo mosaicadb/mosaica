@@ -86,6 +86,7 @@ pub fn args_from_declaration(path: &Path, out: &Path, extent: Bounds) -> BuildAr
             mosaica_build::ViewArgs {
                 visibility: view.visibility.clone(),
                 view_id: view.id.clone(),
+                title: view.title.clone(),
                 projection: view.projection,
                 extent,
                 points: acquired.points,

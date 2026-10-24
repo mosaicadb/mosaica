@@ -98,6 +98,7 @@ fn build(dir: &Path, cells: &[(u64, u64)]) -> PathBuf {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),

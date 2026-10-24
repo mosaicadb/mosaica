@@ -116,6 +116,7 @@ fn bundle(dir: &Path, absent_every: Option<u64>) -> Engine {
         views: vec![ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: Projection::None,
             extent: extent(),
             points: points.clone(),

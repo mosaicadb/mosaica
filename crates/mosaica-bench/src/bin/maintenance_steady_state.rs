@@ -248,6 +248,7 @@ fn build_fixture(tmp: &Path, out: &Path) -> Result<(), Box<dyn std::error::Error
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: VIEW.to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: mosaica_spatial::Bounds {
                 x_min: 0.0,

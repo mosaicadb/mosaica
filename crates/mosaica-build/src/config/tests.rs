@@ -3021,6 +3021,7 @@ fn stub_view_args(registry: &[BuildView]) -> Vec<crate::ViewArgs> {
         .iter()
         .map(|view| crate::ViewArgs {
             view_id: view.id.clone(),
+            title: view.title.clone(),
             projection: view.projection,
             extent: mosaica_spatial::Bounds {
                 x_min: -40.0,

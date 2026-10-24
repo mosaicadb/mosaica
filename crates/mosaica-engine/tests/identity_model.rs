@@ -338,6 +338,7 @@ fn fixture() -> Fixture {
     let view_args = |view: &str, points: &Path| mosaica_build::ViewArgs {
         visibility: None,
         view_id: view.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.to_path_buf(),

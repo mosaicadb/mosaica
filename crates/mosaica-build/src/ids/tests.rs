@@ -211,6 +211,7 @@ fn args(dir: &Path, budget: Option<u64>) -> crate::BuildArgs {
             crate::ViewArgs {
                 visibility: None,
                 view_id: view.id.clone(),
+                title: view.title.clone(),
                 projection: view.projection,
                 extent: Bounds {
                     x_min: 0.0,

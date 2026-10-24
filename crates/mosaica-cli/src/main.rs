@@ -1355,6 +1355,7 @@ fn main() -> ExitCode {
                     // record's own. The group's half travels on the group descriptor beside it.
                     visibility: view.visibility.clone(),
                     view_id: view.id.clone(),
+                    title: view.title.clone(),
                     projection: view.projection,
                     extent: *extent,
                     points: acquired_view.points,

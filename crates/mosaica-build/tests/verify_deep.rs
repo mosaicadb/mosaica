@@ -144,6 +144,7 @@ fn built_bundle_with(root: &Path, n: u64, score: Option<Score>) {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -818,6 +819,7 @@ fn a_missing_scoped_render_lane_is_refused_and_an_intact_one_is_counted() {
     let view = |key: &str| mosaica_build::ViewArgs {
         visibility: None,
         view_id: format!("quarter:{key}"),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.clone(),

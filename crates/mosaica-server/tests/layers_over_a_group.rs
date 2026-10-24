@@ -208,6 +208,7 @@ fn build_side(layers: &str, keyed: &dyn Fn(u64) -> bool) -> Built {
         .map(|view| ViewArgs {
             visibility: view.visibility.clone(),
             view_id: view.id.clone(),
+            title: view.title.clone(),
             projection: view.projection,
             extent: extent(),
             points: view.source.clone().expect("every view names its points"),

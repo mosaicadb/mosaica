@@ -139,6 +139,7 @@ fn build_fixture_with_schema(root: &Path, tmp: &Path, shard_size: Option<u64>) {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),

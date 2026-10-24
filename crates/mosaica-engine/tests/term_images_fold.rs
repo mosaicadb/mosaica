@@ -172,6 +172,7 @@ fn build_fixture(tmp: &Path, root: &Path) {
     let view_args = |view: &str| mosaica_build::ViewArgs {
         visibility: None,
         view_id: view.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.clone(),

@@ -41,11 +41,11 @@ One coordinate system: a position for each item it holds, the frame those positi
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `name` | string | required | The view's name, which a request names it by. ASCII letters, digits, `_` and `-`, unique among views and view groups. |
-| `title` | string | not set | A display title. Not built yet: the title is accepted and not published. |
+| `title` | string | not set | A display title, served on `/v1/meta` as the view's `display_name`. Without one the view's name is served. |
 | `projection` | string | `"none"` | How a longitude and latitude become a position on the map: `web_mercator`, `equirectangular` (also written `plate_carree`), `gall_isographic`, or `none` for coordinates that are not places on the Earth. It decides which spellings `extent` and `fields` take. Any other name is refused. |
 | `source` | string | the value of `[defaults].source` | A name in `[sources]`: the file holding the view's points, one row per item. A build refuses a view with no source; `mosaica check` accepts one. |
 | `fields` | table of strings | not set | Where the points file keeps each field, as `field = "column"`. The fields are either `x` and `y` or `morton` and `residual`, or on a projected view `lon` and `lat`, and each attribute declared `unique`, whose column is its `field` or its name where this map does not move it. A field not named here is read from the column of its own name. A field the view does not have, both kinds of position, `residual` without `morton`, and `fields` where the view has no source are refused. |
-| `extent` | string or table | required | The frame positions are stored across, as a 32-bit position on each axis. A point outside it is stored on its edge, and a build refuses a frame that more than half the points fall outside. The spellings are under `[view.extent]`. |
+| `extent` | string or table | required | The frame positions are stored across, as a 32-bit position on each axis. A point outside it is stored on its edge, and a build reports how many points that moved but never refuses the frame. The spellings are under `[view.extent]`. |
 | `point_visibility` | table | required | Where each point's access label comes from: keys under `[view.point_visibility]`. |
 | `visibility` | string or array of strings | `"public"` | The access label a viewer must satisfy to reach the view, or a list of labels of which they must satisfy one. Each label is an access expression, such as `finance&(eu|uk)`. `public` alone admits every viewer. An empty list, an empty label, `inherited`, `public` beside another label, and a label that is not an access expression are refused. |
 

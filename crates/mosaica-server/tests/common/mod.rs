@@ -440,6 +440,7 @@ pub fn view_args(view_id: &str, points: &Path, access: AccessInput) -> ViewArgs 
     ViewArgs {
         visibility: None,
         view_id: view_id.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.to_path_buf(),
@@ -522,6 +523,7 @@ pub fn args_from_declaration(path: &Path, out: &Path) -> BuildArgs {
         .map(|((view, inputs), extent)| ViewArgs {
             visibility: view.visibility.clone(),
             view_id: view.id.clone(),
+            title: view.title.clone(),
             projection: view.projection,
             extent,
             points: inputs.points,

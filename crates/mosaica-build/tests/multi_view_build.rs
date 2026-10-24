@@ -109,6 +109,7 @@ fn view_args(view: &str, points: &Path, pairs: &Path) -> ViewArgs {
     ViewArgs {
         visibility: None,
         view_id: view.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.to_path_buf(),
@@ -267,6 +268,7 @@ fn a_label_that_disagrees_between_views_refuses() {
     let field_view = |view: &str, points: &Path| ViewArgs {
         visibility: None,
         view_id: view.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.to_path_buf(),

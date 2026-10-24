@@ -290,6 +290,7 @@ fn build_with_labels(
     let view = |group: &str, key: &str, points: &str| ViewArgs {
         visibility: None,
         view_id: format!("{group}:{key}"),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: dir.join(points),

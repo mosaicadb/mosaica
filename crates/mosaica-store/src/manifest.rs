@@ -492,6 +492,14 @@ pub struct ViewDescriptor {
     pub point_default: Option<String>,
 }
 
+impl ViewDescriptor {
+    /// The `display_name` of a view declared under `id` with `title`: the title, or the id where
+    /// the declaration gives none.
+    pub fn display_name_of(id: &str, title: Option<&str>) -> String {
+        title.unwrap_or(id).to_string()
+    }
+}
+
 /// `groups` entry: one view group and its roster (`views.md` §3.1, §3.2).
 ///
 /// **The roster's durable home is the manifest**, not the WAL: rotation reclaims WAL records, so

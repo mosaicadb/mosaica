@@ -275,7 +275,8 @@ struct ViewBlock {
     /// The view's name, which a request names it by. ASCII letters, digits, `_` and `-`, unique
     /// among views and view groups.
     name: String,
-    /// A display title. Not built yet: the title is accepted and not published.
+    /// A display title, served on `/v1/meta` as the view's `display_name`. Without one the
+    /// view's name is served.
     ///
     /// Default: not set.
     #[serde(default)]
@@ -306,8 +307,8 @@ struct ViewBlock {
     #[serde(default)]
     fields: Option<BTreeMap<String, String>>,
     /// The frame positions are stored across, as a 32-bit position on each axis. A point outside
-    /// it is stored on its edge, and a build refuses a frame that more than half the points fall
-    /// outside. The spellings are under `[view.extent]`.
+    /// it is stored on its edge, and a build reports how many points that moved but never refuses
+    /// the frame. The spellings are under `[view.extent]`.
     ///
     /// Type: string or table.
     ///
@@ -1359,11 +1360,8 @@ pub struct MemberSource {
 #[derive(Debug, Clone)]
 pub struct View {
     pub name: String,
-    /// ⊘ Recorded and not yet published. A title is presentation metadata on an object whose
-    /// visibility is already decided, so serving it discloses nothing a name does not — but
-    /// `MANIFEST.json` carries no slot for one on a view, an attribute or a vocabulary, and adding
-    /// three is a contracts change rather than a declaration one. A **level's** title is published
-    /// today, a **layer's** is, and a **view group's** is (contracts §3.2 r61).
+    /// Published as `MANIFEST.views[..].display_name` and served on `/v1/meta`; `None` serves the
+    /// name ([`mosaica_store::manifest::ViewDescriptor::display_name_of`]).
     pub title: Option<String>,
     /// What turns this view's input coordinates into positions in its frame
     /// (`projections.md` §5). [`Projection::None`] — the default — transforms nothing, and the
@@ -2480,7 +2478,11 @@ pub struct Schema {
 #[derive(Debug, Clone)]
 pub struct Attribute {
     pub name: String,
-    /// ⊘ Recorded and not yet published — see [`View::title`].
+    /// ⊘ Recorded and not yet published. A title is presentation metadata on an object whose
+    /// visibility is already decided, so serving it discloses nothing a name does not — but
+    /// `MANIFEST.json` carries no slot for one on an attribute or a vocabulary, and adding two is
+    /// a contracts change rather than a declaration one. A **view's**, a **level's**, a
+    /// **layer's** and a **view group's** title are published (contracts §3.2 r61).
     pub title: Option<String>,
     /// The column this attribute is read from, where it differs from the served name. `None` means
     /// the two are the same; [`Attribute::column`] is what a reader asks.
@@ -2537,8 +2539,8 @@ pub use mosaica_types::layer::ValueSet;
 #[derive(Debug, Clone)]
 pub struct Vocabulary {
     pub name: String,
-    /// ⊘ Recorded and not yet published — see [`View::title`]. A **value's** title is published,
-    /// as `MANIFEST.vocabularies[..].values[..].title`.
+    /// ⊘ Recorded and not yet published — see [`Attribute::title`]. A **value's** title is
+    /// published, as `MANIFEST.vocabularies[..].values[..].title`.
     pub title: Option<String>,
     pub value_set: ValueSet,
     /// The **code space's** width, which is why it lives here and not on a column
@@ -6008,6 +6010,8 @@ pub struct ViewSelector {
 pub struct BuildView {
     /// The view id: a plain view's `name`, or a group's view as the joined `group:key` form.
     pub id: String,
+    /// The plain view's declared title; `None` for a view of a group, which declares none.
+    pub title: Option<String>,
     /// `None` for a plain view.
     pub group: Option<GroupMembership>,
     pub projection: Projection,
@@ -6150,6 +6154,7 @@ impl Config {
             .iter()
             .map(|view| BuildView {
                 id: view.name.clone(),
+                title: view.title.clone(),
                 group: None,
                 projection: view.projection,
                 extent: view.extent,
@@ -6219,6 +6224,7 @@ impl Config {
                 };
                 registry.push(BuildView {
                     id,
+                    title: None,
                     group: Some(GroupMembership {
                         group: group.name.clone(),
                         key: view.key.clone(),

@@ -164,10 +164,7 @@ pub(crate) fn resolve_plain(
             .map_err(refused)?;
 
     let compiled = ViewDescriptor {
-        display_name: declaration
-            .title
-            .clone()
-            .unwrap_or_else(|| declaration.name.clone()),
+        display_name: ViewDescriptor::display_name_of(name, declaration.title.as_deref()),
         id: declaration.name.clone(),
         // **The build's incarnation** (decision 0115). A plain view has no drop route, so its
         // name is created once and no predecessor's artifacts can be on disc under it; the

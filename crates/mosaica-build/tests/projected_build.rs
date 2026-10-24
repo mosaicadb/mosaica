@@ -402,6 +402,7 @@ fn build_bundle(
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "world".to_string(),
+            title: None,
             projection,
             extent,
             points: points.to_path_buf(),

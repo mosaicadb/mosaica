@@ -457,6 +457,7 @@ pub fn build_fixture_sized(
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points_path.to_path_buf(),
@@ -582,6 +583,7 @@ pub fn build_corpus_fixture(
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: corpus.extent(),
             points: points_path.to_path_buf(),
@@ -639,6 +641,7 @@ pub fn build_corpus_fixture_with_layers(
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: corpus.extent(),
             points: points_path.to_path_buf(),
@@ -700,6 +703,7 @@ pub fn build_with_layers_sized(
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent,
             points: points_path.to_path_buf(),

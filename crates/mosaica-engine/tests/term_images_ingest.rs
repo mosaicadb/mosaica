@@ -199,6 +199,7 @@ fn build_bundle(dir: &Path, name: &str, entities: u64) -> std::path::PathBuf {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: VIEW.to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),

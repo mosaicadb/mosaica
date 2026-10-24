@@ -3461,6 +3461,7 @@ mod tests {
             .iter()
             .map(|id| crate::ViewArgs {
                 view_id: (*id).into(),
+                title: None,
                 ..view.clone()
             })
             .collect();
@@ -3707,6 +3708,7 @@ require_member_visibility = "none"
             views: vec![crate::ViewArgs {
                 visibility: None,
                 view_id: "s0".into(),
+                title: None,
                 projection: parsed.views[0].projection,
                 extent: mosaica_spatial::Bounds {
                     x_min: 0.0,

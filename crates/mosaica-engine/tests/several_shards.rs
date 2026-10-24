@@ -871,6 +871,7 @@ fn grouped_fixture(shard_size: Option<u64>) -> Fixture {
     let view = |id: &str, points: &std::path::Path| mosaica_build::ViewArgs {
         visibility: None,
         view_id: id.to_string(),
+        title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
         points: points.to_path_buf(),

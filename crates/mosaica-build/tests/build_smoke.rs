@@ -179,6 +179,7 @@ fn build_produces_a_verifiable_signature_sorted_bundle() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points: points.clone(),
@@ -488,6 +489,7 @@ fn build_refuses_to_clobber_an_existing_bundle() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -525,6 +527,7 @@ fn an_empty_selection_builds_an_empty_bundle() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -562,6 +565,7 @@ fn morton_input_requires_the_identity_extent() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent,
             points: points.clone(),
@@ -605,6 +609,7 @@ fn morton_input_requires_the_identity_extent() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: identity,
             points,
@@ -649,6 +654,7 @@ fn build_rejects_an_unsafe_view_id() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "../escape".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -690,6 +696,7 @@ fn limit_filters_the_source_entity_id_prefix() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -746,6 +753,7 @@ fn limit_keeps_a_row_group_whose_signed_ids_start_below_zero() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -779,6 +787,7 @@ fn verify_accepts_a_freshly_built_bundle() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -817,6 +826,7 @@ fn verify_rejects_a_columns_file_whose_mosaica_ids_do_not_match_the_key() {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,
             view_id: "s0".to_string(),
+            title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
             points,
@@ -1116,6 +1126,7 @@ fn entity_ids_break_signature_ties_on_the_morton_code() {
             views: vec![mosaica_build::ViewArgs {
                 visibility: None,
                 view_id: "s0".to_string(),
+                title: None,
                 projection: mosaica_spatial::Projection::None,
                 extent: mosaica_build::input::IDENTITY_EXTENT,
                 points,
