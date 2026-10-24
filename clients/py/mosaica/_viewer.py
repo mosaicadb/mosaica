@@ -982,6 +982,8 @@ class Viewer:
         self._token: Optional[Token] = None
         #: Category keys already looked up, by `(column, view)` and then by code.
         self._keys: dict = {}
+        #: The timestamp columns this reader's meta lists, by the token it was read with.
+        self._stamps: dict = {}
         #: The access terms this reader's token was made for, or `None` when the token came from
         #: elsewhere and does not say.
         self.terms = None if terms is None else listed(terms)
@@ -1801,9 +1803,7 @@ class Viewer:
             for key in keys
         ):
             return body
-        meta = self.meta()
-        held = (meta.get("declared_scalars") or []) + (meta.get("scoped_scalars") or [])
-        stamps = {one["name"] for one in held if one.get("arrow_type") == "timestamp_us"}
+        stamps = self._timestamp_columns()
         stamped = {
             column
             for key in keys
@@ -1811,6 +1811,18 @@ class Viewer:
             if column.split("@")[0] in stamps
         }
         return {**body, **{key: _moments(body[key], stamped, _iso_microseconds) for key in keys}}
+
+    def _timestamp_columns(self) -> set[str]:
+        """The columns this reader's meta lists as timestamps, read once per token."""
+        token = self.token().token
+        if token not in self._stamps:
+            meta = self.meta()
+            held = (meta.get("declared_scalars") or []) + (meta.get("scoped_scalars") or [])
+            self._stamps.clear()
+            self._stamps[token] = {
+                one["name"] for one in held if one.get("arrow_type") == "timestamp_us"
+            }
+        return self._stamps[token]
 
     def _refused(self, path: str, body: Optional[dict], status: int, answer: str) -> Refusal:
         """A refusal the server made, in one sentence: what the server said, the filterable

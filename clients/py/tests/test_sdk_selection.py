@@ -341,6 +341,23 @@ def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stu
     assert m.filters == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
 
 
+def test_an_iso_moment_reads_the_meta_once_per_token(db, monkeypatch):
+    from mosaica._viewer import Viewer
+
+    later = {"submitted_at": {"range": {"gte": "2017-01-01"}}}
+    selections = [db.view("s0").filter(later), db.viewer(["cs.LG"]).view("s0").filter(later)]
+    read = Viewer.meta
+    asked = []
+    monkeypatch.setattr(Viewer, "meta", lambda self: asked.append(1) or read(self))
+    for selection in selections:
+        first = selection.count()
+        before = len(asked)
+        assert selection.count() == first
+        assert len(asked) == before
+    # At most one read for each set of terms, the operator's and the reader's.
+    assert len(asked) <= 2
+
+
 def test_a_map_naming_what_the_reader_cannot_see_is_refused(db, stub_bundle):
     """A view, a layer or a column the meta does not list is refused at the call, where the map
     would otherwise open on the first view, draw one colour or drop the layer."""
