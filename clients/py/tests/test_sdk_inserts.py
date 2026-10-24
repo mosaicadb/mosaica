@@ -478,3 +478,39 @@ def test_a_padded_label_serves_trimmed_and_a_conjunction_needs_both_terms_at_eac
     assert report.ok, report
     assert counts() == {"red": 2, "both": 4, "sealed": 2}
     assert db.viewer().view("map").count() == 6
+
+
+@pytest.mark.parametrize("zone", [None, "Europe/Dublin"])
+def test_a_nanosecond_timestamp_column_is_stored_to_the_microsecond(tmp_path, zone):
+    """pandas' default unit is the nanosecond, and a timestamp column holds microseconds: the
+    first commit's build and a write to the running server store both columns, naive and aware,
+    with any part below a microsecond dropped."""
+    binary()
+    db = create(tmp_path / "db")
+    db.declare_view("map", extent={"x": [-5, 40], "y": [-5, 40]})
+    joined(db)
+    db.declare_attribute("when", type="timestamp_us", index=True)
+
+    def stamped(ids, moments):
+        when = pd.to_datetime(moments, format="ISO8601").astype("datetime64[ns]")
+        if zone is not None:
+            when = when.tz_localize(zone)
+        return frame(len(ids), id=ids, when=when)
+
+    first = ["2020-01-01 00:00:00", "2021-06-01 12:30:00.123456789"]
+    later = ["2022-03-04 05:06:07.000000999", "2023-01-01"]
+    try:
+        db.insert("map", stamped(["p", "q"], first), x="x", y="y")
+        assert db.commit().ok
+        db.insert("map", stamped(["r", "s"], later), x="x", y="y")
+        assert db.commit().ok
+        read = db.items("map", ["id", "when"]).to_pandas().set_index("id")["when"]
+        expected = pd.to_datetime(first + later, format="ISO8601")
+        if zone is not None:
+            expected = expected.tz_localize(zone)
+        expected = pd.Series(expected, index=["p", "q", "r", "s"]).dt.floor("us")
+        assert [stamp.value for stamp in read.loc[expected.index]] == [
+            stamp.value for stamp in expected
+        ]
+    finally:
+        db.close()

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from ._refusal import Refusal
@@ -244,11 +245,17 @@ def as_table(data: Any) -> pa.Table:
 
 
 def decoded(table: pa.Table) -> pa.Table:
-    """The table with each dictionary column, or list of dictionary values, as its plain values.
+    """The table with each dictionary column, or list of dictionary values, as its plain values,
+    and each timestamp column in microseconds.
 
     A pandas `Categorical` arrives as an Arrow dictionary column. Decoding it here means every
     target that reads a string column reads a categorical one the same way, at the build and at
     a running server.
+
+    pandas keeps a timestamp in nanoseconds, and a `timestamp_us` column holds microseconds, the
+    only unit the build and a running server read. A timestamp in another unit is cast to
+    microseconds, keeping its time zone: a part below a microsecond is dropped, and a moment
+    microseconds cannot hold is refused.
     """
     for at, column in enumerate(table.schema):
         plain = _plain_type(column.type)
@@ -256,6 +263,17 @@ def decoded(table: pa.Table) -> pa.Table:
             table = table.set_column(
                 at, pa.field(column.name, plain, column.nullable), table.column(at).cast(plain)
             )
+        elif pa.types.is_timestamp(column.type) and column.type.unit != "us":
+            micro = pa.timestamp("us", column.type.tz)
+            options = pc.CastOptions(micro, allow_time_truncate=True)
+            try:
+                cast = pc.cast(table.column(at), options=options)
+            except pa.ArrowInvalid as why:
+                raise Refusal(
+                    f"column {column.name!r} holds a moment a timestamp in microseconds cannot "
+                    f"hold: {why}"
+                ) from None
+            table = table.set_column(at, pa.field(column.name, micro, column.nullable), cast)
     return table
 
 
