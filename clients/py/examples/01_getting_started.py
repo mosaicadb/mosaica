@@ -5,6 +5,7 @@
 #     marimo export ipynb clients/py/examples/01_getting_started.py -o clients/py/examples/01_getting_started.ipynb
 #
 # The docs site includes the code between each pair of `--8<--` markers.
+
 import marimo
 
 __generated_with = "0.25.2"
@@ -391,7 +392,7 @@ def _(mo):
     The map opens on the whole world, where the region is a small cluster of points. Scroll to
     zoom in on it. The islands of East Nusa Tenggara lie east of longitude 118°, but one point
     sits on its own far to the west of them. To find out which place it is, read the region's
-    places into pandas with their positions, and sort them from west to east.
+    places into pandas with their longitude and latitude, and sort them from west to east.
     """)
     return
 
@@ -399,8 +400,8 @@ def _(mo):
 @app.cell
 def _(nusa_tenggara):
     # --8<-- [start:outlier-find]
-    region = nusa_tenggara.items(["geonameid", "name"], system_fields=["position"]).to_pandas()
-    region.sort_values("mosaica:x").head()
+    region = nusa_tenggara.items(["geonameid", "name", "lon", "lat"]).to_pandas()
+    region.sort_values("lon").head()
     # --8<-- [end:outlier-find]
     return
 
@@ -408,9 +409,8 @@ def _(nusa_tenggara):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    `items` reads every place in the selection with the columns you name, and
-    `system_fields=["position"]` adds each one's coordinates, as `mosaica:x` for longitude and
-    `mosaica:y` for latitude. `mosaica_id` is the id Mosaica gives each item.
+    `items` reads every place in the selection with the columns you name. `lon` and `lat` are
+    there because we declared them as details. `mosaica_id` is the id Mosaica gives each item.
 
     The westernmost place is Rokot, at longitude 99.7°, a village in the Mentawai Islands off
     West Sumatra. The next is nearly 20° further east. GeoNames files Rokot under East Nusa

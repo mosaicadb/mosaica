@@ -350,9 +350,10 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
         region = places.filter(in_region)
         west = region.take([pc.index(region["lon"], pc.min(region["lon"])).as_py()])
         found = tables[2].iloc[0]
-        assert (found["geonameid"], found["name"]) == (
+        assert (found["geonameid"], found["name"], found["lon"]) == (
             west["geonameid"][0].as_py(),
             west["name"][0].as_py(),
+            west["lon"][0].as_py(),
         )
 
         # The three maps: everything, then each of the two selections.
