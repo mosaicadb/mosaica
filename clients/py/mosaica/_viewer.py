@@ -18,7 +18,7 @@ import urllib.request
 from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Union
 
 from ._auth import Token, TokenSource, minted
-from ._refusal import Refusal
+from ._refusal import Refusal, listed
 
 if TYPE_CHECKING:
     from .widget import Map
@@ -367,6 +367,11 @@ def _extent(meta: dict, view: str) -> list[float]:
     raise Refusal(f"there is no view named {view!r} that this reader can see")
 
 
+def _layers(layers: Any) -> Any:
+    """The layers a request names: `"all"`, or a list of names, one name being a list of one."""
+    return layers if layers is None or layers == "all" else listed(layers)
+
+
 def _query(params: dict) -> str:
     return "?" + urllib.parse.urlencode(params) if params else ""
 
@@ -610,21 +615,19 @@ class Selection:
         meta = reader.meta()
         request: dict = {"view": self._view, "zoom": int(zoom)}
         if tiles is not None:
-            request["tiles"] = [int(tile) for tile in tiles]
+            request["tiles"] = [int(tile) for tile in listed(tiles)]
         else:
             request["bbox"] = list(self.box or _extent(meta, self._view))
         for name, value in (
             ("k", k),
             ("filters", self._expression()),
             ("highlight", highlight),
-            ("layers", layers),
+            ("layers", _layers(layers)),
             ("levels", levels),
             ("artifact_budget", artifact_budget),
             (
                 "point_rows",
-                point_rows
-                if point_rows is None or isinstance(point_rows, str)
-                else list(point_rows),
+                point_rows if point_rows in (None, "full", "highlight") else listed(point_rows),
             ),
             ("underlay_offset", underlay_offset),
             ("pin", pin),
@@ -821,7 +824,7 @@ class Viewer:
         self._keys: dict = {}
         #: The access terms this reader's token was made for, or `None` when the token came from
         #: elsewhere and does not say.
-        self.terms = None if terms is None else list(terms)
+        self.terms = None if terms is None else listed(terms)
 
     def token(self) -> Token:
         """The token this reader sends, replaced with a fresh one when it is close to expiry.
@@ -980,7 +983,7 @@ class Viewer:
             papers.to_pandas()
             recent = db.items("papers", ["title"], filters={"year": {"range": {"gte": 2020}}})
         """
-        request: dict = {"view": view, "fields": list(fields)}
+        request: dict = {"view": view, "fields": listed(fields)}
         given = {
             "position": position,
             "labels": labels,
@@ -1005,7 +1008,7 @@ class Viewer:
 
             v.lookup("papers", "doi", ["10.1/a", "10.2/b"], fields=["title"])
         """
-        return self.items(view, [field, *fields], filters={field: {"in": list(values)}})
+        return self.items(view, [field, *listed(fields)], filters={field: {"in": listed(values)}})
 
     def artifacts(
         self,
@@ -1061,13 +1064,13 @@ class Viewer:
 
             clusters = db.artifacts("papers", "clusters", ["key", "masked_count", "centroid"])
         """
-        request: dict = {"view": view, "layer": layer, "fields": list(fields)}
+        request: dict = {"view": view, "layer": layer, "fields": listed(fields)}
         given = {
             "level": level,
             "parent": None if parent is None else str(parent),
             "q": q,
             # Decimal strings: an id past 2^53 is not exact as a JSON number.
-            "ids": None if ids is None else [str(int(one)) for one in ids],
+            "ids": None if ids is None else [str(int(one)) for one in listed(ids)],
             "filters": filters,
             "keep_unmatched": keep_unmatched,
             "count": count,
@@ -1141,13 +1144,13 @@ class Viewer:
 
         request: dict = {"view": view, "zoom": int(zoom), "per_tile": int(per_tile)}
         if tiles is not None:
-            request["tiles"] = [int(tile) for tile in tiles]
+            request["tiles"] = [int(tile) for tile in listed(tiles)]
         else:
             request["bbox"] = [float(v) for v in (bbox or _extent(self.meta(), view))]
         for name, value in (
-            ("layers", layers),
+            ("layers", _layers(layers)),
             ("levels", levels),
-            ("computed", None if computed is None else list(computed)),
+            ("computed", None if computed is None else listed(computed)),
             ("filters", filters),
             ("highlight", highlight),
             ("budget", budget),
@@ -1436,7 +1439,7 @@ class Viewer:
         path = f"/v1/categories/{urllib.parse.quote(column, safe='')}"
         query: dict = {} if view is None else {"view": view}
         if codes is not None:
-            wanted = [str(int(code)) for code in codes]
+            wanted = [str(int(code)) for code in listed(codes)]
             # An empty `codes=` on the wire lists the whole vocabulary, so ask nothing.
             values = []
             if wanted:

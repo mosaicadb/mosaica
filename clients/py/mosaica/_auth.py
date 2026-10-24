@@ -16,7 +16,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence, Union
 
-from ._refusal import Refusal
+from ._refusal import Refusal, listed
 
 
 @dataclass
@@ -213,7 +213,7 @@ def authorise(
     named = {
         "principal": principal,
         "access_token": access_token,
-        "terms": None if terms is None else list(terms),
+        "terms": None if terms is None else listed(terms),
         "read_all": True if read_all else None,
     }
     body = {k: v for k, v in named.items() if v is not None}

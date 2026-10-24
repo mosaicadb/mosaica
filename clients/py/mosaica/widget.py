@@ -37,6 +37,7 @@ import anywidget
 import traitlets
 
 from ._auth import Token, TokenSource, minted
+from ._refusal import listed
 
 _HERE = pathlib.Path(__file__).parent
 _BUNDLE = "mosaica-components.js"
@@ -288,7 +289,7 @@ class Map(anywidget.AnyWidget):
         super().__init__(
             url=url,
             view=view,
-            layers=None if layers is None else list(layers),
+            layers=None if layers is None else listed(layers),
             colour_by=colour_by,
             palette=palette,
             value_colours=value_colours,

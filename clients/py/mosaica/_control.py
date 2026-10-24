@@ -28,6 +28,8 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
+
+from ._refusal import listed
 from typing import Any, Sequence
 
 ARROW = "application/vnd.apache.arrow.stream"
@@ -574,7 +576,7 @@ def _grant(principal, group, term, terms, permission) -> dict:
         "principal": principal,
         "group": group,
         "term": term,
-        "terms": None if terms is None else list(terms),
+        "terms": None if terms is None else listed(terms),
         "permission": permission,
     }
     return {k: v for k, v in named.items() if v is not None}

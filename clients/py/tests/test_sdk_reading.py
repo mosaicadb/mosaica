@@ -101,6 +101,15 @@ def test_viewer_refuses_an_empty_term_set(db):
         db.viewer([])
 
 
+def test_one_value_given_alone_is_read_as_one_value(db):
+    """A string where a list is taken is one term, one field or one layer, not its characters."""
+    assert db.viewer(ONE_TERM).view("s0").count() == db.viewer([ONE_TERM]).view("s0").count()
+    assert db.token(ONE_TERM).terms == [ONE_TERM]
+    assert db.items("s0", "title").column_names == ["mosaica_id", "title"]
+    sample = db.view("s0").sample(layers="clusters/kmeans")
+    assert "membership:clusters/kmeans" in sample.column_names
+
+
 def test_a_reader_given_no_terms_is_the_operator_and_reads_every_item(db):
     """`viewer()` with no terms reads with the operator's own token, which holds `read-all`: the
     SDK keeps no list of labels to stand in for it."""

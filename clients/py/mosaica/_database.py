@@ -34,7 +34,7 @@ from . import _inserts, _instance
 from ._auth import Token, authorise, revoke
 from ._control import Control
 from ._inserts import Insert
-from ._refusal import Refusal
+from ._refusal import Refusal, listed
 from ._reports import (
     ChangeReport,
     CommitReport,
@@ -424,13 +424,13 @@ class Database:
         schema = _inserts.schema_of(frame)
         attributes, vocabularies, rows = _columns.columns_of(
             schema,
-            set(skip),
-            set(render),
-            set(index),
-            set(keyword),
-            set(category),
+            set(listed(skip)),
+            set(listed(render)),
+            set(listed(index)),
+            set(listed(keyword)),
+            set(listed(category)),
             self.blocks.attribute_names(),
-            set(unique),
+            set(listed(unique)),
         )
         held = self.blocks.vocabulary_names()
         for block in vocabularies:
@@ -1450,8 +1450,9 @@ class Database:
     def token(self, terms: Sequence[str] | None = None) -> Token:
         """A token for reading this database, made with its operator credential.
 
-        - `terms`: the access terms the token holds. Without them the token is the operator's
-          own, which holds `read-all` and reads every item that is not deleted or suppressed.
+        - `terms`: the access terms the token holds, as a list, or one term as a string. Without
+          them the token is the operator's own, which holds `read-all` and reads every item that
+          is not deleted or suppressed.
 
         Pass the token to `connect` or `Map` to read as that reader.
 
@@ -1460,14 +1461,14 @@ class Database:
         self.serve()
         if terms is None:
             return authorise(self.session_url, self.operator_credential, read_all=True)
-        return authorise(self.session_url, self.operator_credential, terms=list(terms))
+        return authorise(self.session_url, self.operator_credential, terms=listed(terms))
 
     def viewer(self, terms: Sequence[str] | None = None) -> Viewer:
         """A reader of this database holding only the access terms given.
 
-        - `terms`: the access terms. The reader sees an item when its terms satisfy one of the
-          item's labels. Without them the reader is the operator, which holds `read-all` and sees every
-          item that is not deleted or suppressed.
+        - `terms`: the access terms, as a list, or one term as a string. The reader sees an item
+          when its terms satisfy one of the item's labels. Without them the reader is the
+          operator, which holds `read-all` and sees every item that is not deleted or suppressed.
 
         Every count, map and record the reader is given covers only what those terms let it see.
         An empty list is refused, since such a reader sees nothing. A term no row carries is
@@ -1477,12 +1478,12 @@ class Database:
             db.viewer(["cs.LG"]).map()
         """
         self._refuse_before_the_first_commit("viewer")
-        if terms is not None and not list(terms):
+        chosen = None if terms is None else listed(terms)
+        if chosen == []:
             raise Refusal(
                 "viewer: a reader holding no terms sees nothing. Name at least one term, or "
                 "call viewer() with no terms to read everything"
             )
-        chosen = None if terms is None else list(terms)
         self.serve()
         reader = Viewer(self.viewer_url, lambda: self.token(chosen), terms=chosen)
         # A new token is made for each call, so a commit's new views are seen, while the category
@@ -1567,7 +1568,7 @@ class Database:
             db.lookup("papers", "doi", ["10.1/a", "10.2/b"], fields=["title"])
         """
         self._refuse_before_the_first_commit("lookup")
-        return self.items(view, [field, *fields], filters={field: {"in": list(values)}})
+        return self.items(view, [field, *listed(fields)], filters={field: {"in": listed(values)}})
 
     def artifacts(self, view: str, layer: str, fields: Sequence[str], **options):
         """Every artifact of `layer`, with the properties named, as one pyarrow table.
@@ -1671,9 +1672,10 @@ class Database:
     def remove(self, items: Any, strict: bool = False) -> ChangeReport:
         """Delete items, and return a report.
 
-        - `items`: the items, as a list of their `mosaica_id`s, or as a table (a pandas or polars
-          data frame, a pyarrow table, or a dict of columns) whose rows each name one item by the
-          values they carry in its `mosaica_id` column and its unique attributes' columns. A
+        - `items`: the items, as a list of their `mosaica_id`s, one `mosaica_id` alone, or as a
+          table (a pandas or polars data frame, a pyarrow table, or a dict of columns) whose rows
+          each name one item by the values they carry in its `mosaica_id` column and its unique
+          attributes' columns. A
           unique attribute is read from the column an insert reads it from: the `field` its block
           declares, or its name.
         - `strict`: `True` refuses the whole request at a row that names no item, or names two.
@@ -1728,13 +1730,8 @@ class Database:
     def _addressed(self, items: Any, verb: str) -> tuple[dict, list[str]]:
         """The items given as a table of the columns that name them, `{name: [text or None]}`,
         and the names of the columns given that name no item, which are not sent."""
-        if isinstance(items, (str, bytes)):
-            raise Refusal(
-                f"{verb}: items is the text {items!r}, which would be read one character per "
-                f"item. Pass a list of mosaica_ids, such as [{items!r}], or a table of columns"
-            )
         if not (isinstance(items, dict) or hasattr(items, "columns")):
-            items = list(items)
+            items = listed(items)
             if any(isinstance(one, dict) for one in items):
                 raise Refusal(
                     f"{verb}: items is a list of dicts. Pass a table instead: a dict of columns, "

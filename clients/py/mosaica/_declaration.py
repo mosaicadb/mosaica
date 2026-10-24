@@ -16,7 +16,7 @@ import datetime
 from typing import Any, Iterable, Sequence
 
 from ._inserts import ARTIFACT_FIELDS, MEMBER_FIELDS, VOCABULARY_FIELDS
-from ._refusal import Refusal
+from ._refusal import Refusal, listed
 from ._toml import Inline
 
 KINDS = ("view", "view_group", "vocabulary", "attribute", "layer")
@@ -334,9 +334,9 @@ def vocabulary_block(
     block["visibility"] = visibility
     if values is not None:
         # A list of keys, or a `key = code` table pinning each code so a rebuild preserves it.
-        block["values"] = Inline(values) if isinstance(values, dict) else list(values)
+        block["values"] = Inline(values) if isinstance(values, dict) else listed(values)
     if reserved:
-        block["reserved"] = [int(code) for code in reserved]
+        block["reserved"] = [int(code) for code in listed(reserved)]
     return block
 
 
@@ -420,7 +420,7 @@ def layer_block(
     if group is not None:
         block["scope"] = Inline({"group": group})
     if views is not None:
-        block["views"] = list(views)
+        block["views"] = listed(views)
     else:
         # A scoped layer's views may name only its own group and the groups sharing its views, so
         # "every view" is that group and nothing else.
@@ -441,11 +441,11 @@ def layer_block(
     block["artifact_visibility"] = _artifact_visibility(artifact_visibility)
     block["require_member_visibility"] = _requirement(require_member_visibility)
     if depends_on:
-        block["depends_on"] = list(depends_on)
+        block["depends_on"] = listed(depends_on)
     # A predicate layer's artifacts are the column's distinct values and carry no content, so the
     # derived set the caller did not ask for is not written onto one.
     if how != "attribute" or supplied or computed is not DERIVED:
-        content: dict[str, Any] = {"computed": list(computed)}
+        content: dict[str, Any] = {"computed": listed(computed)}
         if supplied:
             content["supplied"] = [_supplied(name, entry) for entry in supplied]
             block["content"] = content

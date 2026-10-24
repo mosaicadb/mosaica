@@ -226,12 +226,11 @@ def test_a_column_naming_no_item_is_ignored_and_named_in_the_report(served, corp
 
 
 def test_items_the_call_would_misread_are_refused_and_nothing_is_applied(served, corpus):
-    """A string would be read one character per item, a list of dicts is a table written by rows,
-    columns of different lengths pair no rows, and a table whose every column names no item names
-    nothing: each is refused before a request is sent."""
+    """A list of dicts is a table written by rows, columns of different lengths pair no rows, and
+    a table whose every column names no item names nothing: each is refused before a request is
+    sent."""
     db = served(string_ids)
     for items in (
-        "p0",
         [{"paper": "p0"}],
         {"paper": ["p0", "p1"], "mosaica_id": ["1"]},
         {"paper": "p0"},
@@ -244,6 +243,18 @@ def test_items_the_call_would_misread_are_refused_and_nothing_is_applied(served,
             db.leave("clusters", "c0", items)
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 20
     assert browse(db, "map", "clusters")["artifacts"][0]["masked_count"] == 20
+
+
+def test_one_mosaica_id_given_alone_names_one_item(served, corpus):
+    db = served(string_ids)
+    [held] = db.lookup("map", "paper", "p0").column("mosaica_id").to_pylist()
+    assert db.addresses(held) == db.addresses([held])
+    report = db.suppress(held)
+    assert report.ok and report.accepted == 1, report
+    assert viewport(db, "map", FRAME)["counts"]["visible"] == 19
+    report = db.unsuppress(str(held))
+    assert report.ok and report.accepted == 1, report
+    assert viewport(db, "map", FRAME)["counts"]["visible"] == 20
 
 
 def test_a_none_in_a_list_names_no_item_and_is_refused_by_row(served, corpus):
