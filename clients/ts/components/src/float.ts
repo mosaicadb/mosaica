@@ -1,9 +1,8 @@
 /**
  * A list that opens over what sits below it: shown in the top layer, so no scrolling card clips it,
  * under the control it belongs to and as wide, or over the control where there is more room above.
- * The room is that inside the host's visible box: the outermost `mosaica-*` element around the
- * control, cut to the window and to whatever clips that element, such as a notebook's scrolling
- * output. It follows the control each frame while it is open, as a card scrolls or the page moves,
+ * The room is the window's, and inside an explorer that explorer's visible box: its own box cut to
+ * the window and to whatever clips it, such as a notebook's scrolling output. It follows the control each frame while it is open, as a card scrolls or the page moves,
  * and hides while the control is scrolled out of the card that holds it. Where the browser has no
  * popover API the list is placed under the control inside the card instead.
  */
@@ -18,7 +17,7 @@ export class FloatingList {
   private frame: number | null = null;
   /** The elements around the control that clip what they hold, found as the list opens. */
   private clips: Element[] = [];
-  /** The outermost `mosaica-*` element around the control, and the elements around it that clip it. */
+  /** The explorer around the control, and the elements around it that clip it. */
   private host: {el: Element; clips: Element[]} | null = null;
 
   /** `find` returns the list while it is rendered, with the control it opens from; `null` while closed. */
@@ -114,10 +113,10 @@ function parentAcross(el: Element): Element | null {
   return at instanceof ShadowRoot ? at.host : at instanceof Element ? at : null;
 }
 
-/** The outermost `mosaica-*` element around `el`, with the elements above it whose overflow clips it. */
+/** The outermost `<mosaica-explorer>` around `el`, with the elements above it whose overflow clips it. */
 function hostAround(el: Element): {el: Element; clips: Element[]} | null {
   let host: Element | null = null;
-  for (let at = parentAcross(el); at; at = parentAcross(at)) if (at.localName.startsWith('mosaica-')) host = at;
+  for (let at = parentAcross(el); at; at = parentAcross(at)) if (at.localName === 'mosaica-explorer') host = at;
   return host ? {el: host, clips: clipsAround(host)} : null;
 }
 
