@@ -28,7 +28,7 @@ The counts arrive first, then the points, so a client can start drawing before t
 A tile at a wide zoom can hold millions of items, so Mosaica draws a sample of them.
 
 - **Density is kept.** Each tile draws the same share of its items, so a crowded area looks crowded.
-- **No blank tiles.** Every tile with an item the viewer may see draws at least a couple of points, even when the viewer may see very few.
+- **No blank tiles.** Every tile with a matching item draws at least a couple of points, even when the viewer may see very few.
 - **A cap per tile** keeps the answer to a size a browser can draw.
 
 The sample is the same on every request, and it nests across zoom levels: a point drawn at one zoom is still drawn when the viewer zooms in, with more appearing around it. When the viewer adds a filter, the points that do not match drop out and the rest stay where they were, so the map thins rather than reshuffling.
@@ -78,9 +78,9 @@ A filter changes what is drawn. A highlight keeps everything that is drawn and m
 
 The points carry each one's topic, but not the topics themselves. A client reads those from the annotations request, which returns the artifacts in each tile: their names and other content, their counts, centres and boxes.
 
-- **The largest first.** Each tile returns a limited number of artifacts, ranked by how many members the viewer may see. A small topic in a crowded area appears as the viewer zooms in.
+- **The largest first.** On a layer with levels, such as `topics`, each tile returns a limited number of artifacts of each level, ranked by how many members the viewer may see. A small topic in a crowded area appears as the viewer zooms in.
 - **The same figures in every tile.** An artifact's count, centre and box cover all of its members the viewer may see, wherever they are, so a topic that spans several tiles can be drawn once.
-- **Trees are cut to fit the screen.** On a topic tree, where too many fine topics would show, their parent is returned in their place. Zooming in moves the cut deeper.
+- **Trees are cut to fit the screen.** On a layer shaped as a free tree (`nested` or `dag`), the request can set a budget for the whole screen. Where too many fine topics would show, their parent is returned in their place, and zooming in moves the cut deeper.
 - **A filter marks topics.** A filter does not change which artifacts are returned or their counts, so topics do not come and go as the viewer types. Each artifact carries a flag saying whether any of its members in the tile match the filter, and another for the highlight.
 
 To count each topic's matching members, use a [breakdown by the layer](#charts-and-breakdowns). The [annotations](annotations.md) chapter explains which artifacts a viewer may see at all.
@@ -108,11 +108,11 @@ An aggregate request computes figures without returning the items: the counts be
 |---|---|---|
 | The whole set | (one row) | how many papers match the filter |
 | Category values | value | papers per archive, the ten largest |
-| Annotations | topic | papers per topic at one level of the tree |
+| Annotations | topic | papers per topic at one level |
 | Histogram | bin | papers per year |
 | Density grid | cell of the map | a heat map of matching papers |
 
-A grouping can also be divided into cells, such as a density grid for each archive.
+A grouping by values or topics can also be divided into cells, such as a density grid for each archive. A breakdown by a free tree names the same cut the map uses, so the chart lists the topics on screen.
 
 The counts are over the items that match the filter. A second filter, the reference, adds each row's count in that set and the lift: how much more common the group is among the matches than in the reference. This request breaks the papers since 2020 down by archive, against all papers:
 
@@ -132,13 +132,14 @@ The first table is one row, the number of papers since 2020. The second has a ro
 
 A histogram picks readable bin edges, such as whole decades or months, around the values the viewer may see. The edges ignore the filter, so a filtered histogram lines up with an unfiltered one beside it.
 
-A grouping can also ask for a field's figures: how many items hold a value, the smallest, the largest and the mean, as `{"summary": ["citations"]}`. Not built yet: field figures under a filter or per group. They are taken over everything the viewer may see in the view.
+A grouping can also ask for a field's figures: how many items hold a value, the smallest, the largest and the mean, as `{"summary": ["citations"]}`. They are taken over everything the viewer may see in the view, so they go in a request of their own: one with a filter or a reference is refused. Not built yet: field figures under a filter or per group.
 
 The [HTTP API reference](../reference/http.md) lists every grouping, the columns of each table, and how a large table continues over several pages.
 
 ## Not built yet
 
 - **Statistics per group**, such as the mean citations of each archive. Read the items in bulk and compute them.
+- **Other breakdowns**: of keyword fields, of integer fields by value, histograms divided into cells, and counts across views.
 - **Searching every category at once.** Typeahead covers one field at a time.
 - **Reading one result in parallel.** A bulk read is one chain of requests.
 - **Filters that reshape a topic tree.** A filter marks which topics hold matches. It does not change how deep into the tree the map goes.
