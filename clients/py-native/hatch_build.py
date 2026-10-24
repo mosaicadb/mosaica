@@ -42,18 +42,12 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 ABI_TAG = "cp310-abi3"
 
 
-def is_windows(target: str | None) -> bool:
-    return "windows" in target if target else sys.platform == "win32"
-
-
 def is_macos(target: str | None) -> bool:
     return "apple" in target if target else sys.platform == "darwin"
 
 
 def artifacts(target: str | None) -> list[tuple[str, str]]:
     """The (cargo output name, name in the package) pairs for this target."""
-    if is_windows(target):
-        return [("mosaica.exe", "mosaica.exe"), ("_mosaica.dll", "_mosaica.pyd")]
     built = "lib_mosaica.dylib" if is_macos(target) else "lib_mosaica.so"
     return [("mosaica", "mosaica"), (built, "_mosaica.abi3.so")]
 

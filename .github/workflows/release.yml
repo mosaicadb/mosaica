@@ -96,7 +96,7 @@ jobs:
     uses: ./.github/workflows/wheels.yml
 
   # One archive per target: the binary, the licence, the third-party notices, the readme and the
-  # changelog. `.tar.gz`, or `.zip` for Windows, and one SHA256SUMS over all of them.
+  # changelog, as a `.tar.gz`, and one SHA256SUMS over all of them.
   archives:
     needs: [verify, wheels]
     runs-on: ubuntu-24.04
@@ -118,11 +118,7 @@ jobs:
             cp "$dir"/* "$name"/
             chmod +x "$name"/mosaica*
             cp LICENSE THIRD_PARTY_LICENSES README.md CHANGELOG.md "$name"/
-            if [[ "$triple" == *windows* ]]; then
-              zip -qr "dist/$name.zip" "$name"
-            else
-              tar -czf "dist/$name.tar.gz" "$name"
-            fi
+            tar -czf "dist/$name.tar.gz" "$name"
           done
           (cd dist && sha256sum ./* > SHA256SUMS && cat SHA256SUMS)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

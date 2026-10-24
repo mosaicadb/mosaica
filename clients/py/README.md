@@ -23,8 +23,8 @@ bundle into `mosaica/static/`, so it needs Node 22.15 or later, with or without 
 the bundle is inside it.
 
 `.github/workflows/wheels.yml` builds `mosaica-native` wheels for Linux on x86_64 and aarch64
-(glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, macOS 10.12 or later on
-x86_64, and Windows on x86_64. Each serves every Python from 3.10 up, through the stable ABI.
+(glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and macOS 10.12 or later on
+x86_64. There is no Windows build. Each serves every Python from 3.10 up, through the stable ABI.
 The workflow uploads them as build artifacts and publishes nothing. On a machine the dependency's
 marker leaves out, `mosaica` installs without `mosaica-native`, and making or serving a database
 needs a `mosaica` binary on `PATH` or named by `MOSAICA_BIN`.

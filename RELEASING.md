@@ -81,7 +81,7 @@ Every third-party action in `release.yml` and `wheels.yml` is pinned to a commit
 |---|---|
 | `verify` | Refuses the tag unless its commit is on `main`, it is `v` and the version in `Cargo.toml`, every copy of the version agrees, `CHANGELOG.md` has its dated section, the gate passed on the commit for a push to `main`, `cargo deny check` passes including advisories, and `THIRD_PARTY_LICENSES` is current. |
 | `wheels` | Calls `wheels.yml`: seven `mosaica-native` platform wheels, the pure `mosaica` wheel, the bare binaries, and a smoke test that installs both wheels in a clean virtualenv. |
-| `archives` | One `.tar.gz` (`.zip` for Windows) per target with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, `README.md` and `CHANGELOG.md`, and `SHA256SUMS`. |
+| `archives` | One `.tar.gz` per target with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, `README.md` and `CHANGELOG.md`, and `SHA256SUMS`. |
 | `npm-pack` | Builds the four npm packages and packs them. |
 | `pypi` | Publishes `mosaica-native`, waits until PyPI serves it, then publishes `mosaica`, through trusted publishing. |
 | `npm` | Publishes the four tarballs in dependency order through trusted publishing, with provenance; a pre-release goes to the `next` dist-tag. |

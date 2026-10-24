@@ -79,10 +79,6 @@ jobs:
             target: x86_64-apple-darwin
             cargo: build
             deployment_target: "10.12"
-          - runner: windows-2025
-            platform: win_amd64
-            target: x86_64-pc-windows-msvc
-            cargo: build
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
@@ -134,7 +130,7 @@ jobs:
           with zipfile.ZipFile(sys.argv[1]) as z:
               names = z.namelist()
               print("\n".join(f"{i.file_size:>10}  {i.filename}" for i in z.infolist()))
-          binary = [n for n in names if n.rsplit("/", 1)[-1] in ("mosaica", "mosaica.exe")]
+          binary = [n for n in names if n.rsplit("/", 1)[-1] == "mosaica"]
           extension = [n for n in names if "_mosaica." in n and not n.endswith(".py")]
           if not binary or not extension:
               sys.exit(f"{sys.argv[1]} holds {binary} and {extension}; it needs one of each")
@@ -142,11 +138,11 @@ jobs:
       # The native build is the one this runner can also run. The cross-builds are checked by
       # their contents and their symbols only, which is what the gate can see from here.
       - name: import it and run it
-        if: matrix.platform == 'manylinux_2_28_x86_64' || matrix.platform == 'macosx_11_0_arm64' || matrix.platform == 'win_amd64'
+        if: matrix.platform == 'manylinux_2_28_x86_64' || matrix.platform == 'macosx_11_0_arm64'
         shell: bash
         run: |
           python -m venv /tmp/wheelcheck
-          vpy=$(ls /tmp/wheelcheck/bin/python /tmp/wheelcheck/Scripts/python.exe 2>/dev/null | head -n 1)
+          vpy=/tmp/wheelcheck/bin/python
           "$vpy" -m pip install --force-reinstall clients/py-native/dist/*.whl
           cd /tmp
           "$vpy" -c "
@@ -169,7 +165,6 @@ jobs:
           name: mosaica-binary-${{ steps.triple.outputs.triple }}
           path: |
             clients/py-native/mosaica_native/mosaica
-            clients/py-native/mosaica_native/mosaica.exe
           if-no-files-found: error
 
   # `mosaica` itself: one `py3-none-any` wheel for every platform, built where the components'

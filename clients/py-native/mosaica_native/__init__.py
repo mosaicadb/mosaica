@@ -14,7 +14,6 @@ finds the same module object.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -23,7 +22,7 @@ from . import _mosaica as _mosaica
 sys.modules.setdefault("_mosaica", _mosaica)
 
 _here = Path(__file__).resolve().parent
-_binary = _here / ("mosaica.exe" if os.name == "nt" else "mosaica")
+_binary = _here / "mosaica"
 
 
 def binary_path() -> str:

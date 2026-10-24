@@ -36,7 +36,7 @@ requires-python = ">=3.10"
 # `MOSAICA_BIN` at a `mosaica` binary, or put one on `PATH`, to make or serve a database.
 dependencies = [
   "pyarrow>=14",
-  "mosaica-native==0.1.0; platform_machine in 'x86_64 AMD64 aarch64 arm64'",
+  "mosaica-native==0.1.0; sys_platform != 'win32' and platform_machine in 'x86_64 aarch64 arm64'",
 ]
 
 [project.urls]

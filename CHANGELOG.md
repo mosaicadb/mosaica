@@ -53,7 +53,7 @@ any later release, and a bundle built by one version may be refused by the next.
     principals, groups, API keys, grants, sessions and OIDC providers. It has no command to insert,
     delete, suppress or annotate on a running server; use the HTTP API or a client for those.
 - **Distribution**: release binaries for Linux (glibc and musl, x86_64 and aarch64), macOS (arm64
-  and x86_64) and Windows (x86_64); Python wheels on PyPI; npm packages; a multi-architecture
+  and x86_64); Python wheels on PyPI; npm packages; a multi-architecture
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
