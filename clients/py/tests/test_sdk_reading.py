@@ -146,6 +146,13 @@ def test_a_sample_naming_its_columns_carries_those_alone_over_the_same_points(db
     assert named.schema.metadata[b"mosaica.counts"] == full.schema.metadata[b"mosaica.counts"]
     with pytest.raises(Refusal):
         db.view("s0").sample(k=64, point_rows=["no_such_column"])
+    # A NumPy array is a list of names like any other.
+    np = pytest.importorskip("numpy")
+    arrayed = db.view("s0").sample(k=64, point_rows=np.array([rendered[0]]))
+    assert arrayed.column_names == named.column_names
+    layer = meta["layers"][0]["name"]
+    tagged = db.view("s0").sample(k=64, layers=np.array([layer]))
+    assert f"membership:{layer}" in tagged.column_names
 
 
 def test_item_is_the_record_for_a_point_a_sample_served(db):

@@ -506,7 +506,9 @@ def _require(name: str, names: list[str], what: str) -> None:
 
 def _layers(layers: Any) -> Any:
     """The layers a request names: `"all"`, or a list of names, one name being a list of one."""
-    return layers if layers is None or layers == "all" else listed(layers)
+    if layers is None or isinstance(layers, str) and layers == "all":
+        return layers
+    return listed(layers)
 
 
 def _query(params: dict) -> str:
@@ -770,7 +772,10 @@ class Selection:
             ("artifact_budget", artifact_budget),
             (
                 "point_rows",
-                point_rows if point_rows in (None, "full", "highlight") else listed(point_rows),
+                point_rows
+                if point_rows is None or point_rows in ("full", "highlight")
+                and isinstance(point_rows, str)
+                else listed(point_rows),
             ),
             ("underlay_offset", underlay_offset),
             ("pin", pin),
