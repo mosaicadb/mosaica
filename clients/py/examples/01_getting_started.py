@@ -343,7 +343,7 @@ def _(mo):
 @app.cell
 def _(db):
     # --8<-- [start:counts]
-    (by_class,) = db.aggregate("world", [{"by": {"field": "feature_class", "top": 9}}])
+    (by_class,) = db.aggregate("world", [{"by": {"field": "feature_class", "top": 9}, "count": True}])
     by_class.to_pandas()
     # --8<-- [end:counts]
     return
@@ -353,8 +353,10 @@ def _(db):
 def _(mo):
     mo.md(r"""
     `aggregate` takes a list of groupings and returns one table for each, which is why we unpack
-    a list of one. `top` is how many values to list, the largest first. The answer is an Arrow
-    table, like every table Mosaica returns, and `to_pandas()` turns it into a data frame.
+    a list of one. A grouping says what to group by and what to work out for each group. Here
+    `by` groups by feature class, `top` is how many values to list, the largest first, and
+    `"count": True` asks for the number of places in each. The answer is an Arrow table, like
+    every table Mosaica returns, and `to_pandas()` turns it into a data frame.
 
     Settlements are the largest class, then water, then buildings. The last row, in the group
     `none`, counts the 47 places GeoNames gives no class. The `title` column holds a display
