@@ -2,18 +2,59 @@
 
 A running Mosaica server takes writes while it serves: new items, edits, deletions, suppressions, and new declarations. The examples here continue with the research papers of the [data model](data-model.md).
 
-Writes go to the server's control listener, set by `[serve] control`. It is an address separate from the one viewers use, and is usually kept private or on a Unix socket. The Python and TypeScript clients wrap every write, and the [capabilities](../reference/capabilities.md) table names the call on each surface.
+Writes go to the server's control listener, set by `[serve] control`. It is an address separate from the one viewers use, and is usually kept private or on a Unix socket. The table below names each write's route, call or command on each surface.
 
 ## The writes
 
-| Write | Route | Viewers see it |
-|---|---|---|
-| Insert new items | `POST /control/ingest` | at the next flush |
-| Add existing items to another view | `POST /control/ingest` | at the next flush |
-| Edit items | `POST /control/ingest` | at the next flush. The item leaves the map until then |
-| Delete items | `POST /control/changes` | on the next request |
-| Suppress items, and lift a suppression | `POST /control/changes` | on the next request |
-| Declare fields, views, layers and vocabularies, and publish annotations | `/control/attributes`, `/control/views/…`, `/control/layers/…`, `/control/vocabularies/…` | once the server answers |
+=== "HTTP"
+
+    | Write | Route | Viewers see it |
+    |---|---|---|
+    | Insert new items | `POST /control/ingest` | at the next flush |
+    | Add existing items to another view | `POST /control/ingest` | at the next flush |
+    | Edit items | `POST /control/ingest` | at the next flush. The item leaves the map until then |
+    | Delete items | `POST /control/changes` | on the next request |
+    | Suppress items, and lift a suppression | `POST /control/changes` | on the next request |
+    | Declare fields, views, layers and vocabularies, and publish annotations | `/control/attributes`, `/control/views/…`, `/control/layers/…`, `/control/vocabularies/…` | once the server answers |
+
+=== "Python"
+
+    `Database` writes to a database the Python client runs itself. It sends inserts and declarations at `commit`, and deletions and suppressions at once. On a server elsewhere, `Control` has the TypeScript client's calls, as `ingest`, `changes`, `declare_attribute` and so on.
+
+    | Write | Call | Viewers see it |
+    |---|---|---|
+    | Insert new items | `Database.insert`, then `commit` | at the next flush |
+    | Add existing items to another view | `Database.insert` into the view, then `commit` | at the next flush |
+    | Edit items | `Database.insert`, then `commit` | at the next flush. The item leaves the map until then |
+    | Delete items | `Database.remove` | on the next request |
+    | Suppress items, and lift a suppression | `Database.suppress`, `Database.unsuppress` | on the next request |
+    | Declare fields, views, layers and vocabularies, and publish annotations | `Database.declare_attribute`, `declare_view`, `declare_layer`, `declare_vocabulary`, then `commit` | once the server answers |
+
+=== "TypeScript"
+
+    `Control` sends each write with the operator's credential.
+
+    | Write | Call | Viewers see it |
+    |---|---|---|
+    | Insert new items | `Control.ingest` | at the next flush |
+    | Add existing items to another view | `Control.ingest` | at the next flush |
+    | Edit items | `Control.ingest` | at the next flush. The item leaves the map until then |
+    | Delete items | `Control.changes` | on the next request |
+    | Suppress items, and lift a suppression | `Control.changes` | on the next request |
+    | Declare fields, views, layers and vocabularies, and publish annotations | `Control.declareAttribute`, `declareView`, `declareLayer`, `declareVocabulary`, `publish` | once the server answers |
+
+=== "CLI"
+
+    The `mosaica` command cannot write to a running server.
+
+    | Write | Command | Viewers see it |
+    |---|---|---|
+    | Insert new items | Not built yet | at the next flush |
+    | Add existing items to another view | Not built yet | at the next flush |
+    | Edit items | Not built yet | at the next flush. The item leaves the map until then |
+    | Delete items | Not built yet | on the next request |
+    | Suppress items, and lift a suppression | Not built yet | on the next request |
+    | Declare fields, views, layers and vocabularies, and publish annotations | Only in a new database: the declaration file, built by `mosaica build` | once the server answers |
 
 A **flush** is how new and edited items reach the map. It runs every 90 seconds by default, or sooner once 40,000 items are waiting. See [when new data appears](#when-new-data-appears).
 
