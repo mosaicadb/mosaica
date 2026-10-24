@@ -697,6 +697,7 @@ class Database:
             db.insert("papers", frame, x="x", y="y", access="labels")
             db.insert("clusters", frame, key="cluster", columns={"paper": "paper_id"})
         """
+        self._refuse_when_closed()
         kind, block = self._target(target, named, roster, artifacts, members)
         role, data = self._role(target, kind, table, roster, artifacts, members, named)
         if _inserts.is_path(data) and not Path(data).expanduser().exists():
@@ -1233,8 +1234,8 @@ class Database:
 
         `check()` and `commit()` do this themselves. Call it to look at the files first.
         """
+        self._refuse_when_closed()
         document = self._document()
-        self.path.mkdir(parents=True, exist_ok=True)
         (self.path / "schema.toml").write_text(dumps(document), encoding="utf-8")
         _instance.write_deployment(self.path)
         _instance.secrets_for(self.path)
@@ -1243,6 +1244,7 @@ class Database:
 
     def _save_state(self) -> None:
         """The SDK's own copy of the declaration, so `open()` reads the blocks back."""
+        self._refuse_when_closed()
         state = {
             "inserts": [_stored(insert) for insert in self.inserts],
             "pending": [_stored(insert) for insert in self.pending],
@@ -1909,7 +1911,23 @@ class Database:
         self.serve()
         revoke(self.session_url, self.operator_credential, token)
 
+    def _refuse_when_closed(self) -> None:
+        """Refuse a call on a database whose directory is gone, as a temporary one's is once it
+        is closed."""
+        if self.path.is_dir():
+            return
+        if self.temporary:
+            raise Refusal(
+                "this database is closed, and as a temporary one its directory went with it; a "
+                "copy made with save(path) before it closed opens again with mosaica.open(path)"
+            )
+        raise Refusal(
+            f"the database's directory {self.path} no longer exists; mosaica.open(path) opens a "
+            f"copy saved elsewhere"
+        )
+
     def _refuse_before_the_first_commit(self, verb: str) -> None:
+        self._refuse_when_closed()
         if not self.built:
             raise Refusal(
                 f"{verb}: this database has not been committed, so there is nothing serving it "
@@ -1923,6 +1941,7 @@ class Database:
         """
         if self._held.child is not None:
             return self.listening
+        self._refuse_when_closed()
         binary, _ = _instance.find_binary()
         self._held.child, self.listening = _instance.start(binary, self.path / "mosaica.toml")
         return self.listening
@@ -2022,6 +2041,7 @@ class Database:
         can be reopened with `open(path)` or served with
         `mosaica serve --deployment <path>/mosaica.toml`.
         """
+        self._refuse_when_closed()
         target = Path(path).expanduser()
         if target.exists() and any(target.iterdir()):
             raise Refusal(f"save: {target} is not empty")
@@ -2030,6 +2050,9 @@ class Database:
 
     def close(self) -> None:
         """Stop the server, and delete the directory if the database is a temporary one.
+
+        A temporary database refuses every later call, since its directory is gone. Any other
+        starts its server again when a call needs it.
 
         The same happens when nothing refers to the database any more, and when Python exits,
         however it exits: a kernel restarted or shut down, a notebook run to its end, or the

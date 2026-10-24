@@ -237,6 +237,32 @@ def test_create_refuses_a_directory_that_is_not_empty(tmp_path):
     assert not (database.path / "something").exists()
 
 
+def test_a_closed_temporary_database_refuses_every_call_and_a_named_one_serves_again(tmp_path):
+    binary()
+    pytest.importorskip("anywidget")
+    temporary, named = create(), create(tmp_path / "db")
+    for db in (temporary, named):
+        db.declare_view("map")
+        db.insert("map", frame(), x="x", y="y")
+        db.commit()
+        db.close()
+    for call in (
+        lambda: temporary.view("map").count(),
+        lambda: temporary.map(),
+        lambda: temporary.commit(),
+        lambda: temporary.check(),
+        lambda: temporary.insert("map", frame(), x="x", y="y"),
+        lambda: temporary.declare_view("other"),
+        lambda: temporary.save(tmp_path / "copy"),
+    ):
+        with pytest.raises(Refusal):
+            call()
+    try:
+        assert named.view("map").count() == 3
+    finally:
+        named.close()
+
+
 def test_a_temporary_database_goes_on_a_ram_backed_filesystem_and_close_removes_it():
     db = create()
     assert db.temporary
