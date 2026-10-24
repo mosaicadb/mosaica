@@ -367,6 +367,15 @@ def _extent(meta: dict, view: str) -> list[float]:
     raise Refusal(f"there is no view named {view!r} that this reader can see")
 
 
+def _require(name: str, names: list[str], what: str) -> None:
+    """Refuse a name this reader's meta does not list, naming those it does."""
+    if name not in names:
+        raise Refusal(
+            f"there is no {what} named {name!r} that this reader can see. Name one of: "
+            f"{', '.join(names) or 'none, since there are none'}"
+        )
+
+
 def _layers(layers: Any) -> Any:
     """The layers a request names: `"all"`, or a list of names, one name being a list of one."""
     return layers if layers is None or layers == "all" else listed(layers)
@@ -752,7 +761,8 @@ class Selection:
         - `value_colours`, `cluster_colours`: colours for single category values and single
           clusters in place of their palette colours, as `Map` takes them.
 
-        Items outside the box are still drawn when they are in frame.
+        Items outside the box are still drawn when they are in frame. A layer, a `colour_by` or
+        a `size_by` this reader cannot see is refused, as `Viewer.map` says.
 
             db.view("papers").filter({"year": {"range": {"gte": 2020}}}).map(colour_by="venue")
         """
@@ -875,12 +885,32 @@ class Viewer:
 
         Other keywords go to `Map` unchanged, such as `bbox` to frame the camera on a box, and
         `artifacts_per_tile`, without which the map draws no annotation and colouring by a layer
-        has no colours. The
-        page in the browser fetches its own data from the database with this reader's token. The
-        token is sent to the page as a message and is never saved with the notebook.
+        has no colours. The page in the browser fetches its own data from the database with this
+        reader's token. The token is sent to the page as a message and is never saved with the
+        notebook.
+
+        A view, a layer, a `colour_by` or a `size_by` that this reader's `meta()` does not list is
+        refused, and the refusal names those it does. `colour_by` and `size_by` name a column
+        declared with `render=True`, which every point drawn carries.
         """
         from .widget import Map
 
+        meta = self.meta()
+        if view is not None:
+            self._require_view(view, meta)
+        named = [layer["name"] for layer in meta.get("layers") or []]
+        for layer in [] if layers is None else listed(layers):
+            _require(layer, named, "layer")
+        rendered = [
+            column["name"]
+            for column in (meta.get("declared_scalars") or []) + (meta.get("scoped_scalars") or [])
+            if column.get("render")
+        ]
+        if colour_by is not None:
+            colours = rendered + [f"cluster:{layer}" for layer in named]
+            _require(colour_by, colours, "rendered column or cluster:<layer> to colour by")
+        if size_by is not None:
+            _require(size_by, rendered, "rendered column to size by")
         return Map(
             self.url,
             token=self.token,
@@ -1546,16 +1576,9 @@ class Viewer:
             request["zoom"] = int(zoom)
         return json.loads(self._request("POST", f"/v1/artifacts/{mosaica_id}", request))
 
-    def _views(self) -> list[dict]:
-        return list(self.meta().get("views") or [])
-
-    def _require_view(self, name: str) -> None:
-        names = [block["id"] for block in self._views()]
-        if name not in names:
-            raise Refusal(
-                f"there is no view named {name!r} that this reader can see. The views are: "
-                f"{', '.join(names) or 'none'}"
-            )
+    def _require_view(self, name: str, meta: Optional[dict] = None) -> None:
+        views = (self.meta() if meta is None else meta).get("views") or []
+        _require(name, [block["id"] for block in views], "view")
 
     def _keys_of(self, column: str, view: Optional[str], codes) -> dict:
         """The keys of these codes of a category column, asking the server only for new codes.

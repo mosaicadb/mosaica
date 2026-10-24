@@ -1511,8 +1511,10 @@ class Database:
         - `height`: the widget's height in pixels.
         - `size_by`: a number column to size points by; `None` draws them at one size.
 
-        Other keywords go to `Map` unchanged, such as `size_scale`. `db.view(name).map()` opens on a selection instead,
-        and `db.viewer(terms).map()` shows what a reader holding those terms sees.
+        Other keywords go to `Map` unchanged, such as `size_scale`. A view, a layer, a `colour_by`
+        or a `size_by` the database does not hold is refused, and the refusal names those it
+        does. `db.view(name).map()` opens on a selection instead, and `db.viewer(terms).map()`
+        shows what a reader holding those terms sees.
 
             db.map(colour_by="cluster:clusters")
         """

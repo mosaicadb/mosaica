@@ -283,15 +283,35 @@ def test_a_map_opens_on_the_selections_view_filters_and_box(db, points, stub_bun
     box = box_of(points, 0.2, 0.8)
     expression = {"archive": {"eq": "cs"}}
     m = db.view("s0").filter(expression).within(box).map(
-        colour_by="primary_category", layers=[], height=320, size_by="citations"
+        colour_by="primary_category", layers=[], height=320, size_by="submitted_at"
     )
     assert m.view == "s0"
     assert m.filters == expression
     assert m.bbox == list(box)
     assert m.colour_by == "primary_category" and m.layers == [] and m.height == 320
-    assert m.size_by == "citations"
+    assert m.size_by == "submitted_at"
     assert (m.budget, m.budget_min, m.budget_max) == (0, 1_000, 2_000_000)
     assert (m.cluster_budget, m.cluster_budget_min, m.cluster_budget_max) == (1_000, 10, 10_000)
+
+
+def test_a_map_naming_what_the_reader_cannot_see_is_refused(db, stub_bundle):
+    """A view, a layer or a column the meta does not list is refused at the call, where the map
+    would otherwise open on the first view, draw one colour or drop the layer."""
+    for wrong in (
+        {"view": "nope"},
+        {"layers": ["nope"]},
+        {"colour_by": "nope"},
+        {"colour_by": "cluster:nope"},
+        {"colour_by": "title"},
+        {"size_by": "nope"},
+    ):
+        with pytest.raises(Refusal):
+            db.map(**wrong)
+    for wrong in ({"layers": "nope"}, {"colour_by": "nope"}, {"size_by": "nope"}):
+        with pytest.raises(Refusal):
+            db.view("s0").map(**wrong)
+    layer = db.meta()["layers"][0]["name"]
+    assert db.map(colour_by=f"cluster:{layer}", layers=[layer]).colour_by == f"cluster:{layer}"
 
 
 def test_every_route_to_a_map_takes_the_point_budget(db, stub_bundle):
