@@ -1,5 +1,5 @@
 import {CompositeLayer, type BinaryAttribute as DeckBinaryAttribute, type CompositeLayerProps, type Layer, type LayersList, type UpdateParameters} from '@deck.gl/core';
-import {BitmapLayer, LineLayer, PolygonLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
+import {BitmapLayer, IconLayer, LineLayer, PolygonLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {
   CLUSTER_PREFIX,
   NO_ORDINAL,
@@ -20,6 +20,7 @@ import {
 } from '@mosaicajs/client';
 import {NEUTRAL} from '@mosaicajs/client/internal';
 import {materialiseStandIn, type StandInBuffers} from './assemble.js';
+import {BACKING_HEIGHT_EM, backingAspect, backingAtlas, backingIcon} from './backing.js';
 import {DEFAULT_COLOURING, buildColourAttribute, encodingSignature, rgbOfHex, type Colouring, type Encoding, type Rgb} from './colour.js';
 import {shapeBbox, smoothRing, type ContourShape, type Part} from './contours.js';
 import {DEFAULT_DENSITY_SCALE, binDensity, contourThresholds, densityPaint, densityPosition, densitySteps, densityStops, drawnCells, filterDensity, gridImage, maxCount, type DensityCell, type DensityColours, type DensityCounts, type DensityMode, type DensityScale} from './density.js';
@@ -264,8 +265,17 @@ const ACCENT: Record<'light' | 'dark', [number, number, number]> = {light: [27, 
 const INK: Record<'light' | 'dark', [number, number, number]> = {light: [27, 29, 33], dark: [242, 243, 245]};
 /** The label halo per ground: the map's default background, opaque but for its soft edge. */
 const HALO: Record<'light' | 'dark', [number, number, number, number]> = {light: [246, 246, 244, 250], dark: [17, 19, 23, 250]};
-/** The veil under each name where the ground shows through: the halo's colour, translucent, so the points beneath stay faintly seen. */
-const VEIL: Record<'light' | 'dark', [number, number, number, number]> = {light: [246, 246, 244, 190], dark: [17, 19, 23, 190]};
+/** The soft backing under each name where the ground shows through: the halo's colour, nearly opaque at its centre. */
+const BACKING: Record<'light' | 'dark', [number, number, number, number]> = {light: [246, 246, 244, 235], dark: [17, 19, 23, 235]};
+/** The backing atlas as an image, made at the first label drawn; `null` where there is no `ImageData`. */
+let backingImage: ImageData | null | undefined;
+function backingImageOf(): ImageData | null {
+  if (backingImage === undefined) {
+    const atlas = backingAtlas();
+    backingImage = typeof ImageData !== 'undefined' ? new ImageData(atlas.data, atlas.width, atlas.height) : null;
+  }
+  return backingImage;
+}
 /**
  * The halo's width as a fraction of the em: about 3.4 px on a 14 px name, the middle of the size
  * band, which keeps a name legible over points as dense as the map draws. The distance field's
@@ -1242,6 +1252,33 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     return sizes;
   }
 
+  /**
+   * The soft backings under `rows`, one pill each, centred on its text and as wide as the text's
+   * estimated width plus the fade at both ends. Present from the first paint, empty, like the text.
+   */
+  private backingLayer(rows: LabelDatum[], scheme: 'light' | 'dark', key: string): Layer {
+    const image = backingImageOf();
+    const width = (d: LabelDatum) => d.text.length * NAME_EM * d.size;
+    return new IconLayer(
+      this.getSubLayerProps({id: 'label-backing'}),
+      {
+        visible: rows.length > 0 && image !== null,
+        data: image ? rows : [],
+        iconAtlas: image,
+        iconMapping: backingAtlas().mapping,
+        getIcon: (d: LabelDatum) => backingIcon(backingAspect(width(d), d.size)),
+        getPosition: (d: LabelDatum) => d.position,
+        getSize: (d: LabelDatum) => d.size * BACKING_HEIGHT_EM,
+        sizeUnits: 'pixels' as const,
+        getPixelOffset: (d: LabelDatum) => (d.anchor === 'start' ? [d.offset[0] + width(d) / 2, d.offset[1]] : d.offset),
+        getColor: BACKING[scheme],
+        pickable: false,
+        parameters: {depthCompare: 'always' as const},
+        updateTriggers: {getIcon: key, getSize: key, getPixelOffset: key, getColor: scheme}
+      } as never
+    );
+  }
+
   /** The level clusters are drawn at ({@link drawnLevel}). */
   private levelOf(r: Resolved): number | undefined {
     return drawnLevel(r.meta, r.artifacts, r.legend?.colourBy, this.props.clusterLevel);
@@ -1521,12 +1558,13 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     }
     const scheme = this.props.scheme ?? 'dark';
     const ink = [...INK[scheme], 255] as [number, number, number, number];
-    // Each name sits on a veil of the ground colour and carries a halo of it, so it reads over
-    // points however dense. Over density in saturated colours a halo reads as an outline round each
-    // glyph, so there the plate is opaque and the halo goes. The plates are drawn as layers of their
-    // own beneath all the text, so one row's plate does not cover another's glyphs.
+    // Each name sits on a soft backing of the ground colour, opaque over the text and fading past
+    // it, and carries a halo of it, so it reads over points however dense. Over density in
+    // saturated colours a halo reads as an outline round each glyph, so there the name sits on an
+    // opaque plate instead and the halo goes. Backings and plates are drawn as layers of their own
+    // beneath all the text, so one row's does not cover another's glyphs.
     const plated = this.platesLabels();
-    const plateProps = {background: true, getBackgroundColor: plated ? HALO[scheme] : VEIL[scheme], backgroundPadding: [6, 3], backgroundBorderRadius: 4, getColor: [0, 0, 0, 0], outlineWidth: 0, pickable: false};
+    const plateProps = {background: true, getBackgroundColor: HALO[scheme], backgroundPadding: [6, 4], backgroundBorderRadius: 3, getColor: [0, 0, 0, 0], outlineWidth: 0, pickable: false};
     const own = plated ? {outlineWidth: 0} : {};
     const text = (id: string, kind: LabelDatum['kind'], rows: LabelDatum[], extra: Record<string, unknown>) =>
       new TextLayer(
@@ -1552,7 +1590,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
           pickable: this.props.pickable && kind === 'name',
           artifactIds: rows.map((d) => d.id),
           parameters: {depthCompare: 'always' as const},
-          updateTriggers: {getPixelOffset: key, getSize: key, getColor: scheme, getBackgroundColor: `${scheme}|${plated}`},
+          updateTriggers: {getPixelOffset: key, getSize: key, getColor: scheme, getBackgroundColor: scheme},
           ...extra
         } as never
       );
@@ -1564,7 +1602,8 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     // A name shows at rest; its count and topic only while its artifact is hovered.
     const hovered = this.props.hoveredArtifact ?? null;
     const rowsOf = (kind: LabelDatum['kind']) => data.filter((d) => d.kind === kind && (kind === 'name' || d.id === hovered));
-    for (const k of kinds) layers.push(text(`${k.id}-plates`, k.kind, rowsOf(k.kind), {...k.style, ...plateProps}));
+    if (plated) for (const k of kinds) layers.push(text(`${k.id}-plates`, k.kind, rowsOf(k.kind), {...k.style, ...plateProps}));
+    else layers.push(this.backingLayer(kinds.flatMap((k) => rowsOf(k.kind)), scheme, key));
     for (const k of kinds) layers.push(text(k.id, k.kind, rowsOf(k.kind), {...k.style, ...own}));
     return layers;
   }
