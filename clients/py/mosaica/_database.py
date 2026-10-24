@@ -44,7 +44,7 @@ from ._reports import (
     render_columns_of,
 )
 from ._toml import Inline, dumps
-from ._viewer import TOKEN_MARGIN, Selection, Viewer
+from ._viewer import Selection, Viewer
 
 if TYPE_CHECKING:
     from .widget import Map
@@ -121,10 +121,6 @@ class Database:
         self._loaded_text: str | None = None
         #: Category keys looked up by `sample()`, per reader: by server address and terms.
         self._keys: dict = {}
-        #: The token each set of terms reads with, and the timestamp columns each token was
-        #: found to see, kept until a commit or a drop changes what readers see.
-        self._tokens: dict = {}
-        self._stamps: dict = {}
 
     @property
     def _child(self) -> subprocess.Popen | None:
@@ -1359,7 +1355,6 @@ class Database:
                 report,
             )
         self.built = True
-        self._readers_see_anew()
         self._record_label_columns(document.get("layer", []))
         self.serve()
         report.seconds = time.monotonic() - started
@@ -1438,7 +1433,6 @@ class Database:
         accepted = C.run(control, pages, report, strict)
         self._record_label_columns(page.body for page in accepted if page.kind == "layer")
         self.pending.clear()
-        self._readers_see_anew()
         self._save_state()
         if pages and not accepted:
             raise Refusal(str(report), report)
@@ -1507,27 +1501,12 @@ class Database:
                 "call viewer() with no terms to read everything"
             )
         self.serve()
-        held = (self.viewer_url, None if chosen is None else frozenset(chosen))
-        reader = Viewer(self.viewer_url, lambda: self._reader_token(held, chosen), terms=chosen)
-        # Every reader holding the same terms shares the category keys already looked up and,
-        # until the next commit or drop, one token and what it was found to see.
-        reader._keys = self._keys.setdefault(held, {})
-        reader._stamps = self._stamps.setdefault(held, {})
+        reader = Viewer(self.viewer_url, lambda: self.token(chosen), terms=chosen)
+        # A new token is made for each call, so a commit's new views are seen, while the category
+        # keys already looked up are kept for every reader holding the same terms.
+        held = None if chosen is None else frozenset(chosen)
+        reader._keys = self._keys.setdefault((self.viewer_url, held), {})
         return reader
-
-    def _reader_token(self, held: tuple, chosen: list[str] | None) -> Token:
-        """The token readers holding these terms read with: one made since the last commit or
-        drop, or a new one where that is close to expiry."""
-        token = self._tokens.get(held)
-        left = None if token is None else token.seconds_left
-        if token is None or (left is not None and left <= TOKEN_MARGIN):
-            token = self._tokens[held] = self.token(chosen)
-        return token
-
-    def _readers_see_anew(self) -> None:
-        """Forget the readers' tokens and what they saw, after a change to what a reader sees."""
-        self._tokens.clear()
-        self._stamps.clear()
 
     def map(
         self,
@@ -1900,7 +1879,6 @@ class Database:
         """
         self._refuse_before_the_first_commit("drop_layer")
         answer = _accepted(self.control.drop_layer(name, wait), f"drop_layer {name}")
-        self._readers_see_anew()
         self.blocks.remove_layer(name)
         self.pending = [
             one for one in self.pending
@@ -1920,9 +1898,7 @@ class Database:
         dropped with it.
         """
         self._refuse_before_the_first_commit("drop_view")
-        answer = _accepted(self.control.drop_view(group, key, wait), f"drop_view {group}/{key}")
-        self._readers_see_anew()
-        return answer
+        return _accepted(self.control.drop_view(group, key, wait), f"drop_view {group}/{key}")
 
     def revoke(self, token) -> None:
         """End a token this database made, so it can no longer read.

@@ -309,8 +309,6 @@ def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stu
         datetime.date(2017, 1, 1),
         pd.Timestamp("2017-01-01"),
         np.datetime64("2017-01-01"),
-        "2017-01-01",
-        "2017-01-01T00:00:00Z",
         str(int(datetime.datetime(2017, 1, 1, tzinfo=utc).timestamp()) * 1_000_000),
     ):
         selection = db.view("s0").filter({"submitted_at": {"range": {"gte": moment}}})
@@ -322,8 +320,7 @@ def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stu
         with pytest.raises(Refusal) as refused:
             db.view("s0").filter({"submitted_at": {"range": {"gte": missing}}}).count()
         assert refused.value.status is None
-    # A text that is not a moment is left for the server to refuse, and a keyword is never read
-    # as one.
+    # A string is sent as it is: the server reads it, and refuses one that names no moment.
     with pytest.raises(Refusal):
         db.view("s0").filter({"submitted_at": {"range": {"gte": "last spring"}}}).count()
     assert db.view("s0").filter({"arxiv_id": {"eq": "2017-01-01"}}).count() == 0
@@ -337,25 +334,8 @@ def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stu
     layer = db.meta()["layers"][0]["name"]
     tiles = db.viewport_artifacts("s0", 0, per_tile=5, layers=[layer], filters=after)
     assert json.loads(tiles.schema.metadata[b"mosaica.request"])["filters"] == sent["filters"]
-    m = db.view("s0").filter({"submitted_at": {"range": {"gte": "2017-01-01"}}}).map()
+    m = db.view("s0").filter({"submitted_at": {"range": {"gte": datetime.date(2017, 1, 1)}}}).map()
     assert m.filters == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
-
-
-def test_an_iso_moment_reads_the_meta_once_per_token(db, monkeypatch):
-    from mosaica._viewer import Viewer
-
-    later = {"submitted_at": {"range": {"gte": "2017-01-01"}}}
-    selections = [db.view("s0").filter(later), db.viewer(["cs.LG"]).view("s0").filter(later)]
-    read = Viewer.meta
-    asked = []
-    monkeypatch.setattr(Viewer, "meta", lambda self: asked.append(1) or read(self))
-    for selection in selections:
-        first = selection.count()
-        before = len(asked)
-        assert selection.count() == first
-        assert len(asked) == before
-    # At most one read for each set of terms, the operator's and the reader's.
-    assert len(asked) <= 2
 
 
 def test_a_map_naming_what_the_reader_cannot_see_is_refused(db, stub_bundle):

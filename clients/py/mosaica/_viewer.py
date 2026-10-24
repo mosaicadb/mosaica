@@ -14,7 +14,6 @@ import io
 import json
 import numbers
 import operator
-import re
 import struct
 import urllib.error
 import urllib.parse
@@ -406,7 +405,6 @@ def _an_id(value: Any, what: str) -> str:
 
 _EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 _MICROSECOND = datetime.timedelta(microseconds=1)
-_DECIMAL = re.compile(r"-?[0-9]+")
 
 
 def _microseconds(value: Any) -> Optional[int]:
@@ -449,45 +447,6 @@ def _json_value(value: Any) -> Any:
         f"a request holds {value!r}, a {type(value).__name__}, which cannot be sent; write a "
         f"number, a string, a date or a datetime"
     )
-
-
-def _iso_microseconds(value: Any) -> Optional[int]:
-    """An ISO 8601 date or datetime string as microseconds, or `None` where it is not one or is
-    already a timestamp's decimal digits."""
-    if not isinstance(value, str) or _DECIMAL.fullmatch(value):
-        return None
-    # Python before 3.11 reads no `Z` for UTC.
-    written = value[:-1] + "+00:00" if value.endswith("Z") else value
-    try:
-        moment = datetime.datetime.fromisoformat(written)
-    except ValueError:
-        return None
-    return _microseconds(moment)
-
-
-def _moments(expression: Any, stamped: set[str], convert) -> Any:
-    """A filter expression with each value of a leaf on a column in `stamped` passed through
-    `convert`, which returns the value to send or `None` to keep it."""
-    if not isinstance(expression, dict):
-        return expression
-    out: dict = {}
-    for key, value in expression.items():
-        if key in ("all_of", "any_of", "none_of") and isinstance(value, list):
-            out[key] = [_moments(one, stamped, convert) for one in value]
-        elif key in stamped and isinstance(value, dict):
-            out[key] = {op: _each(operand, convert) for op, operand in value.items()}
-        else:
-            out[key] = value
-    return out
-
-
-def _each(operand: Any, convert) -> Any:
-    if isinstance(operand, dict):
-        return {bound: _each(one, convert) for bound, one in operand.items()}
-    if isinstance(operand, list):
-        return [_each(one, convert) for one in operand]
-    converted = convert(operand)
-    return operand if converted is None else converted
 
 
 def _filter_columns(expression: Any) -> set[str]:
@@ -653,15 +612,15 @@ class Selection:
         `all_of`, `any_of` or `none_of` over a list of expressions. Filters added one after
         another must all match.
 
-        A timestamp column takes a `datetime`, a `date`, a pandas `Timestamp`, a NumPy
-        `datetime64`, an ISO 8601 string such as `"2020-01-01"`, or the microseconds since the
-        Unix epoch. A moment with no time zone is read as UTC, as a timestamp column without one
-        is stored, and a date is its midnight in UTC.
+        A timestamp column takes a `datetime`, a `date`, a pandas `Timestamp` or a NumPy
+        `datetime64`, each sent as the microseconds since the Unix epoch, or those microseconds
+        themselves. A moment with no time zone is read as UTC, as a timestamp column without one
+        is stored, and a date is its midnight in UTC. A string is sent to the server as it is.
 
             db.view("papers").filter({"venue": {"in": ["neurips", "icml"]}})
             db.view("papers").filter({"year": {"range": {"gte": 2020, "lt": 2024}}})
             db.view("papers").filter({"title": {"match": "graph neural network"}})
-            db.view("papers").filter({"submitted": {"range": {"gte": "2020-01-01"}}})
+            db.view("papers").filter({"submitted": {"range": {"gte": datetime.date(2020, 1, 1)}}})
         """
         if not isinstance(expression, dict) or not expression:
             raise Refusal(
@@ -982,8 +941,6 @@ class Viewer:
         self._token: Optional[Token] = None
         #: Category keys already looked up, by `(column, view)` and then by code.
         self._keys: dict = {}
-        #: The timestamp columns this reader's meta lists, by the token it was read with.
-        self._stamps: dict = {}
         #: The access terms this reader's token was made for, or `None` when the token came from
         #: elsewhere and does not say.
         self.terms = None if terms is None else listed(terms)
@@ -1788,41 +1745,9 @@ class Viewer:
                 raise self._refused(path, body, refused.code, answer) from None
 
     def _encoded(self, body: dict) -> bytes:
-        """A request's body as JSON: a moment anywhere in it as its microseconds since the Unix
-        epoch, and an ISO 8601 string in a filter on a timestamp column as the moment it names."""
-        return json.dumps(self._with_moments(body), default=_json_value).encode()
-
-    def _with_moments(self, body: dict) -> dict:
-        """`body` with each ISO 8601 string in its filters on a timestamp column as microseconds.
-        The meta that says which columns hold timestamps is read only where such a string is."""
-        keys = [
-            key for key in ("filters", "highlight", "reference") if isinstance(body.get(key), dict)
-        ]
-        if all(
-            _moments(body[key], _filter_columns(body[key]), _iso_microseconds) == body[key]
-            for key in keys
-        ):
-            return body
-        stamps = self._timestamp_columns()
-        stamped = {
-            column
-            for key in keys
-            for column in _filter_columns(body[key])
-            if column.split("@")[0] in stamps
-        }
-        return {**body, **{key: _moments(body[key], stamped, _iso_microseconds) for key in keys}}
-
-    def _timestamp_columns(self) -> set[str]:
-        """The columns this reader's meta lists as timestamps, read once per token."""
-        token = self.token().token
-        if token not in self._stamps:
-            meta = self.meta()
-            held = (meta.get("declared_scalars") or []) + (meta.get("scoped_scalars") or [])
-            self._stamps.clear()
-            self._stamps[token] = {
-                one["name"] for one in held if one.get("arrow_type") == "timestamp_us"
-            }
-        return self._stamps[token]
+        """A request's body as JSON, a moment anywhere in it as its microseconds since the Unix
+        epoch."""
+        return json.dumps(body, default=_json_value).encode()
 
     def _refused(self, path: str, body: Optional[dict], status: int, answer: str) -> Refusal:
         """A refusal the server made, in one sentence: what the server said, the filterable
