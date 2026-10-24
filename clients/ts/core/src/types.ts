@@ -1668,8 +1668,8 @@ export type RecordsTrailer = {
 
 /**
  * The body of `POST /v1/aggregate`, which {@link MosaicaClient.aggregate} sends: how the items this
- * principal may see in `view` are distributed, as one table of exact counts per grouping. A field
- * left unset is not sent, and the server's default applies.
+ * principal may see in `view` are distributed, as one table per grouping of the figures it names.
+ * A field left unset is not sent, and the server's default applies.
  *
  * @category Requests and responses
  */
@@ -1696,8 +1696,26 @@ export type AggregateRequest = {
 };
 
 /**
- * One table of an aggregate. `{}` is the size of the set. `by` picks groups; `cells` divides the
- * set, or each group, into cells of the view.
+ * One table of an aggregate: how it divides the set, and the figures each row holds. `by` picks
+ * groups; `cells` divides the set, or each group, into cells of the view. A grouping names at
+ * least one figure, and one that names none is refused, so `{count: true}` is the size of the set.
+ *
+ * `count` gives the `count` column, and with a `reference` the `reference_count` and `lift`
+ * columns. `values`, `missing`, `min`, `max` and `mean` each list number or timestamp fields
+ * declared with `index` or `render`, resolved as {@link AggregateBy}'s `field` is, and give one
+ * column per field, named `<figure>_<field>` with the field as written: `values_<field>` (a
+ * `bigint`, the items holding a finite value), `missing_<field>` (a `bigint`, the items holding no
+ * value), `min_<field>` and `max_<field>` (the smallest and largest finite value, typed as a
+ * histogram's edges) and `mean_<field>` (a timestamp on a timestamp field, rounded to the nearest
+ * microsecond, and a number on any other); the last three are null where `values_<field>` is 0.
+ * `summary` names all five over each field it lists, and a figure named twice for one field is one
+ * column. The field columns follow `count`, in the order values, missing, min, max, mean, each
+ * over its fields in the order first named. Every figure is exact, the mean rounded once from the
+ * exact sum, a tie to even.
+ *
+ * The field figures are taken over every item this principal may see in the view, and only over
+ * it: they are refused in a grouping with `by` or `cells` and in a request with `filters` or a
+ * `reference`. A table of field figures is one row; without `count` it has no `count` column.
  *
  * @category Requests and responses
  */
@@ -1706,16 +1724,30 @@ export type Grouping = {
   by?: AggregateBy;
   /** The inner level: the cells each group is divided into. Unset counts each group whole. */
   cells?: AggregateCells;
+  /** The `count` column: the items of the set in each row. */
+  count?: true;
+  /** The `values_<field>` column of each field: the items holding a finite value. */
+  values?: string[];
+  /** The `missing_<field>` column of each field: the items holding no value. */
+  missing?: string[];
+  /** The `min_<field>` column of each field: the smallest finite value. */
+  min?: string[];
+  /** The `max_<field>` column of each field: the largest finite value. */
+  max?: string[];
+  /** The `mean_<field>` column of each field: the mean of the finite values. */
+  mean?: string[];
+  /** All five figures of each field. */
+  summary?: string[];
 };
 
 /**
  * A grouping's outer level: the values of a category field or the artifacts of one level of a
  * layer, as the `top` groups by count or as the groups named; the values of a number or timestamp
- * field in `bins`, a histogram; or a number or timestamp field's `summary`.
+ * field in `bins`, a histogram.
  *
  * With `top` or `values`, a `field` is a category declared with `index` or `render`, or one with a
- * `derived` vocabulary; with `bins` or `summary`, a number or timestamp field declared with `index`
- * or `render`.
+ * `derived` vocabulary; with `bins`, a number or timestamp field declared with `index` or
+ * `render`.
  * A group-scoped field resolves under the request's view as a filter leaf on it does, or is pinned
  * as `<field>@<key>`. A `layer` is one `/v1/meta` publishes to this principal, and `level` is
  * required on a layer with several levels and refused on one with a single level. A named value or
@@ -1746,20 +1778,12 @@ export type Grouping = {
  * more than about one item in 64 of the set. The table's {@link AggregateTable.sample} says how it
  * was counted.
  *
- * With `summary: true`, the table is one row of the field's figures over every item this principal
- * may see in the view, whatever the filters and the reference say: `items`, `count` (those holding
- * a finite value) and `none` (those holding none), each a `bigint`; `min` and `max`, typed as a
- * histogram's edges, null where `count` is 0; and `mean`, null where `count` is 0: a timestamp on a
- * timestamp field, rounded to the nearest microsecond, and a number on any other. Every figure is
- * exact, the mean rounded once from the exact sum, a tie to even. A summary takes no `cells`.
- *
  * @category Requests and responses
  */
 export type AggregateBy =
   | {field: string; top: number}
   | {field: string; values: string[]}
   | {field: string; bins: number; range?: [number | bigint, number | bigint]; sample?: number}
-  | {field: string; summary: true}
   | {layer: string; level?: number; top: number; cut?: AggregateCut; paletteSize?: number}
   | {layer: string; level?: number; artifacts: bigint[]; paletteSize?: number};
 
@@ -1810,8 +1834,9 @@ export type AggregateCells = {
  * on one whose range has a fractional bound, a number on a float field, and a timestamp in
  * milliseconds since the Unix epoch, as Arrow reads one, on a timestamp field; null on `rest` and
  * `none`); `cell` (a `bigint`, the first `2·depth` bits of the Morton position, with `cells`);
- * `count` (a `bigint`); and with a reference, `reference_count` (a `bigint`) and `lift` (a number,
- * null where either count it divides by is 0). A bin holds the values from `lower` up to but not
+ * `count` (a `bigint`, with `count`); with `count` and a reference, `reference_count` (a `bigint`)
+ * and `lift` (a number, null where either count it divides by is 0); then the field figures'
+ * columns, as {@link Grouping} lists them. A bin holds the values from `lower` up to but not
  * including `upper`, and the last bin also holds its `upper`; `rest` holds the values in no bin and
  * `none` the items with no value.
  *
@@ -1826,7 +1851,7 @@ export type AggregateTable = {
   referenceTotal: number | null;
   /**
    * The groups with an item in the set before the cut to `top` or the named list; `null` where the
-   * grouping has no `by`, or is a `summary`.
+   * grouping has no `by`.
    */
   groups: number | null;
   /** How a histogram asked for with a `sample` was counted; `null` on any other grouping. */

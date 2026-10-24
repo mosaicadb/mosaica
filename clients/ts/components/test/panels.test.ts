@@ -564,7 +564,7 @@ describe('<mosaica-filter-panel>', () => {
   describe('the subject row', () => {
     it('reads In view and the matching count in view, beside All matching from its own aggregate', async () => {
       const {host, store} = await mountPanel(none());
-      expect(registered(store).get([...registered(store).keys()].find((k) => k.startsWith('fields-match'))!)).toEqual({groupings: [{}]});
+      expect(registered(store).get([...registered(store).keys()].find((k) => k.startsWith('fields-match'))!)).toEqual({groupings: [{count: true}]});
       store.set('view', {...store.get('view'), inView: {status: 'shown', visible: {value: 900, exact: true}, matched: {value: 206, exact: true}, highlighted: {value: 206, exact: true}, shown: 206}});
       answerAggregate(store, 'fields-match', aggregateEntry([{rows: [], total: 50_000}]));
       await settle(host);

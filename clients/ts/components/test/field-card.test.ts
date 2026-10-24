@@ -66,15 +66,15 @@ async function answer(host: HTMLElement, store: FakeStore, subject: Parameters<t
 describe('<mosaica-field-card> on a category', () => {
   it('registers its counts in view with the highlight and over everything matching, each leaving out its own clause', async () => {
     const {store} = await mountCard('archive');
-    expect(spec(store, 'field-subject')).toEqual({groupings: [{by: {field: 'archive', top: 5}}], subject: 'view', highlighted: true, without: 'archive'});
-    expect(spec(store, 'field-match')).toEqual({groupings: [{by: {field: 'archive', top: 100}}], without: 'archive'});
+    expect(spec(store, 'field-subject')).toEqual({groupings: [{count: true, by: {field: 'archive', top: 5}}], subject: 'view', highlighted: true, without: 'archive'});
+    expect(spec(store, 'field-match')).toEqual({groupings: [{count: true, by: {field: 'archive', top: 100}}], without: 'archive'});
     expect(spec(store, 'field-summary')).toBeUndefined();
   });
 
   it('counts the values its clauses name whether or not they are among the commonest', async () => {
     const {store} = await mountCard('archive', {filter: {archive: {family: 'category', keys: ['math']}}, highlight: {archive: {family: 'category', keys: ['cs']}}});
-    expect(spec(store, 'field-subject')).toMatchObject({groupings: [{by: {field: 'archive', top: 5}}, {by: {field: 'archive', values: ['cs', 'math']}}]});
-    expect(spec(store, 'field-match')).toMatchObject({groupings: [{by: {field: 'archive', top: 100}}, {by: {field: 'archive', values: ['cs', 'math']}}]});
+    expect(spec(store, 'field-subject')).toMatchObject({groupings: [{count: true, by: {field: 'archive', top: 5}}, {count: true, by: {field: 'archive', values: ['cs', 'math']}}]});
+    expect(spec(store, 'field-match')).toMatchObject({groupings: [{count: true, by: {field: 'archive', top: 100}}, {count: true, by: {field: 'archive', values: ['cs', 'math']}}]});
   });
 
   it('names no more values than the server counts by name', async () => {
@@ -83,7 +83,7 @@ describe('<mosaica-field-card> on a category', () => {
     const store = fakeStore({meta: {...META, selection: {...META.selection, maxAggregateNamed: 2}}, status: status({}), filters: filtersOf({filter: {archive: {family: 'category', keys: ['a', 'b', 'c']}}, highlight: {}})});
     card.store = store;
     await settle(host);
-    expect(spec(store, 'field-subject')).toMatchObject({groupings: [{by: {field: 'archive', top: 5}}, {by: {field: 'archive', values: ['a', 'b']}}]});
+    expect(spec(store, 'field-subject')).toMatchObject({groupings: [{count: true, by: {field: 'archive', top: 5}}, {count: true, by: {field: 'archive', values: ['a', 'b']}}]});
   });
 
   it('draws each value with its two counts and bars, each a share of its own set', async () => {
@@ -127,8 +127,8 @@ describe('<mosaica-field-card> on a category', () => {
     // The registrations the card made on mounting are answered as the store would.
     for (const [id, given] of registered(store)) store.set('aggregates', new Map(store.get('aggregates')).set(id, answerFor(id, given as never)));
     for (let i = 0; i < 4; i++) await settle(host);
-    expect(asked('field-match').map((c) => c.args[1])).toEqual([{groupings: [{by: {field: 'archive', top: 100}}], without: 'archive'}]);
-    expect(asked('field-outside').map((c) => c.args[1])).toEqual([{groupings: [{by: {field: 'archive', values: ['rare']}}], without: 'archive'}]);
+    expect(asked('field-match').map((c) => c.args[1])).toEqual([{groupings: [{count: true, by: {field: 'archive', top: 100}}], without: 'archive'}]);
+    expect(asked('field-outside').map((c) => c.args[1])).toEqual([{groupings: [{count: true, by: {field: 'archive', values: ['rare']}}], without: 'archive'}]);
     const rare = rows(host).find((r) => r.dataset.key === 'rare')!;
     expect(rare.querySelector('[part="count"]')!.textContent).toBe('7 / 50');
     expect(parseFloat((rare.querySelector('[part="bar-match"]') as HTMLElement).style.width)).toBe(1);
@@ -278,10 +278,10 @@ describe('<mosaica-field-card> on a date', () => {
 
   it('registers a sampled histogram in view and over everything matching, and the field’s figures over what the viewer may see', async () => {
     const {store} = await mountCard('submitted_at');
-    const histogram = {by: {field: 'submitted_at', bins: 20, sample: 100_000}};
+    const histogram = {count: true, by: {field: 'submitted_at', bins: 20, sample: 100_000}};
     expect(spec(store, 'field-subject')).toEqual({groupings: [histogram], subject: 'view', highlighted: true, without: 'submitted_at'});
     expect(spec(store, 'field-match')).toEqual({groupings: [histogram], without: 'submitted_at'});
-    expect(spec(store, 'field-summary')).toEqual({groupings: [{by: {field: 'submitted_at', summary: true}}], subject: 'visible'});
+    expect(spec(store, 'field-summary')).toEqual({groupings: [{summary: ['submitted_at']}], subject: 'visible'});
   });
 
   it('turns a range dragged across the bins into the field’s range clause, in the position chosen', async () => {
@@ -359,7 +359,7 @@ describe('<mosaica-field-card> on a date', () => {
 
   it('gives the field’s figures in its heading', async () => {
     const {host, store} = await mountCard('submitted_at');
-    answerAggregate(store, 'field-summary', aggregateEntry([{rows: []}], 's0', [{items: 30n, count: 25n, none: 5n, min: YEAR(1990), max: YEAR(2020), mean: YEAR(2011)}]));
+    answerAggregate(store, 'field-summary', aggregateEntry([{rows: []}], 's0', [new Map([['submitted_at', {values: 25n, missing: 5n, min: YEAR(1990), max: YEAR(2020), mean: YEAR(2011)}]])]));
     await settle(host);
     expect(deep(host, '[part="sub"]')!.textContent).toBe('n 25 · mean 1 Jan 2011');
   });
@@ -379,7 +379,7 @@ describe('<mosaica-field-card> on a layer', () => {
     card.store = store;
     await settle(host);
     // Each asks for the clusters' slots in the palette the map colours from, which the swatches read.
-    const ranked = (top: number) => ({by: {layer: 'topics', top, cut: 'drawn', paletteSize: 'drawn'}});
+    const ranked = (top: number) => ({count: true, by: {layer: 'topics', top, cut: 'drawn', paletteSize: 'drawn'}});
     expect(spec(store, 'field-subject')).toEqual({groupings: [ranked(5)], subject: 'view', highlighted: true, withoutMembersOf: 'topics'});
     // The whole match counts how many clusters are drawn, which the search box names.
     expect(spec(store, 'field-match')).toEqual({groupings: [ranked(1)], withoutMembersOf: 'topics'});
@@ -388,7 +388,7 @@ describe('<mosaica-field-card> on a layer', () => {
     await new Promise((r) => setTimeout(r, 0));
     await settle(host);
     // And then the clusters the subject lists, by name, so each row has both counts.
-    expect(spec(store, 'field-match')).toEqual({groupings: [{by: {layer: 'topics', artifacts: [7n, 8n], paletteSize: 'drawn'}}, ranked(1)], withoutMembersOf: 'topics'});
+    expect(spec(store, 'field-match')).toEqual({groupings: [{count: true, by: {layer: 'topics', artifacts: [7n, 8n], paletteSize: 'drawn'}}, ranked(1)], withoutMembersOf: 'topics'});
     answerAggregate(store, 'field-match', aggregateEntry([{rows: [{key: 8n, count: 50}, {key: 7n, count: 90}], total: 140}, {rows: [{key: 7n, count: 90}], groups: 12}]));
     await settle(host);
     expect(deep(host, 'mosaica-cluster-filter')!.getAttribute('placeholder')).toBe('Search 12 clusters');
@@ -497,7 +497,7 @@ describe('<mosaica-field-card> on a layer', () => {
     store.set('view', {...store.get('view'), id: 's0'});
     card.store = store;
     await settle(host);
-    expect(spec(store, 'field-subject')).toMatchObject({groupings: [{by: {layer: 'groups', top: 5}}]});
+    expect(spec(store, 'field-subject')).toMatchObject({groupings: [{count: true, by: {layer: 'groups', top: 5}}]});
   });
 });
 

@@ -113,7 +113,7 @@ describe('DensityCounter', () => {
     expect(asked).toHaveLength(0);
     await settle();
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.groupings).toEqual([{cells: {depth: cellDepth(1 + 119 / 40, 12), area: expect.any(Array) as unknown}}]);
+    expect(asked[0]!.groupings).toEqual([{count: true, cells: {depth: cellDepth(1 + 119 / 40, 12), area: expect.any(Array) as unknown}}]);
     await settle();
     expect(asked).toHaveLength(1);
   });

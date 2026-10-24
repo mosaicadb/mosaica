@@ -1239,7 +1239,7 @@ export class MosaicaClient {
    * const {tables} = await client.aggregate(token, {
    *   view: 'papers',
    *   filters: {year: {range: {gte: 2020}}},
-   *   groupings: [{}, {by: {field: 'venue', top: 10}}]
+   *   groupings: [{count: true}, {count: true, by: {field: 'venue', top: 10}}]
    * });
    * console.log(tables[0]!.total, tables[1]!.rows.toArray());
    * ```

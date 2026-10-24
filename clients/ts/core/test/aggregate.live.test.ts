@@ -62,7 +62,7 @@ describe('aggregates against a live server', () => {
     const {tables, identityKey} = await client.aggregate(session.token, {
       view: 's0',
       filters: CS,
-      groupings: [{}, {by: {field: 'primary_category', top: 3}}, {cells: {depth: 4}}]
+      groupings: [{count: true}, {count: true, by: {field: 'primary_category', top: 3}}, {count: true, cells: {depth: 4}}]
     });
     expect(tables.map((t) => t.total)).toEqual([whole, whole, whole]);
     expect(sum(tables[0]!.rows)).toBe(BigInt(whole));
@@ -76,7 +76,7 @@ describe('aggregates against a live server', () => {
 
   it('counts a timestamp field in bins whose edges stay put under a filter', async (ctx) => {
     live(ctx);
-    const bins = {by: {field: 'submitted_at', bins: 12}};
+    const bins = {count: true as const, by: {field: 'submitted_at', bins: 12}};
     const all = await client.aggregate(session.token, {view: 's0', groupings: [bins]});
     const cs = await client.aggregate(session.token, {view: 's0', filters: CS, groupings: [bins]});
     const edges = (table: Table) => [...table.getChild('lower')!].filter((v) => v !== null);
@@ -89,7 +89,7 @@ describe('aggregates against a live server', () => {
 
   it('reads in one call over many small responses what one response carries', async (ctx) => {
     live(ctx);
-    const request: AggregateRequest = {view: 's0', reference: {}, groupings: [{by: {field: 'archive', top: 2}, cells: {depth: 3}}, {cells: {depth: 5}}]};
+    const request: AggregateRequest = {view: 's0', reference: {}, groupings: [{count: true, by: {field: 'archive', top: 2}, cells: {depth: 3}}, {count: true, cells: {depth: 5}}]};
     const before = requests;
     const one = await client.aggregate(session.token, request);
     expect(requests - before).toBe(1);
@@ -117,7 +117,7 @@ describe('aggregates against a live server', () => {
           store.subscribe('aggregates', check);
           check();
         });
-      store.setAggregate('size', {groupings: [{}]});
+      store.setAggregate('size', {groupings: [{count: true}]});
       await landed(await matched());
       store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
       await landed(await matched(CS));
@@ -132,7 +132,7 @@ describe('aggregates against a live server', () => {
           store.subscribe('aggregates', check);
           check();
         });
-      store.setAggregate('archives', {groupings: [{by: {field: 'archive', top: 5}}], without: 'archive'});
+      store.setAggregate('archives', {groupings: [{count: true, by: {field: 'archive', top: 5}}], without: 'archive'});
       expect((await listed()).length).toBeGreaterThan(1);
       // Another clause still narrows them.
       const LG: FilterExpr = {primary_category: {in: ['cs.LG']}};

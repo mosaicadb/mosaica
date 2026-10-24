@@ -131,34 +131,32 @@ export type AggregateEntry = {
   /** The refusal of the last request, else `null`. */
   refusal: Refusal | null;
   /**
-   * One per grouping `result` answers, in order: the field's figures where the grouping is a
-   * `summary`, else `null`. Empty where `result` is `null`.
+   * One per grouping `result` answers, in order: the figures of each field the grouping lists
+   * under `summary`, by the field as written, else `null`. Empty where `result` is `null`.
    */
-  summaries: readonly (FieldSummary | null)[];
+  summaries: readonly (ReadonlyMap<string, FieldSummary> | null)[];
 };
 
 /**
- * A `summary` grouping's one row: the figures of a number or timestamp field over every item this
- * viewer may see in the view, whatever the filters.
+ * The figures a grouping's `summary` names for one number or timestamp field, over every item this
+ * viewer may see in the view.
  *
  * @category Projections
  */
 export type FieldSummary = {
-  /** The items counted. */
-  items: bigint;
-  /** How many of them hold a finite value. */
-  count: bigint;
-  /** How many hold no value. */
-  none: bigint;
+  /** How many items hold a finite value: the `values_<field>` column. */
+  values: bigint;
+  /** How many hold no value: the `missing_<field>` column. */
+  missing: bigint;
   /**
    * The smallest finite value, typed as a histogram's edge: a `bigint` on an integer field, a
    * number on a float field, and milliseconds since the Unix epoch on a timestamp field. `null`
-   * where `count` is 0.
+   * where `values` is 0.
    */
   min: number | bigint | null;
   /** The largest finite value, typed as `min`. */
   max: number | bigint | null;
-  /** The mean of the finite values, in milliseconds since the Unix epoch on a timestamp field. `null` where `count` is 0. */
+  /** The mean of the finite values, in milliseconds since the Unix epoch on a timestamp field. `null` where `values` is 0. */
   mean: number | null;
 };
 
@@ -177,22 +175,28 @@ function bodyKey(body: AggregateBody): string {
   return JSON.stringify(body, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
 }
 
-/** The figures of each summary grouping of `spec` that `result` answers. */
-function summariesOf(spec: AggregateSpec, result: AggregateResult): (FieldSummary | null)[] {
+/** The figures of each field each grouping of `spec` lists under `summary`, as `result` answers them. */
+function summariesOf(spec: AggregateSpec, result: AggregateResult): (ReadonlyMap<string, FieldSummary> | null)[] {
   return spec.groupings.map((grouping, i) => {
     const table = result.tables.find((t) => t.grouping === i);
-    return grouping.by !== undefined && 'summary' in grouping.by && table !== undefined ? summaryOf(table) : null;
+    if (grouping.summary === undefined || table === undefined) return null;
+    const figures = new Map<string, FieldSummary>();
+    for (const field of grouping.summary) {
+      const summary = summaryOf(table, field);
+      if (summary !== null) figures.set(field, summary);
+    }
+    return figures;
   });
 }
 
-function summaryOf(table: AggregateTable): FieldSummary | null {
+function summaryOf(table: AggregateTable, field: string): FieldSummary | null {
   if (table.rows.numRows === 0) return null;
-  const at = (name: string): unknown => table.rows.getChild(name)?.get(0) ?? null;
-  const [items, count, none] = [at('items'), at('count'), at('none')];
-  if (typeof items !== 'bigint' || typeof count !== 'bigint' || typeof none !== 'bigint') return null;
+  const at = (figure: string): unknown => table.rows.getChild(`${figure}_${field}`)?.get(0) ?? null;
+  const [values, missing] = [at('values'), at('missing')];
+  if (typeof values !== 'bigint' || typeof missing !== 'bigint') return null;
   const edge = (v: unknown) => (typeof v === 'bigint' || typeof v === 'number' ? v : null);
   const mean = at('mean');
-  return {items, count, none, min: edge(at('min')), max: edge(at('max')), mean: typeof mean === 'number' ? mean : null};
+  return {values, missing, min: edge(at('min')), max: edge(at('max')), mean: typeof mean === 'number' ? mean : null};
 }
 
 /**

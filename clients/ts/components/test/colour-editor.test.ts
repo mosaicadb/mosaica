@@ -50,7 +50,7 @@ const CUT = [
 describe('<mosaica-colour-editor> on a tree layer', () => {
   it('lists the clusters of the drawn cut by their counts over everything visible, as a modal dialog named by the layer', async () => {
     const {host, store} = await open('cluster:topics');
-    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{by: {layer: 'topics', top: 1000, cut: 'drawn', paletteSize: 'drawn'}}], subject: 'visible'});
+    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'topics', top: 1000, cut: 'drawn', paletteSize: 'drawn'}}], subject: 'visible'});
     answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
     await settle(host);
     const dialog = deep(host, '[part="dialog"]') as HTMLDialogElement;
@@ -84,7 +84,7 @@ describe('<mosaica-colour-editor> on a tree layer', () => {
     await settle(host);
     // Choosing it puts no clause on.
     expect(store.calls.filter((c) => c.name === 'setMembers')).toEqual([]);
-    expect(specOf(store, 'colours-found')).toEqual({groupings: [{by: {layer: 'topics', artifacts: [42n], paletteSize: 'drawn'}}], subject: 'visible'});
+    expect(specOf(store, 'colours-found')).toEqual({groupings: [{count: true, by: {layer: 'topics', artifacts: [42n], paletteSize: 'drawn'}}], subject: 'visible'});
     answerAggregate(store, 'colours-found', aggregateEntry([{rows: [{key: 42n, count: 3, slot: 4}]}], 's0', undefined, 'tableau10'));
     await settleTwice(host);
     expect(names(host)[0]).toEqual(['42', 'holography', '3']);
@@ -183,7 +183,7 @@ describe('<mosaica-colour-editor> on a tree layer', () => {
     // The category's answer is not the layer's, so nothing is listed until the layer's lands.
     expect(rowsOf(host)).toEqual([]);
     expect(deep(host, '[part="selected"]')).toBeNull();
-    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{by: {layer: 'topics', top: 1000, cut: 'drawn', paletteSize: 'drawn'}}], subject: 'visible'});
+    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'topics', top: 1000, cut: 'drawn', paletteSize: 'drawn'}}], subject: 'visible'});
     answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
     await settle(host);
     expect(names(host).map((n) => n[0])).toEqual(['7', '8', '9']);
@@ -231,18 +231,18 @@ describe('<mosaica-colour-editor> on a tree layer', () => {
 describe('<mosaica-colour-editor> on a levelled layer', () => {
   it('lists the clusters of the level coloured, the deepest unless one is set', async () => {
     const deepest = await open('cluster:bands');
-    expect(specOf(deepest.store, 'colours-ranked')).toEqual({groupings: [{by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
+    expect(specOf(deepest.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
     expect(deep(deepest.host, '[part="sub"]')!.textContent).toBe('Fine · Tableau 10');
     document.body.innerHTML = '';
     const broad = await open('cluster:bands', 'cluster-level="0"');
-    expect(specOf(broad.store, 'colours-ranked')).toEqual({groupings: [{by: {layer: 'bands', level: 0, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
+    expect(specOf(broad.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 0, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
   });
 });
 
 describe('<mosaica-colour-editor> on a category', () => {
   it('lists the values by their counts over everything visible, and gives one the colour chosen in its picker', async () => {
     const {host, store} = await open('archive');
-    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{by: {field: 'archive', top: 1000}}], subject: 'visible'});
+    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {field: 'archive', top: 1000}}], subject: 'visible'});
     answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: [{key: 'cs', title: 'Computer science', count: 70}, {key: 'math', count: 30}], groups: 2}]));
     await settle(host);
     expect(names(host)).toEqual([

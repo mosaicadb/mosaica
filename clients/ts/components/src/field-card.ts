@@ -728,7 +728,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const named = [...new Set([...this.clauseKeys(store, 'filter'), ...this.clauseKeys(store, 'highlight')])];
     if (kind === 'category') {
       const values = named.slice(0, meta.selection.maxAggregateNamed).sort();
-      return [{by: {field: this.field, top}}, ...(values.length > 0 ? [{by: {field: this.field, values}}] : [])];
+      return [{count: true, by: {field: this.field, top}}, ...(values.length > 0 ? [{count: true as const, by: {field: this.field, values}}] : [])];
     }
     const layer = this.declaredLayer(meta);
     if (!layer) return null;
@@ -764,7 +764,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       .filter((k) => !listed.has(k) && !named.has(k))
       .slice(0, meta.selection.maxAggregateNamed)
       .sort();
-    return values.length === 0 ? null : {groupings: [{by: {field: this.field, values}}], without: this.field};
+    return values.length === 0 ? null : {groupings: [{count: true, by: {field: this.field, values}}], without: this.field};
   }
 
   /** The specs the card keeps registered: the subject's counts, the whole match's and a number's figures. */
@@ -772,11 +772,11 @@ export class MosaicaFieldCard extends MosaicaElement {
     const leaveOut = this.layerName !== null ? {withoutMembersOf: this.layerName} : {without: this.field};
     if (kind === 'search') return {subject: null, match: null, figures: null};
     if (kind === 'histogram') {
-      const bins = [{by: {field: this.field, bins: BINS, sample: SAMPLE}}];
+      const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: BINS, sample: SAMPLE}}];
       return {
         subject: {groupings: bins, subject: 'view', highlighted: true, ...leaveOut},
         match: this.folded ? null : {groupings: bins, ...leaveOut},
-        figures: {groupings: [{by: {field: this.field, summary: true}}], subject: 'visible'}
+        figures: {groupings: [{summary: [this.field]}], subject: 'visible'}
       };
     }
     const subject = this.rowGroupings(store, meta, kind, this.expanded ? MORE_ROWS : ROWS);
@@ -1066,7 +1066,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const column = meta.declaredScalars.find((c) => c.name === this.field);
     const whole = column ? column.arrowType !== 'f32' && column.arrowType !== 'f64' : false;
     const value = (v: number) => (timestamp ? shortDateText(v) : formatNumber(v, whole));
-    const summary = this.figures.entry()?.summaries[0] ?? null;
+    const summary = this.figures.entry()?.summaries[0]?.get(this.field) ?? null;
     const sub = html`<span part="sub" title=${this.summaryText(summary, timestamp, whole, false)}>${this.summaryText(summary, timestamp, whole, this.folded)}</span>`;
     if (this.folded) return head(sub);
     const subjectTable = this.subjectCounts.entry()?.result?.tables[0];
@@ -1146,7 +1146,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const max = Number(summary.max) * unit;
     if (folded) return `${this.edgeText(min, min, max, timestamp, whole)} – ${this.edgeText(max, min, max, timestamp, whole)}`;
     const mean = summary.mean === null ? '' : ` · mean ${timestamp ? shortDateText(summary.mean * unit) : formatNumber(summary.mean, false)}`;
-    return `n ${countText(Number(summary.count))}${mean}`;
+    return `n ${countText(Number(summary.values))}${mean}`;
   }
 
   /** An edge on the axis: a date as its year where the range spans years, else its day. */

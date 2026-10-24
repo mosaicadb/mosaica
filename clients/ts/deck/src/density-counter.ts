@@ -293,7 +293,7 @@ export class DensityCounter {
     const [x0, y0] = this.store.dataXY(asked.area[0], asked.area[1]);
     const [x1, y1] = this.store.dataXY(asked.area[2], asked.area[3]);
     const spec: AggregateSpec = {
-      groupings: [{cells: {depth: asked.depth, area: [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]}}],
+      groupings: [{count: true, cells: {depth: asked.depth, area: [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]}}],
       highlighted: true
     };
     this.asked = asked;

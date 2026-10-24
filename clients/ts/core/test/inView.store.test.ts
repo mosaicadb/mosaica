@@ -102,7 +102,7 @@ describe('the counts in view', () => {
     expect(asked).toHaveLength(0);
     await clock.advance(200);
     await flush();
-    expect(asked).toEqual([{view: 's0', groupings: [{}], filters: LEAF, reference: LEAF}]);
+    expect(asked).toEqual([{view: 's0', groupings: [{count: true}], filters: LEAF, reference: LEAF}]);
     expect(store.get('view').inView).toMatchObject({status: 'shown', visible: {value: 1_000, exact: true}, matched: {value: 1_000, exact: true}});
   });
 

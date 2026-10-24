@@ -387,7 +387,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     super.updated(changed);
     this.floating.update();
     const s = this.resolvedStore;
-    this.matching.set(s, this.isConnected && !this.chipsOnly && !this.controlsOnly && s?.get('meta') ? {groupings: [{}]} : null);
+    this.matching.set(s, this.isConnected && !this.chipsOnly && !this.controlsOnly && s?.get('meta') ? {groupings: [{count: true}]} : null);
     if (!this.editing || this.chipsOnly) return;
     const card = Array.from(this.renderRoot.querySelectorAll<MosaicaFieldCard>('[part~="card"]')).find((c) => c.field === this.editing);
     if (!card) return;

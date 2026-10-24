@@ -84,7 +84,7 @@ function trailerBytes(body: Uint8Array): number {
 /** The rows of a table as plain objects. */
 const rowsOf = (table: Table) => table.toArray().map((row) => ({...row.toJSON()}));
 
-const REQUEST: AggregateRequest = {view: 's0', groupings: [{}, {by: {field: 'archive', top: 2}}]};
+const REQUEST: AggregateRequest = {view: 's0', groupings: [{count: true}, {count: true, by: {field: 'archive', top: 2}}]};
 
 /**
  * Two responses: the size of the set and the first page of the breakdown in the first, the rest of
@@ -116,7 +116,7 @@ describe('MosaicaClient.aggregate', () => {
       view: 's0',
       filters: {archive: {in: ['cs']}},
       reference: {},
-      groupings: [{by: {layer: 'clusters', level: 1, artifacts: [2n ** 63n + 5n]}, cells: {depth: 8, area: [0, 0, 10, 10]}}],
+      groupings: [{count: true, by: {layer: 'clusters', level: 1, artifacts: [2n ** 63n + 5n]}, cells: {depth: 8, area: [0, 0, 10, 10]}}],
       pageRows: 100,
       pages: 2,
       compression: 'zstd'
@@ -126,7 +126,7 @@ describe('MosaicaClient.aggregate', () => {
       view: 's0',
       filters: {archive: {in: ['cs']}},
       reference: {},
-      groupings: [{by: {layer: 'clusters', level: 1, artifacts: ['9223372036854775813']}, cells: {depth: 8, area: [0, 0, 10, 10]}}],
+      groupings: [{count: true, by: {layer: 'clusters', level: 1, artifacts: ['9223372036854775813']}, cells: {depth: 8, area: [0, 0, 10, 10]}}],
       page_rows: 100,
       pages: 2,
       compression: 'zstd'
@@ -170,26 +170,28 @@ describe('MosaicaClient.aggregate', () => {
     const table = new Table({count: u64([7n])});
     const head = {grouping: 0, total: 900, reference_total: 1000, groups: 1, resumed: false, sample: {sampled: true, items: 96, reference_items: 101}};
     const {client, sent} = clientFor({'': () => chunked(responseOf([{head, pages: [{table, next: null}]}], null))});
-    const result = await client.aggregate('tok', {view: 's0', reference: {}, groupings: [{by: {field: 'year', bins: 10, sample: 100}}]});
-    expect(sent[0]!.body).toMatchObject({groupings: [{by: {field: 'year', bins: 10, sample: 100}}]});
+    const result = await client.aggregate('tok', {view: 's0', reference: {}, groupings: [{count: true, by: {field: 'year', bins: 10, sample: 100}}]});
+    expect(sent[0]!.body).toMatchObject({groupings: [{count: true, by: {field: 'year', bins: 10, sample: 100}}]});
     expect(result.tables[0]!.sample).toEqual({sampled: true, items: 96, referenceItems: 101});
   });
 
   it('sends a summary and reads its one row of figures', async () => {
     const table = new Table({
-      items: u64([900n]),
-      count: u64([850n]),
-      none: u64([40n]),
-      min: vectorFromArray([-3.5]),
-      max: vectorFromArray([99.5]),
-      mean: vectorFromArray([41.25])
+      count: u64([900n]),
+      values_score: u64([850n]),
+      missing_score: u64([40n]),
+      min_score: vectorFromArray([-3.5]),
+      max_score: vectorFromArray([99.5]),
+      mean_score: vectorFromArray([41.25])
     });
     const head = {grouping: 0, total: 300, resumed: false};
     const {client, sent} = clientFor({'': () => chunked(responseOf([{head, pages: [{table, next: null}]}], null))});
-    const result = await client.aggregate('tok', {view: 's0', filters: {kind: {eq: 'a'}}, groupings: [{by: {field: 'score', summary: true}}]});
-    expect(sent[0]!.body).toMatchObject({groupings: [{by: {field: 'score', summary: true}}]});
+    const result = await client.aggregate('tok', {view: 's0', groupings: [{count: true, summary: ['score']}]});
+    expect(sent[0]!.body).toMatchObject({groupings: [{count: true, summary: ['score']}]});
     expect(result.tables[0]).toMatchObject({total: 300, groups: null, sample: null});
-    expect(rowsOf(result.tables[0]!.rows)).toEqual([{items: 900n, count: 850n, none: 40n, min: -3.5, max: 99.5, mean: 41.25}]);
+    expect(rowsOf(result.tables[0]!.rows)).toEqual([
+      {count: 900n, values_score: 850n, missing_score: 40n, min_score: -3.5, max_score: 99.5, mean_score: 41.25}
+    ]);
   });
 
   it('sends a layer grouping’s palette size under its wire name, and reads its slot column', async () => {
@@ -200,8 +202,8 @@ describe('MosaicaClient.aggregate', () => {
       count: u64([3n, 2n, 1n])
     });
     const {client, sent} = clientFor({'': () => chunked(responseOf([{head: {grouping: 0, total: 6, groups: 3, resumed: false}, pages: [{table, next: null}]}], null))});
-    const result = await client.aggregate('tok', {view: 's0', groupings: [{by: {layer: 'l', top: 2, paletteSize: 20}}, {by: {field: 'f', top: 1}}]});
-    expect(sent[0]!.body).toMatchObject({groupings: [{by: {layer: 'l', top: 2, palette_size: 20}}, {by: {field: 'f', top: 1}}]});
+    const result = await client.aggregate('tok', {view: 's0', groupings: [{count: true, by: {layer: 'l', top: 2, paletteSize: 20}}, {count: true, by: {field: 'f', top: 1}}]});
+    expect(sent[0]!.body).toMatchObject({groupings: [{count: true, by: {layer: 'l', top: 2, palette_size: 20}}, {count: true, by: {field: 'f', top: 1}}]});
     expect(rowsOf(result.tables[0]!.rows).map((r) => r.slot)).toEqual([4, 1, null]);
   });
 
@@ -214,7 +216,7 @@ describe('MosaicaClient.aggregate', () => {
       lift: vectorFromArray([1.5, null])
     });
     const {client} = clientFor({'': () => chunked(responseOf([{head: {grouping: 0, total: 3, reference_total: 10, groups: 1, resumed: false}, pages: [{table, next: null}]}], null))});
-    const result = await client.aggregate('tok', {view: 's0', reference: {}, groupings: [{by: {layer: 'l', top: 1}}]});
+    const result = await client.aggregate('tok', {view: 's0', reference: {}, groupings: [{count: true, by: {layer: 'l', top: 1}}]});
     expect(result.tables[0]).toMatchObject({total: 3, referenceTotal: 10, groups: 1});
     expect(rowsOf(result.tables[0]!.rows)).toEqual([
       {group: 'listed', key: 2n ** 64n - 1n, count: 3n, reference_count: 6n, lift: 1.5},
@@ -233,8 +235,8 @@ describe('MosaicaClient.aggregate', () => {
       count: u64([3n, 0n, 2n])
     });
     const {client, sent} = clientFor({'': () => chunked(responseOf([{head: {grouping: 0, total: 5, groups: 1, resumed: false}, pages: [{table, next: null}]}], null))});
-    const result = await client.aggregate('tok', {view: 's0', groupings: [{by: {field: 'seen', bins: 2, range: [0, 2n ** 60n + 1n]}}]});
-    expect(sent[0]!.body.groupings).toEqual([{by: {field: 'seen', bins: 2, range: [0, '1152921504606846977']}}]);
+    const result = await client.aggregate('tok', {view: 's0', groupings: [{count: true, by: {field: 'seen', bins: 2, range: [0, 2n ** 60n + 1n]}}]});
+    expect(sent[0]!.body.groupings).toEqual([{count: true, by: {field: 'seen', bins: 2, range: [0, '1152921504606846977']}}]);
     expect(rowsOf(result.tables[0]!.rows)).toEqual([
       {group: 'listed', lower: 0, upper: day, count: 3n},
       {group: 'listed', lower: day, upper: 2 * day, count: 0n},
@@ -247,7 +249,7 @@ describe('MosaicaClient.aggregate', () => {
       '': () => chunked(responseOf([], 'c0')),
       c0: () => chunked(responseOf([{head: {grouping: 0, total: 1, resumed: false}, pages: [{table: countPage(1n), next: null}]}], null))
     });
-    const result = await client.aggregate('tok', {view: 's0', groupings: [{}]});
+    const result = await client.aggregate('tok', {view: 's0', groupings: [{count: true}]});
     expect(sent).toHaveLength(2);
     expect(rowsOf(result.tables[0]!.rows)).toEqual([{count: 1n}]);
   });
@@ -269,10 +271,10 @@ describe('MosaicaClient.aggregate', () => {
 
   it('throws on a trailer that miscounts the pages, and on a records frame before any table head', async () => {
     const miscounted = responseOf([{head: {grouping: 0, total: 1, resumed: false}, pages: [{table: countPage(1n), next: null}]}], null, {pages: 2});
-    await expect(clientFor({'': () => chunked(miscounted)}).client.aggregate('tok', {view: 's0', groupings: [{}]})).rejects.toThrow(Error);
+    await expect(clientFor({'': () => chunked(miscounted)}).client.aggregate('tok', {view: 's0', groupings: [{count: true}]})).rejects.toThrow(Error);
     // A records frame with no table head before it.
     const headless = framed([{kind: RECORDS, payload: tableToIPC(countPage(1n), 'stream')}, json(PAGE_END, {next: null, ended_by: 'end'}), json(TRAILER, {pages: 1, rows: 1, next: null, ended_by: 'end', stream_us: 1})]);
-    await expect(clientFor({'': () => chunked(headless)}).client.aggregate('tok', {view: 's0', groupings: [{}]})).rejects.toThrow(Error);
+    await expect(clientFor({'': () => chunked(headless)}).client.aggregate('tok', {view: 's0', groupings: [{count: true}]})).rejects.toThrow(Error);
   });
 
   it('rejects with the refusal, first request or follow-up', async () => {

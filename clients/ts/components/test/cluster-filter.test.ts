@@ -43,7 +43,7 @@ describe('<mosaica-cluster-filter> with the box empty', () => {
     await settle(host);
     expect(browses(store)).toEqual([{layer: 'topics', filters: null, limit: 50}]);
     expect(names(host)).toEqual(['Physics', 'Biology', UNNAMED]);
-    expect([...registered(store).values()]).toEqual([{groupings: [{by: {layer: 'topics', artifacts: [1n, 2n, 3n]}}], withoutMembersOf: 'topics'}]);
+    expect([...registered(store).values()]).toEqual([{groupings: [{count: true, by: {layer: 'topics', artifacts: [1n, 2n, 3n]}}], withoutMembersOf: 'topics'}]);
     answerAggregate(store, 'clusters', aggregateEntry([{rows: [{key: 1n, count: 5}, {key: 2n, count: 90}, {key: 3n, count: 0}]}]));
     await settle(host);
     // Largest first once counted.
@@ -58,7 +58,7 @@ describe('<mosaica-cluster-filter> with the box empty', () => {
     box().dispatchEvent(new Event('focus'));
     await settle(host);
     expect(browses(store)).toEqual([{layer: 'topics', filters: null, limit: 50, level: 0}]);
-    expect([...registered(store).values()]).toEqual([{groupings: [{by: {layer: 'topics', level: 0, artifacts: [4n]}}], withoutMembersOf: 'topics'}]);
+    expect([...registered(store).values()]).toEqual([{groupings: [{count: true, by: {layer: 'topics', level: 0, artifacts: [4n]}}], withoutMembersOf: 'topics'}]);
   });
 });
 

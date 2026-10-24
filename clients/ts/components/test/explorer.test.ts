@@ -810,7 +810,7 @@ describe('<mosaica-explorer> Edit colours', () => {
     const dialog = deep(host, '[part="dialog"]') as HTMLDialogElement;
     expect(dialog.open).toBe(true);
     expect(deep(host, '[part="title"]#title')!.textContent).toBe('Topics');
-    expect([...registered(store).values()]).toContainEqual({groupings: [{by: {layer: 'topics', top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
+    expect([...registered(store).values()]).toContainEqual({groupings: [{count: true, by: {layer: 'topics', top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
     // A press inside the dialog leaves the Layers popover open, so Done gives focus back to the button.
     dialog.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, composed: true}));
     await settle(host);

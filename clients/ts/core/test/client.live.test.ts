@@ -242,7 +242,7 @@ describe('MosaicaClient against a live server', () => {
     for await (const page of read) {
       for (let i = 0; i < page.numRows; i++) expect(page.getChild('slot')!.get(i)).toBe(slots.get(BigInt(page.getChild('mosaica_id')!.get(i))));
     }
-    const {tables} = await client.aggregate(session.token, {view: 's0', groupings: [{by: {layer: 'clusters/kmeans', top: 5, paletteSize: 8}}]});
+    const {tables} = await client.aggregate(session.token, {view: 's0', groupings: [{count: true, by: {layer: 'clusters/kmeans', top: 5, paletteSize: 8}}]});
     const rows = tables[0]!.rows;
     for (let i = 0; i < rows.numRows; i++) {
       if (rows.getChild('group')!.get(i) !== 'listed') continue;

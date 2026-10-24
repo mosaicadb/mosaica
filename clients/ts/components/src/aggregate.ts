@@ -68,9 +68,9 @@ export function levelOf(layer: Pick<Layer, 'hierarchy' | 'levels'>, chosen: numb
  * {@link levelOf} `level`. Each row carries its slot in the palette the map colours clusters from.
  */
 export function rankedGrouping(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, top: number, level: number | null): AggregateSpecGrouping {
-  if (isTree(layer)) return {by: {layer: layer.name, top, cut: 'drawn', paletteSize: 'drawn'}};
+  if (isTree(layer)) return {count: true, by: {layer: layer.name, top, cut: 'drawn', paletteSize: 'drawn'}};
   const at = levelOf(layer, level);
-  return {by: {layer: layer.name, ...(at === undefined || !countedByLevel(layer) ? {} : {level: at}), top, paletteSize: 'drawn'}};
+  return {count: true, by: {layer: layer.name, ...(at === undefined || !countedByLevel(layer) ? {} : {level: at}), top, paletteSize: 'drawn'}};
 }
 
 /**
@@ -98,6 +98,7 @@ export function artifactGroupings(
   return [...byLevel]
     .sort(([x], [y]) => x - y)
     .map(([level, ids]) => ({
+      count: true as const,
       by: {layer: layer.name, ...(level < 0 ? {} : {level}), artifacts: [...ids].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)), ...(paletteSize === undefined ? {} : {paletteSize})}
     }));
 }

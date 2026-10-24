@@ -420,7 +420,7 @@ export class MosaicaColourEditor extends MosaicaElement {
   /** The aggregate that ranks the rows, over everything the viewer may see. */
   private rankedSpec(meta: Meta): AggregateSpec | null {
     const top = meta.selection.maxAggregateTop;
-    if (this.isCategory(meta)) return {groupings: [{by: {field: this.field, top}}], subject: 'visible'};
+    if (this.isCategory(meta)) return {groupings: [{count: true, by: {field: this.field, top}}], subject: 'visible'};
     const layer = this.layerOf(meta);
     return layer ? {groupings: [rankedGrouping(layer, top, this.level)], subject: 'visible'} : null;
   }
@@ -428,7 +428,7 @@ export class MosaicaColourEditor extends MosaicaElement {
   /** The aggregate that counts what the search box found. */
   private foundSpec(meta: Meta): AggregateSpec | null {
     if (this.found.length === 0) return null;
-    if (this.isCategory(meta)) return {groupings: [{by: {field: this.field, values: this.found.map((f) => f.key).slice(0, meta.selection.maxAggregateNamed).sort()}}], subject: 'visible'};
+    if (this.isCategory(meta)) return {groupings: [{count: true, by: {field: this.field, values: this.found.map((f) => f.key).slice(0, meta.selection.maxAggregateNamed).sort()}}], subject: 'visible'};
     const layer = this.layerOf(meta);
     if (!layer) return null;
     return {groupings: artifactGroupings(layer, this.found.map((f) => ({mosaicaId: BigInt(f.key), rung: f.rung})), meta.selection, 'drawn'), subject: 'visible'};

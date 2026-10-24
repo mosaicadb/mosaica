@@ -638,10 +638,10 @@ export interface Store {
    * @example A field card's histogram of `year`, in view and over everything the filters match,
    * each leaving out the card's own clause, and the field's figures:
    * ```ts
-   * const bins = {by: {field: 'year', bins: 24, sample: 100_000}};
+   * const bins: Grouping = {count: true, by: {field: 'year', bins: 24, sample: 100_000}};
    * store.setAggregate('year:subject', {groupings: [bins], subject: 'view', without: 'year', highlighted: true});
    * store.setAggregate('year:match', {groupings: [bins], without: 'year'});
-   * store.setAggregate('year:summary', {groupings: [{by: {field: 'year', summary: true}}], subject: 'visible'});
+   * store.setAggregate('year:summary', {groupings: [{summary: ['year']}], subject: 'visible'});
    * ```
    */
   setAggregate(id: string, spec: AggregateSpec | null): void;
@@ -1999,11 +1999,11 @@ export function createStore(options: StoreOptions): Store {
       const highlighting = requestHighlight() !== null;
       if (highlighting !== inViewHighlighted) {
         inViewHighlighted = highlighting;
-        inView.set('highlighted', highlighting ? {groupings: [{}], highlighted: true} : null);
+        inView.set('highlighted', highlighting ? {groupings: [{count: true}], highlighted: true} : null);
       }
       if (!inViewRegistered) {
         inViewRegistered = true;
-        inView.set('counts', {groupings: [{}]});
+        inView.set('counts', {groupings: [{count: true}]});
         return;
       }
       inView.refresh(drop, {changed});
