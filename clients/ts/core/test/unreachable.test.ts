@@ -165,4 +165,22 @@ describe('a server that goes away and comes back', () => {
     expect(srv.s.asked.filter((r) => r === '/v1/viewport').length).toBeLessThan(20);
     store.dispose();
   });
+
+  it('a token supplied after a session ended is checked for whose it is', async () => {
+    const {srv, clock, store} = await drawing();
+    const bodies: unknown[] = [];
+    const fetch = srv.answer;
+    srv.s.slow = (async (url: string, init?: RequestInit) => {
+      if (new URL(url).pathname === '/v1/viewport' && typeof init?.body === 'string') bodies.push(JSON.parse(init.body));
+      return fetch(url, init);
+    }) as typeof globalThis.fetch;
+    srv.restart();
+    store.refresh();
+    await clock.advance(1_000);
+    await settle();
+    expect(srv.authorise).toHaveBeenCalledTimes(2);
+    // The identity check: one tile at depth 0, counts only, with no layer.
+    expect(bodies.some((b) => (b as {k?: number; zoom?: number}).k === 0 && (b as {zoom?: number}).zoom === 0)).toBe(true);
+    store.dispose();
+  });
 });

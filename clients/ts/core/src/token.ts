@@ -36,12 +36,14 @@ export class TokenSupply {
   private disposed = false;
   /** Moved by {@link forget}, so a supplier call made before it installs nothing. */
   private generation = 0;
+  /** The token {@link forget} dropped, so the next one supplied counts as a change of token. */
+  private dropped: string | null = null;
 
   constructor(
     private readonly supplier: TokenSupplier | undefined,
     fixed: string | undefined,
     private readonly clock: Clock,
-    /** Called after each renewal; `changed` when it replaced a token held before. */
+    /** Called after each renewal; `changed` when it replaced a token held before, or one {@link forget} dropped. */
     private readonly onRenewed: (changed: boolean) => void
   ) {
     this.token = fixed ?? null;
@@ -87,6 +89,7 @@ export class TokenSupply {
   forget(): void {
     if (!this.supplier) return;
     this.generation += 1;
+    this.dropped = this.token ?? this.dropped;
     this.token = null;
     this.expiresAtMs = Infinity;
     this.used = false;
@@ -115,7 +118,9 @@ export class TokenSupply {
     const got = await supplier();
     if (this.disposed) throw disposedError();
     if (generation !== this.generation) return this.get();
-    const changed = this.token !== null && this.token !== got.token;
+    const before = this.token ?? this.dropped;
+    const changed = before !== null && before !== got.token;
+    this.dropped = null;
     this.token = got.token;
     this.expiresAtMs = got.expiresAt * 1000;
     this.armRenewal();
