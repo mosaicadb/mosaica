@@ -133,7 +133,7 @@ The answer also says why the viewer may see the item: the parts of its access la
 `POST /v1/items` returns every item in a view that the viewer may see and the filter matches, with the fields you name. `POST /v1/artifacts` does the same for the artifacts of one layer, or for a list of `mosaica_id`s. Use them for exports, tables and analysis.
 
 - **Pages of Arrow.** Results arrive as pages of Apache Arrow record batches. Each response ends with a cursor, and you pass it back to continue, until it is null. The Python client, the TypeScript client and the `mosaica items` and `mosaica artifacts` commands follow the cursor for you.
-- **Fields.** Name the fields you want. Each row starts with `mosaica_id`. Two extra fields are available: `position`, the item's coordinates in the view, and `labels`, why the viewer may see it. A field an item has no value for is null. A category arrives as its values' keys.
+- **Fields.** Name the fields you want. Each row starts with `mosaica_id`. Two more columns can be asked for: `position`, the item's coordinates in the view, and `labels`, why the viewer may see it. A field an item has no value for is null. A category arrives as its values' keys.
 - **Matched and unmatched.** With `keep_unmatched`, every visible item is returned, each with a `mosaica:matched` flag.
 - **Totals.** With `count` on the first request, the answer starts with exact counts of the visible items and of those the filter matches.
 - **Artifacts.** A read of artifacts can ask for each one's parents, content, centre, box and shape, all as the viewer sees them. It can read one level, the children of one artifact, or those whose key or title contains some text. With a filter, each artifact also carries its count of matching members.
