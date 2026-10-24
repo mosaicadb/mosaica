@@ -282,14 +282,20 @@ describe('density modes', () => {
     expect((h.sublayer('marks-p0')!.props as {visible: boolean}).visible).toBe(true);
   });
 
-  it('sets the names on plates over hexagons, a grid or a ramped wash, and keeps the halo elsewhere', () => {
+  it('sets every name on a plate: opaque with no halo over hexagons, a grid or a ramped wash, translucent under a halo elsewhere', () => {
     const h = host();
-    for (const [density, plated] of [['hex', true], ['grid', true], ['smooth', false], ['contours', false], ['none', false]] as const) {
+    const drawn = () => ({
+      plateAlpha: (h.sublayer('labels-plates')!.props as unknown as {getBackgroundColor: number[]}).getBackgroundColor[3],
+      halo: (h.sublayer('labels')!.props as unknown as {outlineWidth: number}).outlineWidth > 0
+    });
+    for (const [density, opaque] of [['hex', true], ['grid', true], ['smooth', false], ['contours', false], ['none', false]] as const) {
       h.draw({density});
-      expect(h.sublayer('labels-plates') !== undefined).toBe(plated);
+      const {plateAlpha, halo} = drawn();
+      expect(halo).toBe(!opaque);
+      expect(plateAlpha! < 200).toBe(!opaque);
     }
     h.draw({density: 'smooth', densityColours: 'viridis'});
-    expect(h.sublayer('labels-plates')).toBeDefined();
+    expect(drawn().halo).toBe(false);
   });
 
   it('draws at the strength asked for', () => {

@@ -248,24 +248,33 @@ type Resolved = {
 const ACCENT: Record<'light' | 'dark', [number, number, number]> = {light: [27, 29, 33], dark: [236, 238, 241]};
 /** Label ink per ground. */
 const INK: Record<'light' | 'dark', [number, number, number]> = {light: [27, 29, 33], dark: [242, 243, 245]};
-/** The label halo per ground: the map's default background, nearly opaque. */
-const HALO: Record<'light' | 'dark', [number, number, number, number]> = {light: [246, 246, 244, 235], dark: [17, 19, 23, 235]};
+/** The label halo per ground: the map's default background, opaque but for its soft edge. */
+const HALO: Record<'light' | 'dark', [number, number, number, number]> = {light: [246, 246, 244, 250], dark: [17, 19, 23, 250]};
+/** The veil under each name where the ground shows through: the halo's colour, translucent, so the points beneath stay faintly seen. */
+const VEIL: Record<'light' | 'dark', [number, number, number, number]> = {light: [246, 246, 244, 190], dark: [17, 19, 23, 190]};
 /**
- * The halo's width as a fraction of the em: 2 px on a 14 px name, the middle of the size band. The
- * distance field's reach ({@link HALO_RADIUS}) bounds the width it can draw; asking for more fills
- * each glyph's cell as a rectangle. 0.14 em is half the reach.
+ * The halo's width as a fraction of the em: about 3.4 px on a 14 px name, the middle of the size
+ * band, which keeps a name legible over points as dense as the map draws. The distance field's
+ * reach ({@link HALO_RADIUS}) bounds the width it can draw; asking for more fills each glyph's cell
+ * as a rectangle. 0.24 em is a little over half the reach.
  */
-const HALO_EM = 0.14;
+const HALO_EM = 0.24;
 /** The em the SDF atlas is baked at: deck's `fontSettings.fontSize` default. */
 const ATLAS_PX = 64;
 /**
  * The distance field's reach in atlas pixels, and the padding around each glyph. deck puts the
  * outline threshold at `0.75 × (1 − outlineWidth / radius)`, so `outlineWidth / radius` must stay
- * well below 1. The padding need only cover the halo (9 px), and each pixel of it costs atlas
- * area per glyph.
+ * well below 1. The padding need only cover the halo (about 15 px), and each pixel of it costs
+ * atlas area per glyph.
  */
-const HALO_RADIUS = 24;
-const HALO_BUFFER = 14;
+const HALO_RADIUS = 36;
+const HALO_BUFFER = 18;
+/**
+ * The width of the glyphs' and the halo's soft edge, in the distance field's units: 2.4 atlas
+ * pixels, about half a pixel on a 14 px name. deck's default of 0.1 is in units of the reach, so a
+ * wider reach would blur the edge.
+ */
+const HALO_SMOOTHING = 2.4 / HALO_RADIUS;
 /** deck's `outlineWidth` for a halo of {@link HALO_EM}: deck draws `0.75 ×` this in atlas pixels. */
 const HALO_OUTLINE_WIDTH = (HALO_EM * ATLAS_PX) / 0.75;
 /**
@@ -1220,8 +1229,8 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
   }
 
   /**
-   * Whether the labels sit on plates: while density is drawn as hexagons or a grid, or as a smooth
-   * wash in a ramp, whose colours fill the ground under the names.
+   * Whether the labels sit on opaque plates with no halo: while density is drawn as hexagons or a
+   * grid, or as a smooth wash in a ramp, whose colours fill the ground under the names.
    */
   private platesLabels(): boolean {
     const mode = this.props.density ?? 'none';
@@ -1493,11 +1502,12 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     }
     const scheme = this.props.scheme ?? 'dark';
     const ink = [...INK[scheme], 255] as [number, number, number, number];
-    // Over density in saturated colours a halo in the ground colour reads as an outline round each
-    // glyph, so the names sit on plates of the ground colour there instead. The plates are drawn as
-    // layers of their own beneath all the text, so one row's plate does not cover another's glyphs.
+    // Each name sits on a veil of the ground colour and carries a halo of it, so it reads over
+    // points however dense. Over density in saturated colours a halo reads as an outline round each
+    // glyph, so there the plate is opaque and the halo goes. The plates are drawn as layers of their
+    // own beneath all the text, so one row's plate does not cover another's glyphs.
     const plated = this.platesLabels();
-    const plateProps = {background: true, getBackgroundColor: HALO[scheme], backgroundPadding: [6, 4], backgroundBorderRadius: 3, getColor: [0, 0, 0, 0], outlineWidth: 0, pickable: false};
+    const plateProps = {background: true, getBackgroundColor: plated ? HALO[scheme] : VEIL[scheme], backgroundPadding: [6, 3], backgroundBorderRadius: 4, getColor: [0, 0, 0, 0], outlineWidth: 0, pickable: false};
     const own = plated ? {outlineWidth: 0} : {};
     const text = (id: string, kind: LabelDatum['kind'], rows: LabelDatum[], extra: Record<string, unknown>) =>
       new TextLayer(
@@ -1516,14 +1526,14 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
           fontFamily: "'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
           // The halo is drawn from the distance field. deck's default buffer of 4 clips the field
           // to about a third of a pixel of outline on a 12 px name; see HALO_RADIUS.
-          fontSettings: {sdf: true, buffer: HALO_BUFFER, radius: HALO_RADIUS, cutoff: 0.25},
+          fontSettings: {sdf: true, buffer: HALO_BUFFER, radius: HALO_RADIUS, cutoff: 0.25, smoothing: HALO_SMOOTHING},
           outlineWidth: HALO_OUTLINE_WIDTH,
           outlineColor: HALO[scheme],
           characterSet: rows.length > 0 ? 'auto' : WARM_GLYPHS,
           pickable: this.props.pickable && kind === 'name',
           artifactIds: rows.map((d) => d.id),
           parameters: {depthCompare: 'always' as const},
-          updateTriggers: {getPixelOffset: key, getSize: key, getColor: scheme, getBackgroundColor: scheme},
+          updateTriggers: {getPixelOffset: key, getSize: key, getColor: scheme, getBackgroundColor: `${scheme}|${plated}`},
           ...extra
         } as never
       );
@@ -1535,7 +1545,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     // A name shows at rest; its count and topic only while its artifact is hovered.
     const hovered = this.props.hoveredArtifact ?? null;
     const rowsOf = (kind: LabelDatum['kind']) => data.filter((d) => d.kind === kind && (kind === 'name' || d.id === hovered));
-    if (plated) for (const k of kinds) layers.push(text(`${k.id}-plates`, k.kind, rowsOf(k.kind), {...k.style, ...plateProps}));
+    for (const k of kinds) layers.push(text(`${k.id}-plates`, k.kind, rowsOf(k.kind), {...k.style, ...plateProps}));
     for (const k of kinds) layers.push(text(k.id, k.kind, rowsOf(k.kind), {...k.style, ...own}));
     return layers;
   }
