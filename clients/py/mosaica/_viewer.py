@@ -780,6 +780,8 @@ class Selection:
         frames = []
         # The counts are decoded once, as they land, and handed to `on_counts` then.
         tiles = sub_cells = None
+        # The request as sent, which the answer's metadata carries too.
+        request = json.loads(reader._encoded(request))
         with reader._open("POST", "/v1/viewport", request) as response:
             for kind, payload in _frames(response):
                 frames.append((kind, payload))
@@ -1328,6 +1330,8 @@ class Viewer:
                 request[name] = int(value) if name in _VIEWPORT_INTEGERS else value
         tables = []
         trailer = None
+        # The request as sent, which the answer's metadata carries too.
+        request = json.loads(self._encoded(request))
         with self._open("POST", "/v1/artifacts/viewport", request) as response:
             for kind, payload in _frames(response):
                 if trailer is not None:

@@ -7,6 +7,7 @@ matches, and the rows whose position lies inside a box.
 
 from __future__ import annotations
 
+import json
 import numpy as np
 import pyarrow as pa
 import pytest
@@ -321,6 +322,16 @@ def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stu
     with pytest.raises(Refusal):
         db.view("s0").filter({"submitted_at": {"range": {"gte": "last spring"}}}).count()
     assert db.view("s0").filter({"arxiv_id": {"eq": "2017-01-01"}}).count() == 0
+    # A sample and the annotations of each tile take a moment in their filters as a count does,
+    # and their metadata carries the request as it was sent.
+    after = {"submitted_at": {"range": {"gte": datetime.datetime(2017, 1, 1)}}}
+    sample = db.view("s0").filter(after).sample(k=10)
+    sent = json.loads(sample.schema.metadata[b"mosaica.request"])
+    assert sent["filters"] == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
+    assert json.loads(sample.schema.metadata[b"mosaica.counts"])["matched"] == expected
+    layer = db.meta()["layers"][0]["name"]
+    tiles = db.viewport_artifacts("s0", 0, per_tile=5, layers=[layer], filters=after)
+    assert json.loads(tiles.schema.metadata[b"mosaica.request"])["filters"] == sent["filters"]
     m = db.view("s0").filter({"submitted_at": {"range": {"gte": "2017-01-01"}}}).map()
     assert m.filters == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
 
