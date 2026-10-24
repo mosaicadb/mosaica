@@ -107,7 +107,7 @@ The points of a viewport answer carry each point's artifact, but not the artifac
 
 - **How many per tile.** The request sets `per_tile`, the most artifacts of each level a tile returns. The largest come first, by how many of their members the viewer may see.
 - **Counts are over the whole artifact.** The count, centre and box of an artifact cover all of its members the viewer may see, wherever they lie. An artifact that spans several tiles appears in each with the same figures, so a client can draw it once.
-- **Filters mark, they do not hide.** A filter does not change which artifacts are served or their counts, so topics do not appear and disappear as a viewer types. It adds a flag to each artifact saying whether any of its members in that tile match. To count the matching members of each topic, use a [breakdown by layer](#breakdowns).
+- **Filters mark, they do not hide.** A filter does not change which artifacts are served or their counts, so topics do not appear and disappear as a viewer types. It adds a flag to each artifact saying whether any of its members in that tile match. To count the matching members of each topic, use a [breakdown by layer](#groupings).
 - **Hierarchies.** A `nested` or `dag` layer, a topic tree, is cut to the request's budget across all the tiles together: where too many fine topics would show, their parent is served instead. Zooming in moves the cut deeper.
 
 The [annotations](annotations.md) chapter explains which artifacts a viewer is served at all.
@@ -148,9 +148,13 @@ A cursor is sealed, so it cannot be read or forged. It works only for the read i
 
 ## Aggregate
 
-`POST /v1/aggregate` answers how the items a viewer may see are spread out. A request names a set of items, as a filter, and one or more groupings. It gets back one table of exact counts for each.
+`POST /v1/aggregate` is Mosaica's analytics query. It summarises the items a viewer may see, without returning them: how many papers each archive or topic holds, how many were published each year, the range and mean of their citation counts, where on the map they are densest, and which archives are over-represented in a selection compared with everything.
 
-### Breakdowns
+A request names a set of items, as a filter, and one or more groupings, and gets back one Arrow table for each. Every figure is computed from the items the viewer may see, in the same way as the map's counts, so a chart beside the map agrees with the map's own counts.
+
+The figures are counts, apart from a summary's smallest, largest and mean. Not built yet: sums, means or other statistics per group. Read the items in [bulk](#bulk-read) to compute those.
+
+### Groupings
 
 | Grouping | The table |
 |---|---|
