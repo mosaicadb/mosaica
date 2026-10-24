@@ -1,7 +1,7 @@
 # The platform wheels for `mosaica-native` — the companion distribution that carries the
 # `mosaica` executable and the `_mosaica` extension module.
 #
-# Not part of the per-PR gate and deliberately not attached to it. Seven cross-builds of the whole
+# Not part of the per-PR gate and deliberately not attached to it. Six cross-builds of the whole
 # workspace is minutes of runner time per platform, and nothing here checks behaviour: what a wheel
 # holds is checked by `clients/py/check.sh`, on one platform, in the gate. This job answers the
 # other question — whether the build works for a platform this machine is not.
