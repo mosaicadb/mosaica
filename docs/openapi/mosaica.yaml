@@ -2460,7 +2460,7 @@ paths:
             - an unknown key, a missing `view` or `groupings`, no grouping, or more than `selection.max_aggregate_groupings`;
             - `by` naming neither or both of `field` and `layer`, or carrying neither or both of `top` and `values` or `artifacts`, or `values` on a layer, or `artifacts` or `level` on a field;
             - `top` of 0 or above `selection.max_aggregate_top`; `values` or `artifacts` empty or longer than `selection.max_aggregate_named`; an `artifacts` entry that is not a `mosaica_id`;
-            - `bins` beside `top` or `values`, or on a layer; `range` without `bins`; `bins` of 0 or above `selection.max_aggregate_bins`; a `range` whose lower bound is not below its upper, or that is not two numbers; a fractional bound on a timestamp field; `bins` with `cells`; `sample` without `bins`, on a layer, or of 0;
+            - `bins` beside `top` or `values`, or on a layer; `range` without `bins`; `bins` of 0 or above `selection.max_aggregate_bins`; a `range` whose lower bound is not below its upper, or that is not two numbers; a fractional bound on a timestamp field, or a text bound that is not a date or date-time with an offset and at most six fractional-second digits; `bins` with `cells`; `sample` without `bins`, on a layer, or of 0;
             - a grouping that names no figure, `{}` and a `by` alone among them, with a detail saying to write `"count": true`; `count` other than `true`, `null` among them; a `values`, `missing`, `min`, `max`, `mean` or `summary` that is `null` or an empty list;
             - `values`, `missing`, `min`, `max`, `mean` or `summary` in a grouping with `by` or `cells`, or in a request carrying `filters` or `reference`, with a detail saying they are computed over the whole visible set only; a field in one of them that is not a number or timestamp, and a number or timestamp field declared with neither `index` nor `render`, with a detail saying to name a number or timestamp field declared with `index` or `render`;
             - `bins` on a field that is not a number or timestamp, each kind with its own detail; on a `bool`, with a detail saying it has no bins; and on a number or timestamp field declared with neither `index` nor `render`, with a detail saying to name a number or timestamp field declared with `index` or `render`;
@@ -2536,7 +2536,11 @@ paths:
         name is `422`. A category takes its vocabulary's key: under a `closed` vocabulary an
         unknown key is `422`, and under an `open` one it is added. An integer is read exactly,
         from a JSON number or a string of digits; `timestamp_us` is microseconds since the Unix
-        epoch.
+        epoch, as a number or a string of digits, or a string holding an RFC 3339 date
+        (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`,
+        `2020-01-01T10:30:00.25+01:00`). A date-time with no offset, or with more than six
+        fractional-second digits, is `422`; a leap second, `23:59:60`, is the second after
+        `23:59:59`.
 
         **Layers.** A column named after an enumerated layer places each row in that layer's
         artifacts: a key, or a list of keys whose meaning follows the layer's `hierarchy`, `null`
@@ -2692,7 +2696,8 @@ paths:
 
         A change names its item in `match`, by its `mosaica_id`, a string of decimal digits, and
         by the values of fields declared unique: a keyword as a string, an integer or a timestamp
-        as a number or a string of decimal digits. A `null` names nothing. Every value names the
+        as a number or a string of decimal digits, and a timestamp also as an RFC 3339 date or
+        date-time with an offset, as an ingest row writes one. A `null` names nothing. Every value names the
         item that holds it, and a change whose values name no item, or name two, is refused; so is
         a change whose `mosaica_id` names no item. A refused change is listed in `refused` by
         position with its reason, and the others are applied. With `strict=true` the request is
@@ -6168,7 +6173,12 @@ components:
         `text` column takes `match` with a string or `{"query", "minimum_should_match"}`, and
         `phrase` with a string. An integer or `timestamp_us` column also takes an integer as its
         decimal digits in a string, optionally after `-` (`"1152921504606846976"`), which is exact
-        where a JSON number read as a double is not, past 2^53.
+        where a JSON number read as a double is not, past 2^53. A `timestamp_us` column's values
+        are microseconds since the Unix epoch, and it also takes an RFC 3339 date (`"2020-01-01"`,
+        midnight UTC) or date-time with an offset (`"2020-01-01T09:30:00Z"`) as a string; a
+        date-time with no offset, or with more than six fractional-second digits, is `422`. A date
+        is its first instant, so `{"lt": "2021-01-01"}` ends a range with the last of 2020, and
+        `{"lte": "2020-12-31"}` leaves out all of 31 December after midnight.
 
         `eq` and `in` on a unique column answer from its unique index, as the set of visible items
         holding the values; a holder the viewer may not see answers as no holder does.
@@ -6324,11 +6334,11 @@ components:
       additionalProperties: false
 
     NumericComparand:
-      description: A number, or on an integer or `timestamp_us` column its decimal digits as a string, optionally after `-`, which is exact past 2^53.
+      description: A number, or on an integer or `timestamp_us` column its decimal digits as a string, optionally after `-`, which is exact past 2^53. On a `timestamp_us` column, also an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) and at most six fractional-second digits.
       oneOf:
         - type: number
         - type: string
-          pattern: "^-?[0-9]+$"
+          pattern: '^(-?[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}([Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?([Zz]|[+-][0-9]{2}:[0-9]{2}))?)$'
 
     ItemsRequest:
       type: object
@@ -6663,7 +6673,7 @@ components:
               maxItems: 2
               items:
                 $ref: "#/components/schemas/NumericComparand"
-              description: "`[lower, upper]`, with `lower` below `upper`, in the field's own units: on a timestamp field, whole microseconds since the Unix epoch. On an integer field, a fractional bound has the bins cut, and served, in `float64`. Absent is readable edges around the values every item this principal may see in `view` holds."
+              description: "`[lower, upper]`, with `lower` below `upper`, in the field's own units: on a timestamp field, whole microseconds since the Unix epoch, or an RFC 3339 date or date-time with an offset written as a string, as in a filter. On an integer field, a fractional bound has the bins cut, and served, in `float64`. Absent is readable edges around the values every item this principal may see in `view` holds."
             sample:
               type: integer
               minimum: 1
@@ -6935,7 +6945,7 @@ components:
           type: [integer, string, "null"]
           description: The level at which this row's layer keys are placed, as an integer or a string of digits. Read only where the batch carries a layer column.
       additionalProperties:
-        description: "An attribute's value, or a layer's key or list of keys. A category takes its key; an integer is a JSON number or a string of digits; `timestamp_us` is microseconds since the Unix epoch. `null` is no value, and clears one an item holds; a key left out keeps it."
+        description: "An attribute's value, or a layer's key or list of keys. A category takes its key; an integer is a JSON number or a string of digits; `timestamp_us` is microseconds since the Unix epoch, as a number or a string of digits, or an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string, and a date-time with no offset or more than six fractional-second digits is `422`. `null` is no value, and clears one an item holds; a key left out keeps it."
         type: [boolean, number, string, array, "null"]
 
     IngestResponse:
@@ -7034,7 +7044,7 @@ components:
           pattern: "^[0-9]+$"
           description: The item's `mosaica_id`, as a string of decimal digits; a JSON number is `422`.
       additionalProperties:
-        description: A value of the unique field the key names. A keyword is a string, and a number is `422`; an integer or a timestamp is a number or a string of decimal digits. `null` names nothing. Any other value in a unique field's column is `422`; a key that is not a unique field takes any value.
+        description: A value of the unique field the key names. A keyword is a string, and a number is `422`; an integer or a timestamp is a number or a string of decimal digits, and a timestamp also an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string. `null` names nothing. Any other value in a unique field's column is `422`; a key that is not a unique field takes any value.
 
     MemberTable:
       type: object
@@ -7487,7 +7497,7 @@ components:
         metadata:
           type: object
           default: {}
-          description: One value for each name the group declares, and no other. A `timestamp_us` is microseconds since the Unix epoch, as an integer; an integer is never read as a float, nor a float as an integer.
+          description: One value for each name the group declares, and no other. A `timestamp_us` is microseconds since the Unix epoch, as an integer or a string of digits, or an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string, read as `corpus.toml` reads one; a date-time with no offset, or with more than six fractional-second digits, is `422`. An integer is never read as a float, nor a float as an integer.
           additionalProperties:
             type: [boolean, number, string]
 

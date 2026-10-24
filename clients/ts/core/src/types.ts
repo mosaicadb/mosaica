@@ -344,7 +344,9 @@ export type RegionVerdict = {exact: true; depth: null} | {exact: false; depth: n
  * takes its vocabulary key (a string) or its code (a number). A keyword takes exact strings. A
  * numeric column takes numbers, and `range` takes at least one bound and at most one per side.
  * An integer or timestamp column also takes a `bigint`, sent as its decimal digits, which is exact
- * past 2^53 where a `number` is not. A `text` column takes `match` or `phrase`.
+ * past 2^53 where a `number` is not. A timestamp column's numbers are microseconds since the Unix
+ * epoch, and it also takes a date (`'2020-01-01'`, midnight UTC) or a date-time with an offset
+ * (`'2020-01-01T09:30:00Z'`) as a string. A `text` column takes `match` or `phrase`.
  *
  * @category Filters
  */
@@ -357,7 +359,7 @@ export type FilterOperator =
   | {match: string | {query: string; minimum_should_match?: number}}
   /** The analysed terms must appear next to each other, in order. */
   | {phrase: string}
-  | {range: {gte?: number | bigint; gt?: number | bigint; lte?: number | bigint; lt?: number | bigint}};
+  | {range: {gte?: number | bigint | string; gt?: number | bigint | string; lte?: number | bigint | string; lt?: number | bigint | string}};
 
 /**
  * One annotation layer, as `/v1/meta` publishes it to this principal.
@@ -1766,7 +1768,8 @@ export type Grouping = {
  * With `bins` and a `range`, `[lower, upper]` is cut into `bins` equal bins. On an integer field
  * with whole bounds the edges are whole numbers; where either bound is fractional the bins are cut
  * in float and the edges are numbers. On a timestamp field the bounds are whole microseconds since
- * the Unix epoch. A `bigint` bound is sent exactly. A histogram's table is always one page.
+ * the Unix epoch, or dates or date-times with an offset as strings, as in a filter. A `bigint`
+ * bound is sent exactly. A histogram's table is always one page.
  * Without a `range`, the edges are readable values around the smallest and largest value of every
  * item this principal may see in the view, whatever the filters say, in at most `bins` bins, so
  * they stay put as the filters and the viewport change, and no visible value lies outside them.
@@ -1787,7 +1790,7 @@ export type Grouping = {
 export type AggregateBy =
   | {field: string; top: number}
   | {field: string; values: string[]}
-  | {field: string; bins: number; range?: [number | bigint, number | bigint]; sample?: number}
+  | {field: string; bins: number; range?: [number | bigint | string, number | bigint | string]; sample?: number}
   | {layer: string; level?: number; top: number; cut?: AggregateCut; paletteSize?: number}
   | {layer: string; level?: number; artifacts: bigint[]; paletteSize?: number};
 

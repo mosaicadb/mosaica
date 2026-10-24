@@ -127,7 +127,8 @@ export type RefusedMember = {
 /**
  * One item, named by its `mosaica_id` and the values of fields declared unique, keyed by column.
  * A unique field's value is a string for a keyword, and a number or a string of decimal digits
- * for an integer or a timestamp. `null` names nothing. Every value names the item that holds it;
+ * for an integer or a timestamp, or for a timestamp a date or a date-time with an offset as a
+ * string. `null` names nothing. Every value names the item that holds it;
  * a row naming no item, or two, is refused. A key that is neither `mosaica_id` nor a unique field
  * names nothing: it is ignored and listed in the answer's `ignored_columns`.
  *
