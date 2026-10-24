@@ -208,7 +208,7 @@ centroid and box of the members the viewer can see.
 ## A cluster's colour is computed from what the viewer is served
 
 A request may name a palette size, and each artifact it serves then carries a slot: a number below
-that size which the client turns into a colour ([annotations](annotations.md#colour-slots)). The
+that size which the client turns into a colour ([annotations](annotations.md#on-the-map)). The
 slots are worked out once for each session and layer, from the artifacts the viewer is served that
 hold a member they can see, the viewer's tree over those artifacts, each one's count of visible
 members and `mosaica_id`, and a centre over the members the viewer can see: the centroid the
@@ -273,7 +273,7 @@ should not be assumed to resist a viewer who has obtained known pairs of an enti
 on cryptographic strength.
 
 An artifact's or a layer's `mosaica_id` is the same permutation of a kind bit, the layer's space
-and the entity in that space ([an artifact's identity](annotations.md#an-artifacts-identity)). An
+and the entity in that space ([an artifact's identity](annotations.md)). An
 artifact's entity id is internal as an item's is, and is never on the wire. The kind, the shard,
 the tenancy and the layer space are inside the permuted input, so a viewer cannot read them or
 order identifiers by them. The server reads the kind from the inverted identifier: an artifact's

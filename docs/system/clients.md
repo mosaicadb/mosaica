@@ -103,7 +103,7 @@ cluster budget when it is let go. The notebook widget takes them as `cluster_bud
 Clusters are coloured from a palette: Okabe-Ito with 8 colours, Tableau 10 with 10, which is the
 default, Tableau 20 with 20, or Kelly with 22. The store sends the palette's size as
 `palette_size` with every request for artifacts, and the server answers each cluster with a slot
-below it ([annotations](annotations.md#colour-slots)), the same for this viewer at any zoom, box,
+below it ([annotations](annotations.md#on-the-map)), the same for this viewer at any zoom, box,
 budget or filter. The store colours a cluster with the palette's colour at its slot, and a cluster
 with no slot with the neutral grey. `Store.setPalette` changes the palette. Slots of one size mean
 nothing under another, so the store asks again with the new size, and each cluster keeps the colour
@@ -148,7 +148,7 @@ The artifacts of the layers drawn are requested on their own, tile by tile
 ([queries](queries.md#annotations-on-the-map)), rather than read off cached point geometry.
 The layer the points are coloured by is named on the point requests, so each point carries its
 artifact's `mosaica_id`. Artifacts are clusters, boundaries, hierarchy nodes and their labels, as
-[annotations](annotations.md#what-an-artifact-is) defines them. A cache holds geometry it has
+[annotations](annotations.md) defines them. A cache holds geometry it has
 already fetched and does not ask again for a tile it already holds, and such a tile carries no
 artifacts, so a client reading them off the point path would watch clusters disappear from a view
 that had not moved, for no reason a person could see. Asking on its own avoids that at the cost of
