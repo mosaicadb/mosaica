@@ -357,6 +357,21 @@ enum Command {
         /// directory.
         #[arg(long, value_name = "PATH")]
         deployment: Option<PathBuf>,
+        /// Stop, as SIGTERM stops it, when standard input reaches its end. A process that starts
+        /// the server and holds a pipe to its standard input stops it by closing the pipe, and
+        /// stops it too when that process ends in any way, a kill included. Standard input that
+        /// is empty or `/dev/null` stops the server as soon as it starts.
+        #[arg(long)]
+        exit_on_stdin_close: bool,
+        /// Delete the deployment's directory, the one holding the `mosaica.toml` that
+        /// `--deployment` names, with the bundle, the write-ahead log, the catalogue and every
+        /// other file in it, when the server stops. It is for a temporary deployment the process
+        /// that started the server made. It requires `--exit-on-stdin-close` and `--deployment`,
+        /// and the server refuses to start where the file is not named `mosaica.toml`, or where
+        /// the file or its directory is a symbolic link. A symbolic link inside the directory is
+        /// removed without being followed.
+        #[arg(long, requires_all = ["exit_on_stdin_close", "deployment"])]
+        remove_on_exit: bool,
     },
     /// Log in on the viewer plane and print the session token and its `expires_at` as JSON.
     ///
@@ -584,10 +599,91 @@ fn innermost(e: &dyn std::error::Error) -> String {
     last.to_string()
 }
 
-/// Exit with success on the first SIGTERM or SIGINT, from a thread of its own so the handler is
-/// in place before the bundle opens. Inside a container the server is PID 1, which the kernel
-/// sends no signal it has no handler for.
-fn exit_on_termination() {
+/// The deployment directory `--remove-on-exit` deletes as the server stops, once it has been
+/// checked at start-up. A stop before then deletes nothing.
+static REMOVE_ON_EXIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The directory `--remove-on-exit` may delete: the one holding `deployment`, which must be a
+/// regular file named `mosaica.toml` in a directory that is not a symbolic link.
+fn removable(deployment: &Path) -> Result<PathBuf, String> {
+    if deployment.file_name() != Some(std::ffi::OsStr::new("mosaica.toml")) {
+        return Err(format!(
+            "{} is not a file named mosaica.toml; name the deployment file itself",
+            deployment.display()
+        ));
+    }
+    let file = std::fs::symlink_metadata(deployment)
+        .map_err(|e| format!("{}: {e}", deployment.display()))?;
+    if !file.file_type().is_file() {
+        return Err(format!(
+            "{} is a symbolic link or not a file; name the deployment file in its own directory",
+            deployment.display()
+        ));
+    }
+    let parent = deployment.parent().filter(|p| !p.as_os_str().is_empty());
+    let directory = std::path::absolute(parent.unwrap_or(Path::new(".")))
+        .map_err(|e| format!("{}: {e}", deployment.display()))?;
+    let held = std::fs::symlink_metadata(&directory)
+        .map_err(|e| format!("{}: {e}", directory.display()))?;
+    if !held.file_type().is_dir() || directory.parent().is_none() {
+        return Err(format!(
+            "{} is a symbolic link, not a directory or the root; name a deployment in a \
+             directory of its own",
+            directory.display()
+        ));
+    }
+    Ok(directory)
+}
+
+/// Delete the directory `--remove-on-exit` named, if it still holds its `mosaica.toml` and is
+/// still not a symbolic link. `remove_dir_all` removes a symbolic link inside it without
+/// following it.
+fn remove_the_deployment() {
+    let Some(directory) = REMOVE_ON_EXIT.get() else {
+        return;
+    };
+    let unchanged = std::fs::symlink_metadata(directory).is_ok_and(|m| m.file_type().is_dir())
+        && std::fs::symlink_metadata(directory.join("mosaica.toml"))
+            .is_ok_and(|m| m.file_type().is_file());
+    if !unchanged {
+        eprintln!(
+            "mosaica serve: left {} in place, since it no longer holds its mosaica.toml or is now \
+             a symbolic link",
+            directory.display()
+        );
+        return;
+    }
+    // A write still in flight can add a file as the tree is removed, so a second pass finishes it.
+    for _ in 0..2 {
+        match std::fs::remove_dir_all(directory) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) => eprintln!(
+                "mosaica serve: could not remove {}: {e}",
+                directory.display()
+            ),
+        }
+    }
+}
+
+/// Stop the process with success, deleting the deployment where `--remove-on-exit` asked.
+fn stop(on: &str) -> ! {
+    eprintln!("mosaica serve: stopped on {on}");
+    remove_the_deployment();
+    std::process::exit(0);
+}
+
+/// Exit with success on the first SIGTERM or SIGINT, and with `stdin` at the end of standard
+/// input, from threads of their own so the handlers are in place before the bundle opens. Inside a
+/// container the server is PID 1, which the kernel sends no signal it has no handler for.
+fn exit_on_termination(stdin: bool) {
+    if stdin {
+        std::thread::spawn(|| {
+            // Read to the end, keeping nothing: what is written to the pipe means nothing.
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            stop("the end of standard input");
+        });
+    }
     use tokio::signal::unix::{signal, SignalKind};
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
@@ -619,8 +715,7 @@ fn exit_on_termination() {
                 _ = int.recv() => "SIGINT",
             }
         });
-        eprintln!("mosaica serve: stopped on {name}");
-        std::process::exit(0);
+        stop(name);
     });
 }
 
@@ -1757,7 +1852,11 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Command::Serve { deployment } => {
+        Command::Serve {
+            deployment,
+            exit_on_stdin_close,
+            remove_on_exit,
+        } => {
             // Diagnostics on stderr, because stdout carries one thing: the JSON line naming the
             // three bound addresses, which a supervisor reads as the process's first stdout line
             // (`mosaica_server::serve_announcing`).
@@ -1770,7 +1869,21 @@ fn main() -> ExitCode {
             // write is fsynced before it is acknowledged, so stopping loses no acknowledged write,
             // and the next start replays the log. A deletion or suppression answered 500 because
             // the log could not be written is applied but not logged, so stopping undoes it.
-            exit_on_termination();
+            // Checked before the stop handlers are in place, so a refusal is never overtaken by
+            // a stop.
+            if remove_on_exit {
+                let named = deployment.as_deref().expect("clap requires --deployment");
+                match removable(named) {
+                    Ok(directory) => {
+                        let _ = REMOVE_ON_EXIT.set(directory);
+                    }
+                    Err(why) => {
+                        eprintln!("mosaica serve: refused to start: --remove-on-exit: {why}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            exit_on_termination(exit_on_stdin_close);
             let deployment = match mosaica_config::discover(
                 deployment.as_deref(),
                 &std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
@@ -1778,6 +1891,7 @@ fn main() -> ExitCode {
                 Ok(path) => path,
                 Err(e) => {
                     eprintln!("mosaica serve: refused to start: {e}");
+                    remove_the_deployment();
                     return ExitCode::FAILURE;
                 }
             };
@@ -1785,6 +1899,7 @@ fn main() -> ExitCode {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("mosaica serve: refused to start: {e}");
+                    remove_the_deployment();
                     return ExitCode::FAILURE;
                 }
             };
@@ -1811,10 +1926,13 @@ fn main() -> ExitCode {
                 Ok(rt) => rt,
                 Err(e) => {
                     eprintln!("mosaica serve: could not start async runtime: {e}");
+                    remove_the_deployment();
                     return ExitCode::FAILURE;
                 }
             };
-            match runtime.block_on(mosaica_server::run(prepared)) {
+            let served = runtime.block_on(mosaica_server::run(prepared));
+            remove_the_deployment();
+            match served {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("mosaica serve: {e}");
