@@ -2323,26 +2323,27 @@ paths:
               top-categories:
                 summary: The ten subject classes with the most papers
                 description: "One table: the ten largest classes, then `rest` for every other class, so the counts sum to the papers this viewer may see in `topics`."
-                value: {"view": "topics", "groupings": [{"by": {"field": "primary_category", "top": 10}}]}
+                value: {"view": "topics", "groupings": [{"count": true, "by": {"field": "primary_category", "top": 10}}]}
               by-layer:
                 summary: The eight arXiv archives with the most papers, by the taxonomy layer
                 description: "`taxonomy/arxiv` is tiered, so the grouping names a level: 0 is the archives. On a layer whose artifacts overlap, the rows can sum to more than the set."
-                value: {"view": "topics", "groupings": [{"by": {"layer": "taxonomy/arxiv", "level": 0, "top": 8}}]}
+                value: {"view": "topics", "groupings": [{"count": true, "by": {"layer": "taxonomy/arxiv", "level": 0, "top": 8}}]}
               histogram:
                 summary: Papers by submission date, in at most 20 bins
                 description: Without `range`, the edges are readable dates around the earliest and latest submission this viewer may see.
-                value: {"view": "topics", "groupings": [{"by": {"field": "submitted_at", "bins": 20}}]}
+                value: {"view": "topics", "groupings": [{"count": true, "by": {"field": "submitted_at", "bins": 20}}]}
               summary:
-                summary: The earliest, latest and mean submission date
-                value: {"view": "topics", "groupings": [{"by": {"field": "submitted_at", "summary": true}}]}
+                summary: The papers, and their earliest, latest and mean submission date
+                description: "One row over every paper this viewer may see in `topics`: `count`, then `values_submitted_at`, `missing_submitted_at`, `min_submitted_at`, `max_submitted_at` and `mean_submitted_at`."
+                value: {"view": "topics", "groupings": [{"count": true, "summary": ["submitted_at"]}]}
               density:
                 summary: Statistics papers counted in each cell of a 32 by 32 grid
                 description: "`cells` at depth 5 divides the view into the tiles of zoom 5. Each row is one non-empty cell and its count."
-                value: {"view": "topics", "filters": {"archive": {"eq": "stat"}}, "groupings": [{"cells": {"depth": 5}}]}
+                value: {"view": "topics", "filters": {"archive": {"eq": "stat"}}, "groupings": [{"count": true, "cells": {"depth": 5}}]}
               comparison:
                 summary: Which archives papers with "quantum" in the title come from, against the whole map
                 description: "`reference: {}` is every paper this viewer may see. Each row gains `reference_count` and `lift`, the group's share of the filtered set over its share of the reference."
-                value: {"view": "topics", "filters": {"title": {"match": "quantum"}}, "reference": {}, "groupings": [{"by": {"field": "archive", "top": 10}}]}
+                value: {"view": "topics", "filters": {"title": {"match": "quantum"}}, "reference": {}, "groupings": [{"count": true, "by": {"field": "archive", "top": 10}}]}
       responses:
         "200":
           description: The framed body, with the headers `POST /v1/items` sends.
