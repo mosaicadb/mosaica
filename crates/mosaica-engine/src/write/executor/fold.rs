@@ -298,24 +298,30 @@ fn write_next_tenancy_index(
     Ok(next)
 }
 
-/// The derived files whose stamped versions are their level's and their shard's slice's now,
-/// after the fold's retirement has run; every other one is dropped and named. See
-/// [`PendingRetirement`].
+/// The derived files that still stand at their level's versions after the fold's retirement has
+/// run ([`DerivedExtent::stands`], with the layers in `enumerated`); every other one is dropped
+/// and named. See [`PendingRetirement`].
+///
+/// [`DerivedExtent::stands`]: mosaica_store::manifest::DerivedExtent::stands
 fn held_at_current_version(
     store: &ArtifactStore,
+    enumerated: &std::collections::BTreeSet<String>,
     entries: impl IntoIterator<Item = (ShardId, mosaica_store::manifest::DerivedExtent)>,
 ) -> DerivedByShard {
     let mut held = DerivedByShard::new();
     for (shard, entry) in entries {
         let now = store.layer_in(entry.space).and_then(|layer| {
             Some((
+                layer,
                 store.records_version(layer, entry.level),
                 store.slice(shard)?.level_version(layer, entry.level),
             ))
         });
-        if now == Some((entry.level_version, entry.slice_version)) {
-            held.entry(shard).or_default().push(entry);
-            continue;
+        if let Some((layer, records, slice)) = now {
+            if entry.stands(records, slice, enumerated.contains(layer)) {
+                held.entry(shard).or_default().push(entry);
+                continue;
+            }
         }
         tracing::error!(
             space = %entry.space,
@@ -323,9 +329,9 @@ fn held_at_current_version(
             shard = %shard,
             form = entry.form.dir(),
             stamped = ?(entry.level_version, entry.slice_version),
-            now = ?now,
-            "ALARM: a derived file a fold publishes is stamped with a version the level does not \
-             carry after the retirement; it is dropped and the level recomposes on first use"
+            now = ?now.map(|(_, records, slice)| (records, slice)),
+            "ALARM: a derived file a fold publishes does not stand at the versions its level \
+             carries after the retirement; it is dropped and the level recomposes on first use"
         );
     }
     held
@@ -945,31 +951,6 @@ fn kept_derived(
         })
         .map(|(held, extent)| (held, extent.clone()))
         .collect()
-}
-
-/// Whether another shard's `extent` still pairs with the member pack this fold writes again from
-/// that shard's slice as it stands. A row-major column behind its slice is completed at open by
-/// the members joined since the pack it was written with, and against the new pack those joins
-/// read as already held, so such a column and its member file leave and the level is composed
-/// again on first use.
-fn pairs_with_its_members(
-    store: &ArtifactStore,
-    shard: ShardId,
-    extent: &mosaica_store::manifest::DerivedExtent,
-) -> bool {
-    use mosaica_store::manifest::DerivedForm;
-    if !matches!(
-        extent.form,
-        DerivedForm::RowColumn { .. } | DerivedForm::RowMembers
-    ) {
-        return true;
-    }
-    let Some(layer) = store.layer_in(extent.space) else {
-        return true;
-    };
-    store.slice(shard).is_none_or(|slice| {
-        slice.level_version(layer, extent.level) == extent.slice_version
-    })
 }
 
 /// A level's shape over `row_count` rows from `walk`, and the ordinals holding a row there.
@@ -2279,9 +2260,6 @@ impl Executor {
         // shard's carry-forwards.
         let mut kept = kept_derived(&self.side_manifests.derived_extents, shard_id, &derived);
         kept.retain(|(_, extent)| !superseded_by_a_move(extent, &moved));
-        self.live.with_artifacts(|store| {
-            kept.retain(|(shard, extent)| pairs_with_its_members(store, *shard, extent))
-        });
         carried_rels.extend(others.bundle.into_keys());
         carried_rels.extend(others.side.into_keys());
         carried_rels.extend(kept.iter().map(|(_, extent)| extent.path.clone()));
@@ -2473,9 +2451,10 @@ impl Executor {
             .derived_by_shard()
             .map(|(shard, extent)| (shard, extent.clone()))
             .collect();
+        let enumerated = mosaica_types::layer::enumerated_names(&self.live.registered_layers());
         self.side_manifests.derived_extents = self
             .live
-            .with_artifacts(|store| held_at_current_version(store, written));
+            .with_artifacts(|store| held_at_current_version(store, &enumerated, written));
         let folded_tiers = segments_manifest
             .shard(shard_id)
             .map(|record| record.deltas.clone())
@@ -2502,11 +2481,21 @@ impl Executor {
         generations.push(Arc::downgrade(&live));
         stairs.record("13 open");
 
+        // Only the files written over a view's live incarnation, as an open adopts them.
+        let swapped = self.generation.load();
+        let incarnation_of = |view: &str| swapped.bundle.manifest.incarnation_of(view);
         let derived: Vec<_> = self
             .side_manifests
             .derived_extents
             .iter()
             .flat_map(|(shard, extents)| extents.iter().map(|extent| (*shard, extent.clone())))
+            .filter(|(_, extent)| {
+                crate::filter::carries_live_view(
+                    &incarnation_of,
+                    extent.view.as_deref(),
+                    extent.incarnation,
+                )
+            })
             .collect();
         self.live.with_artifacts(|store| {
             self.deps.artifact_projections.adopt_derived(
@@ -2514,6 +2503,7 @@ impl Executor {
                 &completed.prefix,
                 &derived,
                 store,
+                &enumerated,
             )
         });
         stairs.record("14 adopt");

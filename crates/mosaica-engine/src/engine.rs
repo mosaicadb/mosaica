@@ -1167,6 +1167,7 @@ fn adopt_derived_structures(
         &readers.prefix,
         &manifest_derived_extents,
         &state.artifacts,
+        &mosaica_types::layer::enumerated_names(&state.registry.snapshot()),
     );
     // What the open actually took. An open reporting zero adoptions against a manifest that
     // names extents means every coordinate was rejected: correct but expensive, since the next

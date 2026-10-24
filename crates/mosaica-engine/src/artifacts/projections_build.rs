@@ -660,12 +660,13 @@ impl ArtifactProjections {
 
     /// The fold-written column for this `(view, layer, level)`, and whether the level has moved
     /// since it was written. A column written at an earlier version is still taken: a membership
-    /// only grows between folds, so such a column labels a subset of the level and can be
-    /// completed. One held for another prefix is left for [`Self::adopt_columns`] to purge.
+    /// only grows between its shard's compactions, so such a column labels a subset of the level
+    /// and can be completed. One held for another prefix is left for [`Self::adopt_columns`] to
+    /// purge.
     ///
     /// The key names no view incarnation, and a view dropped and created again keeps its id. Two
-    /// guards keep a recreated view off its predecessor's column: an open adopts only columns
-    /// stamped with the view's live incarnation (`adopt_derived_structures`), and
+    /// guards keep a recreated view off its predecessor's column: an open and a compaction adopt
+    /// only columns stamped with the view's live incarnation, and
     /// [`ArtifactRows::build_from_column`] refuses a column whose base row count is not the
     /// view's.
     fn claim_column(&self, at: &Coordinate<'_>) -> Option<(RowColumn, bool)> {

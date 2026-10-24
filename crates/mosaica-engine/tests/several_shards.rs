@@ -2079,20 +2079,45 @@ fn a_growth_in_one_shard_leaves_the_others_files_and_figures() {
 }
 
 /// A growth in one shard, by the growth route or by membership rows in an ingest, survives a
-/// compaction of the other alone and a restart after the log has rotated, with the cache directory
-/// kept and without it: every viewer is served the items, counts, contents and `member_of` verdicts
-/// one shard holding the same items serves after its own compaction.
+/// compaction of the other alone, a second growth after it, and a restart after the log has
+/// rotated, with the cache directory kept and without it: every viewer is served the items,
+/// counts, contents and `member_of` verdicts one shard holding the same items serves after its own
+/// compaction.
 #[test]
 fn a_growth_in_one_shard_survives_another_shards_compaction_and_a_restart() {
     for (grown, compacted) in [(1, 0), (0, 1)] {
         for by_ingest in [false, true] {
-            growth_through_another_shards_compaction(grown, compacted, by_ingest);
+            for again in [false, true] {
+                growth_through_another_shards_compaction(grown, compacted, by_ingest, again);
+            }
         }
     }
 }
 
-fn growth_through_another_shards_compaction(grown: u32, compacted: u32, by_ingest: bool) {
+/// `ids` of the layered fixture joining `c-0` in one write, by the growth route or by membership
+/// rows in an ingest, and a tick.
+fn join_c0(engine: &Engine, ids: &[u64], by_ingest: bool) {
     use mosaica_lifecycle::ShardSets;
+    if by_ingest {
+        for id in ids {
+            name_item(engine, &format!("join-{id}"), *id, None, Some("c-0"));
+        }
+    } else {
+        let mut growth = IncomingGrowth::from_entities("c-0".into(), Vec::new());
+        growth.joining = ShardSets::of_items(ids.iter().map(|id| item_by_id(engine, *id)));
+        engine
+            .grow_memberships("t".into(), 0, vec![growth])
+            .unwrap();
+    }
+    tick(engine);
+}
+
+fn growth_through_another_shards_compaction(
+    grown: u32,
+    compacted: u32,
+    by_ingest: bool,
+    again: bool,
+) {
     let one = layered_fixture(None);
     let several = layered_fixture(Some(TWO_SHARD_SIZE));
     let (one_engine, engine) = (one.open_writing(), several.open_writing());
@@ -2100,7 +2125,11 @@ fn growth_through_another_shards_compaction(grown: u32, compacted: u32, by_inges
         .into_iter()
         .filter(|id| unheld(*id))
         .collect();
-    assert!(!joining.is_empty(), "shard {grown} holds an item no artifact holds");
+    assert!(joining.len() >= 2, "shard {grown} holds two items no artifact holds");
+    let (first, second) = match again {
+        true => joining.split_at(joining.len() / 2),
+        false => (&joining[..], &[][..]),
+    };
     // A member of another artifact in the compacted shard, so its compaction has a deletion to
     // reclaim.
     let deleted = *ids_in_shard(&engine, TWO_SHARD_N, compacted)
@@ -2108,29 +2137,25 @@ fn growth_through_another_shards_compaction(grown: u32, compacted: u32, by_inges
         .find(|id| **id >= 10 && !unheld(**id))
         .unwrap();
     for engine in [&one_engine, &engine] {
-        if by_ingest {
-            for id in &joining {
-                name_item(engine, &format!("join-{id}"), *id, None, Some("c-0"));
-            }
-        } else {
-            let mut growth = IncomingGrowth::from_entities("c-0".into(), Vec::new());
-            growth.joining =
-                ShardSets::of_items(joining.iter().map(|id| item_by_id(engine, *id)));
-            engine
-                .grow_memberships("t".into(), 0, vec![growth])
-                .unwrap();
-        }
-        tick(engine);
+        join_c0(engine, first, by_ingest);
         engine
             .accept_changes(vec![(item_by_id(engine, deleted).target(), ChangeOp::Delete)])
             .unwrap();
     }
     fold(&one_engine);
     compact(&engine, Some(shard(compacted)));
+    if again {
+        for engine in [&one_engine, &engine] {
+            join_c0(engine, second, by_ingest);
+        }
+    }
     for engine in [&one_engine, &engine] {
         reclaim_log(engine);
     }
-    let at = format!("grown in shard {grown} (by ingest: {by_ingest}), shard {compacted} compacted");
+    let at = format!(
+        "grown in shard {grown} (by ingest: {by_ingest}, again: {again}), shard {compacted} \
+         compacted"
+    );
     let expected = served_layer(&one_engine);
     assert!(
         expected[0]
@@ -2151,6 +2176,62 @@ fn growth_through_another_shards_compaction(grown: u32, compacted: u32, by_inges
         served_layer(&engine),
         expected,
         "{at}, across a restart without the cache"
+    );
+}
+
+/// A new artifact moves every shard's slice, so shard 1's column is behind its level when shard 0
+/// is compacted alone. The column is adopted and completed rather than composed again, at the
+/// running service and across a restart, and every viewer is served what one shard holding the
+/// same items serves.
+#[test]
+fn a_column_behind_its_level_is_adopted_through_another_shards_compaction() {
+    use mosaica_lifecycle::ShardSets;
+    let one = layered_fixture(None);
+    let several = layered_fixture(Some(TWO_SHARD_SIZE));
+    let (one_engine, engine) = (one.open_writing(), several.open_writing());
+    // Items no artifact holds, so the level's memberships still partition and no compaction
+    // moves its layout, which would write every shard's column again.
+    let in_shard = |shard: u32| {
+        *ids_in_shard(&engine, TWO_SHARD_N, shard)
+            .iter()
+            .find(|id| unheld(**id))
+            .unwrap()
+    };
+    let fresh_members = [in_shard(0), in_shard(1)];
+    for engine in [&one_engine, &engine] {
+        let mut fresh = IncomingArtifact::from_entities(Some("c-new".into()), Vec::new());
+        fresh.members =
+            ShardSets::of_items(fresh_members.iter().map(|id| item_by_id(engine, *id)));
+        engine
+            .publish_artifacts("t".into(), 0, vec![fresh])
+            .unwrap();
+        tick(engine);
+    }
+    fold(&one_engine);
+    let expected = served_layer(&one_engine);
+    assert!(
+        expected[0]
+            .iter()
+            .any(|a| a.0.as_deref() == Some("c-new") && a.1 == 2),
+        "the new artifact counts its members in both shards: {expected:?}"
+    );
+    let composed = engine.columns_composed();
+    compact(&engine, Some(ShardId::ZERO));
+    assert_eq!(served_layer(&engine), expected, "after shard 0's compaction");
+    assert_eq!(
+        engine.columns_composed(),
+        composed,
+        "no column was composed at the compaction or the reads after it"
+    );
+
+    drop(engine);
+    let engine = several.open_writing();
+    assert_eq!(served_layer(&engine), expected, "across a restart");
+    assert_eq!(engine.columns_composed(), 0, "the restart composed no column");
+    assert_eq!(
+        engine.columns_adopted(),
+        2,
+        "the restart adopted each shard's column"
     );
 }
 

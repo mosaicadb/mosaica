@@ -319,8 +319,7 @@ fn standing<'s>(
 ) -> Option<(&'s str, u64, bool)> {
     let layer = store.layer_in(extent.space)?;
     let now = store.slice(shard)?.level_version(layer, extent.level);
-    let standing = now == extent.slice_version
-        && store.records_version(layer, extent.level) == extent.level_version;
+    let standing = extent.stands(store.records_version(layer, extent.level), now, false);
     Some((layer, now, standing))
 }
 
@@ -399,10 +398,11 @@ impl ArtifactProjections {
         prefix: &str,
         extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
         store: &ArtifactStore,
+        enumerated: &std::collections::BTreeSet<String>,
     ) {
         self.adopt_all(prefix_dir, prefix, extents, store);
         self.adopt_indexes(prefix_dir, prefix, extents, store);
-        self.adopt_columns(prefix_dir, prefix, extents, store);
+        self.adopt_columns(prefix_dir, prefix, extents, store, enumerated);
         self.adopt_labels(prefix_dir, prefix, extents, store);
     }
 
@@ -656,11 +656,12 @@ impl ArtifactProjections {
         }
     }
 
-    /// Take the fold-written row-major columns this prefix's manifests name, for every
-    /// `(view, layer, level)` at or past the version the column was written at. Unlike an index,
-    /// a column the level has moved past is kept, keyed at the version it describes: a membership
-    /// only grows between folds, so its labels are a subset of the level's, and the build that
-    /// claims it completes it rather than projecting the level whole ([`Self::claim_column`]).
+    /// Take the fold-written row-major columns this prefix's manifests name that still stand
+    /// ([`DerivedExtent::stands`], with the layers in `enumerated`). Unlike an index, a column the
+    /// level has moved past is kept, keyed at the version it describes, and the build that claims
+    /// it completes it rather than projecting the level whole ([`Self::claim_column`]).
+    ///
+    /// [`DerivedExtent::stands`]: mosaica_store::manifest::DerivedExtent::stands
     ///
     /// The manifest's layout tag is checked against the file's own magic rather than trusted over
     /// it: a mis-described file refuses at the first bytes, landing here as a drop and a
@@ -672,6 +673,7 @@ impl ArtifactProjections {
         prefix: &str,
         extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
         store: &ArtifactStore,
+        enumerated: &std::collections::BTreeSet<String>,
     ) {
         self.columns_held
             .lock()
@@ -687,17 +689,16 @@ impl ArtifactProjections {
             let Some((layer, level_version, _)) = standing(store, *shard, extent) else {
                 continue;
             };
-            if level_version < extent.slice_version
-                || store.records_version(layer, extent.level) < extent.level_version
-            {
+            let records = store.records_version(layer, extent.level);
+            if !extent.stands(records, level_version, enumerated.contains(layer)) {
                 tracing::warn!(
                     layer = %layer,
                     level = extent.level,
                     view = %view,
-                    written_at = extent.slice_version,
-                    now = level_version,
-                    "a fold-written row-major column describes a later version of its level than \
-                     the store holds; it is not adopted and the level is recomposed on first use"
+                    written_at = ?(extent.level_version, extent.slice_version),
+                    now = ?(records, level_version),
+                    "a fold-written row-major column does not stand at its level's versions; it \
+                     is not adopted and the level is recomposed on first use"
                 );
                 continue;
             }

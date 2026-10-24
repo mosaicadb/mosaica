@@ -1007,12 +1007,14 @@ fn an_entry_held_for_the_published_prefix_survives_a_claim_under_the_outgoing_on
         "v00000",
         &[(ShardId::ZERO, column_entry(10)), (ShardId::ZERO, members_entry(10))],
         &before,
+        &[LAYER.to_string()].into(),
     );
     projections.adopt_columns(
         tmp.path(),
         "v00001",
         &[(ShardId::ZERO, column_entry(11)), (ShardId::ZERO, members_entry(11))],
         &store,
+        &[LAYER.to_string()].into(),
     );
     let _ = form(&projections, &fx, "v00000", "s0", &store, ServingLayout::RowMajorLabel);
     assert_eq!(projections.columns_adopted(), 0);

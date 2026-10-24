@@ -1967,6 +1967,24 @@ pub struct DerivedExtent {
 }
 
 impl DerivedExtent {
+    /// Whether this file still stands for its level, whose records version is `records` and whose
+    /// slice version in the file's shard is `slice`. A row-major column of an enumerated level,
+    /// and the member file beside it, stand behind either version: such a membership only grows
+    /// until its shard's next compaction, and the reader completes the column by what joined
+    /// since. Every other file stands only at both versions exactly. No file stands ahead of
+    /// either.
+    pub fn stands(&self, records: u64, slice: u64, enumerated: bool) -> bool {
+        let completed = enumerated
+            && matches!(
+                self.form,
+                DerivedForm::RowColumn { .. } | DerivedForm::RowMembers
+            );
+        match completed {
+            true => self.level_version <= records && self.slice_version <= slice,
+            false => self.level_version == records && self.slice_version == slice,
+        }
+    }
+
     /// Whether `other` was written for the same level, version, view and incarnation: the
     /// coordinates two files written together share.
     pub fn same_level(&self, other: &DerivedExtent) -> bool {

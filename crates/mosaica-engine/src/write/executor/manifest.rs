@@ -16,16 +16,11 @@ pub(super) struct ArtifactCoordinates {
 }
 
 /// Every level's records version, by space, each shard's slice versions, and the derived files of
-/// `held` still adoptable at them: a file stays while the level's records version and its shard's
-/// slice version are both the ones it was written at. A file whose level has moved is dropped, so
-/// a manifest never names one nothing could adopt, except the row column of a layer in
-/// `enumerated` and the member file beside it: an enumerated membership only grows between folds,
-/// and an open completes a column the level has moved past
-/// ([`crate::artifacts::ArtifactProjections::adopt_columns`]). Nothing completes a level's label
-/// column or its band-order copy, so those are dropped with every other file, and a level holds
-/// a copy only while the copy is current. A spatial layer's column is read only at its level's
-/// version, so it is dropped like any other file. Only the layers in `spaces`, the registered
-/// ones by name, are named, each at its space.
+/// `held` that still stand at them ([`DerivedExtent::stands`], with the layers in `enumerated`),
+/// so a manifest never names a file nothing could adopt. Only the layers in `spaces`, the
+/// registered ones by name, are named, each at its space.
+///
+/// [`DerivedExtent::stands`]: mosaica_store::manifest::DerivedExtent::stands
 pub(super) fn artifact_coordinates(
     store: &ArtifactStore,
     held: &DerivedByShard,
@@ -81,15 +76,7 @@ pub(super) fn artifact_coordinates(
             let Some(slice_now) = slice_at(*shard, layer, entry.level) else {
                 return false;
             };
-            match entry.form {
-                mosaica_store::manifest::DerivedForm::RowColumn { .. }
-                | mosaica_store::manifest::DerivedForm::RowMembers
-                    if enumerated.contains(layer) =>
-                {
-                    entry.level_version <= records_now && entry.slice_version <= slice_now
-                }
-                _ => entry.level_version == records_now && entry.slice_version == slice_now,
-            }
+            entry.stands(records_now, slice_now, enumerated.contains(layer))
         })
         .map(|(shard, entry)| (shard, entry.clone()))
         .collect();
@@ -394,13 +381,7 @@ impl Executor {
         };
         let registered = self.live.registered_layers();
         let spaces = mosaica_types::layer::spaces_by_name(&registered);
-        let enumerated = registered
-            .iter()
-            .filter(|layer| {
-                layer.declaration.membership == mosaica_types::layer::MembershipSource::Enumerated
-            })
-            .map(|layer| layer.declaration.name.clone())
-            .collect();
+        let enumerated = mosaica_types::layer::enumerated_names(&registered);
         let ArtifactCoordinates {
             records: mut level_versions,
             slices: mut slice_versions,

@@ -989,11 +989,18 @@ impl Members {
         }
     }
 
-    /// Whether this membership is read through a mapping rather than held on the heap. Read by
-    /// the build's accounting, by tests and by this type's own `Debug`; no answer a principal
-    /// gets depends on it.
+    /// Whether this membership is read through a mapping rather than held on the heap.
     pub fn is_mapped(&self) -> bool {
         matches!(self.0, MembersInner::Mapped { .. })
+    }
+
+    /// How many members the mapped bytes hold, without what [`Self::joined`] holds: the size of
+    /// the membership its pack was written with. `None` for a membership on the heap.
+    pub fn mapped_cardinality(&self) -> Option<u64> {
+        match &self.0 {
+            MembersInner::Mapped { .. } => Some(self.base().cardinality()),
+            MembersInner::Owned(_) => None,
+        }
     }
 
     /// The members joined since the mapped bytes were written, disjoint from them. `None` where

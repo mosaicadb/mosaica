@@ -1470,3 +1470,48 @@ fn a_denied_edge_is_replaced_from_the_reserve_over_one_shard_and_several() {
         "ten rows off an edge spend a reserve of eight"
     );
 }
+
+/// **A growth survives another shard's compaction and a restart**: a growth in shard 1, deletions
+/// in every shard, a compaction of shard 0 alone, a second growth in shard 1, and a restart with
+/// the cache directory kept and without it serve every principal the count, centroid and box of
+/// every artifact one shard holding the same items serves, each the walk of their visible rows.
+#[test]
+fn a_growth_survives_another_shards_compaction_and_a_restart() {
+    let corpus = Corpus::MultiKey;
+    let one_dir = tempfile::TempDir::new().unwrap();
+    let several_dir = tempfile::TempDir::new().unwrap();
+    let (one_root, several_root) = built_as_one_and_three(&one_dir, &several_dir, corpus);
+    let (one, several) = (open_in(&one_dir, &one_root), open_in(&several_dir, &several_root));
+    for engine in [&one, &several] {
+        publish_by_id(engine);
+        fold(engine);
+    }
+    let in_shard_one = ids_in_shard(&several, N, 1);
+    let joining: Vec<u64> = in_shard_one.iter().copied().filter(|s| s % 3 == 0).collect();
+    let again: Vec<u64> = in_shard_one.iter().copied().filter(|s| s % 3 == 1).collect();
+    for engine in [&one, &several] {
+        grow_by_id(engine, LIST, "l3", &joining);
+    }
+    assert_served_as_one(&one, &several, corpus, "grown in shard 1");
+    for engine in [&one, &several] {
+        deny_by_id(engine, (0..N).filter(|s| s % 17 == 2), ChangeOp::Delete);
+    }
+    compact(&several, Some(shard(0)));
+    fold(&one);
+    assert_served_as_one(&one, &several, corpus, "shard 0 compacted");
+    for engine in [&one, &several] {
+        grow_by_id(engine, LIST, "l3", &again);
+    }
+    assert_served_as_one(&one, &several, corpus, "grown in shard 1 again");
+    for engine in [&one, &several] {
+        engine.figures_settled_for_test();
+    }
+    drop((one, several));
+    let (one, several) = (open_in(&one_dir, &one_root), open_in(&several_dir, &several_root));
+    assert_served_as_one(&one, &several, corpus, "after a restart");
+    drop((one, several));
+    std::fs::remove_dir_all(one_dir.path().join("cache")).unwrap();
+    std::fs::remove_dir_all(several_dir.path().join("cache")).unwrap();
+    let (one, several) = (open_in(&one_dir, &one_root), open_in(&several_dir, &several_root));
+    assert_served_as_one(&one, &several, corpus, "after a restart without the cache");
+}

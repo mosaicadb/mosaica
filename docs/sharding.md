@@ -744,11 +744,14 @@ moves only those shards' slice versions. A shard's derived files and figures for
 stamped with both, so a write to one shard's slice leaves every other shard's files and figures
 standing.
 
-A row-major column written before its shard's slice last moved is completed, when it is read, by
-the members that joined after the shard's member pack was written. A compaction of any shard
-writes every shard's member packs from the slices as they stand, so another shard's column and its
-member file are carried into the new prefix only where they are at that shard's slice version now;
-an older pair leaves the manifest, and that shard composes the level again on first use.
+A shard's row-major column and its member file stay through every other shard's compaction while
+they are behind the level's versions and never ahead of them, in memory and in the manifest alike.
+A membership only grows between its own shard's compactions, so such a column labels a subset of
+the members, and the reader completes it. An artifact with as many members as the column labels
+lacks nothing. One whose member pack holds exactly as many lacks only what joined since the pack
+was written. Any other is projected whole: it was published after the column, or another shard's
+compaction wrote its pack again, since a compaction of any shard writes every shard's member packs
+from the slices as they stand.
 
 When a content is dropped, at the compaction of the shard holding a member its generating set
 lost or at a page that empties the set, its rank is withdrawn in the record: the rank's values go

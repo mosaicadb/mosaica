@@ -1067,6 +1067,15 @@ pub fn spaces_by_name(
         .collect()
 }
 
+/// The names of `layers` whose membership is enumerated.
+pub fn enumerated_names(layers: &[RegisteredLayer]) -> std::collections::BTreeSet<String> {
+    layers
+        .iter()
+        .filter(|layer| layer.declaration.membership == MembershipSource::Enumerated)
+        .map(|layer| layer.declaration.name.clone())
+        .collect()
+}
+
 impl RegisteredLayer {
     /// The layout recorded for one level. Absent is [`ServingLayout::ArtifactMajor`] — see
     /// [`RegisteredLayer::layouts`].

@@ -169,19 +169,17 @@ impl ArtifactRows {
     }
 
     /// The `(row, ordinal)` pairs over the base rows that the form's column does not carry: what a
-    /// column written at an earlier level version misses. A membership only grows between folds,
-    /// so the column's labels are a subset of the records' and these pairs are the whole
-    /// difference.
+    /// column written at an earlier level version misses. A membership only grows between its
+    /// shard's compactions, so the column's labels are a subset of the records' and these pairs
+    /// are the whole difference.
     ///
-    /// What is projected is what joined, not the artifact. A mapped membership below the column's
-    /// length was mapped from the pack the fold wrote beside the column, so what has joined it
-    /// since ([`Members::joined`]) is all the column lacks for it, and one nothing joined is passed
-    /// over. An artifact published since the column sits at or beyond its length and is projected
-    /// whole. A membership held on the heap below that length carries no record of its joins, and
-    /// is passed over only where it is exactly as large as the column labels it: sound because an
-    /// entity has at most one base row per view and a retired entity has none, so a membership
-    /// that has grown is larger than its labels. This holds one artifact's rows and the pairs
-    /// found, never the level.
+    /// An entity has at most one base row per view and a retired entity has none, so a membership
+    /// exactly as large as the column labels it lacks nothing and is passed over. A membership
+    /// mapped from a pack exactly as large as those labels lacks only what has joined it since
+    /// ([`Members::joined`]), which is projected alone. Every other artifact is projected whole:
+    /// one published since the column, at or beyond its length, and one whose pack another
+    /// shard's compaction wrote again with joins the column does not carry. This holds one
+    /// artifact's rows and the pairs found, never the level.
     ///
     /// [`Members::joined`]: mosaica_lifecycle::membership::Members::joined
     pub(super) fn base_joins<'a>(
@@ -195,17 +193,18 @@ impl ArtifactRows {
         let mut added = Vec::new();
         for (ordinal, record) in artifacts {
             let members = &record.members;
+            let labelled = column.declared_size(ordinal);
             let rows = if ordinal as usize >= column.len() {
                 members.projected(|part| space.project_base(part))
-            } else if members.is_mapped() {
-                match members.joined() {
-                    Some(joined) => space.project_base(joined),
-                    None => continue,
-                }
-            } else if members.cardinality() == column.declared_size(ordinal) {
+            } else if members.cardinality() == labelled {
                 continue;
             } else {
-                members.projected(|part| space.project_base(part))
+                match (members.mapped_cardinality(), members.joined()) {
+                    (Some(packed), Some(joined)) if packed == labelled => {
+                        space.project_base(joined)
+                    }
+                    _ => members.projected(|part| space.project_base(part)),
+                }
             };
             for row in rows.iter() {
                 let mut carried = false;
