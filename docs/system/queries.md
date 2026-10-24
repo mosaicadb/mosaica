@@ -4,16 +4,16 @@ Mosaica answers six kinds of query. This chapter covers each, and the filters th
 
 | Query | Route | Returns |
 |---|---|---|
-| Viewport | `POST /v1/viewport` | counts and a sample of points for each map tile |
-| Annotations by tile | `POST /v1/artifacts/viewport` | the clusters, topics or regions in each tile, with their counts and positions |
-| Category values | `GET /v1/categories/{column}`, and `/suggest` | a category's values, for filter lists and typeahead |
-| Item | `POST /v1/items/{mosaica_id}` | one item's fields and positions |
-| Bulk read | `POST /v1/items`, `POST /v1/artifacts` | every matching item or annotation, in pages of Arrow tables |
-| Aggregate | `POST /v1/aggregate` | breakdowns, histograms, summaries and density grids |
+| [Viewport](#viewport) | `POST /v1/viewport` | counts and a sample of points for each map tile |
+| [Annotations by tile](#annotations-by-tile) | `POST /v1/artifacts/viewport` | the clusters, topics or regions in each tile, with their counts and positions |
+| [Category values](#category-values) | `GET /v1/categories/{column}`, and `/suggest` | a category's values, for filter lists and typeahead |
+| [Item](#item) | `POST /v1/items/{mosaica_id}` | one item's fields and positions |
+| [Bulk read](#bulk-read) | `POST /v1/items`, `POST /v1/artifacts` | every matching item or annotation, in pages of Arrow tables |
+| [Aggregate](#aggregate) | `POST /v1/aggregate` | breakdowns, histograms, summaries and density grids |
 
 Every query is answered from the items the viewer may see. A count never includes an item hidden from the viewer, and a filter can only narrow what they see. [Access control](access-control.md) explains how a viewer's visible items are decided. The Python and TypeScript clients wrap each route, and the [capabilities](../reference/capabilities.md) table names the call on each surface.
 
-## Drawing the map
+## Viewport
 
 A map is drawn tile by tile. A viewport request names a view, a zoom level, and the area on screen, as a bounding box or a list of tiles. For each tile, the answer carries:
 
@@ -101,7 +101,7 @@ A filter narrows what is drawn. A highlight keeps everything that is drawn and m
 
 A highlight never changes which points or annotations are served. Each point carries two flags, `matched` and `highlighted`, and each tile counts how many of its matched items were highlighted.
 
-## Annotations on the map
+## Annotations by tile
 
 The points of a viewport answer carry each point's artifact, but not the artifacts themselves. A client reads those, with their titles, counts, centres and boxes, from `POST /v1/artifacts/viewport`, tile by tile.
 
@@ -112,7 +112,7 @@ The points of a viewport answer carry each point's artifact, but not the artifac
 
 The [annotations](annotations.md) chapter explains which artifacts a viewer is served at all.
 
-## Category values and typeahead
+## Category values
 
 A client building a filter list asks for a category's values. `GET /v1/categories/{column}` lists them, and `/v1/categories/{column}/suggest` answers as a viewer types.
 
@@ -120,7 +120,7 @@ A client building a filter list asks for a category's values. `GET /v1/categorie
 - **Typeahead** matches the typed text against the start of each value's key and title, and the start of each word in either, ignoring case and accents. "neural" finds "Graph Neural Networks". There is no fuzzy matching, and results come in the order of the matched text, not by popularity.
 - **Counts.** A suggestion can carry how many of the viewer's items hold each value, under the filter the viewer has applied. A value the filter excludes is still offered, with a count of zero.
 
-## Opening an item
+## Item
 
 `POST /v1/items/{mosaica_id}` returns one item as the viewer may see it: every field, each view it appears in that the viewer can reach with its position there, and any per-view field values.
 
@@ -128,7 +128,7 @@ An item the viewer may not see answers exactly as one that does not exist, with 
 
 The answer also says why the viewer may see the item: the parts of its access label the viewer satisfies, written as label text, such as `team_a` or `public`. It names nothing the viewer does not hold.
 
-## Reading in bulk
+## Bulk read
 
 `POST /v1/items` returns every item in a view that the viewer may see and the filter matches, with the fields you name. `POST /v1/artifacts` does the same for the artifacts of one layer, or for a list of `mosaica_id`s. Use them for exports, tables and analysis.
 
@@ -146,7 +146,7 @@ The answer also says why the viewer may see the item: the parts of its access la
 
 A cursor is sealed, so it cannot be read or forged. It works only for the read it came from, and only for a session with the same access. It stays valid across restarts and background maintenance.
 
-## Counts and breakdowns
+## Aggregate
 
 `POST /v1/aggregate` answers how the items a viewer may see are spread out. A request names a set of items, as a filter, and one or more groupings. It gets back one table of exact counts for each.
 
