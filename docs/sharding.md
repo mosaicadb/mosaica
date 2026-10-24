@@ -19,7 +19,7 @@ their layer's own space (§2.2).
 A deleted item's number, the entity id it was first given and from which its `mosaica_id` is
 derived, is never issued again. Every insert therefore spends an id for good. Under a steady rate
 of deletions and inserts the space fills while the live corpus stays the same size. Only the ids
-that edits leave behind are freed ([write path](system/write-path.md#freed-entity-ids)).
+that edits leave behind are freed, at compaction.
 
 The GBIF bundle holds 3,495,729,729 items, and its high water is the same figure
 (`probes/2026-10-05-serving-layers-bench/`). About 0.8 × 10⁹ ids are left for every insert it will
@@ -96,7 +96,7 @@ past it, so the index answers every number a replayed record names as it stood w
 written.
 
 The tenancy has its own name because "generation" already means a published version of serving
-state ([write path](system/write-path.md#generations)), and "occupancy" the tiles a viewer's items
+state, and "occupancy" the tiles a viewer's items
 occupy, which θ is anchored on.
 
 ### 1.3 What frees a number
@@ -143,8 +143,7 @@ Modelled: an id whose holder turns over every 100 days, 1% daily churn, reaches 
 Ids issued from the pool land among other signatures' runs in the term index rather than in a run of
 their own, as edit-freed ids do today. Measured for edits on GeoNames (13.5 million items, rounds of
 6,748 moved items): the compacted base term index was 82,866 bytes after the two rounds on new ids
-and 82,674 to 82,930 bytes after the rounds on freed ones ([write
-path](system/write-path.md#freed-entity-ids)). The cost of deletions and inserts at a higher churn
+and 82,674 to 82,930 bytes after the rounds on freed ones. The cost of deletions and inserts at a higher churn
 was measured at the first stage's gate (§8.4) on GeoNames at one shard, deleting and inserting half
 the corpus ten times. The high water stopped rising after the second round. The term index's
 postings grew from 9 KB as built to 7 to 13 MB, and a grant's union from 3 to 13 ms to 10 to 22 ms.
@@ -987,7 +986,7 @@ settled the order pool ids are issued in (§4.1) until larger corpora are measur
 |---|---|---|
 | GBIF: 3,495,729,729 items at a high water of 3,495,729,729 | measured | `probes/2026-10-05-serving-layers-bench/` |
 | one level's figures fill on GBIF, 0.24 s to 12.5 s by coverage and level | measured | [serving](system/serving.md#a-levels-figures), `probes/2026-10-06-first-open-fills/` |
-| edit-freed ids stop the high water rising after two rounds on GeoNames | measured | [write path](system/write-path.md#freed-entity-ids) |
+| edit-freed ids stop the high water rising after two rounds on GeoNames | measured | `probes/2026-10-10-churn-reuse/` |
 | counting a 256-tile request at depth 12, 50% coverage: 0.49 ms at N = 1, 4.5 ms at N = 8 | measured, synthetic, one thread, before term images | `probes/2026-09-04-epoch-shard-treemap-mask/` |
 | counting a 3,000-tile contiguous request at depth 10, 10% coverage: 8.0 ms today and 0.38 ms with `count_ranges` at N = 1; 875 ms and 8.5 ms at N = 100 | measured, synthetic, one thread, 4 cores | `probes/2026-10-09-shard-read-costs/` |
 | counting and selecting together at N = 8: 0.7 to 1.6 times today's single shard at 10% coverage and above; 1.9 to 8.1 times at 0.1% and 1%, depth 8 and deeper | measured, synthetic, one thread, 4 cores | `probes/2026-10-09-shard-read-costs/` |
