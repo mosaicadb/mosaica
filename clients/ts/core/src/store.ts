@@ -27,6 +27,8 @@ import {SelectedRegion, type RegionProjection, type SelectionShape} from './sele
 import {Suggestions, type SuggestState} from './suggestions.js';
 import {TokenSupply, type TokenSupplier} from './token.js';
 import type {
+  AggregateResult,
+  AggregateTable,
   Artifact,
   ArtifactDetail,
   BrowsePage,
@@ -866,6 +868,16 @@ export const DEFAULT_BUDGET = 250_000;
 const PROBE_FIRST_MS = 1_000;
 const PROBE_MAX_MS = 30_000;
 
+/** The keys of `table`'s listed groups, in its order. */
+function listedKeys(table: AggregateTable | undefined): string[] {
+  const rows = table?.rows;
+  const group = rows?.getChild('group');
+  const key = rows?.getChild('key');
+  const keys: string[] = [];
+  for (let i = 0; rows && group && key && i < rows.numRows; i++) if (group.get(i) === 'listed') keys.push(String(key.get(i)));
+  return keys;
+}
+
 /** The bearer token in a request's headers, or `null`. */
 function bearerOf(headers: HeadersInit | undefined): string | null {
   const value = headers instanceof Headers ? headers.get('authorization') : Array.isArray(headers) ? (headers.find(([k]) => k.toLowerCase() === 'authorization')?.[1] ?? null) : (headers?.['authorization'] ?? null);
@@ -1055,16 +1067,7 @@ export function createStore(options: StoreOptions): Store {
   const legend = new Legend(
     async (column, codes) => client.categories(await tokens.get(), column, {codes, view: views.id}),
     (value) => replaceProjection('legend', value),
-    async (column) => {
-      const asked = await viewed();
-      const {tables} = await client.aggregate(asked.token, {view: asked.view, groupings: [{by: {field: column, top: RANKED_VALUES}}]});
-      const rows = tables[0]?.rows;
-      const group = rows?.getChild('group');
-      const key = rows?.getChild('key');
-      const keys: string[] = [];
-      for (let i = 0; rows && group && key && i < rows.numRows; i++) if (group.get(i) === 'listed') keys.push(String(key.get(i)));
-      return keys;
-    }
+    (column) => rankingOf(column)
   );
 
   const suggestions = new Suggestions(
@@ -1107,20 +1110,48 @@ export function createStore(options: StoreOptions): Store {
     () => meta?.selection.maxAggregateGroupings ?? 1
   );
 
-  const aggregates = new Aggregates(
+  /** One registered aggregate's request, in the current view under the current token. */
+  async function askRegistered(_spec: AggregateSpec, body: AggregateBody, signal: AbortSignal): Promise<{result: AggregateResult; view: string}> {
+    const asked = await viewed();
+    const result = await aggregate(asked.token, {view: asked.view, ...body}, signal);
+    // A response cancelled before its first page carries no key.
+    if (result.identityKey !== '' && !admit(asked.view, result.identityKey, asked.token)) throw identityChanged();
+    return {result, view: asked.view};
+  }
+
+  const aggregates = new Aggregates(ready, askRegistered, (entries) => replaceProjection('aggregates', entries), clock, {...RETRY_DEFAULTS, ...options.driver}, aggregateBody);
+
+  /**
+   * The legend's asks for a colour column's commonest values over everything this viewer may see,
+   * by column, sent and retried as registered aggregates are, and settled as each answer lands or
+   * its refusal stands.
+   */
+  const rankingAsks = new Map<string, {resolve: (keys: string[]) => void; reject: (refusal: Refusal | null) => void}>();
+  const ranking = new Aggregates(
     ready,
-    async (_spec, body, signal) => {
-      const asked = await viewed();
-      const result = await aggregate(asked.token, {view: asked.view, ...body}, signal);
-      // A response cancelled before its first page carries no key.
-      if (result.identityKey !== '' && !admit(asked.view, result.identityKey, asked.token)) throw identityChanged();
-      return {result, view: asked.view};
+    askRegistered,
+    (entries) => {
+      for (const [column, entry] of entries) {
+        const ask = rankingAsks.get(column);
+        if (!ask || (entry.status !== 'shown' && entry.status !== 'refused')) continue;
+        rankingAsks.delete(column);
+        if (entry.status === 'shown' && entry.result) ask.resolve(listedKeys(entry.result.tables[0]));
+        else ask.reject(entry.refusal);
+        queueMicrotask(() => ranking.set(column, null));
+      }
     },
-    (entries) => replaceProjection('aggregates', entries),
     clock,
     {...RETRY_DEFAULTS, ...options.driver},
     aggregateBody
   );
+
+  function rankingOf(column: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      rankingAsks.set(column, {resolve, reject});
+      const top = Math.min(RANKED_VALUES, meta?.selection.maxAggregateTop ?? RANKED_VALUES);
+      ranking.set(column, {groupings: [{by: {field: column, top}}], subject: 'visible'});
+    });
+  }
 
   /**
    * The counts in view: `counts` is the set under the filters against the area as its reference,
@@ -2409,6 +2440,8 @@ export function createStore(options: StoreOptions): Store {
       ...(filtersSet ? {} : {draft: emptyDraft([]), expr: null, highlight: null})
     });
     legend.clear();
+    for (const column of rankingAsks.keys()) ranking.set(column, null);
+    rankingAsks.clear();
     meta = null;
     warming = null;
     replaceProjection('meta', null);
@@ -2445,6 +2478,7 @@ export function createStore(options: StoreOptions): Store {
     records.dispose();
     legend.dispose();
     aggregates.dispose();
+    ranking.dispose();
     inView.dispose();
     if (inViewTimer !== null) clock.cancel(inViewTimer);
     if (probe !== null) clock.cancel(probe);

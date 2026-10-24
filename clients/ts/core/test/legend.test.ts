@@ -75,13 +75,13 @@ describe('the category ranks', () => {
     expect(ranks[1]).toEqual(ranks[0]);
   });
 
-  it('follow the marks drawn where the count is refused', async () => {
+  it('follow the marks drawn where the count is refused, from the moment it is', async () => {
     const {legend, get} = legendWith(async () => {
       throw new MosaicaError(422, 'unindexed', 'not counted');
     });
     legend.accumulate(archiveFrame([4, 4, 1]), [ARCHIVE]);
     await settle();
-    legend.accumulate(archiveFrame([4, 4, 1]), [ARCHIVE]);
+    // No further frame is needed for the map to be coloured.
     expect(get().ranks['archive']).toEqual({4: 0, 1: 1});
   });
 });

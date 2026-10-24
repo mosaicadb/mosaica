@@ -65,6 +65,8 @@ export class Legend {
   private epoch = 0;
   /** Per category column, its values' order by count as {@link order} answered, by key, or whether it is still asked or was refused. */
   private orders = new Map<string, Map<string, number> | 'asked' | 'refused'>();
+  /** Per category column whose order is asked for, the codes the marks brought meanwhile, with their counts. */
+  private waiting = new Map<string, Map<number, number>>();
   /** Per category column, the codes whose names were asked for, so none is asked twice. */
   private naming = new Map<string, Set<number>>();
   private disposed = false;
@@ -126,13 +128,23 @@ export class Legend {
     if (counts.size === 0) return;
     const order = this.orderOf(colourBy);
     if (order !== 'refused' && !this.state.categoryErrors[colourBy]) {
+      if (order === 'asked') {
+        const met = this.waiting.get(colourBy) ?? new Map<number, number>();
+        for (const [code, n] of counts) met.set(code, (met.get(code) ?? 0) + n);
+        this.waiting.set(colourBy, met);
+      }
       void this.name(colourBy, counts);
       return;
     }
-    const ranks = extendRanks(this.state.ranks[colourBy] ?? {}, counts);
-    if (ranks !== this.state.ranks[colourBy]) {
-      this.set({...this.state, ranks: {...this.state.ranks, [colourBy]: ranks}});
-      void this.name(colourBy, counts);
+    this.rankAsMet(colourBy, counts);
+  }
+
+  /** Rank the codes in `counts` that have no rank by how often the marks brought them, and ask for their names. */
+  private rankAsMet(column: string, counts: Map<number, number>): void {
+    const ranks = extendRanks(this.state.ranks[column] ?? {}, counts);
+    if (ranks !== this.state.ranks[column]) {
+      this.set({...this.state, ranks: {...this.state.ranks, [column]: ranks}});
+      void this.name(column, counts);
     }
   }
 
@@ -149,12 +161,17 @@ export class Legend {
     this.order(column).then(
       (keys) => {
         if (this.disposed || epoch !== this.epoch) return;
+        this.waiting.delete(column);
         this.orders.set(column, new Map(keys.map((key, i) => [key, i])));
         this.rankByOrder(column);
       },
       () => {
-        // The next frame ranks the codes as the marks bring them.
-        if (!this.disposed && epoch === this.epoch) this.orders.set(column, 'refused');
+        if (this.disposed || epoch !== this.epoch) return;
+        // The codes the marks brought while the order was asked for are ranked at once.
+        this.orders.set(column, 'refused');
+        const met = this.waiting.get(column);
+        this.waiting.delete(column);
+        if (met) this.rankAsMet(column, met);
       }
     );
     return 'asked';
@@ -222,6 +239,7 @@ export class Legend {
   clear(): void {
     this.epoch += 1;
     this.orders.clear();
+    this.waiting.clear();
     this.naming.clear();
     this.reservoir = this.state.sizeBy !== null && this.rank ? new ValueReservoir() : null;
     this.scanned = new WeakSet();
