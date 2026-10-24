@@ -615,6 +615,15 @@ pub async fn open(dir: impl AsRef<Path>) -> TestServer {
 
 /// [`open`] under `config`. The catalogue is kept in `dir/catalogue`, so it survives a restart.
 pub async fn open_with(dir: impl AsRef<Path>, config: EngineConfig) -> TestServer {
+    open_tuned(dir, config, |_| {}).await
+}
+
+/// [`open_with`], with `tune` applied last over the `[serve]` limits.
+pub async fn open_tuned(
+    dir: impl AsRef<Path>,
+    config: EngineConfig,
+    tune: impl FnOnce(&mut ServeLimits),
+) -> TestServer {
     let dir = dir.as_ref();
     let max_k = config.max_k;
     let mut engine = Engine::open(
@@ -639,7 +648,7 @@ pub async fn open_with(dir: impl AsRef<Path>, config: EngineConfig) -> TestServe
         DEFAULT_VISIBLE_WAIT_MAX_SECS,
         generous_bulk_gate(),
         Some(&dir.join("catalogue")),
-        |_| {},
+        tune,
     )
     .await
 }
