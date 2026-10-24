@@ -159,12 +159,12 @@ impl Edges {
 }
 
 impl Numbers {
-    /// The number or timestamp field `column` names, where its values can be read. `summary` says
-    /// whether field figures ask for it rather than bins, for the refusal.
-    pub(super) fn of(generation: &Generation, column: &str, summary: bool) -> Result<Numbers> {
+    /// The number or timestamp field `column` names, where its values can be read. `for_figures`
+    /// says whether field figures ask for it rather than bins, for the refusal.
+    pub(super) fn of(generation: &Generation, column: &str, for_figures: bool) -> Result<Numbers> {
         let manifest = &generation.bundle.manifest;
         let refused = |why: AggregateRefused| EngineError::AggregateRefused(why);
-        let unfit = || match summary {
+        let unfit = || match for_figures {
             true => refused(AggregateRefused::NotSummarisable(column.to_string())),
             false => refused(AggregateRefused::NotBinnable(column.to_string())),
         };
@@ -181,7 +181,7 @@ impl Numbers {
                 (family.arrow_type, family.vocabulary.is_some())
             }
         };
-        if ty == ScalarType::Bool && !summary {
+        if ty == ScalarType::Bool && !for_figures {
             return Err(refused(AggregateRefused::BinsOnBool(column.to_string())));
         }
         let kind = Kind::of(ty).filter(|_| !vocabulary).ok_or_else(unfit)?;

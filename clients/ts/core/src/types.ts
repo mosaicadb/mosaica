@@ -1708,9 +1708,10 @@ export type AggregateRequest = {
  * value), `min_<field>` and `max_<field>` (the smallest and largest finite value, typed as a
  * histogram's edges) and `mean_<field>` (a timestamp on a timestamp field, rounded to the nearest
  * microsecond, and a number on any other); the last three are null where `values_<field>` is 0.
- * `summary` names all five over each field it lists, and a figure named twice for one field is one
- * column. The field columns follow `count`, in the order values, missing, min, max, mean, each
- * over its fields in the order first named. Every figure is exact, the mean rounded once from the
+ * `summary` names all five over each field it lists. The field columns follow `count`, in the
+ * order values, missing, min, max, mean; each figure's columns run over the fields of its own list
+ * in order, then over those of `summary` not already listed, a field named twice giving one
+ * column. Every figure is exact, the mean rounded once from the
  * exact sum, a tie to even.
  *
  * The field figures are taken over every item this principal may see in the view, and only over

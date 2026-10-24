@@ -1,6 +1,6 @@
 //! `POST /v1/aggregate`: how the items a viewer may see in one view are distributed, as one table
-//! per grouping of the figures it names, framed as `/v1/items` frames its pages with a table head before
-//! each table's first page in a response.
+//! per grouping of the figures it names, framed as `/v1/items` frames its pages with a table head
+//! before each table's first page in a response.
 //!
 //! It is sent beside viewport requests, so it runs under the viewport's admission. Its response is
 //! held to its own byte budget, `serve.aggregate_response_bytes`, in pages of
@@ -23,6 +23,7 @@ use mosaica_engine::{
 use mosaica_engine::filter::Family;
 use mosaica_wire::table_head_frame;
 
+use crate::control::present;
 use crate::error::ApiError;
 use crate::records::{bulk_read, limits, view_and_filter, CompressionReq, FrameSink, Lane, Opening, Read};
 use crate::state::{ApiJson, AppState, ViewerSession};
@@ -58,19 +59,19 @@ struct GroupingReq {
     #[serde(default)]
     cells: Option<CellsReq>,
     /// Only `true`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     count: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     values: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     missing: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     min: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     max: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     mean: Option<Vec<String>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     summary: Option<Vec<String>>,
 }
 
@@ -102,7 +103,7 @@ struct ByReq {
     level: Option<u32>,
     #[serde(default)]
     top: Option<u32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     values: Option<Vec<String>>,
     #[serde(default)]
     bins: Option<u32>,

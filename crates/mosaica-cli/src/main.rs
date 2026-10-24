@@ -320,9 +320,9 @@ enum Command {
     /// ["year"]}` is one row of a number or timestamp field's `values_year`, `missing_year`,
     /// `min_year`, `max_year` and `mean_year` over every item the token may see in the view, and
     /// `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each; they take
-    /// no `by`, `cells`, `--filters` or `--reference`. The read is carried across responses, and written, as `mosaica items` carries and
-    /// writes one. The table's head, with the set's total, is printed on
-    /// stderr at the end.
+    /// no `by`, `cells`, `--filters` or `--reference`. The read is carried across responses, and
+    /// written, as `mosaica items` carries and writes one. The table's head, with the set's
+    /// total, is printed on stderr at the end.
     ///
     /// For example, `mosaica aggregate --server http://127.0.0.1:8080 --view papers --grouping
     /// '{"count": true, "by": {"field": "submitted_at", "bins": 12}}' --format ipc >

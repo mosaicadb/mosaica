@@ -1952,8 +1952,9 @@ struct IncomingArtifactBody {
     access: Option<Option<Vec<String>>>,
 }
 
-/// A field whose absence differs from `null`: absent is `None`, and `null` is `Some(None)`.
-fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+/// A field whose absence differs from `null`: absent is `None`; `null` is `Some(None)` where `T` is
+/// an `Option`, and is refused where it is not.
+pub(crate) fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: serde::Deserialize<'de>,

@@ -108,9 +108,10 @@ pub struct FigureField {
     pub name: String,
 }
 
-/// A field figure, over the whole visible set. A table's field columns come in this order, each
-/// over its fields in the order first named.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// A field figure, over the whole visible set. A table's field columns come in this order; each
+/// figure's run over the fields of its own list in order, then over those of `summary` not
+/// already listed, a field named twice giving one column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Figure {
     /// `values_<field>`: the items holding a finite value.
     Values,

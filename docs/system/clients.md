@@ -371,8 +371,8 @@ histogram asked for with a `sample` carries, in its table's `sample`, whether it
 scaled and how many items were counted, beside the table's `total`, the size of the set. An entry's
 `summaries` holds, for each grouping that lists fields under `summary`, each field's figures read
 from the table, by the field as written: `values` and `missing` as `bigint`s, and `min`, `max` and
-`mean`; for every other grouping it holds `null`. A histogram's default edges are the server's, exact and independent of the filters
-and the region, so a registration over the view and one over everything matched get the same
+`mean`; for every other grouping it holds `null`. A histogram's default edges are the server's,
+exact and independent of the filters and the region, so a registration over the view and one over everything matched get the same
 edges without sending a range.
 
 A field card registers its counts in view, its counts over everything matched, each leaving out its

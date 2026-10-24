@@ -1245,23 +1245,22 @@ class Viewer:
 
         A table's columns are, where they apply: `group` (`listed`, `rest` or `none`), `key` (a
         category's key or an artifact's `mosaica_id`), `title` (a category's title, or an artifact's
-        name as `browse_artifacts` gives it), `slot` (with a layer, an artifact's palette slot
-        under its `palette_size`, null without one and on the `rest` and `none` rows), `lower`
-        and `upper` (a bin's edges:
-        an integer on an integer field, exactly, a float on a float field or on an integer field
-        whose range has a fractional bound and a UTC timestamp on a timestamp field; a bin holds
-        `lower` up to but not including `upper`, and the last bin also holds its `upper`), `cell`
-        (the cell's Morton prefix), `count`, `reference_count` and `lift`, then the field
-        figures in the order values, missing, min, max, mean, each over its fields in the order
-        first named; `min_<field>` and `max_<field>` are typed as a histogram's edges on the
-        field. Its schema metadata
-        `mosaica.head` is the table's figures as JSON: `grouping`, `total` (the items in the set),
-        `reference_total` with a reference, `groups` (the groups in the set before the cut to
-        `top` or the names given) with `"by"`, and with a `"sample"` the object `sample`:
-        `sampled` (whether any count is scaled), `items` (the set's items counted) and, with a
-        reference, `reference_items`. `mosaica.recomposed` is `"true"` where a page counted a different state of the database
-        from the page before it, and `mosaica.region` is the server's region verdict where a
-        filter had a `region` leaf.
+        name as `browse_artifacts` gives it), `slot` (with a layer, an artifact's palette slot under
+        its `palette_size`, null without one and on the `rest` and `none` rows), `lower` and `upper`
+        (a bin's edges: an integer on an integer field, exactly, a float on a float field or on an
+        integer field whose range has a fractional bound and a UTC timestamp on a timestamp field; a
+        bin holds `lower` up to but not including `upper`, and the last bin also holds its `upper`),
+        `cell` (the cell's Morton prefix), `count`, `reference_count` and `lift`, then the field
+        figures in the order values, missing, min, max, mean. Each figure's columns run over the
+        fields of its own list in order, then over those of `"summary"` not already listed, a field
+        named twice giving one column; `min_<field>` and `max_<field>` are typed as a histogram's
+        edges on the field. Its schema metadata `mosaica.head` is the table's figures as JSON:
+        `grouping`, `total` (the items in the set), `reference_total` with a reference, `groups`
+        (the groups in the set before the cut to `top` or the names given) with `"by"`, and with a
+        `"sample"` the object `sample`: `sampled` (whether any count is scaled), `items` (the set's
+        items counted) and, with a reference, `reference_items`. `mosaica.recomposed` is `"true"`
+        where a page counted a different state of the database from the page before it, and
+        `mosaica.region` is the server's region verdict where a filter had a `region` leaf.
 
         The server answers a page at a time, and each response ends with a cursor for the next.
         This requests responses until none is left and joins each table's pages. A refusal of the

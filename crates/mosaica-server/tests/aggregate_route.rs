@@ -806,6 +806,34 @@ async fn a_table_read_through_its_cursor_is_the_whole_table() {
     );
 }
 
+/// **A cursor binds the figures**: one sent back with `count` added to a grouping, or a figure
+/// changed, is refused, and the request it was issued for reads on.
+#[tokio::test]
+async fn a_cursor_opens_only_for_the_figures_it_was_issued_for() {
+    let f = fixture().await;
+    let token = token_for(&f.server, &["1"]).await;
+    let body = |figures: Value| {
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 10 } }, figures],
+                "page_rows": 5, "pages": 1 })
+    };
+    let asked = body(json!({ "summary": ["score"] }));
+    let (_, first) = aggregate_ok(&f.server, &token, &asked).await;
+    let cursor = first.trailer["next"].as_str().expect("the read spans responses").to_string();
+    for changed in [
+        body(json!({ "count": true, "summary": ["score"] })),
+        body(json!({ "max": ["score"] })),
+        body(json!({ "summary": ["stamp"] })),
+    ] {
+        let mut changed = changed;
+        changed["cursor"] = json!(cursor);
+        let resp = post(&f.server, "/v1/aggregate", &token, &changed).await;
+        assert_eq!(refused(resp, 422).await, "contract", "{changed}");
+    }
+    let mut same = asked.clone();
+    same["cursor"] = json!(cursor);
+    aggregate_ok(&f.server, &token, &same).await;
+}
+
 /// **A suppression applies from the next response**: the set shrinks by the item, as does its
 /// value's row.
 #[tokio::test]
@@ -922,6 +950,9 @@ async fn every_refusal_has_its_status() {
         (json!({ "view": "s0", "groupings": [{ "by": { "field": "archive", "top": 2 } }] }), None),
         (json!({ "view": "s0", "groupings": [{ "cells": { "depth": 2 } }] }), None),
         (json!({ "view": "s0", "groupings": [{ "count": false }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": null }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "min": null }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "summary": null }] }), None),
         (json!({ "view": "s0", "groupings": [{ "count": false, "min": ["score"] }] }), None),
         (json!({ "view": "s0", "groupings": [{ "count": true, "min": [] }] }), None),
         (json!({ "view": "s0", "groupings": [{ "summary": [] }] }), None),
