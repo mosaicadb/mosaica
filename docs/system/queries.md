@@ -1,43 +1,43 @@
 # Queries
 
-Mosaica answers six kinds of query. This chapter covers each, and the filters they all share. The examples use the research papers of the [data model](data-model.md): a collection laid out by abstract, with a layer of topics over it.
+Mosaica answers six kinds of query. This chapter covers each, and the filters most of them take. The examples use the research papers of the [data model](data-model.md): a collection laid out by abstract, with a layer of topics over it.
 
 | Query | Route | Returns |
 |---|---|---|
 | [Viewport](#viewport) | `POST /v1/viewport` | counts and a sample of points for each map tile |
 | [Annotations by tile](#annotations-by-tile) | `POST /v1/artifacts/viewport` | the clusters, topics or regions in each tile, with their counts and positions |
-| [Category values](#category-values) | `GET /v1/categories/{column}`, and `/suggest` | a category's values, for filter lists and typeahead |
+| [Category values](#category-values) | `GET /v1/categories/{column}`, and `GET` or `POST /v1/categories/{column}/suggest` | a category's values, for filter lists and typeahead |
 | [Item](#item) | `POST /v1/items/{mosaica_id}` | one item's fields and positions |
 | [Bulk read](#bulk-read) | `POST /v1/items`, `POST /v1/artifacts` | every matching item or annotation, in pages of Arrow tables |
 | [Aggregate](#aggregate) | `POST /v1/aggregate` | breakdowns, histograms, summaries and density grids |
 
-Every query is answered from the items the viewer may see. A count never includes an item hidden from the viewer, and a filter can only narrow what they see. [Access control](access-control.md) explains how a viewer's visible items are decided. The Python and TypeScript clients wrap each route, and the [capabilities](../reference/capabilities.md) table names the call on each surface.
+Every query is answered from the items the viewer may see. A count never includes an item hidden from the viewer, and a filter can only narrow what they see. [Access control](access-control.md) explains how a viewer's visible items are decided. The Python and TypeScript clients wrap each route, and the [capabilities](../reference/capabilities.md) table names the call on each surface. The [HTTP API reference](../reference/http.md) has worked examples of every request.
 
 ## Viewport
 
 A map is drawn tile by tile. A viewport request names a view, a zoom level, and the area on screen, as a bounding box or a list of tiles. For each tile, the answer carries:
 
-- **Three counts**: `visible`, the items in the tile the viewer may see; `matched`, those that pass the filter; and `highlighted`, those that also pass the [highlight](#highlighting).
-- **A sample of points to draw**, each with its `mosaica_id`, its position and its rendered fields.
+- **Counts**: `visible`, the items in the tile the viewer may see; `matched`, those that pass the filter; `highlighted`, those that also pass the [highlight](#highlighting); and `served`, how many points the tile drew.
+- **A sample of the matching points**, each with its `mosaica_id`, its position and its rendered fields. A category arrives as a numeric code, which [category values](#category-values) turns back into keys and titles.
 - **Each point's annotation**, for each layer the request names: the artifact it belongs to, so the client can colour points by topic.
-- **Optionally, counts for finer cells** beneath the tile, which a client can draw as shading to show density where the points are too many to draw.
+- **Optionally, counts for finer cells** beneath the tile (`underlay_offset`): how many items the viewer may see in each, before any filter. A client can draw them as shading to show density where the points are too many to draw.
 
-Answers stream back as Apache Arrow frames, a tile at a time, so a client can start drawing before the whole answer has arrived. A request with `k` set to 0 asks for the counts alone, with no points.
+Answers stream back as Apache Arrow frames: first every tile's counts, then the points in frames of whole tiles, so a client can start drawing before the whole answer has arrived. A request with `k` set to 0 asks for the counts alone, with no points.
 
 ### Which points are drawn
 
 A tile at a wide zoom may hold millions of items, far more than a screen can show. Mosaica draws a sample, chosen by three rules:
 
-- **A floor.** Every tile that holds an item the viewer may see shows at least a few. A viewer who may see very few items never gets a blank map.
-- **A threshold.** Dense tiles show more points than sparse ones, in proportion to how many items the viewer may see across the whole view.
-- **A cap.** No tile returns more than a set number of points, `k`, which bounds cost and clutter.
+- **A floor.** Every tile that holds an item the viewer may see shows at least `k_min` of them, two by default. A viewer who may see very few items never gets a blank map.
+- **A threshold.** Each tile draws the same share of its items, so a tile with twice the items draws about twice the points. The share is set from everything the viewer may see in the view, so that an average tile draws `theta_target_marks` points, 16 by default.
+- **A cap.** No tile draws more than `k` points, and `k` itself is capped by the server's `k_max_marks`, 500 by default.
 
 Which items are drawn first is decided by a fixed rank derived from each item's `mosaica_id`, so the sample is spread evenly and is the same each time. The sample also nests across zoom levels. A point drawn at one zoom is still drawn when the viewer zooms in, and more points appear around it, so points do not flicker in and out.
 
-The sample is drawn from the viewer's own visible items, never from everything with the hidden ones removed. The density rules count against everything the viewer may see, not the filtered set, so the number of points in a tile does not jump as a viewer types a filter.
+The sample is taken from the viewer's visible items. Mosaica never samples from every item and then removes the hidden ones. The share of each tile that is drawn is set before any filter is applied. A filter then leaves out the points that do not match, and a matching point that was drawn stays drawn, so the map thins as a viewer types instead of reshuffling.
 
 !!! warning "Keep `k` steady while zooming in"
-    `k` defaults to the server's cap. A client may ask for fewer points per tile, but if it lowers `k` while zooming in, a point it was already showing can disappear.
+    `k` defaults to the server's cap, `k_max_marks`. A client may ask for fewer points per tile, but if it lowers `k` while zooming in, a point it was already showing can disappear.
 
 ## Filters
 
@@ -50,11 +50,15 @@ A filter is a JSON expression over the declared fields. Each kind of field has i
 | Number, true or false, date and time | `eq`, `in`, `range` | `{"year": {"range": {"gte": 2020, "lt": 2024}}}` |
 | Text | `match`, `phrase` | `{"abstract": {"match": "graph neural network"}}` |
 
-A field must be [indexed or rendered](data-model.md#items-and-fields) to be filtered. A category accepts its values' keys, or their codes. A `range` takes `gt` or `gte` for its lower bound and `lt` or `lte` for its upper, and either side can be left open.
+A field must be [indexed or rendered](data-model.md#items-and-fields) to be filtered.
 
-Text search is by word. `match` finds items containing every word given, or at least a number of them with `{"query": ..., "minimum_should_match": n}`, and `phrase` finds the words in order. Words are matched regardless of case.
+- **Categories** take their values' keys, or their codes.
+- **Keywords** are compared exactly, case included.
+- **Ranges** take `gt` or `gte` for the lower bound and `lt` or `lte` for the upper, and either side can be left open.
+- **Dates and times** are given in microseconds since the Unix epoch, such as `1577836800000000` for 1 January 2020. A true-or-false field takes `true` or `false`.
+- **Text** is searched by word, ignoring case. `match` finds items containing every word given, or at least a number of them with `{"query": ..., "minimum_should_match": n}`. `phrase` finds the words next to each other, in that order.
 
-Filters combine with `all_of`, `any_of` and `none_of`:
+Filters combine with `all_of`, `any_of` and `none_of`, nested at most four levels deep:
 
 ```json
 {"all_of": [
@@ -66,14 +70,16 @@ Filters combine with `all_of`, `any_of` and `none_of`:
 
 Two more filters work on the map rather than on a field:
 
-- **`region`** keeps the items inside a shape: a box, a circle, an ellipse or a polygon, in the view's coordinates or, on a geographic view, in longitude and latitude. See [drawn regions](#drawn-regions).
-- **`member_of`** keeps the members of one artifact, such as the papers in one topic.
+- **`region`** keeps the items inside a shape: a box, a circle, an ellipse or a polygon, in the view's coordinates, or with `"space": "wgs84"` in longitude and latitude on a geographic view. It can also name an artifact's published shape, as `{"artifact": <mosaica_id>}`. See [drawn regions](#drawn-regions).
+- **`member_of`** keeps the members of one artifact, such as the papers in one topic: `{"member_of": {"layer": "topics", "artifact": 123}}`.
 
-!!! note "Rules for `none_of`"
-    A `none_of` must name a single field, and the values to exclude. A free-text field cannot be negated. Both rules keep a negation from reaching items whose values the viewer cannot see. `region` and `member_of` can be negated.
+`GET /v1/meta` lists each filterable field and its operators under `filter_operands`. A field that does not exist or cannot be filtered, or an operator the field does not take, is refused with 422.
+
+!!! note "How `none_of` treats missing values"
+    A `none_of` keeps the items that hold a value in its field and match none of the expressions inside it. An item with no value in that field is left out: `{"none_of": [{"archive": {"eq": "cs"}}]}` does not return papers with no archive. Every expression inside one `none_of` must name the same field. A text field cannot be negated, because Mosaica keeps no record of which items have text in it. `region` and `member_of` can be negated, and then mean everything outside the shape, or every item outside the artifact.
 
 !!! note "A hidden value matches nothing"
-    A filter naming a category value the viewer may not see behaves exactly like one naming a value that does not exist: it matches nothing, and the answer gives no hint which was the case. A field or operator that does not exist is refused.
+    A filter naming a category value the viewer may not see behaves exactly like one naming a value that does not exist: it matches nothing, and the answer gives no hint which was the case.
 
 !!! note "Large integers"
     JSON numbers lose precision above 2^53. An integer or timestamp value can be sent as a string of digits, such as `"1152921504606846976"`, which is exact across the whole 64-bit range.
@@ -93,22 +99,22 @@ A viewer can draw a shape on the map and filter to the items inside it. The shap
 The test is exact, against each item's stored position. Mosaica splits the shape against the map's grid. Cells wholly inside the shape are counted whole, without reading their items, and only the cells the edge passes through are tested point by point. A large, simple shape therefore costs little more than a small one, and the cost follows the length of the shape's edge rather than its area.
 
 !!! note "Very long edges"
-    If a shape's edge crosses more cells than the server's `max_region_cells` setting allows, the remaining edge cells are counted as if they were inside. The answer is then exact for a slightly larger shape, and the response's `x-mosaica-region` header says so.
+    If splitting a shape's edge would need more cells than the server's `max_region_cells` allows, Mosaica stops at the finest level that fits and counts every cell the edge crosses there as inside. The answer is then exact for a slightly larger shape, and the `x-mosaica-region` header reads `cover; depth=N` instead of `exact`. A polygon with more than `max_region_vertices` vertices, 10,000 by default, is refused.
 
 ## Highlighting
 
 A filter narrows what is drawn. A highlight keeps everything that is drawn and marks the items that also match a second expression, so a client can light them up and dull the rest. A request can carry both: filter to computer science papers, say, and highlight those from 2024.
 
-A highlight never changes which points or annotations are served. Each point carries two flags, `matched` and `highlighted`, and each tile counts how many of its matched items were highlighted.
+A highlight never changes which points or annotations are served. Each point drawn carries a `highlighted` flag, and each tile counts how many of its matched items are highlighted. In the annotations of each tile, every artifact carries two flags, `matched` and `highlighted`.
 
 ## Annotations by tile
 
-The points of a viewport answer carry each point's artifact, but not the artifacts themselves. A client reads those, with their titles, counts, centres and boxes, from `POST /v1/artifacts/viewport`, tile by tile.
+The points of a viewport answer carry each point's artifact, but not the artifacts themselves. A client reads those, with their keys, content such as names, counts, centres and boxes, from `POST /v1/artifacts/viewport`.
 
-- **How many per tile.** The request sets `per_tile`, the most artifacts of each level a tile returns. The largest come first, by how many of their members the viewer may see.
+- **How many per tile.** On a flat, stacked or tiered layer, the request sets `per_tile`, the most artifacts of each level a tile returns. The largest come first, by how many of their members the viewer may see.
 - **Counts are over the whole artifact.** The count, centre and box of an artifact cover all of its members the viewer may see, wherever they lie. An artifact that spans several tiles appears in each with the same figures, so a client can draw it once.
-- **Filters mark, they do not hide.** A filter does not change which artifacts are served or their counts, so topics do not appear and disappear as a viewer types. It adds a flag to each artifact saying whether any of its members in that tile match. To count the matching members of each topic, use a [breakdown by layer](#groupings).
-- **Hierarchies.** A `nested` or `dag` layer, a topic tree, is cut to the request's budget across all the tiles together: where too many fine topics would show, their parent is served instead. Zooming in moves the cut deeper.
+- **A filter marks artifacts.** A filter does not change which artifacts are served or their counts, so topics do not appear and disappear as a viewer types. It adds a flag to each artifact saying whether any of its members in that tile match. To count the matching members of each topic, use a bulk read of the layer with the filter, or an [aggregate](#aggregate) by the layer.
+- **Hierarchies.** A `nested` or `dag` layer, a topic tree, is cut to the request's `budget` across all the tiles together, and served as one frame before the per-tile frames. Where too many fine topics would show, their parent is served instead. Zooming in moves the cut deeper. With no `budget`, the cut is as fine as the tree allows.
 
 The [annotations](annotations.md) chapter explains which artifacts a viewer is served at all.
 
@@ -117,12 +123,16 @@ The [annotations](annotations.md) chapter explains which artifacts a viewer is s
 A client building a filter list asks for a category's values. `GET /v1/categories/{column}` lists them, and `/v1/categories/{column}/suggest` answers as a viewer types.
 
 - **Which values are listed** depends on the vocabulary. A public vocabulary lists every value. A derived one lists only the values carried by at least one item the viewer may see.
-- **Typeahead** matches the typed text against the start of each value's key and title, and the start of each word in either, ignoring case and accents. "neural" finds "Graph Neural Networks". There is no fuzzy matching, and results come in the order of the matched text, not by popularity.
-- **Counts.** A suggestion can carry how many of the viewer's items hold each value, under the filter the viewer has applied. A value the filter excludes is still offered, with a count of zero.
+- **Codes.** `?codes=` turns the codes a viewport's points carry into keys and titles. A code the viewer may not see is left out, as an unknown one is.
+- **Typeahead** matches the typed text against the start of each value's key and title, and the start of each word in its title, or in its key when it has no title. Case is ignored, and accents are not: "cafe" does not find "Café". "neural" finds "Graph Neural Networks". There is no fuzzy matching, and results come in alphabetical order of the text that matched.
+- **Counts.** With `counts`, each suggestion carries how many of the viewer's items hold it. A `POST` with `view` and `filters` takes those counts under the filter, and a value the filter excludes is still offered, with a count of zero.
+
+!!! note "One suggestion at a time"
+    Each session runs one suggestion request at a time. A request sent while another is running is refused with 429, so wait for each answer, or debounce keystrokes.
 
 ## Item
 
-`POST /v1/items/{mosaica_id}` returns one item as the viewer may see it: every field, each view it appears in that the viewer can reach with its position there, and any per-view field values.
+`POST /v1/items/{mosaica_id}` returns one item as the viewer may see it: every field, each view it appears in that the viewer can reach, with its position there in the view's grid units, and any per-view field values.
 
 An item the viewer may not see answers exactly as one that does not exist, with a 404.
 
@@ -130,13 +140,14 @@ The answer also says why the viewer may see the item: the parts of its access la
 
 ## Bulk read
 
-`POST /v1/items` returns every item in a view that the viewer may see and the filter matches, with the fields you name. `POST /v1/artifacts` does the same for the artifacts of one layer, or for a list of `mosaica_id`s. Use them for exports, tables and analysis.
+`POST /v1/items` returns every item in a view that the viewer may see and the filter matches, with the fields you name. `POST /v1/artifacts` does the same for the artifacts of one layer, all of them or those a list of `mosaica_id`s names. Use them for exports, tables and analysis.
 
 - **Pages of Arrow.** Results arrive as pages of Apache Arrow record batches. Each response ends with a cursor, and you pass it back to continue, until it is null. The Python client, the TypeScript client and the `mosaica items` and `mosaica artifacts` commands follow the cursor for you.
 - **Fields.** Name the fields you want. Each row starts with `mosaica_id`. Two more columns can be asked for: `position`, the item's coordinates in the view, and `labels`, why the viewer may see it. A field an item has no value for is null. A category arrives as its values' keys.
+- **Order.** `order: "map"` returns rows by map cell, then by `mosaica_id`. `order: "stored"` follows the order items are stored in, which is faster when the fields are read only from the stored records. With neither, the server chooses.
 - **Matched and unmatched.** With `keep_unmatched`, every visible item is returned, each with a `mosaica:matched` flag.
 - **Totals.** With `count` on the first request, the answer starts with exact counts of the visible items and of those the filter matches.
-- **Artifacts.** A read of artifacts can ask for each one's parents, content, centre, box and shape, all as the viewer sees them. It can read one level, the children of one artifact, or those whose key or title contains some text. With a filter, each artifact also carries its count of matching members.
+- **Artifacts.** A read of artifacts can ask for each one's parents, content, centre, box and shape, all as the viewer sees them. It can read one level, the children of one artifact, or those whose key or title contains some text. With a filter, only artifacts with a matching member come back, each with its count of matching members. With `keep_unmatched`, every artifact comes back, with a count of zero where none match.
 
 !!! note "Positions are rounded to the grid"
     `position` is the stored position converted back to the view's coordinates, so it is within half a grid step of what was inserted. If you need the exact values, declare them as number fields too.
@@ -144,7 +155,7 @@ The answer also says why the viewer may see the item: the parts of its access la
 !!! note "A read is not a snapshot"
     Each page is built from the latest data. A deletion or suppression accepted during a read applies from the next page. An item inserted during a read is returned if it lands ahead of the cursor, and no item is returned twice. Not built yet: a read pinned to one version of the data.
 
-A cursor is sealed, so it cannot be read or forged. It works only for the read it came from, and only for a session with the same access. It stays valid across restarts and background maintenance.
+A cursor is sealed, so it cannot be read or forged. It works only for the read it came from, and only for a session with the same access. It stays valid across flushes, merges, compactions and restarts, but not across a rebuild of the database or a view dropped and created again. The fields and the filter may change between the requests of one read. The view and the order may not.
 
 ## Aggregate
 

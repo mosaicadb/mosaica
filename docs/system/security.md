@@ -336,7 +336,7 @@ item card, and an artifact is served on its layer's terms, as in the artifacts o
 item's unique values are fields like any other, returned only on request, in that item's own row.
 
 A read of items whose filter bounds its matches through a unique field's index or an artifact's
-membership is driven from those matches ([queries](queries.md#bulk-read)). The bound is
+membership is driven from those matches ([queries](queries.md#filtering-by-a-unique-field)). The bound is
 intersected with the viewer's visible set before it is counted or read, and the choice of route
 follows its size, so a value held only by an item the viewer cannot see drives the read exactly as
 a value nobody holds, with the same rows, counts and pages. The index lookup's own time can differ
