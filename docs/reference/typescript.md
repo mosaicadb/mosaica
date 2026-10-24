@@ -10,7 +10,7 @@ The TypeScript client is four packages in `clients/ts`. Each page below lists wh
 | [`@mosaicajs/deck`](typescript/deck.md) | `MosaicaLayer`, a deck.gl layer that draws the store, for a host that builds its own `Deck`. deck.gl and luma.gl are peer dependencies. |
 | [`@mosaicajs/components`](typescript/components.md) | The types of the `mosaica-*` elements' events, parts, context and theme. The elements are on the [Components](components.md) pages. |
 | [`@mosaicajs/react`](typescript/react.md) | `useMosaicaStore` and `useProjection`, the store as React hooks. |
-| [`@mosaicajs/react/components`](typescript/react/components.md) | Every element except `<mosaica-filter>` and `<mosaica-cluster-filter>` as a React component with typed props and event handlers. |
+| [`@mosaicajs/react/components`](typescript/react/components.md) | Every element as a React component with typed props and event handlers. |
 
 `@mosaicajs/client/internal` and `@mosaicajs/deck/internal` hold what the other packages use beyond these entries. They are not a public API and are not listed here.
 
