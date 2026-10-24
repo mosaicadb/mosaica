@@ -1,6 +1,7 @@
 {# Copied from essentials-openapi 1.4.0's partial of the same name. Changed: `markdown`
    attributes, so descriptions render as Markdown, and the parameters' named examples listed under
-   the table, one line per name, headed by the summary any of them gives. #}
+   the table in the order declared, one line per name: the summary any of them gives, and the
+   request they make. #}
 
 **{{texts.parameters}}**
 
@@ -28,14 +29,22 @@
 {%- endfor %}
 </tbody>
 </table>
+{#- The operation's own list, unresolved, keeps the declared order; a referenced parameter
+    carries no examples. #}
 {%- set ns = namespace(names=[]) %}
-{%- for param in parameters %}{% for name in param.examples or {} %}{% if name not in ns.names %}{% set ns.names = ns.names + [name] %}{% endif %}{% endfor %}{% endfor %}
+{%- for param in operation.parameters or [] %}{% for name in param.examples or {} %}{% if name not in ns.names %}{% set ns.names = ns.names + [name] %}{% endif %}{% endfor %}{% endfor %}
 {%- if ns.names %}
 
 **Examples**
 
 {% for name in ns.names -%}
-- {% for param in parameters if (param.examples or {}).get(name, {}).summary %}{% if loop.first %}{{param.examples[name].summary}}:{% endif %}{% endfor %}
-  {%- for param in parameters if name in (param.examples or {}) %}{% with value = param.examples[name].value %} `{{param.name}}={% if value is string %}{{value}}{% else %}{{value | tojson}}{% endif %}`{% endwith %}{% if not loop.last %},{% endif %}{% endfor %}
+{%- set url = namespace(path=path, query=[], summary="") %}
+{%- for param in operation.parameters if name in (param.examples or {}) %}
+{%- set example = param.examples[name] %}
+{%- set text = example.value if example.value is string else example.value | tojson %}
+{%- if example.summary and not url.summary %}{% set url.summary = example.summary %}{% endif %}
+{%- if param.in == "path" %}{% set url.path = url.path.replace("{" ~ param.name ~ "}", text) %}{% else %}{% set url.query = url.query + [param.name ~ "=" ~ text] %}{% endif %}
+{%- endfor -%}
+- {{url.summary}}: `{{http_method.upper()}} {{url.path}}{% if url.query %}?{{url.query | join("&")}}{% endif %}`
 {% endfor %}
 {%- endif %}

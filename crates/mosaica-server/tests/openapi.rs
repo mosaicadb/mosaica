@@ -19,12 +19,13 @@
 //! the same way, and their JSON frames are validated against their schemas.
 //!
 //! Every request example in the description is sent to a server over the arXiv example dataset
-//! (`examples/data/arxiv`) and must be answered with a success the description lists, and every
-//! response example must be valid against its schema.
+//! (`examples/data/arxiv`) and must be answered with a success the description lists that shows
+//! something, and every response example must be valid against its schema and be the answer the
+//! server gives.
 
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -3639,80 +3640,129 @@ const ARXIV: &str = concat!(
     "/../../examples/data/arxiv/schema.toml"
 );
 
-/// The bundle `mosaica build` writes from [`ARXIV`], into `dir/bundle`: the build arguments the
-/// CLI derives from a declaration with no view group and nothing scoped, under the test identity
+/// The bundle `mosaica build` writes from [`ARXIV`], into `dir/bundle`, under the test identity
 /// key.
 fn build_arxiv(dir: &Path) {
-    use mosaica_build::config::{acquire_view, frame_of, Config, FrameSource};
-    let config =
-        Config::parse(Path::new(ARXIV), &Default::default()).expect("the arXiv declaration parses");
-    assert!(
-        config.scoped_attributes.is_empty() && config.scopes.layers.is_empty(),
-        "the arXiv declaration scopes a column or a layer, which this build does not pass on"
-    );
-    let registry = config.build_views().expect("its views compile");
-    let anchor = config
-        .anchor_view(&registry)
-        .expect("it names the view rows are ordered by");
-    let acquired = config.acquire().expect("its files are present");
-    let views: Vec<mosaica_build::ViewArgs> = registry
-        .iter()
-        .map(|view| {
-            assert!(
-                view.group.is_none(),
-                "the arXiv declaration has a view group"
-            );
-            let inputs = acquire_view(view).expect("the view's files are present");
-            let frame = frame_of(
-                &format!("view '{}'", view.id),
-                view.projection,
-                &view.extent,
-                &[FrameSource {
-                    points: &inputs.points,
-                    fields: &inputs.point_fields,
-                    select: inputs.select.as_ref(),
-                    kept: None,
-                }],
-            )
-            .expect("the view's frame fits");
-            mosaica_build::ViewArgs {
-                visibility: view.visibility.clone(),
-                view_id: view.id.clone(),
-                projection: view.projection,
-                extent: frame.extent,
-                points: inputs.points,
-                point_fields: inputs.point_fields,
-                select: inputs.select,
-                access: inputs.access,
-            }
-        })
-        .collect();
-    let mut layers = config.layers.clone();
-    for layer in &mut layers {
-        layer.views = Config::expand_layer_views(&registry, &layer.views);
-    }
-    mosaica_build::build(&mosaica_build::BuildArgs {
-        anchor,
-        attribute_sources: acquired.attribute_sources,
-        layers,
-        layer_inputs: acquired.layers,
-        shard_size: config.shard_size,
-        schema: config.schema,
-        ..build_args(&dir.join("bundle"), views)
-    })
+    mosaica_build::build(&args_from_declaration(
+        Path::new(ARXIV),
+        &dir.join("bundle"),
+    ))
     .expect("the arXiv example dataset builds");
 }
 
 const METHODS: [&str; 5] = ["get", "post", "put", "patch", "delete"];
 
+/// `parts` as a JSON pointer.
+fn pointer(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .map(|part| format!("/{}", part.replace('~', "~0").replace('/', "~1")))
+        .collect()
+}
+
 /// The value a `$ref` names, or `value` where it is not a reference.
 fn resolved<'a>(doc: &'a Value, value: &'a Value) -> &'a Value {
+    located(doc, value, String::new()).0
+}
+
+/// [`resolved`], with the value's pointer in the description: the reference's, or `at`.
+fn located<'a>(doc: &'a Value, value: &'a Value, at: String) -> (&'a Value, String) {
     match value["$ref"].as_str() {
-        Some(pointer) => doc
-            .pointer(pointer.trim_start_matches('#'))
-            .unwrap_or_else(|| panic!("{pointer} names nothing in the description")),
-        None => value,
+        Some(reference) => {
+            let at = reference.trim_start_matches('#');
+            let value = doc
+                .pointer(at)
+                .unwrap_or_else(|| panic!("{reference} names nothing in the description"));
+            (value, at.to_string())
+        }
+        None => (value, at),
     }
+}
+
+/// The pointer of every `example` and `examples` key in `value`, at `at`, outside
+/// `components/schemas`, where a schema's own keyword is not a request or a response.
+fn example_keys(value: &Value, at: &str, out: &mut BTreeSet<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                let here = format!("{at}{}", pointer(&[key]));
+                if here == "/components/schemas" {
+                    continue;
+                }
+                if key == "example" || key == "examples" {
+                    out.insert(here);
+                } else {
+                    example_keys(value, &here, out);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, value) in items.iter().enumerate() {
+                example_keys(value, &format!("{at}/{index}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Where a filled value goes.
+#[derive(Debug)]
+enum Target {
+    /// A JSON pointer into the body.
+    Body(String),
+    Path(String),
+    Query(String),
+}
+
+/// A value an example takes from an earlier answer: where it goes, and its `x-mosaica-fill`
+/// source.
+struct Fill {
+    target: Target,
+    source: Value,
+}
+
+/// The keys an `x-mosaica-fill` source holds, and those its `read` holds.
+const SOURCE_KEYS: [&str; 7] = [
+    "operation",
+    "example",
+    "path",
+    "body",
+    "read",
+    "like",
+    "same",
+];
+const READ_KEYS: [&str; 5] = ["trailer", "header", "column", "rows", "pointer"];
+
+/// `source`, refused where it holds a key a source does not take or lacks `operation`, `read` or
+/// `like`.
+fn fill_source(what: &str, source: &Value) -> Value {
+    let keys = source
+        .as_object()
+        .unwrap_or_else(|| panic!("{what}: a fill source is an object: {source}"));
+    for key in keys.keys() {
+        assert!(
+            SOURCE_KEYS.contains(&key.as_str()),
+            "{what}: a fill source takes {SOURCE_KEYS:?}, and not {key}"
+        );
+    }
+    let read = source["read"]
+        .as_object()
+        .unwrap_or_else(|| panic!("{what}: a fill source says what to read from its answer"));
+    for key in read.keys() {
+        assert!(
+            READ_KEYS.contains(&key.as_str()),
+            "{what}: a fill's read takes {READ_KEYS:?}, and not {key}"
+        );
+    }
+    assert!(
+        source["operation"].is_string(),
+        "{what}: a fill source names its operation"
+    );
+    assert!(
+        source["like"].is_object(),
+        "{what}: a fill source states in `like` the schema its value and the example's literal meet"
+    );
+    source.clone()
 }
 
 /// One request example: a named example of an operation's JSON body, or of its parameters, which
@@ -3723,27 +3773,56 @@ struct RequestExample {
     operation: String,
     name: String,
     body: Option<Value>,
-    /// Where the example's placeholders are filled from: `x-mosaica-fill`, or null.
-    fill: Value,
+    /// Each parameter the example gives a value: its name, where it goes, and the value.
+    parameters: Vec<(String, String, Value)>,
+    fills: Vec<Fill>,
 }
 
-/// Every request example in the description, in path order.
-fn request_examples(doc: &Value) -> Vec<RequestExample> {
+/// Every request example in the description, in path order, with the pointer of every examples
+/// map read.
+fn request_examples(doc: &Value) -> (Vec<RequestExample>, BTreeSet<String>) {
     let mut out = Vec::new();
+    let mut read = BTreeSet::new();
     for (template, item) in doc["paths"].as_object().unwrap() {
         for method in METHODS {
             let Some(operation) = item.get(method) else {
                 continue;
             };
+            let at = |rest: &[&str]| {
+                let mut parts = vec!["paths", template.as_str(), method];
+                parts.extend_from_slice(rest);
+                pointer(&parts)
+            };
             let operation_id = operation["operationId"].as_str().unwrap().to_string();
             let bodies = &operation["requestBody"]["content"]["application/json"]["examples"];
-            let mut names: std::collections::BTreeSet<&String> = bodies
+            if bodies.is_object() {
+                read.insert(at(&[
+                    "requestBody",
+                    "content",
+                    "application/json",
+                    "examples",
+                ]));
+            }
+            let parameters: Vec<&Value> = operation["parameters"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(index, parameter)| {
+                    let (parameter, here) =
+                        located(doc, parameter, at(&["parameters", &index.to_string()]));
+                    if parameter["examples"].is_object() {
+                        read.insert(format!("{here}/examples"));
+                    }
+                    parameter
+                })
+                .collect();
+            let mut names: BTreeSet<&String> = bodies
                 .as_object()
                 .into_iter()
                 .flat_map(|e| e.keys())
                 .collect();
-            for parameter in operation["parameters"].as_array().into_iter().flatten() {
-                let parameter = resolved(doc, parameter);
+            for parameter in &parameters {
                 names.extend(
                     parameter["examples"]
                         .as_object()
@@ -3752,33 +3831,88 @@ fn request_examples(doc: &Value) -> Vec<RequestExample> {
                 );
             }
             for name in names {
+                let what = format!("{method} {template} example {name}");
                 let example = &bodies[name];
                 let takes_body = operation["requestBody"].is_object();
                 assert_eq!(
                     takes_body,
                     example.is_object(),
-                    "{method} {template}: example {name} is on its parameters and not its body, or \
-                     on a body the operation does not take"
+                    "{what} is on the parameters and not the body, or on a body the operation \
+                     does not take"
                 );
-                let summarised = example["summary"].as_str().is_some_and(|s| !s.is_empty())
-                    || operation["parameters"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .any(|p| {
-                            resolved(doc, p)["examples"][name]["summary"]
-                                .as_str()
-                                .is_some_and(|s| !s.is_empty())
+                let named: Vec<&Value> = std::iter::once(example)
+                    .chain(parameters.iter().map(|p| &p["examples"][name]))
+                    .filter(|e| e.is_object())
+                    .collect();
+                for example in &named {
+                    for key in example.as_object().unwrap().keys() {
+                        assert!(
+                            ["summary", "description", "value", "x-mosaica-fill"]
+                                .contains(&key.as_str()),
+                            "{what} has a key {key} this test does not read"
+                        );
+                    }
+                }
+                let has = |key: &str| {
+                    named
+                        .iter()
+                        .any(|e| e[key].as_str().is_some_and(|s| !s.is_empty()))
+                };
+                assert!(has("summary"), "{what} has no summary");
+
+                let mut fills = Vec::new();
+                match &example["x-mosaica-fill"] {
+                    Value::Null => {}
+                    Value::Object(kinds) => {
+                        for (kind, entries) in kinds {
+                            let entries = entries.as_object().unwrap_or_else(|| {
+                                panic!(
+                                    "{what}: x-mosaica-fill's {kind} maps each target to a source"
+                                )
+                            });
+                            for (at, source) in entries {
+                                let target = match kind.as_str() {
+                                    "body" => Target::Body(at.clone()),
+                                    "path" => Target::Path(at.clone()),
+                                    "query" => Target::Query(at.clone()),
+                                    other => panic!(
+                                        "{what}: x-mosaica-fill takes body, path and query, and \
+                                         not {other}"
+                                    ),
+                                };
+                                fills.push(Fill {
+                                    target,
+                                    source: fill_source(&what, source),
+                                });
+                            }
+                        }
+                    }
+                    other => panic!("{what}: x-mosaica-fill is an object, not {other}"),
+                }
+                let mut values = Vec::new();
+                for parameter in &parameters {
+                    let named = &parameter["examples"][name];
+                    if named.is_null() {
+                        continue;
+                    }
+                    let parameter_name = parameter["name"].as_str().unwrap().to_string();
+                    let location = parameter["in"].as_str().unwrap().to_string();
+                    if !named["x-mosaica-fill"].is_null() {
+                        let target = match location.as_str() {
+                            "path" => Target::Path(parameter_name.clone()),
+                            "query" => Target::Query(parameter_name.clone()),
+                            other => panic!("{what}: a fill on a parameter in {other}"),
+                        };
+                        fills.push(Fill {
+                            target,
+                            source: fill_source(&what, &named["x-mosaica-fill"]),
                         });
+                    }
+                    values.push((parameter_name, location, named["value"].clone()));
+                }
                 assert!(
-                    summarised,
-                    "{method} {template}: example {name} has no summary"
-                );
-                let fill = example["x-mosaica-fill"].clone();
-                assert!(
-                    fill.is_null() || example["description"].is_string(),
-                    "{method} {template}: example {name} is filled from an earlier answer, which \
-                     its description must say"
+                    fills.is_empty() || has("description"),
+                    "{what} takes a value from an earlier answer, which its description must say"
                 );
                 out.push(RequestExample {
                     method,
@@ -3786,12 +3920,87 @@ fn request_examples(doc: &Value) -> Vec<RequestExample> {
                     operation: operation_id.clone(),
                     name: name.clone(),
                     body: takes_body.then(|| example["value"].clone()),
-                    fill,
+                    parameters: values,
+                    fills,
                 });
             }
         }
     }
-    out
+    (out, read)
+}
+
+/// One response example.
+struct ResponseExample {
+    method: &'static str,
+    template: String,
+    operation: String,
+    status: u16,
+    media_type: String,
+    name: String,
+    schema: Value,
+    value: Value,
+    /// The JSON pointers the comparison with the server's answer skips: `x-mosaica-vary`.
+    vary: Vec<String>,
+}
+
+/// Every response example in the description, with the pointer of every examples map read.
+fn response_examples(doc: &Value) -> (Vec<ResponseExample>, BTreeSet<String>) {
+    let mut out = Vec::new();
+    let mut read = BTreeSet::new();
+    for (template, item) in doc["paths"].as_object().unwrap() {
+        for method in METHODS {
+            let Some(operation) = item.get(method) else {
+                continue;
+            };
+            for (status, response) in operation["responses"].as_object().unwrap() {
+                let (response, here) = located(
+                    doc,
+                    response,
+                    pointer(&["paths", template, method, "responses", status]),
+                );
+                for (media_type, media) in response["content"].as_object().into_iter().flatten() {
+                    let Some(examples) = media["examples"].as_object() else {
+                        continue;
+                    };
+                    read.insert(format!(
+                        "{here}{}",
+                        pointer(&["content", media_type, "examples"])
+                    ));
+                    for (name, example) in examples {
+                        let what = format!("{method} {template} {status} example {name}");
+                        for key in example.as_object().unwrap().keys() {
+                            assert!(
+                                ["summary", "description", "value", "x-mosaica-vary"]
+                                    .contains(&key.as_str()),
+                                "{what} has a key {key} this test does not read"
+                            );
+                        }
+                        assert!(
+                            example["summary"].as_str().is_some_and(|s| !s.is_empty()),
+                            "{what} has no summary"
+                        );
+                        out.push(ResponseExample {
+                            method,
+                            template: template.clone(),
+                            operation: operation["operationId"].as_str().unwrap().to_string(),
+                            status: status.parse().unwrap(),
+                            media_type: media_type.clone(),
+                            name: name.clone(),
+                            schema: media["schema"].clone(),
+                            value: example["value"].clone(),
+                            vary: example["x-mosaica-vary"]
+                                .as_array()
+                                .into_iter()
+                                .flatten()
+                                .map(|p| p.as_str().unwrap().to_string())
+                                .collect(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    (out, read)
 }
 
 /// What the server answered one request with.
@@ -4006,18 +4215,101 @@ fn operation_named<'a>(doc: &'a Value, id: &str) -> (&'static str, &'a str) {
     panic!("no operation is named {id}");
 }
 
+/// The answer to `example` holds something to show: a viewport tile with a matching item, and
+/// with a highlighted one where the example highlights; a row of items or artifacts; a table
+/// counting at least one item; a `values` list that is not empty. An example whose filter names a
+/// value no item holds is answered with a success that shows nothing, and fails here.
+fn assert_answers_something(example: &RequestExample, answer: &Answer) {
+    let what = format!(
+        "{} {} example {}",
+        example.method, example.template, example.name
+    );
+    match example.operation.as_str() {
+        "viewport" => {
+            let frames = mosaica_wire::split_frames(&answer.body).expect("a framed body");
+            let reader =
+                arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(frames[0].1), None)
+                    .expect("the tiles frame is an Arrow stream");
+            let (mut matched, mut highlighted) = (0, 0);
+            for batch in reader {
+                let batch = batch.unwrap();
+                let total = |column: &str| -> u64 {
+                    batch
+                        .column_by_name(column)
+                        .unwrap_or_else(|| panic!("the tiles frame has no {column}"))
+                        .as_any()
+                        .downcast_ref::<arrow::array::UInt64Array>()
+                        .unwrap()
+                        .values()
+                        .iter()
+                        .sum()
+                };
+                matched += total("matched");
+                highlighted += total("highlighted");
+            }
+            assert!(matched > 0, "{what} matches no item in any tile");
+            if example
+                .body
+                .as_ref()
+                .is_some_and(|b| b.get("highlight").is_some())
+            {
+                assert!(highlighted > 0, "{what} highlights no item in any tile");
+            }
+        }
+        "viewportArtifacts" => {
+            let decoded = decode_artifact_frames(&answer.body);
+            assert!(
+                decoded.trailer["rows"].as_u64().unwrap() > 0,
+                "{what} serves no artifact"
+            );
+        }
+        "items" | "artifacts" => {
+            let decoded = decode_records(&answer.body);
+            assert!(
+                decoded.trailer["rows"].as_u64().unwrap() > 0,
+                "{what} returns no row"
+            );
+        }
+        "aggregate" => {
+            for (head, _) in decode_aggregate(&answer.body).tables {
+                assert!(
+                    head["total"].as_u64().unwrap() > 0,
+                    "{what} counts no item: {head}"
+                );
+            }
+        }
+        _ if answer.content_type.starts_with("application/json") => {
+            let body: Value = serde_json::from_slice(&answer.body).unwrap();
+            if let Some(values) = body.get("values") {
+                assert!(
+                    values.as_array().is_some_and(|v| !v.is_empty()),
+                    "{what} lists no value"
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Every request example, sent as the description gives it to a server over the arXiv example
-/// dataset. A value that has to come from an earlier answer is marked in the example's
-/// `x-mosaica-fill`: for each body location (a JSON pointer) or path parameter, an earlier
-/// request (another example, by operation and name, or a request written in the mark) and what to
-/// read from its answer. The example is valid against its schemas as written and as filled.
+/// dataset, and every response example compared with the answer the server gives.
+///
+/// A request example is valid against its schemas as written and as filled, and its answer is a
+/// success the description lists that shows something. A value marked in `x-mosaica-fill` is read
+/// from a real earlier request. The literal the example shows and the value read both meet the
+/// fill's `like`; the value read is the literal where the fill says `same: true`, and differs from
+/// it otherwise, which shows the fill replaced it.
+///
+/// A response example is the answer to the request example of its name, or to its operation sent
+/// with nothing where the operation takes no parameter and no body, save the parts its
+/// `x-mosaica-vary` lists.
 ///
 /// The viewer is a session for the principal the password login example names, holding `read`
 /// and `read-all`.
 #[tokio::test]
-async fn every_request_example_is_answered_with_a_success_the_description_lists() {
+async fn every_example_is_what_the_server_answers() {
     let doc = description();
-    let examples = request_examples(&doc);
+    let (examples, _) = request_examples(&doc);
     let tmp = TempDir::new().unwrap();
     static BUILT: OnceLock<TempDir> = OnceLock::new();
     copy_built(&BUILT, tmp.path(), build_arxiv);
@@ -4029,12 +4321,8 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
         theta_target_marks: mosaica_config::defaults::DEFAULT_THETA_TARGET_MARKS,
         ..default_engine_config()
     };
-    let max_k = config.max_k;
     let server = open_tuned(&tmp, config, |limits| {
-        *limits = mosaica_server::state::ServeLimits {
-            max_k,
-            ..Default::default()
-        }
+        *limits = mosaica_server::state::ServeLimits::default()
     })
     .await;
 
@@ -4069,7 +4357,7 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
     while !pending.is_empty() {
         let before = pending.len();
         let mut waiting = Vec::new();
-        for example in std::mem::take(&mut pending) {
+        'examples: for example in std::mem::take(&mut pending) {
             let operation = &doc["paths"][&example.template][example.method];
             let what = format!(
                 "{} {} example {}",
@@ -4082,24 +4370,20 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
                 query: Vec::new(),
                 body: example.body.clone(),
             };
-            for parameter in operation["parameters"].as_array().into_iter().flatten() {
-                let parameter = resolved(&doc, parameter);
-                let name = parameter["name"].as_str().unwrap();
-                let value = match &parameter["examples"][&example.name]["value"] {
-                    Value::Null => &parameter["example"],
-                    value => value,
-                };
-                if value.is_null() {
-                    continue;
-                }
+            for (name, location, value) in &example.parameters {
+                let parameter = operation["parameters"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|p| resolved(&doc, p))
+                    .find(|p| p["name"] == name.as_str())
+                    .unwrap();
                 assert_valid_against(&doc, &parameter["schema"], value);
-                match parameter["in"].as_str().unwrap() {
+                match location.as_str() {
                     "path" => {
-                        request.path.insert(name.to_string(), parameter_text(value));
+                        request.path.insert(name.clone(), parameter_text(value));
                     }
-                    "query" => request
-                        .query
-                        .push((name.to_string(), parameter_text(value))),
+                    "query" => request.query.push((name.clone(), parameter_text(value))),
                     other => panic!("{what}: a parameter in {other}"),
                 }
             }
@@ -4108,23 +4392,16 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
                 assert_valid_against(&doc, &media["schema"], body);
             }
 
-            let mut ready = true;
-            let fills = ["body", "path"].into_iter().flat_map(|target| {
-                example.fill[target]
-                    .as_object()
-                    .into_iter()
-                    .flatten()
-                    .map(move |(at, source)| (target, at, source))
-            });
-            for (target, at, source) in fills {
+            for fill in &example.fills {
+                let source = &fill.source;
                 let operation_id = source["operation"].as_str().unwrap();
                 let value = match source["example"].as_str() {
                     Some(name) => {
                         match answers.get(&(operation_id.to_string(), name.to_string())) {
                             Some(answer) => read_answer(answer, &source["read"]),
                             None => {
-                                ready = false;
-                                break;
+                                waiting.push(example);
+                                continue 'examples;
                             }
                         }
                     }
@@ -4147,39 +4424,81 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
                         read_answer(&answer, &source["read"])
                     }
                 };
-                match target {
-                    "body" => {
-                        let body = request.body.as_mut().expect("a body to fill");
-                        *body.pointer_mut(at).unwrap_or_else(|| {
-                            panic!("{what} shows no value at {at} for its fill to replace")
-                        }) = value;
+                let literal: Option<Value> = match &fill.target {
+                    Target::Body(at) => Some(
+                        request
+                            .body
+                            .as_ref()
+                            .and_then(|body| body.pointer(at))
+                            .unwrap_or_else(|| {
+                                panic!("{what} shows no value at {at} for its fill to replace")
+                            })
+                            .clone(),
+                    ),
+                    Target::Path(name) => request.path.get(name).map(|v| json!(v)),
+                    Target::Query(name) => request
+                        .query
+                        .iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, v)| json!(v)),
+                };
+                let like = &source["like"];
+                assert_valid_against(&doc, like, &value);
+                match &literal {
+                    Some(literal) => {
+                        assert_valid_against(&doc, like, literal);
+                        if source["same"] == true {
+                            assert_eq!(
+                                &value, literal,
+                                "{what} shows {literal} at {:?}, and the server gives {value}: \
+                                 write that in its place",
+                                fill.target
+                            );
+                        } else {
+                            assert_ne!(
+                                &value, literal,
+                                "{what}: the fill at {:?} read the literal the example shows",
+                                fill.target
+                            );
+                        }
                     }
-                    _ => {
+                    None => assert!(
+                        matches!(fill.target, Target::Path(_)) && source["same"].is_null(),
+                        "{what} fills {:?}, which it shows no value for",
+                        fill.target
+                    ),
+                }
+                match &fill.target {
+                    Target::Body(at) => {
+                        *request.body.as_mut().unwrap().pointer_mut(at).unwrap() = value;
+                    }
+                    Target::Path(name) => {
                         let declared = operation["parameters"]
                             .as_array()
                             .into_iter()
                             .flatten()
                             .any(|p| {
                                 let p = resolved(&doc, p);
-                                p["in"] == "path" && p["name"] == at.as_str()
+                                p["in"] == "path" && p["name"] == name.as_str()
                             });
                         assert!(
                             declared,
-                            "{what} fills a path parameter {at} it does not have"
+                            "{what} fills a path parameter {name} it does not have"
                         );
-                        request.path.insert(at.clone(), parameter_text(&value));
+                        request.path.insert(name.clone(), parameter_text(&value));
+                    }
+                    Target::Query(name) => {
+                        request.query.retain(|(n, _)| n != name);
+                        request.query.push((name.clone(), parameter_text(&value)));
                     }
                 }
-            }
-            if !ready {
-                waiting.push(example);
-                continue;
             }
             if let Some(body) = &request.body {
                 assert_valid_against(&doc, &media["schema"], body);
             }
             let answer = send_request(&server, &doc, &token, &request).await;
             assert_described_success(&doc, example.method, &example.template, &answer);
+            assert_answers_something(example, &answer);
             if std::ptr::eq(example, &examples[login]) {
                 let session: Value = serde_json::from_slice(&answer.body).unwrap();
                 token = session["token"].as_str().unwrap().to_string();
@@ -4194,6 +4513,57 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
         pending = waiting;
     }
     assert_eq!(answers.len(), examples.len());
+
+    let (responses, _) = response_examples(&doc);
+    for example in &responses {
+        let what = format!(
+            "{} {} {} example {}",
+            example.method, example.template, example.status, example.name
+        );
+        let (status, body) = match answers.get(&(example.operation.clone(), example.name.clone())) {
+            Some(answer) => (answer.status, answer.body.clone()),
+            None => {
+                let operation = &doc["paths"][&example.template][example.method];
+                assert!(
+                    operation["parameters"].is_null() && operation["requestBody"].is_null(),
+                    "{what} has no request example of its name, and its operation takes a \
+                     parameter or a body"
+                );
+                let request = Request {
+                    method: example.method,
+                    template: &example.template,
+                    path: BTreeMap::new(),
+                    query: Vec::new(),
+                    body: None,
+                };
+                let answer = send_request(&server, &doc, &token, &request).await;
+                (answer.status, answer.body)
+            }
+        };
+        assert_eq!(
+            status, example.status,
+            "{what} is under another status than its answer's"
+        );
+        assert_eq!(
+            example.media_type, "application/json",
+            "{what}: only JSON is compared"
+        );
+        let answered: Value = serde_json::from_slice(&body).unwrap();
+        let (mut actual, mut expected) = (answered.clone(), example.value.clone());
+        for at in &example.vary {
+            for value in [&mut actual, &mut expected] {
+                *value.pointer_mut(at).unwrap_or_else(|| {
+                    panic!("{what}: x-mosaica-vary names {at}, which the answer does not hold")
+                }) = Value::Null;
+            }
+        }
+        assert!(
+            actual == expected,
+            "{what} is not what the server answers. If the server is right, capture the example \
+             again from this answer:\n{}",
+            serde_json::to_string_pretty(&answered).unwrap()
+        );
+    }
 }
 
 /// Every response example is valid against the schema of the response and media type it is
@@ -4201,26 +4571,27 @@ async fn every_request_example_is_answered_with_a_success_the_description_lists(
 #[test]
 fn every_response_example_is_valid_against_its_schema() {
     let doc = description();
-    let mut checked = 0;
-    for (template, item) in doc["paths"].as_object().unwrap() {
-        for method in METHODS {
-            let Some(operation) = item.get(method) else {
-                continue;
-            };
-            for (status, response) in operation["responses"].as_object().unwrap() {
-                let response = resolved(&doc, response);
-                for (media_type, media) in response["content"].as_object().into_iter().flatten() {
-                    for (name, example) in media["examples"].as_object().into_iter().flatten() {
-                        assert!(
-                            example["summary"].as_str().is_some_and(|s| !s.is_empty()),
-                            "{method} {template} {status} {media_type}: example {name} has no summary"
-                        );
-                        assert_valid_against(&doc, &media["schema"], &example["value"]);
-                        checked += 1;
-                    }
-                }
-            }
-        }
+    let (responses, _) = response_examples(&doc);
+    assert!(
+        !responses.is_empty(),
+        "the description has no response example"
+    );
+    for example in &responses {
+        assert_valid_against(&doc, &example.schema, &example.value);
     }
-    assert!(checked > 0, "the description has no response example");
+}
+
+/// Every `example` and `examples` key outside `components/schemas` is one the two tests above
+/// read: a singular `example`, a media type other than JSON on a request body, a body that is a
+/// `$ref` or a parameter declared on a path rather than an operation would otherwise go unchecked.
+#[test]
+fn every_example_in_the_description_is_read() {
+    let doc = description();
+    let mut present = BTreeSet::new();
+    example_keys(&doc, "", &mut present);
+    let (_, mut read) = request_examples(&doc);
+    read.extend(response_examples(&doc).1);
+    let unread: Vec<&String> = present.difference(&read).collect();
+    assert!(unread.is_empty(), "examples no test reads: {unread:?}");
+    assert!(!present.is_empty(), "the description has no example");
 }

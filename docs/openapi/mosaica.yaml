@@ -8,10 +8,15 @@
 # this file is wrong.
 #
 # The examples use the arXiv example dataset in `examples/data/arxiv`, and the same test sends
-# every request example to a server built from it. Where a value in an example has to come from an
-# earlier answer, such as a cursor or a `mosaica_id`, the example's `x-mosaica-fill` names, for each
-# body location (a JSON pointer) or path parameter, the earlier request and what to read from its
-# answer: a field of the trailer, a header, a column of the first records frame, or a JSON pointer.
+# every request example to a server built from it and compares every response example with the
+# answer to the request example of its name. Where a value in an example has to come from an
+# earlier answer, such as a cursor or a `mosaica_id`, `x-mosaica-fill` says where from: on a
+# request body's example, for each `body` location (a JSON pointer), `path` or `query` parameter;
+# on a parameter's example, for that parameter. Each names the earlier request (`operation` and
+# `example`, or a request written out), what to `read` from its answer (a field of the trailer, a
+# header, a column of the first records frame, or a JSON pointer), a schema the value is `like`,
+# and with `same: true` that the value shown is the one the dataset gives, which the test checks.
+# A response example's `x-mosaica-vary` lists the JSON pointers the comparison skips.
 #
 # Each server names its plane and the prefix of the routes it serves in `x-mosaica-plane` and
 # `x-mosaica-route-prefix`, which `clients/ts/core/test/contract.test.ts` reads to send each
@@ -301,8 +306,8 @@ paths:
                 description: "The whole key, as `POST /control/principals/{name}/keys` issued it, once."
                 x-mosaica-fill:
                   body:
-                    /api_key: {operation: createKey, path: {name: ada}, body: {}, read: {pointer: /key}}
-                value: {"api_key": "tsk_<prefix>_<secret>"}
+                    /api_key: {operation: createKey, path: {name: ada}, body: {}, read: {pointer: /key}, like: {type: string, pattern: "^msk_[0-9a-f]{12}_[0-9a-f]{64}$"}}
+                value: {"api_key": "msk_3f9c20d1a7b4_6e1d8a0c4b9f27e35d10a6c8f4b2e97d0c3a5f81b6e4d29c7a0f3e85b1d6c42a"}
       responses:
         "200":
           description: A session.
@@ -313,6 +318,7 @@ paths:
               examples:
                 password:
                   summary: "A session for `ada`"
+                  x-mosaica-vary: [/token, /expires_at]
                   value:
                     {
                       "expires_at": 1792877942,
@@ -854,6 +860,8 @@ paths:
           examples:
             next-page:
               summary: The next five archives, after the page that ended at `astro-ph`
+              description: "`after` is the `next` of the answer to `list`."
+              x-mosaica-fill: {operation: categories, example: list, read: {pointer: /next}, like: {type: string}, same: true}
               value: astro-ph
         - name: limit
           in: query
@@ -1357,7 +1365,7 @@ paths:
             examples:
               whole-map:
                 summary: The whole map at zoom 2
-                description: Every tile of the `topics` view at zoom 2 that the box touches, with up to 200 papers drawn in each.
+                description: "Every tile of the `topics` view at zoom 2 that the box touches. `k` caps the papers drawn in a tile at 200; the deployment's density rules decide how many each tile draws below that."
                 value: {"view": "topics", "zoom": 2, "bbox": [-15, -15, 25, 25], "k": 200}
               filtered:
                 summary: Computer science papers since 2020 with "neural" in the title
@@ -1555,8 +1563,8 @@ paths:
                 description: "`cursor` is the `next` of the trailer that answered `named-fields`, sent back unchanged by the same session. The fields may change between the requests of one read; the view and the order may not."
                 x-mosaica-fill:
                   body:
-                    /cursor: {operation: items, example: named-fields, read: {trailer: next}}
-                value: {"view": "topics", "fields": ["arxiv_id", "title", "primary_category", "submitted_at"], "page_rows": 100, "pages": 1, "cursor": "<next, from the trailer of the previous response>"}
+                    /cursor: {operation: items, example: named-fields, read: {trailer: next}, like: {type: string, pattern: "^[A-Za-z0-9_-]+$"}}
+                value: {"view": "topics", "fields": ["arxiv_id", "title", "primary_category", "submitted_at"], "page_rows": 100, "pages": 1, "cursor": "0-NxVGI77sEeTY5GzuaLZkoxm7JubG24OaNE9YpO_Dt28xcgnw1QyiB9nU72cXbSfJxg9Be-YjwrUw"}
       responses:
         "200":
           description: The framed body. The headers are the viewport's, without its cache coordinates.
@@ -1658,16 +1666,16 @@ paths:
                 description: "The `mosaica_id` in the path comes from an earlier answer: a point of `POST /v1/viewport`, or a row of `POST /v1/items`."
                 x-mosaica-fill:
                   path:
-                    mosaica_id: {operation: items, example: named-fields, read: {column: mosaica_id}}
+                    mosaica_id: {operation: items, example: named-fields, read: {column: mosaica_id}, like: {type: string, pattern: "^[0-9]+$"}}
                 value: {}
               pinned:
                 summary: The same, with the generation the map was drawn from
                 description: "`pin` is the `x-mosaica-pin` header of an earlier viewport response, sent back. It is advisory and changes nothing in the answer."
                 x-mosaica-fill:
                   path:
-                    mosaica_id: {operation: items, example: named-fields, read: {column: mosaica_id}}
+                    mosaica_id: {operation: items, example: named-fields, read: {column: mosaica_id}, like: {type: string, pattern: "^[0-9]+$"}}
                   body:
-                    /pin: {operation: viewport, example: whole-map, read: {header: x-mosaica-pin}}
+                    /pin: {operation: viewport, example: whole-map, read: {header: x-mosaica-pin}, like: {$ref: "#/components/schemas/Pin"}, same: true}
                 value: {"pin": {"prefix": "v00000", "segments_version": 0}}
       responses:
         "200":
@@ -1677,7 +1685,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ItemResponse"
               examples:
-                paper:
+                plain:
                   summary: "One paper's record"
                   description: "Every declared field the paper holds, the label clause that lets this session see it, and its position in each view."
                   value:
@@ -1815,11 +1823,11 @@ paths:
                 description: "`ids` are `mosaica_id`s from an earlier answer: here the first three rows of `one-level`. A client holding a point's `membership:clusters/toponymy` tag from the viewport reads the cluster it names the same way."
                 x-mosaica-fill:
                   body:
-                    /ids: {operation: artifacts, example: one-level, read: {column: mosaica_id, rows: 3}}
+                    /ids: {operation: artifacts, example: one-level, read: {column: mosaica_id, rows: 3}, like: {type: array, minItems: 3, maxItems: 3, items: {type: string, pattern: "^[0-9]+$"}}, same: true}
                 value: {"view": "topics", "layer": "clusters/toponymy", "ids": ["15924076608634206902", "18211900501399239182", "2151253543718068722"], "fields": ["key", "level", "parents", "masked_count"]}
               search:
                 summary: The k-means topic labels that mention "neural"
-                description: "`q` keeps the label artifacts whose first served text contains it. `target` is the cluster each label names."
+                description: "`q` keeps the label artifacts whose key, or whose first served text content, contains it, ignoring case. `target` is the cluster each label names."
                 value: {"view": "topics", "layer": "topics/kmeans", "q": "neural", "fields": ["key", "target", "content"]}
       responses:
         "200":
