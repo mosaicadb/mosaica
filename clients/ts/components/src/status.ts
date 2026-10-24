@@ -3,7 +3,7 @@ import {property} from 'lit/decorators.js';
 import {NO_COUNT, NO_MASKED, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
 import {MosaicaElement, emit} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {renderState, showsContent, stateOf, type PanelState} from './states.js';
+import {NOTHING_VISIBLE, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -14,7 +14,9 @@ import './count.js';
  * highlight is set, a cell reads `N highlighted of M`, M being the matched count, and the
  * match cell is left out unless a filter or selection narrows what matches. While the view is up to
  * date the first cell is a dot alone, titled "Up to date", and while it updates a grey dot alone,
- * titled "Updating", so the strip keeps its width through a pan; otherwise it names the state in two
+ * titled "Updating", so the strip keeps its width through a pan. Where the viewer can see no item in
+ * the view at all, it is a grey dot alone titled "Nothing visible to you", which the map says in
+ * words. Otherwise it names the state in two
  * or three words beside its dot (Connecting, Reconnecting, Nothing in view, Data updated, View
  * refused, Session expired) with the action
  * the state offers: Refresh when the data changed, Retry when the view was refused, and Sign in on
@@ -193,15 +195,19 @@ export class MosaicaStatus extends MosaicaElement {
     // Up to date and updating, the two states a pan moves between, are each a dot alone, so the
     // strip keeps its width through a gesture; every other state names itself beside its dot.
     const bare = (cls: string, words: string) => html`<span part="state" data-state=${state}><span class=${cls} role="img" aria-label=${words} title=${words}></span></span>`;
-    const dotAlone = state === 'shown' || (state === 'loading' && status?.sessionWarm === true);
+    // A viewer who can see nothing is told so once, by the map; the strip keeps its dot.
+    const nothingVisible = seesNothing(this.resolvedStore, state);
+    const dotAlone = state === 'shown' || (state === 'loading' && status?.sessionWarm === true) || nothingVisible;
     const inner =
       state === 'shown'
         ? bare('dot', 'Up to date')
-        : dotAlone
-          ? bare('dot quiet', 'Updating')
-          : state === 'empty'
-            ? html`<span part="state" data-state="empty"><span class="dot quiet"></span>Nothing in view</span>`
-            : renderState(state, status, {onRefresh: refresh, onRetry: refresh, onReauthorise: this.reauthorise});
+        : nothingVisible
+          ? bare('dot quiet', NOTHING_VISIBLE)
+          : dotAlone
+            ? bare('dot quiet', 'Updating')
+            : state === 'empty'
+              ? html`<span part="state" data-state="empty"><span class="dot quiet"></span>Nothing in view</span>`
+              : renderState(state, status, {onRefresh: refresh, onRetry: refresh, onReauthorise: this.reauthorise});
     // One live element across every state, so each change of state is announced from it.
     const first = html`<div class=${`cell state${dotAlone ? ' bare' : ''}`} role="status" aria-live="polite">${inner}</div>`;
     return html`<div part="strip" data-state=${state}>${first}${this.counts(state, v, stale)}</div>

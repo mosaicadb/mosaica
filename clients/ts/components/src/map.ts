@@ -17,7 +17,7 @@ import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, Densit
 import type {PaletteName, Quantisation, Rgba} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {renderState, stateOf, type PanelState} from './states.js';
+import {NOTHING_VISIBLE, renderState, seesNothing, stateOf, type PanelState} from './states.js';
 import {icon} from './icons.js';
 import {sameFrame} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
@@ -149,8 +149,10 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - The
  *   `layers` attribute changed.
  * @csspart canvas - The deck.gl canvas's container.
- * @csspart overlay - The state drawn over the canvas when refused, expired or empty.
- * @csspart state - The state line inside the overlay, with `data-state`.
+ * @csspart overlay - The state drawn over the canvas when refused, expired or empty. Where the
+ *   viewer can see no item in the view at all, it says so in place of Nothing in view.
+ * @csspart state - The state line inside the overlay, with `data-state`, and `data-visible="none"`
+ *   where the viewer can see no item in the view.
  * @csspart retry - The Retry button in the overlay, when the view was refused.
  * @csspart refusal - The words "View refused" inside the overlay, with `data-code` set to the
  *   refusal's code.
@@ -1596,7 +1598,12 @@ export class MosaicaMap extends MosaicaElement {
     // Loading and retrying are the status strip's; the map draws the states that could otherwise
     // read as an empty corpus.
     const refresh = () => this.resolvedStore?.refresh();
-    const overlay = state === 'refused' || state === 'expired' || state === 'empty' ? html`<div part="overlay">${renderState(state, status, {onRefresh: refresh, onRetry: refresh})}</div>` : nothing;
+    const nothingVisible = seesNothing(this.resolvedStore, state);
+    const overlay = nothingVisible
+      ? html`<div part="overlay"><span part="state" data-state="empty" data-visible="none">${NOTHING_VISIBLE}</span></div>`
+      : state === 'refused' || state === 'expired' || state === 'empty'
+        ? html`<div part="overlay">${renderState(state, status, {onRefresh: refresh, onRetry: refresh})}</div>`
+        : nothing;
     const controls = this.noControls
       ? nothing
       : html`<div part="controls" role="toolbar" aria-label="Map tools">

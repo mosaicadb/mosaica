@@ -1,5 +1,6 @@
 import {html, nothing, type TemplateResult} from 'lit';
-import type {StatusProjection} from '@mosaicajs/client';
+import type {AggregateSpec, Store, StatusProjection} from '@mosaicajs/client';
+import {HeldAggregate} from './aggregate.js';
 
 /**
  * The eight panel states. Every panel shows its state in one `part="state"` region, with
@@ -121,4 +122,27 @@ export function renderState(
     case 'stale':
       return html`<span part="state" data-state="stale"><span class="dot warn"></span>${stateWord(state, status)}<button part="refresh" class="btn small" type="button" @click=${actions.onRefresh ?? undefined}>Refresh</button></span>`;
   }
+}
+
+/** The words for a viewer who can see no item in the view at all, where `empty` would read as "pan elsewhere". */
+export const NOTHING_VISIBLE = 'Nothing visible to you';
+
+const VISIBLE_TOTAL: AggregateSpec = {groupings: [{}], subject: 'visible'};
+const visibleTotals = new WeakMap<Store, HeldAggregate>();
+
+/**
+ * Whether the viewer of `store` can see no item in the view at all, whatever the camera and the
+ * filters. It is counted, once per store however many elements ask, only while `state` is
+ * `empty`, and is `false` until the count answers.
+ */
+export function seesNothing(store: Store | null, state: PanelState): boolean {
+  if (!store) return false;
+  let held = visibleTotals.get(store);
+  if (!held) {
+    held = new HeldAggregate('visible-total');
+    visibleTotals.set(store, held);
+  }
+  const spec = state === 'empty' ? VISIBLE_TOTAL : null;
+  held.set(store, spec);
+  return held.entryOf(store, spec)?.result?.tables[0]?.total === 0;
 }
