@@ -169,8 +169,8 @@ describe('MosaicaLayer density wash', () => {
     const a1 = counts(0, 0);
     const a2 = counts(2, 2);
     const onB = counts(6, 6);
-    const drawA = (c: DensityCounts) => a.draw({marks: marks(3), depth: DEPTH, densityCounts: c});
-    const drawB = () => b.draw({marks: marks(3), depth: DEPTH, densityCounts: onB});
+    const drawA = (c: DensityCounts) => a.draw({marks: marks(3), depth: DEPTH, density: 'smooth', densityCounts: c});
+    const drawB = () => b.draw({marks: marks(3), depth: DEPTH, density: 'smooth', densityCounts: onB});
 
     drawA(a1);
     drawB();
@@ -188,5 +188,18 @@ describe('MosaicaLayer density wash', () => {
     expect(a.wash()).toEqual({visible: true, bounds: drawnBounds(a2)});
     expect(a.errors).toEqual([]);
     expect(b.errors).toEqual([]);
+  });
+
+  it('is not drawn unless density is asked for, as on <mosaica-map>', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('ImageData', class {
+      constructor(readonly data: Uint8ClampedArray, readonly width: number, readonly height: number) {}
+    });
+    const h = host();
+    h.draw({marks: marks(3), depth: DEPTH, densityCounts: counts(0, 0)});
+    vi.advanceTimersByTime(1000);
+    h.draw({marks: marks(3), depth: DEPTH, densityCounts: counts(0, 0)});
+    expect(h.wash()?.visible ?? false).toBe(false);
+    expect(h.errors).toEqual([]);
   });
 });

@@ -143,7 +143,7 @@ export type MosaicaLayerProps = CompositeLayerProps & {
   /**
    * How density is drawn under the marks, from `densityCounts`: `none`, `smooth` (a soft wash),
    * `hex` (hexagons), `grid` (square cells one cell wide) or `contours` (lines of equal density).
-   * Defaults to `smooth`.
+   * Defaults to `none`, as on `<mosaica-map>`.
    */
   density?: DensityMode;
   /**
@@ -779,7 +779,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     points: true,
     radius: null,
     pointOpacity: null,
-    density: 'smooth',
+    density: 'none',
     densityCounts: null,
     densityCounter: null,
     densityResolution: DEFAULT_DENSITY_CELL_PX,
@@ -857,7 +857,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
       this.state.ownCounted = store;
       this.lookOwnCounter();
     }
-    own.set({on: (this.props.density ?? 'smooth') !== 'none', cellPx: this.props.densityResolution ?? DEFAULT_DENSITY_CELL_PX});
+    own.set({on: (this.props.density ?? 'none') !== 'none', cellPx: this.props.densityResolution ?? DEFAULT_DENSITY_CELL_PX});
   }
 
   /** Tell the layer's own counter where the viewport is. */
@@ -1224,7 +1224,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
    * wash in a ramp, whose colours fill the ground under the names.
    */
   private platesLabels(): boolean {
-    const mode = this.props.density ?? 'smooth';
+    const mode = this.props.density ?? 'none';
     return mode === 'hex' || mode === 'grid' || (mode === 'smooth' && this.densityColours(mode) !== 'warm-grey');
   }
 
@@ -1248,7 +1248,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
    */
   private densityLayers(timings: {densityMs: number}): Layer[] {
     const started = performance.now();
-    const mode = this.props.density ?? 'smooth';
+    const mode = this.props.density ?? 'none';
     const scheme = this.props.scheme ?? 'dark';
     const colours = this.densityColours(mode);
     const strength = Math.min(1, Math.max(0, this.props.densityStrength ?? 1));
