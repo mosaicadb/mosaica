@@ -31,13 +31,13 @@ const VERBS: readonly ClauseVerb[] = ['filter', 'highlight'];
 const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : countText(n));
 
 /**
- * The field column: what the cards count, the clauses applied, and one `<mosaica-field-card>` per
+ * The filter panel: what the cards count, the clauses applied, and one `<mosaica-field-card>` per
  * field.
  *
  * The subject row names what the cards' solid bars count, In view and the number of matching items
  * in the camera's box (the store's counts in view), or Highlighted and the number highlighted there
  * while a highlight is set, with a × that clears the highlight. Beside it, All matching names what
- * the pale bars count: every item the filters admit, from an aggregate the column keeps registered.
+ * the pale bars count: every item the filters admit, from an aggregate the panel keeps registered.
  *
  * While any clause is applied, a line lists each as a chip: a filter clause plain, a highlight
  * clause in the highlight colour, and a `member_of` clause by its cluster's name. Pressing a

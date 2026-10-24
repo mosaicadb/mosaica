@@ -86,7 +86,7 @@ describe('<mosaica-explorer> parts', () => {
     for (const part of ['item-card-headline', 'artifact-card-headline', 'selection-items', 'status-refusal', 'map-refusal', 'status-refresh', 'status-reauthorise']) expect(seen, part).toContain(part);
   });
 
-  it('forwards the field cards’ parts, and their search boxes’, through the field column', async () => {
+  it('forwards the field cards’ parts, and their search boxes’, through the filter panel', async () => {
     const {host, shadow, store} = await explorer();
     store.set('filters', {...store.get('filters'), draft: {filter: {archive: {family: 'category', keys: ['cs']}, author: {family: 'keyword', needle: 'Ada', op: 'eq'}}, highlight: {}}});
     await settle(host);
@@ -132,7 +132,7 @@ describe('<mosaica-explorer> narrow layout', () => {
     expect([...registered(store).keys()]).toEqual([]);
     shadow.querySelector<HTMLButtonElement>('[role="tab"][data-sheet="filters"]')!.click();
     await settle(host);
-    // The sheet's field column folds its cards to a line, so they ask for their counts in view alone.
+    // The sheet's filter panel folds its cards to a line, so they ask for their counts in view alone.
     expect([...registered(store).keys()].map((id) => id.split('#')[0]).sort()).toEqual(['field-subject', 'fields-match']);
   });
 
@@ -393,7 +393,7 @@ describe('<mosaica-explorer> the item card beside its point', () => {
 });
 
 describe('<mosaica-explorer> layouts', () => {
-  it('puts the field column on the left, docked in a sidebar or in a card over the map, and nothing on the right', async () => {
+  it('puts the filter panel on the left, docked in a sidebar or in a card over the map, and nothing on the right', async () => {
     const docked = await explorer('<mosaica-explorer layout="docked"></mosaica-explorer>');
     expect(docked.shadow.querySelector('[part="sidebar"] mosaica-filter-panel')).not.toBeNull();
     expect(docked.shadow.querySelector('[part="panel"]')).toBeNull();

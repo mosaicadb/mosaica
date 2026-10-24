@@ -99,7 +99,7 @@ await page.selectOption('#principal', String(broadIndex));
 await settled();
 await shot('01-broad-opened');
 
-// Open the field column: at a narrow width it is behind the `Fields` tab.
+// Open the filter panel: at a narrow width it is behind the `Fields` tab.
 const filterPanel = page.locator('mosaica-filter-panel').first();
 if ((await filterPanel.count()) === 0 || !(await filterPanel.isVisible().catch(() => false))) {
   const tab = page.locator('[part="tabs"] button', {hasText: 'Fields'}).first();

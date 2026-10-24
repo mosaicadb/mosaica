@@ -101,7 +101,7 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
 }
 
 /**
- * One field as a card in the field column: a category's commonest values, a layer's largest
+ * One field as a card in the filter panel: a category's commonest values, a layer's largest
  * clusters, a number's or a date's histogram, or a text field's search box, under the field's name.
  * `field` is a column `meta.filterOperands` lists, or `cluster:<layer>` for a layer whose clusters
  * can be filtered by.

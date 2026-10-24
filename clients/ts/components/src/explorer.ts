@@ -118,7 +118,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * under it, else the view's name alone. A view's name that is only its id is left out. With
  * several views the view's name is the view choice.
  *
- * The left holds the heading and the field column (`<mosaica-filter-panel>`): what the cards count,
+ * The left holds the heading and the filter panel (`<mosaica-filter-panel>`): what the cards count,
  * In view or Highlighted beside All matching, the clauses applied as chips with Clear all, one
  * `<mosaica-field-card>` per field, and Add field. `layout="docked"` puts them in a sidebar left of
  * the map; `layout="overlay"` puts them in a card over the map's top-left, which scrolls inside
@@ -161,7 +161,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * of 264 px, every field card folded to one line until one is opened, and opening one folds the
  * one open before; the tools move to the bottom-left and the strip shortens its figures. In a
  * container 720 px wide or narrower, the status strip runs full width above a tab bar (Fields,
- * Layers, Item), and each tab opens its panel as a sheet: the field column, folded as in the
+ * Layers, Item), and each tab opens its panel as a sheet: the filter panel, folded as in the
  * compact form; the Layers popover's sections; and the item card. The cards over the map are not
  * drawn there.
  *
@@ -172,7 +172,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @category Elements
  * @slot toolbar - Replaces the view picker and the key picker.
  * @slot layers - Replaces the layer picker, in the Layers popover.
- * @slot filters - Replaces the field column.
+ * @slot filters - Replaces the filter panel.
  * @slot selection - Replaces the selection panel, shown while a region is selected.
  * @slot detail - Replaces the item and artifact cards, in the card beside the point.
  * @slot status - Replaces the status strip drawn on the map.
@@ -278,7 +278,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart key-picker-<part> - A part of the inner `<mosaica-key-picker>`.
  * @csspart layer-picker-<part> - A part of the inner `<mosaica-layer-picker>`.
  * @csspart filter-panel-<part> - A part of the inner `<mosaica-filter-panel>`.
- * @csspart field-card-<part> - A part of a `<mosaica-field-card>` in the field column.
+ * @csspart field-card-<part> - A part of a `<mosaica-field-card>` in the filter panel.
  * @csspart filter-<part> - A part of a `<mosaica-filter>` search box on a card.
  * @csspart cluster-filter-<part> - A part of a `<mosaica-cluster-filter>` search box on a card.
  * @csspart selection-<part> - A part of the inner `<mosaica-selection>`.
@@ -406,7 +406,7 @@ export class MosaicaExplorer extends MosaicaElement {
       .pickers[hidden] {
         display: none;
       }
-      /* The field column's subject row draws the rule under the heading. */
+      /* The filter panel's subject row draws the rule under the heading. */
       .head {
         display: flex;
         align-items: center;
@@ -729,7 +729,7 @@ export class MosaicaExplorer extends MosaicaElement {
   @property({reflect: true}) accessor layout: 'docked' | 'overlay' = 'docked';
   /**
    * Which regions appear, space- or comma-separated, from `toolbar` (the heading), `legend` (the
-   * Layers button and its popover), `filters` (the field column), `selection` and `detail` (the
+   * Layers button and its popover), `filters` (the filter panel), `selection` and `detail` (the
    * item and artifact cards). Defaults to all five. Any other name, such as `hierarchy`, shows
    * nothing.
    */
@@ -811,7 +811,7 @@ export class MosaicaExplorer extends MosaicaElement {
   @property({attribute: false}) accessor clusterColours: Record<string, Record<string, string>> | null = null;
   /** The dataset's title, which heads the explorer above the view's name. Unset, the view's name is the heading. */
   @property({attribute: 'dataset-title'}) accessor datasetTitle = '';
-  /** Passed to the field column's `pinned`: the columns whose cards are listed before they hold a clause. */
+  /** Passed to the filter panel's `pinned`: the columns whose cards are listed before they hold a clause. */
   @property({attribute: 'pinned-filters'}) accessor pinnedFilters = '';
   /** Leaves the palette and ramp choices out of the Colour section, for a host that sets them. */
   @property({type: Boolean, attribute: 'hide-palettes'}) accessor hidePalettes = false;

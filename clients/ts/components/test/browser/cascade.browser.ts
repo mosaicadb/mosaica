@@ -173,7 +173,7 @@ describe('the map’s toolbar in a bottom corner', () => {
   });
 });
 
-describe('the field column', () => {
+describe('the filter panel', () => {
   it('renders a card’s rows from the counts registered, and Tab from its search box reaches a row’s Highlight and shows it', async () => {
     const p = await page('<div style="width: 340px"><mosaica-filter-panel pinned="archive"></mosaica-filter-panel></div>');
     const seen = await p.evaluate(async () => {
