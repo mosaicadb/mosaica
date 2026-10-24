@@ -843,7 +843,7 @@ paths:
             type: string
           examples:
             codes:
-              summary: "What three codes of `primary_category` stand for: codes a client read from a points frame"
+              summary: "What three codes of `primary_category` stand for, as a client reads them from a points frame"
               value: "33,50,164"
         - name: after
           in: query

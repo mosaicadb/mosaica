@@ -1,0 +1,22 @@
+{# Copied from essentials-openapi 1.4.0's partial of the same name. Changed: a named example is
+   headed by its `summary` and its `description`, and an empty value such as `{}` is shown. The
+   lines are indented for a tab of the request body; the responses partial indents them further. #}
+{% for example in handler.get_content_examples(definition) %}
+    {% if example.value is not none %}
+    {%- with named = (definition.examples or {}).get(example.name) or {} %}
+    {%- if named.summary %}
+
+    **{{named.summary}}**
+    {%- endif %}
+    {%- if named.description %}
+
+    {{named.description | indent(4)}}
+    {%- endif %}
+    {%- endwith %}
+
+    ```json
+    {{handler.write_content_example(example, content_type) | indent(4) | safe}}
+    ```
+    {% if example.auto_generated %}<span class="small-note">⚠️</span>&nbsp;<em class="small-note warning">{{texts.auto_generated_example_note}}</em>{% endif -%}
+    {% endif %}
+{% endfor %}

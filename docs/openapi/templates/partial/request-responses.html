@@ -1,5 +1,6 @@
 {# Copied from essentials-openapi 1.4.0's partial of the same name. Changed: an inline
-   response's description is written. #}
+   response's description is written, and its examples are the request body's partial, one tab
+   deeper. #}
 <p class="responses-title"><strong>{{texts.responses}}</strong></p>
 
 {% for code, definition in operation.responses.items() %}
@@ -16,14 +17,7 @@
     {%- with content = handler.simplify_content(definition.content) %}
     {% for content_type, definition in content.items() %}
     === "{{content_type}}"
-        {% for example in handler.get_content_examples(definition) %}
-        {% if example.value %}
-        ```json
-        {{handler.write_content_example(example, content_type) | indent(8) | safe}}
-        ```
-        {% if example.auto_generated %}<span class="small-note">⚠️</span>&nbsp;<em class="small-note warning">{{texts.auto_generated_example_note}}</em>{% endif -%}
-        {% endif %}
-        {% endfor %}
+{% filter indent(4, true) %}{% include "partial/content-examples.html" %}{% endfilter %}
         {% if "alt_types" in definition %}<em class="small-note alt-types">{{texts.other_possible_types}}: {{definition.alt_types | join(", ")}}</em>{% endif %}
 
         ??? hint "{{texts.schema_of_the_response_body}}"
