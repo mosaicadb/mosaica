@@ -1793,6 +1793,9 @@ fn main() -> ExitCode {
             tracing_subscriber::fmt()
                 .with_writer(std::io::stderr)
                 .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+                // A failed write to stderr, as once the process reading it has gone, is not
+                // reported on stderr: that report is an `eprintln!`, which would panic.
+                .log_internal_errors(false)
                 .init();
             // SIGTERM or SIGINT ends the process at once, including while the bundle opens. A
             // write is fsynced before it is acknowledged, so stopping loses no acknowledged write,
