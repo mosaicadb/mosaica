@@ -188,7 +188,7 @@ artifacts to avoid the duplication.
 ## How many artifacts a tile shows
 
 A `flat`, `stacked` or `tiered` layer is served tile by tile
-([queries](queries.md#the-artifacts-in-each-tile)). The request names a quota, `per_tile`: the
+([queries](queries.md#annotations-on-the-map)). The request names a quota, `per_tile`: the
 most artifacts one level shows in one tile. For each tile and each level, the server takes the
 artifacts this viewer is served that have at least one member the viewer can see inside the tile.
 It orders them by the viewer's count of the artifact's visible members across the whole view,
@@ -339,8 +339,8 @@ the viewer cannot see. It says strictly less about the corpus than the boundary 
 already infer from the count and the members drawn on the map.
 
 Supplied content, the count, the centroid, the box and the two flags reach a client with the
-[artifacts of each tile](queries.md#the-artifacts-in-each-tile). A hull or an authored shape is read
-by the artifact's `mosaica_id`, or in a [bulk read](queries.md#what-a-read-of-artifacts-returns) of
+[artifacts of each tile](queries.md#annotations-on-the-map). A hull or an authored shape is read
+by the artifact's `mosaica_id`, or in a [bulk read](queries.md#reading-in-bulk) of
 its layer.
 
 ### Colour slots

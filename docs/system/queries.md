@@ -1,718 +1,198 @@
 # Queries
 
-Every response to a viewer's query (a count, a sampled point, a label, a cluster's shape) is
-computed from that viewer's own visible items, never filtered out of an answer computed for
-everyone. A drawn selection makes the difference concrete: asking how many of a viewer's own
-points fall inside a shape they just drew returns the exact count for that shape, computed against
-their own visible set at the moment they ask.
+This chapter describes what you can ask a Mosaica server, and what comes back. It uses the same example as the [data model](data-model.md): a collection of research papers, laid out by their abstracts, with a layer of topics over them.
 
-A filter and a drawn region each narrow what a viewport draws; a highlight marks a subset of it
-without narrowing. None of them can widen a response beyond what the viewer's own credentials
-permit.
+Every answer is computed from the items the viewer may see. A count never includes an item hidden from the viewer, and a filter can only narrow what they see, never widen it. [Access control](access-control.md) explains how a viewer's visible items are decided.
 
-## The viewport
+The questions you can ask are:
 
-A viewport request names a view, a zoom level, and either a bounding box or an explicit list of
-tiles. Points are stored in Morton order, an established way of arranging two-dimensional data so
-that points near each other in space stay near each other on disc. A tile at any zoom level is
-therefore one contiguous run of rows, and a count over it is bitmap arithmetic against the
-viewer's own visible set rather than a scan of the tile's contents.
+| Question | Route | Used for |
+|---|---|---|
+| What is in these map tiles? | `POST /v1/viewport` | drawing the map |
+| Which annotations are in these tiles? | `POST /v1/artifacts/viewport` | drawing cluster and topic labels |
+| What values does this category have? | `GET /v1/categories/{column}`, and `/suggest` | filter lists and typeahead |
+| What is this one item? | `POST /v1/items/{mosaica_id}` | an item card |
+| Give me every matching item, or annotation | `POST /v1/items`, `POST /v1/artifacts` | exports, tables, analysis |
+| How are the matching items distributed? | `POST /v1/aggregate` | charts, breakdowns, comparisons |
 
-A request can also carry a cap on how many points to return per tile (`k`), a filter, a highlight,
-which annotation layers to tag the points with, and how many levels deeper than the requested zoom
-to compute an exact sub-cell grid for (`underlay_offset`). Naming more tiles than a published
-ceiling allows, nesting a filter expression deeper than the deployment permits, or asking for a
-sub-cell depth or budget past its own ceiling, is refused rather than clamped: an oversized request
-is refused outright, never answered with less than it asked for.
+All of them take the same [filters](#filters). The Python and TypeScript clients wrap each route, and the [capabilities](../reference/capabilities.md) table names the call on each surface.
 
-```mermaid
-flowchart LR
-  req["view, bounds + zoom<br/>(or explicit tiles)"] --> tiles["tiles<br/>each a contiguous row range"]
-  set["the visible set,<br/>then filters"] --> per
-  tiles --> per["per tile: rows in range ∩ set"]
-  per --> count["counts:<br/>visible, matched, highlighted"]
-  per --> sample["sampled points<br/>floor, threshold, cap"]
-  per --> cells["sub-cell counts"]
-  sample --> tags["each point's artifact<br/>in each layer named"]
-  count --> resp["one framed response"]
-  tags --> resp
-  cells --> resp
-```
+## Drawing the map
 
-*A viewport request resolves to tiles, each a contiguous row range answered against the viewer's
-own visible set.*
+A map is drawn tile by tile. A viewport request names a view, a zoom level, and the area on screen, as a bounding box or a list of tiles. For each tile, the answer carries:
 
-The response answers each requested tile with three exact counts, `visible`, `matched` and
-`highlighted`. Alongside the counts it carries a sample of points drawn from the tile; `k = 0` asks
-for the counts alone, with no points at all, the cheapest way to read the shape of a viewer's own
-data without drawing anything. Where the request also asked for a finer grid of sub-cells beneath
-the points, the response carries an exact count for each of those sub-cells too: the same masked
-arithmetic, taken one or more zoom levels deeper, with no points attached. Drawn as a continuous
-shaded field rather than individual marks, this sub-cell grid gives a sense of density in regions
-too sparse or too crowded for the drawn marks alone to convey.
+- **Three counts**: `visible`, the items in the tile the viewer may see; `matched`, those that pass the filter; and `highlighted`, those that also pass the [highlight](#highlighting).
+- **A sample of points to draw**, each with its `mosaica_id`, its position and its rendered fields.
+- **Each point's annotation**, for each layer the request names: the artifact it belongs to, so the client can colour points by topic.
+- **Optionally, counts for finer cells** beneath the tile, which a client can draw as shading to show density where the points are too many to draw.
 
-Each point carries the item's values for the view's rendered fields. A number, bool, timestamp or
-string the item does not hold arrives as a null, so a client can tell it from a zero. A category
-the item does not hold arrives as code 0, which every vocabulary reserves for no value. A
-conformance test compares these values with the source corpus for every item, over three number
-columns, a timestamp and a bool that hold both absences and genuine zeros, with absences written
-by the build and by a flush, live, after a restart and after a fold.
+Answers stream back as Apache Arrow frames, a tile at a time, so a client can start drawing before the whole answer has arrived. A request with `k` set to 0 asks for the counts alone, with no points.
 
-Where a request names annotation layers, each point carries, for each of them, the `mosaica_id` of
-the artifact it belongs to that this viewer is served, the deepest where the layer has several, or a
-null. A `nested` or `dag` layer's tags are cut to the request's `artifact_budget`, so a tag can name
-an ancestor of the artifact the point belongs to. A client colours points by a layer from these
-tags. The artifacts themselves, with their counts, centroids and boxes, are not in a viewport
-response. They are read tile by tile from [their own route](#the-artifacts-in-each-tile).
+### Which points are drawn
 
-## The visible set and the filtered set
+A tile at a wide zoom may hold millions of items, far more than a screen can show. Mosaica draws a sample, chosen by three rules:
 
-Every viewer has an authorised set: everything their session's terms admit, computed once when the
-session opens ([access control](access-control.md#what-a-request-answers-from)). Every request
-composes the authorised set against the overlay, the record of items currently deleted or
-suppressed, to get the visible set: read fresh each time, so a suppression applies to every session
-immediately ([access control](access-control.md#what-a-request-answers-from)). A filter narrows
-the visible set further, to a filtered set of items matching the query. A filter can only narrow,
-never widen: no combination of clauses ever draws or counts an item outside what the viewer's own
-credentials permit.
+- **A floor.** Every tile that holds an item the viewer may see shows at least a few. A viewer who may see very few items never gets a blank map.
+- **A threshold.** Dense tiles show more points than sparse ones, in proportion to how many items the viewer may see across the whole view.
+- **A cap.** No tile returns more than a set number of points, `k`, which bounds cost and clutter.
 
-```mermaid
-flowchart TB
-  subgraph vis["the visible set: the authorised set, minus the overlay"]
-    subgraph filt["the filtered set: visible set ∩ filters"]
-      pts["points drawn<br/>matched counts"]
-    end
-    lab["labels and artifacts:<br/>gated on the whole visible set"]
-    lod["density rules:<br/>anchored on the whole visible set"]
-  end
-```
+Which items are drawn first is decided by a fixed rank derived from each item's `mosaica_id`, so the sample is spread evenly and is the same each time. The sample also nests across zoom levels. A point drawn at one zoom is still drawn when the viewer zooms in, and more points appear around it, so points do not flicker in and out.
 
-*The filtered set narrows within the visible set; only points drawn and matched counts read it.*
+The sample is drawn from the viewer's own visible items, never from everything with the hidden ones removed. The density rules count against everything the viewer may see, not the filtered set, so the number of points in a tile does not jump as a viewer types a filter.
 
-Labels, whether a cluster or hierarchy artifact is served at all, and the viewer's own visible
-total across the whole view, which decides how many marks a tile is allowed, are all decided
-against the visible set, never the filtered one. Anchoring these to the filtered set instead would
-make them move for reasons unrelated to what a filter narrows. A label could disappear the moment
-a query excluded one of the items it describes. The number of marks a tile shows could shift as a
-viewer typed, independent of how many of those marks matched.
-
-One count follows from having both sets on hand for free: a single request can return how many of
-a tile's visible items matched a filter alongside how many were visible at all, for two bitwise
-operations. This lets a client highlight the matches against everything else still shown, rather
-than hiding everything that did not match and leaving a handful of points on an otherwise blank
-map.
-
-## How many points are shown
-
-A tile can hold far more visible items than a screen can usefully draw. Rather than a flat cap on
-how many marks appear, each tile is served a number of points chosen from three density rules
-working together. Every item carries a fixed, pseudo-random rank derived from its own
-[`mosaica_id`](data-model.md#naming-an-item) rather than from any internal ordering, so which
-items appear first at a coarse zoom is unrelated to how an item came to be authorised.
-
-| Rule | What it does |
-|---|---|
-| A floor | guarantees a minimum number of marks in any tile that has visible items at all, so a viewer with few visible items never sees a blank tile where visible ones exist |
-| A threshold | admits roughly a fixed proportion of a tile's visible items, scaled against the viewer's own visible total across the whole view, so denser tiles show more marks than sparse ones |
-| A cap | bounds how many marks a single tile ever returns, whatever the threshold would otherwise admit, so cost and visual clutter stay bounded |
-
-The three rules nest across zoom: an item served in a parent tile is still served in whichever of
-its children contains it, so panning and zooming in never make a previously visible mark disappear
-only to reappear later.
-
-A request's `k` defaults to the deployment's cap on marks per tile, and a client may ask for fewer.
-**It must not ask for fewer while zooming in, or a mark it was already showing can vanish.**
-
-Every tile's answer is computed fresh from the viewer's own visible set at request time.
-
-At the shallow zooms a tile serves a few of its many visible items, and those are the items with
-the smallest ranks, so they are read from a segment's identity bands rather than from every visible
-item. Band `j` holds each item whose `mosaica_id` has at least `j` leading zero bits, about one item
-in `2^j`, with its position and rendered values copied beside it. Any band that holds every rank
-below the threshold can answer a tile; selection starts at the narrowest one expected to hold as
-many of the tile's visible items as it serves, which is wider than the narrowest holding every
-rank below the threshold where the tile's floor asks for more. Each entry is tested against the
-viewer's visible set before it is counted, and the band answers when it holds at least as many
-visible entries as the tile serves; otherwise a wider band is tried. A tile whose visible items are
-too few for the widest band is read from the full identity column. Either way the served items are
-the same. A deletion or suppression takes effect through the visible set, so nothing in the bands
-changes when one is accepted.
-
-## The artifacts in each tile
-
-`POST /v1/artifacts/viewport` answers which artifacts lie in each tile: clusters, regions, hierarchy
-nodes and their labels. It names a view, a zoom and either a bounding box or a list of tiles, as a
-viewport request does, with the layers to answer for and a quota, `per_tile`, which is required. A
-request may also name the levels of each layer to answer for, by default those whose declared zoom
-range holds the request's zoom; which of `centroid` and `box` to serve, as `computed`, narrowing
-what the layer declares; a filter and a highlight; and a budget for `nested` and `dag` layers. A
-`per_tile` above `selection.max_artifacts_per_tile` in `/v1/meta` is refused, as is a request for a
-shape, which is read by an artifact's `mosaica_id` instead.
-
-For each tile, and each level of a `flat`, `stacked` or `tiered` layer, the response holds the
-artifacts this viewer is served that have a member the viewer can see in the tile, at most
-`per_tile` of them. They are ordered by the viewer's count of each artifact's visible members over
-the whole view, largest first, and then by `mosaica_id`
-([annotations](annotations.md#how-many-artifacts-a-tile-shows)). An artifact with visible members
-in several tiles is in each tile's frame, with the same count, centroid and box. Every number is
-taken over all of the artifact's members this viewer can see, wherever they lie, so a client
-holding several tiles can draw an artifact once. The filter and highlight flags are the exception:
-each is taken over the artifact's visible members inside the tile. A filter changes nothing else,
-and a filtered request serves the same artifacts with the same counts.
-
-A `nested` or `dag` layer is answered over all the requested tiles together, cut to the request's
-budget by serving ancestors in place of their descendants, as one frame with no tile. A dependent
-artifact is served in a tile only where its target is in that tile's frame or in the frame for
-those layers, when the request also names the target's layer.
-
-### How a client asks for a layer
-
-The TypeScript store asks for the artifacts of the layers it draws by tile, at a depth of the
-camera's zoom rounded down, plus two, so a tile is 128 to 256 pixels across. The depth stops at 16,
-so from a camera zoom of 15 a tile is wider than 256 pixels. A request names at
-most 558 tiles, the most a 3840 by 2160 screen touches at that depth, or
-`selection.max_tiles_per_request` where that is fewer, and a larger screen is asked for one depth
-coarser, then another, until its tiles fit. The store has no quota of its own: a host sets
-`artifacts.perTile` when it creates the store, and without it a drawn layer shows nothing and the
-store says what to set. So the tiles in view times `perTile` bounds the artifacts one level draws.
-
-Each tile's frame depends only on the tile, the layers the request names, their levels, the filter
-and the response's identity and content keys. The layers named matter because a dependent is served
-only where its target is in the frame. The store holds each frame by filter, depth and tile, and
-records inside it which layer and level pairs it answered. A view that has settled asks only for the
-tiles it does not hold, the centre first. A `nested` or `dag` layer is cut over the whole request,
-so the store holds its frame for the view alone and asks for every tile each time. At idle the store
-asks for the ring of tiles around the view and for the view one depth coarser, so a pan or a step
-out draws from held tiles. Held tiles are capped, the least recently drawn leaving first, and all of
-them are dropped when either key changes. A layer the points are coloured by is named in the
-viewport request, so each point carries its tag. Where a tag names an artifact no held tile carries,
-such as one past a tile's quota, the store reads it with a bulk read by `ids`.
-
-The Python client reads the same route with `Viewer.viewport_artifacts` and
-`Database.viewport_artifacts`, each returning a `pyarrow.Table` with a `tile` column, and reads
-artifacts by identifier with `ids=` on `Viewer.artifacts` and `Database.artifacts`. `mosaica
-artifacts --ids` does the same at the command line, which has no viewport command and so no tile
-route.
+!!! warning "Keep `k` steady while zooming in"
+    `k` defaults to the server's cap. A client may ask for fewer points per tile, but if it lowers `k` while zooming in, a point it was already showing can disappear.
 
 ## Filters
 
-A filter is built from five families of predicate, one per kind of declared field:
+A filter is a JSON expression over the declared fields. Each kind of field has its own operators:
 
-| Family | What it matches | How |
+| Field kind | Operators | Example |
 |---|---|---|
-| Category | a value from a declared, named set | an exact value, or membership in a list of values |
-| Keyword | an identifier stored exactly as given | an exact match, membership in a list, a prefix, or a substring |
-| Number | a numeric value | an exact match, or a bound on either or both sides |
-| Date | a point in time | the same kind of bound as a number |
-| Text | analysed prose | every named word present by default, at least a stated number of them on request, or an exact phrase |
+| Category | `eq`, `in` | `{"archive": {"in": ["cs", "stat"]}}` |
+| Keyword | `eq`, `in`, `prefix`, `contains` | `{"doi": {"prefix": "10.1145/"}}` |
+| Number, true or false, date and time | `eq`, `in`, `range` | `{"year": {"range": {"gte": 2020, "lt": 2024}}}` |
+| Text | `match`, `phrase` | `{"abstract": {"match": "graph neural network"}}` |
 
-These combine into a boolean expression: every clause in a set must match, any one clause in a set
-must match, or none of a set of values must match. Negation requires naming a column and at least
-one value to exclude. A bare negation, matching everything the other clauses did not, would also
-match every item whose value in that column cannot be resolved for this viewer, reaching into what
-the viewer cannot see. Naming a value, and confining the clause to one column, keeps it a predicate
-that can only narrow a result. A text column cannot be negated: a negation subtracts from the items
-known to carry some value in a column, and a text field carries no such per-item presence value to
-subtract from.
+A field must be [indexed or rendered](data-model.md#items-and-fields) to be filtered. A category accepts its values' keys, or their codes. A `range` takes `gt` or `gte` for its lower bound and `lt` or `lte` for its upper, and either side can be left open.
 
-Naming a column the corpus has not declared, or an operator outside that column's family, is
-refused. A value is different: a filter naming a value the viewer is not permitted to see behaves
-exactly as one naming a value that does not exist at all, matching nothing either way, with no
-difference in the response that would let a viewer tell "hidden" apart from "absent."
+Text search is by word. `match` finds items containing every word given, or at least a number of them with `{"query": ..., "minimum_should_match": n}`, and `phrase` finds the words in order. Words are matched regardless of case.
 
-An integer or timestamp comparand may be sent as its decimal digits in a string, with an optional
-leading `-`. A JSON number is read as a 64-bit float by most parsers, which is exact only up to
-2^53; the string form is exact across the whole 64-bit range. This holds on every integer and
-timestamp field.
+Filters combine with `all_of`, `any_of` and `none_of`:
 
-A field declared unique ([data model](data-model.md#naming-an-item)) answers `eq` and `in` from its
-unique index. The server looks up each named value, takes the items holding them, drops deleted
-items, and intersects the result with the viewer's visible set before any other clause reads it. An
-`in` naming a thousand values costs a thousand lookups in the index, and reads none of the field's
-other values. A holder the viewer may not see matches exactly as a value nobody holds. A unique
-field with neither `render` nor `index` has no other filter structure, so it takes `eq` and `in`
-alone, and any other operator on it is refused as an operator outside its family would be.
-`/v1/meta` lists the two operators as that field's `operands`.
+```json
+{"all_of": [
+  {"archive": {"eq": "cs"}},
+  {"year": {"range": {"gte": 2020}}},
+  {"none_of": [{"primary_category": {"in": ["cs.CR", "cs.NI"]}}]}
+]}
+```
 
-A text search carries no relevance score and no ranking by how well an item matches, only a plain
-match or no match. A relevance ranking is ordinarily computed from how common each word is across
-a whole corpus, and a viewer's own results would then shift depending on documents that viewer
-cannot see. A text search stays a boolean predicate, composed with every other filter clause, for
-the same reason a category or region clause is: what an item matches must depend only on what the
-viewer themselves may see.
+Two more filters work on the map rather than on a field:
 
-A filter clause can also name one artifact directly and narrow to its own members, the same shape
-of question as a drawn region, answered against a stored membership rather than against geometry.
+- **`region`** keeps the items inside a shape: a box, a circle, an ellipse or a polygon, in the view's coordinates or, on a geographic view, in longitude and latitude. See [drawn regions](#drawn-regions).
+- **`member_of`** keeps the members of one artifact, such as the papers in one topic.
+
+!!! note "Rules for `none_of`"
+    A `none_of` must name a single field, and the values to exclude. A free-text field cannot be negated. Both rules keep a negation from reaching items whose values the viewer cannot see. `region` and `member_of` can be negated.
+
+!!! note "A hidden value matches nothing"
+    A filter naming a category value the viewer may not see behaves exactly like one naming a value that does not exist: it matches nothing, and the answer gives no hint which was the case. A field or operator that does not exist is refused.
+
+!!! note "Large integers"
+    JSON numbers lose precision above 2^53. An integer or timestamp value can be sent as a string of digits, such as `"1152921504606846976"`, which is exact across the whole 64-bit range.
+
+### Search results are not ranked
+
+A text search matches or it does not. There is no relevance score. A relevance score is usually computed from how common each word is across the whole collection, and a viewer's results would then depend on documents that viewer cannot see.
+
+### Filtering by a unique field
+
+A field declared `unique` can be filtered with `eq` and `in` even if it is neither indexed nor rendered, since its unique index finds the items holding each value. This is the quick way to find a list of papers by DOI.
 
 ## Drawn regions
 
-A box, circle, ellipse or polygon a viewer draws is sent as a clause of the same filter as any
-other, evaluated exactly against every point's own stored position rather than approximated by the
-client from which map tiles the shape happens to touch.
+A viewer can draw a shape on the map and filter to the items inside it. The shape is sent as a `region` filter, so it combines with every other filter, and it can be negated to mean everything outside it.
 
-```mermaid
-flowchart LR
-  shape["box, circle, ellipse or polygon"] --> decomp["decompose against the Morton cells"]
-  decomp --> inside["cells wholly inside<br/>→ whole row ranges,<br/>bitmap arithmetic"]
-  decomp --> edge["cells the boundary crosses<br/>→ per-point test,<br/>after masking"]
-  decomp --> outside["cells outside<br/>→ dropped"]
-  inside --> leaf["the region as a filter leaf"]
-  edge --> leaf
-```
+The test is exact, against each item's stored position. Mosaica splits the shape against the map's grid. Cells wholly inside the shape are counted whole, without reading their items, and only the cells the edge passes through are tested point by point. A large, simple shape therefore costs little more than a small one, and the cost follows the length of the shape's edge rather than its area.
 
-*A drawn shape is classified against the tile grid: cells wholly inside become a row range; only
-the boundary is tested point by point, after masking.*
+!!! note "Very long edges"
+    If a shape's edge crosses more cells than the server's `max_region_cells` setting allows, the remaining edge cells are counted as if they were inside. The answer is then exact for a slightly larger shape, and the response's `x-mosaica-region` header says so.
 
-Only the cells a shape's boundary crosses are tested point by point, after the viewer's visible set
-has already narrowed which of those points need checking at all. Cost is modelled, not measured,
-to track how long a shape's boundary is rather than how much area it encloses: a selection covering
-half the map would cost little more than a small one, while a shape with a very long, winding edge
-would cost more regardless of its size.
+## Highlighting
 
-The count is exact for the shape as drawn, unless the shape's boundary crosses more cells than a
-published limit (`max_region_cells`) allows. Then the decomposition stops early, every remaining
-boundary cell is counted as if it were inside, and the answer is exact for a shape slightly larger
-than the one drawn; the response's `x-mosaica-region` header says which case applies. A region
-clause composes with every other kind: it can sit alongside a category or text clause, and it can
-be negated to mean everything outside the shape.
+A filter narrows what is drawn. A highlight keeps everything that is drawn and marks the items that also match a second expression, so a client can light them up and dull the rest. A request can carry both: filter to computer science papers, say, and highlight those from 2024.
 
-## Highlight and filter
+A highlight never changes which points or annotations are served. Each point carries two flags, `matched` and `highlighted`, and each tile counts how many of its matched items were highlighted.
 
-A filter narrows which points are drawn; a highlight keeps every point that was already going to
-be drawn and marks which of them also match a second condition. The two are separate parts of the
-same request: a viewer can narrow the map with one clause and light a subset of what remains with
-another, or highlight without narrowing at all.
+## Annotations on the map
 
-A highlight is evaluated only over whatever a filter already matched (or, with no filter, over
-everything the viewer may see in the requested tiles), so a highlighted item is always also a
-matched one. Each served point and each served annotation artifact carries two flags, `matched` and
-`highlighted`, saying whether it satisfies the filter and the highlight, and a tile's response
-carries a count of how many of its matched items were also highlighted. None of this changes which
-points or artifacts are served: the map drawn under a highlight is identical to the map drawn
-without one, only some of it is lit and the rest dulled.
+The points of a viewport answer carry each point's artifact, but not the artifacts themselves. A client reads those, with their titles, counts, centres and boxes, from `POST /v1/artifacts/viewport`, tile by tile.
 
-A filter narrows which artifacts are flagged as matching, but it does not change which artifacts
-exist on the map or how far into a hierarchy the response descends. **Not built yet:** a mechanism
-for letting a filter change that, serving a hierarchy's structure more finely where matches
-concentrate and pruning it where a filter has emptied a region, was designed and then withdrawn,
-and nothing has replaced it. A filtered hierarchy view looks the same as an unfiltered one, except
-for which of its nodes are marked as matching.
+- **How many per tile.** The request sets `per_tile`, the most artifacts of each level a tile returns. The largest come first, by how many of their members the viewer may see.
+- **Counts are over the whole artifact.** The count, centre and box of an artifact cover all of its members the viewer may see, wherever they lie. An artifact that spans several tiles appears in each with the same figures, so a client can draw it once.
+- **Filters mark, they do not hide.** A filter does not change which artifacts are served or their counts, so topics do not appear and disappear as a viewer types. It adds a flag to each artifact saying whether any of its members in that tile match. To count the matching members of each topic, use a [breakdown by layer](#breakdowns).
+- **Hierarchies.** A `nested` or `dag` layer, a topic tree, is cut to the request's budget across all the tiles together: where too many fine topics would show, their parent is served instead. Zooming in moves the cut deeper.
 
-## Category listing and typeahead
+The [annotations](annotations.md) chapter explains which artifacts a viewer is served at all.
 
-A category's declared values can be listed outright, or resolved from codes a client already
-holds. Whether the whole value set is offered to every viewer, or only the values at least one
-visible item carries, is set once per vocabulary: some categories publish their names as authored;
-others gate each name on whether the viewer can see something wearing it.
+## Category values and typeahead
 
-Typing into a category filter is served by the same visibility rule, on its own endpoint, so the
-values offered while typing are never wider than the values the enumeration itself would offer. A
-typed prefix is matched, case- and accent-folded, against a value's own key, its title, and the
-start of each word within either, so typing part of a later word in a multi-word title still finds
-it. Matching is a fixed rule rather than a ranked one: there is no fuzzy matching and no ordering by
-popularity or recency, only the order the matched text itself falls in. A count of how many visible
-items carry a suggested value can be requested alongside it, computed for that viewer alone, and
-never used to decide which suggestions are shown or in what order. A request can carry the filter
-the viewer has applied to the map, and each count is then of the visible items in the view that pass
-it. The filter changes the counts and nothing else: a value it excludes is still offered, with a
-count of zero, because what is offered is decided over everything the viewer may see. A page with
-counts also carries the number of items they are taken over, so a client can draw each value's
-exact share.
+A client building a filter list asks for a category's values. `GET /v1/categories/{column}` lists them, and `/v1/categories/{column}/suggest` answers as a viewer types.
 
-A value the viewer cannot see behaves exactly as one that does not exist, in every suggestion as in
-every filter, but how long a request over a gated category takes reflects how many values, visible
-or not, share the typed prefix, and that timing difference is accepted rather than closed.
+- **Which values are listed** depends on the vocabulary. A public vocabulary lists every value. A derived one lists only the values carried by at least one item the viewer may see.
+- **Typeahead** matches the typed text against the start of each value's key and title, and the start of each word in either, ignoring case and accents. "neural" finds "Graph Neural Networks". There is no fuzzy matching, and results come in the order of the matched text, not by popularity.
+- **Counts.** A suggestion can carry how many of the viewer's items hold each value, under the filter the viewer has applied. A value the filter excludes is still offered, with a count of zero.
 
-## Item drill-down
+## Opening an item
 
-Opening one item returns its whole record as this viewer may see it: every declared field, every
-view the item appears in that this viewer can reach with its position there, and any attribute
-values scoped to those views. An identifier naming nothing and one naming an item this viewer may
-not see answer identically, both with a 404, so the response never distinguishes "does not exist"
-from "exists, but not for you." An artifact's or a layer's identifier names no item, even where
-its entity number in its layer space is one an item holds as its number
-([an artifact's identity](annotations.md#an-artifacts-identity)), and is answered the same way.
+`POST /v1/items/{mosaica_id}` returns one item as the viewer may see it: every field, each view it appears in that the viewer can reach with its position there, and any per-view field values.
 
-The response also says why this viewer sees the item, as a sorted list of clauses, each written as
-label text. The item's labels are read as one disjunction, as they are indexed ([access
-control](access-control.md#how-labels-are-indexed)), so `a|(b&c)` and the list `a`, `b&c` give the
-same answer. Each term among its operands that the viewer holds is listed, and a `public` label
-gives `public`. Each conjunction among its operands that the viewer satisfies gives one clause of
-it, written as the held terms whose conjunction satisfies it. Within that conjunction, at each
-disjunction the satisfied operand with fewest terms, then the first in byte order, is taken. A held
-term that appears only inside a conjunction is not listed on its own. The answer depends on the
-item's labels and the viewer's terms and on no internal number. The response never names a whole
-conjunction, a clause the viewer does not satisfy, or a term the viewer does not hold. Learning that
-an item they can see also carries one of those would tell the viewer how the corpus is labelled
-beyond what they may see. A bulk read in stored order discloses part of what this withholds: which
-of the viewer's items share a full set of index keys, as [security](security.md#reading-in-bulk)
-states.
+An item the viewer may not see answers exactly as one that does not exist, with a 404.
 
-## Reading items and artifacts in bulk
+The answer also says why the viewer may see the item: the parts of its access label the viewer satisfies, written as label text, such as `team_a` or `public`. It names nothing the viewer does not hold.
 
-Two routes return in bulk what the map is computed from. `POST /v1/items` returns every item the
-viewer may see in one view that matches a filter, with the fields the caller names. `POST
-/v1/artifacts` returns every artifact of one layer the viewer is served, or the ones a list of
-`mosaica_id`s names, with the properties the caller names. Both answer with pages of Apache Arrow
-record batches, framed as a viewport response is. A caller reads a whole result by passing each
-response's cursor back in its next request until the cursor is null, and the server keeps nothing
-between requests.
+## Reading in bulk
 
-Every page is built from the latest published data, with the visible set composed again as a
-viewport composes it, so a deletion or suppression accepted during a read applies from the next
-page. A row inserted during a read is returned if it lands ahead of the cursor and not if it lands
-behind it, and no row is returned twice. **Not built yet:** a read pinned to one version of the
-corpus. Rows returned before a flush and rows returned after it come from different versions.
+`POST /v1/items` returns every item in a view that the viewer may see and the filter matches, with the fields you name. `POST /v1/artifacts` does the same for the artifacts of one layer, or for a list of `mosaica_id`s. Use them for exports, tables and analysis.
 
-### What a read of items returns
+- **Pages of Arrow.** Results arrive as pages of Apache Arrow record batches. Each response ends with a cursor, and you pass it back to continue, until it is null. The Python client, the TypeScript client and the `mosaica items` and `mosaica artifacts` commands follow the cursor for you.
+- **Fields.** Name the fields you want. Each row starts with `mosaica_id`. Two extra fields are available: `position`, the item's coordinates in the view, and `labels`, why the viewer may see it. A field an item has no value for is null. A category arrives as its values' keys.
+- **Matched and unmatched.** With `keep_unmatched`, every visible item is returned, each with a `mosaica:matched` flag.
+- **Totals.** With `count` on the first request, the answer starts with exact counts of the visible items and of those the filter matches.
+- **Artifacts.** A read of artifacts can ask for each one's parents, content, centre, box and shape, all as the viewer sees them. It can read one level, the children of one artifact, or those whose key or title contains some text. With a filter, each artifact also carries its count of matching members.
 
-A page holds `mosaica_id`, then the named fields in the order named, then either or both of two
-system fields: `position`, and `labels`, the clauses of the item's labels this viewer satisfies,
-as the item card serves them. A unique
-field is named like any other. Under `keep_unmatched` every visible item is returned, with a
-`mosaica:matched` column. Every named field is present whether or not an item holds a value, and a
-value it does not hold is a null. A category arrives as its value keys, and each page's dictionary
-holds only the keys its own rows carry.
+!!! note "Positions are rounded to the grid"
+    `position` is the stored position converted back to the view's coordinates, so it is within half a grid step of what was inserted. If you need the exact values, declare them as number fields too.
 
-`position` is the stored position converted back through the view's projection and frame, in
-degrees on a geographic view, within half a grid step of the position supplied. A caller that
-needs the exact values it supplied declares them as number fields.
+!!! note "A read is not a snapshot"
+    Each page is built from the latest data. A deletion or suppression accepted during a read applies from the next page. An item inserted during a read is returned if it lands ahead of the cursor, and no item is returned twice. Not built yet: a read pinned to one version of the data.
 
-A rendered field is read from the view the request names. The item card reads the first view the
-viewer can reach, so the two can differ where views hold different values. A field declared per
-view of a group resolves as a filter leaf on it does, and is pinned as `<field>@<key>` under a view
-outside its group. An item joined into a second view before its own ingest is flushed has null
-record fields until that flush.
+A cursor is sealed, so it cannot be read or forged. It works only for the read it came from, and only for a session with the same access. It stays valid across restarts and background maintenance.
 
-The rows come in one of two orders, which return the same rows. Map order is by map cell in the
-view, then by `mosaica_id`, merged across the view's segments in every shard, which is the order
-rendered fields are stored in. Stored order walks the bundle's point shards, the spaces its items
-are numbered in ([write path](write-path.md#admission)), in shard number order, and within a shard
-follows the server's internal item numbering, which is the order the shard's record store holds
-items in. In map order a page's items are scattered through the record store, so each page
-decompresses blocks it uses only a few rows of, and the smaller the pages, the more often each block
-is decompressed over a read. Each field's `homes` in `/v1/meta` says where its value is read from:
-the view's rendered columns, a per-item value column, or the record store. A request with neither
-`order` nor a cursor is served in stored order if any named field's only home is the record store,
-and in map order otherwise. That choice may change.
+## Counts and breakdowns
 
-Within each shard, stored order groups a viewer's items by their full set of index keys,
-including keys the viewer does not satisfy. [Security](security.md#reading-in-bulk) states what
-that discloses.
+`POST /v1/aggregate` answers how the items a viewer may see are spread out. A request names a set of items, as a filter, and one or more groupings. It gets back one table of exact counts for each.
 
-### What a read of artifacts returns
+### Breakdowns
 
-A read of artifacts walks one layer level by level, and within a level in the order the artifacts
-were published. The server does not reorder them, so the order says nothing about access labels.
-For each artifact, a page runs the viewport's own verdict: the artifact's access label, its
-layer's membership requirement over the viewer's visible members, and whether the viewer may read
-its content. An artifact the viewer is not served leaves no row, no count and no entry in another
-artifact's `parents`. An attached artifact, such as the label on a cluster, is served only while
-the artifact it is attached to is.
-
-If the layer stops being published to the viewer, the response under way ends as though no
-artifact remained, and the next request is refused as naming an unknown layer. A layer dropped and
-registered again under the same name is another layer, and a cursor from the first does not open
-for it.
-
-`ids` reads the artifacts those `mosaica_id`s name, such as the tags on points a client holds no
-artifact for. An identifier the viewer is not served has no row, as one naming nothing does. A
-read by `ids` builds the figures of the levels its identifiers name and no others, with the levels
-of their parents where `parents` is asked for and the levels of their targets where a target or a
-filter needs them, so it does not wait for a walk of a level it does not read. `level` reads one
-level of a levelled layer. `parent` reads the artifacts that name one artifact
-among their parents, and a parent the viewer is not served answers as a parent with no children
-does. `q` keeps the artifacts whose key, or first text content the viewer is served, contains it,
-ignoring case, and cannot be combined with `parent`. A filter keeps the artifacts with at least one
-visible member that matches and adds each one's count of matching members; `keep_unmatched` keeps
-the rest too, with a count of 0. An attached artifact is kept, dropped and counted as its target
-is.
-
-These properties depend on the viewer:
-
-- `parents` lists only the parents this viewer is also served.
-- `content` is the one set of supplied content this viewer is served, with an authored shape's slot
-  empty. The shape for this view is served as `shape`.
-- `centroid` and `box` are taken over the members this viewer can see, in the view's coordinates.
-  On a geographic view the centroid is the members' mean in the projected plane, converted to
-  degrees: the point the map draws, which differs from the mean of their longitudes and latitudes.
-- `shape` is Well-Known Binary: a hull over the members this viewer can see, or a predicate or
-  authored shape whole. A hull over one or two members, or over members on one line, is a polygon
-  of zero area whose rings are still closed and at least four points long.
-
-### Pages, responses and the cursor
-
-A page ends at `page_rows` rows, held to `selection.max_page_rows`, or before the row that would
-take its Arrow bytes past `selection.max_page_bytes`. A single larger row is sent alone. Each page
-is followed by a page end holding the cursor after it, and each response closes with a trailer
-holding the cursor for the next request. [Serving](serving.md#bulk-reads) says what ends a
-response and how a client resumes one that is cut.
-
-Every response moves the cursor on, even under a very sparse filter, unless it is cancelled before
-its first page. The trailer's cursor can lie past the last page end, where the scan went on
-without finding a row. A response that finds no row carries one page of no rows, so that every
-response gives the read's columns and their types.
-
-A cursor is sealed, so a caller can neither read one nor make one. It opens only in the read it was
-issued for, and only in a session opened with the same authorisation data;
-[security](security.md#reading-in-bulk) lists what it is bound to. A cursor that does not open is
-one 422, whatever the reason, including a cursor issued by another bundle, whose key differs. A
-cursor stays valid across flushes, merges, compactions and restarts, because the position it holds
-is a value each page finds again in whatever segments it reads. The cursor fixes the order, and a
-request naming another order is refused. It does not bind the fields, the filter, `keep_unmatched`
-or the page size, which may change between the requests of one read.
-
-With `count` on its first request, a read's head carries two exact counts taken at the start of
-the response. On items they are the visible items in the view, which is the count the viewport
-serves, and those the filter matches. On artifacts they are the artifacts served after `level`,
-`parent` and `q`, and those with a matching member. A count costs one evaluation of the filter over
-the whole view. A read driven from its matches ([filters across pages](#filters-across-pages))
-takes the count from its first stretch instead, at no cost beyond what its first page spends.
-
-### Filters across pages
-
-An items response evaluates its filter over a stretch: the part of the view ahead of the cursor, a
-range of map cells in map order or of item numbers in one shard in stored order. A read's first
-stretch spans a page's rows, held to a ceiling that `max_page_bytes` sets. Each time a stretch is
-used up, the next is four times longer, up to that ceiling, and a response stopped inside a stretch
-passes on one a quarter the size. Only the size travels in the cursor. Every response begins a fresh
-stretch, so a read evaluates its filter at least once per response. A sparse filter's stretches
-reach the ceiling in a few steps, and from then on the number of evaluations grows in proportion to
-the rows scanned.
-
-A stretch's result is held in the row positions and the visible set it was evaluated under. A
-flush, merge or compaction renumbers the rows, and a deletion, a suppression or a refreshed
-projection of the session's visible set changes the set. After any of these during a response,
-the next page evaluates its stretch again. Every page tests every row against the visible set
-composed for it, and nothing about the filter is kept between requests.
-
-A filter can bound its matches through an index: a unique field's `eq` or `in` names the items
-holding those values, and a `member_of` names the artifact's members. An `all_of` is bounded by the
-rows every bounded clause in it admits, and an `any_of` by the union of its clauses where every
-one is bounded. The bound is taken inside the viewer's visible set: each holder of a unique value
-is tested against it before any is counted, and a `member_of` answers with the members the viewer
-may see. Where the bound holds no more rows than `max_page_bytes` allows a driven stretch, about
-one row for every 40 bytes and at least 4,096 rows, the response is driven from those rows. One
-stretch runs from the cursor to the end of the view and holds only them, in the read's order, and
-the filter is evaluated over them alone. Each row is taken, tested against the visible set and the
-filter, and paged as the walk over the view would take it, so the response has the same rows,
-pages, page ends, counts, region verdict and trailer. A response stopped by its time budget is the
-exception: the two routes take different time, so each may stop at a different row, and the read
-continues from wherever the trailer's cursor says. A read driven from its matches costs the index
-lookups, twice, and the rows the bound holds, once per response and again after a flush, merge,
-compaction or change to the visible set during the response, and none of the rest of the view.
-Otherwise the response walks the view in stretches as above. Which route answers depends on the
-filter, `max_page_bytes` and how many rows of the bound the viewer may see, and on nothing the
-viewer cannot see.
-
-What a filter costs across a whole read depends on its leaves:
-
-| Leaf | Cost across a read |
+| Grouping | The table |
 |---|---|
-| number, date and keyword leaves; a category leaf on a derived vocabulary; any leaf on a rendered field | one pass over the rows of the stretches covered, in total |
-| text `match` and `phrase`; `eq` and `in` on a category that is not rendered and whose vocabulary is public | the leaf's index entries, read once per stretch evaluated |
-| `eq` and `in` on a unique field, and `member_of`, where they drive the read | the index lookups and the visible rows they name, once per response and again after a change the stretch was held under |
-| `member_of` | the artifact's visible members, once per page that evaluates a stretch |
-| `region` | the shape's cells, once per page that evaluates a stretch |
+| None | One row: how many items are in the set |
+| By a category's values | One row per value |
+| By the artifacts of one level of a layer | One row per artifact, such as per topic |
+| By bins of a number or date | A histogram |
+| A summary of a number or date | One row over everything the viewer may see in the view, ignoring the filter: the count, how many have no value, the smallest, the largest and the mean |
+| By cells of the view | One row per non-empty cell, a density grid |
+| Values or artifacts, then cells | A density grid for each group |
 
-Both orders test each row by the same rule, including a region's enlarged cover past
-`max_region_cells`.
+Each grouping lists the `top` values by count, or the values you name. Two extra rows make the counts add up: `rest`, the items in any other group, and `none`, the items in no group at all. An item can belong to several artifacts, so a layer's rows can add up to more than the set.
 
-An artifacts response evaluates its filter over the whole view, because an artifact's members can
-lie anywhere in it. It does so once per response, and again after a publication or a change to
-the visible set during the response.
+A category can be grouped if it is indexed or rendered. A number or date can be binned or summarised under the same condition.
 
-## Counts by group
+### Comparing with a reference
 
-`POST /v1/aggregate` answers how the items a viewer may see in one view are distributed. A request
-names a set, in the filter grammar the viewport takes, and one or more groupings, and receives one
-table of exact counts for each grouping. With no filter the set is every item the viewer may see
-in the view. A second set, the reference, can be named for comparison: each row then also carries
-the reference's count and the lift, the row's share of the set divided by its share of the
-reference. The reference is drawn from the same visible set, and `{}` names the whole of it, so
-the usual comparison is the viewer's selection against everything they can see.
+A request can name a second set, the reference. Each row then also carries the reference's count and the lift: the group's share of the set divided by its share of the reference. With `{}` as the reference, which means everything the viewer may see, the lift shows which archives or topics are over-represented in a selection.
 
-A grouping has an outer level, an inner level, both or neither:
+### Histograms
 
-| grouping | its table |
-|---|---|
-| neither | one row: the size of the set, which equals the viewport's matched count over the view |
-| the values of a category field | one row per value, with `rest` and `none` |
-| bins of a number or timestamp field | one row per bin, a histogram, with `rest` and `none` |
-| the summary of a number or timestamp field | one row: how many items, how many hold a finite value, how many hold none, the smallest, the largest and the mean |
-| the artifacts of one level of a layer | one row per artifact, with `rest` and `none` |
-| cells of the view at a depth from 0 to 32 | one row per non-empty cell, a density surface |
-| values or artifacts, then cells | a density surface for each group |
+Without a range, the bins' edges are readable values around the smallest and largest value the viewer may see: multiples of 1, 2, 2.5 or 5 times a power of ten for numbers, and whole seconds, minutes, hours, days, weeks, months or years for dates. The edges ignore the filter, so a histogram of the filtered set lines up with one of everything, and the edges stay put as filters change. A bin holds values from its lower edge up to, but not including, its upper edge. The last bin also holds its upper edge.
 
-The groups are the `top` values or artifacts by count, or the ones the request names. For a field,
-`rest` counts the items carrying any other value and `none` the items carrying no value, so a
-table's counts sum to the size of the set. A category field can be counted where it is declared
-with `index`, so that the engine keeps a record of which items carry each value, or with
-`render`, so that its codes lie beside each item's position in map order. Any other field is
-refused, with a detail saying to declare it one of those ways. For a layer, `rest` counts the
-items in an artifact that is not listed and in no listed one, and `none` the items in no artifact
-of the level. An item can belong to several artifacts, so a layer's rows can sum to more than the
-set. A value or an artifact is listed on the same terms as everywhere else: a value of a gated
-vocabulary only where the viewer can see an item carrying it, an artifact only where the viewport
-would serve it, tested against the viewer's whole visible set whatever the filter.
+A histogram can be computed from a sample, for speed on a large set. Ask for a sample size, and Mosaica counts a uniform sample of about that many items and scales each count up. The response says whether it did.
 
-A `nested` or `dag` layer is drawn as a cut through its tree, finer as the map zooms in, so its
-`top` artifacts are ranked at a cut: the grouping names one as `cut`, with the `zoom`, `bbox` and
-`budget` the map's own `POST /v1/artifacts/viewport` request names, and lists only the artifacts
-that request's treed frame would draw. Where the layer is declared with `prune_children = false`
-and draws ancestors beside their descendants, only those with nothing drawn beneath them are
-ranked. `rest` and `none` are then counted against the listed cut. The map and the aggregate take
-the cut from one function in the engine, so the two agree for the same view, zoom, box and budget.
-Which artifacts the cut holds is decided over the viewer's visible items in the cut's tiles; a
-filter changes only their counts and their order. `top` on such a layer without `cut` is refused,
-and so is `cut` on any other layer. The TypeScript store resolves `cut: 'drawn'` in a registered
-aggregate to the cut its map draws at that moment, and asks again when the map's view settles or
-`Store.setClusterBudget` changes the budget.
+### Topic trees
 
-A grouping by bins counts a number or timestamp field declared with `index` or `render` in at most
-the number of bins asked for, each row carrying the bin's lower and upper edge. A bin holds the
-values from its lower edge up to but not including its upper edge, and the last bin also holds its
-upper edge, so a `range` filter between two edges selects exactly one bin's items. `rest` counts the
-values in no bin and `none` the items with no value. With a range, the bins cut it into equal widths
-and `rest` holds the values outside it. With no range, the edges are readable values around the
-smallest and largest value among every item the viewer may see in the view: multiples of 1, 2, 2.5
-or 5 times a power of ten for a number, whole numbers for an integer, and whole seconds, minutes,
-hours, days, weeks from Monday, months or years in UTC for a timestamp, the finest that needs no
-more bins than were asked for. The filter, the reference and any region play no part in them, so a
-client drawing the same field over the viewport and over the filtered set gets the same edges for
-both, and the edges stay put as the filters change. The smallest and largest value are the field's
-figures, below, so they are exact and no visible value falls outside the bins. A client that sends
-the first answer's outer edges back as the range, with the number of bins it returned, gets the same
-edges, except for a timestamp binned by months or years. An integer's or a timestamp's edges are
-whole numbers worked out exactly, served as integers, so a value past 2^53 is placed as exactly as a
-small one; a range with a fractional bound has an integer field's bins cut and served as floats. A
-grouping by bins has no cell level.
+For a `nested` or `dag` layer, a breakdown can ask for the same cut the map is drawing, with `cut` and the map's zoom, area and budget, so a chart beside the map lists the topics the map shows.
 
-A grouping by bins can ask for a sample size `s`. Where the set holds `N` items and `N` is more
-than `s`, the counts are taken over the set's items whose `mosaica_id` lies below a cut of `s / N`
-of the identity range, about `s` items, and each count is scaled by `N` over the items counted, to
-the nearest whole number. The cut is the same for the whole set: no tile, cell or group has a floor
-or a cap, so a region dense in items is counted in proportion to its density. Identities are a
-keyed permutation, so the items below a cut are a uniform sample of the set. The reference is
-sampled the same way at its own cut. Without a range, the edges are the exact ones, from the
-field's figures, whether or not the counts are sampled, so a value outside the sample still falls
-in a bin. The table head says whether a count was scaled and how many items of the set and of the
-reference were counted. A set no larger than the sample size is counted exactly.
+### Density grids
 
-The items below a cut are read from the identity bands, which hold each segment's rows with the
-smallest identities, a band about half the size of the one before it. Each segment's band copies the
-values of every drawn column and of every indexed number and timestamp column, so a sampled item's
-value is read beside its identity rather than from a column at a scattered row. Each piece of a
-segment is read from the band, testing each entry against the set, or by scanning the set's own
-rows' identities, whichever the band's entry count and the set's row count, both known before
-anything is read, say costs less: a narrow viewer's set is scanned, a broad one's read from the
-band. A band entry costs about as much as 25 scanned rows, since each is a lookup in the set.
+A cell at depth `d` divides the view into a grid of 2^d by 2^d cells. Up to depth 16 a cell is a map tile. A density grid can be limited to an area, and a request for more than `selection.max_aggregate_cells` cells is refused with the deepest depth that fits. The whole view fits at depth 10.
 
-A set is counted exactly, every item read and nothing scaled, where its cut is wider than any
-band: where the sample size is more than about one item in 64 of the set. Whether a set is sampled
-depends only on its size and the sample size, both counted inside the visible set, and the choice
-between the band and a scan reads the same items, so the answer never depends on rows the viewer
-cannot see. The head then says the set was not sampled.
+!!! note "Not built yet"
+    A summary over a filtered set; histograms within cells; breakdowns of keyword fields and of integer fields by value; one grouping of a kind inside another of the same kind, such as cells within cells; and counts across views. Read the items in bulk and compute these yourself.
 
-A cell at depth `d` is the first `2d` bits of an item's 64-bit Morton position. At depths up to 16
-a cell is a tile of the map at that zoom, and its count is the tile's matched count; deeper cells
-divide a tile down to the stored position. A cell level can name an area, a bbox as the viewport
-takes one, and then lists only the cells at its depth that the area intersects, each with all of
-its items, while the table's totals and the counts that rank its groups stay the whole set's. The
-cells at a depth in an area are counted from the geometry before anything is read, and a request
-for more than `selection.max_aggregate_cells` of them is refused with the deepest depth that fits;
-the whole view fits down to depth 10. Each request counts cells by whichever of two methods costs
-less: by bitmap arithmetic over the row range of each cell where the cells are far fewer than the
-set's items, or by one pass over the set's rows reading each row's position.
+## Not built yet
 
-The response is framed as a bulk read is, with a table head before each table's first page, and a
-table larger than a page continues through a cursor. Every page composes the visible set again, so a
-deletion or suppression accepted during a read applies from the next page. The groups a table lists
-under `top` are fixed at its first page and carried in the cursor, so a table read across a changing
-corpus keeps its groups, and a response's trailer says when a page counted a different state of the
-corpus from the page before it. A histogram is always one page, whatever the page size, so its edges
-and counts are drawn together and no edge outlives the state it was drawn from. Every request runs
-under the viewport's admission, and each response is held to a byte budget of its own, 16 MiB by
-default in pages of 4 MiB, so what one request holds is bounded however large its table; a larger
-table continues through the cursor. A request stops its work when the client disconnects.
-
-### A field's figures
-
-A summary of a number or timestamp field declared with `index` or `render` is one row: the items
-the viewer may see in the view, how many hold a finite value, how many hold none, and the
-smallest, largest and mean of the finite values. A NaN or an infinity counts among the items and
-in neither of the other two. The summary is taken over the whole visible set in the view, and the
-filter, the reference and any region play no part in it, so it describes what the viewer may see,
-as a card beside a histogram does. Every figure is exact. The sum is kept exactly, as an integer
-count of 2^-1074, the smallest step between two `float64` values, so subtracting the values of
-denied rows leaves exactly the sum of the rest, and the mean is that sum over the count rounded
-once, a tie to even: on a timestamp field to the nearest microsecond, served as a timestamp, and
-on any other to the nearest `float64`.
-
-The figures are computed as a layer's artifact figures are, in three parts. The visible set `S`
-is the session's projection `P` less the rows the request's composition subtracts, `minus`, plus
-the rows it adds, `plus`. Below the bundle's base row count `B`:
-
-- **F**, the grant's base rows, `P ∩ [0, B)`. A build and a compaction store, for each view, a
-  tally of each field for each distinct list of index keys the base rows' items carry: the count
-  of finite values, their sum, the items with no value, and the eight smallest and eight largest
-  values with their rows (`field-tallies.bin`). The items of one key list are in a grant's base
-  rows together or not at all, decided by the rule the authorised set is built by: a list is
-  admitted where the grant satisfies any of its keys. F is the merge of the admitted lists'
-  tallies, and no request walks a base row to find it. A base row's value and its item's keys
-  never change between compactions: an edit gives the item a new entity, whose row is above the
-  base, and a compaction writes the file again. A field declared at a running service has no
-  stored tally, and its base rows are walked once per grant.
-- **D**, the base rows the request subtracts, `minus ∩ [0, B)`, which are the deleted and
-  suppressed rows the grant holds there. Their count, sum and items with no value are read from
-  their values once per deny version and subtracted from F's.
-- **T**, every visible row outside F, held per session and generation, and added.
-
-The count, the sum and the items with no value are `F − D + T` exactly. The smallest value of
-`F − D` is the first of F's eight smallest whose row D does not hold, since any value not kept is
-at least the last one kept, and the largest likewise. Where D holds every row kept on a side, the
-base rows left are walked for that side, once per deny version. A request that starts after a
-suppression is accepted reads the deny version it was accepted under, so the figures, and a
-histogram's default edges, are corrected from that request on.
-
-```mermaid
-flowchart LR
-  F["F: the grant's base rows<br/>merged from the base's tallies<br/>per key list"] --> S
-  D["D: denied base rows<br/>per deny version"] -->|subtracted| S
-  T["T: rows above the base<br/>per session and generation"] -->|added| S
-  S["the figures of the visible set:<br/>count, none, sum, smallest, largest"]
-```
-
-*The three parts of a field's figures. The smallest and largest of F − D come from F's eight most
-extreme rows on each side, or from a walk of F − D where D holds all eight.*
-
-A build and a fold tally the base in entity order, a span of 2^18 entities at a time, so they read
-each entity's key list and held values in the order they are stored and ask one rank a span. The
-entity terms reader finds an entity's rank from a table of each block's rank below it. An item card
-reads its labels through the same table.
-
-**Not built yet:** a summary over a filtered set, which would need a walk of the set's values for
-each request; bins of a number or timestamp field within cells; breakdowns of keyword fields and
-of integer fields by value; a grouping of one kind inside another of the same kind, such as cells
-within cells; and counts across views. A caller asks for each such figure through `/v1/items`
-and computes it.
-
-The TypeScript client reads a whole result with `MosaicaClient.aggregate`, and its store keeps each
-aggregate a component registers with `Store.setAggregate` counted over the store's current filters
-and selected region, within the camera's area or over the whole visible set where the registration
-asks, and asks again when its request changes, as
-[clients](clients.md#what-a-registration-counts-and-when-it-is-asked-again) says. The Python client
-reads one with `Viewer.aggregate`, `Database.aggregate` and `Selection.aggregate`, each table a
-`pyarrow.Table`. Both follow the cursor until the result is whole.
-
-`mosaica aggregate` reads one grouping's table from a running server and writes it as Arrow
-IPC or Parquet, following the cursor as `mosaica items` does.
-
-## What is not built
-
-**Not built yet:** typing into one box to search every category at once does not exist; a caller
-filters or suggests one column at a time.
-
-**Not built yet:** reading one result in parallel. A bulk read is one chain of requests, each
-continuing from the cursor the one before it returned, and one result cannot be split into slices
-read at once.
+- **Searching every category at once.** A typeahead covers one field at a time.
+- **Reading one result in parallel.** A bulk read is one chain of requests, each continuing from the last one's cursor.
+- **Filters that reshape a topic tree.** A filter marks which topics hold matches. It does not change how deep into a tree the map goes or prune topics it has emptied.
