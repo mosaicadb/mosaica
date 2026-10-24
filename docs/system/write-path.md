@@ -15,7 +15,7 @@ Writes go to the server's control listener, set by `[serve] control`. It is an a
     | Edit items | `POST /control/ingest` | at the next flush. The item leaves the map until then |
     | Delete items | `POST /control/changes` | on the next request |
     | Suppress items, and lift a suppression | `POST /control/changes` | on the next request |
-    | Declare fields, views, layers and vocabularies, and publish annotations | `/control/attributes`, `/control/views/…`, `/control/layers/…`, `/control/vocabularies/…` | once the server answers |
+    | Declare fields, views, layers and vocabularies, and publish annotations | `/control/attributes`, `/control/views/…`, `/control/view_groups/…`, `/control/layers`, `/control/vocabularies/…` | once the server answers |
 
 === "Python"
 
@@ -28,7 +28,7 @@ Writes go to the server's control listener, set by `[serve] control`. It is an a
     | Edit items | `Database.insert`, then `commit` | at the next flush. The item leaves the map until then |
     | Delete items | `Database.remove` | on the next request |
     | Suppress items, and lift a suppression | `Database.suppress`, `Database.unsuppress` | on the next request |
-    | Declare fields, views, layers and vocabularies, and publish annotations | `Database.declare_attribute`, `declare_view`, `declare_layer`, `declare_vocabulary`, then `commit` | once the server answers |
+    | Declare fields, views, layers and vocabularies, and publish annotations | `Database.declare_attribute`, `declare_view`, `declare_view_group`, `declare_layer`, `declare_labels`, `declare_vocabulary`, and `insert` into a layer to publish, then `commit` | once the server answers |
 
 === "TypeScript"
 
@@ -45,7 +45,7 @@ Writes go to the server's control listener, set by `[serve] control`. It is an a
 
 === "CLI"
 
-    The `mosaica` command cannot write to a running server.
+    The `mosaica` command cannot write items, changes, declarations or annotations to a running server.
 
     | Write | Command | Viewers see it |
     |---|---|---|
