@@ -160,9 +160,6 @@ CONTRACTS: dict[tuple[str, str], Contract] = {
 #: call gives rather than `x` and `y`.
 PROJECTED = {"x": "lon", "y": "lat"}
 
-#: The keywords naming a view's coordinate columns, which the build reads as float32 or float64.
-COORDINATES = ("x", "y", "lon", "lat")
-
 
 @dataclass(repr=False)
 class Insert(Summarised):
@@ -403,15 +400,6 @@ def _check(
             raise Refusal(
                 f"insert into {insert.kind} {insert.target!r}: {role}={column!r} names no column "
                 f"of this table. Its columns are {', '.join(insert.schema)}"
-            )
-        if role in COORDINATES and not (
-            pa.types.is_float32(insert.schema[column]) or pa.types.is_float64(insert.schema[column])
-        ):
-            pair = " and ".join(PROJECTED.values() if projected else PROJECTED)
-            raise Refusal(
-                f"insert into {insert.kind} {insert.target!r}: {role}= names column {column!r}, "
-                f"which holds {insert.schema[column]}; {pair} take float32 or float64 numbers, so "
-                f"name a number column or cast this one to float"
             )
         if role in contract.canonical_only and column != role:
             raise Refusal(
