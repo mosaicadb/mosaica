@@ -74,6 +74,11 @@ const DENSITY_SCALES: readonly {scale: DensityScale; label: string}[] = [
 ];
 /** The range of the size sliders, radii in pixels. */
 const SIZE_RANGE = {min: 1, max: 12, step: 0.5} as const;
+/** The least room kept between the Layers popover and the edge of the explorer's visible box. */
+const POPOVER_EDGE = 8;
+/** The shortest the Layers popover is made, however little room there is. */
+const MIN_POPOVER = 120;
+
 /** A radius as the popover shows it. */
 const px = (n: number) => n.toLocaleString('en-GB', {maximumFractionDigits: 1});
 /** How far along its track a slider's value is, for its filled part. */
@@ -495,14 +500,25 @@ export class MosaicaExplorer extends MosaicaElement {
         border-radius: 50%;
         background: var(--_mosaica-accent);
       }
+      /*
+       * Its height is set as it opens to the room between its button and the far edge of the
+       * explorer's visible box. A shade at the top or bottom edge shows there is more to scroll to:
+       * the two covers scroll with the content and hide each shade at its end.
+       */
       [part='layers-popover'] {
         position: absolute;
         top: 0;
         left: calc(100% + 8px);
         width: 320px;
-        max-height: min(560px, calc(100cqh - 2 * var(--_mosaica-space)));
         overflow-y: auto;
+        overscroll-behavior: contain;
         box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+        background:
+          linear-gradient(var(--_mosaica-surface) 30%, transparent) top / 100% 32px no-repeat local,
+          linear-gradient(transparent, var(--_mosaica-surface) 70%) bottom / 100% 32px no-repeat local,
+          linear-gradient(color-mix(in srgb, var(--_mosaica-ink) 16%, transparent), transparent) top / 100% 10px no-repeat scroll,
+          linear-gradient(transparent, color-mix(in srgb, var(--_mosaica-ink) 16%, transparent)) bottom / 100% 10px no-repeat scroll,
+          var(--_mosaica-surface);
       }
       [part='layers-popover'] mosaica-layer-picker,
       [part='sheet'] mosaica-layer-picker {
@@ -903,7 +919,10 @@ export class MosaicaExplorer extends MosaicaElement {
     if (typeof ResizeObserver === 'undefined') return;
     // The width is taken once now, so the first render already has the layout it will keep.
     this.fitWidth(this.getBoundingClientRect().width);
-    this.resize ??= new ResizeObserver((entries) => this.fitWidth(entries.at(-1)?.contentRect.width ?? 0));
+    this.resize ??= new ResizeObserver((entries) => {
+      this.fitWidth(entries.at(-1)?.contentRect.width ?? 0);
+      this.fitLayers();
+    });
     this.resize.observe(this);
     this.sizes ??= new ResizeObserver(() => this.measure());
   }
@@ -1959,12 +1978,30 @@ export class MosaicaExplorer extends MosaicaElement {
   /** Focus goes into a sheet as it opens, and back to its tab as it closes. */
   protected override updated(changed: PropertyValues<this>): void {
     this.toggleAttribute('data-compact', this.compact);
+    this.fitLayers();
     this.placeMenu(changed.has('menu') && this.menu !== null);
     this.followLayout();
     if (!changed.has('sheet')) return;
     const before = changed.get('sheet');
     if (this.sheet) this.renderRoot.querySelector<HTMLElement>('[part="sheet"]')?.focus();
     else if (before) this.renderRoot.querySelector<HTMLElement>(`[role="tab"][data-sheet="${before}"]`)?.focus();
+  }
+
+  /**
+   * Hold the open Layers popover within the explorer's visible box: the part of it inside the
+   * window. It opens down from its button, or up from it in the compact form, and is as tall as the
+   * room on that side, scrolling where its content is taller.
+   */
+  private fitLayers(): void {
+    const popover = this.renderRoot.querySelector<HTMLElement>('[part="layers-popover"]');
+    const button = this.renderRoot.querySelector<HTMLElement>('.layers');
+    if (!popover || !button) return;
+    const box = this.getBoundingClientRect();
+    const top = Math.max(box.top, 0);
+    const bottom = Math.min(box.bottom, typeof innerHeight === 'number' ? innerHeight : box.bottom);
+    const b = button.getBoundingClientRect();
+    const room = (this.compact ? b.bottom - top : bottom - b.top) - POPOVER_EDGE;
+    popover.style.maxHeight = `${Math.max(MIN_POPOVER, Math.floor(room))}px`;
   }
 
   /**
