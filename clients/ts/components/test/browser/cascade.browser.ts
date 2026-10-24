@@ -26,9 +26,9 @@ afterAll(async () => {
   if (out) rmSync(out, {recursive: true, force: true});
 });
 
-/** A page holding `body` and `css`, with every element defined and rendered. */
-async function page(body: string, css = ''): Promise<Page> {
-  const p = await browser.newPage();
+/** A page holding `body` and `css`, with every element defined and rendered, under the system scheme `system`. */
+async function page(body: string, css = '', system: 'light' | 'dark' = 'light'): Promise<Page> {
+  const p = await browser.newPage({colorScheme: system});
   await p.setContent(`<!doctype html><html><head><style>${css}</style></head><body>${body}</body></html>`);
   await p.addScriptTag({path: join(out, 'mosaica-components.js'), type: 'module'});
   await p.evaluate(async () => {
@@ -66,6 +66,18 @@ describe('theme tokens', () => {
     const dark = await page('<mosaica-map></mosaica-map>', ':root { color-scheme: dark; }');
     expect(await computed(dark, ['mosaica-map'], 'background-color')).toBe('rgb(17, 19, 23)');
     expect(await computed(dark, PAN, 'background-color')).toBe('rgb(236, 238, 241)');
+  });
+
+  it('give the map the ground its tokens render in, whatever the system prefers', async () => {
+    const ground = (p: Page) => p.evaluate(() => (document.querySelector('mosaica-map') as unknown as {drawnGround: string}).drawnGround);
+    // A page naming no scheme renders light under a dark system preference, and so does the map.
+    const unnamed = await page('<mosaica-map></mosaica-map>', '', 'dark');
+    expect(await computed(unnamed, ['mosaica-map'], 'background-color')).toBe('rgb(246, 246, 244)');
+    expect(await ground(unnamed)).toBe('light');
+    // A page allowing both follows the system preference.
+    const both = await page('<mosaica-map></mosaica-map>', ':root { color-scheme: light dark; }', 'dark');
+    expect(await computed(both, ['mosaica-map'], 'background-color')).toBe('rgb(17, 19, 23)');
+    expect(await ground(both)).toBe('dark');
   });
 
   it('take a value set on any ancestor', async () => {

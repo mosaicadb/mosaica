@@ -416,8 +416,9 @@ export class MosaicaMap extends MosaicaElement {
   /**
    * The ground the map draws on, `light` or `dark`, where it differs from the page's, such as a
    * light basemap under a dark page. The labels and the density colours follow it, and the
-   * toolbar and panels follow the page. Unset, the host's `color-scheme` decides, else the system
-   * preference.
+   * toolbar and panels follow the page. Unset, the scheme the elements render in: the one the
+   * host's `color-scheme` names, the system preference where it names both, and light where it
+   * names neither.
    */
   @property({reflect: true}) accessor ground: 'light' | 'dark' | '' = '';
   /** Hides the points. Density, outlines, labels and the selection are still drawn. */
@@ -752,15 +753,16 @@ export class MosaicaMap extends MosaicaElement {
     store.setSizeBy(column, {rank});
   }
 
-  /** The ground: `ground` if set, else the host's `color-scheme`, else the system preference. */
+  /**
+   * The ground: `ground` if set, else the scheme `light-dark()` resolves to in the element's
+   * styles, which is light where the host's `color-scheme` names neither.
+   */
   private scheme(): 'light' | 'dark' {
     if (this.ground === 'light' || this.ground === 'dark') return this.ground;
     if (typeof getComputedStyle === 'undefined') return 'dark';
     const declared = getComputedStyle(this).colorScheme ?? '';
-    const dark = /dark/.test(declared);
-    const light = /light/.test(declared);
-    if (dark && !light) return 'dark';
-    if (light && !dark) return 'light';
+    if (!/dark/.test(declared)) return 'light';
+    if (!/light/.test(declared)) return 'dark';
     return typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
 
