@@ -159,7 +159,7 @@ A cursor is sealed, so it cannot be read or forged. It works only for the read i
 
 ## Aggregate
 
-`POST /v1/aggregate` computes figures over a set of items without returning the items: counts by group, histograms, a summary of a number field, and density grids. It is the query behind charts, facet counts and breakdowns beside a map.
+`POST /v1/aggregate` computes figures over a set of items without returning the items: counts by group, histograms, density grids, and a summary of a number or date field. It is the query behind charts, facet counts and breakdowns beside a map.
 
 ### The request
 
@@ -177,8 +177,8 @@ For example, this request counts the papers from 2020 onwards, breaks them down 
   "view": "map",
   "filters": {"year": {"range": {"gte": 2020}}},
   "groupings": [
-    {},
-    {"by": {"field": "archive", "top": 10}}
+    {"count": true},
+    {"count": true, "by": {"field": "archive", "top": 10}}
   ],
   "reference": {}
 }
@@ -188,32 +188,39 @@ It returns two tables. The first has one row, the number of papers from 2020 onw
 
 ### Groupings
 
-| Grouping | Written as | One row for each | Needs |
+A grouping says two things: how to divide the set into rows, and which figures each row holds. `{"count": true}` alone is one row, the size of the set. Add `by`, `cells` or both to divide it:
+
+| Rows | Written as | One row for each | Needs |
 |---|---|---|---|
-| Size | `{}` | the whole set | |
-| Category values | `{"by": {"field": "archive", "top": 10}}`, or `"values": ["cs", "math"]` in place of `top` | value | a category that is indexed or rendered, or has a derived vocabulary |
-| Annotations | `{"by": {"layer": "topics", "level": 1, "top": 10}}`, or `"artifacts": [...]` in place of `top` | artifact | a layer the viewer may see. `level` on a layer with several levels |
-| Histogram | `{"by": {"field": "year", "bins": 20}}` | bin | a number or date that is indexed or rendered |
-| Summary | `{"by": {"field": "citations", "summary": true}}` | (one row only) | a number or date that is indexed or rendered |
-| Density grid | `{"cells": {"depth": 8}}` | non-empty cell of the view | |
-| Grid per group | `{"by": {...}, "cells": {...}}` | group and cell | as for the `by` part. Not with a histogram or a summary |
+| The whole set | neither `by` nor `cells` | (one row only) | |
+| Category values | `"by": {"field": "archive", "top": 10}`, or `"values": ["cs", "math"]` in place of `top` | value | a category that is indexed or rendered, or has a derived vocabulary |
+| Annotations | `"by": {"layer": "topics", "level": 1, "top": 10}`, or `"artifacts": [...]` in place of `top` | artifact | a layer the viewer may see. `level` on a layer with several levels |
+| Histogram | `"by": {"field": "year", "bins": 20}` | bin | a number or date that is indexed or rendered |
+| Density grid | `"cells": {"depth": 8}` | non-empty cell of the view | |
+| Grid per group | `"by": {...}, "cells": {...}` | group and cell | as for the `by` part. Not with a histogram |
+
+### Figures
+
+Each grouping names at least one figure:
+
+- **`"count": true`** counts the items of the set in each row.
+- **`values`, `missing`, `min`, `max` and `mean`** each list number or date fields that are indexed or rendered, and give one column per field: how many items hold a value, how many hold none, the smallest and largest value, and the mean.
+- **`summary`** lists fields and gives all five of those figures for each. `{"count": true, "summary": ["citations"]}` is the number of papers and the spread of their citation counts.
+
+The field figures describe everything the viewer may see in the view. A grouping that names one has neither `by` nor `cells`, and a request that names one has neither `filters` nor `reference`, so a summary can sit beside a filtered histogram as a fixed description of the field. Send it as a request of its own.
 
 ### What comes back
 
 Each table is an Arrow table. Its columns depend on the grouping:
 
-- `count`: the items of the set in the row's group or cell.
 - `group`, `key` and `title`, for values and annotations. `group` is `listed` for a value or artifact you asked for, `rest` for the items in any other, and `none` for the items in none at all, so a table's counts add up to the size of the set. An item can be in several artifacts, so a layer's counts can add up to more.
 - `lower` and `upper`, for a histogram: each bin's edges.
 - `cell`, for a density grid: the cell's position code. At depth 16 or less it is the map tile at that zoom.
+- `count`: the items of the set in the row's group or cell.
 - `reference_count` and `lift`, with a reference: the row's count in the reference set, and its share of the set divided by its share of the reference. A lift above 1 means the group is more common in the set than in the reference.
+- A column for each field figure, named after the figure and the field: `values_citations`, `missing_citations`, `min_citations`, `max_citations` and `mean_citations`. An item holding NaN or an infinity counts in neither `values_` nor `missing_`, and is left out of the others.
 
 Each table also carries a head with the size of the set, `total`, the size of the reference, and how many groups there are in all before `top` keeps the largest.
-
-A summary has its own columns: `items`, every item the viewer may see in the view; `count`, those with a finite value; `none`, those with no value; and `min`, `max` and `mean`.
-
-!!! note "A summary ignores the filter"
-    A summary describes everything the viewer may see in the view, whatever `filters` and `reference` say, so it can sit beside a histogram as a fixed description of the field. Not built yet: a summary over a filtered set.
 
 ### Histograms
 
@@ -236,7 +243,7 @@ At depth `d`, the view is divided into a grid of 2^d by 2^d cells, and each row 
 A table longer than a page continues through a cursor, as a [bulk read](#bulk-read) does. The Python and TypeScript clients and `mosaica aggregate` follow the cursor for you.
 
 !!! note "Not built yet"
-    Sums, means or other statistics per group; a summary over a filtered set; histograms within cells; breakdowns of keyword fields, and of integer fields by value; a grouping of one kind inside another of the same kind, such as cells within cells; and counts across views. Read the items in bulk and compute these yourself.
+    Field figures per group or over a filtered set; histograms within cells; breakdowns of keyword fields, and of integer fields by value; a grouping of one kind inside another of the same kind, such as cells within cells; and counts across views. Read the items in bulk and compute these yourself.
 
 ## Not built yet
 
