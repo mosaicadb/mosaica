@@ -134,17 +134,19 @@ const visibleTotals = new WeakMap<Store, HeldAggregate>();
 
 /**
  * Whether the viewer of `store` can see no item in the view at all, whatever the camera and the
- * filters. It is counted, once per store however many elements ask, only while `state` is
- * `empty`, and is `false` until the count answers.
+ * filters. It is counted, once per store however many elements ask, from the first time `state` is
+ * `empty`, and the registration is kept, so the store asks again only where it asks every
+ * registered aggregate again: for another viewer, view or state of the corpus. `false` until the
+ * count answers, and wherever `state` is not `empty`.
  */
 export function seesNothing(store: Store | null, state: PanelState): boolean {
   if (!store) return false;
   let held = visibleTotals.get(store);
   if (!held) {
+    if (state !== 'empty') return false;
     held = new HeldAggregate('visible-total');
     visibleTotals.set(store, held);
   }
-  const spec = state === 'empty' ? VISIBLE_TOTAL : null;
-  held.set(store, spec);
-  return held.entryOf(store, spec)?.result?.tables[0]?.total === 0;
+  held.set(store, VISIBLE_TOTAL);
+  return state === 'empty' && held.entryOf(store, VISIBLE_TOTAL)?.result?.tables[0]?.total === 0;
 }

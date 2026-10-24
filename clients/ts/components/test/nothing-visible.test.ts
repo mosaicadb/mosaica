@@ -43,8 +43,17 @@ describe('a viewer who can see nothing', () => {
     expect(deep(map.shadowRoot!, '[part="state"]')?.getAttribute('data-visible')).toBeNull();
     expect(text(map)).toBe(camera);
     expect(text(strip)).toBe(camera);
-    store.set('status', status({status: 'shown', sessionWarm: true}));
-    await settle(host);
-    expect([...registered(store).keys()].filter((id) => id.startsWith('visible-total'))).toEqual([]);
+  });
+
+  it('is asked once however often the view goes empty, and the answer kept', async () => {
+    const {host, store} = await page();
+    answerAggregate(store, 'visible-total', aggregateEntry([{rows: [], total: 12}]));
+    for (let i = 0; i < 5; i++) {
+      store.set('status', status({status: 'loading', sessionWarm: true}));
+      await settle(host);
+      store.set('status', status({status: 'empty', sessionWarm: true}));
+      await settle(host);
+    }
+    expect(store.calls.filter((c) => c.name === 'setAggregate' && String(c.args[0]).startsWith('visible-total'))).toHaveLength(1);
   });
 });
