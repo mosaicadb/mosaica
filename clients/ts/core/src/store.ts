@@ -1149,7 +1149,7 @@ export function createStore(options: StoreOptions): Store {
     return new Promise((resolve, reject) => {
       rankingAsks.set(column, {resolve, reject});
       const top = Math.min(RANKED_VALUES, meta?.selection.maxAggregateTop ?? RANKED_VALUES);
-      ranking.set(column, {groupings: [{by: {field: column, top}}], subject: 'visible'});
+      ranking.set(column, {groupings: [{count: true, by: {field: column, top}}], subject: 'visible'});
     });
   }
 

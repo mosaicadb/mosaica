@@ -24,7 +24,7 @@ describe('a viewer who can see nothing', () => {
   it('is counted over the whole visible set once while the view is empty, and named by the map alone', async () => {
     const {host, store, map, strip} = await page();
     const asked = [...registered(store)].filter(([id]) => id.startsWith('visible-total'));
-    expect(asked.map(([, spec]) => spec)).toEqual([{groupings: [{}], subject: 'visible'}]);
+    expect(asked.map(([, spec]) => spec)).toEqual([{groupings: [{count: true}], subject: 'visible'}]);
     const camera = text(map);
     expect(camera).toBe(text(strip));
     answerAggregate(store, 'visible-total', aggregateEntry([{rows: [], total: 0}]));

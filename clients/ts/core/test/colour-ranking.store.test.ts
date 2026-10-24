@@ -45,7 +45,7 @@ describe('the colour ranking', () => {
     scheduler.flush();
     await settle();
     expect(asked.length).toBe(2);
-    expect(asked[0]!.groupings).toEqual([{by: {field: 'archive', top: 8}}]);
+    expect(asked[0]!.groupings).toEqual([{count: true, by: {field: 'archive', top: 8}}]);
     expect(store.get('legend').ranks['archive']).toEqual({7: 0, 5: 1});
     store.dispose();
   });

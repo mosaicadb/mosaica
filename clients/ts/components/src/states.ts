@@ -129,7 +129,7 @@ export function renderState(
 /** The words for a viewer who can see no item in the view at all, where `empty` would read as "pan elsewhere". */
 export const NOTHING_VISIBLE = 'Nothing visible to you';
 
-const VISIBLE_TOTAL: AggregateSpec = {groupings: [{}], subject: 'visible'};
+const VISIBLE_TOTAL: AggregateSpec = {groupings: [{count: true}], subject: 'visible'};
 const visibleTotals = new WeakMap<Store, HeldAggregate>();
 
 /**
