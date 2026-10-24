@@ -292,9 +292,17 @@ fn json_array_body(rows: &[Row]) -> Vec<u8> {
         .into_bytes()
 }
 
+/// Newline-delimited records, each `seen` written as a date-time an hour east of UTC.
 fn ndjson_body(rows: &[Row]) -> Vec<u8> {
+    const AT_1_700_000_000_S: i64 = 1_700_000_000_000_000;
     rows.iter()
-        .map(|row| json_record(row).to_string())
+        .map(|row| {
+            let mut record = json_record(row);
+            let micros = row.seen - AT_1_700_000_000_S;
+            assert!((0..1_000_000).contains(&micros));
+            record["seen"] = json!(format!("2023-11-14T23:13:20.{micros:06}+01:00"));
+            record.to_string()
+        })
         .collect::<Vec<_>>()
         .join("\n")
         .into_bytes()
@@ -391,7 +399,8 @@ async fn record_without_ids(server: &TestServer, token: &str, mosaica_id: u64) -
 }
 
 /// **The headline.** Ten rows as Arrow, the same ten values as a JSON array and again as
-/// newline-delimited objects, and a viewer is served thirty rows it cannot tell apart:
+/// newline-delimited objects, the last with its timestamps written as text, and a viewer is
+/// served thirty rows it cannot tell apart:
 /// every indexed filter matches three for one, the layer's artifact counts all three sets, and a
 /// drill-down of one row from each encoding reads the same values, the `u64` past 2⁵³ included.
 #[tokio::test]
@@ -495,6 +504,9 @@ async fn a_cell_that_does_not_coerce_is_refused_naming_row_and_column() {
         ("weight", json!(1.0e39)),
         ("big", json!(-1)),
         ("seen", json!(1.0e6)),
+        ("seen", json!("2023-11-14T22:13:20")),
+        ("seen", json!("2023-11-14T22:13:20.1234567Z")),
+        ("seen", json!("14/11/2023")),
         ("tag", json!(7)),
         ("x", json!("east")),
         ("access", json!(7)),

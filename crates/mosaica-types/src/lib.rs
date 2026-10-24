@@ -20,6 +20,7 @@ pub use shard::{
 /// asks about its own memory never names it.
 pub mod process;
 pub mod scalar;
+pub mod written;
 
 /// The annotation layer declaration, shared by the WAL record that makes a registration durable,
 /// the manifest section that carries it, and the gate-filtered `/v1/meta` view.

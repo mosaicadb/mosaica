@@ -3849,7 +3849,8 @@ fn inline_lists(
 }
 
 /// A value written in the declaration as the key its unique field holds it under: a string for a
-/// keyword, and an integer, or a string of its decimal digits, for an integer field.
+/// keyword, and an integer, or a string of its decimal digits, for an integer field, and on a
+/// timestamp field a date too.
 fn member_value_key(
     layer: &str,
     key: &str,
@@ -3869,10 +3870,13 @@ fn member_value_key(
             )))
         }
         (_, MemberValue::Integer(integer)) => i128::from(*integer),
-        (_, MemberValue::Text(text)) => text.parse::<i128>().map_err(|_| {
+        (ty, MemberValue::Text(text)) => mosaica_types::written::WrittenAs::of(
+            ty == mosaica_spatial::tiler::ScalarType::TimestampUs,
+        )
+        .parse(text)
+        .map_err(|e| {
             BuildError::Invalid(format!(
-                "{object}: the member '{text}' of '{}' is not an integer, and the field holds \
-                 integers. Write it in decimal digits",
+                "{object}: the member '{text}' of '{}' {e}",
                 field.attribute
             ))
         })?,

@@ -467,11 +467,12 @@ fn resolve_category_column<'m>(
 
 /// What a spelling names as a field.
 pub(crate) enum FieldColumn {
-    /// The column, the family its values are read by, and whether they are exact integers.
+    /// The column, the family its values are read by, and how a string spells a value where
+    /// values are exact integers.
     Resolved {
         column: String,
         family: mosaica_engine::filter::Family,
-        integer: bool,
+        integer: Option<mosaica_types::written::WrittenAs>,
     },
     /// No column this principal can reach.
     Unknown,

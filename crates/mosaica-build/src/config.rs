@@ -4437,14 +4437,14 @@ fn compile_metadata_value(
             _ => return Err(wrong("write a number")),
         },
         ScalarType::TimestampUs => match value {
-            toml::Value::Datetime(when) => {
-                MetadataValue::TimestampUs(timestamp_us(object, name, when)?)
-            }
-            // The stored representation, for a producer that emits it directly.
             toml::Value::Integer(us) => MetadataValue::TimestampUs(*us),
+            // A TOML date-time is read as the text it writes, so it takes the forms a JSON
+            // string takes at a running service.
+            toml::Value::Datetime(when) => timestamp_us(object, name, &when.to_string())?,
+            toml::Value::String(text) => timestamp_us(object, name, text)?,
             _ => return Err(wrong(
-                "write an offset date-time (`2026-04-01T00:00:00Z`), or the microseconds since \
-                     the Unix epoch as an integer",
+                "write a date (`2026-04-01`), a date-time with an offset \
+                 (`2026-04-01T00:00:00Z`), or the microseconds since the Unix epoch as an integer",
             )),
         },
         ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => MetadataValue::Text(
@@ -4474,24 +4474,12 @@ fn compile_metadata_value(
     })
 }
 
-/// A TOML date-time as microseconds since the Unix epoch.
-///
-/// **An offset is required.** A local date-time names an instant only against a time zone nobody
-/// declared, and a `timestamp_us` is a fixed point on the line — so a local one is refused rather
-/// than read as UTC, which would move a quarter boundary silently by up to a day.
-fn timestamp_us(object: &str, name: &str, when: &toml::value::Datetime) -> Result<i64> {
-    let text = when.to_string();
-    let parsed = chrono::DateTime::parse_from_rfc3339(&text).map_err(|_| {
-        declaration_error(format!(
-            "{object}: `{name} = {text}` is not an instant this can store. A `timestamp_us` is \
-             microseconds since the Unix epoch, so the value needs a date, a time and an offset — \
-             `2026-04-01T00:00:00Z`. A local date-time names an instant only against a time zone \
-             nobody declared here"
-        ))
-    })?;
-    Ok(parsed.timestamp_micros())
+/// A timestamp written as text, as [`mosaica_types::written`] reads one.
+fn timestamp_us(object: &str, name: &str, text: &str) -> Result<MetadataValue> {
+    mosaica_types::written::timestamp_us(text)
+        .map(MetadataValue::TimestampUs)
+        .map_err(|e| declaration_error(format!("{object}: `{name}` = '{text}' {e}")))
 }
-
 
 /// `[view_group.views]` — form B's roster table (`views.md` §3.1).
 ///

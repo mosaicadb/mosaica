@@ -107,7 +107,8 @@ struct ByReq {
     values: Option<Vec<String>>,
     #[serde(default)]
     bins: Option<u32>,
-    /// `[lower, upper]`, each a number, or on an integer or timestamp field its decimal string.
+    /// `[lower, upper]`, each a number, or on an integer or timestamp field its decimal string,
+    /// and on a timestamp field an RFC 3339 date or date-time with an offset.
     #[serde(default)]
     range: Option<[Value; 2]>,
     /// With `bins`: count about this many of the set's items and scale the counts to the set.
@@ -361,7 +362,7 @@ fn resolved_column(
     view: &str,
     session: &mosaica_engine::Session,
     field: &str,
-) -> Result<(String, Family, bool), ApiError> {
+) -> Result<(String, Family, Option<mosaica_types::written::WrittenAs>), ApiError> {
     match field_column(meta, field, view, session.visible_views())? {
         FieldColumn::Resolved {
             column,

@@ -1345,7 +1345,7 @@ struct ViewRecord {
     #[serde(default)]
     visibility: Option<mosaica_types::view::DeclaredGate>,
     /// One entry per name the group declared. A `timestamp_us` is microseconds since the epoch,
-    /// as a JSON integer.
+    /// as a JSON integer or a string of digits, or an RFC 3339 date or date-time with an offset.
     #[serde(default)]
     metadata: serde_json::Map<String, serde_json::Value>,
 }

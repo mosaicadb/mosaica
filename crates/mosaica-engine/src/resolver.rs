@@ -15,6 +15,7 @@ use mosaica_lifecycle::ShardSets;
 use mosaica_store::manifest::DeclaredScalar;
 use mosaica_store::unique::UniqueKey;
 use mosaica_store::StoreError;
+use mosaica_types::written::WrittenAs;
 use mosaica_types::{
     EntityId, IdentityKey, ItemAt, LayerSpace, MosaicaId, ShardId, Target, TermId,
 };
@@ -931,11 +932,12 @@ pub(crate) fn key_of_value(
             )))
         }
         (AddressValue::Integer(n), false) => *n,
-        (AddressValue::Text(text), false) => text.parse().map_err(|_| {
-            EngineError::AddressMalformed(format!(
-                "'{text}' is not a value of '{}', which holds integers. Write it in decimal digits",
-                declared.name
-            ))
+        (AddressValue::Text(text), false) => WrittenAs::of(
+            declared.arrow_type == mosaica_spatial::tiler::ScalarType::TimestampUs,
+        )
+        .parse(text)
+        .map_err(|e| {
+            EngineError::AddressMalformed(format!("'{text}', a value of '{}', {e}", declared.name))
         })?,
     };
     Ok(mosaica_store::unique::key_of_integer(

@@ -1483,6 +1483,11 @@ fn id_column_at(ty: &DataType, ids: &[u64]) -> ArrayRef {
         DataType::Int32 => Arc::new(arrow::array::Int32Array::from_iter_values(
             ids.iter().map(|&id| id as i32),
         )),
+        DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None) => Arc::new(
+            arrow::array::TimestampMicrosecondArray::from_iter_values(
+                ids.iter().map(|&id| id as i64),
+            ),
+        ),
         other => panic!("no id column at {other:?} here"),
     }
 }
@@ -1655,6 +1660,35 @@ fn an_inline_member_written_as_its_digits_builds_what_the_file_builds() {
         &from_declaration,
         "digits inline against a file",
     );
+}
+
+/// **An inline member of a timestamp field may be written as a date**, as a running service reads
+/// one in an address: members written as date-times with an offset build what the same
+/// microseconds written as integers build.
+#[test]
+fn an_inline_timestamp_member_written_as_a_date_builds_what_its_microseconds_build() {
+    let at = DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None);
+    let build_with = |member: &dyn Fn(u64) -> String| {
+        let inputs = inputs();
+        retype_ids(&inputs.points, "entity_id", &at);
+        retype_ids(&inputs.pairs, "entity_id", &at);
+        let artifacts: Vec<String> = CURATED
+            .iter()
+            .map(|(key, members)| {
+                let members: Vec<String> = members.iter().map(|&m| member(m)).collect();
+                format!("{{ key = \"{key}\", members = {{ id = [{}] }} }}", members.join(", "))
+            })
+            .collect();
+        let declaration = format!("{VIEW_TOML}{CURATED_LAYER}artifacts = [{}]\n", artifacts.join(", "))
+            .replace("type   = \"u64\"", "type   = \"timestamp_us\"");
+        std::fs::write(&inputs.config, declaration).unwrap();
+        let out = inputs.dir.join("bundle");
+        run(&inputs, &out).expect("a build over timestamp ids succeeds");
+        (out, inputs)
+    };
+    let (integers, _a) = build_with(&|m| m.to_string());
+    let (dates, _b) = build_with(&|m| format!("\"1970-01-01T01:00:00.{m:06}+01:00\""));
+    assert_bundles_identical(&integers, &dates, "dates inline against integers");
 }
 
 /// **An exclusion naming no item is refused, reported and left out**, as an unknown member is:

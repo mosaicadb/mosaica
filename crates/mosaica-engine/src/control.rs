@@ -451,15 +451,38 @@ impl Engine {
     }
 
     /// Create a view of a view group. Almost nothing is validated here; the gate's labels are the
-    /// exception, checked at [`Engine::check_visibility`].
+    /// exception, checked at [`Engine::check_visibility`], and so is a `timestamp_us` value sent
+    /// as a string, which is read as a build reads one ([`mosaica_types::written`]).
     pub fn create_view(
         &self,
         group: String,
         key: String,
         visibility: Option<Vec<String>>,
-        metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
+        mut metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
     ) -> std::result::Result<(), crate::write::AcceptError> {
+        use mosaica_types::view::{ViewMetadataType, ViewMetadataValue};
         let visibility = self.check_visibility(visibility.as_deref())?;
+        let generation = self.generation.load_full();
+        let declared = generation
+            .bundle
+            .manifest
+            .groups
+            .iter()
+            .find(|g| g.name == group)
+            .map_or(&[][..], |g| &g.metadata[..]);
+        for field in declared {
+            if field.ty != ViewMetadataType::TimestampUs {
+                continue;
+            }
+            if let Some(ViewMetadataValue::Text(text)) = metadata.get(&field.name) {
+                let micros = mosaica_types::written::timestamp_us(text).map_err(|e| {
+                    crate::write::AcceptError::Exec(mosaica_lifecycle::ExecError::ViewRefused {
+                        detail: format!("metadata '{}' is '{text}', which {e}", field.name),
+                    })
+                })?;
+                metadata.insert(field.name.clone(), ViewMetadataValue::TimestampUs(micros));
+            }
+        }
         self.write.create_view(group, key, visibility, metadata)
     }
 

@@ -16,6 +16,7 @@ use serde_json::Value;
 use mosaica_engine::filter::{Endpoint, Family, FilterExpr, FilterOperand, RegionLeaf, Scalar};
 use mosaica_engine::LeafColumn;
 use mosaica_engine::shapes::{Bounds, CanonError, Projection, ShapeF64, ShapeSpace};
+use mosaica_types::written::WrittenAs;
 use mosaica_types::{AttrLocalId, MosaicaId};
 
 use crate::error::ApiError;
@@ -101,7 +102,7 @@ struct Resolved {
     column: String,
     family: Family,
     operands: &'static [&'static str],
-    integer: bool,
+    integer: Option<WrittenAs>,
     unique_only: bool,
 }
 
@@ -496,7 +497,11 @@ fn parse_operand(
 
 /// A range's bounds: `gte`/`gt` below, `lte`/`lt` above, at least one of them. An empty range is
 /// refused rather than read as no constraint; a caller wanting none omits the leaf.
-fn parse_range(column: &str, value: &Value, integer: bool) -> Result<FilterOperand, ApiError> {
+fn parse_range(
+    column: &str,
+    value: &Value,
+    integer: Option<WrittenAs>,
+) -> Result<FilterOperand, ApiError> {
     let obj = value
         .as_object()
         .ok_or_else(|| bad(format!("column '{column}': `range` takes a bounds object")))?;
@@ -541,15 +546,20 @@ fn parse_range(column: &str, value: &Value, integer: bool) -> Result<FilterOpera
 /// A numeric comparand. An integer is carried exactly as `i128`; a fractional or out-of-range
 /// number becomes `f64`. A JSON boolean is accepted for a `bool` column, which stores as 0/1. On
 /// an integer or timestamp column a decimal string (`"-42"`) is an exact integer too, for a
-/// client whose numbers are doubles and cannot carry one past 2^53.
-pub(crate) fn numeric_value(column: &str, value: &Value, integer: bool) -> Result<Scalar, ApiError> {
+/// client whose numbers are doubles and cannot carry one past 2^53, and on a timestamp column so
+/// is a date ([`WrittenAs`]).
+pub(crate) fn numeric_value(
+    column: &str,
+    value: &Value,
+    integer: Option<WrittenAs>,
+) -> Result<Scalar, ApiError> {
+    if let (Value::String(text), Some(written)) = (value, integer) {
+        return written
+            .parse(text)
+            .map(Scalar::Int)
+            .map_err(|e| bad(format!("column '{column}': '{text}' {e}")));
+    }
     match value {
-        Value::String(text) if integer => decimal_integer(text).map(Scalar::Int).ok_or_else(|| {
-            bad(format!(
-                "column '{column}': '{text}' is not a decimal integer; send a number, or its \
-                 digits as a string, optionally after a '-'"
-            ))
-        }),
         Value::Bool(b) => Ok(Scalar::Int(i128::from(*b))),
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
@@ -566,18 +576,13 @@ pub(crate) fn numeric_value(column: &str, value: &Value, integer: bool) -> Resul
         }
         _ => Err(bad(format!(
             "column '{column}': a numeric comparand must be a number{}",
-            if integer { ", or a decimal integer as a string" } else { "" }
+            match integer {
+                Some(WrittenAs::Integer) => ", or a decimal integer as a string",
+                Some(WrittenAs::Timestamp) => ", or a date or decimal integer as a string",
+                None => "",
+            }
         ))),
     }
-}
-
-/// `^-?[0-9]+$` as an integer, or `None`; one past `i128` is `None` too.
-fn decimal_integer(text: &str) -> Option<i128> {
-    let digits = text.strip_prefix('-').unwrap_or(text);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    text.parse::<i128>().ok()
 }
 
 /// A category value: its key (a string) or its code (an integer). An unknown key becomes
@@ -623,7 +628,7 @@ mod tests {
                 column: c.to_string(),
                 family,
                 operands: family.operands(),
-                integer: family == Family::Numeric,
+                integer: (family == Family::Numeric).then_some(WrittenAs::Integer),
                 unique_only: false,
             };
             match c.split_once(PIN) {
@@ -635,7 +640,7 @@ mod tests {
                     column: c.to_string(),
                     family: Family::Keyword,
                     operands: &["eq", "in"],
-                    integer: false,
+                    integer: None,
                     unique_only: true,
                 },
                 None if c == "gid" => plain(Family::Numeric),
@@ -646,7 +651,7 @@ mod tests {
                     column: "sentiment@quarter:2026-Q3".to_string(),
                     family: Family::Numeric,
                     operands: Family::Numeric.operands(),
-                    integer: false,
+                    integer: None,
                     unique_only: false,
                 },
                 Some(("sentiment", pin)) => LeafColumn::UnknownPin {

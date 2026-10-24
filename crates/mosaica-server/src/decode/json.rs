@@ -20,6 +20,7 @@ use arrow::record_batch::{RecordBatch, RecordBatchOptions};
 use serde_json::{Map, Value};
 use mosaica_engine::{member_key, scalar_column, DeclaredScalar, ScalarType, ScopedScalar};
 use mosaica_types::layer::LayerDeclaration;
+use mosaica_types::written::WrittenAs;
 
 use super::{DecodeError, Fixed};
 
@@ -241,7 +242,7 @@ fn u32_column(
     for (row, record) in rows.iter().enumerate() {
         match record.get(name) {
             None | Some(Value::Null) => builder.append_null(),
-            Some(value) => match integer(body_name, value, row, name)? {
+            Some(value) => match integer(body_name, value, row, name, WrittenAs::Integer)? {
                 None => builder.append_null(),
                 Some(value) => builder.append_value(u32::try_from(value).map_err(|_| {
                     refusal(body_name, row, name, "is out of range; send a uint32")
@@ -327,11 +328,12 @@ fn scalar_column(
             ),
         ))
     };
+    let written = WrittenAs::of(wire == ScalarType::TimestampUs);
     macro_rules! integers {
         ($builder:ty, $ty:ty) => {{
             let mut builder = <$builder>::new();
             for row in 0..rows.len() {
-                match integer(body_name, cell(row), row, name)? {
+                match integer(body_name, cell(row), row, name, written)? {
                     None => builder.append_null(),
                     Some(value) => builder.append_value(in_range(row, value)? as $ty),
                 }
@@ -406,12 +408,14 @@ fn scalar_column(
     })
 }
 
-/// An integer, exactly: a number with a fraction or exponent is refused rather than rounded.
+/// An integer, exactly: a number with a fraction or exponent is refused rather than rounded. A
+/// string is read as `written` says.
 fn integer(
     body_name: &str,
     value: &Value,
     row: usize,
     name: &str,
+    written: WrittenAs,
 ) -> Result<Option<i128>, DecodeError> {
     match value {
         Value::Null => Ok(None),
@@ -429,14 +433,10 @@ fn integer(
                 ))
             }
         }
-        Value::String(text) => text.parse::<i128>().map(Some).map_err(|_| {
-            refusal(
-                body_name,
-                row,
-                name,
-                "is a string that is not an integer; send a JSON integer or a string of digits",
-            )
-        }),
+        Value::String(text) => written
+            .parse(text)
+            .map(Some)
+            .map_err(|e| refusal(body_name, row, name, &format!("is '{text}', which {e}"))),
         _ => Err(refusal(body_name, row, name, "is not an integer")),
     }
 }
@@ -473,7 +473,7 @@ fn membership_column(
             Value::Null => Ok(None),
             Value::String(text) => Ok(Some(text.clone())),
             Value::Number(_) => {
-                Ok(integer(body_name, value, row, name)?
+                Ok(integer(body_name, value, row, name, WrittenAs::Integer)?
                     .and_then(mosaica_types::layer::integer_key))
             }
             _ => Err(refusal(

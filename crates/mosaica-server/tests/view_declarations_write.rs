@@ -333,6 +333,126 @@ async fn a_roster_integer_past_its_declared_width_is_refused_at_a_create() {
     assert_eq!(fits["metadata"]["tier"]["value"], 255, "{fits}");
 }
 
+/// The roster `timestamp_us` values the test below writes: each view's key, the value as a create
+/// sends it in JSON, the value as a build reads it in TOML, and the microseconds it names.
+const ROSTER_TIMES: [(&str, &str, &str, i64); 4] = [
+    ("offset", r#""2026-04-01T10:30:00+01:00""#, r#""2026-04-01T10:30:00+01:00""#, 1_775_035_800_000_000),
+    // A TOML local date and offset date-time, against the same text in a JSON string.
+    ("date", r#""2026-04-02""#, "2026-04-02", 1_775_088_000_000_000),
+    ("toml", r#""2026-04-01T09:30:00.5Z""#, "2026-04-01T09:30:00.5Z", 1_775_035_800_500_000),
+    ("digits", r#""1775035800000000""#, r#""1775035800000000""#, 1_775_035_800_000_000),
+];
+
+/// Each `eras:<key>` view's `starts` as `/v1/meta` serves it.
+async fn roster_times(served: &Served) -> Vec<(String, Value)> {
+    let document = meta(served).await;
+    let mut out: Vec<(String, Value)> = document["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|v| v["id"].as_str().unwrap().starts_with("eras:"))
+        .map(|v| (v["id"].as_str().unwrap().to_string(), v["metadata"]["starts"].clone()))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// A declaration of the `eras` group, its views each from `points.parquet`, with `starts` written
+/// as `starts` gives it for each key.
+fn eras_declaration(starts: &[(&str, &str)]) -> String {
+    let mut out = r#"
+[sources]
+points = "points.parquet"
+
+[defaults]
+allocation_view = "world"
+
+[[view]]
+name             = "world"
+source           = "points"
+extent           = { x = [0.0, 1000.0], y = [0.0, 1000.0] }
+point_visibility = { default = "public" }
+
+[[view_group]]
+name             = "eras"
+extent           = { x = [0.0, 1000.0], y = [0.0, 1000.0] }
+point_visibility = { default = "public" }
+metadata         = { starts = "timestamp_us" }
+"#
+    .to_string();
+    for (key, value) in starts {
+        out.push_str(&format!(
+            "\n[[view_group.view]]\nkey    = \"{key}\"\nsource = \"points\"\nstarts = {value}\n"
+        ));
+    }
+    out
+}
+
+/// **A roster timestamp written as text is stored alike by a build and a create**: a date, a
+/// date-time with an offset and a string of digits are each the microseconds they name, on both
+/// paths and after a restart, and a date-time with no offset or a seventh fractional digit is
+/// refused on both.
+#[tokio::test]
+async fn a_roster_timestamp_written_as_text_is_stored_alike_by_a_build_and_a_create() {
+    let expected: Vec<(String, Value)> = {
+        let mut out: Vec<(String, Value)> = ROSTER_TIMES
+            .iter()
+            .map(|(key, _, _, micros)| {
+                (format!("eras:{key}"), json!({ "type": "timestamp_us", "value": micros }))
+            })
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
+    };
+    const REFUSED: [&str; 2] = ["2026-04-01T09:30:00", "2026-04-01T09:30:00.1234567Z"];
+
+    // A create at a running service.
+    let mut served = Served::build(|dir| build_fixture(dir, N)).await;
+    let group = json!({
+        "extent": frame(),
+        "point_visibility": { "default": "public" },
+        "metadata": [{ "name": "starts", "type": "timestamp_us" }]
+    });
+    assert_eq!(declare_group(&served, "eras", group).await.0, 201);
+    for (key, sent, _, _) in ROSTER_TIMES {
+        let starts: Value = serde_json::from_str(sent).unwrap();
+        let (status, body) =
+            put(&served, &format!("/control/views/eras/{key}"), json!({ "metadata": { "starts": starts } })).await;
+        assert_eq!(status, 201, "{key}: {body}");
+    }
+    for (n, refused) in REFUSED.iter().enumerate() {
+        let (status, body) =
+            put(&served, &format!("/control/views/eras/refused{n}"), json!({ "metadata": { "starts": refused } })).await;
+        assert_eq!(status, 422, "{refused}: {body}");
+    }
+    served.reauthorise().await;
+    assert_eq!(roster_times(&served).await, expected, "as created");
+    let served = served.restart().await;
+    assert_eq!(roster_times(&served).await, expected, "after a restart");
+
+    // The same values declared at a build.
+    let written: Vec<(&str, &str)> = ROSTER_TIMES.iter().map(|(key, _, toml, _)| (*key, *toml)).collect();
+    let built = Served::build(|dir| {
+        write_points_n(&dir.join("points.parquet"), N);
+        let path = dir.join("corpus.toml");
+        std::fs::write(&path, eras_declaration(&written)).unwrap();
+        mosaica_build::build(&args_from_declaration(&path, &dir.join("bundle"))).expect("the build runs");
+    })
+    .await;
+    assert_eq!(roster_times(&built).await, expected, "as built");
+
+    let dir = tempfile::TempDir::new().unwrap();
+    write_points_n(&dir.path().join("points.parquet"), N);
+    for refused in ["2026-04-01T09:30:00", r#""2026-04-01T09:30:00""#, r#""2026-04-01T09:30:00.1234567Z""#] {
+        let path = dir.path().join("corpus.toml");
+        std::fs::write(&path, eras_declaration(&[("refused", refused)])).unwrap();
+        assert!(
+            mosaica_build::config::Config::parse(&path, &Default::default()).is_err(),
+            "{refused}"
+        );
+    }
+}
+
 /// **A plain view created at runtime takes rows at its first flush and serves a viewport**
 /// (decision 0136, R9). Its answers are the group route's, and it shares a namespace with the
 /// groups.

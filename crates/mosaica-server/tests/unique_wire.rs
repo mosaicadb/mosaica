@@ -138,6 +138,22 @@ async fn ingest(served: &Served, batch_id: &str, body: Vec<u8>) -> (u16, Value) 
     (status, resp.json().await.unwrap_or(Value::Null))
 }
 
+async fn ingest_json(served: &Served, batch_id: &str, rows: Value) -> (u16, Value) {
+    let resp = served
+        .server
+        .client
+        .post(served.server.control_url("/control/ingest"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .header("x-mosaica-batch-id", batch_id)
+        .header("x-mosaica-view", "s0")
+        .json(&rows)
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status().as_u16();
+    (status, resp.json().await.unwrap_or(Value::Null))
+}
+
 async fn declare(served: &Served, body: Value) -> (u16, Value) {
     let resp = served
         .server
@@ -214,6 +230,53 @@ async fn a_row_carrying_a_held_value_names_the_holder() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["edited"], 1, "{body}");
     assert_eq!(body["mosaica_ids"][0], holder.to_string(), "{body}");
+}
+
+/// **A unique timestamp is named by a date written as text**: in an ingest row, a filter and a
+/// change, an RFC 3339 date-time names the item holding the microseconds it writes, a string of
+/// digits names it as microseconds, and a date-time with no offset or a seventh fractional digit
+/// is refused.
+#[tokio::test]
+async fn a_unique_timestamp_is_named_by_a_date_written_as_text() {
+    let served = Served::build(fixture).await;
+    let (status, body) =
+        declare(&served, json!({ "name": "at", "type": "timestamp_us", "unique": true })).await;
+    assert!(status < 300, "{body}");
+    const NINE_THIRTY: i64 = 1_775_035_800_000_000;
+    let row = |at: &str| json!({ "x": 500.0, "y": 500.0, "access": ["0"], "at": at });
+    let (status, body) =
+        ingest_json(&served, "dated", json!([row("2026-04-01T09:30:00Z"), row("2026-04-02")])).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["created"], 2, "{body}");
+    let holder: u64 = body["mosaica_ids"][0].as_str().unwrap().parse().unwrap();
+    drain(&served.server).await;
+
+    for at in [json!(NINE_THIRTY), json!(NINE_THIRTY.to_string()), json!("2026-04-01T10:30:00+01:00")] {
+        let (status, found) = filtered(&served, json!({ "at": { "eq": at } })).await;
+        assert_eq!((status, found), (200, BTreeSet::from([holder])), "{at}");
+    }
+    let (status, body) = ingest_json(&served, "again", json!([row("2026-04-01T09:30:00.000000Z")])).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["created"], 0, "{body}");
+    assert_eq!(body["mosaica_ids"][0], holder.to_string(), "{body}");
+
+    for at in ["2026-04-02T00:00:00", "2026-04-02T00:00:00.0000001Z"] {
+        let resp = post_changes(&served.server, &json!([{ "op": "suppress", "match": { "at": at } }])).await;
+        assert_eq!(resp.status(), 422, "{at}");
+        let (status, body) = ingest_json(&served, &format!("refused {at}"), json!([row(at)])).await;
+        assert_eq!(status, 422, "{at}: {body}");
+        let (status, _) = filtered(&served, json!({ "at": { "eq": at } })).await;
+        assert_eq!(status, 422, "{at}");
+    }
+    let resp = post_changes(
+        &served.server,
+        &json!([{ "op": "suppress", "match": { "at": "2026-04-01T09:30:00Z" } }]),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.json::<Value>().await.unwrap()["accepted"], 1);
+    let (_, found) = filtered(&served, json!({ "at": { "eq": NINE_THIRTY } })).await;
+    assert!(found.is_empty(), "the suppressed item is withheld");
 }
 
 /// **`PUT /control/attributes` changes `unique` on a column that exists**: refused with `409`

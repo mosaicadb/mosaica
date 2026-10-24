@@ -1492,6 +1492,68 @@ async fn a_number_or_timestamp_field_is_counted_in_bins() {
     assert_eq!((bins[0].0, bins[1].1), (1_577_836_800_000_000.0, 1_640_995_200_000_000.0));
 }
 
+/// **A timestamp may be written as text** in a filter and in a range: a date or a date-time with
+/// an offset counts the items the microseconds it names count, a string of digits is
+/// microseconds, and a date-time with no offset or a seventh fractional digit is refused.
+#[tokio::test]
+async fn a_timestamp_is_written_as_text_in_a_filter_and_a_range() {
+    let f = fixture().await;
+    let terms = ["1"];
+    let token = token_for(&f.server, &terms).await;
+    const JAN_2020: i64 = 1_577_836_800_000_000;
+    const JUN_2020: i64 = 1_590_969_600_000_000;
+    const JAN_2021: i64 = 1_609_459_200_000_000;
+    let body = |filters: Value| json!({ "view": "s0", "filters": filters, "groupings": [{ "count": true }] });
+    let server = &f.server;
+    let token = token.as_str();
+    let total = |filters: Value| async move {
+        let (_, decoded) = aggregate_ok(server, token, &body(filters)).await;
+        decoded.tables[0].0["total"].as_u64().unwrap() as usize
+    };
+    let count = |test: &dyn Fn(i64) -> bool| items(&terms, |e| stamp_of(e).is_some_and(test)).len();
+
+    let in_range = count(&|t| (JUN_2020..JAN_2021).contains(&t));
+    assert!(in_range > 0 && in_range < count(&|_| true));
+    for (gte, lt) in [
+        (json!(JUN_2020), json!(JAN_2021)),
+        (json!("2020-06-01"), json!("2021-01-01T00:00:00Z")),
+        // The same instants at another offset, and a leap second that is the next second.
+        (json!("2020-06-01T02:00:00.000000+02:00"), json!("2020-12-31T23:59:60Z")),
+    ] {
+        let filters = json!({ "stamp": { "range": { "gte": gte, "lt": lt } } });
+        assert_eq!(total(filters.clone()).await, in_range, "{filters}");
+    }
+    let filters = json!({ "stamp": { "in": ["2020-01-01", "2020-06-01T00:00:00Z"] } });
+    assert_eq!(total(filters).await, count(&|t| t == JAN_2020 || t == JUN_2020));
+    // Digits are microseconds, however much they look like a date.
+    let filters = json!({ "stamp": { "range": { "gte": "20200101" } } });
+    assert_eq!(total(filters).await, count(&|t| t >= 20_200_101));
+
+    for refused in [
+        json!({ "stamp": { "eq": "2020-06-01T00:00:00" } }),
+        json!({ "stamp": { "range": { "lt": "2020-06-01T00:00:00.1234567Z" } } }),
+    ] {
+        let resp = post(server, "/v1/aggregate", token, &body(refused.clone())).await;
+        assert_eq!(resp.status().as_u16(), 422, "{refused}");
+    }
+
+    // A range's bounds: the text forms give the bins the microseconds give.
+    let bins = |range: Value| async move {
+        let body = json!({ "view": "s0", "groupings": [{ "count": true,
+            "by": { "field": "stamp", "bins": 3, "range": range } }] });
+        bin_rows(&read_all(server, token, &body).await, true).0
+    };
+    let held = bins(json!([JAN_2020, JAN_2021])).await;
+    assert_eq!(held.len(), 3);
+    assert_eq!(bins(json!(["2020-01-01", "2021-01-01T01:00:00+01:00"])).await, held);
+    for refused in [json!(["2020-01-01T00:00:00", JAN_2021]), json!([JAN_2020, "2021-01-01T00:00:00.0000001Z"])] {
+        let body = json!({ "view": "s0", "groupings": [{ "count": true,
+            "by": { "field": "stamp", "bins": 3, "range": refused } }] });
+        let resp = post(server, "/v1/aggregate", token, &body).await;
+        assert_eq!(resp.status().as_u16(), 422, "{body}");
+    }
+}
+
 /// One summary row: `(count, values, missing, min, max, mean)` of `field`, the smallest and largest
 /// as `f64`.
 type Summary = (u64, u64, u64, Option<f64>, Option<f64>, Option<f64>);

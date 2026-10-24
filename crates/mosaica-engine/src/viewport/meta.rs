@@ -121,9 +121,10 @@ pub enum LeafColumn {
         family: crate::filter::Family,
         /// The operators a filter may apply to it ([`crate::filter::operands_of`]).
         operands: &'static [&'static str],
-        /// Whether its values are exact integers (every integer width and `timestamp_us`), so a
-        /// comparand may be spelled as a decimal string past what a JSON number carries exactly.
-        integer: bool,
+        /// How a string spells a value, where values are exact integers (every integer width
+        /// and `timestamp_us`): decimal digits past what a JSON number carries exactly, and on a
+        /// timestamp a date too.
+        integer: Option<mosaica_types::written::WrittenAs>,
         /// Whether its unique index is its only filter home ([`crate::filter::unique_only`]).
         unique_only: bool,
     },
@@ -159,10 +160,17 @@ pub(crate) enum Resolution<'a> {
     },
 }
 
-/// Every integer width, and `timestamp_us`, whose values are `i64` microseconds.
-fn is_integer(ty: mosaica_spatial::tiler::ScalarType) -> bool {
+/// How a string spells a value of an uncategorised column of type `ty`: every integer width, and
+/// `timestamp_us`, whose values are `i64` microseconds.
+fn written_as(
+    vocabulary: Option<&str>,
+    ty: mosaica_spatial::tiler::ScalarType,
+) -> Option<mosaica_types::written::WrittenAs> {
     use mosaica_store::unique::KeyKind;
-    matches!(KeyKind::of(ty), Some(KeyKind::Unsigned | KeyKind::Signed))
+    let integer = matches!(KeyKind::of(ty), Some(KeyKind::Unsigned | KeyKind::Signed));
+    (vocabulary.is_none() && integer).then(|| {
+        mosaica_types::written::WrittenAs::of(ty == mosaica_spatial::tiler::ScalarType::TimestampUs)
+    })
 }
 
 impl Resolution<'_> {
@@ -175,7 +183,7 @@ impl Resolution<'_> {
                     column: declared.name.clone(),
                     family: crate::filter::Family::of(declared),
                     operands: crate::filter::operands_of(declared),
-                    integer: declared.vocabulary.is_none() && is_integer(declared.arrow_type),
+                    integer: written_as(declared.vocabulary.as_deref(), declared.arrow_type),
                     unique_only: crate::filter::unique_only(declared),
                 }
             }
@@ -183,7 +191,7 @@ impl Resolution<'_> {
                 column: crate::filter::scoped_column_name(&family.name, &view),
                 family: crate::filter::Family::of_scoped(family),
                 operands: crate::filter::Family::of_scoped(family).operands(),
-                integer: family.vocabulary.is_none() && is_integer(family.arrow_type),
+                integer: written_as(family.vocabulary.as_deref(), family.arrow_type),
                 unique_only: false,
             },
             Resolution::Unknown => LeafColumn::Unknown,
