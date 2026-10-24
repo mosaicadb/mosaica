@@ -194,7 +194,7 @@ def test_a_remove_naming_nothing_is_refused_by_row_and_strict_refuses_the_whole_
     the call applies nothing and raises."""
     db = served(string_ids)
     report = db.remove({"paper": ["nobody", "p5"]})
-    assert report.ok and report.accepted == 1, report
+    assert not report.ok and report.accepted == 1, report
     assert report.refused == [{"row": 0, "item": {"paper": "nobody"}, "reason": "names_no_item"}]
     assert report.refused_by_reason == {"names_no_item": 1}
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 19
@@ -266,7 +266,7 @@ def test_a_change_report_names_each_refused_row_and_is_not_ok_when_nothing_appli
     held = set(db.items("map", []).column("mosaica_id").to_pylist())
     absent = [one for one in range(1, 100) if one not in held][:3]
     report = db.suppress(absent)
-    assert report.accepted == 0
+    assert report.accepted == 0 and not report.ok
     assert [one["item"] for one in report.refused] == [{"mosaica_id": str(one)} for one in absent]
     lines = str(report).splitlines()
     assert not lines[0].endswith("ok")
@@ -280,7 +280,7 @@ def test_a_none_in_a_list_names_no_item_and_is_refused_by_row(served, corpus):
     db = served(string_ids)
     [held] = db.lookup("map", "paper", ["p0"]).column("mosaica_id").to_pylist()
     report = db.remove([None, held])
-    assert report.ok and report.accepted == 1, report
+    assert not report.ok and report.accepted == 1, report
     assert report.refused == [{"row": 0, "item": {"mosaica_id": None}, "reason": "names_no_item"}]
     assert viewport(db, "map", FRAME)["counts"]["visible"] == 19
 

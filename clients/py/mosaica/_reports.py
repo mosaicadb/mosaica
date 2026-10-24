@@ -410,8 +410,10 @@ class ChangeReport(Summarised):
       rows were applied. `refused_by_reason` counts them.
     - `ignored_columns`: the columns given that name no item, being neither `mosaica_id` nor a
       unique attribute's column: those not sent, and any the server says it ignored.
-    - `refusals`: each refused request, with its status and the server's answer. `ok` is `True`
-      when there were none. Each is in the summary.
+    - `refusals`: each refused request, with its status and the server's answer. Each is in
+      the summary.
+
+    `ok` is `True` when every row given was applied: no request and no row was refused.
     """
 
     op: str
@@ -423,8 +425,8 @@ class ChangeReport(Summarised):
 
     @property
     def ok(self) -> bool:
-        """`True` when no request was refused."""
-        return not self.refusals
+        """`True` when every row given was applied."""
+        return not self.refusals and not self.refused
 
     @property
     def refused_by_reason(self) -> dict:
