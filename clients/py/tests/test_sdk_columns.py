@@ -4,6 +4,7 @@ import pyarrow as pa
 import pytest
 
 from mosaica._database import create
+from mosaica._refusal import Refusal
 
 pd = pytest.importorskip("pandas")
 
@@ -81,6 +82,13 @@ def test_a_list_and_a_type_with_no_mapping_are_not_declared_and_are_listed(db):
     assert declared["terms"].declared_as == "not declared"
     assert "access=" in declared["terms"].why
     assert 'name = "terms"' not in db.declaration
+
+
+def test_a_name_the_frame_does_not_carry_is_refused_and_nothing_is_declared(db):
+    for argument in ("skip", "render", "index", "keyword", "category", "unique"):
+        with pytest.raises(Refusal):
+            db.declare_columns(frame(), **{argument: ["year", "nope"]})
+    assert db.blocks.attribute_names() == {"paper"}
 
 
 def test_a_column_already_declared_is_left_as_it_was(db):

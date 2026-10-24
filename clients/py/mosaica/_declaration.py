@@ -21,6 +21,15 @@ from ._toml import Inline
 
 KINDS = ("view", "view_group", "vocabulary", "attribute", "layer")
 
+#: Each kind as a sentence names one.
+KIND_WORDS = {
+    "view": "a view",
+    "view_group": "a view group",
+    "vocabulary": "a vocabulary",
+    "attribute": "an attribute",
+    "layer": "a layer",
+}
+
 #: A layer that named no `views` takes every view, resolved when the document is written so that a
 #: view declared after the layer is included.
 VIEWS_ALL = "__views_all__"
@@ -70,7 +79,10 @@ class Declaration:
         block = dict(block)
         name = block.get("name")
         if name is not None and any(b.get("name") == name for b in self.blocks[kind]):
-            raise Refusal(f"declare: a {kind} named {name!r} is already declared")
+            raise Refusal(
+                f"declare: {KIND_WORDS[kind]} named {name!r} is already declared; give this one "
+                f"another name"
+            )
         if kind in ("view", "view_group") and name is not None:
             # A view of a group is addressed `<group>:<key>` and a plain view by its own name, so
             # one name held by both would make a request mean two things.

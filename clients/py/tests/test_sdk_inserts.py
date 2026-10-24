@@ -72,6 +72,27 @@ def test_a_name_that_is_no_column_of_the_table_is_refused_naming_the_columns(tmp
         db.insert("map", frame(), x="x", y="y", columns={"id": "paper"})
 
 
+def test_a_coordinate_that_is_not_a_float_column_is_refused_at_the_insert(tmp_path):
+    db = mapped(tmp_path)
+    rows = frame(id=["p", "q", "r"], title=["a", "b", "c"], k=[1, 2, 3])
+    for named in ({"x": "title", "y": "y"}, {"x": "x", "y": "k"}):
+        with pytest.raises(Refusal):
+            db.insert("map", rows, **named)
+    assert db.inserts == []
+    assert db.insert("map", rows.astype({"k": "float32"}), x="x", y="k").rows == 3
+
+
+def test_a_build_refusal_gives_its_reason_before_the_log(tmp_path):
+    binary()
+    db = create(tmp_path / "db")
+    db.declare_view("map")
+    db.insert("map", frame(x=[0.0, None, 2.0]), x="x", y="y")
+    with pytest.raises(Refusal) as refused:
+        db.commit()
+    written = [line.strip() for line in refused.value.report.log.splitlines() if line.strip()]
+    assert written[-1].rstrip(".") in str(refused.value).splitlines()[0]
+
+
 def test_an_insert_on_something_undeclared_names_the_verb_that_declares_it(tmp_path):
     db = create(tmp_path / "db")
     with pytest.raises(Refusal):

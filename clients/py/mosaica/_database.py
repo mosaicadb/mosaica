@@ -417,11 +417,22 @@ class Database:
         open vocabulary of the same name, which adds each value it meets, with codes of width
         `u16`, so it holds at most 65,535 values. The width cannot be changed after the first
         commit; for another width, call `declare_vocabulary` and `declare_attribute` instead.
-        A column already declared is left as it is.
+        A column already declared is left as it is. A name in `skip`, `render`, `index`,
+        `keyword`, `category` or `unique` that is not a column of the frame is refused.
 
             db.declare_columns(frame, skip=["paper_id", "x", "y"], category=["venue"])
         """
         schema = _inserts.schema_of(frame)
+        for argument, names in (
+            ("skip", skip), ("render", render), ("index", index), ("keyword", keyword),
+            ("category", category), ("unique", unique),
+        ):
+            absent = [name for name in listed(names) if name not in schema]
+            if absent:
+                raise Refusal(
+                    f"declare_columns: {argument}= names {', '.join(map(repr, absent))}, which "
+                    f"the frame does not carry; name one of its columns: {', '.join(schema)}"
+                )
         attributes, vocabularies, rows = _columns.columns_of(
             schema,
             set(listed(skip)),
@@ -623,11 +634,10 @@ class Database:
         if not (self.built and render):
             return
         raise Refusal(
-            f"attribute {name!r}: render=True is fixed at the first commit. A rendered value is "
-            f"served from the hot column of the row that carries it, and PUT /control/attributes "
-            f"declares a column against entities that already exist, so it refuses one. Declare "
-            f"it with index=True, which is filterable and drawn at drill-down, or rebuild the "
-            f"database with create(path, replace=True)"
+            f"attribute {name!r}: render=True is set at the first commit only, since the points "
+            f"already stored cannot take a new drawn value; declare it with index=True to filter "
+            f"by it, or make the database again with create(path, replace=True) and declare it "
+            f"with render=True before the first commit"
         )
 
     def _refuse_an_undeclared_group(self, kind: str, name: str, block: dict) -> None:
@@ -1316,13 +1326,13 @@ class Database:
         findings = self._preflight(document)
         if findings:
             raise Refusal(
-                "commit: the pre-flight found what follows, and nothing was sent or built\n"
+                "commit: nothing was sent or built, because of what follows:\n"
                 + "\n".join(f"  {finding}" for finding in findings)
             )
         started = time.monotonic()
         ok, page = self._checked()
         if not ok:
-            raise Refusal("commit: the declaration did not check\n" + page)
+            raise Refusal(_reason_first("commit: the declaration did not check", page, page))
         build = self._run(
             ["build", "--deployment", str(self.path / "mosaica.toml")]
             + (["--strict"] if strict else [])
@@ -1338,7 +1348,10 @@ class Database:
             identity=self._identity_in_words(),
         )
         if build.returncode != 0:
-            raise Refusal("commit: the build failed\n" + report.log, report)
+            raise Refusal(
+                _reason_first("commit: the build failed", build.stderr or build.stdout, report.log),
+                report,
+            )
         self.built = True
         self._record_label_columns(document.get("layer", []))
         self.serve()
@@ -1436,16 +1449,17 @@ class Database:
         """
         self.write()
         deployment = str(self.path / "mosaica.toml")
-        refused = "commit: the declaration did not check, so no declaration payload was emitted\n"
+        refused = "commit: the declaration did not check, so nothing was sent"
         if _mosaica is None:
             result = self._run(["check", "--deployment", deployment, "--payloads"])
             if result.returncode != 0:
-                raise Refusal(refused + result.stdout + result.stderr)
+                log = result.stdout + result.stderr
+                raise Refusal(_reason_first(refused, log, log))
             return json.loads(result.stdout)
         try:
             return json.loads(_mosaica.payloads(deployment))
         except _mosaica.DeclarationError as why:
-            raise Refusal(f"{refused}check FAILED: {why}") from None
+            raise Refusal(f"{refused}: {why}") from None
 
     def token(self, terms: Sequence[str] | None = None) -> Token:
         """A token for reading this database, made with its operator credential.
@@ -2031,6 +2045,19 @@ class Database:
 
     def __exit__(self, *exception) -> None:
         self.close()
+
+
+def _reason_first(what: str, output: str, log: str) -> str:
+    """A refusal that says why on its first line, and keeps the whole log after it.
+
+    The reason is each line `mosaica` marks `FAILED`, else the last line it wrote. Each line ends
+    with a full stop, so the message still reads where a notebook joins its lines.
+    """
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    failed = [line for line in lines if line.startswith(("FAILED", "check FAILED"))]
+    reasons = failed or lines[-1:] or ["mosaica wrote nothing"]
+    head = f"{what}: " + "; ".join(reason.rstrip(".") for reason in reasons) + "."
+    return f"{head}\nThe whole log follows.\n{log}"
 
 
 def _fold_change(report: ChangeReport, answer, start: int) -> None:
