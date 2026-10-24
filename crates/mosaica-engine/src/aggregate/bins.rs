@@ -160,7 +160,7 @@ impl Edges {
 
 impl Numbers {
     /// The number or timestamp field `column` names, where its values can be read. `summary` says
-    /// which grouping asks, for the refusal.
+    /// whether field figures ask for it rather than bins, for the refusal.
     pub(super) fn of(generation: &Generation, column: &str, summary: bool) -> Result<Numbers> {
         let manifest = &generation.bundle.manifest;
         let refused = |why: AggregateRefused| EngineError::AggregateRefused(why);

@@ -24,8 +24,9 @@ use mosaica_engine::filter::{
 };
 use mosaica_engine::{
     AggregateHead, AggregateRequest, AggregateSink, ArtifactOut, ArtifactsRequest, By,
-    CategoryQuery, Engine, Grouping, PageEnd, Pick, RecordsCounts, RecordsOrder, Reference,
-    Session, SinkResult, SuggestRequest, TableHead, ViewportArtifactsRequest, ViewportRequest,
+    CategoryQuery, Engine, Figure, FigureField, FigureList, Grouping, PageEnd, Pick, RecordsCounts,
+    RecordsOrder, Reference, Session, SinkResult, SuggestRequest, TableHead,
+    ViewportArtifactsRequest, ViewportRequest,
 };
 use mosaica_types::{AttrLocalId, MosaicaId, ShardId};
 
@@ -1700,6 +1701,8 @@ fn aggregate_groupings_sum_over_every_shard() {
             by: Some(by),
             cells: None,
             area: None,
+            count: true,
+            figures: Vec::new(),
         };
         vec![
             by(By::Field {
@@ -1715,9 +1718,6 @@ fn aggregate_groupings_sum_over_every_shard() {
                 bins: 5,
                 range: None,
                 sample: None,
-            }),
-            by(By::Summary {
-                column: "score".into(),
             }),
             by(By::Layer {
                 layer: "clusters".into(),
@@ -1743,11 +1743,15 @@ fn aggregate_groupings_sum_over_every_shard() {
                 }),
                 cells: Some(1),
                 area: None,
+                count: true,
+                figures: Vec::new(),
             },
             Grouping {
                 by: None,
                 cells: Some(3),
                 area: None,
+                count: true,
+                figures: Vec::new(),
             },
         ]
     };
@@ -1768,7 +1772,23 @@ fn aggregate_groupings_sum_over_every_shard() {
     ];
     for (what, filter, reference) in cases {
         pair.same(&format!("the {what} aggregate"), |built, session| {
-            let groupings = groupings(built);
+            let mut groupings = groupings(built);
+            // A field's figures are taken over the whole visible set only.
+            if filter(built).is_none() && reference.is_none() {
+                groupings.push(Grouping {
+                    by: None,
+                    cells: None,
+                    area: None,
+                    count: true,
+                    figures: vec![FigureList {
+                        figure: Figure::Summary,
+                        fields: vec![FigureField {
+                            column: "score".into(),
+                            name: "score".into(),
+                        }],
+                    }],
+                });
+            }
             let mut tables = Tables::default();
             built
                 .engine

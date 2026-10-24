@@ -30,8 +30,8 @@ use mosaica_engine::filter::{FilterExpr, FilterOperand, RegionLeaf, Scalar};
 use mosaica_engine::IngestRequest;
 use mosaica_engine::{
     AggregateCaps, AggregateHead, AggregateRefused, AggregateRequest, AggregateSink,
-    AggregateTrailer, By, Engine, EngineError, Grouping, PageEnd, RecordsLimits, Reference,
-    Session, SinkResult, TableHead, ViewportRequest,
+    AggregateTrailer, By, Engine, EngineError, Figure, FigureField, FigureList, Grouping, PageEnd,
+    RecordsLimits, Reference, Session, SinkResult, TableHead, ViewportRequest,
 };
 use mosaica_lifecycle::command::IngestRow;
 use mosaica_lifecycle::wal::{ChangeOp, WalScalar};
@@ -530,6 +530,8 @@ fn bins(column: &str, n: u32, range: Option<(Scalar, Scalar)>) -> Grouping {
         }),
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     }
 }
 
@@ -984,6 +986,8 @@ fn a_histogram_is_one_page_beside_groupings_that_page() {
         by: None,
         cells: Some(10),
         area: None,
+        count: true,
+        figures: Vec::new(),
     };
     let groupings = [bins("rank", 20, None), cells.clone(), bins("seen", 6, None)];
     let alone = |g: usize| table(engine, &session, request(&groupings[g..g + 1])).1;
@@ -1801,13 +1805,31 @@ fn a_sample_read_partly_from_the_band_and_partly_by_scanning_is_the_oracles() {
 
 // ---- a field's figures ----------------------------------------------------------------------
 
-fn summary(column: &str) -> Grouping {
+/// A table of `figure` over each of `columns`, with no count.
+fn figures(figure: Figure, columns: &[&str]) -> Grouping {
     Grouping {
-        by: Some(By::Summary {
-            column: column.to_string(),
-        }),
+        by: None,
         cells: None,
         area: None,
+        count: false,
+        figures: vec![FigureList {
+            figure,
+            fields: columns
+                .iter()
+                .map(|column| FigureField {
+                    column: column.to_string(),
+                    name: column.to_string(),
+                })
+                .collect(),
+        }],
+    }
+}
+
+/// A table of the count and every figure of `column`.
+fn summary(column: &str) -> Grouping {
+    Grouping {
+        count: true,
+        ..figures(Figure::Summary, &[column])
     }
 }
 
@@ -1839,7 +1861,7 @@ impl PartialEq for Figures {
     }
 }
 
-fn figures_of(batch: &RecordBatch) -> Figures {
+fn figures_of(batch: &RecordBatch, column: &str) -> Figures {
     assert_eq!(batch.num_rows(), 1, "a summary is one row");
     let u64_of = |name: &str| {
         batch
@@ -1851,12 +1873,12 @@ fn figures_of(batch: &RecordBatch) -> Figures {
             .value(0)
     };
     Figures {
-        items: u64_of("items"),
-        count: u64_of("count"),
-        none: u64_of("none"),
-        min: value_at(batch, "min", 0),
-        max: value_at(batch, "max", 0),
-        mean: value_at(batch, "mean", 0),
+        items: u64_of("count"),
+        count: u64_of(&format!("values_{column}")),
+        none: u64_of(&format!("missing_{column}")),
+        min: value_at(batch, &format!("min_{column}"), 0),
+        max: value_at(batch, &format!("max_{column}"), 0),
+        mean: value_at(batch, &format!("mean_{column}"), 0),
     }
 }
 
@@ -1919,22 +1941,15 @@ fn oracle(items: &[&Item], column: &str) -> Figures {
     }
 }
 
-/// The summary of `column` in `view`, under `filter`.
-fn summary_of(
-    engine: &Engine,
-    session: &Session,
-    view: &str,
-    column: &str,
-    filter: Option<FilterExpr>,
-) -> Figures {
+/// The summary of `column` in `view`.
+fn summary_of(engine: &Engine, session: &Session, view: &str, column: &str) -> Figures {
     let groupings = [summary(column)];
     let mut req = request(&groupings);
     req.view = view;
-    req.filter = filter;
     let (collect, trailer) = respond(engine, session, req).expect("the summary answers");
     assert_eq!(trailer.next, None, "a summary is one page");
     assert_eq!(collect.pages.len(), 1);
-    figures_of(&collect.pages[0].1)
+    figures_of(&collect.pages[0].1, column)
 }
 
 /// The default edges of `column` in `view`, checked against `items`, the items the viewer may see
@@ -1958,6 +1973,8 @@ fn check_edges(
             }),
             cells: None,
             area: None,
+            count: true,
+            figures: Vec::new(),
         }];
         let mut req = request(&groupings);
         req.view = view;
@@ -1990,12 +2007,10 @@ fn check_edges(
     }
 }
 
-/// **The summary of every field is the oracle's for each viewer, and a filter or a region leaves it
-/// as it is.**
+/// **The summary of every field is the oracle's for each viewer.**
 #[test]
 fn a_summary_is_the_oracles_over_the_whole_visible_set() {
     let fx = fixture();
-    let area = [100.0, 200.0, 600.0, 750.0];
     for broad in [true, false] {
         let session = fx.session(broad);
         let all: Vec<&Item> = fx.visible(broad, &|_| true).collect();
@@ -2006,17 +2021,11 @@ fn a_summary_is_the_oracles_over_the_whole_visible_set() {
                 want.count > 0 && want.none > 0,
                 "{what}: the fixture has both"
             );
-            for filter in [
-                None,
-                Some(fx.kind_is("b")),
-                Some(bbox(area[0], area[1], area[2], area[3])),
-            ] {
-                assert_eq!(
-                    summary_of(&fx.engine, &session, "s0", column, filter),
-                    want,
-                    "{what}"
-                );
-            }
+            assert_eq!(
+                summary_of(&fx.engine, &session, "s0", column),
+                want,
+                "{what}"
+            );
             check_edges(&fx.engine, &session, "s0", column, &all, &what);
         }
         // A summary beside other groupings is one table of its own, after the one before it.
@@ -2027,18 +2036,74 @@ fn a_summary_is_the_oracles_over_the_whole_visible_set() {
                 by: None,
                 cells: None,
                 area: None,
+                count: true,
+                figures: Vec::new(),
             },
         ];
-        let mut req = request(&groupings);
-        req.filter = Some(fx.kind_is("a"));
-        let (collect, _) = respond(&fx.engine, &session, req).unwrap();
+        let (collect, _) = respond(&fx.engine, &session, request(&groupings)).unwrap();
         assert_eq!(collect.tables.len(), 3);
         assert_eq!(collect.tables[1].groups, None);
+        assert_eq!(collect.tables[1].total, all.len() as u64);
         assert_eq!(
-            collect.tables[1].total,
-            fx.visible(broad, &|i| i.kind == "a").count() as u64
+            figures_of(&collect.pages[1].1, "rank"),
+            oracle(&all, "rank")
         );
-        assert_eq!(figures_of(&collect.pages[1].1), oracle(&all, "rank"));
+    }
+}
+
+/// **A table's field figures are columns named after the figure and the field**, after `count`,
+/// in the order values, missing, min, max, mean, each over its fields in the order first named; a
+/// figure named twice for one field is one column, and a table of field figures alone has no
+/// `count`.
+#[test]
+fn field_figures_are_columns_in_figure_order() {
+    let fx = fixture();
+    let session = fx.session(true);
+    let all: Vec<&Item> = fx.visible(true, &|_| true).collect();
+    let mut grouping = figures(Figure::Max, &["rank"]);
+    grouping.figures.push(FigureList {
+        figure: Figure::Summary,
+        fields: ["score", "rank"]
+            .map(|column| FigureField {
+                column: column.to_string(),
+                name: column.to_string(),
+            })
+            .to_vec(),
+    });
+    let groupings = [grouping, figures(Figure::Missing, &["seen"])];
+    let (collect, _) = respond(&fx.engine, &session, request(&groupings)).unwrap();
+    let names = |g: usize| -> Vec<String> {
+        let batch = &collect.pages[g].1;
+        batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect()
+    };
+    assert_eq!(
+        names(0),
+        [
+            "values_score",
+            "values_rank",
+            "missing_score",
+            "missing_rank",
+            "min_score",
+            "min_rank",
+            "max_rank",
+            "max_score",
+            "mean_score",
+            "mean_rank",
+        ]
+    );
+    assert_eq!(names(1), ["missing_seen"]);
+    assert_eq!(collect.tables[0].total, all.len() as u64);
+    assert_eq!(collect.tables[0].groups, None);
+    let batch = &collect.pages[0].1;
+    for column in ["score", "rank"] {
+        let want = oracle(&all, column);
+        assert_eq!(value_at(batch, &format!("max_{column}"), 0), want.max);
+        assert_eq!(value_at(batch, &format!("min_{column}"), 0), want.min);
     }
 }
 
@@ -2059,7 +2124,7 @@ fn a_grant_gets_the_figures_of_the_key_lists_it_satisfies() {
         );
         for column in COLUMNS {
             assert_eq!(
-                summary_of(&fx.engine, &session, "s0", column, None),
+                summary_of(&fx.engine, &session, "s0", column),
                 oracle(&lists, column),
                 "{column}, broad {broad}"
             );
@@ -2072,8 +2137,9 @@ fn a_grant_gets_the_figures_of_the_key_lists_it_satisfies() {
     );
 }
 
-/// **A summary that cannot be served is refused**: a cell level, a category, a bool and a field
-/// that is not declared.
+/// **Field figures that cannot be served are refused**: beside `by` or a cell level, in a request
+/// with a filter or a reference, over no field, and of a category, a bool or a field that is not
+/// declared. A table that names no figure is refused.
 #[test]
 fn a_summary_that_cannot_be_served_is_refused() {
     let fx = fixture();
@@ -2085,12 +2151,46 @@ fn a_summary_that_cannot_be_served_is_refused() {
             other => panic!("not refused: {:?}", other.map(|(_, t)| t)),
         }
     };
+    let over_visible = AggregateRefused::FiguresOverVisibleSet(Figure::Summary);
     assert_eq!(
         refused(Grouping {
             cells: Some(4),
             ..summary("rank")
         }),
-        AggregateRefused::SummaryWithCells
+        over_visible
+    );
+    assert_eq!(
+        refused(Grouping {
+            by: bins("rank", 4, None).by,
+            ..summary("rank")
+        }),
+        over_visible
+    );
+    let groupings = [summary("rank")];
+    for (filter, reference) in [
+        (Some(fx.kind_is("b")), None),
+        (None, Some(Reference::Visible)),
+    ] {
+        let mut req = request(&groupings);
+        req.filter = filter;
+        req.reference = reference;
+        assert!(matches!(
+            respond(&fx.engine, &session, req),
+            Err(EngineError::AggregateRefused(
+                AggregateRefused::FiguresOverVisibleSet(_)
+            ))
+        ));
+    }
+    assert_eq!(
+        refused(figures(Figure::Mean, &[])),
+        AggregateRefused::NoFields(Figure::Mean)
+    );
+    assert_eq!(
+        refused(Grouping {
+            count: false,
+            ..bins("rank", 4, None)
+        }),
+        AggregateRefused::NoFigure
     );
     for column in ["kind", "flag", "nothing"] {
         assert_eq!(
@@ -2110,13 +2210,13 @@ fn invisible_items_move_no_figure() {
     let (all, only) = (fx.session(false), alone.session(false));
     let broad = fx.session(true);
     for column in COLUMNS {
-        let seen = summary_of(&fx.engine, &all, "s0", column, None);
+        let seen = summary_of(&fx.engine, &all, "s0", column);
         assert_eq!(
             seen,
-            summary_of(&alone.engine, &only, "s0", column, None),
+            summary_of(&alone.engine, &only, "s0", column),
             "{column}"
         );
-        let everything = summary_of(&fx.engine, &broad, "s0", column, None);
+        let everything = summary_of(&fx.engine, &broad, "s0", column);
         assert!(
             everything.min != seen.min && everything.max != seen.max,
             "{column}: the hidden items hold the extremes"
@@ -2161,14 +2261,14 @@ fn a_value_in_a_view_the_viewer_cannot_reach_moves_no_edge() {
     let in_s0: Vec<&Item> = s0.iter().filter(|i| i.subset).collect();
     for column in COLUMNS {
         assert_eq!(
-            summary_of(&engine, &subset, "s0", column, None),
+            summary_of(&engine, &subset, "s0", column),
             oracle(&in_s0, column),
             "{column}"
         );
         check_edges(&engine, &subset, "s0", column, &in_s0, "s0");
         let reached: Vec<&Item> = items.iter().collect();
         assert_eq!(
-            summary_of(&engine, &broad, "s1", column, None),
+            summary_of(&engine, &broad, "s1", column),
             oracle(&reached, column),
             "{column}: the broad viewer sees the extremes in s1"
         );
@@ -2203,7 +2303,7 @@ fn a_huge_float_suppressed_leaves_the_mean_of_the_rest() {
             let session = fx.session(broad);
             let shown = |i: &Item| !hidden.contains(&i.source);
             let seen: Vec<&Item> = fx.visible(broad, &shown).collect();
-            let served = summary_of(&fx.engine, &session, "s0", "score", None);
+            let served = summary_of(&fx.engine, &session, "s0", "score");
             let want = oracle(&seen, "score");
             assert_eq!(served, want, "{when}, broad {broad}");
             assert!(
@@ -2219,7 +2319,7 @@ fn a_huge_float_suppressed_leaves_the_mean_of_the_rest() {
     }
     check(&huge, "suppressed");
     let session = fx.session(false);
-    let mean = summary_of(&fx.engine, &session, "s0", "score", None).mean;
+    let mean = summary_of(&fx.engine, &session, "s0", "score").mean;
     assert!(
         matches!(mean, Some(Val::F(m)) if m.abs() < 1_000.0),
         "the huge values left no trace: {mean:?}"
@@ -2270,7 +2370,7 @@ fn the_figures_are_the_oracles_through_every_change() {
             for column in COLUMNS {
                 let what = format!("{when}, {column}, broad {broad}");
                 assert_eq!(
-                    summary_of(engine, &session, "s0", column, None),
+                    summary_of(engine, &session, "s0", column),
                     oracle(&visible, column),
                     "{what}"
                 );
@@ -2421,7 +2521,6 @@ fn the_figures_are_the_oracles_through_every_change() {
             &engine.authorise(&full_coverage_credential()).unwrap(),
             "s0",
             "score",
-            None,
         );
         change(&engine, &extremes, ChangeOp::Suppress);
         for &source in &extremes {
@@ -2433,8 +2532,7 @@ fn the_figures_are_the_oracles_through_every_change() {
                 &engine,
                 &engine.authorise(&full_coverage_credential()).unwrap(),
                 "s0",
-                "score",
-                None
+                "score"
             ),
             shown,
             "the suppression moved the extremes"

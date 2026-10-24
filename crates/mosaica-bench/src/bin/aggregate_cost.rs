@@ -316,11 +316,15 @@ fn main() -> Result<(), BoxError> {
         }),
         cells,
         area: None,
+        count: true,
+        figures: Vec::new(),
     };
     let density = |depth: u8| Grouping {
         by: None,
         cells: Some(depth),
         area: None,
+        count: true,
+        figures: Vec::new(),
     };
     let mut cases: Vec<(String, Grouping, bool)> = vec![(
         "size".to_string(),
@@ -328,6 +332,8 @@ fn main() -> Result<(), BoxError> {
             by: None,
             cells: None,
             area: None,
+            count: true,
+            figures: Vec::new(),
         },
         true,
     )];
@@ -344,6 +350,8 @@ fn main() -> Result<(), BoxError> {
             }),
             cells: None,
             area: None,
+            count: true,
+            figures: Vec::new(),
         };
         let edges = read(&engine, &session, &args.view, None, &[histogram(None)])?.edges;
         cases.push((format!("{column} bins 20"), histogram(None), true));
@@ -377,6 +385,8 @@ fn main() -> Result<(), BoxError> {
                 }),
                 cells: None,
                 area: None,
+                count: true,
+                figures: Vec::new(),
             },
             true,
         ));

@@ -375,6 +375,8 @@ fn aggregate_slots(
         by: Some(by),
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     }];
     let mut sink = Pages::default();
     engine

@@ -507,6 +507,8 @@ fn field(column: &str, pick: Pick<String>) -> Grouping {
         }),
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     }
 }
 
@@ -519,6 +521,8 @@ fn size() -> Grouping {
         by: None,
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     }
 }
 
@@ -1104,6 +1108,8 @@ fn a_request_past_a_limit_or_naming_what_cannot_be_counted_is_refused() {
             by: None,
             cells: Some(33),
             area: None,
+            count: true,
+            figures: Vec::new(),
         },
     ] {
         assert!(
@@ -1620,6 +1626,8 @@ fn layer(name: &str, pick: Pick<mosaica_types::MosaicaId>) -> Grouping {
         }),
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     }
 }
 
@@ -1762,6 +1770,8 @@ fn artifact_rows_are_the_oracles_and_a_withheld_artifact_shows_nowhere() {
                 }),
                 cells: Some(depth),
                 area: None,
+                count: true,
+                figures: Vec::new(),
             }];
             table(engine, &session, request(&groupings))
                 .1
@@ -2190,6 +2200,8 @@ fn artifact_cells_are_the_oracles() {
                     }),
                     cells: Some(depth),
                     area: None,
+                    count: true,
+                    figures: Vec::new(),
                 }];
                 let served_rows: Vec<(Option<String>, u64, u64)> =
                     table(engine, &session, request(&groupings))
@@ -2417,6 +2429,8 @@ fn a_level_is_required_on_a_layer_with_several() {
         }),
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     };
     assert!(matches!(
         respond(engine, &session, request(&[at(None)])),
@@ -2988,6 +3002,8 @@ fn cut_layer(name: &str, pick: Pick<mosaica_types::MosaicaId>, cut: Option<Cut>)
         }),
         cells: None,
         area: None,
+        count: true,
+        figures: Vec::new(),
     }
 }
 

@@ -345,9 +345,9 @@ async fn a_value_grouping_counts_each_value_the_viewer_sees() {
             let mut body = json!({
                 "view": "s0",
                 "groupings": [
-                    {},
-                    { "by": { "field": "archive", "top": 2 } },
-                    { "by": { "field": "archive", "values": ["hep", "nope", "astro"] } },
+                    { "count": true },
+                    { "count": true, "by": { "field": "archive", "top": 2 } },
+                    { "count": true, "by": { "field": "archive", "values": ["hep", "nope", "astro"] } },
                 ],
             });
             if let Some(filters) = &filters {
@@ -407,9 +407,9 @@ async fn the_body_and_its_columns_are_the_contracts() {
             "view": "s0",
             "reference": {},
             "groupings": [
-                {},
-                { "by": { "field": "archive", "top": 3 }, "cells": { "depth": 4 } },
-                { "by": { "layer": LAYER, "top": 2 } },
+                { "count": true },
+                { "count": true, "by": { "field": "archive", "top": 3 }, "cells": { "depth": 4 } },
+                { "count": true, "by": { "layer": LAYER, "top": 2 } },
             ],
         }),
     )
@@ -496,8 +496,8 @@ async fn a_density_table_is_the_viewports_tiles() {
                 "view": "s0",
                 "filters": filters,
                 "groupings": [
-                    { "cells": { "depth": depth } },
-                    { "by": { "field": "archive", "top": 1 }, "cells": { "depth": depth } },
+                    { "count": true, "cells": { "depth": depth } },
+                    { "count": true, "by": { "field": "archive", "top": 1 }, "cells": { "depth": depth } },
                 ],
             }),
         )
@@ -591,8 +591,8 @@ async fn an_artifact_grouping_counts_the_members_the_viewer_sees() {
             "view": "s0",
             "filters": left_half(),
             "groupings": [
-                { "by": { "layer": LAYER, "top": 2 } },
-                { "by": { "layer": LAYER, "artifacts": [ids["a2"].to_string(), 7, ids["a0"]] } },
+                { "count": true, "by": { "layer": LAYER, "top": 2 } },
+                { "count": true, "by": { "layer": LAYER, "artifacts": [ids["a2"].to_string(), 7, ids["a0"]] } },
             ],
         }),
     )
@@ -616,11 +616,11 @@ async fn a_sampled_histograms_head_says_how_it_was_counted() {
         if let Some(sample) = sample {
             by["sample"] = json!(sample);
         }
-        json!({ "view": "s0", "reference": {}, "groupings": [{ "by": by }] })
+        json!({ "view": "s0", "reference": {}, "groupings": [{ "count": true, "by": by }] })
     };
     let drawn = |sample: u64| {
         let by = json!({ "field": "stamp", "bins": 6, "sample": sample });
-        json!({ "view": "s0", "reference": {}, "groupings": [{ "by": by }] })
+        json!({ "view": "s0", "reference": {}, "groupings": [{ "count": true, "by": by }] })
     };
     let n = items(&["1"], |_| true).len() as u64;
     let (_, exact) = aggregate_ok(&f.server, &token, &body(None)).await;
@@ -646,7 +646,7 @@ async fn a_sampled_histograms_head_says_how_it_was_counted() {
     let edges = |decoded: DecodedAggregate| -> Vec<(f64, f64)> {
         bin_rows(&[decoded], true).0.into_iter().map(|(lower, upper, _, _)| (lower, upper)).collect()
     };
-    let unsampled = json!({ "view": "s0", "groupings": [{ "by": { "field": "stamp", "bins": 6 } }] });
+    let unsampled = json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "stamp", "bins": 6 } }] });
     let (_, whole) = aggregate_ok(&f.server, &token, &unsampled).await;
     assert_eq!(edges(drawn), edges(whole));
 
@@ -684,7 +684,7 @@ async fn a_reference_adds_its_counts_and_the_lift() {
                 "view": "s0",
                 "filters": left_half(),
                 "reference": reference,
-                "groupings": [ {}, { "by": { "field": "archive", "values": ARCHIVES } } ],
+                "groupings": [ { "count": true }, { "count": true, "by": { "field": "archive", "values": ARCHIVES } } ],
             }),
         )
         .await;
@@ -729,7 +729,7 @@ async fn the_region_header_is_exact_or_a_cover() {
     let f = fixture().await;
     let token = token_for(&f.server, &["0"]).await;
     let circle = json!({ "region": { "circle": [500.0, 500.0, 300.0], "space": "view" } });
-    let body = |key: &str| json!({ "view": "s0", key: circle, "groupings": [{}] });
+    let body = |key: &str| json!({ "view": "s0", key: circle, "groupings": [{ "count": true }] });
     for key in ["filters", "reference"] {
         let (headers, _) = aggregate_ok(&f.server, &token, &body(key)).await;
         assert_eq!(headers["x-mosaica-region"], "exact", "{key}");
@@ -741,7 +741,7 @@ async fn the_region_header_is_exact_or_a_cover() {
         assert!(verdict.starts_with("cover; depth="), "{key}: {verdict}");
     }
     let (headers, _) =
-        aggregate_ok(&f.server, &token, &json!({ "view": "s0", "groupings": [{}] })).await;
+        aggregate_ok(&f.server, &token, &json!({ "view": "s0", "groupings": [{ "count": true }] })).await;
     assert!(headers.get("x-mosaica-region").is_none());
     assert!(headers.contains_key("x-mosaica-identity-key"));
     for header in ["x-mosaica-server-us", "x-mosaica-admission-us"] {
@@ -757,9 +757,9 @@ async fn a_table_read_through_its_cursor_is_the_whole_table() {
     let f = fixture().await;
     let token = token_for(&f.server, &["1"]).await;
     let groupings = json!([
-        { "cells": { "depth": 10 } },
-        { "by": { "field": "archive", "top": 2 }, "cells": { "depth": 8 } },
-        { "by": { "layer": LAYER, "top": 3 } },
+        { "count": true, "cells": { "depth": 10 } },
+        { "count": true, "by": { "field": "archive", "top": 2 }, "cells": { "depth": 8 } },
+        { "count": true, "by": { "layer": LAYER, "top": 3 } },
     ]);
     let whole = aggregate_ok(
         &f.server,
@@ -796,7 +796,7 @@ async fn a_table_read_through_its_cursor_is_the_whole_table() {
         &f.server,
         "/v1/aggregate",
         &token,
-        &json!({ "view": "s0", "groupings": [{}], "cursor": cursor }),
+        &json!({ "view": "s0", "groupings": [{ "count": true }], "cursor": cursor }),
     )
     .await;
     assert_eq!(
@@ -814,7 +814,7 @@ async fn a_suppression_applies_from_the_next_response() {
     let token = token_for(&f.server, &["0"]).await;
     let body = json!({
         "view": "s0",
-        "groupings": [ {}, { "by": { "field": "archive", "values": ["hep"] } } ],
+        "groupings": [ { "count": true }, { "count": true, "by": { "field": "archive", "values": ["hep"] } } ],
     });
     let counts = |decoded: &DecodedAggregate| -> (u64, u64) {
         let responses = std::slice::from_ref(decoded);
@@ -851,24 +851,24 @@ async fn every_refusal_has_its_status() {
     let (_, first) = aggregate_ok(
         &f.server,
         &token,
-        &json!({ "view": "s0", "groupings": [{ "cells": { "depth": 10 } }], "page_rows": 10,
+        &json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 10 } }], "page_rows": 10,
                  "pages": 1 }),
     )
     .await;
     let cursor = first.trailer["next"].as_str().unwrap().to_string();
-    let by = |by: Value| json!({ "view": "s0", "groupings": [{ "by": by }] });
+    let by = |by: Value| json!({ "view": "s0", "groupings": [{ "count": true, "by": by }] });
     let contract = [
-        (json!({ "view": "s0", "groupings": [{}], "unknown": 1 }), None),
-        (json!({ "groupings": [{}] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }], "unknown": 1 }), None),
+        (json!({ "groupings": [{ "count": true }] }), None),
         (json!({ "view": "s0" }), None),
         (json!({ "view": "s0", "groupings": [] }), None),
-        (json!({ "view": "s0", "groupings": [{}, {}, {}] }), Some("max_aggregate_groupings")),
-        (json!({ "view": "s0", "groupings": [{ "unknown": 1 }] }), None),
-        (json!({ "view": "s0", "groupings": [{ "cells": { "depth": 33 } }] }), None),
-        (json!({ "view": "s0", "groupings": [{ "cells": { "depth": 300 } }] }), None),
-        (json!({ "view": "s0", "groupings": [{ "cells": { "depth": 4, "area": [5.0, 0.0, 1.0, 9.0] } }] }), None),
-        (json!({ "view": "s0", "groupings": [{ "cells": { "depth": 4, "area": [0.0, 0.0, 1.0] } }] }), None),
-        (json!({ "view": "s0", "groupings": [{ "cells": { "zoom": 3 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }, { "count": true }, { "count": true }] }), Some("max_aggregate_groupings")),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "unknown": 1 }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 33 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 300 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 4, "area": [5.0, 0.0, 1.0, 9.0] } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 4, "area": [0.0, 0.0, 1.0] } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "zoom": 3 } }] }), None),
         (by(json!({ "top": 2 })), None),
         (by(json!({ "field": "archive", "layer": LAYER, "top": 2 })), None),
         (by(json!({ "field": "archive" })), None),
@@ -909,7 +909,7 @@ async fn every_refusal_has_its_status() {
         (by(json!({ "field": "score", "bins": 4, "range": [10, "50"] })), None),
         (by(json!({ "field": "stamp", "bins": 4, "range": [0.5, 10] })), None),
         (by(json!({ "layer": LAYER, "bins": 4 })), None),
-        (json!({ "view": "s0", "groupings": [{ "by": { "field": "score", "bins": 4 }, "cells": { "depth": 2 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "score", "bins": 4 }, "cells": { "depth": 2 } }] }), None),
         (by(json!({ "field": "archive", "bins": 4 })), None),
         (by(json!({ "field": "pages", "bins": 4 })), None),
         (by(json!({ "field": "nope", "bins": 4 })), None),
@@ -917,19 +917,27 @@ async fn every_refusal_has_its_status() {
         (by(json!({ "field": "score", "top": 2, "sample": 10 })), None),
         (by(json!({ "field": "score", "sample": 10 })), None),
         (by(json!({ "layer": LAYER, "top": 2, "sample": 10 })), None),
-        (by(json!({ "field": "score", "summary": true, "top": 2 })), None),
-        (by(json!({ "field": "score", "summary": true, "bins": 4 })), None),
-        (by(json!({ "field": "score", "summary": true, "sample": 10 })), None),
-        (by(json!({ "field": "archive", "summary": true })), None),
-        (by(json!({ "field": "pages", "summary": true })), None),
-        (by(json!({ "field": "nope", "summary": true })), None),
-        (by(json!({ "layer": LAYER, "summary": true })), None),
-        (json!({ "view": "s0", "groupings": [{ "by": { "field": "score", "summary": true }, "cells": { "depth": 2 } }] }), None),
-        (json!({ "view": "s0", "groupings": [{}], "filters": { "nope": { "eq": 1 } } }), None),
-        (json!({ "view": "s0", "groupings": [{}], "reference": { "nope": { "eq": 1 } } }), None),
-        (json!({ "view": "s0", "groupings": [{}], "page_rows": 0 }), None),
-        (json!({ "view": "s0", "groupings": [{}], "cursor": "not a cursor" }), None),
-        (json!({ "view": "s0", "groupings": [{}], "cursor": cursor }), None),
+        (by(json!({ "field": "score", "summary": true })), None),
+        (json!({ "view": "s0", "groupings": [{}] }), None),
+        (json!({ "view": "s0", "groupings": [{ "by": { "field": "archive", "top": 2 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "cells": { "depth": 2 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": false }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": false, "min": ["score"] }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "min": [] }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "summary": [] }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "mean": "score" }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "summary": ["archive"] }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "max": ["pages"] }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "values": ["nope"] }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "summary": ["score"], "by": { "field": "archive", "top": 2 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true, "missing": ["score"], "cells": { "depth": 2 } }] }), None),
+        (json!({ "view": "s0", "groupings": [{ "summary": ["score"] }], "filters": left_half() }), None),
+        (json!({ "view": "s0", "groupings": [{ "summary": ["score"] }], "reference": {} }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }], "filters": { "nope": { "eq": 1 } } }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }], "reference": { "nope": { "eq": 1 } } }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }], "page_rows": 0 }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }], "cursor": "not a cursor" }), None),
+        (json!({ "view": "s0", "groupings": [{ "count": true }], "cursor": cursor }), None),
     ];
     for (body, limit) in contract {
         let resp = post(&f.server, "/v1/aggregate", &token, &body).await;
@@ -949,13 +957,13 @@ async fn every_refusal_has_its_status() {
     ];
     assert_eq!(details.iter().collect::<HashSet<_>>().len(), 3, "{details:?}");
 
-    let resp = post(&f.server, "/v1/aggregate", &token, &json!({ "view": "nowhere", "groupings": [{}] })).await;
+    let resp = post(&f.server, "/v1/aggregate", &token, &json!({ "view": "nowhere", "groupings": [{ "count": true }] })).await;
     assert_eq!(refused(resp, 404).await, "unknown");
     let resp = f
         .server
         .client
         .post(f.server.viewer_url("/v1/aggregate"))
-        .json(&json!({ "view": "s0", "groupings": [{}] }))
+        .json(&json!({ "view": "s0", "groupings": [{ "count": true }] }))
         .send()
         .await
         .unwrap();
@@ -964,7 +972,7 @@ async fn every_refusal_has_its_status() {
 
 /// The detail of the refusal to count `field`, with the field's name taken out.
 async fn refusal_detail(server: &TestServer, token: &str, field: &str) -> String {
-    let body = json!({ "view": "s0", "groupings": [{ "by": { "field": field, "top": 1 } }] });
+    let body = json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": field, "top": 1 } }] });
     let resp = post(server, "/v1/aggregate", token, &body).await;
     assert_eq!(resp.status().as_u16(), 422);
     let body: Value = resp.json().await.unwrap();
@@ -978,8 +986,8 @@ async fn every_request_is_admitted_as_the_viewport_is() {
     let f = fixture_with_gates(ComputeGate::new(1, 0, 250), ComputeGate::for_bulk_reads(1), |_| {})
         .await;
     let token = token_for(&f.server, &["0"]).await;
-    let counts = json!({ "view": "s0", "groupings": [{}, { "by": { "field": "archive", "top": 2 } }] });
-    let cells = json!({ "view": "s0", "groupings": [{}, { "cells": { "depth": 6 } }] });
+    let counts = json!({ "view": "s0", "groupings": [{ "count": true }, { "count": true, "by": { "field": "archive", "top": 2 } }] });
+    let cells = json!({ "view": "s0", "groupings": [{ "count": true }, { "count": true, "cells": { "depth": 6 } }] });
     for body in [&counts, &cells] {
         let held = hold(&f.server.state.compute_gate).await;
         let resp = post(&f.server, "/v1/aggregate", &token, body).await;
@@ -1018,7 +1026,7 @@ async fn a_client_that_goes_away_stops_the_work() {
     .await;
     let token = token_for(&f.server, &["0"]).await;
     let groupings: Vec<Value> = (0..16)
-        .map(|_| json!({ "by": { "field": "archive", "top": 3 }, "cells": { "depth": 10 } }))
+        .map(|_| json!({ "count": true, "by": { "field": "archive", "top": 3 }, "cells": { "depth": 10 } }))
         .collect();
     let mut reader = post(
         &f.server,
@@ -1062,7 +1070,7 @@ async fn a_trailer_says_when_a_table_was_counted_over_a_changed_corpus() {
     let token = token_for(&f.server, &["0"]).await;
     let mut body = json!({
         "view": "s0",
-        "groupings": [{ "cells": { "depth": 10 } }],
+        "groupings": [{ "count": true, "cells": { "depth": 10 } }],
         "page_rows": 100,
         "pages": 1,
     });
@@ -1099,7 +1107,7 @@ async fn the_cell_limit_counts_the_cells_of_the_area() {
     let f = fixture().await;
     let token = token_for(&f.server, &["0"]).await;
     let whole = |depth: u8, by: Option<Value>| {
-        let mut grouping = json!({ "cells": { "depth": depth } });
+        let mut grouping = json!({ "count": true, "cells": { "depth": depth } });
         if let Some(by) = by {
             grouping["by"] = by;
         }
@@ -1121,8 +1129,8 @@ async fn the_cell_limit_counts_the_cells_of_the_area() {
         &f.server,
         &token,
         &json!({ "view": "s0", "groupings": [
-            { "cells": { "depth": 20, "area": area } },
-            { "cells": { "depth": 20, "area": area }, "by": { "field": "archive", "top": 3 } },
+            { "count": true, "cells": { "depth": 20, "area": area } },
+            { "count": true, "cells": { "depth": 20, "area": area }, "by": { "field": "archive", "top": 3 } },
         ] }),
     )
     .await;
@@ -1143,8 +1151,8 @@ async fn an_area_lists_only_its_own_cells() {
                 cells["area"] = json!(area);
             }
             json!({ "view": "s0", "reference": {}, "groupings": [
-                { "cells": cells.clone() },
-                { "by": { "field": "archive", "top": 2 }, "cells": cells },
+                { "count": true, "cells": cells.clone() },
+                { "count": true, "by": { "field": "archive", "top": 2 }, "cells": cells },
             ] })
         };
         let (_, all) = aggregate_ok(&f.server, &token, &body(None)).await;
@@ -1201,8 +1209,8 @@ async fn a_large_table_continues_through_the_cursor_within_the_budget() {
     let roomy = fixture().await;
     let token = token_for(&f.server, &["0"]).await;
     let body = json!({ "view": "s0", "reference": {}, "groupings": [
-        { "cells": { "depth": 10 } },
-        { "by": { "field": "archive", "top": 3 }, "cells": { "depth": 10 } },
+        { "count": true, "cells": { "depth": 10 } },
+        { "count": true, "by": { "field": "archive", "top": 3 }, "cells": { "depth": 10 } },
     ] });
     let responses = read_all(&f.server, &token, &body).await;
     assert!(responses.len() > 1, "the table spans responses");
@@ -1327,7 +1335,7 @@ async fn a_number_or_timestamp_field_is_counted_in_bins() {
         let mut held = None;
         for filters in [json!(null), json!({ "archive": { "eq": "hep" } }), left_half()] {
             let mut body = json!({ "view": "s0", "reference": {},
-                                   "groupings": [{ "by": { "field": field, "bins": 10 } }] });
+                                   "groupings": [{ "count": true, "by": { "field": field, "bins": 10 } }] });
             if !filters.is_null() {
                 body["filters"] = filters.clone();
             }
@@ -1361,7 +1369,7 @@ async fn a_number_or_timestamp_field_is_counted_in_bins() {
         }
     }
     // A range: equal bins, and the values outside it in `rest`.
-    let body = json!({ "view": "s0", "groupings": [{ "by": { "field": "score", "bins": 4,
+    let body = json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "score", "bins": 4,
                                                               "range": [10, 50] } }] });
     let (bins, others) = bin_rows(&read_all(&f.server, &token, &body).await, false);
     let edges: Vec<(f64, f64)> = bins.iter().map(|b| (b.0, b.1)).collect();
@@ -1372,17 +1380,18 @@ async fn a_number_or_timestamp_field_is_counted_in_bins() {
         .count() as u64;
     assert_eq!(others.iter().find(|o| o.0 == "rest").map(|o| o.1), Some(outside));
     // A timestamp's bounds as a decimal string or a number.
-    let body = json!({ "view": "s0", "groupings": [{ "by": { "field": "stamp", "bins": 2,
+    let body = json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "stamp", "bins": 2,
         "range": ["1577836800000000", 1_640_995_200_000_000u64] } }] });
     let (bins, _) = bin_rows(&read_all(&f.server, &token, &body).await, true);
     assert_eq!(bins.len(), 2);
     assert_eq!((bins[0].0, bins[1].1), (1_577_836_800_000_000.0, 1_640_995_200_000_000.0));
 }
 
-/// One summary row: `(items, count, none, min, max, mean)`, the smallest and largest as `f64`.
+/// One summary row: `(count, values, missing, min, max, mean)` of `field`, the smallest and largest
+/// as `f64`.
 type Summary = (u64, u64, u64, Option<f64>, Option<f64>, Option<f64>);
 
-fn summary_row(decoded: &DecodedAggregate, grouping: usize) -> Summary {
+fn summary_row(decoded: &DecodedAggregate, grouping: usize, field: &str) -> Summary {
     use arrow::array::{Array, AsArray};
     use arrow::datatypes::{Float64Type, TimestampMicrosecondType, UInt64Type};
     let pages = &decoded.tables[grouping].1;
@@ -1390,7 +1399,8 @@ fn summary_row(decoded: &DecodedAggregate, grouping: usize) -> Summary {
     let batch = &pages[0].0;
     assert_eq!(batch.num_rows(), 1);
     let names: Vec<String> = batch.schema().fields().iter().map(|f| f.name().clone()).collect();
-    assert_eq!(names, ["items", "count", "none", "min", "max", "mean"]);
+    let named = |figure: &str| format!("{figure}_{field}");
+    assert_eq!(names, ["count".to_string(), named("values"), named("missing"), named("min"), named("max"), named("mean")]);
     let u64_of = |name: &str| batch.column_by_name(name).unwrap().as_primitive::<UInt64Type>().value(0);
     let number = |name: &str| -> Option<f64> {
         let column = batch.column_by_name(name).unwrap();
@@ -1403,7 +1413,14 @@ fn summary_row(decoded: &DecodedAggregate, grouping: usize) -> Summary {
             other => panic!("a summary value of type {other:?}"),
         })
     };
-    (u64_of("items"), u64_of("count"), u64_of("none"), number("min"), number("max"), number("mean"))
+    (
+        u64_of("count"),
+        u64_of(&named("values")),
+        u64_of(&named("missing")),
+        number(&named("min")),
+        number(&named("max")),
+        number(&named("mean")),
+    )
 }
 
 /// The summary of `values` over `items`, worked out here.
@@ -1423,8 +1440,9 @@ fn near(a: Summary, b: Summary) -> bool {
     (a.0, a.1, a.2, a.3, a.4) == (b.0, b.1, b.2, b.3, b.4) && close(a.5, b.5)
 }
 
-/// **A summary is the figures of every item the viewer may see in the view**, whatever the filters
-/// say, for each viewer, and **a suppression applies to it from the next response**.
+/// **A summary is the figures of every item the viewer may see in the view**, for each viewer,
+/// **a field's figures alone have no count column**, and **a suppression applies to them from the
+/// next response**.
 #[tokio::test]
 async fn a_summary_covers_the_whole_visible_set() {
     let f = fixture().await;
@@ -1432,27 +1450,32 @@ async fn a_summary_covers_the_whole_visible_set() {
         let token = token_for(&f.server, terms).await;
         let body = json!({
             "view": "s0",
-            "filters": left_half(),
             "groupings": [
-                { "by": { "field": "score", "summary": true } },
-                { "by": { "field": "stamp", "summary": true } },
+                { "count": true, "summary": ["score"] },
+                { "count": true, "summary": ["stamp"] },
+                { "max": ["score"], "values": ["stamp", "score", "stamp"] },
             ],
         });
         let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;
         let all = items(terms, |_| true);
-        assert_eq!(decoded.tables[0].0["total"], items(terms, in_left_half).len());
+        assert_eq!(decoded.tables[0].0["total"], all.len());
         assert!(decoded.tables[0].0.get("groups").is_none());
-        let score = summary_row(&decoded, 0);
+        let score = summary_row(&decoded, 0, "score");
         assert!(near(score, summary_oracle(&all, score_of)), "{terms:?}: {score:?}");
-        let stamp = summary_row(&decoded, 1);
+        let stamp = summary_row(&decoded, 1, "stamp");
         assert!(
             near(stamp, summary_oracle(&all, |e| stamp_of(e).map(|t| t as f64))),
             "{terms:?}: {stamp:?}"
         );
+        let batch = &decoded.tables[2].1[0].0;
+        let names: Vec<String> = batch.schema().fields().iter().map(|f| f.name().clone()).collect();
+        assert_eq!(names, ["values_stamp", "values_score", "max_score"]);
+        assert_eq!(decoded.tables[2].0["total"], all.len());
+        assert!(decoded.tables[2].0.get("groups").is_none());
     }
 
     let token = token_for(&f.server, &["0"]).await;
-    let body = json!({ "view": "s0", "groupings": [{ "by": { "field": "score", "summary": true } }] });
+    let body = json!({ "view": "s0", "groupings": [{ "count": true, "summary": ["score"] }] });
     let all = items(&["0"], |_| true);
     let top = *all
         .iter()
@@ -1475,7 +1498,7 @@ async fn a_summary_covers_the_whole_visible_set() {
     assert_eq!(resp.status().as_u16(), 200);
     let (_, after) = aggregate_ok(&f.server, &token, &body).await;
     let left: Vec<u64> = all.iter().copied().filter(|e| !holders.contains(e)).collect();
-    let summary = summary_row(&after, 0);
+    let summary = summary_row(&after, 0, "score");
     assert!(near(summary, summary_oracle(&left, score_of)), "{summary:?}");
     assert!(summary.4 < score_of(top), "the largest value moved at once");
 }
@@ -1552,7 +1575,7 @@ async fn a_tree_is_ranked_at_the_cut_the_map_draws() {
         let (_, decoded) = aggregate_ok(
             &f.server,
             &token,
-            &json!({ "view": "s0", "groupings": [{ "by": { "layer": TREE, "top": 50, "cut": cut } }] }),
+            &json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": TREE, "top": 50, "cut": cut } }] }),
         )
         .await;
         let listed: Vec<(u64, u64)> = table(&[decoded], 0)
@@ -1572,7 +1595,7 @@ async fn a_tree_is_ranked_at_the_cut_the_map_draws() {
         &f.server,
         "/v1/aggregate",
         &token,
-        &json!({ "view": "s0", "groupings": [{ "by": { "layer": TREE, "top": 5 } }] }),
+        &json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": TREE, "top": 5 } }] }),
     )
     .await;
     assert_eq!(refused(resp, 422).await, "contract");
@@ -1664,7 +1687,7 @@ async fn a_layer_rows_title_is_the_name_browse_gives() {
         let (_, decoded) = aggregate_ok(
             &f.server,
             &token,
-            &json!({ "view": "s0", "groupings": [{ "by": { "layer": NAMED, "top": 10 } }] }),
+            &json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": NAMED, "top": 10 } }] }),
         )
         .await;
         let titled: Vec<(u64, Option<String>)> = table(&[decoded], 0)
@@ -1741,7 +1764,7 @@ async fn a_cluster_carries_one_slot_wherever_it_is_served() {
     let (_, decoded) = aggregate_ok(
         &f.server,
         &token,
-        &json!({ "view": "s0", "groupings": [{ "by": { "layer": TREE, "top": 50,
+        &json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": TREE, "top": 50,
                  "cut": { "zoom": 0, "bbox": [0.0, 0.0, 1000.0, 1000.0], "budget": 4 },
                  "palette_size": 10 } }] }),
     )
@@ -1827,7 +1850,7 @@ async fn a_cluster_carries_one_slot_wherever_it_is_served() {
             ),
             (
                 "/v1/aggregate",
-                json!({ "view": "s0", "groupings": [{ "by": { "layer": TREE,
+                json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": TREE,
                         "top": 3, "palette_size": size } }] }),
             ),
             (

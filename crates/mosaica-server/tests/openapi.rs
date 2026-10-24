@@ -2076,13 +2076,13 @@ async fn the_aggregate_read_matches_the_description_with_its_refusals() {
         "filters": { "region": { "bbox": [0.0, 0.0, 600.0, 1000.0] } },
         "reference": {},
         "groupings": [
-            {},
-            { "by": { "field": "archive", "top": 2 } },
-            { "by": { "field": "archive", "values": ["hep", "astro"] }, "cells": { "depth": 8 } },
-            { "by": { "layer": LAYER, "top": 5 } },
-            { "by": { "layer": LAYER, "artifacts": [f.artifacts[1].clone(), 7] } },
-            { "cells": { "depth": 10 } },
-            { "cells": { "depth": 20, "area": [100.0, 100.0, 100.4, 100.4] } },
+            { "count": true },
+            { "count": true, "by": { "field": "archive", "top": 2 } },
+            { "count": true, "by": { "field": "archive", "values": ["hep", "astro"] }, "cells": { "depth": 8 } },
+            { "count": true, "by": { "layer": LAYER, "top": 5 } },
+            { "count": true, "by": { "layer": LAYER, "artifacts": [f.artifacts[1].clone(), 7] } },
+            { "count": true, "cells": { "depth": 10 } },
+            { "count": true, "cells": { "depth": 20, "area": [100.0, 100.0, 100.4, 100.4] } },
         ],
         "page_rows": 50,
         "pages": 4,
@@ -2141,52 +2141,80 @@ async fn the_aggregate_read_matches_the_description_with_its_refusals() {
     }
     assert!(resumed > 0, "a response continued a table");
 
+    // A field's figures, over the whole visible set.
+    let body = json!({
+        "view": "s0",
+        "groupings": [{ "count": true, "summary": ["score"] }, { "min": ["score"] }],
+    });
+    assert_valid(&doc, "AggregateRequest", &body);
+    let resp = post(body, token).await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let decoded = decode_aggregate(&resp.bytes().await.unwrap());
+    assert_eq!(decoded.tables.len(), 2);
+    for (head, pages) in &decoded.tables {
+        assert_valid(&doc, "AggregateTableHead", head);
+        for (_, end) in pages {
+            assert_valid(&doc, "PageEnd", end);
+        }
+    }
+
     // Refusals.
     for body in [
         json!({ "view": "s0", "groupings": [] }),
-        json!({ "view": "s0", "groupings": [{}], "unknown": 1 }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "archive" } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "score", "top": 1 } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "layer": LAYER, "top": 1, "level": 0 } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "layer": LAYER, "top": 1, "cut": { "zoom": 2, "bbox": [0.0, 0.0, 1000.0, 1000.0], "budget": 50 } } }] }),
-        json!({ "view": "s0", "groupings": [{ "cells": { "depth": 33 } }] }),
-        json!({ "view": "s0", "groupings": [{ "cells": { "depth": 300 } }] }),
-        json!({ "view": "s0", "groupings": [{ "cells": { "depth": 11 } }] }),
-        json!({ "view": "s0", "groupings": [{ "cells": { "depth": 3, "area": [9.0, 0.0, 1.0, 1.0] } }] }),
-        json!({ "view": "s0", "groupings": [{}], "cursor": "not-a-cursor" }),
+        json!({ "view": "s0", "groupings": [{ "count": true }], "unknown": 1 }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "archive" } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "score", "top": 1 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": LAYER, "top": 1, "level": 0 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": LAYER, "top": 1, "cut": { "zoom": 2, "bbox": [0.0, 0.0, 1000.0, 1000.0], "budget": 50 } } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 33 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 300 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 11 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 3, "area": [9.0, 0.0, 1.0, 1.0] } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true }], "cursor": "not-a-cursor" }),
+        json!({ "view": "s0", "groupings": [{}] }),
+        json!({ "view": "s0", "groupings": [{ "count": false }] }),
+        json!({ "view": "s0", "groupings": [{ "min": [] }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "score", "summary": true } }] }),
+        json!({ "view": "s0", "groupings": [{ "summary": ["score"], "cells": { "depth": 3 } }] }),
+        json!({ "view": "s0", "groupings": [{ "summary": ["score"] }], "reference": {} }),
     ] {
         let resp = post(body, token).await.unwrap();
         assert_refusal(&doc, resp, 422, "contract").await;
     }
-    let resp = post(json!({ "view": "no-such-view", "groupings": [{}] }), token)
+    let resp = post(json!({ "view": "no-such-view", "groupings": [{ "count": true }] }), token)
         .await
         .unwrap();
     assert_refusal(&doc, resp, 404, "unknown").await;
-    let resp = post(json!({ "view": "s0", "groupings": [{}] }), "not-a-token")
+    let resp = post(json!({ "view": "s0", "groupings": [{ "count": true }] }), "not-a-token")
         .await
         .unwrap();
     assert_refusal(&doc, resp, 401, "bad-credential").await;
 
     // The request schema refuses what the server refuses.
     for body in [
-        json!({ "view": "s0", "groupings": [{}], "unknown": 1 }),
+        json!({ "view": "s0", "groupings": [{ "count": true }], "unknown": 1 }),
         json!({ "view": "s0" }),
-        json!({ "groupings": [{}] }),
+        json!({ "groupings": [{ "count": true }] }),
         json!({ "view": "s0", "groupings": [] }),
-        json!({ "view": "s0", "groupings": [{ "cells": { "depth": 33 } }] }),
-        json!({ "view": "s0", "groupings": [{ "cells": { "depth": 3, "area": [0.0, 0.0, 1.0] } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "archive" } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "archive", "top": 0 } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "archive", "values": [] } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "a", "layer": "b", "top": 1 } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "a", "top": 1, "values": ["x"] } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "field": "a", "artifacts": [1] } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "layer": "a", "values": ["x"] } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "layer": "a", "top": 1, "cut": { "zoom": 17, "bbox": [0.0, 0.0, 1.0, 1.0] } } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "layer": "a", "top": 1, "cut": { "zoom": 2 } } }] }),
-        json!({ "view": "s0", "groupings": [{ "by": { "layer": "a", "artifacts": [1], "cut": { "zoom": 2, "bbox": [0.0, 0.0, 1.0, 1.0] } } }] }),
-        json!({ "view": "s0", "groupings": [{}], "reference": { "a": 1, "b": 2 } }),
-        json!({ "view": "s0", "groupings": [{}], "compression": "gzip" }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 33 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "cells": { "depth": 3, "area": [0.0, 0.0, 1.0] } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "archive" } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "archive", "top": 0 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "archive", "values": [] } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "a", "layer": "b", "top": 1 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "a", "top": 1, "values": ["x"] } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "a", "artifacts": [1] } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": "a", "values": ["x"] } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": "a", "top": 1, "cut": { "zoom": 17, "bbox": [0.0, 0.0, 1.0, 1.0] } } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": "a", "top": 1, "cut": { "zoom": 2 } } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "layer": "a", "artifacts": [1], "cut": { "zoom": 2, "bbox": [0.0, 0.0, 1.0, 1.0] } } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true }], "reference": { "a": 1, "b": 2 } }),
+        json!({ "view": "s0", "groupings": [{ "count": true }], "compression": "gzip" }),
+        json!({ "view": "s0", "groupings": [{}] }),
+        json!({ "view": "s0", "groupings": [{ "by": { "field": "archive", "top": 1 } }] }),
+        json!({ "view": "s0", "groupings": [{ "count": false }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "min": [] }] }),
+        json!({ "view": "s0", "groupings": [{ "count": true, "by": { "field": "score", "summary": true } }] }),
     ] {
         assert_invalid(&doc, "AggregateRequest", &body);
     }
@@ -2609,7 +2637,7 @@ fn viewer_body(path: &str) -> Value {
         "/v1/artifacts/{mosaica_id}" => json!({ "view": "s0" }),
         "/v1/artifacts/browse" => json!({ "view": "s0", "layer": "clusters/none" }),
         "/v1/categories/{column}/suggest" => json!({ "q": "a" }),
-        "/v1/aggregate" => json!({ "view": "s0", "groupings": [{}] }),
+        "/v1/aggregate" => json!({ "view": "s0", "groupings": [{ "count": true }] }),
         "/v1/logout" => json!({}),
         other => panic!(
             "{other} is a described POST route and this test has no request body for it; add \

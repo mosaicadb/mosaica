@@ -234,6 +234,8 @@ pub fn cell_counts(engine: &Engine, session: &Session, depth: u8) -> Vec<(u64, u
         by: None,
         cells: Some(depth),
         area: None,
+        count: true,
+        figures: Vec::new(),
     }];
     let mut pages = Pages::default();
     engine

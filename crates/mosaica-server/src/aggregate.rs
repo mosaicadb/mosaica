@@ -1,5 +1,5 @@
 //! `POST /v1/aggregate`: how the items a viewer may see in one view are distributed, as one table
-//! of exact counts per grouping, framed as `/v1/items` frames its pages with a table head before
+//! per grouping of the figures it names, framed as `/v1/items` frames its pages with a table head before
 //! each table's first page in a response.
 //!
 //! It is sent beside viewport requests, so it runs under the viewport's admission. Its response is
@@ -17,9 +17,8 @@ use serde_json::Value;
 
 use mosaica_engine::{
     AggregateCaps, AggregateHead, AggregateRefused, AggregateRequest, AggregateSink, By,
-    CancelToken, Cut, EngineError, Grouping, PageEnd, Pick, RecordsLimits, RecordsSink, RecordsTrailer,
-    Reference,
-    SinkResult, TableHead,
+    CancelToken, Cut, EngineError, Figure, FigureField, FigureList, Grouping, PageEnd, Pick,
+    RecordsLimits, RecordsSink, RecordsTrailer, Reference, SinkResult, TableHead,
 };
 use mosaica_engine::filter::Family;
 use mosaica_wire::table_head_frame;
@@ -58,10 +57,39 @@ struct GroupingReq {
     by: Option<ByReq>,
     #[serde(default)]
     cells: Option<CellsReq>,
+    /// Only `true`.
+    #[serde(default)]
+    count: Option<bool>,
+    #[serde(default)]
+    values: Option<Vec<String>>,
+    #[serde(default)]
+    missing: Option<Vec<String>>,
+    #[serde(default)]
+    min: Option<Vec<String>>,
+    #[serde(default)]
+    max: Option<Vec<String>>,
+    #[serde(default)]
+    mean: Option<Vec<String>>,
+    #[serde(default)]
+    summary: Option<Vec<String>>,
 }
 
-/// A grouping's outer level: `field` with `top` or `values`, with `bins` and optionally `range`,
-/// or with `summary`; or `layer` with `top` or `artifacts` and, on a levelled layer, `level`, or
+impl GroupingReq {
+    /// The field figures' lists in the order the engine orders their columns by.
+    fn figure_lists(&self) -> [(Figure, &Option<Vec<String>>); 6] {
+        [
+            (Figure::Values, &self.values),
+            (Figure::Missing, &self.missing),
+            (Figure::Min, &self.min),
+            (Figure::Max, &self.max),
+            (Figure::Mean, &self.mean),
+            (Figure::Summary, &self.summary),
+        ]
+    }
+}
+
+/// A grouping's outer level: `field` with `top` or `values`, or with `bins` and optionally
+/// `range`; or `layer` with `top` or `artifacts` and, on a levelled layer, `level`, or
 /// on a treed layer, `cut`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,10 +112,6 @@ struct ByReq {
     /// With `bins`: count about this many of the set's items and scale the counts to the set.
     #[serde(default)]
     sample: Option<u64>,
-    /// `true`: the count, smallest, largest and mean of the field's values over the whole visible
-    /// set.
-    #[serde(default)]
-    summary: bool,
     /// `mosaica_id`s, each a number or its decimal string.
     #[serde(default)]
     artifacts: Option<Vec<Value>>,
@@ -287,7 +311,70 @@ fn grouping_of(
             }
         },
     };
-    Ok(Grouping { by, cells, area })
+    let count = match grouping.count {
+        None => false,
+        Some(true) => true,
+        Some(false) => {
+            return Err(ApiError::Contract(
+                "`count` is only ever `true`; leave it out for a table without counts"
+                    .to_string(),
+            ))
+        }
+    };
+    let mut figures = Vec::new();
+    for (figure, fields) in grouping.figure_lists() {
+        let Some(fields) = fields else { continue };
+        let fields = fields
+            .iter()
+            .map(|field| figure_field(meta, view, session, field))
+            .collect::<Result<_, _>>()?;
+        figures.push(FigureList { figure, fields });
+    }
+    Ok(Grouping {
+        by,
+        count,
+        figures,
+        cells,
+        area,
+    })
+}
+
+/// A field a figure is named over, resolved under `view`. Whether it has figures is the engine's
+/// to decide.
+fn figure_field(
+    meta: &mosaica_engine::EngineMeta,
+    view: &str,
+    session: &mosaica_engine::Session,
+    field: &str,
+) -> Result<FigureField, ApiError> {
+    let column = resolved_column(meta, view, session, field)?.0;
+    Ok(FigureField {
+        column,
+        name: field.to_string(),
+    })
+}
+
+/// `field`'s column under `view`, its family and whether it is an integer.
+fn resolved_column(
+    meta: &mosaica_engine::EngineMeta,
+    view: &str,
+    session: &mosaica_engine::Session,
+    field: &str,
+) -> Result<(String, Family, bool), ApiError> {
+    match field_column(meta, field, view, session.visible_views())? {
+        FieldColumn::Resolved {
+            column,
+            family,
+            integer,
+        } => Ok((column, family, integer)),
+        FieldColumn::Unknown => Err(ApiError::Contract(format!(
+            "field '{field}' is unknown; name a field /v1/meta publishes"
+        ))),
+        FieldColumn::Unpinned { group } => Err(ApiError::Contract(format!(
+            "field '{field}' is scoped to view group '{group}' and view '{view}' is not one of \
+             its views; pin the view it means as '{field}@<key>'"
+        ))),
+    }
 }
 
 fn by_of(
@@ -302,14 +389,7 @@ fn by_of(
             if by.artifacts.is_some() || by.level.is_some() || by.cut.is_some() {
                 return bad(
                     "`artifacts`, `level` and `cut` go with `layer`; a field takes `top`, \
-                     `values`, `bins` or `summary`",
-                );
-            }
-            let picked = by.top.is_some() || by.values.is_some() || by.bins.is_some();
-            if by.summary && (picked || by.range.is_some() || by.sample.is_some()) {
-                return bad(
-                    "`summary` stands alone; send `top`, `values` or `bins` in a grouping of \
-                     their own",
+                     `values` or `bins`",
                 );
             }
             if by.range.is_some() && by.bins.is_none() {
@@ -319,7 +399,6 @@ fn by_of(
                 return bad("`sample` goes with `bins`; send `bins` beside it, or leave it out");
             }
             let pick = match (by.bins, by.top, &by.values) {
-                _ if by.summary => None,
                 (Some(_), None, None) => None,
                 (Some(_), _, _) => {
                     return bad("`by` carries `bins` beside `top` or `values`; send one")
@@ -331,36 +410,12 @@ fn by_of(
                 }
                 (None, None, None) => {
                     return bad(
-                        "`by` on a field carries none of `top`, `values`, `bins` and `summary`; \
-                         send one",
+                        "`by` on a field carries none of `top`, `values` and `bins`; send one",
                     )
                 }
             };
-            let (column, family, integer) =
-                match field_column(meta, field, view, session.visible_views())? {
-                    FieldColumn::Resolved {
-                        column,
-                        family,
-                        integer,
-                    } => (column, family, integer),
-                    FieldColumn::Unknown => {
-                        return Err(ApiError::Contract(format!(
-                            "field '{field}' is unknown; name a field /v1/meta publishes"
-                        )))
-                    }
-                    FieldColumn::Unpinned { group } => {
-                        return Err(ApiError::Contract(format!(
-                            "field '{field}' is scoped to view group '{group}' and view '{view}' \
-                             is not one of its views; pin the view it means as '{field}@<key>'"
-                        )))
-                    }
-                };
+            let (column, family, integer) = resolved_column(meta, view, session, field)?;
             match (pick, by.bins, family) {
-                (_, _, Family::Numeric) if by.summary => Ok(By::Summary { column }),
-                (_, _, _) if by.summary => Err(ApiError::Contract(format!(
-                    "field '{field}' is not a number or timestamp; name a number or timestamp \
-                     field for a summary"
-                ))),
                 (Some(pick), _, Family::Category) => Ok(By::Field { column, pick }),
                 (Some(_), _, _) => Err(ApiError::Contract(format!(
                     "field '{field}' is not a category; name a category field"
@@ -395,11 +450,10 @@ fn by_of(
                 || by.bins.is_some()
                 || by.range.is_some()
                 || by.sample.is_some()
-                || by.summary
             {
                 return bad(
-                    "`values`, `bins`, `range`, `sample` and `summary` go with `field`; a layer \
-                     takes `top` or `artifacts`",
+                    "`values`, `bins`, `range` and `sample` go with `field`; a layer takes `top` \
+                     or `artifacts`",
                 );
             }
             let palette = by
@@ -458,9 +512,6 @@ fn in_callers_words(e: EngineError, asked: &[GroupingReq], sent: &[Grouping]) ->
         EngineError::AggregateRefused(AggregateRefused::BinsOnBool(column)) => {
             (column, AggregateRefused::BinsOnBool)
         }
-        EngineError::AggregateRefused(AggregateRefused::NotSummarisable(column)) => {
-            (column, AggregateRefused::NotSummarisable)
-        }
         EngineError::AggregateRefused(AggregateRefused::FractionalTime(column)) => {
             (column, AggregateRefused::FractionalTime)
         }
@@ -472,8 +523,7 @@ fn in_callers_words(e: EngineError, asked: &[GroupingReq], sent: &[Grouping]) ->
         })
         | Some(By::Bins {
             column: resolved, ..
-        })
-        | Some(By::Summary { column: resolved }) if resolved == column =>
+        }) if resolved == column =>
         {
             asked.by.as_ref().and_then(|by| by.field.clone())
         }

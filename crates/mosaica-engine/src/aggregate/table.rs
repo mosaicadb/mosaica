@@ -28,7 +28,7 @@ use super::bins::{Bins, Kind, Numbers};
 use super::cursor::Position;
 use super::set::Cx;
 use super::values::Field;
-use super::{AggregateTimings, By, Grouping, TableHead};
+use super::{AggregateRefused, AggregateTimings, By, Figure, Grouping, TableHead};
 use crate::cells::{
     count_chunk_by_ranges, count_chunk_into, rows_in_chunk, CellSet, CellSink, GroupTable,
     RowGroups,
@@ -50,6 +50,13 @@ pub(super) struct Plan {
     area: Option<Area>,
     /// How many cells the cell level lists.
     area_cells: u64,
+    /// Whether the table has the `count` column.
+    count: bool,
+    /// The field figures' columns in order: each figure, its column's name and the field it is
+    /// taken of in `numbers`.
+    figures: Vec<(Figure, String, usize)>,
+    /// The fields the figures are taken of, each once.
+    numbers: Vec<Numbers>,
 }
 
 /// The cells of a cell level's area, and the ranges of chunk prefixes, at depth `min(depth, 16)`,
@@ -63,7 +70,6 @@ enum Outer {
     None,
     Field(Field),
     Bins(Bins),
-    Summary(Numbers),
     Layer(Layer),
 }
 
@@ -333,7 +339,6 @@ impl Plan {
                 range,
                 sample,
             }) => Outer::Bins(Bins::of(generation, column, *bins, *range, *sample)?),
-            Some(By::Summary { column }) => Outer::Summary(Numbers::of(generation, column, true)?),
             Some(By::Layer {
                 layer,
                 level,
@@ -384,12 +389,48 @@ impl Plan {
                 (area, count)
             }
         };
+        let mut numbers: Vec<Numbers> = Vec::new();
+        let mut columns: Vec<&str> = Vec::new();
+        let mut figures: Vec<(Figure, String, usize)> = Vec::new();
+        for figure in Figure::EACH {
+            let named = grouping
+                .figures
+                .iter()
+                .filter(|list| list.figure == figure || list.figure == Figure::Summary);
+            for field in named.flat_map(|list| &list.fields) {
+                let name = format!("{}_{}", figure.key(), field.name);
+                if figures.iter().any(|(_, named, _)| *named == name) {
+                    continue;
+                }
+                let at = match columns.iter().position(|&c| c == field.column) {
+                    Some(at) => at,
+                    None => {
+                        numbers.push(Numbers::of(generation, &field.column, true).map_err(
+                            |e| match e {
+                                EngineError::AggregateRefused(
+                                    AggregateRefused::NotSummarisable(_),
+                                ) => EngineError::AggregateRefused(
+                                    AggregateRefused::NotSummarisable(field.name.clone()),
+                                ),
+                                e => e,
+                            },
+                        )?);
+                        columns.push(&field.column);
+                        numbers.len() - 1
+                    }
+                };
+                figures.push((figure, name, at));
+            }
+        }
         Ok(Plan {
             grouping: index as u32,
             outer,
             cells: grouping.cells,
             area,
             area_cells,
+            count: grouping.count,
+            figures,
+            numbers,
         })
     }
 
@@ -397,7 +438,7 @@ impl Plan {
     pub(super) fn wants_rows(&self) -> bool {
         self.cells.is_some()
             || match &self.outer {
-                Outer::None | Outer::Summary(_) => false,
+                Outer::None => false,
                 Outer::Field(field) => field.wants_rows(),
                 Outer::Bins(bins) => bins.wants_rows(),
                 Outer::Layer(_) => true,
@@ -431,8 +472,8 @@ impl Plan {
             response_bytes_left,
         } = *budget;
         cx.check_cancelled()?;
-        if let Outer::Summary(field) = &self.outer {
-            return self.summary(cx, field, position, timings).map(Some);
+        if !self.figures.is_empty() {
+            return self.figures_page(cx, position, timings).map(Some);
         }
         let (groups, served, spill) = match held.take().filter(|h| h.holds(cx, position)) {
             Some(h) => (h.groups, h.served, h.spill),
@@ -443,7 +484,6 @@ impl Plan {
                         (field.groups(cx, position.chosen.as_deref(), timings)?, None)
                     }
                     Outer::Bins(bins) => (bins.groups(cx, timings)?, None),
-                    Outer::Summary(_) => unreachable!("a summary is served above"),
                     Outer::Layer(layer) => {
                         let (groups, served) =
                             layer.groups(cx, position.chosen.as_deref(), timings)?;
@@ -506,7 +546,6 @@ impl Plan {
                             .collect::<Result<_>>()?
                     }
                     Outer::Bins(_) => unreachable!("a grouping by bins with cells is refused"),
-                    Outer::Summary(_) => unreachable!("a summary with cells is refused"),
                     Outer::Layer(_) => {
                         let served = served.as_ref().expect("a layer's groups were read");
                         labels = served.label_table();
@@ -662,7 +701,7 @@ impl Plan {
         let mut bytes = 8;
         let mut nullable = 0;
         match self.outer {
-            Outer::None | Outer::Summary(_) => {}
+            Outer::None => {}
             Outer::Bins(_) => {
                 nullable += 2;
                 bytes += 1 + 16;
@@ -856,16 +895,20 @@ fn typed(kind: Kind, values: &[Option<Edge>]) -> ArrayRef {
 }
 
 impl Plan {
-    /// A summary's one page: its figures over the whole visible set, one row.
-    fn summary(
+    /// The one page of a table of field figures: its count, where it has one, and each field's
+    /// figures over the whole visible set, in one row. Each field's figures are read once.
+    fn figures_page(
         &self,
         cx: &Cx<'_>,
-        field: &Numbers,
         position: &Position,
         timings: &mut AggregateTimings,
     ) -> Result<Page> {
         let counting = std::time::Instant::now();
-        let figures = field.figures(cx)?;
+        let read = self
+            .numbers
+            .iter()
+            .map(|field| field.figures(cx))
+            .collect::<Result<Vec<_>>>()?;
         timings.count_ns += counting.elapsed().as_nanos() as u64;
         let head = TableHead {
             grouping: self.grouping,
@@ -881,37 +924,45 @@ impl Plan {
                 crate::figures::Number::Float(x) => Edge::Float(x),
             })
         };
-        // A timestamp's mean is the instant to the nearest microsecond, typed as its smallest and
-        // largest are; any other field's is a float.
-        let mean: ArrayRef = match field.kind() {
-            Kind::Timestamp => typed(
-                Kind::Timestamp,
-                &[figures.sum.mean_whole(figures.count).map(Edge::Int)],
-            ),
-            _ => Arc::new(Float64Array::from(vec![figures.sum.mean(figures.count)])),
-        };
-        let columns: Vec<(&str, ArrayRef)> = vec![
-            ("items", Arc::new(UInt64Array::from(vec![figures.items]))),
-            ("count", Arc::new(UInt64Array::from(vec![figures.count]))),
-            ("none", Arc::new(UInt64Array::from(vec![figures.none]))),
-            ("min", typed(field.kind(), &[edge(figures.min)])),
-            ("max", typed(field.kind(), &[edge(figures.max)])),
-            ("mean", mean),
-        ];
-        let bytes = 6 * 8 + 1;
+        let mut columns: Vec<(&str, ArrayRef, bool)> = Vec::new();
+        if self.count {
+            columns.push((
+                "count",
+                Arc::new(UInt64Array::from(vec![head.total])),
+                false,
+            ));
+        }
+        for (figure, name, at) in &self.figures {
+            let (kind, figures) = (self.numbers[*at].kind(), &read[*at]);
+            let array: ArrayRef = match figure {
+                Figure::Values => Arc::new(UInt64Array::from(vec![figures.count])),
+                Figure::Missing => Arc::new(UInt64Array::from(vec![figures.none])),
+                Figure::Min => typed(kind, &[edge(figures.min)]),
+                Figure::Max => typed(kind, &[edge(figures.max)]),
+                // A timestamp's mean is the instant to the nearest microsecond, typed as its
+                // smallest and largest are; any other field's is a float.
+                Figure::Mean => match kind {
+                    Kind::Timestamp => typed(
+                        Kind::Timestamp,
+                        &[figures.sum.mean_whole(figures.count).map(Edge::Int)],
+                    ),
+                    _ => Arc::new(Float64Array::from(vec![figures.sum.mean(figures.count)])),
+                },
+                Figure::Summary => unreachable!("a summary is planned as its five figures"),
+            };
+            let nullable = matches!(figure, Figure::Min | Figure::Max | Figure::Mean);
+            columns.push((name, array, nullable));
+        }
+        let bytes = columns.len() * 8 + 1;
         let fields: Vec<ArrowField> = columns
             .iter()
-            .map(|(name, array)| {
-                ArrowField::new(
-                    *name,
-                    array.data_type().clone(),
-                    matches!(*name, "min" | "max" | "mean"),
-                )
+            .map(|(name, array, nullable)| {
+                ArrowField::new(*name, array.data_type().clone(), *nullable)
             })
             .collect();
         let batch = RecordBatch::try_new(
             Arc::new(Schema::new(fields)),
-            columns.into_iter().map(|(_, array)| array).collect(),
+            columns.into_iter().map(|(_, array, _)| array).collect(),
         )
         .map_err(|e| EngineError::Malformed(format!("an aggregate page did not assemble: {e}")))?;
         Ok(Page {

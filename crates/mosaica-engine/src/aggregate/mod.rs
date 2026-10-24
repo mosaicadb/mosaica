@@ -1,10 +1,9 @@
 //! `POST /v1/aggregate`: how a set of the items a viewer may see in one view is distributed, across
 //! the values of a category field, across bins of a number or timestamp field, across the
 //! artifacts of one level of a layer, across the cells of the map, or across a group and cells
-//! together. Every figure is an exact count over the
-//! viewer's visible set, and a second set can be given to compare each figure with. A summary of a
-//! number or timestamp field gives the count, smallest, largest and mean of its values over the
-//! whole visible set.
+//! together. Each table names its figures: a count, which is exact over the viewer's visible set
+//! and can be compared with a second set, and the figures of number or timestamp fields, the items
+//! holding a value or none, the smallest, largest and mean value, over the whole visible set.
 //!
 //! [`Engine::aggregate_stream`] serves one response: a head, then each grouping's table in order,
 //! each table a head and pages of rows, then a trailer. Every page composes the visible set again
@@ -77,17 +76,73 @@ pub enum Reference {
     Filter(FilterExpr),
 }
 
-/// One table: an optional outer level of groups and an optional inner level of cells. With
-/// neither, the table is the size of the set.
+/// One table: an optional outer level of groups, an optional inner level of cells, and the figures
+/// each row holds, at least one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Grouping {
     pub by: Option<By>,
+    /// The `count` column.
+    pub count: bool,
+    /// The field figures, as the request named them. Each list names at least one field.
+    pub figures: Vec<FigureList>,
     /// The depth of the cells, 0 to 32.
     pub cells: Option<u8>,
     /// With `cells`, the bbox `[x0, y0, x1, y1]` in the view's frame whose cells are listed, as a
     /// viewport's `bbox` lists tiles; `None` is the view's whole extent. A listed cell counts all
     /// of its items.
     pub area: Option<[f64; 4]>,
+}
+
+/// A figure a grouping names over a list of number or timestamp fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FigureList {
+    pub figure: Figure,
+    pub fields: Vec<FigureField>,
+}
+
+/// A field a figure is named over: its resolved column name, as a group-scoped field arrives
+/// pinned to one view's column, and the name as the request wrote it, which names its column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FigureField {
+    pub column: String,
+    pub name: String,
+}
+
+/// A field figure, over the whole visible set. A table's field columns come in this order, each
+/// over its fields in the order first named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Figure {
+    /// `values_<field>`: the items holding a finite value.
+    Values,
+    /// `missing_<field>`: the items holding no value.
+    Missing,
+    Min,
+    Max,
+    Mean,
+    /// All five of the above.
+    Summary,
+}
+
+impl Figure {
+    pub const EACH: [Figure; 5] = [
+        Figure::Values,
+        Figure::Missing,
+        Figure::Min,
+        Figure::Max,
+        Figure::Mean,
+    ];
+
+    /// The request's key for this figure, and its columns' prefix.
+    pub fn key(self) -> &'static str {
+        match self {
+            Figure::Values => "values",
+            Figure::Missing => "missing",
+            Figure::Min => "min",
+            Figure::Max => "max",
+            Figure::Mean => "mean",
+            Figure::Summary => "summary",
+        }
+    }
 }
 
 /// A grouping's outer level.
@@ -106,10 +161,6 @@ pub enum By {
         range: Option<(Scalar, Scalar)>,
         sample: Option<u64>,
     },
-    /// The count, smallest, largest and mean of a number or timestamp field's values, as a
-    /// resolved column name, over every item the viewer may see in the view, whatever the
-    /// request's set and reference.
-    Summary { column: String },
     /// The artifacts of one level of a layer. `level` is required on a layer with several levels
     /// and refused on one with a single level. On a treed layer (`nested`, `dag`), `cut` lists
     /// only the artifacts the map draws there, and `top` requires it. With `palette`, each listed
@@ -263,11 +314,16 @@ pub enum AggregateRefused {
     NotBinnable(String),
     /// A grouping by bins of a `bool` field.
     BinsOnBool(String),
-    /// Not a number or timestamp field this deployment can summarise: not a number, or a number
-    /// declared with neither `index` nor `render`.
+    /// Not a number or timestamp field this deployment can take field figures of: not a number,
+    /// or a number declared with neither `index` nor `render`.
     NotSummarisable(String),
-    /// A summary with a cell level.
-    SummaryWithCells,
+    /// A grouping that names no figure.
+    NoFigure,
+    /// A figure named over an empty list of fields.
+    NoFields(Figure),
+    /// A field figure in a grouping with an outer level or cells, or in a request with a set or a
+    /// reference.
+    FiguresOverVisibleSet(Figure),
     ZeroBins,
     /// A sample size of 0.
     ZeroSample,
@@ -330,12 +386,23 @@ impl std::fmt::Display for AggregateRefused {
             ),
             AggregateRefused::NotSummarisable(field) => write!(
                 f,
-                "field '{field}' cannot be summarised; name a number or timestamp field declared \
-                 with index or render"
+                "field '{field}' has no figures to serve; name a number or timestamp field \
+                 declared with index or render"
             ),
-            AggregateRefused::SummaryWithCells => write!(
+            AggregateRefused::NoFigure => write!(
                 f,
-                "a summary has no cell level; ask for cells in a grouping of its own"
+                "a grouping names no figure; write \"count\": true for its counts"
+            ),
+            AggregateRefused::NoFields(figure) => write!(
+                f,
+                "{} lists no field; name at least one, or leave it out",
+                figure.key()
+            ),
+            AggregateRefused::FiguresOverVisibleSet(figure) => write!(
+                f,
+                "{} is computed over the whole visible set only; ask for it in a grouping \
+                 without by or cells, in a request without filters or reference",
+                figure.key()
             ),
             AggregateRefused::ZeroBins => write!(f, "bins is 0; ask for at least one bin"),
             AggregateRefused::ZeroSample => write!(
@@ -429,7 +496,11 @@ impl Engine {
     ) -> Result<AggregateTrailer> {
         let started = Instant::now();
         refuse_shape(req.page_rows, req.pages, false, req.cursor)?;
-        refuse_groupings(req.groupings, &req.caps)?;
+        refuse_groupings(
+            req.groupings,
+            req.filter.is_some() || req.reference.is_some(),
+            &req.caps,
+        )?;
         let (planned, position) = self.plan_aggregate(session, req)?;
         self.serve_tables(session, planned, position, started, sink)
     }
@@ -660,8 +731,9 @@ fn fragments_stamp(served: &crate::viewport::ServedView<'_>) -> u64 {
     hasher.finish()
 }
 
-/// The refusals a request's groupings decide from their shape alone.
-fn refuse_groupings(groupings: &[Grouping], caps: &AggregateCaps) -> Result<()> {
+/// The refusals a request's groupings decide from their shape alone. `filtered` is whether the
+/// request carries a set or a reference.
+fn refuse_groupings(groupings: &[Grouping], filtered: bool, caps: &AggregateCaps) -> Result<()> {
     let refused = |why| Err(EngineError::AggregateRefused(why));
     if groupings.is_empty() {
         return refused(AggregateRefused::NoGroupings);
@@ -675,6 +747,17 @@ fn refuse_groupings(groupings: &[Grouping], caps: &AggregateCaps) -> Result<()> 
         });
     }
     for grouping in groupings {
+        if !grouping.count && grouping.figures.is_empty() {
+            return refused(AggregateRefused::NoFigure);
+        }
+        if let Some(list) = grouping.figures.iter().find(|list| list.fields.is_empty()) {
+            return refused(AggregateRefused::NoFields(list.figure));
+        }
+        if let Some(list) = grouping.figures.first() {
+            if filtered || grouping.by.is_some() || grouping.cells.is_some() {
+                return refused(AggregateRefused::FiguresOverVisibleSet(list.figure));
+            }
+        }
         if let Some(depth) = grouping.cells.filter(|&depth| depth > 32) {
             return refused(AggregateRefused::DepthPast32(depth));
         }
@@ -689,12 +772,6 @@ fn refuse_groupings(groupings: &[Grouping], caps: &AggregateCaps) -> Result<()> 
                 refuse_bins(*bins, range.as_ref(), grouping.cells.is_some(), caps)?;
                 if *sample == Some(0) {
                     return refused(AggregateRefused::ZeroSample);
-                }
-                continue;
-            }
-            Some(By::Summary { .. }) => {
-                if grouping.cells.is_some() {
-                    return refused(AggregateRefused::SummaryWithCells);
                 }
                 continue;
             }

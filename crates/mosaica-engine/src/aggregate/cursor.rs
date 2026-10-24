@@ -125,7 +125,6 @@ pub(super) fn digest(
                 range,
                 sample,
             }) => format!("bins {column:?} {bins} {range:?} sample {sample:?}"),
-            Some(By::Summary { column }) => format!("summary {column:?}"),
             Some(By::Layer {
                 layer,
                 level,
@@ -139,7 +138,10 @@ pub(super) fn digest(
                 )
             }
         };
-        part(format!("{by} cells {:?} area {:?}", grouping.cells, grouping.area));
+        part(format!(
+            "{by} cells {:?} area {:?} count {} figures {:?}",
+            grouping.cells, grouping.area, grouping.count, grouping.figures
+        ));
     }
     part(format!("{layers:?}"));
     hasher.finalize().into()

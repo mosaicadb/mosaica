@@ -71,7 +71,8 @@ use arc_swap::ArcSwap;
 
 pub use aggregate::{
     AggregateCaps, AggregateHead, AggregateRefused, AggregateRequest, AggregateSink,
-    AggregateTimings, AggregateTrailer, By, Cut, Grouping, Pick, Reference, TableHead, TableSample,
+    AggregateTimings, AggregateTrailer, By, Cut, Figure, FigureField, FigureList, Grouping, Pick,
+    Reference, TableHead, TableSample,
 };
 pub use cancel::CancelToken;
 pub use categories::{
