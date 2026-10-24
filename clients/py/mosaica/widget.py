@@ -38,6 +38,7 @@ import traitlets
 
 from ._auth import Token, TokenSource, minted
 from ._refusal import listed
+from ._viewer import decimal_id
 
 _HERE = pathlib.Path(__file__).parent
 _BUNDLE = "mosaica-components.js"
@@ -59,22 +60,16 @@ def bundle_path() -> Optional[pathlib.Path]:
     return None
 
 
-U64_MAX = 2**64 - 1
-
-
 def _decimal_id(value: Any, name: str) -> Optional[str]:
     """An id as the decimal string of a ``u64``; an ``int`` is accepted and stringified."""
     if value is None:
         return None
-    if isinstance(value, bool):
-        raise traitlets.TraitError(f"{name} is a mosaica_id as a decimal string, not {value!r}")
-    if isinstance(value, int):
-        if not 0 <= value <= U64_MAX:
-            raise traitlets.TraitError(f"{name} {value} is outside u64")
-        return str(value)
-    if isinstance(value, str) and value.isdecimal() and 0 <= int(value) <= U64_MAX:
-        return value
-    raise traitlets.TraitError(f"{name} is a mosaica_id as a decimal string, not {value!r}")
+    text = decimal_id(value)
+    if text is None:
+        raise traitlets.TraitError(
+            f"{name} is a mosaica_id, a whole number from 0 to 2^64 - 1, not {value!r}"
+        )
+    return text
 
 
 def _hex(value: Any, name: str) -> str:

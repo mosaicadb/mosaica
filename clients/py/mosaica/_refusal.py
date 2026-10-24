@@ -17,9 +17,10 @@ class Refusal(ValueError):
     """A request that was refused, with a message saying what was wrong and what to do instead.
 
     The package raises it for a call it will not make, and for a request the server refused, in
-    which case the message carries the server's status and answer. A `commit()` that did nothing
-    carries its report as `report`, which is `None` otherwise. `authorise` and `revoke` raise
-    `PermissionError` for a refused request instead.
+    which case the message carries what the server said and `status` its HTTP status, which is
+    `None` otherwise. A `commit()` that did nothing carries its report as `report`, which is
+    `None` otherwise. `authorise` and `revoke` raise `PermissionError` for a refused request
+    instead.
 
         try:
             db.commit()
@@ -27,6 +28,7 @@ class Refusal(ValueError):
             print(refused.report)
     """
 
-    def __init__(self, message: str = "", report=None) -> None:
+    def __init__(self, message: str = "", report=None, status: int | None = None) -> None:
         super().__init__(message)
         self.report = report
+        self.status = status

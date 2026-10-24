@@ -159,6 +159,37 @@ def test_item_is_the_record_for_a_point_a_sample_served(db):
     assert [view["id"] for view in record["views"]] == ["s0"]
 
 
+def test_an_item_hidden_from_the_reader_is_refused_as_one_that_does_not_exist(db):
+    everything = set(db.items("s0", []).column("mosaica_id").to_pylist())
+    reader = db.viewer([ONE_TERM])
+    hidden = min(everything - set(reader.items("s0", []).column("mosaica_id").to_pylist()))
+    missing = next(one for one in range(1, 1_000_000) if one not in everything)
+    with pytest.raises(Refusal) as seen_by_nobody:
+        reader.item(missing)
+    with pytest.raises(Refusal) as seen_by_others:
+        reader.item(hidden)
+    assert seen_by_nobody.value.status == seen_by_others.value.status == 404
+    assert str(seen_by_nobody.value).replace(str(missing), "<id>") == str(
+        seen_by_others.value
+    ).replace(str(hidden), "<id>")
+    # A malformed id is refused before a request is sent, so the server gives no status.
+    for malformed in ("abc", -1, 2**64, 1.5):
+        with pytest.raises(Refusal) as refused:
+            reader.item(malformed)
+        assert refused.value.status is None
+
+
+def test_a_refused_filter_names_the_filterable_columns_and_carries_the_status(db):
+    filterable = [one["column"] for one in db.meta()["filter_operands"]]
+    nested = {"all_of": [{"archive": {"eq": "cs"}}, {"nope": {"eq": 1}}]}
+    for expression in ({"nope": {"eq": 1}}, nested):
+        with pytest.raises(Refusal) as refused:
+            db.view("s0").filter(expression).count()
+        assert refused.value.status == 422
+        assert all(column in str(refused.value) for column in filterable)
+        assert '"error"' not in str(refused.value)
+
+
 def test_a_sample_that_serves_no_point_still_has_the_two_fixed_columns(db):
     """A response with no points frame: the table is empty, and its columns are not invented."""
     empty = db.view("s0").filter({"arxiv_id": {"eq": "no-such-paper"}}).sample()

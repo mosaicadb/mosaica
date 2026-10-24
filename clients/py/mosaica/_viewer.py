@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.client
 import io
 import json
+import numbers
 import struct
 import urllib.error
 import urllib.parse
@@ -365,6 +366,46 @@ def _extent(meta: dict, view: str) -> list[float]:
             q = block["quantisation"]
             return [q["x_min"], q["y_min"], q["x_max"], q["y_max"]]
     raise Refusal(f"there is no view named {view!r} that this reader can see")
+
+
+U64_MAX = 2**64 - 1
+
+
+def decimal_id(value: Any) -> Optional[str]:
+    """A `mosaica_id` as the decimal string of a `u64`, or `None` where `value` is not one: an
+    integer from 0 to 2^64 - 1, or its decimal digits."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, numbers.Integral):
+        return str(int(value)) if 0 <= value <= U64_MAX else None
+    if isinstance(value, str) and value.isascii() and value.isdigit() and int(value) <= U64_MAX:
+        return value
+    return None
+
+
+def _an_id(value: Any, what: str) -> str:
+    """`value` as the decimal string a route's path takes, or a refusal before the request."""
+    text = decimal_id(value)
+    if text is None:
+        raise Refusal(
+            f"{what}: {value!r} is not a mosaica_id; write a whole number from 0 to 2^64 - 1, as "
+            f"a sample's or a read's mosaica_id column holds it"
+        )
+    return text
+
+
+def _filter_columns(expression: Any) -> set[str]:
+    """The columns a filter expression's leaves name."""
+    if not isinstance(expression, dict):
+        return set()
+    named: set[str] = set()
+    for key, value in expression.items():
+        if key in ("all_of", "any_of", "none_of"):
+            for one in value if isinstance(value, list) else []:
+                named |= _filter_columns(one)
+        elif key not in ("region", "member_of"):
+            named.add(key)
+    return named
 
 
 def _require(name: str, names: list[str], what: str) -> None:
@@ -941,12 +982,13 @@ class Viewer:
         `labels` (why this reader sees the item: its labels read as one disjunction, each held term
         among its operands and one satisfied clause of each conjunction among them, as label
         text; a held term that appears only inside a conjunction is not listed), `views`
-        (the views this reader can find it in). An item this reader may not see is refused exactly as one that
-        does not exist.
+        (the views this reader can find it in). An item this reader may not see is refused exactly
+        as one that does not exist, and an id that is not a `mosaica_id` is refused before the
+        request is sent.
 
             v.item(sample.column("mosaica_id")[0].as_py())
         """
-        return json.loads(self._request("POST", f"/v1/items/{mosaica_id}", {}))
+        return json.loads(self._request("POST", f"/v1/items/{_an_id(mosaica_id, 'item')}", {}))
 
     def items(
         self,
@@ -1097,10 +1139,10 @@ class Viewer:
         request: dict = {"view": view, "layer": layer, "fields": listed(fields)}
         given = {
             "level": level,
-            "parent": None if parent is None else str(parent),
+            "parent": None if parent is None else _an_id(parent, "artifacts"),
             "q": q,
             # Decimal strings: an id past 2^53 is not exact as a JSON number.
-            "ids": None if ids is None else [str(int(one)) for one in listed(ids)],
+            "ids": None if ids is None else [_an_id(one, "artifacts") for one in listed(ids)],
             "filters": filters,
             "keep_unmatched": keep_unmatched,
             "count": count,
@@ -1538,7 +1580,7 @@ class Viewer:
         if level is not None:
             request["level"] = int(level)
         if parent is not None:
-            request["parent"] = str(parent)
+            request["parent"] = _an_id(parent, "browse_artifacts")
         if q is not None:
             request["q"] = q
         if filters is not None:
@@ -1574,7 +1616,8 @@ class Viewer:
         request: dict = {"view": view}
         if zoom is not None:
             request["zoom"] = int(zoom)
-        return json.loads(self._request("POST", f"/v1/artifacts/{mosaica_id}", request))
+        path = f"/v1/artifacts/{_an_id(mosaica_id, 'artifact')}"
+        return json.loads(self._request("POST", path, request))
 
     def _require_view(self, name: str, meta: Optional[dict] = None) -> None:
         views = (self.meta() if meta is None else meta).get("views") or []
@@ -1621,11 +1664,41 @@ class Viewer:
             try:
                 return urllib.request.urlopen(request, timeout=120)
             except urllib.error.HTTPError as refused:
-                detail = refused.read().decode(errors="replace")[:1000]
-                if attempt == 0 and refused.code == 403 and "expired-token" in detail:
+                answer = refused.read().decode(errors="replace")[:1000]
+                if attempt == 0 and refused.code == 403 and "expired-token" in answer:
                     if self._forget():
                         continue
-                raise Refusal(f"{method} {path} refused ({refused.code}): {detail}") from None
+                raise self._refused(path, body, refused.code, answer) from None
+
+    def _refused(self, path: str, body: Optional[dict], status: int, answer: str) -> Refusal:
+        """A refusal the server made, in one sentence: what the server said, the filterable
+        columns where a filter named a column that is not one, and the status.
+
+        A `404` for an item or an annotation says the same whether the id names nothing or names
+        something this reader may not see, as the server's answer does.
+        """
+        try:
+            detail = json.loads(answer)["detail"]
+        except (ValueError, TypeError, KeyError):
+            detail = answer.strip() or "no reason given"
+        segments = path.split("?")[0].strip("/").split("/")
+        if status == 404 and len(segments) == 3 and segments[1] in ("items", "artifacts"):
+            what = "item" if segments[1] == "items" else "annotation"
+            detail = f"there is no {what} {segments[2]} that this reader can see"
+        expressions = [body.get(key) for key in ("filters", "highlight", "reference")] if body else []
+        named = set().union(*(_filter_columns(one) for one in expressions))
+        if status == 422 and named:
+            try:
+                filterable = [one["column"] for one in self.meta().get("filter_operands") or []]
+            except Refusal:
+                filterable = None
+            unknown = sorted(named - set(filterable or named))
+            if unknown:
+                detail = (
+                    f"{', '.join(repr(one) for one in unknown)} is not a filterable column; name "
+                    f"one of: {', '.join(filterable) or 'none, since no column is indexed'}"
+                )
+        return Refusal(f"{detail} (HTTP {status})", status=status)
 
     def _forget(self) -> bool:
         """Drop the held token so the next request gets another; `False` where none can be got."""
