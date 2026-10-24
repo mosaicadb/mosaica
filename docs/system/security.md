@@ -409,8 +409,8 @@ withheld from the viewer counts as `none`, so a withheld artifact cannot show th
 histogram with no range takes its edges from the smallest and largest value among the items the
 viewer may see in the view, read from the field's figures above, so an item the viewer may not see,
 or an item with no row in the view, moves no edge. A sampled histogram's default edges are the same
-exact ones. A summary of a field serves those figures, over the visible set and never the filtered
-set. A sampled histogram counts the set's items below one cut on `mosaica_id`, taken from the set's
+exact ones. A grouping's field figures serve those figures, over the visible set only, and are refused
+with a filter or a reference. A sampled histogram counts the set's items below one cut on `mosaica_id`, taken from the set's
 composed count. The identity bands decide only which rows are read, and every entry read is tested
 against the set before it is counted. So an item the viewer may not see is never in a sample, never
 moves the count the cut is taken from, and never moves an edge. Whether a set is sampled depends on

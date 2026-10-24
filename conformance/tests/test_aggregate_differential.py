@@ -80,17 +80,17 @@ FILTERS = {
 }
 
 GROUPINGS = [
-    {},
-    {"by": {"field": "department", "top": 3}},
-    {"by": {"field": "department", "values": ["gamma", "omega", "hollow", "nope", "alpha", "gamma"]}},
-    {"by": {"field": "archive", "top": 2}, "cells": {"depth": 3}},
-    {"by": {"field": "archive", "values": ["void", "green"]}},
-    {"by": {"field": "shelf", "top": 5}, "cells": {"depth": 7}},
-    {"cells": {"depth": 0}},
-    {"cells": {"depth": 10}},
-    {"cells": {"depth": 12, "area": [0.0, 0.0, 16383.0, 16383.0]}},
-    {"by": {"field": "archive", "top": 2}, "cells": {"depth": 12, "area": [8000.0, 3000.0, 20000.0, 9000.0]}},
-    {"cells": {"depth": 20, "area": [30000.0, 30000.0, 30040.0, 30040.0]}},
+    {"count": True},
+    {"count": True, "by": {"field": "department", "top": 3}},
+    {"count": True, "by": {"field": "department", "values": ["gamma", "omega", "hollow", "nope", "alpha", "gamma"]}},
+    {"count": True, "by": {"field": "archive", "top": 2}, "cells": {"depth": 3}},
+    {"count": True, "by": {"field": "archive", "values": ["void", "green"]}},
+    {"count": True, "by": {"field": "shelf", "top": 5}, "cells": {"depth": 7}},
+    {"count": True, "cells": {"depth": 0}},
+    {"count": True, "cells": {"depth": 10}},
+    {"count": True, "cells": {"depth": 12, "area": [0.0, 0.0, 16383.0, 16383.0]}},
+    {"count": True, "by": {"field": "archive", "top": 2}, "cells": {"depth": 12, "area": [8000.0, 3000.0, 20000.0, 9000.0]}},
+    {"count": True, "cells": {"depth": 20, "area": [30000.0, 30000.0, 30040.0, 30040.0]}},
 ]
 
 
@@ -253,10 +253,10 @@ REFERENCES = {
 }
 
 REFERENCE_GROUPINGS = [
-    {},
-    {"by": {"field": "department", "top": 2}},
-    {"by": {"field": "archive", "values": ["red", "void"]}},
-    {"by": {"field": "shelf", "top": 1}, "cells": {"depth": 3}},
+    {"count": True},
+    {"count": True, "by": {"field": "department", "top": 2}},
+    {"count": True, "by": {"field": "archive", "values": ["red", "void"]}},
+    {"count": True, "by": {"field": "shelf", "top": 1}, "cells": {"depth": 3}},
 ]
 
 
@@ -321,9 +321,9 @@ def test_a_table_without_a_reference_has_no_reference_columns(
 def test_the_cell_limit_refuses_the_whole_view_past_depth_10(catalogue_server):
     case = next(c for c in cat.catalogue() if c.name == "full_100pct")
     token = catalogue_server.authorise(list(case.grants))["token"]
-    ok = catalogue_server.aggregate(token, view=cat.VIEW_ID, groupings=[{"cells": {"depth": 10}}])
+    ok = catalogue_server.aggregate(token, view=cat.VIEW_ID, groupings=[{"count": True, "cells": {"depth": 10}}])
     assert ok.status_code == 200, ok.text
-    over = catalogue_server.aggregate(token, view=cat.VIEW_ID, groupings=[{"cells": {"depth": 11}}])
+    over = catalogue_server.aggregate(token, view=cat.VIEW_ID, groupings=[{"count": True, "cells": {"depth": 11}}])
     assert over.status_code == 422 and over.json()["error"] == "contract", over.text
 
 
@@ -332,7 +332,7 @@ def test_a_field_that_cannot_be_counted_is_refused(catalogue_server):
     token = catalogue_server.authorise(list(case.grants))["token"]
     for field in ("title", "no_such_field"):
         resp = catalogue_server.aggregate(
-            token, view=cat.VIEW_ID, groupings=[{"by": {"field": field, "top": 1}}]
+            token, view=cat.VIEW_ID, groupings=[{"count": True, "by": {"field": field, "top": 1}}]
         )
         assert resp.status_code == 422, resp.text
         assert resp.json()["error"] == "contract"
@@ -369,9 +369,9 @@ def test_every_artifact_table_is_the_oracles(member_server, terms):  # noqa: F81
         assert groups, f"{layer}: the layer serves artifacts to {terms}"
         first = sorted(groups)[0]
         groupings = [
-            {"by": {"layer": layer, "top": 2}},
-            {"by": {"layer": layer, "artifacts": [str(first), 7, first]}},
-            {"by": {"layer": layer, "top": 10}, "cells": {"depth": 5}},
+            {"count": True, "by": {"layer": layer, "top": 2}},
+            {"count": True, "by": {"layer": layer, "artifacts": [str(first), 7, first]}},
+            {"count": True, "by": {"layer": layer, "top": 10}, "cells": {"depth": 5}},
         ]
         heads, tables = read_tables(
             server, token,
@@ -442,8 +442,8 @@ def test_overlapping_and_withheld_artifacts_are_the_oracles(label_server, terms)
             drawn = agg.drawn_cut(TEAM_PARENTS, {key for (name, key) in served if name == layer}, None, False)
             ranked = {every[(layer, key)]: members_of[key] for key in agg.frontier(TEAM_PARENTS, drawn)}
         groupings = [
-            {"by": top},
-            {"by": {"layer": layer, "artifacts": [str(i) for i in named]}},
+            {"count": True, "by": top},
+            {"count": True, "by": {"layer": layer, "artifacts": [str(i) for i in named]}},
         ]
         heads, tables = read_tables(
             label_server, token, {"view": lfx.VIEW_ID, "reference": {}, "groupings": groupings}
@@ -519,7 +519,7 @@ def test_a_tree_lists_the_cut_the_map_draws(label_server, terms):
         groups = {every[(lfx.TEAMS, key)]: members_of[key] for key in agg.frontier(TEAM_PARENTS, drawn)}
         for filters in (None, LEFT):
             items = visible_items if filters is None else filt.evaluate(filters, {"region": region}, visible_items)
-            body = {"view": lfx.VIEW_ID, "groupings": [{"by": {"layer": lfx.TEAMS, "top": 10, "cut": cut}}]}
+            body = {"view": lfx.VIEW_ID, "groupings": [{"count": True, "by": {"layer": lfx.TEAMS, "top": 10, "cut": cut}}]}
             if filters is not None:
                 body["filters"] = filters
             heads, tables = read_tables(label_server, token, body)
@@ -531,6 +531,6 @@ def test_a_tree_lists_the_cut_the_map_draws(label_server, terms):
             assert served_head == want_head, f"{what}: head {heads[0]}"
             assert_rows_equal(tables[0], want_rows, what)
     refused = label_server.aggregate(
-        token, view=lfx.VIEW_ID, groupings=[{"by": {"layer": lfx.TEAMS, "top": 10}}]
+        token, view=lfx.VIEW_ID, groupings=[{"count": True, "by": {"layer": lfx.TEAMS, "top": 10}}]
     )
     assert refused.status_code == 422 and refused.json()["error"] == "contract", refused.text

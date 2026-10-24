@@ -971,16 +971,15 @@ def catalogue_battery(side: Side) -> list[Request]:
     )
     left = {"region": {"bbox": [0.0, 0.0, 32768.0, 65536.0]}}
     groupings = [
-        {},
-        {"cells": {"depth": 4}},
-        {"by": {"field": "department", "top": 5}},
-        {"by": {"field": "department", "top": 3}, "cells": {"depth": 2}},
-        {"by": {"field": "archive", "values": ["red", "blue", "void", "nonesuch"]}},
-        {"by": {"field": "shelf", "top": 2}},
-        {"by": {"field": "fx_key", "bins": 10}},
-        {"by": {"field": "serial", "bins": 12, "range": [1_000_000, 1_150_000]}},
-        {"by": {"field": "serial", "bins": 6, "sample": 50}},
-        {"by": {"field": "fx_key", "summary": True}},
+        {"count": True},
+        {"count": True, "cells": {"depth": 4}},
+        {"count": True, "by": {"field": "department", "top": 5}},
+        {"count": True, "by": {"field": "department", "top": 3}, "cells": {"depth": 2}},
+        {"count": True, "by": {"field": "archive", "values": ["red", "blue", "void", "nonesuch"]}},
+        {"count": True, "by": {"field": "shelf", "top": 2}},
+        {"count": True, "by": {"field": "fx_key", "bins": 10}},
+        {"count": True, "by": {"field": "serial", "bins": 12, "range": [1_000_000, 1_150_000]}},
+        {"count": True, "by": {"field": "serial", "bins": 6, "sample": 50}},
         {
             "by": {"field": "department", "top": 6},
             "cells": {"depth": 3, "area": [0.0, 0.0, 20000.0, 40000.0]},
@@ -1014,6 +1013,11 @@ def catalogue_battery(side: Side) -> list[Request]:
                 "POST /v1/aggregate",
                 principal,
                 {"view": view, "groupings": groupings, "filters": left, "reference": {}},
+            ),
+            Request(
+                "POST /v1/aggregate",
+                principal,
+                {"view": view, "groupings": [{"count": True, "summary": ["fx_key", "serial"]}]},
             ),
             Request(
                 "POST /v1/aggregate",
@@ -1164,9 +1168,9 @@ def aggregates(
         names = sorted(s for s in side.raw if s.startswith(f"artifact {layer}/"))
         groupings.append(
             [
-                {"by": {"layer": layer, "top": 50, **extra}},
-                {"by": {"layer": layer, "top": 50, **extra}, "cells": {"depth": 2}},
-                {"by": {"layer": layer, "artifacts": [f"@{n}" for n in names[::-1]]}},
+                {"count": True, "by": {"layer": layer, "top": 50, **extra}},
+                {"count": True, "by": {"layer": layer, "top": 50, **extra}, "cells": {"depth": 2}},
+                {"count": True, "by": {"layer": layer, "artifacts": [f"@{n}" for n in names[::-1]]}},
             ]
         )
     groupings.append(fields)
@@ -1192,7 +1196,7 @@ def shapes_battery(side: Side) -> list[Request]:
         TREE: {"cut": {"zoom": 2, "bbox": WHOLE}},
         CLUSTERS: {},
     }
-    fields = [{"by": {"field": "fx_key", "bins": 8}}, {"by": {"field": "fx_key", "summary": True}}]
+    fields = [{"count": True, "by": {"field": "fx_key", "bins": 8}}]
     sources = range(0, N_POINTS, 211)
     out = []
     for principal in SHAPE_PRINCIPALS:
@@ -1214,6 +1218,13 @@ def shapes_battery(side: Side) -> list[Request]:
         ]
         out += layer_reads(side, principal, view, SHAPE_LAYERS, {LABELS}, filters)
         out += aggregates(side, principal, view, layers, fields, filters)
+        out.append(
+            Request(
+                "POST /v1/aggregate",
+                principal,
+                {"view": view, "groupings": [{"summary": ["fx_key"]}, {"count": True}]},
+            )
+        )
         out.append(Request("GET /v1/meta", principal))
     return out
 
@@ -1231,7 +1242,7 @@ def labels_battery(side: Side) -> list[Request]:
     highlight = {JOIN_FIELD: {"in": list(range(0, 60))}}
     tree = {"cut": {"zoom": 1, "bbox": WHOLE}}
     layers = {lfx.TEAMS: tree, lfx.SEALED: {}, lfx.NAMES: {}, lfx.TITLES: {}, lfx.GATED: {}}
-    fields = [{}, {"cells": {"depth": 3}}]
+    fields = [{"count": True}, {"count": True, "cells": {"depth": 3}}]
     out = []
     for principal in LABEL_PRINCIPALS:
         out += viewports(principal, view, "all", filters, highlight)

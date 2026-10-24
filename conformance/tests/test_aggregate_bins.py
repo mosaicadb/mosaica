@@ -28,9 +28,10 @@ The oracle derives, from the contract's rules alone and in exact arithmetic:
 Each table is compared row for row, with every principal, under no filter and two filters, against
 a reference of the whole visible set. The edges must be the same under every filter.
 
-**A summary** of each field, `{"field": f, "summary": true}`, is one row of figures over the
-principal's whole visible set, whatever the filters say: `items`, `count` (the finite values),
-`none`, `min`, `max` and `mean`, each worked out here from the values. A deployment of its own
+**A summary** of each field, `{"count": true, "summary": [f]}`, is one row of figures over the
+principal's whole visible set: `count`, `values_<f>` (the finite values), `missing_<f>`,
+`min_<f>`, `max_<f>` and `mean_<f>`, each worked out here from the values; beside `by`, `cells`,
+`filters` or `reference` it is refused. A deployment of its own
 takes a suppression, its lift, a deletion, an ingest, a fold and a restart, and after each the
 summaries and the default edges, counted whole and sampled, are the oracle's for every principal.
 
@@ -398,7 +399,7 @@ def test_default_bins_are_the_oracles_and_hold_still(deployment, principal, colu
         held = None
         for name, (filters, keep) in FILTERS.items():
             body = {"view": fx.WORLD, "reference": {}, "page_rows": 4,
-                    "groupings": [{"by": {"field": column, "bins": n}}]}
+                    "groupings": [{"count": True, "by": {"field": column, "bins": n}}]}
             if filters is not None:
                 body["filters"] = filters
             head, rows = read_table(deployment.server, token, body)
@@ -447,7 +448,7 @@ def test_a_range_is_the_oracles(deployment, case):
     token = deployment.server.authorise(list(fx.PRINCIPALS["two"]))["token"]
     seen = visible("two")
     body = {"view": fx.WORLD, "reference": {}, "filters": FILTERS["rank"][0],
-            "groupings": [{"by": {"field": column, "bins": n, "range": [lower, upper]}}]}
+            "groupings": [{"count": True, "by": {"field": column, "bins": n, "range": [lower, upper]}}]}
     head, rows = read_table(deployment.server, token, body)
     edges = range_edges(column, lower, upper, n)
     want_head, want_rows = expected(column, edges, [i for i in seen if FILTERS["rank"][1](i)], seen)
@@ -462,7 +463,7 @@ def test_a_value_past_2_to_the_53_is_placed_by_its_exact_bin(deployment):
     seen = visible("two")
     v = _a_big_value()
     body = {"view": fx.WORLD, "reference": {},
-            "groupings": [{"by": {"field": "big", "bins": 3, "range": [str(v - 1), str(v + 2)]}}]}
+            "groupings": [{"count": True, "by": {"field": "big", "bins": 3, "range": [str(v - 1), str(v + 2)]}}]}
     head, rows = read_table(deployment.server, token, body)
     assert [(r[1], r[2]) for r in rows if r[0] == "listed"] == [(v - 1, v), (v, v + 1), (v + 1, v + 2)]
     assert (head, rows) == expected("big", [v - 1, v, v + 1, v + 2], seen, seen)
@@ -474,8 +475,8 @@ def test_a_histogram_is_one_page_between_groupings_that_page(deployment):
     histogram still arrives as one page, the same table it is read alone, and the response's
     `pages` counts it as one."""
     token = deployment.server.authorise(list(fx.PRINCIPALS["two"]))["token"]
-    histograms = [{"by": {"field": "rank", "bins": 37}}, {"by": {"field": "seen", "bins": 10}}]
-    cells = {"cells": {"depth": 6}}
+    histograms = [{"count": True, "by": {"field": "rank", "bins": 37}}, {"count": True, "by": {"field": "seen", "bins": 10}}]
+    cells = {"count": True, "cells": {"depth": 6}}
     groupings = [cells, histograms[0], cells, histograms[1]]
     alone = [
         read_table(deployment.server, token, {"view": fx.WORLD, "reference": {}, "groupings": [h]})
@@ -512,10 +513,10 @@ def test_a_grouping_by_bins_that_cannot_be_served_is_refused(deployment):
         {"field": "seen", "bins": 4, "range": [0.5, 9]},
         {"field": "nothing", "bins": 4},
     ):
-        resp = deployment.server.aggregate(token, view=fx.WORLD, groupings=[{"by": by}])
+        resp = deployment.server.aggregate(token, view=fx.WORLD, groupings=[{"count": True, "by": by}])
         assert resp.status_code == 422 and resp.json()["error"] == "contract", (by, resp.text)
     resp = deployment.server.aggregate(
-        token, view=fx.WORLD, groupings=[{"by": {"field": "score", "bins": 2}, "cells": {"depth": 3}}]
+        token, view=fx.WORLD, groupings=[{"count": True, "by": {"field": "score", "bins": 2}, "cells": {"depth": 3}}]
     )
     assert resp.status_code == 422, resp.text
 
@@ -585,7 +586,7 @@ def test_sampled_bins_are_the_items_below_one_cut_scaled(deployment, identities,
         for name, (filters, keep) in FILTERS.items():
             items = [i for i in seen if keep(i)]
             body = {"view": fx.WORLD, "reference": {},
-                    "groupings": [{"by": {"field": column, "bins": 10, "sample": s}}]}
+                    "groupings": [{"count": True, "by": {"field": column, "bins": 10, "sample": s}}]}
             if filters is not None:
                 body["filters"] = filters
             head, rows = read_table(deployment.server, token, body)
@@ -618,10 +619,10 @@ def test_a_sample_as_large_as_the_set_is_exact(deployment):
     n = len(visible("two"))
     grouping = {"field": "rank", "bins": 12}
     exact = read_table(deployment.server, token,
-                       {"view": fx.WORLD, "reference": {}, "groupings": [{"by": grouping}]})
+                       {"view": fx.WORLD, "reference": {}, "groupings": [{"count": True, "by": grouping}]})
     for s in (n, n // 60):
         whole = read_table(deployment.server, token,
-                           {"view": fx.WORLD, "reference": {}, "groupings": [{"by": {**grouping, "sample": s}}]})
+                           {"view": fx.WORLD, "reference": {}, "groupings": [{"count": True, "by": {**grouping, "sample": s}}]})
         assert "sample" not in exact[0]
         assert whole[0].pop("sample") == {
             "sampled": False, "items": n, "reference_items": n,
@@ -636,7 +637,7 @@ def test_a_sample_that_cannot_be_served_is_refused(deployment):
         {"field": "score", "sample": 10},
         {"field": "fx", "top": 2, "sample": 10},
     ):
-        resp = deployment.server.aggregate(token, view=fx.WORLD, groupings=[{"by": by}])
+        resp = deployment.server.aggregate(token, view=fx.WORLD, groupings=[{"count": True, "by": by}])
         assert resp.status_code == 422 and resp.json()["error"] == "contract", (by, resp.text)
 
 
@@ -650,9 +651,9 @@ def summary_oracle(column: str, items: list[int]) -> dict:
     values = [v for i in items if (v := BY_NAME[column].value(i)) is not None]
     finite = [v for v in values if not (isinstance(v, float) and not math.isfinite(v))]
     return {
-        "items": len(items),
-        "count": len(finite),
-        "none": len(items) - len(values),
+        "count": len(items),
+        "values": len(finite),
+        "missing": len(items) - len(values),
         "min": min(finite) if finite else None,
         "max": max(finite) if finite else None,
         "mean": exact_mean(column, finite),
@@ -668,27 +669,27 @@ def exact_mean(column: str, finite: list):
     return round(mean) if column in TIMESTAMPS else float(mean)
 
 
-def read_summary(server, token: str, column: str, filters: dict | None = None) -> tuple[dict, dict]:
-    """A summary's head and its one row, its smallest and largest value as the oracle holds them."""
-    body: dict = {"view": fx.WORLD, "groupings": [{"by": {"field": column, "summary": True}}]}
-    if filters is not None:
-        body["filters"] = filters
+def read_summary(server, token: str, column: str) -> tuple[dict, dict]:
+    """A summary's head and its one row, by figure, its smallest and largest value as the oracle
+    holds them."""
+    body: dict = {"view": fx.WORLD, "groupings": [{"count": True, "summary": [column]}]}
     resp = server.aggregate(token, **body)
     assert resp.status_code == 200, resp.text
     decoded = split_aggregate_frames(resp.content)
     [(head, pages)] = decoded.tables
     assert len(pages) == 1, f"a summary is one page, not {len(pages)}"
     batch = ipc.open_stream(io.BytesIO(pages[0][0])).read_next_batch()
-    assert batch.schema.names == ["items", "count", "none", "min", "max", "mean"]
-    assert batch.column("min").type == EDGE_TYPES[column], batch.column("min").type
+    figures = ["values", "missing", "min", "max", "mean"]
+    assert batch.schema.names == ["count", *(f"{f}_{column}" for f in figures)]
+    assert batch.column(f"min_{column}").type == EDGE_TYPES[column]
     mean_type = EDGE_TYPES[column] if column in TIMESTAMPS else pa.float64()
-    assert batch.column("mean").type == mean_type, batch.column("mean").type
+    assert batch.column(f"mean_{column}").type == mean_type
     row = {}
     for name in batch.schema.names:
         column_values = batch.column(name)
         if pa.types.is_timestamp(column_values.type):
             column_values = column_values.cast(pa.int64())
-        row[name] = column_values.to_pylist()[0]
+        row[name.removesuffix(f"_{column}")] = column_values.to_pylist()[0]
     return head, row
 
 
@@ -700,29 +701,35 @@ def same_summary(served: dict, want: dict) -> bool:
 @pytest.mark.parametrize("principal", list(fx.PRINCIPALS))
 @pytest.mark.parametrize("column", [c.name for c in COLUMNS])
 def test_a_summary_is_the_oracles_over_the_whole_visible_set(deployment, principal, column):
-    """A summary is the figures of every item the principal may see, whatever the filter; its head
-    keeps the filtered set's `total`. Items it cannot see hold every field's extremes."""
+    """A summary is the figures of every item the principal may see; its head's `total` is the
+    visible set's. Items it cannot see hold every field's extremes."""
     token = deployment.server.authorise(list(fx.PRINCIPALS[principal]))["token"]
     seen = visible(principal)
     want = summary_oracle(column, seen)
-    for name, (filters, keep) in FILTERS.items():
-        head, row = read_summary(deployment.server, token, column, filters)
-        what = f"{principal} / {column} / filter {name}"
-        assert same_summary(row, want), f"{what}: served {row}, expected {want}"
-        assert head["total"] == sum(1 for i in seen if keep(i)), what
-        assert "groups" not in head and "sample" not in head, what
+    head, row = read_summary(deployment.server, token, column)
+    what = f"{principal} / {column}"
+    assert same_summary(row, want), f"{what}: served {row}, expected {want}"
+    assert head["total"] == len(seen), what
+    assert "groups" not in head and "sample" not in head, what
 
 
 def test_a_summary_that_cannot_be_served_is_refused(deployment):
     token = deployment.server.authorise(list(fx.PRINCIPALS["everyone"]))["token"]
     for grouping in (
-        {"by": {"field": "fx", "summary": True, "top": 2}},
-        {"by": {"field": "score", "summary": True, "bins": 4}},
-        {"by": {"field": "score", "summary": True}, "cells": {"depth": 3}},
-        {"by": {"field": "nope", "summary": True}},
+        {"summary": ["nope"]},
+        {"summary": []},
+        {"count": True, "summary": ["score"], "by": {"field": "score", "bins": 4}},
+        {"count": True, "summary": ["score"], "cells": {"depth": 3}},
+        {"by": {"field": "score", "summary": True}},
+        {},
     ):
         resp = deployment.server.aggregate(token, view=fx.WORLD, groupings=[grouping])
         assert resp.status_code == 422 and resp.json()["error"] == "contract", (grouping, resp.text)
+    for extra in ({"filters": {"score": {"range": {"lt": 50}}}}, {"reference": {}}):
+        resp = deployment.server.aggregate(
+            token, view=fx.WORLD, groupings=[{"summary": ["score"]}], **extra
+        )
+        assert resp.status_code == 422 and resp.json()["error"] == "contract", (extra, resp.text)
 
 
 #: Items ingested by the lifecycle test after its build and first ingest.
@@ -773,7 +780,7 @@ def test_the_figures_are_the_oracles_through_every_change(changing):
                     if sample is not None:
                         by["sample"] = sample
                     _, rows = read_table(changing.server, token, {
-                        "view": fx.WORLD, "reference": {}, "groupings": [{"by": by}],
+                        "view": fx.WORLD, "reference": {}, "groupings": [{"count": True, "by": by}],
                     })
                     served = [(r[1], r[2]) for r in rows if r[0] == "listed"]
                     assert served == list(zip(edges, edges[1:])), f"{what} / sample {sample}"

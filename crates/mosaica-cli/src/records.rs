@@ -115,15 +115,16 @@ pub(crate) struct AggregateArgs {
     /// The view the counts are taken in. An item with no position in it is not counted.
     #[arg(long)]
     view: String,
-    /// One grouping as JSON, such as `{"by": {"field": "year", "bins": 20}}`. `{}` is the size of
-    /// the set.
+    /// One grouping as JSON, such as `{"count": true, "by": {"field": "year", "bins": 20}}`.
+    /// `{"count": true}` is the size of the set.
     #[arg(long, value_name = "JSON")]
     grouping: String,
     /// A filter expression as JSON. Only the items that match are counted.
     #[arg(long, value_name = "JSON")]
     filters: Option<String>,
     /// A second set to compare each count with, as a filter expression in JSON; `{}` is every
-    /// item the token may see in the view. The table then has `reference_count` and `lift`.
+    /// item the token may see in the view. A table with `count` then has `reference_count` and
+    /// `lift`.
     #[arg(long, value_name = "JSON")]
     reference: Option<String>,
     #[command(flatten)]
@@ -251,7 +252,11 @@ pub(crate) fn artifacts(args: ArtifactsArgs) -> ExitCode {
 pub(crate) fn aggregate(args: AggregateArgs) -> ExitCode {
     let request = paged(&args.paging).and_then(|mut request| {
         request.insert("view".into(), args.view.into());
-        let grouping = json_argument("--grouping", &args.grouping, "one grouping, such as '{}'")?;
+        let grouping = json_argument(
+            "--grouping",
+            &args.grouping,
+            "one grouping, such as '{\"count\": true}'",
+        )?;
         request.insert("groupings".into(), Value::Array(vec![grouping]));
         if let Some(filters) = &args.filters {
             request.insert("filters".into(), filter_argument("--filters", filters)?);

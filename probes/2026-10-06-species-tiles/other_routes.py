@@ -132,7 +132,7 @@ def main() -> int:
                     f"{v}/v1/aggregate",
                     json={
                         "view": view,
-                        "groupings": [{"by": {"layer": layer, "level": LEVEL, "top": 50}}],
+                        "groupings": [{"count": True, "by": {"layer": layer, "level": LEVEL, "top": 50}}],
                     },
                     timeout=600,
                 ),
@@ -141,7 +141,7 @@ def main() -> int:
                     json={
                         "view": view,
                         "filters": FILTER,
-                        "groupings": [{"by": {"layer": layer, "level": LEVEL, "top": 50}}],
+                        "groupings": [{"count": True, "by": {"layer": layer, "level": LEVEL, "top": 50}}],
                     },
                     timeout=600,
                 ),

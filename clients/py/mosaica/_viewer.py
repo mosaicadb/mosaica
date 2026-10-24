@@ -700,7 +700,9 @@ class Selection:
         them.
 
             papers = db.view("papers").filter({"year": {"range": {"gte": 2020}}})
-            [size, venues] = papers.aggregate([{}, {"by": {"field": "venue", "top": 10}}])
+            [size, venues] = papers.aggregate(
+                [{"count": True}, {"count": True, "by": {"field": "venue", "top": 10}}]
+            )
         """
         return self._reader().aggregate(self._view, groupings, self._expression(), reference)
 
@@ -1194,12 +1196,21 @@ class Viewer:
         filters: Optional[dict] = None,
         reference: Optional[dict] = None,
     ) -> list:
-        """How the items this reader may see in `view` are distributed: one pyarrow table of
-        exact counts per grouping, in the order of `groupings`.
+        """How the items this reader may see in `view` are distributed: one pyarrow table per
+        grouping, of the figures it names, in the order of `groupings`.
 
         - `view`: the view the counts are taken in. An item with no position in it is not
           counted.
-        - `groupings`: one dictionary per table. `{}` is the size of the set. `"by"` groups the
+        - `groupings`: one dictionary per table, naming its figures and how it groups. A table
+          names at least one figure. `"count": True` counts the items in each row, so
+          `{"count": True}` is the size of the set. `"values"`, `"missing"`, `"min"`, `"max"` and
+          `"mean"` each list number or timestamp fields, and give a column for each field:
+          `values_<field>` (the items holding a finite value), `missing_<field>` (those holding
+          none), `min_<field>`, `max_<field>` and `mean_<field>`, with the field as written.
+          `"summary"` lists fields and names all five figures of each. These field figures are
+          taken over every item this reader may see in the view, each exact; a timestamp field's
+          `mean` is a UTC timestamp to the nearest microsecond, and any other's a float. They are
+          refused beside `"by"` or `"cells"` and with `filters` or `reference`. `"by"` groups the
           items by a category field, `{"field": name, "top": n}` or `{"field": name, "values":
           [key, ...]}`, or by the artifacts of one level of a layer, `{"layer": name, "level": k,
           "top": n}` or `{"layer": name, "level": k, "artifacts": [mosaica_id, ...]}`. On a
@@ -1222,19 +1233,15 @@ class Viewer:
           identity range, about `s` of them, each count scaled to the set's `total`; default edges
           are the exact ones still. A set of at most `s` items is counted exactly, and so is one
           where `s` is more than about one item in 64 of the set. A histogram's table is always
-          one page. `{"field": name, "summary": True}` gives one row of a number or timestamp
-          field's figures over every item this reader may see in the view, whatever the filters
-          and the reference: `items`, `count` (those holding a finite value), `none` (those
-          holding none), `min`, `max` and `mean`, each exact; a timestamp field's `mean` is a
-          UTC timestamp to the nearest microsecond, and any other's a float. `"cells"` divides
+          one page. `"cells"` divides
           the set, or each group, into the view's cells at a depth from 0 to 32, `{"depth": d}`,
           optionally only those meeting a box, `{"depth": d, "area": [x0, y0, x1, y1]}`; a
-          grouping by bins or a summary takes no cells.
+          grouping by bins takes no cells.
         - `filters`: the set counted, as `Selection.filter` takes an expression. Without it, every
           item this reader may see in the view.
         - `reference`: a second set to compare with, drawn from what this reader may see. `{}` is
-          everything this reader may see in the view. Each table then also has `reference_count`
-          and `lift`.
+          everything this reader may see in the view. Each table with `"count"` then also has
+          `reference_count` and `lift`.
 
         A table's columns are, where they apply: `group` (`listed`, `rest` or `none`), `key` (a
         category's key or an artifact's `mosaica_id`), `title` (a category's title, or an artifact's
@@ -1244,14 +1251,15 @@ class Viewer:
         an integer on an integer field, exactly, a float on a float field or on an integer field
         whose range has a fractional bound and a UTC timestamp on a timestamp field; a bin holds
         `lower` up to but not including `upper`, and the last bin also holds its `upper`), `cell`
-        (the cell's Morton prefix), `count`, `reference_count` and `lift`. Its schema metadata
+        (the cell's Morton prefix), `count`, `reference_count` and `lift`, then the field
+        figures in the order values, missing, min, max, mean, each over its fields in the order
+        first named; `min_<field>` and `max_<field>` are typed as a histogram's edges on the
+        field. Its schema metadata
         `mosaica.head` is the table's figures as JSON: `grouping`, `total` (the items in the set),
         `reference_total` with a reference, `groups` (the groups in the set before the cut to
-        `top` or the names given) with `"by"` other than a summary, and with a `"sample"` the
-        object `sample`: `sampled` (whether any count is scaled), `items` (the set's items
-        counted) and, with a reference, `reference_items`. A summary's table has its own
-        columns, named above; its `min` and `max` are typed as a histogram's edges on the field.
-        `mosaica.recomposed` is `"true"` where a page counted a different state of the database
+        `top` or the names given) with `"by"`, and with a `"sample"` the object `sample`:
+        `sampled` (whether any count is scaled), `items` (the set's items counted) and, with a
+        reference, `reference_items`. `mosaica.recomposed` is `"true"` where a page counted a different state of the database
         from the page before it, and `mosaica.region` is the server's region verdict where a
         filter had a `region` leaf.
 
@@ -1261,15 +1269,20 @@ class Viewer:
         `PartialRead` whose `rows` are the tables read before it and whose `cursor` reads on: pass
         it as the request's `cursor` over HTTP. `.to_pandas()` on a table gives a DataFrame.
 
-            [size, venues] = v.aggregate("papers", [{}, {"by": {"field": "venue", "top": 10}}])
+            venue = {"count": True, "by": {"field": "venue", "top": 10}}
+            [size, venues] = v.aggregate("papers", [{"count": True}, venue])
             venues.to_pandas()
-            v.aggregate("papers", [{"cells": {"depth": 6}}], filters={"year": {"eq": 2023}}, reference={})
-            [years] = v.aggregate("papers", [{"by": {"field": "submitted", "bins": 20}}])
-            [sampled] = v.aggregate("papers", [{"by": {"field": "year", "bins": 20, "sample": 100_000}}])
-            [year] = v.aggregate("papers", [{"by": {"field": "year", "summary": True}}])
+            cells = {"count": True, "cells": {"depth": 6}}
+            v.aggregate("papers", [cells], filters={"year": {"eq": 2023}}, reference={})
+            [years] = v.aggregate("papers", [{"count": True, "by": {"field": "submitted", "bins": 20}}])
+            sampled = {"count": True, "by": {"field": "year", "bins": 20, "sample": 100_000}}
+            [sampled] = v.aggregate("papers", [sampled])
+            [year] = v.aggregate("papers", [{"count": True, "summary": ["year"]}])
             cut = {"zoom": 3, "bbox": [0, 0, 100, 100], "budget": 1000}
-            [topics] = v.aggregate("papers", [{"by": {"layer": "topics", "top": 10, "cut": cut}}])
-            [slots] = v.aggregate("papers", [{"by": {"layer": "clusters", "top": 10, "palette_size": 10}}])
+            topics = {"count": True, "by": {"layer": "topics", "top": 10, "cut": cut}}
+            [topics] = v.aggregate("papers", [topics])
+            clusters = {"count": True, "by": {"layer": "clusters", "top": 10, "palette_size": 10}}
+            [slots] = v.aggregate("papers", [clusters])
         """
         import pyarrow as pa
         from pyarrow import ipc

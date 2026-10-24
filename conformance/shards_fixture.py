@@ -182,7 +182,7 @@ class Shards:
         """The visible count a whole-map viewport sums to, and the aggregate's total."""
         token = self.token(principal)
         tiles, _points = decode_viewport(self.server.viewport(token, WORLD, 0, BBOX, k=1))
-        resp = self.server.aggregate(token, view=WORLD, groupings=[{}])
+        resp = self.server.aggregate(token, view=WORLD, groupings=[{"count": True}])
         assert resp.status_code == 200, resp.text
         decoded = split_aggregate_frames(resp.content)
         total = 0

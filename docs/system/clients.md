@@ -275,12 +275,14 @@ the items the selection counts.
 | Python | `viewer.aggregate(view, groupings, filters, reference)`, `db.aggregate` and `selection.aggregate` | one `pyarrow` table per grouping, the head's figures in its schema metadata |
 | CLI | `mosaica aggregate --view <view> --grouping <json>` | one grouping's table, read through the cursor and written as Arrow IPC or Parquet, its head on stderr |
 
-Every surface sends a grouping as the caller wrote it, a histogram's `bins`, `range` and `sample`
-and a field's `summary` included, and none adds a default. Each reads a sampled histogram's head as
+Every surface sends a grouping as the caller wrote it, its figures, a histogram's `bins`, `range`
+and `sample` and a field's `summary` included, and none adds a default: a table counts only where
+the caller wrote `"count": true`. Each reads a sampled histogram's head as
 it reads the rest: the TypeScript client as the table's `sample`, Python in the `mosaica.head`
-metadata, and the CLI on stderr. A summary is a table of one row on every surface, with the
-columns `items`, `count`, `none`, `min`, `max` and `mean`, over the whole visible set in the view;
-the request's filters change its head's `total` and none of its figures. The store sends a
+metadata, and the CLI on stderr. A grouping of field figures is a table of one row on every
+surface, with a column `<figure>_<field>` for each, such as `values_year`, `missing_year`,
+`min_year`, `max_year` and `mean_year` for `"summary": ["year"]`, over the whole visible set in the
+view; it is refused beside `by`, `cells`, filters or a reference. The store sends a
 reference only where the component registered one, as a filter expression or as the whole visible
 set. It chooses no grouping. A registration can name one
 column in `without`, as the filter draft keys its controls, and the store then sends its filters
@@ -367,9 +369,9 @@ the joined request is aborted once every share in it has been.
 Each entry of the projection holds its status, the last answer and the view it was counted in. A
 histogram asked for with a `sample` carries, in its table's `sample`, whether its counts were
 scaled and how many items were counted, beside the table's `total`, the size of the set. An entry's
-`summaries` holds, for each grouping that is a field's `summary`, its figures read from the table:
-`items`, `count` and `none` as `bigint`s, and `min`, `max` and `mean`; for every other grouping it
-holds `null`. A histogram's default edges are the server's, exact and independent of the filters
+`summaries` holds, for each grouping that lists fields under `summary`, each field's figures read
+from the table, by the field as written: `values` and `missing` as `bigint`s, and `min`, `max` and
+`mean`; for every other grouping it holds `null`. A histogram's default edges are the server's, exact and independent of the filters
 and the region, so a registration over the view and one over everything matched get the same
 edges without sending a range.
 
@@ -377,10 +379,10 @@ A field card registers its counts in view, its counts over everything matched, e
 own clause, and its field's figures:
 
 ```ts
-const bins = {by: {field: 'year', bins: 24, sample: 100_000}};
+const bins = {count: true, by: {field: 'year', bins: 24, sample: 100_000}} as const;
 store.setAggregate('year:subject', {groupings: [bins], subject: 'view', without: 'year', highlighted: true});
 store.setAggregate('year:match', {groupings: [bins], without: 'year'});
-store.setAggregate('year:summary', {groupings: [{by: {field: 'year', summary: true}}], subject: 'visible'});
+store.setAggregate('year:summary', {groupings: [{summary: ['year']}], subject: 'visible'});
 ```
 
 With `highlighted`, the counts in view are the highlighted items' while a highlight is set and the

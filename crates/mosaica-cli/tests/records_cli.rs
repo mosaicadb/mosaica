@@ -838,67 +838,67 @@ fn the_format_is_named_or_refused_before_any_request() {
 }
 
 /// `mosaica aggregate` writes the one table its grouping asks for, as the same read over HTTP
-/// gives it: a histogram, which is one page however small the pages asked for, a summary, and a
-/// breakdown, carried across responses from its cursor; and arguments that are not JSON send
-/// nothing.
+/// gives it: a histogram, which is one page however small the pages asked for, a summary over the
+/// whole visible set, and a breakdown, carried across responses from its cursor; and arguments
+/// that are not JSON send nothing.
 #[test]
 fn an_aggregate_read_is_the_table_over_http() {
     let served = serve();
     let reads = [
         (
-            r#"{"by": {"field": "seen_at", "bins": 12}}"#,
-            json!({ "by": { "field": "seen_at", "bins": 12 } }),
+            r#"{"count": true, "by": {"field": "seen_at", "bins": 12}}"#,
+            json!({ "count": true, "by": { "field": "seen_at", "bins": 12 } }),
             "histogram.arrows",
             false,
+            true,
         ),
         (
-            r#"{"by": {"field": "seen_at", "bins": 12, "sample": 5}}"#,
-            json!({ "by": { "field": "seen_at", "bins": 12, "sample": 5 } }),
+            r#"{"count": true, "by": {"field": "seen_at", "bins": 12, "sample": 5}}"#,
+            json!({ "count": true, "by": { "field": "seen_at", "bins": 12, "sample": 5 } }),
             "sampled.arrows",
             false,
+            true,
         ),
         (
-            r#"{"by": {"field": "seen_at", "summary": true}}"#,
-            json!({ "by": { "field": "seen_at", "summary": true } }),
+            r#"{"count": true, "summary": ["seen_at"]}"#,
+            json!({ "count": true, "summary": ["seen_at"] }),
             "summary.arrows",
+            false,
             false,
         ),
         (
-            r#"{"by": {"field": "bay", "top": 3}}"#,
-            json!({ "by": { "field": "bay", "top": 3 } }),
+            r#"{"count": true, "by": {"field": "bay", "top": 3}}"#,
+            json!({ "count": true, "by": { "field": "bay", "top": 3 } }),
             "breakdown.parquet",
+            true,
             true,
         ),
     ];
-    for (grouping, parsed, name, pages) in reads {
-        let body = json!({
+    for (grouping, parsed, name, pages, filtered) in reads {
+        let mut body = json!({
             "view": "s0",
             "groupings": [parsed],
-            "filters": { "bay": { "in": ["amber", "basalt", "cedar", "dune"] } },
-            "reference": {},
             "page_rows": 2,
             "pages": 1,
         });
+        if filtered {
+            body["filters"] = json!({ "bay": { "in": ["amber", "basalt", "cedar", "dune"] } });
+            body["reference"] = json!({});
+        }
         let (whole, responses) = served.http_read("aggregate", &body);
         assert_eq!(responses > 1, pages, "{name}: {responses} responses, {} rows", rows(&whole));
         let out = served.dir.path().join(name);
-        let done = served.run(&[
-            "aggregate",
-            "--view",
-            "s0",
-            "--grouping",
-            grouping,
-            "--filters",
-            r#"{"bay": {"in": ["amber", "basalt", "cedar", "dune"]}}"#,
-            "--reference",
-            "{}",
-            "--page-rows",
-            "2",
-            "--pages",
-            "1",
-            "--out",
-            out.to_str().unwrap(),
-        ]);
+        let mut args = vec!["aggregate", "--view", "s0", "--grouping", grouping];
+        if filtered {
+            args.extend([
+                "--filters",
+                r#"{"bay": {"in": ["amber", "basalt", "cedar", "dune"]}}"#,
+                "--reference",
+                "{}",
+            ]);
+        }
+        args.extend(["--page-rows", "2", "--pages", "1", "--out", out.to_str().unwrap()]);
+        let done = served.run(&args);
         assert!(done.status.success(), "{}", done.stderr);
         assert!(done.stderr.contains("\"total\""), "the head is printed: {}", done.stderr);
         assert_eq!(
@@ -918,7 +918,7 @@ fn an_aggregate_read_is_the_table_over_http() {
 
     let out = served.dir.path().join("refused.arrows");
     for (flag, text) in [("--grouping", "{by"), ("--filters", "nope")] {
-        let mut args = vec!["aggregate", "--view", "s0", "--grouping", "{}"];
+        let mut args = vec!["aggregate", "--view", "s0", "--grouping", r#"{"count": true}"#];
         if flag == "--grouping" {
             args.truncate(3);
         }

@@ -307,23 +307,26 @@ enum Command {
     /// Count how the items a session token may see in one view are distributed, by one grouping,
     /// from a running server, and write the table as Arrow IPC or Parquet.
     ///
-    /// The grouping is `POST /v1/aggregate`'s, as JSON: `{}` is the size of the set; `{"by":
-    /// {"field": "venue", "top": 10}}` the ten commonest values of a category field; `{"by":
-    /// {"field": "year", "bins": 20}}` a histogram of a number or timestamp field, and with
+    /// The grouping is `POST /v1/aggregate`'s, as JSON, and names its figures: `"count": true`
+    /// counts the items in each row, so `{"count": true}` is the size of the set. With it, `"by":
+    /// {"field": "venue", "top": 10}` gives the ten commonest values of a category field; `"by":
+    /// {"field": "year", "bins": 20}` a histogram of a number or timestamp field, and with
     /// `"sample": 100000` one counted over about that many of the set's items and scaled to it;
-    /// `{"by": {"field": "year", "summary": true}}` one row of a number or timestamp field's count,
-    /// smallest, largest and mean over every item the token may see in the view, whatever
-    /// `--filters` says; `{"by": {"layer": "clusters", "top": 10}}` the largest artifacts of a
-    /// layer, and on a `nested` or `dag` layer `{"by": {"layer": "topics", "top": 10, "cut":
-    /// {"zoom": 3, "bbox": [0, 0, 100, 100], "budget": 1000}}}` the largest of those the map draws
-    /// at that tile depth, box and cluster budget, and with `"palette_size": 10` beside `layer` a
-    /// `slot` column, each artifact's colour among ten; `{"cells": {"depth": 8}}` a density
-    /// surface. The read is carried across responses, and written, as `mosaica items` carries and
+    /// `"by": {"layer": "clusters", "top": 10}` the largest artifacts of a layer, and on a `nested`
+    /// or `dag` layer `"by": {"layer": "topics", "top": 10, "cut": {"zoom": 3, "bbox": [0, 0,
+    /// 100, 100], "budget": 1000}}` the largest of those the map draws at that tile depth, box and
+    /// cluster budget, and with `"palette_size": 10` beside `layer` a `slot` column, each
+    /// artifact's colour among ten; `"cells": {"depth": 8}` a density surface. `{"summary":
+    /// ["year"]}` is one row of a number or timestamp field's `values_year`, `missing_year`,
+    /// `min_year`, `max_year` and `mean_year` over every item the token may see in the view, and
+    /// `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each; they take
+    /// no `by`, `cells`, `--filters` or `--reference`. The read is carried across responses, and written, as `mosaica items` carries and
     /// writes one. The table's head, with the set's total, is printed on
     /// stderr at the end.
     ///
     /// For example, `mosaica aggregate --server http://127.0.0.1:8080 --view papers --grouping
-    /// '{"by": {"field": "submitted_at", "bins": 12}}' --format ipc > submitted.arrows`.
+    /// '{"count": true, "by": {"field": "submitted_at", "bins": 12}}' --format ipc >
+    /// submitted.arrows`.
     Aggregate(records::AggregateArgs),
     /// Serve the bundle that `mosaica.toml` names.
     ///

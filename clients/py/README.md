@@ -440,22 +440,32 @@ here.to_pandas()                              # the topics of each tile at zoom 
 ```python
 size, archives, density = db.aggregate(
     "s0",
-    [{}, {"by": {"field": "archive", "top": 5}}, {"cells": {"depth": 6}}],
+    [
+        {"count": True},
+        {"count": True, "by": {"field": "archive", "top": 5}},
+        {"count": True, "cells": {"depth": 6}},
+    ],
     filters={"primary_category": {"eq": "cs.LG"}},
     reference={},
 )
 archives.to_pandas()                          # group, key, title, count, reference_count, lift
-db.view("s0").within((0, 0, 10, 10)).aggregate([{"by": {"field": "archive", "top": 5}}])
+db.view("s0").within((0, 0, 10, 10)).aggregate([{"count": True, "by": {"field": "archive", "top": 5}}])
+(year,) = db.aggregate("s0", [{"summary": ["year"]}])   # values_year, missing_year, min_year, ...
 ```
 
 `aggregate(view, groupings, filters=None, reference=None)` counts how the items the reader may see
-in a view are distributed, and returns one pyarrow table per grouping, in order. `{}` is the size
-of the set. `"by"` groups by the values of a category field declared with `index` or `render`, or
+in a view are distributed, and returns one pyarrow table per grouping, in order. Each grouping
+names its figures: `"count": True` counts the items in each row, so `{"count": True}` is the size
+of the set. `"summary": [field, ...]` gives one row of each number or timestamp field's
+`values_<field>`, `missing_<field>`, `min_<field>`, `max_<field>` and `mean_<field>` over every
+item the reader may see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"`
+name one of those each; they take no `"by"`, `"cells"`, `filters` or `reference`. `"by"` groups by the values of a category field declared with `index` or `render`, or
 by the artifacts of one level of a layer, as the `top` groups by count or the groups named in
 `values` or `artifacts`; `rest` and `none` rows count the items in no listed group and in none.
 `"cells"` divides the set, or each group, into the view's cells at a depth from 0 to 32, each row's
 `cell` being the cell's Morton prefix. `reference` is a second set to compare with, `{}` for
-everything the reader may see in the view; each row then adds `reference_count` and `lift`. The
+everything the reader may see in the view; each row with a count then adds `reference_count` and
+`lift`. The
 table's schema metadata `mosaica.head` holds `total`, and `reference_total` and `groups` where they
 apply. The call follows each response's cursor until every table is whole. On a selection,
 `aggregate(groupings, reference=None)` sends the selection's filters and box as `filters`.

@@ -1597,7 +1597,8 @@ class Database:
 
         This is `Viewer.aggregate` as this database's own reader, which sees every item.
 
-            [size, venues] = db.aggregate("papers", [{}, {"by": {"field": "venue", "top": 10}}])
+            venue = {"count": True, "by": {"field": "venue", "top": 10}}
+            [size, venues] = db.aggregate("papers", [{"count": True}, venue])
         """
         self._refuse_before_the_first_commit("aggregate")
         return self.viewer().aggregate(view, groupings, filters, reference)

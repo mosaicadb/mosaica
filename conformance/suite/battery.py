@@ -240,11 +240,11 @@ def _aggregate(meta: dict, view_id: str, bbox: tuple[float, float, float, float]
         if d.get("category") is not None
         and (d.get("index") or d.get("render") or d["category"].get("visibility") == "derived")
     )
-    groupings: list[dict] = [{}, {"cells": {"depth": 4}}]
+    groupings: list[dict] = [{"count": True}, {"count": True, "cells": {"depth": 4}}]
     if countable:
         groupings += [
-            {"by": {"field": countable[0], "top": 5}},
-            {"by": {"field": countable[0], "top": 3}, "cells": {"depth": 2}},
+            {"count": True, "by": {"field": countable[0], "top": 5}},
+            {"count": True, "by": {"field": countable[0], "top": 3}, "cells": {"depth": 2}},
         ]
     x0, y0, x1, y1 = bbox
     region = {"region": {"bbox": [x0, y0, (x0 + x1) / 2, y1]}}

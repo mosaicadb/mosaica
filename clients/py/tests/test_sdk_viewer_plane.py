@@ -79,7 +79,7 @@ def test_every_route_gives_a_cluster_the_one_slot_below_the_palette_size_asked_f
     assert dict(zip(read.column("mosaica_id").to_pylist(), read.column("slot").to_pylist())) == slots
     assert read.schema.field("slot").type == pa.uint8()
 
-    (top,) = db.aggregate("map", [{"by": {"layer": "clusters", "top": 5, "palette_size": 8}}])
+    (top,) = db.aggregate("map", [{"count": True, "by": {"layer": "clusters", "top": 5, "palette_size": 8}}])
     assert {row["key"]: row["slot"] for row in top.to_pylist() if row["group"] == "listed"} == slots
 
     with pytest.raises(Refusal, match="422"):

@@ -38,7 +38,7 @@ def test_the_size_a_breakdown_and_a_density_surface(db):
     """Twenty papers, five to a venue: the size of the set, the two venues with most papers
     (ties by key) then the rest, and cells whose counts sum to the set."""
     size, venues, cells = db.aggregate(
-        "map", [{}, {"by": {"field": "venue", "top": 2}}, {"cells": {"depth": 3}}]
+        "map", [{"count": True}, {"count": True, "by": {"field": "venue", "top": 2}}, {"count": True, "cells": {"depth": 3}}]
     )
     assert rows(size) == [{"count": 20}]
     assert head(size) == {"grouping": 0, "total": 20}
@@ -59,7 +59,7 @@ def test_a_filtered_set_against_a_reference(db):
     twice its share and the others none."""
     (venues,) = db.aggregate(
         "map",
-        [{"by": {"field": "venue", "values": ["neurips", "icml", "kdd"]}}],
+        [{"count": True, "by": {"field": "venue", "values": ["neurips", "icml", "kdd"]}}],
         filters={"n": {"range": {"lt": 10}}},
         reference={},
     )
@@ -77,7 +77,7 @@ def test_a_filtered_set_against_a_reference(db):
 def test_the_artifacts_of_a_layer(db):
     """Five clusters of four papers each, keyed by their `mosaica_id`s as the artifacts read
     gives them."""
-    (clusters,) = db.aggregate("map", [{"by": {"layer": "clusters", "top": 5}}])
+    (clusters,) = db.aggregate("map", [{"count": True, "by": {"layer": "clusters", "top": 5}}])
     assert [r["count"] for r in rows(clusters)] == [4] * 5
     ids = db.artifacts("map", "clusters", []).column("mosaica_id").to_pylist()
     assert sorted(clusters.column("key").to_pylist()) == sorted(ids)
@@ -99,7 +99,7 @@ def named_papers(db) -> None:
 
 def test_a_layer_row_is_titled_with_the_name_browse_gives(served, corpus):
     db = served(named_papers)
-    (named,) = db.aggregate("map", [{"by": {"layer": "named", "top": 5}}])
+    (named,) = db.aggregate("map", [{"count": True, "by": {"layer": "named", "top": 5}}])
     listed = [r for r in rows(named) if r["group"] == "listed"]
     assert [(r["title"], r["count"]) for r in listed] == [("Alpha", 6), ("Beta", 4)]
     browsed = db.viewer().browse_artifacts("map", "named")["artifacts"]
@@ -122,7 +122,7 @@ def test_a_shared_title_and_none_read_into_a_data_frame(served, corpus):
     data frame."""
     pd = pytest.importorskip("pandas")
     db = served(titled_papers)
-    (venues,) = db.aggregate("map", [{"by": {"field": "venue", "top": 4}}])
+    (venues,) = db.aggregate("map", [{"count": True, "by": {"field": "venue", "top": 4}}])
     titles = {"neurips": "Conference", "icml": "Conference", "iclr": None, "kdd": None}
     assert {r["key"]: r["title"] for r in rows(venues)} == titles
     frame = venues.to_pandas()
@@ -132,17 +132,17 @@ def test_a_shared_title_and_none_read_into_a_data_frame(served, corpus):
 def test_a_selection_counts_what_count_counts(db):
     """The selection's filters and box are the request's filters."""
     part = db.view("map").filter({"n": {"range": {"gte": 3}}}).within((0.0, 0.0, 12.0, 1.0))
-    (size,) = part.aggregate([{}])
+    (size,) = part.aggregate([{"count": True}])
     assert head(size)["total"] == part.count() > 0
     assert size.schema.metadata[b"mosaica.region"] == b"exact"
-    (with_reference,) = part.aggregate([{}], reference={})
+    (with_reference,) = part.aggregate([{"count": True}], reference={})
     assert head(with_reference)["reference_total"] == 20
 
 
 def test_a_viewer_reads_every_response_and_joins_each_tables_pages(db, monkeypatch):
     """A page of one row and one page to a response: the result, over many responses, is the
     one a single response gives, and each later request is the first with its cursor."""
-    groupings = [{"by": {"field": "venue", "top": 3}, "cells": {"depth": 2}}, {"cells": {"depth": 4}}]
+    groupings = [{"count": True, "by": {"field": "venue", "top": 3}, "cells": {"depth": 2}}, {"count": True, "cells": {"depth": 4}}]
     whole = db.aggregate("map", groupings, reference={})
 
     bodies = []
@@ -169,7 +169,7 @@ def test_a_number_in_bins(db):
     """`n`, a `u32`, runs from 0 to 19: four readable bins of five hold it, their edges `uint64`,
     with the same edges under a filter, and a range of two bins, whose last holds its upper edge,
     leaves the others in `rest`."""
-    (whole,) = db.aggregate("map", [{"by": {"field": "n", "bins": 4}}])
+    (whole,) = db.aggregate("map", [{"count": True, "by": {"field": "n", "bins": 4}}])
     edges = [(0, 5), (5, 10), (10, 15), (15, 20)]
     assert [(r["group"], r["lower"], r["upper"], r["count"]) for r in rows(whole)] == [
         ("listed", lo, hi, 5) for lo, hi in edges
@@ -177,12 +177,12 @@ def test_a_number_in_bins(db):
     assert whole.schema.field("lower").type == pa.uint64()
     assert head(whole) == {"grouping": 0, "total": 20, "groups": 4}
     (part,) = db.aggregate(
-        "map", [{"by": {"field": "n", "bins": 4}}], filters={"n": {"range": {"lt": 10}}}, reference={}
+        "map", [{"count": True, "by": {"field": "n", "bins": 4}}], filters={"n": {"range": {"lt": 10}}}, reference={}
     )
     assert [(r["lower"], r["upper"], r["count"], r["reference_count"]) for r in rows(part)] == [
         (lo, hi, 5 if lo < 10 else 0, 5) for lo, hi in edges
     ]
-    (ranged,) = db.aggregate("map", [{"by": {"field": "n", "bins": 2, "range": [0, 10]}}])
+    (ranged,) = db.aggregate("map", [{"count": True, "by": {"field": "n", "bins": 2, "range": [0, 10]}}])
     assert [(r["group"], r["lower"], r["upper"], r["count"]) for r in rows(ranged)] == [
         ("listed", 0, 5, 5),
         ("listed", 5, 10, 6),
@@ -195,45 +195,46 @@ def test_a_sampled_number_in_bins(db):
     every item is counted, as no sample does, and the head says so; so does a sample of twenty.
     Without a range, the edges are the unsampled table's."""
     grouping = {"field": "n", "bins": 2, "range": [0, 10]}
-    (exact,) = db.aggregate("map", [{"by": grouping}])
+    (exact,) = db.aggregate("map", [{"count": True, "by": grouping}])
     assert "sample" not in head(exact)
     for s in (8, 20):
-        (counted,) = db.aggregate("map", [{"by": {**grouping, "sample": s}}])
+        (counted,) = db.aggregate("map", [{"count": True, "by": {**grouping, "sample": s}}])
         assert head(counted)["sample"] == {"sampled": False, "items": 20}
         assert rows(counted) == rows(exact)
-    (drawn,) = db.aggregate("map", [{"by": {"field": "n", "bins": 2, "sample": 8}}])
+    (drawn,) = db.aggregate("map", [{"count": True, "by": {"field": "n", "bins": 2, "sample": 8}}])
     assert head(drawn)["sample"] == {"sampled": False, "items": 20}
-    (whole,) = db.aggregate("map", [{"by": {"field": "n", "bins": 2}}])
+    (whole,) = db.aggregate("map", [{"count": True, "by": {"field": "n", "bins": 2}}])
     assert [(r["lower"], r["upper"]) for r in rows(drawn)] == [
         (r["lower"], r["upper"]) for r in rows(whole)
     ]
 
 
 def test_a_summary_of_a_number(db):
-    """`n` runs from 0 to 19: its summary is every paper's, whatever the filter, and its smallest
-    and largest value are `uint64` as the field's edges are."""
-    (whole,) = db.aggregate("map", [{"by": {"field": "n", "summary": True}}])
-    assert rows(whole) == [{"items": 20, "count": 20, "none": 0, "min": 0, "max": 19, "mean": 9.5}]
-    assert whole.schema.field("min").type == pa.uint64()
+    """`n` runs from 0 to 19: its summary is every paper's, its smallest and largest value are
+    `uint64` as the field's edges are, and a summary beside a filter is refused."""
+    (whole,) = db.aggregate("map", [{"count": True, "summary": ["n"]}])
+    assert rows(whole) == [
+        {"count": 20, "values_n": 20, "missing_n": 0, "min_n": 0, "max_n": 19, "mean_n": 9.5}
+    ]
+    assert whole.schema.field("min_n").type == pa.uint64()
     assert head(whole) == {"grouping": 0, "total": 20}
-    (part,) = db.aggregate(
-        "map", [{"by": {"field": "n", "summary": True}}], filters={"n": {"range": {"lt": 10}}}
-    )
-    assert rows(part) == rows(whole)
-    assert head(part)["total"] == 10
+    (figures,) = db.aggregate("map", [{"max": ["n"]}])
+    assert rows(figures) == [{"max_n": 19}]
+    with pytest.raises(Refusal, match="422"):
+        db.aggregate("map", [{"summary": ["n"]}], filters={"n": {"range": {"lt": 10}}})
 
 
 def test_a_refusal_says_what_the_server_said(db):
     with pytest.raises(Refusal, match="422"):
-        db.aggregate("map", [{"by": {"field": "title", "top": 2}}])
+        db.aggregate("map", [{"count": True, "by": {"field": "title", "top": 2}}])
     with pytest.raises(Refusal, match="404"):
-        db.aggregate("nowhere", [{}])
+        db.aggregate("nowhere", [{"count": True}])
 
 
 def test_a_response_cut_short_raises_the_tables_read_and_the_cursor_to_read_on(db):
     """Cut after the first table's page: the error holds that table whole and a cursor from which
     the server sends the rest, which is the rest of the result read in one."""
-    groupings = [{}, {"by": {"field": "venue", "top": 2}, "cells": {"depth": 3}}]
+    groupings = [{"count": True}, {"count": True, "by": {"field": "venue", "top": 2}, "cells": {"depth": 3}}]
     whole = db.aggregate("map", groupings)
     through = Proxy(db.viewer_url)
     try:
@@ -276,7 +277,7 @@ def test_a_later_request_refused_raises_the_tables_read(db, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", refusing)
     with pytest.raises(PartialRead) as stopped:
-        db.viewer().aggregate("map", [{"cells": {"depth": 4}}])
+        db.viewer().aggregate("map", [{"count": True, "cells": {"depth": 4}}])
     assert stopped.value.cursor == bodies[2]["cursor"]
     assert [len(t) for t in stopped.value.rows] == [2]
 
@@ -322,9 +323,9 @@ def test_a_tree_ranks_the_clusters_the_map_draws(served, corpus):
     the root under a budget of one; without a cut the server refuses the grouping."""
     db = served(tree_papers)
     whole = {"zoom": 0, "bbox": [-5.0, -5.0, 40.0, 40.0]}
-    (leaves,) = db.aggregate("map", [{"by": {"layer": "tree", "top": 10, "cut": whole}}])
+    (leaves,) = db.aggregate("map", [{"count": True, "by": {"layer": "tree", "top": 10, "cut": whole}}])
     assert [(r["group"], r["count"]) for r in rows(leaves)] == [("listed", 5)] * 4
-    (root,) = db.aggregate("map", [{"by": {"layer": "tree", "top": 10, "cut": {**whole, "budget": 1}}}])
+    (root,) = db.aggregate("map", [{"count": True, "by": {"layer": "tree", "top": 10, "cut": {**whole, "budget": 1}}}])
     assert [(r["group"], r["count"]) for r in rows(root)] == [("listed", 20)]
     with pytest.raises(Refusal, match="422"):
-        db.aggregate("map", [{"by": {"layer": "tree", "top": 10}}])
+        db.aggregate("map", [{"count": True, "by": {"layer": "tree", "top": 10}}])

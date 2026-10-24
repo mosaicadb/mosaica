@@ -359,8 +359,8 @@ def unreplayable(r: dict) -> str | None:
     for name in ("filters", "reference"):
         if set(b.get(name) or {}) - {"region"}:
             return f"{r['path']} with a {name} on more than a region"
-    if any(g for g in b.get("groupings") or []):
-        return f"{r['path']} with a named grouping"
+    if any(g != {"count": True} for g in b.get("groupings") or []):
+        return f"{r['path']} with a grouping other than an ungrouped count"
     return None
 
 
