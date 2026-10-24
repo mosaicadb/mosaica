@@ -119,6 +119,32 @@ describe('the token protocol', () => {
     expect(explorer.titleField).toBe('');
   });
 
+  it('fills the room below its top while its output is shown full screen, and takes `height` again on the way out', () => {
+    const {model, el} = setUp({height: 400});
+    const explorer = el.querySelector('mosaica-explorer') as HTMLElement;
+    const height = () => explorer.style.getPropertyValue('--mosaica-explorer-height');
+    expect(height()).toBe('400px');
+    const box = (top: number, bottom: number) => ({top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: () => null}) as DOMRect;
+    el.getBoundingClientRect = () => box(0, 700);
+    explorer.getBoundingClientRect = () => box(60, 460);
+    const full = (shown: Element | null) => {
+      Object.defineProperty(document, 'fullscreenElement', {configurable: true, get: () => shown});
+      document.dispatchEvent(new Event('fullscreenchange'));
+    };
+    full(el);
+    expect(height()).toBe('640px');
+    model.set('height', 500);
+    expect(height()).toBe('640px');
+    full(null);
+    expect(height()).toBe('500px');
+    // Another element, or the whole page, shown full screen leaves the map as it is.
+    full(document.createElement('div'));
+    expect(height()).toBe('500px');
+    full(document.documentElement);
+    expect(height()).toBe('500px');
+    full(null);
+  });
+
   it('hands the point budget and its range to every view’s explorer, and follows a change to each', async () => {
     const {model, el} = setUp({budget: 40_000, budget_min: 500, budget_max: 90_000});
     const explorer = el.querySelector('mosaica-explorer') as unknown as {budget: number; budgetMin: number; budgetMax: number};

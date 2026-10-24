@@ -131,7 +131,8 @@ class Map(anywidget.AnyWidget):
       linear until one is made.
     - `filters`: a filter expression, as `Selection.filter` takes one.
     - `bbox`: the box to frame the camera on, as `(min_x, min_y, max_x, max_y)`.
-    - `height`: the widget's height in pixels. The default is 480.
+    - `height`: the widget's height in pixels in the notebook. The default is 480. While the
+      output holding the map is shown full screen, the map fills the screen instead.
     - `explorer_layout`: `"docked"`, the default, puts the controls in a sidebar beside the map;
       `"overlay"` draws the map across the whole widget with the controls floating over it.
     - `title_field`: the field whose value titles a point in the hover and the item card.

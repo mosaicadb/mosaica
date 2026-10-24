@@ -29,6 +29,9 @@ import './explorer.js';
  * supplier (renewal before expiry, or after a refusal that ends the session) send `reauthorise`.
  * A page reload makes a new model, which sends `ready` again.
  *
+ * `height` is the map's height in the notebook's flow. While the output holding the map is shown full
+ * screen, the map fills the room below its top instead, and takes `height` again on the way out.
+ *
  * Only controls and selections cross the kernel boundary. `url`, `explorer_layout`, `height`,
  * `title_field`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_budget_min` and `cluster_budget_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
  * `size_max`, `size_scale` and `filters` go both ways, and so do `budget`, sent up when Most points is let go,
@@ -238,6 +241,30 @@ function heightOf(model: WidgetModel): string {
   const h = model.get('height');
   return typeof h === 'number' ? `${h}px` : String(h || '480px');
 }
+
+/** Whether `inner` is `outer` or inside it, across shadow roots. */
+function within(outer: Element, inner: Element): boolean {
+  for (let at: Node | null = inner; at; at = at instanceof ShadowRoot ? at.host : at.parentNode) if (at === outer) return true;
+  return false;
+}
+
+/**
+ * Size `explorer`: `height` in the notebook's flow, and while an element around it is shown full
+ * screen, as a notebook's output can be, the room from its top to the bottom of that element. The
+ * whole page shown full screen leaves the notebook's flow as it is.
+ */
+function fitHeight(explorer: HTMLElement, model: WidgetModel): void {
+  const full = typeof document === 'undefined' ? null : document.fullscreenElement;
+  if (full && full !== document.documentElement && full !== document.body && within(full, explorer)) {
+    const room = Math.min(full.getBoundingClientRect().bottom, innerHeight) - explorer.getBoundingClientRect().top;
+    explorer.style.setProperty('--mosaica-explorer-height', `${Math.max(MIN_FULL_SCREEN, Math.floor(room))}px`);
+  } else {
+    explorer.style.setProperty('--mosaica-explorer-height', heightOf(model));
+  }
+}
+
+/** The shortest the explorer is made while shown full screen, its own least height. */
+const MIN_FULL_SCREEN = 320;
 
 export function initialize({model, storeFactory = createStore}: {model: WidgetModel; storeFactory?: StoreFactory}): () => void {
   const listeners: ((msg: KernelMessage) => void)[] = [];
@@ -490,7 +517,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     fit(bbox as [number, number, number, number]);
   });
   model.on('change:height', () => {
-    for (const v of state.views.values()) v.explorer.style.setProperty('--mosaica-explorer-height', heightOf(model));
+    for (const v of state.views.values()) fitHeight(v.explorer, model);
   });
   model.on('change:title_field', () => {
     for (const v of state.views.values()) v.explorer.titleField = titleFieldOf(model);
@@ -613,11 +640,14 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
   }
   const explorer = document.createElement('mosaica-explorer') as MosaicaExplorer;
   explorer.layout = (model.get('explorer_layout') as 'docked' | 'overlay') || 'docked';
-  explorer.style.setProperty('--mosaica-explorer-height', heightOf(model));
   explorer.titleField = titleFieldOf(model);
   applyBudget(explorer, model);
   applyColours(explorer, model);
   el.append(explorer);
+  fitHeight(explorer, model);
+  const refit = () => fitHeight(explorer, model);
+  document.addEventListener('fullscreenchange', refit);
+  addEventListener('resize', refit);
   const unmount = mounts.get(state)!(explorer);
   const v = state.views.get(explorer)!;
   const onView = (e: Event) => {
@@ -632,6 +662,8 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
     });
   }
   const cleanup = () => {
+    document.removeEventListener('fullscreenchange', refit);
+    removeEventListener('resize', refit);
     explorer.removeEventListener('mosaica-viewchange', onView);
     unmount();
     explorer.remove();
