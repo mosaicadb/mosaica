@@ -7,6 +7,12 @@
 # `additionalProperties: false`. Where this file and the server disagree, the server is right and
 # this file is wrong.
 #
+# The examples use the arXiv example dataset in `examples/data/arxiv`, and the same test sends
+# every request example to a server built from it. Where a value in an example has to come from an
+# earlier answer, such as a cursor or a `mosaica_id`, the example's `x-mosaica-fill` names, for each
+# body location (a JSON pointer) or path parameter, the earlier request and what to read from its
+# answer: a field of the trailer, a header, a column of the first records frame, or a JSON pointer.
+#
 # Each server names its plane and the prefix of the routes it serves in `x-mosaica-plane` and
 # `x-mosaica-route-prefix`, which `clients/ts/core/test/contract.test.ts` reads to send each
 # operation to its listener.
@@ -286,6 +292,17 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/LoginRequest"
+            examples:
+              password:
+                summary: A local principal's name and password
+                value: {"password": {"principal": "ada", "password": "correct horse battery staple"}}
+              api-key:
+                summary: An API key
+                description: "The whole key, as `POST /control/principals/{name}/keys` issued it, once."
+                x-mosaica-fill:
+                  body:
+                    /api_key: {operation: createKey, path: {name: ada}, body: {}, read: {pointer: /key}}
+                value: {"api_key": "tsk_<prefix>_<secret>"}
       responses:
         "200":
           description: A session.
@@ -390,6 +407,13 @@ paths:
           schema:
             type: string
             pattern: "^[A-Za-z0-9_-]+(@[A-Za-z0-9_.:-]+)?$"
+          examples:
+            list:
+              value: archive
+            next-page:
+              value: archive
+            codes:
+              value: primary_category
         - name: view
           in: query
           required: false
@@ -407,12 +431,20 @@ paths:
           description: Comma-separated `u32` codes to resolve. Present, the route resolves them; absent, it lists values. `next` is always `null` in this form.
           schema:
             type: string
+          examples:
+            codes:
+              summary: "What three codes of `primary_category` stand for: codes a client read from a points frame"
+              value: "33,50,164"
         - name: after
           in: query
           required: false
           description: Resume listing after this value key, the previous page's `next`.
           schema:
             type: string
+          examples:
+            next-page:
+              summary: The next five archives, after the page that ended at `astro-ph`
+              value: astro-ph
         - name: limit
           in: query
           required: false
@@ -420,6 +452,12 @@ paths:
           schema:
             type: integer
             minimum: 1
+          examples:
+            list:
+              summary: The first five archives, in key order
+              value: 5
+            next-page:
+              value: 5
       responses:
         "200":
           description: The values this principal may be told about, in key order for the bare form and in request order for `?codes=`.
@@ -493,6 +531,11 @@ paths:
           schema:
             type: string
             pattern: "^[A-Za-z0-9_-]+(@[A-Za-z0-9_.:-]+)?$"
+          examples:
+            prefix:
+              value: primary_category
+            counts:
+              value: primary_category
         - name: q
           in: query
           required: true
@@ -500,6 +543,13 @@ paths:
           schema:
             type: string
             maxLength: 256
+          examples:
+            prefix:
+              summary: The first five subject classes starting with "cond-mat"
+              value: cond-mat
+            counts:
+              summary: The same, with how many papers in the `topics` view carry each
+              value: cond-mat
         - name: limit
           in: query
           required: false
@@ -507,18 +557,29 @@ paths:
           schema:
             type: integer
             minimum: 1
+          examples:
+            prefix:
+              value: 5
+            counts:
+              value: 5
         - name: counts
           in: query
           required: false
           description: "`true` serves `count` beside each value: how many items carrying it this principal may see, exact, computed per request. Without `view`, an item ingested and not yet flushed counts. With `view`, only the items `/v1/viewport` would show this session in that view count: an item holds a row there once it is flushed and, for a session already served that view, the refresh after the flush reaches this session's grant (`x-mosaica-pin` describes that window), and a value this principal can see only in other views counts `0`. Without `counts`, `count` is absent. It does not affect the order."
           schema:
             type: boolean
+          examples:
+            counts:
+              value: true
         - name: view
           in: query
           required: false
           description: The request's own view. It resolves a group-scoped category as on `/v1/categories/{column}`, and with `counts=true` it limits each count to the items in this view. It does not change which values are offered. An unknown view, or one this principal may not reach, is `404`.
           schema:
             type: string
+          examples:
+            counts:
+              value: topics
       responses:
         "200":
           description: At most `limit` values this principal may be told about, in matched-entry order.
@@ -583,12 +644,26 @@ paths:
           schema:
             type: string
             pattern: "^[A-Za-z0-9_-]+(@[A-Za-z0-9_.:-]+)?$"
+          examples:
+            prefix:
+              value: primary_category
+            counts-filtered:
+              value: primary_category
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/SuggestRequest"
+            examples:
+              prefix:
+                summary: The first five subject classes starting with "cond-mat"
+                description: The `GET` form's request, as a body.
+                value: {"q": "cond-mat", "limit": 5}
+              counts-filtered:
+                summary: The same, counting only the papers submitted since 2020
+                description: "Each value's `count` is the papers in `topics` carrying it that were submitted on or after 1 January 2020, and `total` is all such papers. The values offered, and their order, are the ones the unfiltered request gets."
+                value: {"q": "cond-mat", "limit": 5, "counts": true, "view": "topics", "filters": {"submitted_at": {"range": {"gte": 1577836800000000}}}}
       responses:
         "200":
           description: At most `limit` values this principal may be told about, in matched-entry order.
@@ -672,6 +747,27 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ViewportRequest"
+            examples:
+              whole-map:
+                summary: The whole map at zoom 2
+                description: Every tile of the `topics` view at zoom 2 that the box touches, with up to 200 papers drawn in each.
+                value: {"view": "topics", "zoom": 2, "bbox": [-15, -15, 25, 25], "k": 200}
+              filtered:
+                summary: Computer science papers since 2020 with "neural" in the title
+                description: "A filter combining a category, a range and a text match. `submitted_at` is in microseconds since the Unix epoch, so the range starts on 1 January 2020. Each tile's `matched` count, and the points drawn, are the papers that pass all three."
+                value: {"view": "topics", "zoom": 4, "bbox": [5, 0, 15, 10], "filters": {"all_of": [{"archive": {"eq": "cs"}}, {"submitted_at": {"range": {"gte": 1577836800000000}}}, {"title": {"match": "neural"}}]}}
+              highlighted:
+                summary: High-energy physics, with the papers about black holes lit
+                description: "`filters` narrows the map to three archives. `highlight` marks, among the papers drawn, those whose title holds the phrase \"black holes\": each tile's `highlighted` count is at most its `matched`, and each point carries a `highlighted` bit."
+                value: {"view": "topics", "zoom": 3, "bbox": [-15, -15, 25, 25], "filters": {"archive": {"in": ["hep-th", "hep-ph", "gr-qc"]}}, "highlight": {"title": {"phrase": "black holes"}}}
+              tagged:
+                summary: Points tagged with their k-means cluster
+                description: "Each point carries a `membership:clusters/kmeans` column holding the `mosaica_id` of its cluster, which `POST /v1/artifacts/viewport` serves. `point_rows` asks for one render column beside the position, the one a client colours by."
+                value: {"view": "topics", "zoom": 3, "bbox": [-15, -15, 25, 25], "layers": ["clusters/kmeans"], "point_rows": ["primary_category"]}
+              counts-only:
+                summary: Counts per tile, no points
+                description: "`k: 0` serves the tiles frame alone, with the counts of every tile, here at zoom 5 across the second layout."
+                value: {"view": "topics-wide", "zoom": 5, "bbox": [-6, -8, 18, 18], "k": 0}
       responses:
         "200":
           description: The framed body. Its headers carry the coordinates a client caches and revalidates by.
@@ -834,6 +930,26 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ItemsRequest"
+            examples:
+              named-fields:
+                summary: The first 100 papers, with four fields each
+                description: One page of 100 rows. The trailer's `next` resumes the read.
+                value: {"view": "topics", "fields": ["arxiv_id", "title", "primary_category", "submitted_at"], "page_rows": 100, "pages": 1}
+              filtered:
+                summary: Computation and language papers about translation, with their positions
+                description: "Every paper in `cs.CL` whose title matches \"translation\", with its position in `topics` as `mosaica:x` and `mosaica:y`."
+                value: {"view": "topics", "fields": ["arxiv_id", "title"], "system_fields": ["position"], "filters": {"all_of": [{"primary_category": {"eq": "cs.CL"}}, {"title": {"match": "translation"}}]}}
+              counted:
+                summary: How many quantum physics papers there are, and the first 50
+                description: "`count` puts `visible` and `matched` in the head: the papers this viewer may see in `topics`, and those in `quant-ph`."
+                value: {"view": "topics", "fields": ["arxiv_id", "title"], "filters": {"archive": {"eq": "quant-ph"}}, "count": true, "page_rows": 50, "pages": 1}
+              next-page:
+                summary: The next page of the first read
+                description: "`cursor` is the `next` of the trailer that answered `named-fields`, sent back unchanged by the same session. The fields may change between the requests of one read; the view and the order may not."
+                x-mosaica-fill:
+                  body:
+                    /cursor: {operation: items, example: named-fields, read: {trailer: next}}
+                value: {"view": "topics", "fields": ["arxiv_id", "title", "primary_category", "submitted_at"], "page_rows": 100, "pages": 1, "cursor": "<next, from the trailer of the previous response>"}
       responses:
         "200":
           description: The framed body. The headers are the viewport's, without its cache coordinates.
@@ -929,6 +1045,23 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ItemRequest"
+            examples:
+              plain:
+                summary: One paper's whole record
+                description: "The `mosaica_id` in the path comes from an earlier answer: a point of `POST /v1/viewport`, or a row of `POST /v1/items`."
+                x-mosaica-fill:
+                  path:
+                    mosaica_id: {operation: items, example: named-fields, read: {column: mosaica_id}}
+                value: {}
+              pinned:
+                summary: The same, with the generation the map was drawn from
+                description: "`pin` is the `x-mosaica-pin` header of an earlier viewport response, sent back. It is advisory and changes nothing in the answer."
+                x-mosaica-fill:
+                  path:
+                    mosaica_id: {operation: items, example: named-fields, read: {column: mosaica_id}}
+                  body:
+                    /pin: {operation: viewport, example: whole-map, read: {header: x-mosaica-pin}}
+                value: {"pin": {"prefix": "v00000", "segments_version": 0}}
       responses:
         "200":
           description: The record.
@@ -1034,6 +1167,22 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ArtifactsRequest"
+            examples:
+              one-level:
+                summary: The 16 coarsest Toponymy clusters, with their sizes and centres
+                description: "Level 0 of the tiered layer `clusters/toponymy`. `masked_count`, `centroid` and `box` are over the papers this viewer may see."
+                value: {"view": "topics", "layer": "clusters/toponymy", "level": 0, "fields": ["key", "masked_count", "centroid", "box"]}
+              by-ids:
+                summary: Three clusters, read by their identifiers
+                description: "`ids` are `mosaica_id`s from an earlier answer: here the first three rows of `one-level`. A client holding a point's `membership:clusters/toponymy` tag from the viewport reads the cluster it names the same way."
+                x-mosaica-fill:
+                  body:
+                    /ids: {operation: artifacts, example: one-level, read: {column: mosaica_id, rows: 3}}
+                value: {"view": "topics", "layer": "clusters/toponymy", "ids": ["15924076608634206902", "18211900501399239182", "2151253543718068722"], "fields": ["key", "level", "parents", "masked_count"]}
+              search:
+                summary: The k-means topic labels that mention "neural"
+                description: "`q` keeps the label artifacts whose first served text contains it. `target` is the cluster each label names."
+                value: {"view": "topics", "layer": "topics/kmeans", "q": "neural", "fields": ["key", "target", "content"]}
       responses:
         "200":
           description: The framed body, with `POST /v1/items`' headers.
@@ -1173,6 +1322,15 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ViewportArtifactsRequest"
+            examples:
+              one-layer:
+                summary: The eight largest Toponymy topics in each tile
+                description: One level of a tiered layer, the 46 topics of level 1, with at most eight in each tile, largest first.
+                value: {"view": "topics", "zoom": 2, "bbox": [-15, -15, 25, 25], "layers": ["clusters/toponymy"], "levels": [1], "per_tile": 8}
+              with-labels:
+                summary: k-means clusters with their topic labels and colours
+                description: "`topics/kmeans` is attached to `clusters/kmeans`, so each label is served in the tiles its cluster is served in, with the cluster's `mosaica_id` as its `target`. `palette_size` gives each cluster a colour slot that differs from its neighbours'."
+                value: {"view": "topics", "zoom": 2, "bbox": [-15, -15, 25, 25], "layers": ["clusters/kmeans", "topics/kmeans"], "per_tile": 5, "palette_size": 8}
       responses:
         "200":
           description: The framed body. Its headers are `POST /v1/viewport`'s, and carry the same coordinates.
@@ -1594,6 +1752,30 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/AggregateRequest"
+            examples:
+              top-categories:
+                summary: The ten subject classes with the most papers
+                description: "One table: the ten largest classes, then `rest` for every other class, so the counts sum to the papers this viewer may see in `topics`."
+                value: {"view": "topics", "groupings": [{"by": {"field": "primary_category", "top": 10}}]}
+              by-layer:
+                summary: The eight arXiv archives with the most papers, by the taxonomy layer
+                description: "`taxonomy/arxiv` is tiered, so the grouping names a level: 0 is the archives. On a layer whose artifacts overlap, the rows can sum to more than the set."
+                value: {"view": "topics", "groupings": [{"by": {"layer": "taxonomy/arxiv", "level": 0, "top": 8}}]}
+              histogram:
+                summary: Papers by submission date, in at most 20 bins
+                description: Without `range`, the edges are readable dates around the earliest and latest submission this viewer may see.
+                value: {"view": "topics", "groupings": [{"by": {"field": "submitted_at", "bins": 20}}]}
+              summary:
+                summary: The earliest, latest and mean submission date
+                value: {"view": "topics", "groupings": [{"by": {"field": "submitted_at", "summary": true}}]}
+              density:
+                summary: Statistics papers counted in each cell of a 32 by 32 grid
+                description: "`cells` at depth 5 divides the view into the tiles of zoom 5. Each row is one non-empty cell and its count."
+                value: {"view": "topics", "filters": {"archive": {"eq": "stat"}}, "groupings": [{"cells": {"depth": 5}}]}
+              comparison:
+                summary: Which archives papers with "quantum" in the title come from, against the whole map
+                description: "`reference: {}` is every paper this viewer may see. Each row gains `reference_count` and `lift`, the group's share of the filtered set over its share of the reference."
+                value: {"view": "topics", "filters": {"title": {"match": "quantum"}}, "reference": {}, "groupings": [{"by": {"field": "archive", "top": 10}}]}
       responses:
         "200":
           description: The framed body, with the headers `POST /v1/items` sends.
