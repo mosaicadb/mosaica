@@ -1,21 +1,17 @@
 # Queries
 
-This chapter describes what you can ask a Mosaica server, and what comes back. It uses the same example as the [data model](data-model.md): a collection of research papers, laid out by their abstracts, with a layer of topics over them.
+Mosaica answers six kinds of query. This chapter covers each, and the filters they all share. The examples use the research papers of the [data model](data-model.md): a collection laid out by abstract, with a layer of topics over it.
 
-Every answer is computed from the items the viewer may see. A count never includes an item hidden from the viewer, and a filter can only narrow what they see, never widen it. [Access control](access-control.md) explains how a viewer's visible items are decided.
-
-The questions you can ask are:
-
-| Question | Route | Used for |
+| Query | Route | Returns |
 |---|---|---|
-| What is in these map tiles? | `POST /v1/viewport` | drawing the map |
-| Which annotations are in these tiles? | `POST /v1/artifacts/viewport` | drawing cluster and topic labels |
-| What values does this category have? | `GET /v1/categories/{column}`, and `/suggest` | filter lists and typeahead |
-| What is this one item? | `POST /v1/items/{mosaica_id}` | an item card |
-| Give me every matching item, or annotation | `POST /v1/items`, `POST /v1/artifacts` | exports, tables, analysis |
-| How are the matching items distributed? | `POST /v1/aggregate` | charts, breakdowns, comparisons |
+| Viewport | `POST /v1/viewport` | counts and a sample of points for each map tile |
+| Annotations by tile | `POST /v1/artifacts/viewport` | the clusters, topics or regions in each tile, with their counts and positions |
+| Category values | `GET /v1/categories/{column}`, and `/suggest` | a category's values, for filter lists and typeahead |
+| Item | `POST /v1/items/{mosaica_id}` | one item's fields and positions |
+| Bulk read | `POST /v1/items`, `POST /v1/artifacts` | every matching item or annotation, in pages of Arrow tables |
+| Aggregate | `POST /v1/aggregate` | breakdowns, histograms, summaries and density grids |
 
-All of them take the same [filters](#filters). The Python and TypeScript clients wrap each route, and the [capabilities](../reference/capabilities.md) table names the call on each surface.
+Every query is answered from the items the viewer may see. A count never includes an item hidden from the viewer, and a filter can only narrow what they see. [Access control](access-control.md) explains how a viewer's visible items are decided. The Python and TypeScript clients wrap each route, and the [capabilities](../reference/capabilities.md) table names the call on each surface.
 
 ## Drawing the map
 
