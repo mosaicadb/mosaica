@@ -149,7 +149,7 @@ At a build, a layer and its artifacts come from the declaration and its files. A
     | Declare a new layer | `PUT /control/layers` |
     | Publish artifacts and their members | `PUT /control/layers/{name}/artifacts` |
     | Add members to existing artifacts | `PATCH /control/layers/{name}/artifacts` |
-    | Put new items into artifacts as they are inserted | a column named after the layer in the insert batch |
+    | Put new items into artifacts as they are inserted | on an `enumerated` layer, a column named after the layer in the insert batch |
     | Delete or suppress an artifact, or suppress a whole layer | `POST /control/changes`, naming it by `mosaica_id` |
     | Drop a layer | `DELETE /control/layers/{name}` |
 
@@ -160,9 +160,9 @@ At a build, a layer and its artifacts come from the declaration and its files. A
     | To | Call |
     |---|---|
     | Declare a new layer | `Database.declare_layer`, or `declare_labels` for a label layer, then `commit` |
-    | Publish artifacts and their members | `Database.insert` into the layer, with `artifacts=` and `members=`, then `commit` |
+    | Publish artifacts and their members | `Database.insert` into the layer with `artifacts=`, and again with `members=`, then `commit` |
     | Add members to existing artifacts | `Database.insert` into the layer, with `members=`, then `commit` |
-    | Put new items into artifacts as they are inserted | `Database.insert` into the layer, with `members=` naming the new items |
+    | Put new items into artifacts as they are inserted | `Database.insert` into the layer with the items' table and `key=` naming the column, then `commit` |
     | Delete or suppress an artifact, or suppress a whole layer | `Database.remove`, `Database.suppress`, naming it by `mosaica_id` |
     | Drop a layer | `Database.drop_layer` |
 
@@ -173,7 +173,7 @@ At a build, a layer and its artifacts come from the declaration and its files. A
     | Declare a new layer | `Control.declareLayer` |
     | Publish artifacts and their members | `Control.publish` |
     | Add members to existing artifacts | `Control.grow` |
-    | Put new items into artifacts as they are inserted | a column named after the layer in `Control.ingest` |
+    | Put new items into artifacts as they are inserted | on an `enumerated` layer, a column named after the layer in `Control.ingest` |
     | Delete or suppress an artifact, or suppress a whole layer | `Control.changes`, naming it by `mosaica_id` |
     | Drop a layer | `Control.dropLayer` |
 
