@@ -304,30 +304,36 @@ def test_a_database_nothing_refers_to_stops_its_server_and_removes_its_directory
             gc.enable()
 
 
-@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads the process table in /proc")
-def test_a_server_stopped_from_outside_is_reaped(tmp_path):
-    """A Jupyter kernel stops its children at shutdown and waits until none is left, so a stopped
-    server must leave no entry in the process table."""
+def test_a_temporary_database_is_removed_when_marimo_exports_its_notebook(tmp_path):
+    """marimo runs the notebook in a kernel that leaves through `os._exit` and kills its process
+    group, so no exit handler of this package runs."""
     from conftest import binary
 
     binary()
-    import pyarrow as pa
-
-    import mosaica
-
-    db = mosaica.create(tmp_path / "db")
-    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
-    db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
-    db.commit()
-    pid = db._child.pid
-    try:
-        os.kill(pid, signal.SIGTERM)
-        deadline = time.monotonic() + 10
-        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert not os.path.exists(f"/proc/{pid}")
-    finally:
-        db.close()
+    where = tmp_path / "left.json"
+    cell = textwrap.indent(
+        textwrap.dedent(ENDED)
+        .replace("how = sys.argv[1]", "how = 'marimo'")
+        .replace("time.sleep(120)", "")
+        .replace("print(json.dumps(", f"open({str(where)!r}, 'w').write(json.dumps(")
+        .replace("}), flush=True)", "}))"),
+        "    ",
+    )
+    notebook = tmp_path / "notebook.py"
+    notebook.write_text(
+        "import marimo\napp = marimo.App()\n\n@app.cell\ndef _():\n" + cell
+        + "    return\n\nif __name__ == '__main__':\n    app.run()\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-m", "marimo", "export", "html", str(notebook), "-o",
+         str(tmp_path / "out.html")],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert where.exists(), done.stderr
+    left = json.loads(where.read_text())
+    assert gone(left["path"], left["pid"]), done.stderr
 
 
 def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down():

@@ -9,20 +9,17 @@ There is no fallback that guesses a port. A guess is a second process's port as 
 one's, and the notebook would then hold a URL answering for somebody else's server. A child that
 announces nothing is a refusal carrying what the child wrote.
 
-The child is killed by its pid, never by process name: a kill by name reaches every other server
-on the machine. It is killed at `close()`, when the `Database` is no longer referenced, and at
-interpreter exit. A temporary database's directory is removed at the same points, after its child
-has stopped.
+The child is started with `--exit-on-stdin-close`, and this process holds the pipe to its
+standard input. Closing the pipe stops it, which is how `close()`, a `Database` no longer
+referenced and the exit handler stop it. The pipe also closes however this process ends, so the
+child stops when a marimo kernel leaves through `os._exit` or a kernel is killed, which run no
+exit handler. A temporary database's child is also started with `--remove-on-exit`, so the server
+deletes the directory as it stops. Nothing is ever killed by process name, since a kill by name
+reaches every other server on the machine.
 
-A thread waits on each child, so a child stopped from outside is reaped at once. A Jupyter kernel
-stops its children at shutdown and waits until none is left, and an unreaped child would hold it
-there until the kernel was killed, before its exit handlers ran.
-
-Some processes end without running exit handlers: a marimo kernel leaves through `os._exit`, and
-a kernel can be killed. So the first database a process makes or serves also starts a watchdog: a
-small Python process in its own session, which this process tells of each child and temporary
-directory through a pipe. When the pipe closes, which it does however this process ends, the
-watchdog stops each child still running and removes each temporary directory.
+The child runs in a session of its own (a process group of its own on Windows). A kernel's signal
+to its own process group, and a Jupyter kernel's wait at shutdown for the children in its group to
+end, then do not reach it; the pipe stops it instead.
 """
 
 from __future__ import annotations
@@ -34,7 +31,6 @@ import os
 import queue
 import secrets
 import shutil
-import signal
 import subprocess
 import sys
 import threading
@@ -80,7 +76,6 @@ class Held:
         self.child: subprocess.Popen | None = None
         if is_temporary:
             temporary.add(path)
-            _tell({"temporary": str(path)})
 
 
 def release(held: Held) -> None:
@@ -95,84 +90,6 @@ def release(held: Held) -> None:
 def remove(directory: Path) -> None:
     shutil.rmtree(directory, ignore_errors=True)
     temporary.discard(directory)
-    _tell({"removed": str(directory)})
-
-
-#: The watchdog's program. It reads one JSON line per change to what the process holds, and acts
-#: when its input ends. A pid is signalled only while its command line still names the deployment
-#: file it was started with, so a pid the system has handed to another process is left alone.
-_WATCHDOG = r"""
-import json, os, shutil, signal, subprocess, sys, time
-
-signal.signal(signal.SIGINT, signal.SIG_IGN)
-signal.signal(signal.SIGHUP, signal.SIG_IGN)
-servers, directories = {}, set()
-for line in sys.stdin:
-    message = json.loads(line)
-    if "serve" in message:
-        servers[message["serve"]] = message["deployment"]
-    elif "stopped" in message:
-        servers.pop(message["stopped"], None)
-    elif "temporary" in message:
-        directories.add(message["temporary"])
-    elif "removed" in message:
-        directories.discard(message["removed"])
-
-
-def ours(pid, deployment):
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as file:
-            command = file.read().decode(errors="replace")
-    except FileNotFoundError:
-        return False
-    except OSError:
-        done = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
-        command = done.stdout
-    return deployment in command
-
-
-for number in (signal.SIGTERM, signal.SIGKILL):
-    left = [pid for pid, deployment in servers.items() if ours(pid, deployment)]
-    for pid in left:
-        try:
-            os.kill(pid, number)
-        except OSError:
-            pass
-    deadline = time.monotonic() + 5
-    while left and time.monotonic() < deadline:
-        time.sleep(0.05)
-        left = [pid for pid in left if ours(pid, servers[pid])]
-for directory in directories:
-    shutil.rmtree(directory, ignore_errors=True)
-"""
-
-_watchdog: subprocess.Popen | None = None
-_told = threading.RLock()
-#: Set once the exit handler has cleaned up, after which no watchdog is started.
-_exiting = False
-
-
-def _tell(message: dict) -> None:
-    """Tell the watchdog of a change, starting it on the first. A watchdog that cannot be started
-    leaves the cleanup to `close()`, the finaliser and the exit handler."""
-    global _watchdog
-    with _told:
-        try:
-            if _exiting:
-                return
-            if _watchdog is None or _watchdog.poll() is not None:
-                _watchdog = subprocess.Popen(
-                    [sys.executable, "-I", "-S", "-c", _WATCHDOG],
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    start_new_session=True,
-                )
-            _watchdog.stdin.write(json.dumps(message) + "\n")
-            _watchdog.stdin.flush()
-        except OSError:
-            pass
 
 
 class ServeRefused(Refusal):
@@ -265,19 +182,27 @@ def start(
     binary: str,
     deployment: Path,
     timeout: float | None = None,
+    remove_on_exit: bool = False,
 ) -> tuple[subprocess.Popen, Listening]:
-    """Start `mosaica serve` and read the addresses it bound."""
+    """Start `mosaica serve`, stopped when its standard input closes, and read the addresses it
+    bound. `remove_on_exit` has the server delete the deployment's directory as it stops."""
+    flags = ["--exit-on-stdin-close"] + (["--remove-on-exit"] if remove_on_exit else [])
+    apart = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
     child = subprocess.Popen(
-        [binary, "serve", "--deployment", str(deployment)],
+        [binary, "serve", "--deployment", str(Path(deployment).absolute()), *flags],
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
         cwd=str(Path(deployment).parent),
+        **apart,
     )
     _running[child.pid] = child
-    _tell({"serve": child.pid, "deployment": str(deployment)})
-    threading.Thread(target=child.wait, daemon=True).start()
     errors = _drain(child.stderr)
     try:
         return child, read_announce(
@@ -381,30 +306,27 @@ def _tail(text: str) -> str:
 
 
 def stop(child: subprocess.Popen, timeout: float = 5.0) -> None:
-    """Stop the child by its pid: `SIGTERM`, then `SIGKILL` if it is still there."""
+    """Stop the child by closing its standard input, then by its pid if it is still there."""
     _running.pop(child.pid, None)
-    _tell({"stopped": child.pid})
-    # `Popen` signals only a child it has not reaped, so a pid handed on is never signalled.
-    child.send_signal(signal.SIGTERM)
+    if child.stdin is not None and not child.stdin.closed:
+        try:
+            child.stdin.close()
+        except OSError:
+            pass
     try:
         child.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
+        # `Popen` signals only a child it has not reaped, so a pid handed on is never signalled.
         child.kill()
         child.wait(timeout=timeout)
 
 
 @atexit.register
 def _stop_everything() -> None:
-    global _exiting
     for child in list(_running.values()):
         stop(child)
     for directory in list(temporary):
         remove(directory)
-    with _told:
-        _exiting = True
-        if _watchdog is not None:
-            _watchdog.stdin.close()
-            _watchdog.wait()
 
 
 def find_binary() -> tuple[str, str]:

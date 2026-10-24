@@ -55,10 +55,10 @@ widget = ["anywidget>=0.9"]
 # never needs it. marimo and scikit-learn run the demo notebook; nbformat lets marimo export its
 # Jupyter copy.
 # `tomli` reads TOML on Pythons below 3.11, which have no `tomllib`. hatchling is imported by the
-# tests of the wheel's build hook.
+# tests of the wheel's build hook, and ipykernel runs the test of a Jupyter kernel's shutdown.
 dev = [
-  "anywidget>=0.9", "hatchling>=1.27", "marimo", "nbformat", "pandas", "pytest", "pytest-cov",
-  "ruff", "scikit-learn", "tomli>=2; python_version < '3.11'",
+  "anywidget>=0.9", "hatchling>=1.27", "ipykernel", "marimo", "nbformat", "pandas", "pytest",
+  "pytest-cov", "ruff", "scikit-learn", "tomli>=2; python_version < '3.11'",
 ]
 
 [tool.hatch.build.targets.wheel]
