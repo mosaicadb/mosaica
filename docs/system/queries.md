@@ -8,7 +8,7 @@ A client builds everything it shows from a handful of requests: the points of th
     |---|---|---|
     | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | `POST /v1/viewport` |
     | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | `POST /v1/artifacts/viewport` |
-    | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | `/v1/categories/{column}` |
+    | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | `GET /v1/categories/{column}`, `/v1/categories/{column}/suggest` |
     | [An item's card](#reading-records) | one item's fields | `POST /v1/items/{mosaica_id}` |
     | [A table or an export](#reading-records) | every matching item or artifact | `POST /v1/items`, `POST /v1/artifacts` |
     | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `POST /v1/aggregate` |
@@ -48,7 +48,7 @@ A client builds everything it shows from a handful of requests: the points of th
     | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | Not built yet |
     | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | Not built yet |
     | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | Not built yet |
-    | [An item's card](#reading-records) | one item's fields | `mosaica items` with a filter on a unique field |
+    | [An item's card](#reading-records) | one item's fields | Not built yet. `mosaica items` with an `eq` filter on a unique field reads the fields you name of one item in one view |
     | [A table or an export](#reading-records) | every matching item or artifact | `mosaica items`, `mosaica artifacts` |
     | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `mosaica aggregate` |
 
