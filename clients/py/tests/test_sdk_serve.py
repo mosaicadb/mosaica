@@ -6,9 +6,11 @@ prints, so the parser is covered without a bundle and without the binary.
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import textwrap
+import time
 
 import pytest
 
@@ -202,3 +204,145 @@ def test_a_database_at_a_path_the_user_named_is_kept_at_interpreter_exit(tmp_pat
     left = left_open(str(tmp_path / "db"))
     assert (tmp_path / "db" / "mosaica.toml").exists()
     assert left["path"] == str(tmp_path / "db")
+
+
+#: A committed temporary database in a process that then ends as `how` says, after printing its
+#: directory and its server's pid.
+ENDED = """
+    import json, os, signal, sys, time
+    import pyarrow as pa
+    import mosaica
+
+    how = sys.argv[1]
+    db = mosaica.create()
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
+    db.commit()
+    print(json.dumps({"path": str(db.path), "pid": db._child.pid}), flush=True)
+    if how == "os._exit":
+        # How a marimo kernel leaves: its SIGTERM handler exits without running exit handlers.
+        os._exit(0)
+    time.sleep(120)
+"""
+
+
+def gone(path: str, pid: int, within: float = 15.0) -> bool:
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            if not os.path.exists(path):
+                return True
+        time.sleep(0.1)
+    return False
+
+
+@pytest.mark.parametrize("how", ["os._exit", "SIGTERM", "SIGKILL"])
+def test_a_temporary_database_is_removed_however_its_process_ends(how):
+    from conftest import binary
+
+    binary()
+    process = subprocess.Popen(
+        [sys.executable, "-c", textwrap.dedent(ENDED), how],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        left = json.loads(process.stdout.readline())
+        if how != "os._exit":
+            os.kill(process.pid, getattr(signal, how))
+        process.wait(timeout=30)
+        assert gone(left["path"], left["pid"]), process.stderr.read()
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+
+def test_a_database_nothing_refers_to_stops_its_server_and_removes_its_directory():
+    from conftest import binary
+
+    binary()
+    import gc
+
+    import pyarrow as pa
+
+    import mosaica
+
+    db = mosaica.create()
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
+    db.commit()
+    selection = db.view("map")
+    path, pid = str(db.path), db._child.pid
+    collecting = gc.isenabled()
+    gc.disable()
+    try:
+        db = None
+        # A selection reads through its database, so the server runs while one is held.
+        assert selection.count() == 2
+        selection = None
+        assert gone(path, pid, within=10)
+    finally:
+        if collecting:
+            gc.enable()
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="reads the process table in /proc")
+def test_a_server_stopped_from_outside_is_reaped(tmp_path):
+    """A Jupyter kernel stops its children at shutdown and waits until none is left, so a stopped
+    server must leave no entry in the process table."""
+    from conftest import binary
+
+    binary()
+    import pyarrow as pa
+
+    import mosaica
+
+    db = mosaica.create(tmp_path / "db")
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
+    db.commit()
+    pid = db._child.pid
+    try:
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 10
+        while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not os.path.exists(f"/proc/{pid}")
+    finally:
+        db.close()
+
+
+def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down():
+    from conftest import binary
+
+    binary()
+    jupyter_client = pytest.importorskip("jupyter_client")
+    pytest.importorskip("ipykernel")
+    manager = jupyter_client.KernelManager(kernel_name="python3")
+    manager.start_kernel()
+    client = manager.client()
+    client.start_channels()
+    try:
+        client.wait_for_ready(timeout=60)
+        cell = textwrap.dedent(ENDED).replace("time.sleep(120)", "").replace(
+            "how = sys.argv[1]", "how = 'kernel'"
+        )
+        printed = ""
+        client.execute(cell)
+        while True:
+            message = client.get_iopub_msg(timeout=120)
+            content = message["content"]
+            if message["msg_type"] == "stream":
+                printed += content["text"]
+            if message["msg_type"] == "error":
+                pytest.fail("\n".join(content["traceback"]))
+            if message["msg_type"] == "status" and content["execution_state"] == "idle":
+                break
+        left = json.loads(printed.strip().splitlines()[-1])
+    finally:
+        client.stop_channels()
+        manager.shutdown_kernel()
+    assert gone(left["path"], left["pid"])

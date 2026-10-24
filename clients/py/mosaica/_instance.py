@@ -9,9 +9,20 @@ There is no fallback that guesses a port. A guess is a second process's port as 
 one's, and the notebook would then hold a URL answering for somebody else's server. A child that
 announces nothing is a refusal carrying what the child wrote.
 
-The child is killed by its pid, at `close()` and at interpreter exit, never by process name: a
-kill by name reaches every other server on the machine. A temporary database's directory is
-removed at the same two points, after its child has stopped.
+The child is killed by its pid, never by process name: a kill by name reaches every other server
+on the machine. It is killed at `close()`, when the `Database` is no longer referenced, and at
+interpreter exit. A temporary database's directory is removed at the same points, after its child
+has stopped.
+
+A thread waits on each child, so a child stopped from outside is reaped at once. A Jupyter kernel
+stops its children at shutdown and waits until none is left, and an unreaped child would hold it
+there until the kernel was killed, before its exit handlers ran.
+
+Some processes end without running exit handlers: a marimo kernel leaves through `os._exit`, and
+a kernel can be killed. So the first database a process makes or serves also starts a watchdog: a
+small Python process in its own session, which this process tells of each child and temporary
+directory through a pipe. When the pipe closes, which it does however this process ends, the
+watchdog stops each child still running and removes each temporary directory.
 """
 
 from __future__ import annotations
@@ -56,6 +67,112 @@ _running: dict[int, subprocess.Popen] = {}
 
 #: The directories of the temporary databases this process made and has not closed.
 temporary: set[Path] = set()
+
+
+class Held:
+    """What one database holds outside this process: its server, and its directory where it is a
+    temporary one. `release` gives both up; the `Database` holds no reference back, so a finaliser
+    can release them once the `Database` is gone."""
+
+    def __init__(self, path: Path, is_temporary: bool) -> None:
+        self.path = path
+        self.temporary = is_temporary
+        self.child: subprocess.Popen | None = None
+        if is_temporary:
+            temporary.add(path)
+            _tell({"temporary": str(path)})
+
+
+def release(held: Held) -> None:
+    """Stop the database's server, and remove its directory if it is a temporary one."""
+    if held.child is not None:
+        stop(held.child)
+        held.child = None
+    if held.temporary and held.path in temporary:
+        remove(held.path)
+
+
+def remove(directory: Path) -> None:
+    shutil.rmtree(directory, ignore_errors=True)
+    temporary.discard(directory)
+    _tell({"removed": str(directory)})
+
+
+#: The watchdog's program. It reads one JSON line per change to what the process holds, and acts
+#: when its input ends. A pid is signalled only while its command line still names the deployment
+#: file it was started with, so a pid the system has handed to another process is left alone.
+_WATCHDOG = r"""
+import json, os, shutil, signal, subprocess, sys, time
+
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+servers, directories = {}, set()
+for line in sys.stdin:
+    message = json.loads(line)
+    if "serve" in message:
+        servers[message["serve"]] = message["deployment"]
+    elif "stopped" in message:
+        servers.pop(message["stopped"], None)
+    elif "temporary" in message:
+        directories.add(message["temporary"])
+    elif "removed" in message:
+        directories.discard(message["removed"])
+
+
+def ours(pid, deployment):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as file:
+            command = file.read().decode(errors="replace")
+    except FileNotFoundError:
+        return False
+    except OSError:
+        done = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
+        command = done.stdout
+    return deployment in command
+
+
+for number in (signal.SIGTERM, signal.SIGKILL):
+    left = [pid for pid, deployment in servers.items() if ours(pid, deployment)]
+    for pid in left:
+        try:
+            os.kill(pid, number)
+        except OSError:
+            pass
+    deadline = time.monotonic() + 5
+    while left and time.monotonic() < deadline:
+        time.sleep(0.05)
+        left = [pid for pid in left if ours(pid, servers[pid])]
+for directory in directories:
+    shutil.rmtree(directory, ignore_errors=True)
+"""
+
+_watchdog: subprocess.Popen | None = None
+_told = threading.RLock()
+#: Set once the exit handler has cleaned up, after which no watchdog is started.
+_exiting = False
+
+
+def _tell(message: dict) -> None:
+    """Tell the watchdog of a change, starting it on the first. A watchdog that cannot be started
+    leaves the cleanup to `close()`, the finaliser and the exit handler."""
+    global _watchdog
+    with _told:
+        try:
+            if _exiting:
+                return
+            if _watchdog is None or _watchdog.poll() is not None:
+                _watchdog = subprocess.Popen(
+                    [sys.executable, "-I", "-S", "-c", _WATCHDOG],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    start_new_session=True,
+                )
+            _watchdog.stdin.write(json.dumps(message) + "\n")
+            _watchdog.stdin.flush()
+        except OSError:
+            pass
 
 
 class ServeRefused(Refusal):
@@ -159,6 +276,8 @@ def start(
         cwd=str(Path(deployment).parent),
     )
     _running[child.pid] = child
+    _tell({"serve": child.pid, "deployment": str(deployment)})
+    threading.Thread(target=child.wait, daemon=True).start()
     errors = _drain(child.stderr)
     try:
         return child, read_announce(
@@ -264,28 +383,28 @@ def _tail(text: str) -> str:
 def stop(child: subprocess.Popen, timeout: float = 5.0) -> None:
     """Stop the child by its pid: `SIGTERM`, then `SIGKILL` if it is still there."""
     _running.pop(child.pid, None)
-    if child.poll() is not None:
-        return
-    try:
-        os.kill(child.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
+    _tell({"stopped": child.pid})
+    # `Popen` signals only a child it has not reaped, so a pid handed on is never signalled.
+    child.send_signal(signal.SIGTERM)
     try:
         child.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        try:
-            os.kill(child.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        child.kill()
         child.wait(timeout=timeout)
 
 
 @atexit.register
 def _stop_everything() -> None:
+    global _exiting
     for child in list(_running.values()):
         stop(child)
     for directory in list(temporary):
-        shutil.rmtree(directory, ignore_errors=True)
+        remove(directory)
+    with _told:
+        _exiting = True
+        if _watchdog is not None:
+            _watchdog.stdin.close()
+            _watchdog.wait()
 
 
 def find_binary() -> tuple[str, str]:

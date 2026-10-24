@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Sequence
 
@@ -107,19 +108,23 @@ class Database:
     def __init__(self, path: Path, temporary: bool = False) -> None:
         self.path = Path(path)
         self.temporary = temporary
-        if temporary:
-            _instance.temporary.add(self.path)
+        # The server and a temporary directory, released by `close()` or once this is unreferenced.
+        self._held = _instance.Held(self.path, temporary)
+        weakref.finalize(self, _instance.release, self._held)
         #: The tables inserted before the first commit: what the build reads.
         self.inserts: list[Insert] = []
         #: The tables inserted since the last commit, which the next one sends and forgets.
         self.pending: list[Insert] = []
         self.blocks = D.Declaration()
         self.built = (self.path / "bundle" / "CURRENT").exists()
-        self._child: subprocess.Popen | None = None
         self.listening: _instance.Listening | None = None
         self._loaded_text: str | None = None
         #: Category keys looked up by `sample()`, per reader: by server address and terms.
         self._keys: dict = {}
+
+    @property
+    def _child(self) -> subprocess.Popen | None:
+        return self._held.child
 
     @property
     def binary(self) -> str:
@@ -1903,10 +1908,10 @@ class Database:
 
         Reading and later commits do this themselves.
         """
-        if self._child is not None:
+        if self._held.child is not None:
             return self.listening
         binary, _ = _instance.find_binary()
-        self._child, self.listening = _instance.start(binary, self.path / "mosaica.toml")
+        self._held.child, self.listening = _instance.start(binary, self.path / "mosaica.toml")
         return self.listening
 
     @property
@@ -2013,16 +2018,14 @@ class Database:
     def close(self) -> None:
         """Stop the server, and delete the directory if the database is a temporary one.
 
-        Tokens the database made stay valid until they expire, within the hour; `revoke` ends one
-        sooner. A directory you named is never deleted.
+        The same happens when nothing refers to the database any more, and when Python exits,
+        however it exits: a kernel restarted or shut down, a notebook run to its end, or the
+        process killed. A `Map` or a `Selection` refers to the database it reads, so the server
+        runs while one is held. Tokens the database made stay valid until they expire, within the
+        hour; `revoke` ends one sooner. A directory you named is never deleted.
         """
-        if self._child is not None:
-            _instance.stop(self._child)
-            self._child = None
-            self.listening = None
-        if self.temporary:
-            shutil.rmtree(self.path, ignore_errors=True)
-            _instance.temporary.discard(self.path)
+        _instance.release(self._held)
+        self.listening = None
 
     def __enter__(self) -> "Database":
         return self
@@ -2113,7 +2116,7 @@ def create(path: str | os.PathLike | None = None, replace: bool = False) -> Data
 
     - `path`: the directory. It must be empty or not yet exist. Without it the database goes in
       a temporary directory, in memory where the system offers one (`/dev/shm` on Linux), and is
-      deleted when closed or when Python exits.
+      deleted when closed, when nothing refers to it any more, or when Python exits.
     - `replace`: `True` deletes a Mosaica database already at `path` first. A directory that holds
       anything else is refused.
 
