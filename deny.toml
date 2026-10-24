@@ -55,4 +55,9 @@ ignore = [
   # (crates/mosaica-server/src/oidc.rs, DecodingKey::from_jwk), and never decrypts or signs, so the
   # attack does not apply. rsa reaches the graph through jsonwebtoken.
   { id = "RUSTSEC-2023-0071", reason = "rsa is used only to verify signatures with public JWKs; the private-key timing attack does not apply" },
+  # crypto-bigint's timing leaks matter only for operations on secret integers. It reaches the graph
+  # through jsonwebtoken's p256 and p384, which the server uses only to verify ES256 and ES384 token
+  # signatures against public JWKs: every input is public. The fix is in crypto-bigint 0.7.6, which
+  # elliptic-curve 0.13 does not accept.
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint is used only to verify signatures with public JWKs; no secret integer is involved" },
 ]
