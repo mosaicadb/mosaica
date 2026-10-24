@@ -413,9 +413,10 @@ def _microseconds(value: Any) -> Optional[int]:
     """A moment as the microseconds since the Unix epoch a `timestamp_us` column holds, or `None`
     where `value` is not a moment. A naive moment is read as UTC, as Arrow stores a naive
     timestamp column."""
+    # NumPy's and pandas' NaT, the second a datetime whose arithmetic answers NaN.
+    if type(value).__name__ in ("datetime64", "NaTType") and str(value) == "NaT":
+        raise Refusal("a filter value is NaT, which is no moment; write a date or a datetime")
     if type(value).__name__ == "datetime64":
-        if str(value) == "NaT":
-            raise Refusal("a filter value is NaT, which is no moment; write a date or a datetime")
         return int(value.astype("datetime64[us]").astype("int64"))
     if isinstance(value, datetime.datetime):
         try:

@@ -317,6 +317,11 @@ def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stu
         assert selection.count() == expected, moment
     selection = db.view("s0").filter({"submitted_at": {"in": [pd.Timestamp("2017-01-01")]}})
     assert selection.count() == int((points["submitted_at"] == pd.Timestamp("2017-01-01")).sum())
+    # No moment is refused before a request is sent, whichever library's NaT it is.
+    for missing in (pd.NaT, np.datetime64("NaT", "us")):
+        with pytest.raises(Refusal) as refused:
+            db.view("s0").filter({"submitted_at": {"range": {"gte": missing}}}).count()
+        assert refused.value.status is None
     # A text that is not a moment is left for the server to refuse, and a keyword is never read
     # as one.
     with pytest.raises(Refusal):
