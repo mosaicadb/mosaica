@@ -176,6 +176,10 @@ def test_an_item_hidden_from_the_reader_is_refused_as_one_that_does_not_exist(db
     with pytest.raises(Refusal) as seen_by_others:
         reader.item(hidden)
     assert seen_by_nobody.value.status == seen_by_others.value.status == 404
+    # A mistyped view is refused as a view, before the annotation is asked for.
+    with pytest.raises(Refusal) as wrong_view:
+        reader.artifact(missing, "nope")
+    assert wrong_view.value.status is None
     assert str(seen_by_nobody.value).replace(str(missing), "<id>") == str(
         seen_by_others.value
     ).replace(str(hidden), "<id>")

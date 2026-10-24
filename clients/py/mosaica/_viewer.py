@@ -1722,14 +1722,16 @@ class Viewer:
 
         The record has `masked_count`, the number of its items this reader may see, and, where
         its layer computes them, `centroid`, `box` and `shape` in the view's grid coordinates,
-        computed over those items alone. A property the layer does not compute is missing.
+        computed over those items alone. A property the layer does not compute is missing. A view
+        this reader cannot see is refused, naming those it can.
 
             v.artifact(page["artifacts"][0]["mosaica_id"], "papers")
         """
+        path = f"/v1/artifacts/{_an_id(mosaica_id, 'artifact')}"
+        self._require_view(view)
         request: dict = {"view": view}
         if zoom is not None:
             request["zoom"] = int(zoom)
-        path = f"/v1/artifacts/{_an_id(mosaica_id, 'artifact')}"
         return json.loads(self._request("POST", path, request))
 
     def _require_view(self, name: str, meta: Optional[dict] = None) -> None:
