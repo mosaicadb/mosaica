@@ -436,10 +436,13 @@ def find_binary() -> tuple[str, str]:
             candidate = parent / "target" / profile / "mosaica"
             if candidate.exists():
                 return str(candidate), f"this checkout's target/{profile}"
+    from . import __version__
+
     raise Refusal(
         "no `mosaica` binary at MOSAICA_BIN, on PATH, in the mosaica-native wheel, or in a "
-        "checkout's target directory. Install it with `pip install mosaica-native`, or build "
-        "it with `cargo build --release -p mosaica`"
+        f"checkout's target directory; install the wheel this package was made with, "
+        f"`pip install \"mosaica-native=={__version__}\"`, or build the binary with "
+        "`cargo build --release -p mosaica` and name it in MOSAICA_BIN"
     )
 
 

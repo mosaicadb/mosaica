@@ -155,6 +155,21 @@ def test_the_binary_is_found_at_mosaica_bin(tmp_path, monkeypatch):
         _instance.find_binary()
 
 
+def test_no_binary_anywhere_names_the_companion_wheel_at_this_packages_version(
+    tmp_path, monkeypatch
+):
+    import mosaica
+
+    monkeypatch.delenv("MOSAICA_BIN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setitem(sys.modules, "mosaica_native", None)
+    monkeypatch.setattr(_instance, "__file__", str(tmp_path / "site" / "mosaica" / "_instance.py"))
+    with pytest.raises(Exception) as refused:
+        _instance.find_binary()
+    # The unpinned name installs a placeholder, so the pin is what the refusal must carry.
+    assert f"mosaica-native=={mosaica.__version__}" in str(refused.value)
+
+
 #: A committed database, left open at interpreter exit. `where` is `None` for a temporary one.
 LEFT_OPEN = """
     import json, sys
