@@ -443,6 +443,17 @@ declaration sent to `PUT /control/view_groups/{name}` is refused with `422`. Thi
 that a build is an ingest into an empty database. Left as it is for the first release. No issue
 exists.
 
+**An `exists` operator in filters.** Once `none_of` means everything the viewer may see minus
+the matches, nothing asks directly whether an item holds a value in a field. `{"x": {"exists":
+true}}` would. No issue exists.
+
+**Topic counts and flags under a filter.** The map's annotations request returns each topic's
+count over everything the viewer may see, and a `matched` flag for the tile, so it is fetched
+again on every filter change. A breakdown by the layer already returns each topic's filtered and
+unfiltered counts in one request. To revisit: whether the annotations request should carry no
+filter at all, leaving the filter's figures to that breakdown. Left as it is for the first
+release. No issue exists.
+
 [#3]: https://github.com/jennis0/tessera-index/issues/3
 [#4]: https://github.com/jennis0/tessera-index/issues/4
 [#73]: https://github.com/jennis0/tessera-index/issues/73
