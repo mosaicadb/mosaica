@@ -150,6 +150,8 @@ def test_a_sample_naming_its_columns_carries_those_alone_over_the_same_points(db
     np = pytest.importorskip("numpy")
     arrayed = db.view("s0").sample(k=64, point_rows=np.array([rendered[0]]))
     assert arrayed.column_names == named.column_names
+    two = db.view("s0").sample(k=64, point_rows=np.array(rendered[:2]))
+    assert two.column_names == ["mosaica_id", "code", *rendered[:2]]
     layer = meta["layers"][0]["name"]
     tagged = db.view("s0").sample(k=64, layers=np.array([layer]))
     assert f"membership:{layer}" in tagged.column_names

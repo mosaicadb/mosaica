@@ -741,8 +741,8 @@ class Selection:
             (
                 "point_rows",
                 point_rows
-                if point_rows is None or point_rows in ("full", "highlight")
-                and isinstance(point_rows, str)
+                if point_rows is None
+                or isinstance(point_rows, str) and point_rows in ("full", "highlight")
                 else listed(point_rows),
             ),
             ("underlay_offset", underlay_offset),
