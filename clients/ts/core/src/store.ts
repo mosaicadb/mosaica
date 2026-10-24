@@ -266,6 +266,15 @@ export type StatusProjection = {
   expired: boolean;
   /** Whether `status` is `retrying`. */
   retrying: boolean;
+  /**
+   * Whether the server cannot be reached: a request failed to connect, a proxy in front of it
+   * answered `502` or `504`, or `authorise` failed with anything but a `MosaicaError` with a `4xx`
+   * status. While it is set the store asks `/v1/meta` again, waiting 1 s, then twice as long each
+   * time up to 30 s. At the first answer it clears, the store asks `authorise` for a new token
+   * where it was given one and holds the token it had before, and asks again for what is drawn. A
+   * store given a `client` does not watch its requests, and this stays `false`.
+   */
+  unreachable: boolean;
 };
 
 /**
@@ -853,6 +862,16 @@ const RANKED_VALUES = 32;
  */
 export const DEFAULT_BUDGET = 250_000;
 
+/** The first wait before `/v1/meta` is asked again while the server cannot be reached, and the longest. */
+const PROBE_FIRST_MS = 1_000;
+const PROBE_MAX_MS = 30_000;
+
+/** The bearer token in a request's headers, or `null`. */
+function bearerOf(headers: HeadersInit | undefined): string | null {
+  const value = headers instanceof Headers ? headers.get('authorization') : Array.isArray(headers) ? (headers.find(([k]) => k.toLowerCase() === 'authorization')?.[1] ?? null) : (headers?.['authorization'] ?? null);
+  return value?.startsWith('Bearer ') ? value.slice(7) : null;
+}
+
 /** How many tiles of artifacts a view keeps where `artifacts.heldTiles` names no number. */
 const DEFAULT_HELD_TILES = 4096;
 
@@ -862,7 +881,8 @@ const NO_STATUS: StatusProjection = {
   refusal: null,
   stale: false,
   expired: false,
-  retrying: false
+  retrying: false,
+  unreachable: false
 };
 
 /**
@@ -891,7 +911,7 @@ export function createStore(options: StoreOptions): Store {
   const ownsClient = !options.client;
   const client =
     options.client ??
-    new MosaicaClient({viewerUrl: options.viewerUrl, sessionUrl: '', ...options.clientOptions});
+    new MosaicaClient({viewerUrl: options.viewerUrl, sessionUrl: '', ...options.clientOptions, fetch: watched(options.clientOptions?.fetch)});
 
   const table = new SessionArtifactTable();
 
@@ -920,7 +940,7 @@ export function createStore(options: StoreOptions): Store {
    */
   let awaitingSwitchFrame = false;
 
-  const tokens = new TokenSupply(options.authorise, options.token, clock, (changed) => {
+  const tokens = new TokenSupply(watchedSupplier(options.authorise), options.token, clock, (changed) => {
     // A renewal keeps what is held. Until an answer under the new token confirms a key held, `admit`
     // does not trust an answer on a view that holds no key, and one ask goes out at once so the key
     // is seen without waiting for the camera. A store holding `meta` and no key yet has nothing to
@@ -934,6 +954,100 @@ export function createStore(options: StoreOptions): Store {
     // A warm-up that failed for want of a token runs again now there is one.
     if (meta === null) void ready().catch(() => {});
   });
+
+  /** See {@link StatusProjection.unreachable}. */
+  let unreachable = false;
+  /** The next ask of `/v1/meta` while the server cannot be reached, and how many have gone before it. */
+  let probe: unknown = null;
+  let probes = 0;
+  /** The token a request last succeeded with: a `401` on it means the session ended, not that it was refused from the start. */
+  let confirmedToken: string | null = null;
+  /** The token held when the server stopped answering; one supplied since is kept on the way back. */
+  let heldAtLoss: string | null = null;
+
+  /**
+   * `fetch` for the client the store builds, reporting each request's outcome: whether the server
+   * answered, and a `401` on a token that had worked.
+   */
+  function watched(base: typeof fetch | undefined): typeof fetch {
+    const send = base ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
+    return async (input, init) => {
+      const token = bearerOf(init?.headers);
+      let response: Response;
+      try {
+        response = await send(input, init);
+      } catch (error) {
+        if (!init?.signal?.aborted && !(error instanceof DOMException && error.name === 'AbortError')) lost();
+        throw error;
+      }
+      if (response.status === 502 || response.status === 504) lost();
+      else answered(response.status, token);
+      return response;
+    };
+  }
+
+  /**
+   * `authorise`, reporting a failure other than a Mosaica refusal (a `MosaicaError` with a `4xx`
+   * status) as the server not being reached: a host's token route fails while the server it asks
+   * is down.
+   */
+  function watchedSupplier(supplier: TokenSupplier | undefined): TokenSupplier | undefined {
+    if (!supplier || !ownsClient) return supplier;
+    return async () => {
+      try {
+        return await supplier();
+      } catch (error) {
+        if (!(error instanceof MosaicaError && error.status >= 400 && error.status < 500)) lost();
+        throw error;
+      }
+    };
+  }
+
+  /** A request could not reach the server: say so, and start asking again. */
+  function lost(): void {
+    if (disposed) return;
+    if (!unreachable) {
+      unreachable = true;
+      probes = 0;
+      heldAtLoss = tokens.current;
+      replaceProjection('status', {...projections.status, unreachable: true});
+    }
+    if (probe === null) probe = clock.after(Math.min(PROBE_FIRST_MS * 2 ** probes, PROBE_MAX_MS), askAgain);
+  }
+
+  function askAgain(): void {
+    probe = null;
+    probes += 1;
+    if (disposed || !unreachable) return;
+    // The outcome reaches `lost` or `answered` through the watched fetch and supplier. A store that
+    // never read `meta` reads it now, asking for a token first where it has none.
+    if (meta === null) void ready().catch(() => {});
+    else void client.meta(tokens.current ?? '').catch(() => {});
+  }
+
+  /**
+   * The server answered `status` to a request made with `token`. The first answer after it could
+   * not be reached ends the outage; a `401` on a token that had worked ends the session. Either way
+   * a store with `authorise` asks it for a new token, and the store asks again for what is drawn.
+   */
+  function answered(status: number, token: string | null): void {
+    if (disposed) return;
+    const ended = status === 401 && token !== null && token === confirmedToken && options.authorise !== undefined && options.token === undefined;
+    if (status >= 200 && status < 300 && token !== null && token === tokens.current) confirmedToken = token;
+    if (!unreachable && !ended) return;
+    if (unreachable) {
+      unreachable = false;
+      if (probe !== null) clock.cancel(probe);
+      probe = null;
+      replaceProjection('status', {...projections.status, unreachable: false});
+    }
+    if (options.authorise !== undefined && options.token === undefined && (ended || tokens.current === heldAtLoss)) {
+      confirmedToken = null;
+      tokens.forget();
+    }
+    if (meta === null) void ready().catch(() => {});
+    else refresh();
+  }
 
   /** The identity key of the answers held, by view; see {@link Store} for what it derives from. */
   const identities = new Map<string, string>();
@@ -1425,7 +1539,8 @@ export function createStore(options: StoreOptions): Store {
       refusal,
       stale: projections.status.stale,
       expired,
-      retrying: status === 'retrying'
+      retrying: status === 'retrying',
+      unreachable
     });
     if (status === 'refused' && refusal) region.refuse(refusal);
   }
@@ -2309,7 +2424,7 @@ export function createStore(options: StoreOptions): Store {
     meta = null;
     warming = null;
     replaceProjection('meta', null);
-    replaceProjection('status', {...NO_STATUS});
+    replaceProjection('status', {...NO_STATUS, unreachable});
     publishReplica(null);
     void ready().catch(() => {});
     // Each asks under the meta and token the read above brings.
@@ -2344,6 +2459,7 @@ export function createStore(options: StoreOptions): Store {
     aggregates.dispose();
     inView.dispose();
     if (inViewTimer !== null) clock.cancel(inViewTimer);
+    if (probe !== null) clock.cancel(probe);
     for (const held of views.all()) {
       held.presenter.cancel();
       held.channel.cancel();

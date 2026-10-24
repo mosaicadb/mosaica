@@ -32,7 +32,7 @@ const pages: Record<string, BrowsePage> = {
 
 const projections = {
   meta,
-  status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false},
+  status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
   view: {id: 's0', composition: null, depth: 9, visible: {value: 181_900, exact: true}, matched: {value: 12_465, exact: true},
          highlighted: {value: 3_204, exact: true}, highlighting: true, served: {shown: 4_812, total: 181_900, exact: true}, provisional: 0},
   marks: {bands: [], standIn: [], count: NO_COUNT},

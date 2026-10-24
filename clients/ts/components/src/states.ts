@@ -11,21 +11,23 @@ import {HeldAggregate} from './aggregate.js';
  * |---|---|
  * | detached | no store |
  * | loading | `idle` or `loading` |
- * | retrying | `retrying` |
+ * | retrying | `retrying`, or `unreachable` |
  * | shown | `shown` |
  * | empty | `empty` |
  * | refused | `refused` |
  * | expired | the `expired` flag: `expired-token`, a `bad-credential` on a token this store used, or `expiresAt` passed |
  * | stale | `shown` with `stale` |
  *
- * `expired` is a named refusal and wins over `refused`. `stale` is `shown` with the picture older
- * than the numbers.
+ * `expired` is a named refusal and wins over `refused`. While the server cannot be reached the state
+ * is `retrying` whatever the last answer was, since the store is asking again; what is drawn stays.
+ * `stale` is `shown` with the picture older than the numbers.
  */
 export type PanelState = 'detached' | 'loading' | 'retrying' | 'shown' | 'empty' | 'refused' | 'expired' | 'stale';
 
 export function stateOf(status: StatusProjection | null | undefined): PanelState {
   if (!status) return 'detached';
   if (status.expired) return 'expired';
+  if (status.unreachable) return 'retrying';
   switch (status.status) {
     case 'idle':
     case 'loading':
@@ -68,7 +70,7 @@ export function stateWord(state: PanelState, status: StatusProjection | null | u
     case 'loading':
       return status && !status.sessionWarm ? 'Connecting' : 'Updating';
     case 'retrying':
-      return 'Reconnecting';
+      return status?.unreachable ? 'Server unreachable' : 'Reconnecting';
     case 'shown':
       return 'Up to date';
     case 'empty':

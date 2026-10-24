@@ -42,6 +42,27 @@ describe('stateOf maps status onto the eight states exactly as the table says', 
     expect(stateOf(status({status: 'refused', refusal: {code: 'expired-token', detail: ''}, expired: true}))).toBe('expired');
     expect(stateOf(status({status: 'shown', stale: true}))).toBe('stale');
   });
+
+  it('retrying while the server cannot be reached, whatever was last answered, until a session ends', () => {
+    for (const s of ['shown', 'refused', 'empty', 'loading'] as const) expect(stateOf(status({status: s, unreachable: true}))).toBe('retrying');
+    expect(stateOf(status({status: 'refused', expired: true, unreachable: true}))).toBe('expired');
+  });
+
+  it('the strip has no green dot while the server cannot be reached, and names it apart from a shed request', async () => {
+    const host = await mount('<mosaica-status></mosaica-status>');
+    const store = fakeStore({status: status({}), view});
+    (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
+    await settle(host);
+    expect(deep(host, '[part="state"] .dot:not(.quiet):not(.warn):not(.refuse)')).not.toBeNull();
+    store.set('status', status({status: 'retrying'}));
+    await settle(host);
+    const shed = deep(host, '[part="state"]')?.textContent?.trim();
+    store.set('status', status({unreachable: true}));
+    await settle(host);
+    expect(deep(host, '[part="state"]')?.getAttribute('data-state')).toBe('retrying');
+    expect(deep(host, '[part="state"] .dot.warn')).not.toBeNull();
+    expect(deep(host, '[part="state"]')?.textContent?.trim()).not.toBe(shed);
+  });
 });
 
 describe('<mosaica-status> renders every state through part="state"', () => {

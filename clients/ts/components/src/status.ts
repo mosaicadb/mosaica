@@ -16,11 +16,10 @@ import './count.js';
  * date the first cell is a dot alone, titled "Up to date", and while it updates a grey dot alone,
  * titled "Updating", so the strip keeps its width through a pan. Where the viewer can see no item in
  * the view at all, it is a grey dot alone titled "Nothing visible to you", which the map says in
- * words. Otherwise it names the state in two
- * or three words beside its dot (Connecting, Reconnecting, Nothing in view, Data updated, View
- * refused, Session expired) with the action
- * the state offers: Refresh when the data changed, Retry when the view was refused, and Sign in on
- * expiry where `reauthorise` is set. The counts grey out while they are not current. The strip
+ * words. Otherwise it names the state in two or three words beside its dot (Connecting,
+ * Reconnecting, Server unreachable, Nothing in view, Data updated, View refused, Session expired)
+ * with the action the state offers: Refresh when the data changed, Retry when the view was refused,
+ * and Sign in on expiry where `reauthorise` is set. The counts grey out while they are not current. The strip
  * sizes to its content and does not wrap. `compact` shortens the figures (`16.8M of 21.4M match`)
  * and drops the shown count. `expanded` renders the figures again as a card below the strip.
  *

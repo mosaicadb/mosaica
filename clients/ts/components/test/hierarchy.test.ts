@@ -229,7 +229,7 @@ describe('<mosaica-hierarchy>', () => {
     const {host, store} = await panel();
     const before = store.calls.filter((c) => c.name === 'browse').length;
     // A store tick that changes nothing the request carries — the panel is told, and asks nothing.
-    store.set('status', {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false});
+    store.set('status', {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false});
     await settle(host);
     await settle(host);
     expect(store.calls.filter((c) => c.name === 'browse').length).toBe(before);

@@ -61,7 +61,7 @@ export function meta(over: Partial<Meta> = {}): Meta {
 export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
   const projections: Projections = {
     meta: null,
-    status: {status: 'idle', sessionWarm: false, refusal: null, stale: false, expired: false, retrying: false},
+    status: {status: 'idle', sessionWarm: false, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
     view: {id: '', composition: null, depth: 0, visible: NO_MASKED, matched: NO_MASKED, highlighted: NO_MASKED, highlighting: false, served: NO_COUNT, provisional: 0, inView: null},
     marks: {bands: [], standIn: [], count: NO_COUNT},
     tiles: {tiles: []},
@@ -172,7 +172,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
 }
 
 export function status(over: Partial<StatusProjection>): StatusProjection {
-  return {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, ...over};
+  return {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false, ...over};
 }
 
 /** Mount markup and wait for every Lit update inside it. */

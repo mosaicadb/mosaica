@@ -144,7 +144,7 @@ describe('a list that opens over what sits below it', () => {
       const columns = ['archive', 'title', 'submitted_at', 'author', 'venue', 'year'];
       const projections: Record<string, unknown> = {
         meta: {declaredScalars: [], layers: [], views: [], filterOperands: columns.map((column) => ({column, family: 'keyword', operands: ['eq']})), selection: {}},
-        status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false},
+        status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
         view: {id: 's0'},
         filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
         legend: {colourBy: null},
@@ -205,7 +205,7 @@ describe('the filter panel', () => {
       let aggregates = new Map<string, unknown>();
       const projections: Record<string, unknown> = {
         meta: {declaredScalars: [{name: 'archive', arrowType: 'u16', category: {}, render: false}], layers: [], views: [], filterOperands: [{column: 'archive', family: 'category', operands: ['in']}], selection: {maxAggregateTop: 1000}},
-        status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false},
+        status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
         view: {id: 's0', inView: null},
         filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
         legend: {colourBy: null, categories: {}, ranks: {}},
