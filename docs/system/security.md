@@ -273,7 +273,7 @@ should not be assumed to resist a viewer who has obtained known pairs of an enti
 on cryptographic strength.
 
 An artifact's or a layer's `mosaica_id` is the same permutation of a kind bit, the layer's space
-and the entity in that space ([an artifact's identity](annotations.md)). An
+and the entity in that space. An
 artifact's entity id is internal as an item's is, and is never on the wire. The kind, the shard,
 the tenancy and the layer space are inside the permuted input, so a viewer cannot read them or
 order identifiers by them. The server reads the kind from the inverted identifier: an artifact's

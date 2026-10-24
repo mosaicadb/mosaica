@@ -119,7 +119,7 @@ compaction moves the stamp, and the command is resolved again.
 The rules that keep a freed id from carrying anything of its previous holder apply to a freed number
 unchanged. Its rows, term-index entries, memberships, unique values and suppression are gone before
 it is freed. Content whose generating set named the item has been withdrawn
-([annotations](system/annotations.md#how-artifacts-change-under-writes)). The id is held back until
+([annotations](system/annotations.md#publishing-and-changing-annotations)). The id is held back until
 the WAL rotates past the compaction's publication. The test that checks this for edit-freed ids
 (`freed_ids_carry_nothing`) is extended to freed numbers.
 

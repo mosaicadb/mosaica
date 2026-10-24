@@ -501,8 +501,8 @@ class Database:
           wherever its annotation is shown, or `"all"` to show it only to a reader who may see
           every item it was written from.
         - `depends_on`: layers this one attaches to, such as the clustering a label set names.
-        - `prune_children`: `True` shows a parent in place of its children when both qualify.
-          The default is `False`.
+        - `prune_children`: `True` shows only the finest annotation that qualifies on each
+          branch, without its ancestors. The default, `False`, shows the qualifying ancestors too.
         - `withdraw_on_member_deletion`: Not built yet: `True` is refused at `check()`. The
           default, `False`, keeps the annotation.
         - `value_set`: `"closed"` if no annotation keys may appear beyond those inserted, `"open"`
