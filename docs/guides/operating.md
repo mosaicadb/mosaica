@@ -329,7 +329,7 @@ by artifact, is served by artifact instead, with no rewrite. A level the server 
 composed as a list by the next request that reads it. The next compaction records the level as a
 list and writes both files again.
 
-[Compaction](../system/write-path.md#compaction) in the write-path chapter describes it in full.
+[Compaction](../system/write-path.md#background-maintenance) in the write-path chapter describes it in full.
 
 ## Stopping and restarting
 
@@ -341,4 +341,4 @@ Sessions are held only in memory. After a restart none of them exists, and each 
 your backend for a new token. Changes are a different matter. On starting, the server opens the
 newest state of the bundle on disc that passes its checks and replays the log over it, which brings
 back every change it acknowledged before it stopped. [Restart
-and recovery](../system/write-path.md#restart-and-recovery) has the detail.
+and recovery](../system/write-path.md#durability-and-restarts) has the detail.

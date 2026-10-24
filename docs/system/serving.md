@@ -54,7 +54,7 @@ A grant's authorised set and its row projection, which [access control
 describes](access-control.md#what-a-request-answers-from), are built once, together, and then kept
 for every session with the grant rather than rebuilt on every request. Rebuilding either from
 nothing is the most expensive step in the path a request takes. What [a flush, a merge and a
-compaction fold](write-path.md#flush) each do to that cached pair is described there; none of the
+compaction fold](write-path.md#when-new-data-appears) each do to that cached pair is described there; none of the
 three is applied on the thread answering a request. A background pass folds a flush or a merge
 into every resident grant's cached pair as it reaches each one. Only a session whose grant the pass
 has not yet reached pays the cost inline, as an ordinary cache miss, on its own next request. After
@@ -222,7 +222,7 @@ are computed from the request's visible set in three parts:
 The visible set is F less D, together with T, and the three never overlap, so an artifact's count
 is its count over F, less its count over D, plus its count over T. The same holds for the number
 of its rows with a position and for the sums of their positions, which give the centroid. In a
-bundle whose items are numbered in several point shards ([write path](write-path.md#admission)),
+bundle whose items are numbered in several point shards ([write path](write-path.md#inserting-and-editing)),
 F, D and T are each the union of the shards' own. F's figures are held as one sum over every
 shard, so an artifact's count, centroid and box are read once, as in a bundle of one shard, before
 the artifact is tested or served.
@@ -322,7 +322,7 @@ whatever the client already has.
 
 A third value, the generation a response was answered from, travels as a header,
 `x-mosaica-pin`, and a request may echo it back. While the background refresh after a
-[flush](write-path.md#flush) has not reached a session, the header names the previous generation,
+[flush](write-path.md#when-new-data-appears) has not reached a session, the header names the previous generation,
 because the session's visible set is still that generation's projection. A response's visible set
 is one generation's in every point shard it reads: the previous generation's projections serve only
 where every shard has one, and a response never combines one shard's previous projection with

@@ -165,7 +165,7 @@ nav:
       - Data model: system/data-model.md
       - Queries: system/queries.md
       - Serving: system/serving.md
-      - Write path: system/write-path.md
+      - Changing data: system/write-path.md
       - Clients: system/clients.md
       - Annotations: system/annotations.md
       - Access control: system/access-control.md
