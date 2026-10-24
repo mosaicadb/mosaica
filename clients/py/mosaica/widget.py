@@ -28,6 +28,7 @@ JavaScript number, and a `BigInt` does not serialise.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import warnings
@@ -38,7 +39,7 @@ import traitlets
 
 from ._auth import Token, TokenSource, minted
 from ._refusal import listed
-from ._viewer import decimal_id
+from ._viewer import _json_value, decimal_id
 
 _HERE = pathlib.Path(__file__).parent
 _BUNDLE = "mosaica-components.js"
@@ -364,6 +365,13 @@ class Map(anywidget.AnyWidget):
             }
             for layer, ids in _by_name(proposal["value"], "cluster_colours", "layer", "mosaica_id").items()
         }
+
+    @traitlets.validate("filters")
+    def _validate_filters(self, proposal: dict) -> Optional[dict]:
+        # A moment is sent as its microseconds, which is what the page reads a timestamp in.
+        if proposal["value"] is None:
+            return None
+        return json.loads(json.dumps(proposal["value"], default=_json_value))
 
     @traitlets.validate("layers")
     def _validate_layers(self, proposal: dict) -> Optional[list]:

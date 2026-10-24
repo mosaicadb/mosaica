@@ -294,6 +294,37 @@ def test_a_map_opens_on_the_selections_view_filters_and_box(db, points, stub_bun
     assert (m.cluster_budget, m.cluster_budget_min, m.cluster_budget_max) == (1_000, 10, 10_000)
 
 
+def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stub_bundle):
+    """A naive moment is read as UTC, as the corpus's naive timestamp column was stored, so each
+    spelling counts what pandas counts over the source table."""
+    import datetime
+
+    expected = int((points["submitted_at"] >= pd.Timestamp("2017-01-01")).sum())
+    assert 0 < expected < len(points)
+    utc = datetime.timezone.utc
+    for moment in (
+        datetime.datetime(2017, 1, 1),
+        datetime.datetime(2017, 1, 1, 1, tzinfo=datetime.timezone(datetime.timedelta(hours=1))),
+        datetime.date(2017, 1, 1),
+        pd.Timestamp("2017-01-01"),
+        np.datetime64("2017-01-01"),
+        "2017-01-01",
+        "2017-01-01T00:00:00Z",
+        str(int(datetime.datetime(2017, 1, 1, tzinfo=utc).timestamp()) * 1_000_000),
+    ):
+        selection = db.view("s0").filter({"submitted_at": {"range": {"gte": moment}}})
+        assert selection.count() == expected, moment
+    selection = db.view("s0").filter({"submitted_at": {"in": [pd.Timestamp("2017-01-01")]}})
+    assert selection.count() == int((points["submitted_at"] == pd.Timestamp("2017-01-01")).sum())
+    # A text that is not a moment is left for the server to refuse, and a keyword is never read
+    # as one.
+    with pytest.raises(Refusal):
+        db.view("s0").filter({"submitted_at": {"range": {"gte": "last spring"}}}).count()
+    assert db.view("s0").filter({"arxiv_id": {"eq": "2017-01-01"}}).count() == 0
+    m = db.view("s0").filter({"submitted_at": {"range": {"gte": "2017-01-01"}}}).map()
+    assert m.filters == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
+
+
 def test_a_map_naming_what_the_reader_cannot_see_is_refused(db, stub_bundle):
     """A view, a layer or a column the meta does not list is refused at the call, where the map
     would otherwise open on the first view, draw one colour or drop the layer."""
