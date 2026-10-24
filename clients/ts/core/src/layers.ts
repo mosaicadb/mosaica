@@ -100,3 +100,25 @@ export function colourLayers(layers: readonly Layer[]): Layer[] {
 export function browsableLayers(layers: readonly Layer[]): Layer[] {
   return layers.filter((l) => l.depsOn.length === 0 && l.hierarchy.kind !== 'flat');
 }
+
+const topLevels = new WeakMap<readonly unknown[], Map<string, number | undefined>>();
+
+/**
+ * The top (coarsest) level of a `stacked` or `tiered` layer among those served now: the least
+ * level of the layer's artifacts in `served`, which hold only the levels the camera's zoom
+ * declares, or the layer's first declared level while none of its artifacts is served.
+ * `undefined` on a layer of any other kind, and on one declaring no levels.
+ *
+ * @internal
+ */
+export function topLevelServed(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, served: readonly {layer: string; rung: number}[]): number | undefined {
+  if ((layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered') || layer.levels.length === 0) return undefined;
+  let held = topLevels.get(served);
+  if (!held) topLevels.set(served, (held = new Map()));
+  if (held.has(layer.name)) return held.get(layer.name);
+  let top: number | undefined;
+  for (const a of served) if (a.layer === layer.name && (top === undefined || a.rung < top)) top = a.rung;
+  top ??= layer.levels[0]!.level;
+  held.set(layer.name, top);
+  return top;
+}

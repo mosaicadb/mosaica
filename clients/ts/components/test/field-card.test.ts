@@ -566,4 +566,17 @@ describe('<mosaica-field-card> on a levelled layer', () => {
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
   });
+
+  it('counts at the top level the camera’s zoom serves, where the top declared level is not served', async () => {
+    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: [0, 5]}, {level: 1, title: 'Fine', zoom: [4, 16]}]} as unknown as Meta['layers'][number];
+    const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
+    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
+    const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    store.set('artifacts', {...store.get('artifacts'), served: [{layer: 'bands', rung: 1, mosaicaId: 5n}] as never});
+    card.store = store;
+    await settle(host);
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
+    expect((deep(host, '[part="level-select"]') as HTMLSelectElement).value).toBe('1');
+  });
 });

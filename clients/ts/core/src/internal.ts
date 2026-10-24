@@ -6,6 +6,7 @@
 export {SessionArtifactTable} from './artifactTable.js';
 export {servedLineage} from './artifactChannel.js';
 export {attachedTextOf} from './names.js';
+export {topLevelServed} from './layers.js';
 export {bandsOfResult} from './bands.js';
 export type {DepthChoice} from './budget.js';
 export {compose, fold} from './compose.js';

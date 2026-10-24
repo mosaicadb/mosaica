@@ -712,7 +712,7 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   /** The level a levelled layer's card counts and browses at: the one chosen, else the top level. */
   private levelOf(layer: Layer): number | undefined {
-    return levelOf(layer, this.level);
+    return levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []);
   }
 
   /** The keys of the field's clause in `verb`: a category's values, or a layer's clusters by id. */
@@ -737,7 +737,7 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   /** The grouping ranking a layer's `top` clusters at the cut the map draws or the card's level; each row's slot colours its swatch. */
   private ranked(layer: Layer, top: number): AggregateSpec['groupings'][number] {
-    return rankedGrouping(layer, top, this.level);
+    return rankedGrouping(layer, top, this.levelOf(layer) ?? null);
   }
 
   /** The groupings counting `ids` of `layer` by name, leaving room for one more beside them. */

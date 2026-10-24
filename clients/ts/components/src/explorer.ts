@@ -6,7 +6,7 @@ import type {ArtifactDetail, ItemDetail, PaletteName, Store} from '@mosaicajs/cl
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import {CATEGORY_PALETTES, DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DENSITY_CELL_SIZES, RAMPS, cellDepth, nearestStop} from '@mosaicajs/deck';
 import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, colourLayers, emptyDraft} from '@mosaicajs/client';
-import {hasOneLayout, sizesPoints} from '@mosaicajs/client/internal';
+import {hasOneLayout, sizesPoints, topLevelServed} from '@mosaicajs/client/internal';
 import {DENSITY_COLOUR_TITLES, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
 import {MosaicaElement, columnCaption, emit, shortCount} from './base.js';
 import {placeCallout, type Rect, type Side} from './callout.js';
@@ -1640,7 +1640,7 @@ export class MosaicaExplorer extends MosaicaElement {
     const layers = colourLayers(meta.layers).flatMap((decl) => {
       const value = `${CLUSTER_PREFIX}${decl.name}`;
       if (decl.levels.length <= 1) return [{value, title: decl.title || decl.name, kind: 'Clusters', checked: colourBy === value}];
-      const drawn = this.level ?? decl.levels[0]!.level;
+      const drawn = this.level ?? topLevelServed(decl, s?.get('artifacts').served ?? []);
       return decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && drawn === lv.level}));
     });
     const columns = meta.declaredScalars.filter((c) => c.render).map((c) => ({value: c.name, title: columnCaption(c.name), kind: c.category ? 'Category' : c.arrowType === 'timestamp_us' ? 'Date' : 'Number', checked: colourBy === c.name}));

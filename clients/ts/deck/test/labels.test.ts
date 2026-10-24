@@ -145,10 +145,17 @@ describe('drawnLevel', () => {
   const layer = (name: string, kind: string, levels: number[]) => ({name, hierarchy: {kind, pruneChildren: false}, levels: levels.map((level) => ({level, title: null}))}) as unknown as Meta['layers'][number];
   const META = {layers: [layer('bands', 'tiered', [0, 1, 2]), layer('tree', 'nested', [])]} as unknown as Meta;
 
-  it('is the chosen level, else the top level of the layer coloured by or drawn first, and the cut served on a tree', () => {
-    expect(drawnLevel(META, {layers: ['bands']}, null, undefined)).toBe(0);
-    expect(drawnLevel(META, {layers: ['tree']}, 'cluster:bands', undefined)).toBe(0);
-    expect(drawnLevel(META, {layers: ['bands']}, null, 2)).toBe(2);
-    expect(drawnLevel(META, {layers: ['tree']}, null, undefined)).toBeUndefined();
+  it('is the chosen level, else the top level served of the layer coloured by or drawn first, and the cut served on a tree', () => {
+    const none = [] as never[];
+    expect(drawnLevel(META, {layers: ['bands'], served: none}, null, undefined)).toBe(0);
+    expect(drawnLevel(META, {layers: ['tree'], served: none}, 'cluster:bands', undefined)).toBe(0);
+    expect(drawnLevel(META, {layers: ['bands'], served: none}, null, 2)).toBe(2);
+    expect(drawnLevel(META, {layers: ['tree'], served: none}, null, undefined)).toBeUndefined();
+  });
+
+  it('follows the levels the camera’s zoom serves: where the top level is not served, the next one down', () => {
+    const at = (rungs: number[]) => rungs.map((rung, i) => ({layer: 'bands', rung, mosaicaId: BigInt(i)})) as never;
+    expect(drawnLevel(META, {layers: ['bands'], served: at([1, 2, 1])}, null, undefined)).toBe(1);
+    expect(drawnLevel(META, {layers: ['bands'], served: at([2, 0, 1])}, null, undefined)).toBe(0);
   });
 });

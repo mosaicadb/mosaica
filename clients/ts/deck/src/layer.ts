@@ -18,7 +18,7 @@ import {
   type ShapeKind,
   type Store
 } from '@mosaicajs/client';
-import {NEUTRAL} from '@mosaicajs/client/internal';
+import {NEUTRAL, topLevelServed} from '@mosaicajs/client/internal';
 import {materialiseStandIn, type StandInBuffers} from './assemble.js';
 import {BACKING_HEIGHT_EM, backingAspect, backingAtlas, backingIcon} from './backing.js';
 import {DEFAULT_COLOURING, buildColourAttribute, encodingSignature, rgbOfHex, type Colouring, type Encoding, type Rgb} from './colour.js';
@@ -238,16 +238,15 @@ export function clusterLayerOf(colourBy: string | null | undefined): string | nu
 
 /**
  * The level clusters are coloured, named and outlined at: `chosen` where given, else the top
- * (coarsest) level of the layer coloured by, or of the first layer drawn, where that layer is
- * `stacked` or `tiered`. On any other layer, `undefined`: each point takes its nearest served
- * cluster.
+ * (coarsest) level served at the camera's zoom of the layer coloured by, or of the first layer
+ * drawn, where that layer is `stacked` or `tiered`. On any other layer, `undefined`: each point
+ * takes its nearest served cluster.
  */
-export function drawnLevel(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers'> | null, colourBy: string | null | undefined, chosen: number | undefined): number | undefined {
+export function drawnLevel(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers' | 'served'> | null, colourBy: string | null | undefined, chosen: number | undefined): number | undefined {
   if (chosen !== undefined) return chosen;
   const name = clusterLayerOf(colourBy) ?? artifacts?.layers[0];
   const layer = name === undefined ? undefined : meta?.layers.find((l) => l.name === name);
-  if (!layer || (layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered')) return undefined;
-  return layer.levels[0]?.level;
+  return layer ? topLevelServed(layer, artifacts?.served ?? []) : undefined;
 }
 
 type Resolved = {

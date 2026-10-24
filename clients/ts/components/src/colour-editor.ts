@@ -422,7 +422,7 @@ export class MosaicaColourEditor extends MosaicaElement {
     const top = meta.selection.maxAggregateTop;
     if (this.isCategory(meta)) return {groupings: [{count: true, by: {field: this.field, top}}], subject: 'visible'};
     const layer = this.layerOf(meta);
-    return layer ? {groupings: [rankedGrouping(layer, top, this.level)], subject: 'visible'} : null;
+    return layer ? {groupings: [rankedGrouping(layer, top, levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []) ?? null)], subject: 'visible'} : null;
   }
 
   /** The aggregate that counts what the search box found. */
@@ -595,7 +595,7 @@ export class MosaicaColourEditor extends MosaicaElement {
     const rows = this.rows(s, meta);
     const ranked = this.ranked.entryOf(s, this.rankedSpec(meta));
     const table = ranked?.result?.tables[0];
-    const level = layer ? levelOf(layer, this.level) : undefined;
+    const level = layer ? levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []) : undefined;
     const levelTitle = layer && level !== undefined && layer.levels.length > 1 ? (layer.levels.find((l) => l.level === level)?.title ?? `Level ${level}`) : null;
     const where = layer && isTree(layer) ? 'Clusters drawn' : levelTitle;
     const sub = [where, this.palette(s).title].filter(Boolean).join(' · ');
