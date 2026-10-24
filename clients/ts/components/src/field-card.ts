@@ -122,8 +122,8 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * shares are of what the filter keeps. Hovering or focusing a row shows Highlight and Filter, which
  * put the value in or out of the field's clause in that position. Over the rows is the field's
  * search box, the typeahead of `<mosaica-filter>` or `<mosaica-cluster-filter>`, whose choice joins
- * the filter. A levelled layer's card has a Level choice in its heading, the deepest level by
- * default, which fires `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's
+ * the filter. A levelled layer's card has a Level choice in its heading, the top (coarsest) level
+ * by default, which fires `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's
  * clusters at the cut the map draws (`cut: 'drawn'`), and a flat or levelled layer's at its level.
  * A cluster is named as the aggregate's table names it, which is the name the layer's browse pages
  * give the same viewer. On a `nested` or `dag` layer its path is named from a browse page of its
@@ -623,7 +623,7 @@ export class MosaicaFieldCard extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor folded = false;
   /** Draws the small chart for the compact layout. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level a levelled layer's card counts at; `null` is its deepest. */
+  /** The level a levelled layer's card counts at; `null` is its top level. */
   @property({type: Number, attribute: 'cluster-level'}) accessor level: number | null = null;
 
   /** Whether "N more" was pressed. @internal */
@@ -710,7 +710,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     return (kind === 'category' || kind === 'histogram') && meta.declaredScalars.some((c) => c.name === this.field && c.render);
   }
 
-  /** The level a levelled layer's card counts and browses at: the one chosen, else the deepest. */
+  /** The level a levelled layer's card counts and browses at: the one chosen, else the top level. */
   private levelOf(layer: Layer): number | undefined {
     return levelOf(layer, this.level);
   }
@@ -988,8 +988,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const sub =
       layer && levelled !== undefined && layer.levels.length > 1
         ? html`<span part="sub" class="choice"><select part="level-select" aria-label="Level" @change=${(e: Event) => this.chooseLevel((e.target as HTMLSelectElement).value)}>
-              <option value="" ?selected=${this.level === null}>Deepest level</option>
-              ${layer.levels.map((l) => html`<option value=${l.level} ?selected=${this.level === l.level}>${l.title || `Level ${l.level}`}</option>`)}
+              ${layer.levels.map((l) => html`<option value=${l.level} ?selected=${levelled === l.level}>${l.title || `Level ${l.level}`}</option>`)}
             </select>${icon('chev', 12, 1.4)}</span>`
         : html`<span part="sub"></span>`;
     if (this.folded) return head(sub);

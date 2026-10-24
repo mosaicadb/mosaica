@@ -1,5 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {LABEL_SIZE_MAX, LABEL_SIZE_MIN, MAX_DISPLACEMENT, MAX_LABEL_CHARS, labelSize, placeLabels, labelLine, type LabelCandidate} from '../src/labels.js';
+import type {Meta} from '@mosaicajs/client';
+import {drawnLevel} from '../src/layer.js';
 
 const at = (id: number, x: number, y: number, priority: number, width = 60, height = 24): LabelCandidate => ({id: BigInt(id), x, y, width, height, priority});
 
@@ -136,5 +138,17 @@ describe('a name on one line', () => {
     expect(tall.length).toBe(1);
     const short = placeLabels([box(2n, 0, 12), box(1n, 30, 12)]);
     expect(short.length).toBe(2);
+  });
+});
+
+describe('drawnLevel', () => {
+  const layer = (name: string, kind: string, levels: number[]) => ({name, hierarchy: {kind, pruneChildren: false}, levels: levels.map((level) => ({level, title: null}))}) as unknown as Meta['layers'][number];
+  const META = {layers: [layer('bands', 'tiered', [0, 1, 2]), layer('tree', 'nested', [])]} as unknown as Meta;
+
+  it('is the chosen level, else the top level of the layer coloured by or drawn first, and the cut served on a tree', () => {
+    expect(drawnLevel(META, {layers: ['bands']}, null, undefined)).toBe(0);
+    expect(drawnLevel(META, {layers: ['tree']}, 'cluster:bands', undefined)).toBe(0);
+    expect(drawnLevel(META, {layers: ['bands']}, null, 2)).toBe(2);
+    expect(drawnLevel(META, {layers: ['tree']}, null, undefined)).toBeUndefined();
   });
 });

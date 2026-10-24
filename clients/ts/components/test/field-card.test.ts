@@ -548,3 +548,22 @@ describe('<mosaica-field-card> on text', () => {
     expect(registered(store).size).toBe(0);
   });
 });
+
+describe('<mosaica-field-card> on a levelled layer', () => {
+  it('counts at the top level and shows it chosen until another is chosen', async () => {
+    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad'}, {level: 1, title: 'Fine'}]} as unknown as Meta['layers'][number];
+    const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
+    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
+    const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    card.store = store;
+    await settle(host);
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
+    const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
+    expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['Broad', true], ['Fine', false]]);
+    select.value = '1';
+    select.dispatchEvent(new Event('change'));
+    await settle(host);
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
+  });
+});

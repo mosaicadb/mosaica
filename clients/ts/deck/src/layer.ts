@@ -70,8 +70,8 @@ export type MosaicaLayerProps = CompositeLayerProps & {
    */
   status?: PresentedStatus;
   /**
-   * The level of a nested layer to colour, name and outline artifacts at. Defaults to `undefined`,
-   * the deepest level served.
+   * The level of a `stacked` or `tiered` layer to colour, name and outline artifacts at. Defaults to
+   * `undefined`, the layer's top (coarsest) level; on a `nested` or `dag` layer, the cut served.
    */
   clusterLevel?: number;
   /** Whether the artifacts' names are drawn at their centroids, with the hovered one's count. Defaults to true. */
@@ -233,6 +233,20 @@ const LABEL_ZOOM_STEP = 4;
 /** A layer's colouring, as the store's `colourBy` names it: `cluster:<layer>` or a column. */
 export function clusterLayerOf(colourBy: string | null | undefined): string | null {
   return colourBy && colourBy.startsWith(CLUSTER_PREFIX) ? colourBy.slice(CLUSTER_PREFIX.length) : null;
+}
+
+/**
+ * The level clusters are coloured, named and outlined at: `chosen` where given, else the top
+ * (coarsest) level of the layer coloured by, or of the first layer drawn, where that layer is
+ * `stacked` or `tiered`. On any other layer, `undefined`: each point takes its nearest served
+ * cluster.
+ */
+export function drawnLevel(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers'> | null, colourBy: string | null | undefined, chosen: number | undefined): number | undefined {
+  if (chosen !== undefined) return chosen;
+  const name = clusterLayerOf(colourBy) ?? artifacts?.layers[0];
+  const layer = name === undefined ? undefined : meta?.layers.find((l) => l.name === name);
+  if (!layer || (layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered')) return undefined;
+  return layer.levels[0]?.level;
 }
 
 type Resolved = {
@@ -987,8 +1001,8 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const highlightOrdinal = highlight && r.artifacts ? r.artifacts.table.ordinalOf(highlight.layer, highlight.mosaicaId) : NO_ORDINAL;
     if (r.artifacts) {
       lut.update(
-        {artifacts: r.artifacts, level: this.props.clusterLevel, highlight: highlightOrdinal},
-        `${r.artifacts.palette}|${this.props.clusterLevel ?? ''}|${highlightOrdinal}`
+        {artifacts: r.artifacts, level: this.levelOf(r), highlight: highlightOrdinal},
+        `${r.artifacts.palette}|${this.levelOf(r) ?? ''}|${highlightOrdinal}`
       );
     }
     timings.lutMs = performance.now() - lutStarted;
@@ -1228,6 +1242,11 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     return sizes;
   }
 
+  /** The level clusters are drawn at ({@link drawnLevel}). */
+  private levelOf(r: Resolved): number | undefined {
+    return drawnLevel(r.meta, r.artifacts, r.legend?.colourBy, this.props.clusterLevel);
+  }
+
   /**
    * Whether the labels sit on opaque plates with no halo: while density is drawn as hexagons or a
    * grid, or as a smooth wash in a ramp, whose colours fill the ground under the names.
@@ -1400,10 +1419,10 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const opened = this.props.openedArtifact ?? null;
     const hovered = this.props.hoveredArtifact ?? null;
     const scheme = this.props.scheme ?? 'dark';
-    const key = a ? `${a.version}|${a.palette}|${opened ?? ''}|${hovered ?? ''}|${scheme}|${this.props.clusterLevel ?? ''}` : '';
+    const key = a ? `${a.version}|${a.palette}|${opened ?? ''}|${hovered ?? ''}|${scheme}|${this.levelOf(r) ?? ''}` : '';
     let held = a ? heldOutlines.get(a.served) : undefined;
     if (a && (!held || held.key !== key || held.shapes !== a.shapes)) {
-      held = {key, shapes: a.shapes, data: focusOutlines(a, {opened, hovered, level: this.props.clusterLevel, scheme, meta: r.meta})};
+      held = {key, shapes: a.shapes, data: focusOutlines(a, {opened, hovered, level: this.levelOf(r), scheme, meta: r.meta})};
       heldOutlines.set(a.served, held);
     }
     const data = held?.data ?? NO_OUTLINES;
@@ -1448,11 +1467,11 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const bucket = Math.round(zoom * LABEL_ZOOM_STEP);
     const budget = a ? labelBudget(a.served.length) : 0;
     const opened = this.props.openedArtifact ?? null;
-    const key = a ? `${a.version}|${a.palette}|${bucket}|${budget}|${this.props.clusterLevel ?? ''}|${opened ?? ''}` : '';
+    const key = a ? `${a.version}|${a.palette}|${bucket}|${budget}|${this.levelOf(r) ?? ''}|${opened ?? ''}` : '';
     let held = a ? heldLabels.get(a.served) : undefined;
     if (a && viewport && (!held || held.key !== key)) {
       const scale = 2 ** zoom; // pixels per world unit
-      const {candidates, byId} = labelCandidates(a, r.meta, this.props.clusterLevel, zoom, budget, opened);
+      const {candidates, byId} = labelCandidates(a, r.meta, this.levelOf(r), zoom, budget, opened);
       const data: LabelDatum[] = [];
       const leaders: LeaderDatum[] = [];
       let placed = 0;

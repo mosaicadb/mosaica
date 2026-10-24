@@ -37,7 +37,7 @@ type Found = {key: string; name: string; path: string; rung: number};
  * it as a modal dialog, and Close, Done or Escape closes it and gives focus back to what had it.
  *
  * The rows are a category's values, a flat layer's clusters, a `stacked` or `tiered` layer's
- * clusters at `cluster-level` (its deepest level where unset), or on a `nested` or `dag` layer the
+ * clusters at `cluster-level` (its top level where unset), or on a `nested` or `dag` layer the
  * clusters of the cut the map draws (`cut: 'drawn'`), which the layer's field card ranks too, and
  * which changes as the camera does. Each row has a checkbox, its colour, its name (a cluster's two
  * nearest parents in grey under it) and its count over everything the viewer may see, with no
@@ -308,7 +308,7 @@ export class MosaicaColourEditor extends MosaicaElement {
 
   /** What the dialog colours: a rendered category column, or `cluster:<layer>`. */
   @property() accessor field = '';
-  /** The level of a `stacked` or `tiered` layer whose clusters are listed; `null` is its deepest. */
+  /** The level of a `stacked` or `tiered` layer whose clusters are listed; `null` is its top level. */
   @property({type: Number, attribute: 'cluster-level'}) accessor level: number | null = null;
 
   /** Whether the dialog is open. @internal */

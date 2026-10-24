@@ -229,13 +229,13 @@ describe('<mosaica-colour-editor> on a tree layer', () => {
 });
 
 describe('<mosaica-colour-editor> on a levelled layer', () => {
-  it('lists the clusters of the level coloured, the deepest unless one is set', async () => {
-    const deepest = await open('cluster:bands');
-    expect(specOf(deepest.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
-    expect(deep(deepest.host, '[part="sub"]')!.textContent).toBe('Fine · Tableau 10');
+  it('lists the clusters of the level coloured, the top level unless one is set', async () => {
+    const top = await open('cluster:bands');
+    expect(specOf(top.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 0, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
     document.body.innerHTML = '';
-    const broad = await open('cluster:bands', 'cluster-level="0"');
-    expect(specOf(broad.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 0, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
+    const fine = await open('cluster:bands', 'cluster-level="1"');
+    expect(specOf(fine.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
+    expect(deep(fine.host, '[part="sub"]')!.textContent).toBe('Fine · Tableau 10');
   });
 });
 

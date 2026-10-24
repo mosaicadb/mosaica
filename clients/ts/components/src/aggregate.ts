@@ -56,11 +56,11 @@ export function isTree(layer: Pick<Layer, 'hierarchy'>): boolean {
 
 /**
  * The level of a `stacked` or `tiered` layer that is counted and coloured: `chosen` where the layer
- * declares it, else its deepest. `undefined` on a layer with no levels to choose.
+ * declares it, else its top (coarsest). `undefined` on a layer with no levels to choose.
  */
 export function levelOf(layer: Pick<Layer, 'hierarchy' | 'levels'>, chosen: number | null): number | undefined {
   if ((layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered') || layer.levels.length === 0) return undefined;
-  return chosen !== null && layer.levels.some((l) => l.level === chosen) ? chosen : layer.levels.at(-1)!.level;
+  return chosen !== null && layer.levels.some((l) => l.level === chosen) ? chosen : layer.levels[0]!.level;
 }
 
 /**

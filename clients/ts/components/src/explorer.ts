@@ -1621,7 +1621,7 @@ export class MosaicaExplorer extends MosaicaElement {
     const layers = colourLayers(meta.layers).flatMap((decl) => {
       const value = `${CLUSTER_PREFIX}${decl.name}`;
       if (decl.levels.length <= 1) return [{value, title: decl.title || decl.name, kind: 'Clusters', checked: colourBy === value}];
-      const drawn = this.level ?? decl.levels.at(-1)!.level;
+      const drawn = this.level ?? decl.levels[0]!.level;
       return decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && drawn === lv.level}));
     });
     const columns = meta.declaredScalars.filter((c) => c.render).map((c) => ({value: c.name, title: columnCaption(c.name), kind: c.category ? 'Category' : c.arrowType === 'timestamp_us' ? 'Date' : 'Number', checked: colourBy === c.name}));

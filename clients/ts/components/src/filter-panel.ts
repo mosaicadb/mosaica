@@ -107,7 +107,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
   @property() accessor pinned = '';
   /** Folds every card but one, and shortens the subject row's figures. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level the cards of levelled layers count at, passed to each; `null` is the deepest. */
+  /** The level the cards of levelled layers count at, passed to each; `null` is their top level. */
   @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
 
   /** The fields the user added, which stay listed. @internal */
