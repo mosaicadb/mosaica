@@ -646,11 +646,11 @@ fn remove_the_deployment() {
         && std::fs::symlink_metadata(directory.join("mosaica.toml"))
             .is_ok_and(|m| m.file_type().is_file());
     if !unchanged {
-        eprintln!(
-            "mosaica serve: left {} in place, since it no longer holds its mosaica.toml or is now \
-             a symbolic link",
+        note(&format!(
+            "left {} in place, since it no longer holds its mosaica.toml or is now a symbolic \
+             link",
             directory.display()
-        );
+        ));
         return;
     }
     // A write still in flight can add a file as the tree is removed, so a second pass finishes it.
@@ -658,17 +658,21 @@ fn remove_the_deployment() {
         match std::fs::remove_dir_all(directory) {
             Ok(()) => return,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-            Err(e) => eprintln!(
-                "mosaica serve: could not remove {}: {e}",
-                directory.display()
-            ),
+            Err(e) => note(&format!("could not remove {}: {e}", directory.display())),
         }
     }
 }
 
+/// One line on stderr while stopping, where nothing may stop the stop: once the process that read
+/// stderr has gone, `eprintln!` would panic on the closed pipe and the process would not exit.
+fn note(line: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stderr(), "mosaica serve: {line}");
+}
+
 /// Stop the process with success, deleting the deployment where `--remove-on-exit` asked.
 fn stop(on: &str) -> ! {
-    eprintln!("mosaica serve: stopped on {on}");
+    note(&format!("stopped on {on}"));
     remove_the_deployment();
     std::process::exit(0);
 }

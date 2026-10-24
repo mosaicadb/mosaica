@@ -45,6 +45,11 @@ fn health_follows_the_server_and_sigterm_stops_it_cleanly() {
 /// `mosaica serve --deployment <dir>/mosaica.toml` with `flags`, its standard input a pipe held
 /// here, once it has announced its addresses.
 fn piped(dir: &Path, flags: &[&str]) -> Child {
+    piped_with(dir, flags, Stdio::null())
+}
+
+/// [`piped`], with standard error going to `stderr`.
+fn piped_with(dir: &Path, flags: &[&str], stderr: Stdio) -> Child {
     let mut child = mosaica()
         .arg("serve")
         .arg("--deployment")
@@ -52,7 +57,7 @@ fn piped(dir: &Path, flags: &[&str]) -> Child {
         .args(flags)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .spawn()
         .unwrap();
     let mut line = String::new();
@@ -113,6 +118,18 @@ fn the_end_of_stdin_stops_the_server_and_what_it_wrote_survives_a_restart() {
         "the principal written before the stop"
     );
     assert!(close_stdin(again).success());
+}
+
+#[test]
+fn the_server_stops_after_the_process_reading_its_stderr_has_gone() {
+    // A starting process that dies closes the server's stderr with its stdin. Writing the stop's
+    // note must not stop the stop.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path();
+    deployment(dir, &Ports::chosen());
+    let mut server = piped_with(dir, &["--exit-on-stdin-close"], Stdio::piped());
+    drop(server.stderr.take());
+    assert!(close_stdin(server).success());
 }
 
 #[test]
