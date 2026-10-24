@@ -53,8 +53,8 @@ reader cannot hold compute capacity a waiting request needs.
 A grant's authorised set and its row projection, which [access control
 describes](access-control.md#what-a-request-answers-from), are built once, together, and then kept
 for every session with the grant rather than rebuilt on every request. Rebuilding either from
-nothing is the most expensive step in the path a request takes. What [a flush, a merge and a
-compaction fold](write-path.md#when-new-data-appears) each do to that cached pair is described there; none of the
+nothing is the most expensive step in the path a request takes. A flush, a merge and a
+compaction each change that cached pair, and none of the
 three is applied on the thread answering a request. A background pass folds a flush or a merge
 into every resident grant's cached pair as it reaches each one. Only a session whose grant the pass
 has not yet reached pays the cost inline, as an ordinary cache miss, on its own next request. After
@@ -222,7 +222,7 @@ are computed from the request's visible set in three parts:
 The visible set is F less D, together with T, and the three never overlap, so an artifact's count
 is its count over F, less its count over D, plus its count over T. The same holds for the number
 of its rows with a position and for the sums of their positions, which give the centroid. In a
-bundle whose items are numbered in several point shards ([write path](write-path.md#inserting-and-editing)),
+bundle whose items are numbered in several point shards,
 F, D and T are each the union of the shards' own. F's figures are held as one sum over every
 shard, so an artifact's count, centroid and box are read once, as in a bundle of one shard, before
 the artifact is tested or served.

@@ -101,10 +101,22 @@ A deletion or suppression applies to every request that starts after the server 
 !!! note "If a change cannot be written to the log"
     If the server cannot make a change durable, it answers 500. A deletion or suppression in that request is already in force anyway, since hiding an item early is safe. A lift of a suppression is not applied. Resend the request: until it succeeds, a restart would bring the deleted or suppressed items back.
 
-!!! warning "Deleted data stays on disc until a compaction"
-    A deleted item is hidden at once, but its values stay in the database's files until a [compaction](#background-maintenance) rewrites them. The values an edit replaces stay in the same way. After the compaction, the previous files are removed once no request is reading them, usually within one flush interval, and the log's copy goes when the log next rotates. Two things are not removed: an access-label term the item carried, and a category value added to a vocabulary for it.
+### Erasing deleted data
 
-    If the law or a privacy request requires the data gone, send `POST /control/compact` after the deletion. The 202 it answers only asks for a compaction, which can still be refused, for example for lack of disc space. Check `/control/status` until `compaction.folds` has risen with no new `fold_refusals`, and `overlay.retirable` has fallen. Copies outside Mosaica are yours to remove: backups, filesystem snapshots, the build's source files, and the request log if `[serve] request_log` is set.
+A deleted item is hidden at once, but its values stay in the database's files until a [compaction](#background-maintenance) rewrites them. The values an edit replaces stay in the same way. After the compaction:
+
+- the previous files are removed once no request is reading them, usually within one flush interval;
+- the log's copy goes when the log next rotates;
+- the server's cache directory holds no field values. Counts and positions the item contributed to are dropped when the cache is next swept, or evicted sooner.
+
+Compaction never removes three things: an access-label term that only deleted items carried, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
+
+To remove a deleted item's values without a rebuild, send `POST /control/compact` after the deletion.
+
+!!! note "Confirming that a compaction ran"
+    `POST /control/compact` answers 202 when it has asked for a compaction, and the compaction can still be refused, for example for lack of disc space. To confirm it ran, check `/control/status` until `compaction.folds` has risen, `compaction.fold_refusals` has not, and `overlay.retirable` has fallen.
+
+Copies outside Mosaica are yours to remove: backups, filesystem snapshots, the build's source files, and the request log if `[serve] request_log` is set.
 
 ## Durability and restarts
 
@@ -134,6 +146,6 @@ A compaction runs alongside requests, which keep being answered. When it finishe
 - **Telling clients what changed.** A response says that the data has changed, not which items or which part of the map. A client that wants to know re-requests what it shows.
 - **Telling a client its session is behind.** Nothing tells a client that items under a new access term need a new session.
 - **Notifying clients that annotation content they hold was withdrawn** because an item it was generated from was deleted. Each request checks current state, so the content is not served again, but nothing announces the change.
-- **Removing an access-label term or a vocabulary value** at a running server, after the items carrying it are deleted. Rebuild from source files that leave it out.
+- **Removing unused access-label terms, vocabulary keys and artifact keys** at compaction. Rebuild from source files that leave them out.
 - **Replicas.** A deployment is one server.
 - **Writing from the command line.** The `mosaica` command builds and reads. Use the HTTP API or a client to write to a running server.

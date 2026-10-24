@@ -454,6 +454,12 @@ unfiltered counts in one request. To revisit: whether the annotations request sh
 filter at all, leaving the filter's figures to that breakdown. Left as it is for the first
 release. No issue exists.
 
+**Pruning unused label terms, vocabulary keys and artifact keys at compaction.** A compaction
+removes a deleted item's rows and values, but an access-label term only deleted items carried, a
+key an open vocabulary added for one, and an artifact key one created on an open layer stay in the
+bundle; a public vocabulary goes on serving such a key. Erasing them today means a rebuild from
+sources that leave them out (`docs/guides/rebuild.md`). No issue exists.
+
 [#3]: https://github.com/jennis0/tessera-index/issues/3
 [#4]: https://github.com/jennis0/tessera-index/issues/4
 [#73]: https://github.com/jennis0/tessera-index/issues/73
