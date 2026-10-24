@@ -142,16 +142,53 @@ The computed hull follows only the members the viewer may see, so it reveals not
 
 At a build, a layer and its artifacts come from the declaration and its files. At a running server:
 
-| To | Use |
-|---|---|
-| Declare a new layer | `PUT /control/layers` |
-| Publish artifacts and their members | `PUT /control/layers/{name}/artifacts` |
-| Add members to existing artifacts | `PATCH /control/layers/{name}/artifacts` |
-| Put new items into artifacts as they are inserted | a column named after the layer in the insert batch |
-| Delete or suppress an artifact, or suppress a whole layer | `POST /control/changes`, naming it by `mosaica_id` |
-| Drop a layer | `DELETE /control/layers/{name}` |
+=== "HTTP"
 
-The Python client does the same with `declare_layer`, `declare_labels`, `insert` into the layer and `commit()`, with `remove`, `suppress` and `drop_layer` for the rest. The TypeScript client has `Control.declareLayer`, `Control.publish`, `Control.grow`, `Control.changes` and `Control.dropLayer`. The command line cannot change a running server's layers.
+    | To | Route |
+    |---|---|
+    | Declare a new layer | `PUT /control/layers` |
+    | Publish artifacts and their members | `PUT /control/layers/{name}/artifacts` |
+    | Add members to existing artifacts | `PATCH /control/layers/{name}/artifacts` |
+    | Put new items into artifacts as they are inserted | a column named after the layer in the insert batch |
+    | Delete or suppress an artifact, or suppress a whole layer | `POST /control/changes`, naming it by `mosaica_id` |
+    | Drop a layer | `DELETE /control/layers/{name}` |
+
+=== "Python"
+
+    On a server elsewhere, `Control` has the TypeScript client's calls: `declare_layer`, `publish`, `grow`, `changes` and `drop_layer`.
+
+    | To | Call |
+    |---|---|
+    | Declare a new layer | `Database.declare_layer`, or `declare_labels` for a label layer, then `commit` |
+    | Publish artifacts and their members | `Database.insert` into the layer, with `artifacts=` and `members=`, then `commit` |
+    | Add members to existing artifacts | `Database.insert` into the layer, with `members=`, then `commit` |
+    | Put new items into artifacts as they are inserted | `Database.insert` into the layer, with `members=` naming the new items |
+    | Delete or suppress an artifact, or suppress a whole layer | `Database.remove`, `Database.suppress`, naming it by `mosaica_id` |
+    | Drop a layer | `Database.drop_layer` |
+
+=== "TypeScript"
+
+    | To | Call |
+    |---|---|
+    | Declare a new layer | `Control.declareLayer` |
+    | Publish artifacts and their members | `Control.publish` |
+    | Add members to existing artifacts | `Control.grow` |
+    | Put new items into artifacts as they are inserted | a column named after the layer in `Control.ingest` |
+    | Delete or suppress an artifact, or suppress a whole layer | `Control.changes`, naming it by `mosaica_id` |
+    | Drop a layer | `Control.dropLayer` |
+
+=== "CLI"
+
+    The `mosaica` command builds layers into a new database, and cannot change a running server's layers.
+
+    | To | Command |
+    |---|---|
+    | Declare a new layer | `[[layer]]` in the declaration file, built by `mosaica build` |
+    | Publish artifacts and their members | The layer's source files, built by `mosaica build` |
+    | Add members to existing artifacts | Not built yet |
+    | Put new items into artifacts as they are inserted | Not built yet |
+    | Delete or suppress an artifact, or suppress a whole layer | Not built yet |
+    | Drop a layer | Not built yet |
 
 As the items change, the annotations follow:
 
