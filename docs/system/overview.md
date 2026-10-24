@@ -73,7 +73,7 @@ A deletion or suppression applies to every request that starts after the server 
 
 Anything you can declare when you first build a database, you can also declare to a running server, and the reverse, with one exception. Not built yet: declaring a rendered field at a running server. Declare it at a build.
 
-The [write path](write-path.md) chapter covers ingest, flushes and compaction.
+[Changing data](write-path.md) covers ingest, flushes and compaction.
 
 ## Who sees what
 
