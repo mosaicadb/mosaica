@@ -34,7 +34,7 @@ PAPERS = [f"p{i}" for i in range(20)]
 PAGED = {
     "view": "map",
     "fields": ["paper", "venue", "n", "title"],
-    "system_fields": ["position"],
+    "position": True,
     "order": "map",
     "page_rows": 3,
     "pages": 1,
@@ -319,7 +319,7 @@ def test_every_request_is_the_arguments_given(db, sent):
     asked = {
         "view": "map",
         "fields": ["venue"],
-        "system_fields": ["labels"],
+        "labels": True,
         "filters": {"n": {"range": {"lt": 12}}},
         "keep_unmatched": True,
         "count": True,
@@ -368,7 +368,7 @@ def test_the_values_read_are_the_values_inserted(db):
 
 def test_a_position_is_the_coordinates_the_item_was_inserted_with(db):
     """In the view's own coordinates, to one step of its grid: 45 units over 2^32 steps."""
-    rows = db.items("map", ["n"], system_fields=["position"], page_rows=4, pages=1).to_pylist()
+    rows = db.items("map", ["n"], position=True, page_rows=4, pages=1).to_pylist()
     assert len(rows) == 20
     for row in rows:
         i = row["n"]
@@ -542,7 +542,7 @@ def test_a_refused_read_raises_a_refusal(db):
 def test_a_read_that_returns_no_row_has_the_columns_asked_for(db):
     """A table of no rows, typed as a read with rows types it; from `batches=True`, one batch of
     no rows."""
-    asked = {"view": "map", "fields": ["paper", "venue", "n", "title"], "system_fields": ["labels"]}
+    asked = {"view": "map", "fields": ["paper", "venue", "n", "title"], "labels": True}
     schema = db.items(**asked).schema
     nothing = {**asked, "filters": {"venue": {"eq": "absent"}}}
     table = db.items(**nothing)

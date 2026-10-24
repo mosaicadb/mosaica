@@ -676,7 +676,7 @@ class Selection:
         """Every item in this selection, with the fields named, as one pyarrow table.
 
         The selection's filters and box are sent as the read's `filters`, so the rows are the
-        items `count()` counts. `options` are `items`'s other keywords, such as `system_fields`,
+        items `count()` counts. `options` are `items`'s other keywords, such as `position`,
         `order`, `page_rows` and `batches`, each sent only when given.
 
             db.view("papers").filter({"year": {"eq": 2023}}).items(["title"]).to_pandas()
@@ -920,7 +920,8 @@ class Viewer:
         view: str,
         fields: Sequence[str],
         *,
-        system_fields: Optional[Sequence[str]] = None,
+        position: Optional[bool] = None,
+        labels: Optional[bool] = None,
         filters: Optional[dict] = None,
         keep_unmatched: Optional[bool] = None,
         count: Optional[bool] = None,
@@ -943,10 +944,10 @@ class Viewer:
         - `fields`: the declared columns to return, in this order. `[]` returns `mosaica_id`
           alone. A column declared for a view group, read under a view outside that group, is
           named `"<column>@<key>"` to say which of the group's views to read it in.
-        - `system_fields`: any of `"position"`, the columns `mosaica:x` and `mosaica:y` in the
-          view's coordinates (degrees for a geographic view), and `"labels"`, the column
-          `mosaica:labels` holding, for each item, the clauses of its labels that this reader
-          satisfies, as `item` gives them.
+        - `position`: return the columns `mosaica:x` and `mosaica:y`, each item's position in
+          the view's coordinates (degrees for a geographic view).
+        - `labels`: return the column `mosaica:labels` holding, for each item, the clauses of its
+          labels that this reader satisfies, as `item` gives them.
         - `filters`: a filter expression, as `Selection.filter` takes one. Only the items that
           match are returned.
         - `keep_unmatched`: return every item, with a `mosaica:matched` column saying whether it
@@ -964,8 +965,8 @@ class Viewer:
         Each of these is sent only when given, so the server's own setting applies otherwise.
         `count` goes on the first request only, which is where the server takes it.
 
-        The columns are `mosaica_id`, the fields in the order named, the system fields in the
-        order named, then `mosaica:matched`. A column is present even where no item has a value,
+        The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y`
+        under `position`, `mosaica:labels` under `labels`, then `mosaica:matched`. A column is present even where no item has a value,
         and a missing value is null. A category column holds each value's key, as a dictionary
         column. The table's schema metadata `mosaica.head` is the first response's head as JSON:
         `page_rows`, the page size used, `order`, the order used, and the counts under `count`.
@@ -975,13 +976,14 @@ class Viewer:
         refused, raises a `PartialRead` whose `rows` are the rows read before it and whose
         `cursor` reads the rest.
 
-            papers = db.items("papers", ["title", "year"], system_fields=["position"])
+            papers = db.items("papers", ["title", "year"], position=True)
             papers.to_pandas()
             recent = db.items("papers", ["title"], filters={"year": {"range": {"gte": 2020}}})
         """
         request: dict = {"view": view, "fields": list(fields)}
         given = {
-            "system_fields": None if system_fields is None else list(system_fields),
+            "position": position,
+            "labels": labels,
             "filters": filters,
             "keep_unmatched": keep_unmatched,
             "count": count,

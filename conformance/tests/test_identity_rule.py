@@ -235,7 +235,7 @@ class Deployment:
     def _read(self, fields: list[str], filters: dict | None = None) -> pa.Table:
         body: dict = {"view": VIEW, "fields": fields, "order": "map"}
         if fields:
-            body["system_fields"] = ["position"]
+            body["position"] = True
         if filters is not None:
             body["filters"] = filters
         tables = []

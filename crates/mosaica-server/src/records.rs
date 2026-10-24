@@ -39,8 +39,12 @@ use crate::viewer::FilterParser;
 pub(crate) struct ItemsReq {
     view: String,
     fields: Vec<String>,
+    /// Return `mosaica:x` and `mosaica:y`.
     #[serde(default)]
-    system_fields: Vec<String>,
+    position: bool,
+    /// Return `mosaica:labels`, after the position when both are asked for.
+    #[serde(default)]
+    labels: bool,
     /// Parsed by [`crate::filter_dto`] against the view, as the viewport's is.
     #[serde(default)]
     filters: Option<serde_json::Value>,
@@ -399,10 +403,15 @@ fn run_items(
             Ok(resolved) => resolved,
             Err(e) => return Read::Refused(e),
         };
+    let system_fields: Vec<String> = [(req.position, "position"), (req.labels, "labels")]
+        .into_iter()
+        .filter(|&(asked, _)| asked)
+        .map(|(_, name)| name.to_string())
+        .collect();
     let request = ItemsRequest {
         view: &view.id,
         fields: &req.fields,
-        system_fields: &req.system_fields,
+        system_fields: &system_fields,
         filter,
         keep_unmatched: req.keep_unmatched,
         count: req.count,

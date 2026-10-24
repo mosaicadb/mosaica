@@ -1484,7 +1484,8 @@ export type BrowsePage = {
  * server's default applies.
  *
  * The columns of each page are `mosaica_id` (`uint64`), the named fields in the order named, the
- * system fields in the order named, then `mosaica:matched` (`bool`) under `keepUnmatched`. Every
+ * position under `position`, the labels under `labels`, then `mosaica:matched` (`bool`) under
+ * `keepUnmatched`. Every
  * named field is present whether or not an item carries a value, and an absent value is null. A
  * category field is a dictionary column of its keys, each page's dictionary holding only the keys
  * its rows carry.
@@ -1501,12 +1502,15 @@ export type ItemsRequest = {
    */
   fields: string[];
   /**
-   * System columns, after the fields, in this order. `position` is `mosaica:x` and `mosaica:y`
-   * (`float64`) in the view's coordinates, so degrees on a geographic view. `labels` is
-   * `mosaica:labels` (`list<utf8>`), the clauses of each item's labels that this principal
+   * Return each item's position as `mosaica:x` and `mosaica:y` (`float64`) in the view's
+   * coordinates, so degrees on a geographic view.
+   */
+  position?: boolean;
+  /**
+   * Return `mosaica:labels` (`list<utf8>`), the clauses of each item's labels that this principal
    * satisfies, as the item card gives them.
    */
-  systemFields?: ('position' | 'labels')[];
+  labels?: boolean;
   /** The viewport's filter. Only the items matching it are returned, unless `keepUnmatched` is set. */
   filters?: FilterExpr;
   /**

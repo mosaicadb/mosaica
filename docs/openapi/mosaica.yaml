@@ -1396,19 +1396,19 @@ paths:
         latest data with the visible set composed again, so a deletion or suppression accepted
         during a read applies from the next page. A read returns each row at most once. A row
         inserted behind the cursor during a read is not returned, and one inserted ahead of it is.
-        `fields`, `system_fields`, `filters`, `keep_unmatched` and `page_rows` may change between
-        the requests of one read, and the page schema changes with them.
+        `fields`, `position`, `labels`, `filters`, `keep_unmatched` and `page_rows` may change
+        between the requests of one read, and the page schema changes with them.
 
         **Columns.** `mosaica_id` (`uint64`) first, then the named fields in the order named, then
-        the system fields in the order named, then `mosaica:matched` (`bool`) under
-        `keep_unmatched`. Every named field is present whether or not an item carries a value. A
+        the position under `position`, then the labels under `labels`, then `mosaica:matched`
+        (`bool`) under `keep_unmatched`. Every named field is present whether or not an item carries a value. A
         number or boolean arrives as its declared type, `timestamp_us` as `timestamp[us, UTC]`, a
         keyword or text field as `utf8`, and a category as `dictionary<int32, utf8>` holding its
         keys, each frame's dictionary holding only the keys its rows carry. An absent value is
-        null. `position` is two `float64` columns, `mosaica:x` and `mosaica:y`: the centre of the
+        null. The position is two `float64` columns, `mosaica:x` and `mosaica:y`: the centre of the
         step of the view's 32-bit grid the item is stored in, converted back through the view's
         projection and frame, so degrees on a geographic view, and within half a step of the
-        position the item was given. `labels` is `list<utf8>` as `mosaica:labels`: the clauses of the item's labels this principal satisfies, as the item card serves them. A rendered field is read
+        position the item was given. The labels are `list<utf8>` as `mosaica:labels`: the clauses of the item's labels this principal satisfies, as the item card serves them. A rendered field is read
         from `view`, where the item card reads the first view the principal can reach, so the two
         can differ. An item joined into `view` before its own ingest is flushed has null record
         fields until that flush.
@@ -1461,7 +1461,7 @@ paths:
               filtered:
                 summary: Computation and language papers about translation, with their positions
                 description: "Every paper in `cs.CL` whose title matches \"translation\", with its position in `topics` as `mosaica:x` and `mosaica:y`."
-                value: {"view": "topics", "fields": ["arxiv_id", "title"], "system_fields": ["position"], "filters": {"all_of": [{"primary_category": {"eq": "cs.CL"}}, {"title": {"match": "translation"}}]}}
+                value: {"view": "topics", "fields": ["arxiv_id", "title"], "position": true, "filters": {"all_of": [{"primary_category": {"eq": "cs.CL"}}, {"title": {"match": "translation"}}]}}
               counted:
                 summary: How many quantum physics papers there are, and the first 50
                 description: "`count` puts `visible` and `matched` in the head: the papers this viewer may see in `topics`, and those in `quant-ph`."
@@ -1521,10 +1521,9 @@ paths:
             The request needs to change:
 
             - the viewport's filter refusals;
-            - an unknown key, a missing `view` or `fields`, or an `order` or `compression` outside its values;
+            - an unknown key, a missing `view` or `fields`, a `position` or `labels` that is not a boolean, or an `order` or `compression` outside its values;
             - an unknown or repeated field;
             - an unpinned group-scoped field outside its group, a pin on a field that is not group-scoped, or a group-scoped `text` field;
-            - an unknown system field;
             - `page_rows` or `pages` of 0;
             - `count` with a `cursor`;
             - a cursor that does not open for this request, or whose order differs from `order`.
@@ -6278,12 +6277,12 @@ components:
           type: array
           items: { type: string }
           description: Declared fields to return, by name, each once. A group-scoped field may be pinned as `<field>@<key>`. Empty returns `mosaica_id` alone.
-        system_fields:
-          type: array
-          items:
-            type: string
-            enum: [position, labels]
-          description: System columns to return, in this order. Absent is none.
+        position:
+          type: boolean
+          description: Return the item's position in `view` as `mosaica:x` and `mosaica:y`. Absent is false.
+        labels:
+          type: boolean
+          description: Return the clauses of the item's labels this principal satisfies as `mosaica:labels`. Absent is false.
         filters:
           $ref: "#/components/schemas/FilterExpr"
         keep_unmatched:

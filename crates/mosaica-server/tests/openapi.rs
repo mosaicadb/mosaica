@@ -1973,7 +1973,8 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
     let body = json!({
         "view": "s0",
         "fields": ["archive", "score"],
-        "system_fields": ["position", "labels"],
+        "position": true,
+        "labels": true,
         "filters": { "score": { "range": { "gte": 5 } } },
         "keep_unmatched": true,
         "count": true,
@@ -2048,7 +2049,7 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
         json!({ "view": "s0", "fields": [], "page_rows": 0 }),
         json!({ "view": "s0", "fields": [], "order": "random" }),
         json!({ "view": "s0", "fields": [], "compression": "gzip" }),
-        json!({ "view": "s0", "fields": [], "system_fields": ["entity_id"] }),
+        json!({ "view": "s0", "fields": [], "system_fields": ["position"] }),
     ] {
         assert_invalid(&doc, "ItemsRequest", &body);
     }

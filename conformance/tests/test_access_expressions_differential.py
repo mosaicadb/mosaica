@@ -31,7 +31,7 @@ def read_all(server, token: str) -> dict[int, tuple[int, list[str]]]:
     body = {
         "view": fx.VIEW_ID,
         "fields": [JOIN_FIELD],
-        "system_fields": ["labels"],
+        "labels": True,
         "page_rows": 50,
     }
     out: dict[int, tuple[int, list[str]]] = {}

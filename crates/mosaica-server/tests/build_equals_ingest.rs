@@ -678,7 +678,7 @@ async fn seen(
     let mut body = json!({
         "view": view,
         "fields": fields,
-        "system_fields": ["position"],
+        "position": true,
         "order": "map",
     });
     if let Some(filters) = filters {

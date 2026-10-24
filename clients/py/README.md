@@ -475,7 +475,7 @@ selection's filters and box as `filters`.
 ### Every row: `items` and `artifacts`
 
 ```python
-papers = db.items("s0", ["title", "primary_category"], system_fields=["position"])
+papers = db.items("s0", ["title", "primary_category"], position=True)
 papers.to_pandas()                            # every paper, as one DataFrame
 cs = db.viewer(["cs.LG"]).items("s0", ["title"], filters={"archive": {"eq": "cs"}})
 topics = db.artifacts("s0", "clusters/kmeans", ["key", "masked_count", "centroid"])
@@ -489,8 +489,8 @@ for batch in db.items("s0", ["title"], page_rows=10_000, batches=True):
 named, as one pyarrow table. The server answers a page at a time, several pages to a response,
 and ends each response with a cursor for the next. `items` asks for responses until no row
 remains and joins their pages. The columns are `mosaica_id`, the fields in the order named, then
-the `system_fields` asked for: `position` as `mosaica:x` and `mosaica:y`, in the view's
-coordinates, and `labels` as `mosaica:labels`. A unique attribute is a field like any other. A category column holds each value's key as a
+with `position=True` the columns `mosaica:x` and `mosaica:y`, in the view's coordinates, and with
+`labels=True` the column `mosaica:labels`. A unique attribute is a field like any other. A category column holds each value's key as a
 dictionary column, and a missing value is null. `filters` narrows the rows as `Selection.filter` does, and `keep_unmatched=True`
 keeps every row and adds a `mosaica:matched` column. The table's schema metadata `mosaica.head`
 holds the page size and order the server used, and with `count=True` the numbers of items

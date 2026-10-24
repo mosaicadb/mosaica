@@ -334,7 +334,6 @@ ITEMS_FIELDS = [
     "serial", "fx_key", "department", "archive", "title", "shelf", "submitter", "abstract", "note",
     "pages",
 ]
-ITEMS_SYSTEM_FIELDS = ["position", "labels"]
 ITEMS_PAGE_ROWS = 4_999
 ITEMS_PAGES_PER_RESPONSE = 2
 # `POST /v1/artifacts`: a layer the sweep publishes, read with every property.
@@ -1143,7 +1142,8 @@ def test_no_entity_id_or_identity_key_crosses_the_wire_or_appears_in_logs(grant:
         body = {
             "view": VIEW,
             "fields": ITEMS_FIELDS,
-            "system_fields": ITEMS_SYSTEM_FIELDS,
+            "position": True,
+            "labels": True,
             "order": order,
             "page_rows": ITEMS_PAGE_ROWS,
             "pages": ITEMS_PAGES_PER_RESPONSE,

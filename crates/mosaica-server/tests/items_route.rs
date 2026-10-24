@@ -263,11 +263,11 @@ async fn a_full_read_returns_every_visible_row_once_in_either_order() {
     }
 }
 
-/// **The columns are the ones asked for, in the order asked for**: `mosaica_id`, the named fields,
-/// the system fields, then `mosaica:matched` under `keep_unmatched`, which then returns every
+/// **The columns are the ones asked for**: `mosaica_id`, the named fields in the order named, the
+/// position, the labels, then `mosaica:matched` under `keep_unmatched`, which then returns every
 /// visible row.
 #[tokio::test]
-async fn the_page_schema_is_the_named_fields_then_the_system_fields() {
+async fn the_page_schema_is_the_named_fields_then_the_position_and_labels() {
     let f = fixture().await;
     let token = token_for(&f.server, &["1"]).await;
     let (visible, matched) =
@@ -278,7 +278,8 @@ async fn the_page_schema_is_the_named_fields_then_the_system_fields() {
         &json!({
             "view": "s0",
             "fields": ["note", "archive", "year", "score"],
-            "system_fields": ["labels", "position"],
+            "position": true,
+            "labels": true,
             "filters": { "archive": { "in": ["astro"] } },
             "keep_unmatched": true,
             "page_rows": 400,
@@ -300,9 +301,9 @@ async fn the_page_schema_is_the_named_fields_then_the_system_fields() {
             "archive",
             "year",
             "score",
-            "mosaica:labels",
             "mosaica:x",
             "mosaica:y",
+            "mosaica:labels",
             "mosaica:matched",
         ]
     );
@@ -333,7 +334,8 @@ async fn a_read_that_finds_no_row_carries_one_typed_page_of_no_rows() {
     let mut body = json!({
         "view": "s0",
         "fields": ["note", "archive", "year", "score"],
-        "system_fields": ["labels", "position"],
+        "position": true,
+        "labels": true,
         "page_rows": 10,
         "pages": 1,
     });
@@ -452,7 +454,7 @@ async fn zstd_pages_decode_to_the_uncompressed_pages() {
     let token = token_for(&f.server, &["0"]).await;
     let body = json!({
         "view": "s0", "fields": ["note", "archive", "score", "year"],
-        "system_fields": ["position", "labels"],
+        "position": true, "labels": true,
         "order": "stored", "page_rows": 500,
     });
     let plain = read_all(&f.server, &token, &body).await;
@@ -497,7 +499,7 @@ async fn every_refusal_has_its_status() {
     let contract = [
         json!({ "view": "s0", "fields": ["no_such_field"] }),
         json!({ "view": "s0", "fields": ["score", "score"] }),
-        json!({ "view": "s0", "fields": [], "system_fields": ["entity_id"] }),
+        json!({ "view": "s0", "fields": [], "system_fields": ["position"] }),
         json!({ "view": "s0", "fields": [], "page_rows": 0 }),
         json!({ "view": "s0", "fields": [], "pages": 0 }),
         json!({ "view": "s0", "fields": [], "count": true, "cursor": cursor }),

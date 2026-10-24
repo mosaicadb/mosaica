@@ -280,8 +280,9 @@ enum Command {
     /// writes each page as it arrives. Each of the route's fields is the argument of the same
     /// name, sent only when given, so the server's own setting applies otherwise.
     ///
-    /// The columns are `mosaica_id`, the fields in the order named, the system fields in the order
-    /// named, then `mosaica:matched` under `--keep-unmatched`. A category field is a dictionary
+    /// The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y`
+    /// under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under
+    /// `--keep-unmatched`. A category field is a dictionary
     /// column of its value keys, each page's dictionary holding the keys of its own rows. A read
     /// that returns no row writes these columns with no rows.
     ///
@@ -290,7 +291,7 @@ enum Command {
     /// `--count`, is printed on stderr at the end.
     ///
     /// For example, `mosaica items --server http://127.0.0.1:8080 --view papers --fields
-    /// title,year --system-fields labels --out papers.parquet`.
+    /// title,year --labels --out papers.parquet`.
     Items(records::ItemsArgs),
     /// Read every artifact of one layer a session token is served, with the properties named, from
     /// a running server, and write them as Arrow IPC or Parquet.

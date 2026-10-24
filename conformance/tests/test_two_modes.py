@@ -905,7 +905,7 @@ def items_reads(principal: str, view: str, fields: list[str], filters: dict) -> 
         Request(
             "POST /v1/items",
             principal,
-            {**base, "order": "map", "system_fields": ["position", "labels"], "count": True},
+            {**base, "order": "map", "position": True, "labels": True, "count": True},
         ),
         Request(
             "POST /v1/items",
@@ -913,7 +913,7 @@ def items_reads(principal: str, view: str, fields: list[str], filters: dict) -> 
             {
                 **base,
                 "order": "map",
-                "system_fields": ["position"],
+                "position": True,
                 "filters": filters,
                 "keep_unmatched": True,
                 "count": True,
@@ -925,7 +925,8 @@ def items_reads(principal: str, view: str, fields: list[str], filters: dict) -> 
             {
                 **base,
                 "order": "stored",
-                "system_fields": ["position", "labels"],
+                "position": True,
+                "labels": True,
                 "filters": filters,
             },
         ),
@@ -998,7 +999,7 @@ def catalogue_battery(side: Side) -> list[Request]:
                     "view": view,
                     "fields": ["serial", "title"],
                     "order": "map",
-                    "system_fields": ["position"],
+                    "position": True,
                     "count": True,
                     "filters": {"serial": {"in": serials}},
                 },

@@ -33,10 +33,13 @@ pub(crate) struct ItemsArgs {
     /// that group, is named `<field>@<key>`. An undeclared or repeated field is refused.
     #[arg(long, value_name = "NAMES")]
     fields: String,
-    /// Any of `position` and `labels`, comma-separated, in the order wanted: the columns
-    /// `mosaica:x` and `mosaica:y`, and `mosaica:labels`. Any other name is refused.
-    #[arg(long, value_name = "NAMES")]
-    system_fields: Option<String>,
+    /// Return each item's position in the view as the columns `mosaica:x` and `mosaica:y`.
+    #[arg(long)]
+    position: bool,
+    /// Return the clauses of each item's labels the token satisfies as the column
+    /// `mosaica:labels`.
+    #[arg(long)]
+    labels: bool,
     /// A filter expression as JSON, such as `{"year": {"range": {"gte": 2020}}}`. Only the items
     /// that match are returned.
     #[arg(long, value_name = "JSON")]
@@ -200,8 +203,11 @@ fn wire_name(value: impl ValueEnum) -> Value {
 pub(crate) fn items(args: ItemsArgs) -> ExitCode {
     let request = request(&args.fields, args.filters.as_deref(), &args.paging).map(|mut request| {
         request.insert("view".into(), args.view.into());
-        if let Some(system) = &args.system_fields {
-            request.insert("system_fields".into(), names(system));
+        if args.position {
+            request.insert("position".into(), true.into());
+        }
+        if args.labels {
+            request.insert("labels".into(), true.into());
         }
         if args.keep_unmatched {
             request.insert("keep_unmatched".into(), true.into());

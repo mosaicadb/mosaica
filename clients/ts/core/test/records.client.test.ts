@@ -176,7 +176,8 @@ describe('MosaicaClient.items and artifacts', () => {
     const items: ItemsRequest = {
       view: 's0',
       fields: ['title'],
-      systemFields: ['position', 'labels'],
+      position: true,
+      labels: true,
       filters: {archive: {in: ['cs']}},
       keepUnmatched: true,
       count: true,
@@ -192,7 +193,8 @@ describe('MosaicaClient.items and artifacts', () => {
     expect(sent[0]!.body).toEqual({
       view: 's0',
       fields: ['title'],
-      system_fields: ['position', 'labels'],
+      position: true,
+      labels: true,
       filters: {archive: {in: ['cs']}},
       keep_unmatched: true,
       count: true,
@@ -238,12 +240,12 @@ describe('MosaicaClient.items and artifacts', () => {
 
   it('follows each response’s cursor until it is null, sending the caller’s request with only the cursor changed and no count', async () => {
     const {client, sent} = clientFor(byCursor(TWO));
-    const request: ItemsRequest = {...REQUEST, systemFields: ['labels'], filters: {archive: {in: ['cs']}}, count: true, pageRows: 3, pages: 2, order: 'map'};
+    const request: ItemsRequest = {...REQUEST, labels: true, filters: {archive: {in: ['cs']}}, count: true, pageRows: 3, pages: 2, order: 'map'};
     const read = await client.items('tok', request);
     const pages = await drain(read);
     expect(pages.map((p) => p.rows)).toEqual(PAGES.map(rowsOf));
     expect(pages.map((p) => p.next)).toEqual(['c1', 'c2', null]);
-    const first = {view: 's0', fields: ['archive', 'title', 'score'], system_fields: ['labels'], filters: {archive: {in: ['cs']}}, page_rows: 3, pages: 2, order: 'map'};
+    const first = {view: 's0', fields: ['archive', 'title', 'score'], labels: true, filters: {archive: {in: ['cs']}}, page_rows: 3, pages: 2, order: 'map'};
     expect(sent.map((s) => s.body)).toEqual([{...first, count: true}, {...first, cursor: 't2'}]);
     // The first response's head, and the last response's trailer.
     expect(read.head).toEqual<ItemsHead>({order: 'map', pageRows: 3, visible: 8, matched: 8});
