@@ -56,6 +56,12 @@ def hidden(monkeypatch, module: str) -> None:
     monkeypatch.setattr(builtins, "__import__", refuse)
 
 
+def test_the_names_loaded_on_first_use_are_listed_for_completion(monkeypatch):
+    hidden(monkeypatch, "pyarrow")
+    hidden(monkeypatch, "anywidget")
+    assert {"create", "open", "Map", "Database", "connect"} <= set(dir(mosaica))
+
+
 def test_the_widget_without_anywidget_names_the_extra_to_install(monkeypatch):
     hidden(monkeypatch, "anywidget")
     with pytest.raises(ImportError) as why:

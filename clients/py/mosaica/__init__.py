@@ -60,3 +60,8 @@ def __getattr__(name: str):
             raise ImportError("making a database needs pyarrow: pip install 'pyarrow>=14'") from e
         return getattr(_database, _SDK[name])
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    # The names loaded on first use are listed too, so a notebook completes them.
+    return sorted(set(globals()) | set(__all__))
