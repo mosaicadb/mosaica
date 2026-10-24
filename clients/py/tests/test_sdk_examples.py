@@ -1,4 +1,5 @@
-"""The demo notebook, run headless: every cell of `examples/notebook_marimo.py` at the sample scale.
+"""The example notebooks, run headless: every cell of `examples/notebook_marimo.py` at the sample
+scale, and of the first tutorial, `examples/01_getting_started.py`, over the GeoNames example data.
 
 A marimo notebook is importable Python: an `App` whose cells are decorated functions. This reads
 the file instead, takes each `@app.cell` function's body and executes the bodies in file order in
@@ -18,8 +19,8 @@ What is asserted is what each section prints, with the expected numbers read fro
 own files; that every map is served each layer it draws or colours by; and that a reader is
 served each topic's title exactly when it may see every paper the title was written from.
 
-`examples/notebook.ipynb` is generated from the marimo file by `marimo export ipynb`, and the last
-test checks that it is what a fresh export makes.
+Each Jupyter notebook beside a marimo file is generated from it by `marimo export ipynb`, and the
+last test checks that it is what a fresh export makes.
 """
 
 from __future__ import annotations
@@ -44,14 +45,17 @@ pytest.importorskip("sklearn")
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "examples" / "notebook_marimo.py"
 TWIN = NOTEBOOK.with_name("notebook.ipynb")
+GETTING_STARTED = NOTEBOOK.with_name("01_getting_started.py")
 
 ASTRO_PH = {"astro-ph", "astro-ph.CO", "astro-ph.EP", "astro-ph.GA", "astro-ph.HE",
             "astro-ph.IM", "astro-ph.SR"}
 LEARNING = {"cs.LG", "stat.ML"}
 
 
-def cell_bodies(path: Path) -> list[ast.Module]:
-    """Each `@app.cell` function's body, with its `return` cut and `SCALE` set to the sample."""
+def cell_bodies(path: Path, scaled: bool = True) -> list[ast.Module]:
+    """Each `@app.cell` function's body, with its `return` cut and `SCALE` set to the sample.
+
+    `scaled=False` is a notebook with no `SCALE`."""
     bodies, scales = [], 0
     for node in ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body:
         if not isinstance(node, ast.FunctionDef):
@@ -68,7 +72,7 @@ def cell_bodies(path: Path) -> list[ast.Module]:
                 line.value = ast.copy_location(ast.Constant("sample"), line.value)
                 scales += 1
         bodies.append(ast.Module(body=body, type_ignores=[]))
-    assert scales == 1, f"{path.name} should assign SCALE in exactly one cell"
+    assert scales == int(scaled), f"{path.name} should assign SCALE in {int(scaled)} cells"
     return bodies
 
 
@@ -300,12 +304,71 @@ def test_the_notebook_runs_and_serves_what_each_section_prints(walk, maps):
             )
 
 
-def test_the_jupyter_notebook_is_the_export_of_the_marimo_file(tmp_path):
-    """`notebook.ipynb` is what `marimo export ipynb` makes of the marimo file today."""
+def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundle, maps):
+    """The first tutorial, each cell run as the reader runs it, against counts read from its
+    Parquet file with pyarrow.
+
+    What a cell shows is the value of its last line, so that value is what is checked.
+    """
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    binary()
+    namespace: dict = {"__name__": "getting_started", "__file__": str(GETTING_STARTED)}
+    shown = []
+    try:
+        for body in cell_bodies(GETTING_STARTED, scaled=False):
+            last = body.body.pop() if body.body and isinstance(body.body[-1], ast.Expr) else None
+            exec(compile(body, str(GETTING_STARTED), "exec"), namespace)  # noqa: S102
+            if last is not None:
+                shown.append(
+                    eval(compile(ast.Expression(last.value), str(GETTING_STARTED), "eval"), namespace)  # noqa: S307
+                )
+        places = pq.read_table(namespace["geonames"] / "points.parquet")
+        counts = [value for value in shown if isinstance(value, int)]
+        tables = [value for value in shown if isinstance(value, pd.DataFrame)]
+
+        population = pc.fill_null(places["population"], 0)
+        big = pc.sum(pc.greater_equal(population, 1_000_000)).as_py()
+        san = sum("san" in words for words in tokens(places["name"].to_pylist()))
+        in_region = pc.equal(places["admin1"], "ID.18")
+        assert counts == [big, san, pc.sum(in_region).as_py()]
+        assert namespace["db"].view("world").count() == places.num_rows
+
+        # Every class and the places with none, largest first, as pyarrow counts them.
+        by_class = tables[1].set_index("key")["count"]
+        classes = places["feature_class"].value_counts().to_pylist()
+        want = {entry["values"]: entry["counts"] for entry in classes}
+        assert {(None if pd.isna(key) else key): n for key, n in by_class.items()} == want
+        assert list(by_class) == sorted(by_class, reverse=True)
+
+        # The westernmost place filed under the region, which the outlier step finds.
+        region = places.filter(in_region)
+        west = region.take([pc.index(region["lon"], pc.min(region["lon"])).as_py()])
+        found = tables[2].iloc[0]
+        assert (found["geonameid"], found["name"]) == (
+            west["geonameid"][0].as_py(),
+            west["name"][0].as_py(),
+        )
+
+        # The three maps: everything, then each of the two selections.
+        assert [widget.filters for _, widget in maps] == [
+            None,
+            {"population": {"range": {"gte": 1_000_000}}},
+            {"admin1": {"eq": "ID.18"}},
+        ]
+    finally:
+        if "db" in namespace:
+            namespace["db"].close()
+
+
+@pytest.mark.parametrize("marimo_file", [NOTEBOOK, GETTING_STARTED], ids=lambda p: p.stem)
+def test_the_jupyter_notebook_is_the_export_of_the_marimo_file(tmp_path, marimo_file):
+    """Each `.ipynb` is what `marimo export ipynb` makes of its marimo file today."""
     pytest.importorskip("marimo")
     fresh = tmp_path / "notebook.ipynb"
     subprocess.run(
-        [sys.executable, "-m", "marimo", "export", "ipynb", str(NOTEBOOK), "-o", str(fresh)],
+        [sys.executable, "-m", "marimo", "export", "ipynb", str(marimo_file), "-o", str(fresh)],
         check=True,
         capture_output=True,
     )
@@ -315,4 +378,5 @@ def test_the_jupyter_notebook_is_the_export_of_the_marimo_file(tmp_path):
         notebook["metadata"].get("marimo", {}).pop("marimo_version", None)
         return notebook
 
-    assert read(TWIN) == read(fresh)
+    twin = TWIN if marimo_file == NOTEBOOK else marimo_file.with_suffix(".ipynb")
+    assert read(twin) == read(fresh)

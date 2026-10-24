@@ -10,8 +10,8 @@
 # `check-clients.sh` already needs — and a cargo toolchain for the companion wheel below.
 #
 # The demo notebooks are in the pytest step: `tests/test_sdk_examples.py` executes the cells of
-# `examples/notebook_marimo.py` against a real build and a real server, and checks that the
-# Jupyter notebook beside it is the marimo file's export, so the walk a reader is pointed at cannot
+# `examples/notebook_marimo.py` and `examples/01_getting_started.py` against a real build and a
+# real server, and checks that the Jupyter notebook beside each is the marimo file's export, so the walk a reader is pointed at cannot
 # drift from the package. It skips, naming what is missing, where `data/notebook-sample/` or the
 # `mosaica` binary is absent.
 #
