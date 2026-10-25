@@ -39,7 +39,7 @@ We'll keep everything in one directory, `~/places`, with Mosaica's files in `~/p
     Where step 2 says `npm install @mosaicajs/components`, install the three tarballs together instead:
 
     ```bash
-    npm install ~/mosaica-packs/mosaicajs-client-0.1.0.tgz ~/mosaica-packs/mosaicajs-deck-0.1.0.tgz ~/mosaica-packs/mosaicajs-components-0.1.0.tgz
+    npm install ~/mosaica-packs/mosaicajs-*.tgz
     ```
 
     The npm registry holds an empty placeholder under each name, so `npm install @mosaicajs/components` succeeds today and installs no Mosaica code.

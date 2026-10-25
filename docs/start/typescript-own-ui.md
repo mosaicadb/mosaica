@@ -43,7 +43,7 @@ mosaica build --config ~/mosaica/examples/data/arxiv/schema.toml
 
 ```
 ...
-built /home/you/papers/mosaica/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024990 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
+built /home/you/papers/mosaica/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024822 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
   view topics: 50000 row(s)
   view topics-wide: 50000 row(s)
 ```
@@ -56,7 +56,7 @@ mosaica serve
 
 ```
 ...
-2026-10-25T16:34:50.918968Z  WARN mosaica_server: serve.open is set: this server is open to this machine, and every request, with or without a credential, sees and may change everything
+2026-10-25T18:12:08.235884Z  WARN mosaica_server: serve.open is set: this server is open to this machine, and every request, with or without a credential, sees and may change everything
 {"event":"listening","viewer":"127.0.0.1:9241","session":"127.0.0.1:9242","control":"127.0.0.1:9243"}
 ```
 
@@ -79,7 +79,7 @@ rm -r src/counter.ts src/assets public/icons.svg
 While the packages are unpublished, install the three tarballs in place of the `npm install` line, as the first tutorial did:
 
 ```bash
-npm install ~/mosaica-packs/mosaicajs-client-0.1.0.tgz ~/mosaica-packs/mosaicajs-deck-0.1.0.tgz ~/mosaica-packs/mosaicajs-components-0.1.0.tgz
+npm install ~/mosaica-packs/mosaicajs-*.tgz
 ```
 
 Here is the whole page. Replace `index.html` with it:
@@ -104,7 +104,7 @@ Now make the store. Create `mosaica.ts` in `src`:
 --8<-- "clients/ts/examples/own-ui/web/src/mosaica.ts"
 ```
 
-`MosaicaClient` sends Mosaica's HTTP requests. `viewerUrl` is the server's viewer address. `sessionUrl` is the address a backend uses to sign viewers in, which an open server doesn't need, so it is empty. `createStore` makes a store that sends its requests through this client. We export both because our own code will need them in a moment, the store for filters and the client for reading papers.
+`createStore` makes a store that talks to the server at `viewerUrl`, the viewer address from `mosaica.toml`. We give no token, which an open server accepts. We export the store because our own code will talk to it from the next step on.
 
 Replace `main.ts` with:
 
@@ -124,12 +124,12 @@ npm run dev -- --port 5273
 
 ```
 > web@0.0.0 dev
-> vite --port 5273 --strictPort
+> vite --port 5273
 
 
-  VITE v8.3.5  ready in 153 ms
+  VITE v8.3.5  ready in 236 ms
 
-  ➜  Local: http://localhost:5273/
+  ➜  Local:   http://localhost:5273/
   ➜  Network: use --host to expose
 ```
 
@@ -147,7 +147,7 @@ The archive menu should list the archives the data has, so we ask the server rat
 
 `store.setAggregate` asks the server to count the papers in groups, here one group per archive, and keeps the answer in the `aggregates` projection under the name we gave it, `archives`. `subject: 'visible'` counts every paper the viewer may see and ignores the filters, so the menu stays the same while the reader filters. Without it the counts would follow the filters, which suits a panel that shows how many match but not a menu. `top: 50` asks for up to fifty archives, largest first, which is more than the 38 in arXiv's list.
 
-`store.subscribe('aggregates', ...)` calls our function each time that projection is replaced. The answer is a table with a row per archive: its key, such as `math`, its title from the archive vocabulary, and its count. Rows in the `listed` group are the archives themselves, as opposed to a row for everything outside the top fifty. Once the menu is filled we unsubscribe.
+`store.subscribe('aggregates', ...)` calls our function each time that projection is replaced. The answer is a table with a row per archive: its key, such as `math`, its title from the archive vocabulary, such as Mathematics, and its count. The menu shows the title and sends the key. Rows in the `listed` group are the archives themselves, as opposed to a row for everything outside the top fifty. Once the menu is filled we unsubscribe.
 
 `apply` builds the draft from the controls. The archive's control is a category control with the chosen key, or none for All archives. The title's is a text control. Its query is read as search words, all of which must appear, in any order, and `phrase: true` lets the reader put a phrase in double quotes. Submission times are a timestamp field, and Mosaica counts a timestamp in microseconds since the start of 1970, so `startOf` and `endOf` turn a date from the date inputs into the first and last microsecond of that day. Each control calls `apply` whenever it changes.
 
@@ -163,7 +163,7 @@ document.querySelector('mosaica-store')!.store = store;
 filters(store);
 ```
 
-Save, and open the Archive menu. It lists `cs (10,478)` first, then `math (10,123)` and `astro-ph (6,084)`, down to archives arXiv has since folded into others, with a paper or two each. Choose `gr-qc`, arXiv's archive for general relativity and quantum cosmology, and the map keeps about a thousand dots, most of them in a few clumps. Type `black hole` in the title box and fewer remain. Set From to 1 January 2020 and fewer again. We can't see the counts yet, so that's the next thing to build.
+Save, and open the Archive menu. It lists Computer Science (10,478) first, then Mathematics (10,123) and Astrophysics (6,084), down to archives arXiv has since folded into others, such as Superconductivity, with a paper or two each. Choose General Relativity and Quantum Cosmology, and the map keeps about a thousand dots, most of them in a few clumps. Type `black hole` in the title box and fewer remain. Set From to 1 January 2020 and fewer again. We can't see the counts yet, so that's the next thing to build.
 
 ## A count and a list of your own
 
@@ -171,7 +171,7 @@ We want two things on the right: how many papers match, and the titles of the fi
 
 The count is already in the store. Its `view` projection has an `inView` part, which holds counts over the camera's box: `visible`, how many papers the viewer can see there, and `matched`, how many of those the filters let through. The store asks for them once the camera has been still for a quarter of a second.
 
-The titles are not, because a map only needs the points, so we read them from the server. `client.items` reads the records of the items that match a filter expression, page by page. Create `results.ts`:
+The titles are not, because a map only needs the points, so we ask for them. `store.items` reads the records of the papers that match the store's filters, page by page, with the same token and view the map uses. Create `results.ts`:
 
 ```ts
 --8<-- "clients/ts/examples/own-ui/web/src/results.ts"
@@ -179,27 +179,25 @@ The titles are not, because a map only needs the points, so we read them from th
 
 The count comes from subscribing to `view`. `formatMasked` writes a count with thousands separators, and marks one that is not exact.
 
-For the list, the map fires `mosaica-viewchange` each time the camera moves, with the box on screen as `bbox` in the view's coordinates. `store.requestFilters()` gives the filter expression the store sends with every request, which `setFilters` composed from our draft. We join it to a `region` filter for the box with `all_of`, so the read returns papers that match and are on screen. `fields: ['title']` asks for the titles only, `pageRows: 20` and `pages: 1` ask for one page of twenty, and `order: 'map'` returns them in the order they lie on the map. We read that first page and stop the read with `read.return()`.
+For the list, `store.items` takes the fields to return, here only `title`. `inView: true` limits the read to the area the in-view counts cover, which is the part of the map on screen, so the list and the count agree. `pageRows: 20` and `pages: 1` ask for one page of twenty, and `order: 'map'` returns them in the order they lie on the map. We read that first page and stop the read with `read.return()`.
 
-The first argument to `client.items` is the viewer's token. An open server needs none, so it is empty here. A server with users wants the same token you gave the store, and the [backend guide](../guides/backend.md) shows where a page gets one.
+The map fires `mosaica-viewchange` each time the camera moves, and the store publishes `filters` each time they change, so both ask for the list again. `soon` waits until they have been still for a quarter of a second before asking, so a pan sends one request rather than one per frame. An `AbortController` cancels a read the next one replaces. `inView` needs the camera, so nothing is read until the map has reported where it is looking.
 
-`soon` waits until the camera or the filters have been still for a quarter of a second before asking, so a pan sends one request rather than one per frame. An `AbortController` cancels a read the next one replaces.
-
-Add it to `main.ts`, importing the client as well as the store:
+Add it to `main.ts`:
 
 ```ts
 import '@mosaicajs/components';
 import {filters} from './filters.ts';
-import {client, store} from './mosaica.ts';
+import {store} from './mosaica.ts';
 import {results} from './results.ts';
 import './style.css';
 
 document.querySelector('mosaica-store')!.store = store;
 filters(store);
-results(store, client);
+results(store);
 ```
 
-The page reloads with the filters cleared and reads "50,000 of the 50,000 papers in view match", with twenty titles under it. Choose `gr-qc` again and the count drops to 1,177. Type `black hole` and it reads 133, and every title in the list mentions a black hole. Set From to 1 January 2020 and 45 remain.
+The page reloads with the filters cleared and reads "50,000 of the 50,000 papers in view match", with twenty titles under it. Choose General Relativity and Quantum Cosmology again and the count drops to 1,177. Type `black hole` and it reads 133, and every title in the list mentions a black hole. Set From to 1 January 2020 and 45 remain.
 
 Now clear the filters and zoom into one of the clumps with the mouse wheel. The count covers only what is on screen, so both figures fall, and the list changes to papers from the part you're looking at. Every figure is computed from the papers this viewer is allowed to see. On an open server that is all of them, and on a server with users each person's counts and lists cover only what they may see.
 
@@ -211,7 +209,7 @@ When the reader clicks a dot, the map asks the server for that paper's record an
 --8<-- "clients/ts/examples/own-ui/web/src/paper.ts"
 ```
 
-The title and the link come straight from the record. arXiv's address for a paper is `https://arxiv.org/abs/` followed by its identifier, so `arxiv_id` makes the link. The archive is stored as its key, and `store.titleOf` asks for the title the archive vocabulary gives that key. A vocabulary is the list of values a category field may take, each with a key and a title. This sample's vocabularies use the code as the title too, so the panel shows `gr-qc`. With data whose vocabulary carries readable names, the panel shows the name. `shown` remembers which paper the panel is for, so a slow answer about a previous paper doesn't overwrite it. A click on empty map fires `mosaica-miss`, and the panel closes.
+The title and the link come straight from the record. arXiv's address for a paper is `https://arxiv.org/abs/` followed by its identifier, so `arxiv_id` makes the link. The archive is stored as its key, such as `gr-qc`, and `store.titleOf` asks for the title the archive vocabulary gives that key. A vocabulary is the list of values a category field may take, each with a key and a title. `shown` remembers which paper the panel is for, so a slow answer about a previous paper doesn't overwrite it. A click on empty map fires `mosaica-miss`, and the panel closes.
 
 Add two lines to `main.ts`, the import and `paper(store);` at the end:
 
@@ -223,7 +221,7 @@ import {paper} from './paper.ts';
 paper(store);
 ```
 
-Click a dot. Its title appears at the top of the right column, with its archive and a link that opens the paper on arXiv. The map draws a ring round the dot you picked.
+With General Relativity and Quantum Cosmology chosen and `black hole` typed, click a dot. Its title appears at the top of the right column, with "Archive: General Relativity and Quantum Cosmology" and a link that opens the paper on arXiv. The map draws a ring round the dot you picked. Click an empty part of the map and the panel closes.
 
 ## Topics
 
@@ -247,7 +245,7 @@ Add the import and the call to `main.ts`, which is now complete:
 --8<-- "clients/ts/examples/own-ui/web/src/main.ts"
 ```
 
-The page reloads with every paper coloured. Tick "Show topic names", and names appear over the clusters: Condensed Matter, AI Systems, Higgs Physics. Click "Black Holes and Quantum Gravity". The map keeps only that cluster, the left column shows the topic, and the count reads "1,261 of the 50,000 papers in view match". The list may surprise you, since it starts with papers on LISA, a gravitational-wave observatory, and on gamma-ray telescopes. A name was written from a few papers near its cluster's centre, and a cluster this broad also holds papers the name doesn't describe. Type `entropy` in the title box to search within the topic, and 17 papers remain. Empty the box and press Clear to bring every paper back.
+The page reloads with every paper coloured. Tick "Show topic names", and names appear over the clusters: Nanodevices, AI Systems, Computational Biology. Click "Nanodevices". The map keeps only that cluster, the left column shows the topic, and the count reads "1,242 of the 50,000 papers in view match". The list fills with its papers: graphene photodetectors, silicon waveguides, plasmonic sensors and optical modulators. Type `graphene` in the title box to search within the topic, and 71 papers remain. Empty the box and press Clear to bring every paper back.
 
 ## What you built
 

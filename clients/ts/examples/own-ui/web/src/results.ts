@@ -1,6 +1,6 @@
-import {formatMasked, type FilterExpr, type MosaicaClient, type Store} from '@mosaicajs/client';
+import {formatMasked, type Store} from '@mosaicajs/client';
 
-export function results(store: Store, client: MosaicaClient): void {
+export function results(store: Store): void {
   const count = document.querySelector<HTMLParagraphElement>('#count')!;
   const list = document.querySelector<HTMLOListElement>('#results')!;
   const map = document.querySelector('mosaica-map')!;
@@ -13,31 +13,17 @@ export function results(store: Store, client: MosaicaClient): void {
     count.textContent = `${matched} of the ${visible} papers in view match`;
   });
 
-  let bbox: [number, number, number, number] | null = null;
+  let cameraSet = false;
   let reading: AbortController | null = null;
   let timer = 0;
 
   // The titles of the first 20 of those papers, in the order they lie on the map.
   async function listFirst(): Promise<void> {
-    const view = store.get('view').id;
-    if (!bbox || !view) return;
+    if (!cameraSet) return;
     reading?.abort();
     const controller = (reading = new AbortController());
-    const inView: FilterExpr = {region: {bbox}};
-    const filters = store.requestFilters();
     try {
-      const read = await client.items(
-        '',
-        {
-          view,
-          fields: ['title'],
-          filters: filters ? {all_of: [filters, inView]} : inView,
-          order: 'map',
-          pageRows: 20,
-          pages: 1
-        },
-        controller.signal
-      );
+      const read = await store.items({fields: ['title'], inView: true, order: 'map', pageRows: 20, pages: 1}, controller.signal);
       const page = await read.next();
       await read.return();
       const titles: string[] = page.done ? [] : page.value.getChild('title')!.toArray();
@@ -52,8 +38,8 @@ export function results(store: Store, client: MosaicaClient): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(listFirst, 250);
   }
-  map.addEventListener('mosaica-viewchange', (e) => {
-    bbox = e.detail.bbox;
+  map.addEventListener('mosaica-viewchange', () => {
+    cameraSet = true;
     soon();
   });
   store.subscribe('filters', soon);

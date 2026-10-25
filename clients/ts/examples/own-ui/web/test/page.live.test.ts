@@ -90,7 +90,7 @@ it.skipIf(!binary)('draws every paper, lists the archives, and narrows the count
 
   const options = page.locator('#archive option');
   await expect.poll(() => options.count(), {timeout: 60_000}).toBeGreaterThan(30);
-  expect(await options.nth(1).textContent()).toBe('cs (10,478)');
+  expect(await options.nth(1).textContent()).toBe('Computer Science (10,478)');
 
   const count = page.locator('#count');
   await expect.poll(() => count.textContent(), {timeout: 60_000}).toBe('50,000 of the 50,000 papers in view match');
