@@ -145,9 +145,10 @@ fn accepted(status: u16, answer: &Value, what: &str) {
     assert!(status == 201 || status == 200, "{what}: {status} {answer}");
 }
 
-/// **Every emitted body, at the route it names.** The order is `commit()`'s (§6.2 step 1): a
-/// vocabulary before the column that names it, a group before anything scoped to it, a view
-/// before the layer drawn on it.
+/// **Every emitted body, at the route it names**, in the order the Python client's `commit()`
+/// sends them: the shard size, the vocabularies with their values, the view groups, the plain
+/// views, the attributes, the layers. A vocabulary goes before the group or column that names it,
+/// a group before anything scoped to it, a view before the layer drawn on it.
 #[tokio::test]
 async fn every_emitted_body_is_taken_by_its_route() {
     let served = Served::build(|dir| build_fixture(dir, ITEMS)).await;
@@ -182,13 +183,6 @@ async fn every_emitted_body_is_taken_by_its_route() {
         }
     }
 
-    for entry in payloads["views"].as_array().unwrap() {
-        let name = entry["name"].as_str().unwrap();
-        let (status, answer) =
-            put(&served, &format!("/control/views/{name}"), &entry["body"]).await;
-        accepted(status, &answer, &format!("view '{name}'"));
-    }
-
     for entry in payloads["view_groups"].as_array().unwrap() {
         let name = entry["name"].as_str().unwrap();
         let (status, answer) = put(
@@ -198,6 +192,13 @@ async fn every_emitted_body_is_taken_by_its_route() {
         )
         .await;
         accepted(status, &answer, &format!("view group '{name}'"));
+    }
+
+    for entry in payloads["views"].as_array().unwrap() {
+        let name = entry["name"].as_str().unwrap();
+        let (status, answer) =
+            put(&served, &format!("/control/views/{name}"), &entry["body"]).await;
+        accepted(status, &answer, &format!("view '{name}'"));
     }
 
     for body in payloads["attributes"].as_array().unwrap() {

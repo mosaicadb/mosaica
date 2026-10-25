@@ -279,9 +279,9 @@ class Planner:
         declaration: the SDK builds it from the roster it was given.
 
         Which of them are new is read from `/v1/meta`: the database is what knows what it holds.
-        The order is the one the routes need: a group before a view of it, a view before the layer
-        drawn on it, a vocabulary before the attribute that names it, and every declaration before
-        the values pages that fill the columns it declared.
+        The order is the one the routes need: a vocabulary, with its values, before the group or
+        attribute that names it, a group before a view of it, a view before the layer drawn on it,
+        and every declaration before the values pages that fill the columns it declared.
         """
         payloads = self.db._payloads() if self._pending(document) else {}
         if self.sends_shard_size:
@@ -293,6 +293,10 @@ class Planner:
                     body=payloads["shards"],
                 )
             )
+        for entry in payloads.get("vocabularies", []):
+            self._vocabulary(entry)
+        for name in self._held_vocabularies_with_values():
+            self._value_pages(name)
         for entry in _placed(
             payloads.get("view_groups", []),
             lambda entry: entry["name"],
@@ -323,10 +327,6 @@ class Planner:
                     body=entry["body"],
                 )
             )
-        for entry in payloads.get("vocabularies", []):
-            self._vocabulary(entry)
-        for name in self._held_vocabularies_with_values():
-            self._value_pages(name)
         for body in payloads.get("attributes", []):
             name = body["name"]
             if name in self.held_attributes:

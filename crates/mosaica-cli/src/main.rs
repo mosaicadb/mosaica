@@ -183,7 +183,9 @@ enum Command {
         /// /control/vocabularies/{name}/values`, or `values_source`, the `[sources]` name its
         /// values are read from. Values read from a source are not printed. Where the
         /// declaration writes `[shards]`, the object also has `shards`, the body for `PUT
-        /// /control/shards`.
+        /// /control/shards`. Send them in this order: the shard size, the vocabularies with their
+        /// values, the view groups, the views, the attributes, then the layers, since a body may
+        /// name what an earlier one declares and its route refuses a name it does not hold.
         #[arg(long)]
         payloads: bool,
     },

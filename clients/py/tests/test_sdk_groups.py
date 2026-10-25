@@ -337,6 +337,39 @@ def test_a_view_created_with_no_rows_is_listed_on_meta_and_is_not_created_twice(
     assert db.check().plan == []
 
 
+def test_a_group_with_category_metadata_and_its_new_vocabulary_commit_together(grouped):
+    """A later commit declaring a vocabulary and a group whose metadata names it sends the
+    vocabulary first, since the group route refuses a category over a vocabulary it does not hold.
+    Each view of the group carries its key."""
+    db = grouped
+    db.declare_vocabulary("regions", values=["north", "south"], closed=True)
+    db.declare_view_group(
+        "zones",
+        extent=EXTENT,
+        metadata={"region": {"type": "category", "vocabulary": "regions"}},
+    )
+    db.insert(
+        "zones",
+        roster=pa.table({"key": ["east", "west"], "region": ["north", "south"]}),
+        key="key",
+        region="region",
+    )
+    report = db.commit()
+    assert report.ok, report.refusals
+    assert report.plan.index("declare vocabulary 'regions' (closed)") < report.plan.index(
+        "declare view group 'zones'"
+    )
+    served = {
+        view["id"]: view["metadata"]["region"]
+        for view in db.meta()["views"]
+        if view["id"].startswith("zones:")
+    }
+    assert served == {
+        "zones:east": {"type": "text", "value": "north"},
+        "zones:west": {"type": "text", "value": "south"},
+    }
+
+
 def test_a_plain_view_declared_after_the_first_commit_is_created_and_served(grouped):
     """`PUT /control/views/{name}` from the emitter's own body (§6.2 step 1). The frame is the
     view's own: there are no rows at a running service to fit one against, so `extent=` is
