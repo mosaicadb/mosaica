@@ -21,7 +21,7 @@ import urllib.request
 from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Union
 
 from ._auth import Token, TokenSource, minted
-from ._refusal import Refusal, listed
+from ._refusal import Refusal, listed, retry_after
 
 if TYPE_CHECKING:
     from .widget import Map
@@ -123,10 +123,16 @@ class PartialRead(Refusal):
       from the start.
     - `done`: `True` where every row had arrived before the stop, so none is left to read.
     - `why`: what stopped the read, which the message begins with.
+    - `status` and `retry_after_s`: where a refused request stopped the read, the refusal's, as on
+      `Refusal`, so a `429` carries the wait the server asked for. `None` otherwise.
     """
 
-    def __init__(self, why: str, cursor: Optional[str], done: bool) -> None:
-        super().__init__(why)
+    def __init__(self, why: str, cursor: Optional[str], done: bool, cause: Any = None) -> None:
+        super().__init__(
+            why,
+            status=getattr(cause, "status", None),
+            retry_after_s=getattr(cause, "retry_after_s", None),
+        )
         self.why = why
         self.cursor = cursor
         self.done = done
@@ -225,7 +231,7 @@ class Batches:
                 request = {**rest, "cursor": self.next}
                 self._response = reader._open("POST", f"/v1/{self._route}", request)
             except (Refusal, OSError, http.client.HTTPException) as refused:
-                raise self._stopped(str(refused)) from None
+                raise self._stopped(str(refused), refused) from None
             frames = _frames(self._response)
 
     def _reached(self, frame: dict) -> None:
@@ -233,8 +239,8 @@ class Batches:
         self.next = frame["next"]
         self.done = self.next is None
 
-    def _stopped(self, why: str) -> PartialRead:
-        return PartialRead(why, self.next, self.done)
+    def _stopped(self, why: str, cause: Any = None) -> PartialRead:
+        return PartialRead(why, self.next, self.done, cause)
 
     def __iter__(self) -> "Batches":
         return self
@@ -925,8 +931,8 @@ class Viewer:
     `db.viewer(terms)` for one of your own.
 
     A server too busy to take a read answers `429`. The read is not sent again: it raises
-    `Refusal` with `status` 429, and the caller calls it again after a wait. The `Refusal` does not carry the
-    server's `Retry-After`.
+    `Refusal` with `status` 429 and the server's `Retry-After` in `retry_after_s`, and the caller
+    calls it again after that many seconds.
 
     - `url`: the address of the database's viewer plane, where readers read.
     - `token`: a token as a string, a `Token`, or a function that returns either. A function is
@@ -1467,8 +1473,8 @@ class Viewer:
                 tables.append(table.replace_schema_metadata(metadata))
             return tables
 
-        def stopped(why: str) -> PartialRead:
-            partial = PartialRead(why, resume, False)
+        def stopped(why: str, cause: Any = None) -> PartialRead:
+            partial = PartialRead(why, resume, False, cause)
             partial.rows = joined()
             return partial
 
@@ -1486,7 +1492,7 @@ class Viewer:
                 try:
                     response = self._open("POST", "/v1/aggregate", {**request, "cursor": cursor})
                 except (Refusal, OSError, http.client.HTTPException) as refused:
-                    raise stopped(str(refused)) from None
+                    raise stopped(str(refused), refused) from None
             table, pending, trailer, carried = None, None, None, [0, 0]
             with response:
                 region = region or response.headers.get("x-mosaica-region")
@@ -1753,14 +1759,16 @@ class Viewer:
                 if attempt == 0 and refused.code == 403 and "expired-token" in answer:
                     if self._forget():
                         continue
-                raise self._refused(path, body, refused.code, answer) from None
+                raise self._refused(path, body, refused.code, answer, refused.headers) from None
 
     def _encoded(self, body: dict) -> bytes:
         """A request's body as JSON, a moment anywhere in it as its microseconds since the Unix
         epoch."""
         return json.dumps(body, default=_json_value).encode()
 
-    def _refused(self, path: str, body: Optional[dict], status: int, answer: str) -> Refusal:
+    def _refused(
+        self, path: str, body: Optional[dict], status: int, answer: str, headers=None
+    ) -> Refusal:
         """A refusal the server made, in one sentence: what the server said, the filterable
         columns where a filter named a column that is not one, and the status.
 
@@ -1768,8 +1776,12 @@ class Viewer:
         something this reader may not see, as the server's answer does.
         """
         try:
-            detail = json.loads(answer)["detail"]
-        except (ValueError, TypeError, KeyError):
+            said = json.loads(answer)
+        except ValueError:
+            said = None
+        try:
+            detail = said["detail"]
+        except (TypeError, KeyError):
             detail = answer.strip() or "no reason given"
         segments = path.split("?")[0].strip("/").split("/")
         if status == 404 and len(segments) == 3 and segments[1] in ("items", "artifacts"):
@@ -1789,7 +1801,11 @@ class Viewer:
                     f"{', '.join(repr(one) for one in unknown)} is not a filterable column; name "
                     f"one of: {', '.join(filterable) or 'none, since no column is indexed'}"
                 )
-        return Refusal(f"{detail} (HTTP {status})", status=status)
+        return Refusal(
+            f"{detail} (HTTP {status})",
+            status=status,
+            retry_after_s=retry_after(status, headers, said),
+        )
 
     def _forget(self) -> bool:
         """Drop the held token so the next request gets another; `False` where none can be got."""

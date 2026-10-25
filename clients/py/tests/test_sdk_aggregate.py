@@ -286,7 +286,8 @@ def test_a_later_request_refused_raises_the_tables_read(db, monkeypatch):
             body = {**json.loads(request.data), "page_rows": 1, "pages": 1}
             bodies.append(body)
             if len(bodies) == 3:
-                raise urllib.error.HTTPError(request.full_url, 429, "busy", {}, None)
+                busy = {"retry-after": "3"}
+                raise urllib.error.HTTPError(request.full_url, 429, "busy", busy, None)
             request.data = json.dumps(body).encode()
         return urlopen(request, *args, **kwargs)
 
@@ -295,6 +296,7 @@ def test_a_later_request_refused_raises_the_tables_read(db, monkeypatch):
         db.viewer().aggregate("map", [{"count": True, "cells": {"depth": 4}}])
     assert stopped.value.cursor == bodies[2]["cursor"]
     assert [len(t) for t in stopped.value.rows] == [2]
+    assert (stopped.value.status, stopped.value.retry_after_s) == (429, 3)
 
 
 def tree_papers(db) -> None:

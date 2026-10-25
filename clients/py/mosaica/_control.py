@@ -29,18 +29,20 @@ import urllib.request
 import uuid
 from dataclasses import dataclass, field
 
-from ._refusal import listed
+from ._refusal import listed, retry_after
 from typing import Any, Sequence
 
 ARROW = "application/vnd.apache.arrow.stream"
 JSON = "application/json"
 
 #: The longest wait between attempts after a `429`, in seconds. A longer `Retry-After` is cut to
-#: this, and a negative one is taken as 0.
+#: this.
 MAX_BACKOFF = 30.0
 
-#: How many times one page is re-sent after a `429` before the SDK reports it as a refusal.
-MAX_ATTEMPTS = 600
+#: How long one request keeps being sent again after a `429`, in seconds. While the waits so far
+#: total less than this, a `429` is waited out and the request sent again; after that the last
+#: `429` is the answer.
+RETRY_BUDGET_S = 300.0
 
 #: The status an answer carries when the request reached no server at all. Not an HTTP status: the
 #: request was never answered, so there is none to report.
@@ -93,7 +95,8 @@ class Control:
     someone else runs. Each route method sends one request with the credential and returns its
     `Answer`; `status()` and `limits()` return dictionaries, and `limits()` keeps the first
     answer it gets. A request the server answers `429` is sent again after the wait it names, at
-    most 30 seconds, up to 600 attempts in all. Every other status is returned as it came.
+    least 1 second and at most 30, while the waits so far total less than five minutes; then the
+    last `429` is returned. Every other status is returned as it came.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token. Writes, flush
@@ -125,6 +128,7 @@ class Control:
         )
         started = time.monotonic()
         attempts = 0
+        waited = 0.0
         while True:
             attempts += 1
             try:
@@ -139,8 +143,10 @@ class Control:
                     )
             except urllib.error.HTTPError as refusal:
                 text = refusal.read().decode(errors="replace")
-                if refusal.code == 429 and attempts < MAX_ATTEMPTS:
-                    time.sleep(_retry_after(refusal.headers, _decoded(text)))
+                if refusal.code == 429 and waited < RETRY_BUDGET_S:
+                    wait = min(retry_after(429, refusal.headers, _decoded(text)), MAX_BACKOFF)
+                    time.sleep(wait)
+                    waited += wait
                     continue
                 return Answer(
                     refusal.code, _decoded(text), text, attempts, time.monotonic() - started
@@ -631,18 +637,6 @@ def _decoded(text: str) -> dict:
     except ValueError:
         return {}
     return value if isinstance(value, dict) else {"value": value}
-
-
-def _retry_after(headers, body: dict) -> float:
-    """How long a `429` asks the caller to wait. The header and the body agree."""
-    named = headers.get("retry-after") if headers is not None else None
-    if named is None:
-        named = body.get("retry_after_s")
-    try:
-        seconds = float(named)
-    except (TypeError, ValueError):
-        seconds = 1.0
-    return max(0.0, min(seconds, MAX_BACKOFF))
 
 
 def arrow_body(table: Any) -> bytes:

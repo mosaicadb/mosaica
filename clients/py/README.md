@@ -291,8 +291,9 @@ counting rows it did not land. That is what a retry inside one commit gets.
 
 A page carries a fresh random batch id, made once when the request is built, and a retry of that
 request carries it again. A server too busy to take a page answers `429` with `Retry-After`, and
-the page is sent again after that many seconds, at most 30, with the same id and identical bytes,
-up to 600 attempts in all. A page still refused then is listed in the report's `refusals`.
+the page is sent again after that many seconds, at least 1 and at most 30, with the same id and
+identical bytes, while the waits so far total less than five minutes. A page still refused then is
+listed in the report's `refusals`.
 Nothing is kept beyond the commit, and no id is derived from what a page contains, so the same
 frame inserted and committed five times is five loads: on the second, rows carrying a unique value
 name the items the first created and change nothing, and points rows carrying none are loaded
@@ -373,9 +374,10 @@ deleted or suppressed. `db.viewer(terms)` is a reader holding exactly the terms 
 carries is accepted and reaches nothing, and an empty list is refused.
 
 A server too busy to take a read answers `429`. The read is not sent again: it raises `Refusal`
-with `status` 429, and you call it again after a wait. The `Refusal` does not carry the server's
-`Retry-After`. A later request of `items`, `artifacts` or `aggregate` that is refused raises
-`PartialRead`, described below, whose `cursor` is where to read on.
+with `status` 429 and the server's `Retry-After` in `retry_after_s`, and you call it again after
+that many seconds. A later request of `items`, `artifacts` or `aggregate` that is refused raises
+`PartialRead`, described below, whose `cursor` is where to read on and whose `status` and
+`retry_after_s` are the refusal's.
 
 `map(view=None, layers=None, colour_by=None, filters=None, height=480)` is the notebook widget
 described below, pointed at this database's server with a token made for the reader. Give it
@@ -612,7 +614,7 @@ db.drop_view("slices", "a")                    # remove one view of a view group
 sessions it ended. A database you read alone needs none of it. `mosaica.Control(url,
 credential)` is the same client for a database somebody else runs, with the operator credential,
 an API key or an OIDC access token. A request on it that the server answers `429` is sent again as
-a commit's page is, and the call returns the last answer after 600 attempts.
+a commit's page is, and the call returns the last `429` once the waits total five minutes.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call

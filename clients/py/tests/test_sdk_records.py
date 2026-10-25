@@ -165,7 +165,8 @@ class Proxy:
     """A proxy in front of a served database's viewer plane. It passes each request on and the
     answer back as a chunked body, unless a step is planned for that request: `("cut", at)`
     closes the connection at the offset `at(body)` gives, `("rewrite", change)` sends
-    `change(body)`, and `("refuse", status)` answers with that status."""
+    `change(body)`, and `("refuse", status)` answers with that status, a `429` with the
+    `Retry-After` of 2 seconds and the body a busy server sends."""
 
     def __init__(self, upstream: str) -> None:
         self.plan: list = []
@@ -190,12 +191,18 @@ class Proxy:
                 status, body = answer.status, answer.read()
                 connection.close()
                 step, value = proxy.plan.pop(0) if proxy.plan else (None, None)
+                waits = {}
                 if step == "refuse":
                     status, body = value, b'{"error": "planned by the test"}'
+                if step == "refuse" and status == 429:
+                    waits = {"retry-after": "2"}
+                    body = b'{"error": "backpressure", "detail": "busy", "retry_after_s": 2}'
                 if step == "rewrite":
                     body = value(body)
                 if status != 200:
                     self.send_response(status)
+                    for name, value in waits.items():
+                        self.send_header(name, value)
                     self.send_header("content-length", str(len(body)))
                     self.end_headers()
                     self.wfile.write(body)
@@ -505,6 +512,7 @@ def test_a_later_request_refused_gives_the_pages_before_it_and_the_cursor(proxy,
     read, stopped = read_until_stopped(viewer, batches, **IDS)
     assert len(read) == 9
     assert stopped.cursor is not None and not stopped.done
+    assert (stopped.status, stopped.retry_after_s) == (429, 2)
     rest = viewer.items(**IDS, cursor=stopped.cursor)
     assert sorted(read + papers_read(rest)) == sorted(PAPERS)
 
@@ -522,6 +530,14 @@ def test_a_page_end_given_twice_is_refused(proxy):
     read, stopped = read_until_stopped(viewer, True, **IDS)
     assert len(read) == 3
     assert stopped.cursor is not None
+
+
+def test_a_busy_server_refuses_a_read_with_the_wait_it_asked_for(proxy):
+    through, viewer = proxy
+    through.plan = [("refuse", 429)]
+    with pytest.raises(Refusal) as refused:
+        viewer.items(**IDS)
+    assert (refused.value.status, refused.value.retry_after_s) == (429, 2)
 
 
 def test_a_refused_read_raises_a_refusal(db):

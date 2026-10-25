@@ -16,7 +16,8 @@ import pytest
 
 from mosaica import _control
 from mosaica._control import (
-    MAX_ATTEMPTS,
+    MAX_BACKOFF,
+    RETRY_BUDGET_S,
     UNANSWERED,
     Control,
     batch_id,
@@ -26,9 +27,12 @@ from mosaica._refusal import Refusal
 
 
 class _Backpressure(http.server.BaseHTTPRequestHandler):
-    """Answers `429` with a `Retry-After` until `refusals` is spent, then `200`."""
+    """Answers `429` until `refusals` is spent, then `200`. Each `429` carries `retry_after` as
+    its `Retry-After` header and `retry_after_s` in its body, where each is not `None`."""
 
     refusals = 2
+    retry_after: str | None = "0.01"
+    retry_after_s: float | None = 0.01
     bodies: list = []
     batches: list = []
 
@@ -38,9 +42,13 @@ class _Backpressure(http.server.BaseHTTPRequestHandler):
         _Backpressure.batches.append(self.headers.get("x-mosaica-batch-id"))
         if _Backpressure.refusals > 0:
             _Backpressure.refusals -= 1
-            answer = json.dumps({"error": "busy", "retry_after_s": 0.01}).encode()
+            said = {"error": "backpressure", "detail": "busy"}
+            if _Backpressure.retry_after_s is not None:
+                said["retry_after_s"] = _Backpressure.retry_after_s
+            answer = json.dumps(said).encode()
             self.send_response(429)
-            self.send_header("retry-after", "0.01")
+            if _Backpressure.retry_after is not None:
+                self.send_header("retry-after", _Backpressure.retry_after)
             self.send_header("content-length", str(len(answer)))
             self.end_headers()
             self.wfile.write(answer)
@@ -55,10 +63,21 @@ class _Backpressure(http.server.BaseHTTPRequestHandler):
         return
 
 
-def test_a_429_is_retried_after_its_retry_after_with_identical_bytes():
+@pytest.fixture
+def waits(monkeypatch):
+    """The waits `Control` sleeps between attempts, recorded and not slept, and the fake plane
+    set to its defaults."""
+    slept: list = []
+    monkeypatch.setattr(_control.time, "sleep", slept.append)
     _Backpressure.refusals = 2
+    _Backpressure.retry_after = "0.01"
+    _Backpressure.retry_after_s = 0.01
     _Backpressure.bodies = []
     _Backpressure.batches = []
+    return slept
+
+
+def test_a_429_is_retried_after_its_retry_after_with_identical_bytes(waits):
     server = http.server.HTTPServer(("127.0.0.1", 0), _Backpressure)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -142,12 +161,11 @@ def serving():
     return server, f"http://127.0.0.1:{server.server_port}"
 
 
-def test_a_429_that_never_lets_up_is_reported_rather_than_retried_for_ever(monkeypatch):
-    """`MAX_ATTEMPTS` bounds the wait: the page comes back as the refusal the report carries."""
-    monkeypatch.setattr(_control, "MAX_ATTEMPTS", 3)
+def test_a_429_that_never_lets_up_is_answered_once_the_waits_reach_the_budget(waits):
+    """The request is sent again while the waits so far total less than `RETRY_BUDGET_S`, each
+    wait cut to `MAX_BACKOFF`; then the last `429` is the answer, which a commit's report lists."""
     _Backpressure.refusals = 1_000
-    _Backpressure.bodies = []
-    _Backpressure.batches = []
+    _Backpressure.retry_after = "100"
     server, base = serving()
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
@@ -155,8 +173,29 @@ def test_a_429_that_never_lets_up_is_reported_rather_than_retried_for_ever(monke
         server.shutdown()
         server.server_close()
     assert not answer.ok and answer.status == 429
-    assert answer.attempts == 3 and len(_Backpressure.bodies) == 3
-    assert MAX_ATTEMPTS > 3, "the SDK's own figure is the one a deployment waits under"
+    assert waits == [MAX_BACKOFF] * int(RETRY_BUDGET_S / MAX_BACKOFF)
+    assert answer.attempts == len(waits) + 1 == len(_Backpressure.bodies)
+    assert len(set(_Backpressure.batches)) == 1
+
+
+@pytest.mark.parametrize(
+    ("header", "body", "waited"),
+    [("2", 5, 2.0), (None, 3, 3.0), (None, None, 1.0), ("0.01", 0.01, 1.0), ("0", None, 1.0)],
+    ids=["header-first", "then-body", "then-one-second", "floor", "zero"],
+)
+def test_a_429_waits_its_header_then_its_body_then_one_second_and_never_less(
+    waits, header, body, waited
+):
+    _Backpressure.refusals = 1
+    _Backpressure.retry_after = header
+    _Backpressure.retry_after_s = body
+    server, base = serving()
+    try:
+        answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert answer.ok and waits == [waited]
 
 
 def test_a_request_that_reaches_no_server_is_an_answer_and_not_an_exception():
