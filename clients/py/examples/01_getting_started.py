@@ -177,15 +177,16 @@ def _(mo):
 
     Every declared column is stored, and shown when someone opens a place. A column can also be
     **rendered**: its value is sent with every point drawn, so the map can colour or size
-    points by it, and it can be filtered and counted. Or it can be **indexed**: Mosaica builds
-    an index on it, so it can be filtered and counted without travelling with the points. A
+    points by it, and it can be filtered and, if it is a category, counted. Or it can be
+    **indexed**: Mosaica builds an index on it, so it can be filtered, and a category counted,
+    without travelling with the points. A
     column that is neither rendered nor indexed is a **detail**. `country` is a category and a
     detail, so it is shown when a place is opened, but the map can't be filtered or counted by
     it.
 
-    Each has a cost. A rendered column makes every point the server sends larger, and a column
-    can only be made rendered before the first commit. So render only what the map needs, which
-    here is the feature class, for colour; it can then be filtered and counted by as well,
+    Each has a cost. A column can only be made rendered before the first commit, but a rendered
+    column makes every point the server sends larger, so render only what the map needs. Here
+    that is the feature class, for colour; it can then be filtered and counted by as well,
     without an index. An index takes disc and build time, so index the columns people will
     filter on. We index `name` to search it, `population` to filter on a range, and `division`
     to filter and count by it. The rest are details, which cost least.
@@ -368,8 +369,8 @@ def _(mo):
 
     Settlements are the largest class, then water, then buildings. The last row, in the group
     `none`, counts the 47 places GeoNames gives no class. While the whole world is in view, the
-    map's Feature class card shows the same numbers, because it makes the same request over the
-    places in view.
+    map's Feature class card shows the same numbers for the nine classes, because it makes the
+    same request over the places in view.
 
     ## Find a misfiled place
 

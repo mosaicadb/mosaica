@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime
 from typing import Any, Iterable, Sequence
 
-from ._inserts import ARTIFACT_FIELDS, MEMBER_FIELDS, VOCABULARY_FIELDS
+from ._inserts import ARTIFACT_FIELDS, MEMBER_FIELDS, VOCABULARY_FIELDS, axes
 from ._refusal import Refusal, listed
 from ._toml import Inline
 
@@ -860,10 +860,7 @@ class _Bind:
     @staticmethod
     def _points(block: dict, insert: Any) -> None:
         columns = insert.columns
-        if block.get("projection", "none") == "none":
-            _fields(block, {"x": columns.get("x"), "y": columns.get("y")})
-        else:
-            _fields(block, {"lon": columns.get("lon"), "lat": columns.get("lat")})
+        _fields(block, {axis: columns.get(axis) for axis in axes(block)})
         if columns.get("access"):
             block["point_visibility"] = Inline(
                 {**dict(block.get("point_visibility") or {}), "field": columns["access"]}

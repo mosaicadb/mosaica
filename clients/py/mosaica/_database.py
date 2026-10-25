@@ -707,7 +707,7 @@ class Database:
             )
         self._refuse_an_insert_the_target_cannot_take(target, kind, role, block, named)
         self._refuse_a_label_column_the_layer_does_not_read(target, kind, role, block, named)
-        projected = kind in ("view", "view_group") and block.get("projection", "none") != "none"
+        projected = kind in ("view", "view_group") and _inserts.projected(block)
         metadata = D.metadata_names(block) if role == "roster" else ()
         if kind == "labels" and role == "text":
             data, named = self._label_text(target, block, data, named)

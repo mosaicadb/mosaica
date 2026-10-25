@@ -162,6 +162,17 @@ CONTRACTS: dict[tuple[str, str], Contract] = {
 PROJECTED = {"x": "lon", "y": "lat"}
 
 
+def projected(block: dict) -> bool:
+    """Whether a view's or view group's declaration places its points under a projection."""
+    return block.get("projection", "none") != "none"
+
+
+def axes(block: dict) -> tuple[str, str]:
+    """A view's two coordinate names, which the insert's columns are held under and the ingest
+    route reads."""
+    return (PROJECTED["x"], PROJECTED["y"]) if projected(block) else ("x", "y")
+
+
 @dataclass(repr=False)
 class Insert(Summarised):
     """What one `insert` call handed over: a table, its target, and the columns read.
