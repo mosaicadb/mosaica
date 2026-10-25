@@ -48,7 +48,7 @@ import pyarrow as pa
 from ._control import Answer, Control, arrow_body, batch_id
 from . import _declaration as _D
 from ._declaration import rows_of
-from ._inserts import SHAPE_COLUMNS, SHAPE_FIELDS, SHAPE_RECORD_FIELD
+from ._inserts import PROJECTED, SHAPE_COLUMNS, SHAPE_FIELDS, SHAPE_RECORD_FIELD
 from ._refusal import Refusal
 
 @dataclass
@@ -542,11 +542,14 @@ class Planner:
         A column no target reads is not here: what travels is what the insert named, which is
         what the declaration says this view reads.
         """
-        x_column = insert.columns.get("x") or insert.columns.get("lon")
-        y_column = insert.columns.get("y") or insert.columns.get("lat")
+        # The route reads `x` and `y` on a view whose projection is `none` and `lon` and `lat` on
+        # any other, which are also the names the insert's columns are held under.
+        if block.get("projection", "none") == "none":
+            axes = ("x", "y")
+        else:
+            axes = (PROJECTED["x"], PROJECTED["y"])
         columns: list[tuple[str, Any]] = [
-            ("x", table[x_column].cast(pa.float64())),
-            ("y", table[y_column].cast(pa.float64())),
+            (axis, table[insert.columns[axis]].cast(pa.float64())) for axis in axes
         ]
         access = insert.columns.get("access")
         if access:

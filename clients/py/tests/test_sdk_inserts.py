@@ -442,6 +442,34 @@ def test_a_committed_database_reopens_and_takes_the_next_commit(tmp_path):
         again.close()
 
 
+def test_a_later_commit_into_a_projected_view_serves_its_rows_where_they_were_placed(tmp_path):
+    """A projected view's coordinates are longitude and latitude at every commit: the first builds
+    the database and the second pages through the running server, and both rows serve at their
+    own place."""
+    binary()
+    db = create(tmp_path / "db")
+    try:
+        db.declare_view("world", projection="web_mercator",
+                        extent={"lon": [-180.0, 180.0], "lat": [-80.0, 80.0]})
+        joined(db, type="i64")
+        db.insert("world", pd.DataFrame({"id": [1], "lon": [-3.19], "lat": [55.95]}),
+                  lon="lon", lat="lat")
+        assert db.commit().ok
+        db.insert("world", pd.DataFrame({"id": [2], "lon": [151.21], "lat": [-33.87]}),
+                  lon="lon", lat="lat")
+        second = db.commit()
+        assert second.ok, second
+        assert second.rows == 1
+        assert db.view("world").count() == 2
+        served = db.items("world", ["id"], position=True).to_pandas().set_index("id")
+        assert served.loc[1, "mosaica:x"] == pytest.approx(-3.19, abs=1e-4)
+        assert served.loc[1, "mosaica:y"] == pytest.approx(55.95, abs=1e-4)
+        assert served.loc[2, "mosaica:x"] == pytest.approx(151.21, abs=1e-4)
+        assert served.loc[2, "mosaica:y"] == pytest.approx(-33.87, abs=1e-4)
+    finally:
+        db.close()
+
+
 
 def test_a_padded_label_serves_trimmed_and_a_conjunction_needs_both_terms_at_each_commit(served):
     """The server reads the labels the SDK sends: surrounding spaces are trimmed, an empty label is
