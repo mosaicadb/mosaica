@@ -82,8 +82,7 @@ pub fn declared_frame(
     projection: &str,
     extent: Option<mosaica_spatial::extent::WrittenExtent>,
 ) -> Result<DeclaredFrame, String> {
-    let projection = mosaica_spatial::Projection::from_name(projection)
-        .ok_or_else(|| format!("{object}: no projection named '{projection}'"))?;
+    let projection = projection_named(object, projection)?;
     let frame = mosaica_spatial::extent::Extent::compile(object, projection, extent)?
         .stated_frame(object, projection)?;
     Ok(DeclaredFrame {
@@ -92,6 +91,12 @@ pub fn declared_frame(
         y_min: frame.y_min,
         y_max: frame.y_max,
     })
+}
+
+/// The projection `name` names, for the declaration `object`.
+fn projection_named(object: &str, name: &str) -> Result<mosaica_spatial::Projection, String> {
+    mosaica_spatial::Projection::from_name(name)
+        .ok_or_else(|| format!("{object}: no projection named '{name}'"))
 }
 
 /// What resolving a declaration against the served manifest decided.
@@ -225,8 +230,7 @@ fn compile_common(
     if taken {
         return Err(format!("'{name}' already names a view or a view group"));
     }
-    let projection = mosaica_spatial::Projection::from_name(projection)
-        .ok_or_else(|| format!("'{name}': no projection named '{projection}'"))?;
+    let projection = projection_named(&format!("'{name}'"), projection)?;
     mosaica_spatial::Bounds {
         x_min: frame.x_min,
         x_max: frame.x_max,

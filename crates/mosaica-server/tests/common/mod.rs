@@ -2204,6 +2204,81 @@ pub fn decode_viewport(bytes: &[u8]) -> (Vec<TileRow>, Vec<PointRow>) {
     (decoded.tiles, decoded.points)
 }
 
+/// `POST /v1/items` with `body`, under `token`.
+pub async fn post_items(
+    server: &TestServer,
+    token: &str,
+    body: &serde_json::Value,
+) -> reqwest::Response {
+    server
+        .client
+        .post(server.viewer_url("/v1/items"))
+        .bearer_auth(token)
+        .json(body)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// One response, which must be a 200, decoded.
+pub async fn items_ok(
+    server: &TestServer,
+    token: &str,
+    body: &serde_json::Value,
+) -> DecodedRecords {
+    let resp = post_items(server, token, body).await;
+    let status = resp.status().as_u16();
+    let bytes = resp.bytes().await.unwrap();
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
+    decode_records(&bytes)
+}
+
+/// A whole read: `body` sent, then again with each response's `next` as its cursor until that is
+/// null. Returns every response.
+pub async fn read_items(
+    server: &TestServer,
+    token: &str,
+    body: &serde_json::Value,
+) -> Vec<DecodedRecords> {
+    let mut responses = Vec::new();
+    let mut body = body.clone();
+    loop {
+        let decoded = items_ok(server, token, &body).await;
+        let next = decoded.trailer["next"].clone();
+        responses.push(decoded);
+        assert!(responses.len() < 10_000, "a read that never ends");
+        match next {
+            serde_json::Value::Null => return responses,
+            serde_json::Value::String(cursor) => {
+                body["cursor"] = serde_json::json!(cursor);
+                // `count` is refused with a cursor.
+                body.as_object_mut().unwrap().remove("count");
+            }
+            other => panic!("next is {other}"),
+        }
+    }
+}
+
+/// `method` on the control route `path` with `body` as JSON, under the operator credential: the
+/// status and the body, or null where there is none.
+pub async fn control(
+    server: &TestServer,
+    method: reqwest::Method,
+    path: &str,
+    body: &serde_json::Value,
+) -> (u16, serde_json::Value) {
+    let resp = server
+        .client
+        .request(method, server.control_url(path))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(body)
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status().as_u16();
+    (status, resp.json().await.unwrap_or(serde_json::Value::Null))
+}
+
 /// `GET /control/status`'s body.
 pub async fn control_status(server: &TestServer) -> serde_json::Value {
     server

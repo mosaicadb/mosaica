@@ -473,90 +473,6 @@ struct PointVisibilityBlock {
     default: Option<String>,
 }
 
-/// `extent` is the word `"auto"` or a table. A view with no projection takes four spellings, in
-/// the units of its own coordinates:
-///
-/// ```toml
-/// extent = "auto"                           # the same as { auto = true, margin = 0.01 }
-/// extent = { auto = true, margin = 0.25 }   # a square fitted to the data, plus margin each side
-/// extent = { min = -25.0, max = 25.0 }      # one range for both axes
-/// extent = { x = [-18, 19], y = [-22, 24] } # a range for each axis
-/// ```
-///
-/// A projected view takes two, in degrees, and widens the box to the smallest aligned square that
-/// contains it:
-///
-/// ```toml
-/// extent = "auto"                                     # the data's own longitude and latitude
-/// extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }  # a box
-/// ```
-///
-/// `auto` reads the view's points to fit the frame, so it is refused where the points source
-/// holds no rows. Any other word, an empty table, half a box, a number that is not finite, and a
-/// spelling of the other kind of view are refused.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExtentTable {
-    /// `true` fits the frame to the points the build reads. `false` is refused, and so is `auto`
-    /// beside `min`, `max`, `x` or `y`. A projected view writes `extent = "auto"` instead.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    auto: Option<bool>,
-    /// Space added to each side of an `auto` frame, as a fraction of the data's span. Finite and
-    /// at least 0. Refused without `auto = true`.
-    ///
-    /// Default: `0.01`.
-    #[serde(default)]
-    margin: Option<f64>,
-    /// The low end of both axes, beside `max`.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    min: Option<f64>,
-    /// The high end of both axes, beside `min`. It must be above `min`.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    max: Option<f64>,
-    /// The x axis as `[low, high]`, beside `y`, with `high` above `low`.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    x: Option<[f64; 2]>,
-    /// The y axis as `[low, high]`, beside `x`, with `high` above `low`.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    y: Option<[f64; 2]>,
-    /// A projected view's longitudes as `[west, east]`, in degrees within ±180, beside `lat`. A
-    /// box crossing the antimeridian, with `west` above `east`, is refused.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    lon: Option<[f64; 2]>,
-    /// A projected view's latitudes as `[south, north]`, in degrees within ±90, beside `lon`,
-    /// with `north` not below `south`.
-    ///
-    /// Default: not set.
-    #[serde(default)]
-    lat: Option<[f64; 2]>,
-}
-
-impl From<ExtentTable> for mosaica_spatial::extent::ExtentKeys {
-    fn from(t: ExtentTable) -> Self {
-        mosaica_spatial::extent::ExtentKeys {
-            auto: t.auto,
-            margin: t.margin,
-            min: t.min,
-            max: t.max,
-            x: t.x,
-            y: t.y,
-            lon: t.lon,
-            lat: t.lat,
-        }
-    }
-}
 
 /// What gates each artifact beyond the layer's own `visibility`. Written as
 /// `artifact_visibility = { default = "inherited" }`, or with a `field` naming each artifact's own
@@ -2091,17 +2007,10 @@ fn compile_extent(
     projection: Projection,
     value: Option<&toml::Value>,
 ) -> Result<Extent> {
-    use mosaica_spatial::extent::WrittenExtent;
-    let written = match value {
-        None => None,
-        Some(toml::Value::String(word)) => Some(WrittenExtent::Word(word.clone())),
-        Some(toml::Value::Table(table)) => {
-            let table: ExtentTable = ExtentTable::deserialize(toml::Value::Table(table.clone()))
-                .map_err(|e| declaration_error(format!("{object}: `extent`: {e}")))?;
-            Some(WrittenExtent::Keys(table.into()))
-        }
-        Some(_) => Some(WrittenExtent::Neither),
-    };
+    let written = value
+        .map(|value| mosaica_spatial::extent::WrittenExtent::deserialize(value.clone()))
+        .transpose()
+        .map_err(|e| declaration_error(format!("{object}: `extent`: {e}")))?;
     Extent::compile(object, projection, written).map_err(declaration_error)
 }
 

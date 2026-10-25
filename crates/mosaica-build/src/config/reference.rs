@@ -28,8 +28,8 @@ const REGENERATE: &str =
 /// Fields held as a `toml::Value` whose table form is a struct: the key it is under, and the
 /// struct that describes the table.
 const TABLE_FORMS: [(&str, &str, &str); 3] = [
-    ("ViewBlock", "extent", "ExtentTable"),
-    ("ViewGroupBlock", "extent", "ExtentTable"),
+    ("ViewBlock", "extent", "ExtentKeys"),
+    ("ViewGroupBlock", "extent", "ExtentKeys"),
     ("ViewGroupBlock", "view", "RosterViewBlock"),
 ];
 
@@ -73,10 +73,12 @@ struct Table {
     keys: Vec<Key>,
 }
 
-/// The two files the page is read from: `config.rs`, and this one for [`RosterViewBlock`].
+/// The files the page is read from: `config.rs`, this one for [`RosterViewBlock`], and
+/// `mosaica-spatial`'s `extent.rs` for the keys of an `extent`, which a running service reads too.
 struct Files {
     config: Source,
     own: Source,
+    extent: Source,
 }
 
 impl Files {
@@ -85,19 +87,21 @@ impl Files {
         Files {
             config: Source::read(&dir.join("config.rs")),
             own: Source::read(&dir.join("config/reference.rs")),
+            extent: Source::read(&dir.join("../../mosaica-spatial/src/extent.rs")),
         }
     }
 
     fn of(&self, name: &str) -> &Source {
-        if self.config.has_struct(name) {
-            &self.config
-        } else {
-            &self.own
-        }
+        [&self.config, &self.extent]
+            .into_iter()
+            .find(|source| source.has_struct(name))
+            .unwrap_or(&self.own)
     }
 
     fn is_table(&self, name: &str) -> bool {
-        self.config.has_struct(name) || self.own.has_struct(name)
+        [&self.config, &self.own, &self.extent]
+            .iter()
+            .any(|source| source.has_struct(name))
     }
 
     /// The struct a key's value is written with, and whether the file writes an array of them.

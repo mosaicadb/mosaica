@@ -13,8 +13,8 @@ description = "Quantisation, Morton codes, tiles and projections for Mosaica. In
 
 [dependencies]
 mosaica-types = { workspace = true }
-# Off by default: only a crate reading an `extent` from a request body needs it.
-serde = { workspace = true, optional = true }
+# An `extent` is read from a declaration and from a request body.
+serde = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
@@ -22,6 +22,3 @@ proptest = { workspace = true }
 # (test_corpora/common/projection-vectors.json), so the Rust side needs a parser. Nothing in this
 # crate's own code reads JSON.
 serde_json = { workspace = true }
-
-[features]
-serde = ["dep:serde"]

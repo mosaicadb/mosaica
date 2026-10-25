@@ -72,33 +72,77 @@ pub fn snap_lon_lat(projection: Projection, asked: &LonLatBox) -> Snap {
     snap_outward(&asked.project(projection))
 }
 
-/// The keys of an `extent` written as a table.
-#[derive(Debug, Clone, Default, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize),
-    serde(deny_unknown_fields)
-)]
+/// `extent` is the word `"auto"` or a table. A view with no projection takes four spellings, in
+/// the units of its own coordinates:
+///
+/// ```toml
+/// extent = "auto"                           # the same as { auto = true, margin = 0.01 }
+/// extent = { auto = true, margin = 0.25 }   # a square fitted to the data, plus margin each side
+/// extent = { min = -25.0, max = 25.0 }      # one range for both axes
+/// extent = { x = [-18, 19], y = [-22, 24] } # a range for each axis
+/// ```
+///
+/// A projected view takes two, in degrees, and widens the box to the smallest aligned square that
+/// contains it:
+///
+/// ```toml
+/// extent = "auto"                                     # the data's own longitude and latitude
+/// extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }  # a box
+/// ```
+///
+/// `auto` reads the view's points to fit the frame, so it is refused where the points source
+/// holds no rows. Any other word, an empty table, half a box, a number that is not finite, and a
+/// spelling of the other kind of view are refused.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExtentKeys {
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// `true` fits the frame to the points the build reads. `false` is refused, and so is `auto`
+    /// beside `min`, `max`, `x` or `y`. A projected view writes `extent = "auto"` instead.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub auto: Option<bool>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// Space added to each side of an `auto` frame, as a fraction of the data's span. Finite and
+    /// at least 0. Refused without `auto = true`.
+    ///
+    /// Default: `0.01`.
+    #[serde(default)]
     pub margin: Option<f64>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// The low end of both axes, beside `max`.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub min: Option<f64>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// The high end of both axes, beside `min`. It must be above `min`.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub max: Option<f64>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// The x axis as `[low, high]`, beside `y`, with `high` above `low`.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub x: Option<[f64; 2]>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// The y axis as `[low, high]`, beside `x`, with `high` above `low`.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub y: Option<[f64; 2]>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// A projected view's longitudes as `[west, east]`, in degrees within ±180, beside `lat`. A
+    /// box crossing the antimeridian, with `west` above `east`, is refused.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub lon: Option<[f64; 2]>,
-    #[cfg_attr(feature = "serde", serde(default))]
+    /// A projected view's latitudes as `[south, north]`, in degrees within ±90, beside `lon`,
+    /// with `north` not below `south`.
+    ///
+    /// Default: not set.
+    #[serde(default)]
     pub lat: Option<[f64; 2]>,
 }
 
-/// An `extent` as a declaration wrote it.
+/// An `extent` as a declaration or a request body wrote it, read from either.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WrittenExtent {
     /// A string.
@@ -107,6 +151,59 @@ pub enum WrittenExtent {
     Keys(ExtentKeys),
     /// Anything else: a number, a list, a boolean.
     Neither,
+}
+
+impl<'de> serde::Deserialize<'de> for WrittenExtent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
+        use serde::Deserialize as _;
+
+        struct Written;
+
+        impl<'de> Visitor<'de> for Written {
+            type Value = WrittenExtent;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("the word `auto` or a table")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, word: &str) -> Result<WrittenExtent, E> {
+                Ok(WrittenExtent::Word(word.to_string()))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<WrittenExtent, A::Error> {
+                ExtentKeys::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(WrittenExtent::Keys)
+            }
+
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<WrittenExtent, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(WrittenExtent::Neither)
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<WrittenExtent, E> {
+                Ok(WrittenExtent::Neither)
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<WrittenExtent, E> {
+                Ok(WrittenExtent::Neither)
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<WrittenExtent, E> {
+                Ok(WrittenExtent::Neither)
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<WrittenExtent, E> {
+                Ok(WrittenExtent::Neither)
+            }
+
+            fn visit_unit<E: serde::de::Error>(self) -> Result<WrittenExtent, E> {
+                Ok(WrittenExtent::Neither)
+            }
+        }
+
+        deserializer.deserialize_any(Written)
+    }
 }
 
 /// A projected view's two spellings, appended to every `extent` refusal it earns.

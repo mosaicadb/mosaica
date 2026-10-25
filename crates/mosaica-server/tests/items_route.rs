@@ -137,48 +137,6 @@ async fn fixture() -> Fixture {
     fixture_with(N, 16, generous_test_gate(), generous_bulk_gate(), |_| {}).await
 }
 
-async fn post_items(server: &TestServer, token: &str, body: &Value) -> reqwest::Response {
-    server
-        .client
-        .post(server.viewer_url("/v1/items"))
-        .bearer_auth(token)
-        .json(body)
-        .send()
-        .await
-        .unwrap()
-}
-
-/// One response, which must be a 200, decoded.
-async fn items_ok(server: &TestServer, token: &str, body: &Value) -> DecodedRecords {
-    let resp = post_items(server, token, body).await;
-    let status = resp.status().as_u16();
-    let bytes = resp.bytes().await.unwrap();
-    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
-    decode_records(&bytes)
-}
-
-/// A whole read: `body` sent, then again with each response's `next` as its cursor until that is
-/// null. Returns every response.
-async fn read_all(server: &TestServer, token: &str, body: &Value) -> Vec<DecodedRecords> {
-    let mut responses = Vec::new();
-    let mut body = body.clone();
-    loop {
-        let decoded = items_ok(server, token, &body).await;
-        let next = decoded.trailer["next"].clone();
-        responses.push(decoded);
-        assert!(responses.len() < 10_000, "a read that never ends");
-        match next {
-            Value::Null => return responses,
-            Value::String(cursor) => {
-                body["cursor"] = json!(cursor);
-                // `count` is refused with a cursor.
-                body.as_object_mut().unwrap().remove("count");
-            }
-            other => panic!("next is {other}"),
-        }
-    }
-}
-
 fn ids_of(responses: &[DecodedRecords]) -> Vec<u64> {
     responses.iter().flat_map(DecodedRecords::mosaica_ids).collect()
 }
@@ -242,7 +200,7 @@ async fn a_full_read_returns_every_visible_row_once_in_either_order() {
                 if let Some(filters) = filters {
                     body["filters"] = filters.clone();
                 }
-                let responses = read_all(&f.server, &token, &body).await;
+                let responses = read_items(&f.server, &token, &body).await;
                 assert!(responses.len() > 1, "the read spans several responses");
                 for response in &responses {
                     assert_eq!(response.head["order"], order);
@@ -272,7 +230,7 @@ async fn the_page_schema_is_the_named_fields_then_the_position_and_labels() {
     let token = token_for(&f.server, &["1"]).await;
     let (visible, matched) =
         viewport_counts(&f.server, &token, Some(&json!({ "archive": { "in": ["astro"] } }))).await;
-    let responses = read_all(
+    let responses = read_items(
         &f.server,
         &token,
         &json!({
@@ -396,7 +354,7 @@ async fn a_response_that_finds_no_row_before_its_time_runs_out_carries_a_page_of
     let (_, matched) = viewport_counts(&f.server, &token, Some(&filters)).await;
     let body = json!({ "view": "s0", "fields": ["score", "archive"], "filters": filters,
                        "page_rows": 1 });
-    let responses = read_all(&f.server, &token, &body).await;
+    let responses = read_items(&f.server, &token, &body).await;
     assert_eq!(ids_of(&responses).len() as u64, matched);
     let schema = responses
         .iter()
@@ -483,10 +441,10 @@ async fn zstd_pages_decode_to_the_uncompressed_pages() {
         "position": true, "labels": true,
         "order": "stored", "page_rows": 500,
     });
-    let plain = read_all(&f.server, &token, &body).await;
+    let plain = read_items(&f.server, &token, &body).await;
     let mut zstd_body = body.clone();
     zstd_body["compression"] = json!("zstd");
-    let zstd = read_all(&f.server, &token, &zstd_body).await;
+    let zstd = read_items(&f.server, &token, &zstd_body).await;
     let batches = |responses: &[DecodedRecords]| -> Vec<RecordBatch> {
         responses
             .iter()
@@ -780,7 +738,7 @@ async fn the_byte_budget_ends_a_response_that_the_next_resumes() {
     for (_, end) in &first.pages {
         assert_eq!(end["ended_by"], "bytes");
     }
-    let ids = ids_of(&read_all(&f.server, &token, &body).await);
+    let ids = ids_of(&read_items(&f.server, &token, &body).await);
     assert_eq!(ids.iter().copied().collect::<HashSet<_>>().len(), ids.len());
     assert_eq!(ids.len() as u64, visible);
 }
@@ -796,7 +754,7 @@ async fn the_time_budget_ends_a_response_that_the_next_resumes() {
     let token = token_for(&f.server, &["1"]).await;
     let (visible, _) = viewport_counts(&f.server, &token, None).await;
     let body = json!({ "view": "s0", "fields": ["score"], "page_rows": 200 });
-    let responses = read_all(&f.server, &token, &body).await;
+    let responses = read_items(&f.server, &token, &body).await;
     assert!(responses.len() > 1);
     for response in &responses[..responses.len() - 1] {
         assert_eq!(response.trailer["ended_by"], "budget_time");

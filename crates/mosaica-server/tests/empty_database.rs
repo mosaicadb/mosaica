@@ -55,19 +55,6 @@ fn build_from(dir: &Path, declaration: &str) {
         .expect("a declaration naming no file builds");
 }
 
-async fn send(server: &TestServer, method: reqwest::Method, path: &str, body: &Value) -> (u16, Value) {
-    let resp = server
-        .client
-        .request(method, server.control_url(path))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .json(body)
-        .send()
-        .await
-        .unwrap();
-    let status = resp.status().as_u16();
-    (status, resp.json().await.unwrap_or(Value::Null))
-}
-
 /// Three new items in the view `world`, each carrying both declared columns.
 async fn ingest_rows(server: &TestServer) {
     let resp = server
@@ -103,26 +90,14 @@ fn ingested() -> Vec<(u64, i64, i64, i64)> {
 /// in thousandths, sorted.
 async fn items(server: &TestServer, view: &str) -> Vec<(u64, i64, i64, i64)> {
     let token = token_for(server, &[]).await;
-    let mut body = json!({
+    let body = json!({
         "view": view,
         "fields": ["a", "score"],
         "position": true,
         "order": "map",
     });
     let mut out = Vec::new();
-    loop {
-        let resp = server
-            .client
-            .post(server.viewer_url("/v1/items"))
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await
-            .unwrap();
-        let status = resp.status().as_u16();
-        let bytes = resp.bytes().await.unwrap();
-        assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
-        let decoded = decode_records(&bytes);
+    for decoded in read_items(server, &token, &body).await {
         for (batch, _) in &decoded.pages {
             let a = arrow::compute::cast(
                 batch.column_by_name("a").unwrap(),
@@ -150,10 +125,6 @@ async fn items(server: &TestServer, view: &str) -> Vec<(u64, i64, i64, i64)> {
                 ));
             }
         }
-        match decoded.trailer["next"].clone() {
-            Value::Null => break,
-            cursor => body["cursor"] = cursor,
-        }
     }
     out.sort();
     out
@@ -163,17 +134,11 @@ async fn items(server: &TestServer, view: &str) -> Vec<(u64, i64, i64, i64)> {
 /// masked count.
 async fn artifacts(server: &TestServer, view: &str) -> Vec<(String, u64)> {
     let token = token_for(server, &[]).await;
-    let resp = server
-        .client
-        .post(server.viewer_url("/v1/artifacts/viewport"))
-        .bearer_auth(&token)
-        .json(&json!({
-            "view": view, "zoom": 0, "per_tile": 1000, "bbox": [0.0, 0.0, 100.0, 100.0],
-            "layers": [LAYER],
-        }))
-        .send()
-        .await
-        .unwrap();
+    let body = json!({
+        "view": view, "zoom": 0, "per_tile": 1000, "bbox": [0.0, 0.0, 100.0, 100.0],
+        "layers": [LAYER],
+    });
+    let resp = post_viewport_artifacts(server, &token, &body).await;
     assert_eq!(resp.status().as_u16(), 200);
     let mut out: Vec<(String, u64)> = decode_artifact_frames(&resp.bytes().await.unwrap())
         .artifacts
@@ -222,15 +187,7 @@ async fn an_empty_declaration_builds_a_database_declared_and_filled_through_cont
     let tmp = TempDir::new().unwrap();
     build_from(tmp.path(), "");
     let server = open(tmp.path()).await;
-    let status = server
-        .client
-        .get(server.control_url("/control/status"))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .send()
-        .await
-        .unwrap()
-        .status();
-    assert_eq!(status.as_u16(), 200);
+    assert!(control_status(&server).await.is_object(), "the control plane answers");
     let meta_before = meta(&server, &[]).await;
     assert!(ids(&meta_before, "views", "id").is_empty(), "{meta_before}");
     assert!(ids(&meta_before, "layers", "name").is_empty(), "{meta_before}");
@@ -242,20 +199,23 @@ async fn an_empty_declaration_builds_a_database_declared_and_filled_through_cont
         .expect("the declaration parses");
     let payloads = mosaica_build::config::control_payloads(&config);
     for body in payloads["attributes"].as_array().unwrap() {
-        let (status, answer) = send(&server, reqwest::Method::PUT, "/control/attributes", body).await;
+        let (status, answer) =
+            control(&server, reqwest::Method::PUT, "/control/attributes", body).await;
         assert_eq!(status, 201, "{answer}");
     }
     for entry in payloads["views"].as_array().unwrap() {
         let path = format!("/control/views/{}", entry["name"].as_str().unwrap());
-        let (status, answer) = send(&server, reqwest::Method::PUT, &path, &entry["body"]).await;
+        let (status, answer) =
+            control(&server, reqwest::Method::PUT, &path, &entry["body"]).await;
         assert_eq!(status, 201, "{answer}");
     }
     for body in payloads["layers"].as_array().unwrap() {
-        let (status, answer) = send(&server, reqwest::Method::PUT, "/control/layers", body).await;
+        let (status, answer) =
+            control(&server, reqwest::Method::PUT, "/control/layers", body).await;
         assert_eq!(status, 201, "{answer}");
     }
     ingest_rows(&server).await;
-    let (status, answer) = send(
+    let (status, answer) = control(
         &server,
         reqwest::Method::PUT,
         &format!("/control/layers/{LAYER}/artifacts"),
@@ -345,7 +305,7 @@ point_visibility = { default = "public" }
 
     for (group, key) in [("regions", "north"), ("quarters", "q1")] {
         let path = format!("/control/views/{group}/{key}");
-        let (status, answer) = send(&server, reqwest::Method::PUT, &path, &json!({})).await;
+        let (status, answer) = control(&server, reqwest::Method::PUT, &path, &json!({})).await;
         assert_eq!(status, 201, "{answer}");
     }
     let state = async |server: &TestServer| {

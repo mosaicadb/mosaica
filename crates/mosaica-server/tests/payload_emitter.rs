@@ -129,25 +129,11 @@ fn payloads(dir: &Path, declaration: &str) -> Value {
 }
 
 async fn put(served: &Served, path: &str, body: &Value) -> (u16, Value) {
-    send(served, reqwest::Method::PUT, path, body).await
+    control(&served.server, reqwest::Method::PUT, path, body).await
 }
 
 async fn patch(served: &Served, path: &str, body: &Value) -> (u16, Value) {
-    send(served, reqwest::Method::PATCH, path, body).await
-}
-
-async fn send(served: &Served, method: reqwest::Method, path: &str, body: &Value) -> (u16, Value) {
-    let resp = served
-        .server
-        .client
-        .request(method, served.server.control_url(path))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .json(body)
-        .send()
-        .await
-        .unwrap();
-    let status = resp.status().as_u16();
-    (status, resp.json().await.unwrap_or(Value::Null))
+    control(&served.server, reqwest::Method::PATCH, path, body).await
 }
 
 /// `201` for a create and `200` for a restatement are both "the route took it"; anything else is

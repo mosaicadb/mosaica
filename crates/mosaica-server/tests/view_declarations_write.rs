@@ -26,17 +26,7 @@ use serde_json::{json, Value};
 const N: u64 = 20;
 
 async fn put(served: &Served, path: &str, body: Value) -> (u16, Value) {
-    let resp = served
-        .server
-        .client
-        .put(served.server.control_url(path))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .json(&body)
-        .send()
-        .await
-        .unwrap();
-    let status = resp.status().as_u16();
-    (status, resp.json().await.unwrap_or(Value::Null))
+    control(&served.server, reqwest::Method::PUT, path, &body).await
 }
 
 async fn declare_group(served: &Served, name: &str, body: Value) -> (u16, Value) {

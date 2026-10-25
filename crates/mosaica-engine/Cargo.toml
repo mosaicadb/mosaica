@@ -36,7 +36,7 @@ mosaica-authz = { workspace = true }
 # mosaica-authz, which sits below this crate.
 mosaica-cache = { workspace = true }
 mosaica-store = { workspace = true }
-mosaica-spatial = { workspace = true, features = ["serde"] }
+mosaica-spatial = { workspace = true }
 mosaica-lifecycle = { workspace = true }
 # **The container encoder**, for the same reason `mosaica-store` and `mosaica-filter` hold it: a row
 # column's transposition already holds one Roaring block's worth of finished words per artifact, so

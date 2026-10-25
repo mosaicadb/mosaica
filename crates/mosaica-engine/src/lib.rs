@@ -220,7 +220,7 @@ pub use mosaica_lifecycle::IngestRow;
 // The two vocabulary routes' bodies, and the two view declarations', on the same rule.
 pub use mosaica_lifecycle::wal::{DeclaredFrame, PlainViewDeclaration, ViewGroupDeclaration};
 // A declared view's `extent` as its body wrote it, and the frame it states.
-pub use mosaica_spatial::extent::{ExtentKeys, WrittenExtent};
+pub use mosaica_spatial::extent::WrittenExtent;
 pub use view_declarations::declared_frame;
 pub use mosaica_lifecycle::{DeclaredValue, VocabularyRequest};
 
