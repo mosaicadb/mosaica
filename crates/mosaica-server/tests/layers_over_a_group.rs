@@ -387,6 +387,162 @@ async fn a_layer_naming_a_group_follows_a_view_created_in_it_at_both_paths() {
     }
 }
 
+/// `PUT /control/views/years/<key>`, answered `201`.
+async fn create_year(server: &TestServer, key: &str) {
+    let resp = server
+        .client
+        .put(server.control_url(&format!("/control/views/years/{key}")))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+}
+
+/// Rows of `id` and position into `view`, answered once readers see them.
+async fn place(server: &TestServer, batch: &str, view: &str, ids: std::ops::Range<u64>) {
+    let rows: Vec<Value> = ids
+        .map(|e| json!({ "id": e, "x": 100.0 + e as f64, "y": 500.0 }))
+        .collect();
+    let resp = server
+        .client
+        .post(server.control_url("/control/ingest?wait=visible"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .header("x-mosaica-batch-id", batch)
+        .header("x-mosaica-view", view)
+        .json(&rows)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "{}", resp.text().await.unwrap());
+}
+
+/// How many points `/v1/viewport` serves in `view` with a tag of `layer`.
+async fn tagged(server: &TestServer, view: &str, layer: &str) -> usize {
+    use arrow::array::Array;
+    let auth = authorise(server, &["0", "1"]).await;
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/viewport"))
+        .bearer_auth(auth["token"].as_str().unwrap())
+        .json(&json!({
+            "view": view, "zoom": 0, "bbox": [0.0, 0.0, 1000.0, 1000.0], "k": 1000,
+            "layers": [layer],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let column = format!("membership:{layer}");
+    let mut tagged = 0;
+    for (kind, payload) in mosaica_wire::split_frames(&resp.bytes().await.unwrap()).unwrap() {
+        if kind != mosaica_wire::FRAME_POINTS {
+            continue;
+        }
+        let reader =
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(payload.to_vec()), None)
+                .unwrap();
+        for batch in reader {
+            let batch = batch.unwrap();
+            if let Some(tags) = batch.column_by_name(&column) {
+                tagged += tags.len() - tags.null_count();
+            }
+        }
+    }
+    tagged
+}
+
+/// **An artifact published before a view of its group existed is served on that view**, with its
+/// members' tags, once items are placed there; and a view dropped from the group leaves the layer,
+/// before and after a restart.
+#[tokio::test]
+async fn a_followed_view_serves_the_layers_artifacts_and_a_dropped_one_leaves_it() {
+    const LAYER: &str = "clusters/topics";
+    let built = build_side("", &|_| true);
+    let server = open(&built.dir).await;
+    let (status, body) = put_layer(&server, layer_json(LAYER, &["papers", "years"], None)).await;
+    assert_eq!(status, 201, "{body}");
+    let resp = server
+        .client
+        .put(server.control_url("/control/layers/clusters%2Ftopics/artifacts"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&json!({
+            "artifacts": [{ "key": "all", "members": { "id": (0..ENTITIES).collect::<Vec<_>>() } }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201, "{}", resp.text().await.unwrap());
+
+    create_year(&server, "2012").await;
+    place(&server, "into-2012", "years:2012", 0..5).await;
+    assert_eq!(browse(&server, "years:2012", LAYER).await.get("all"), Some(&5));
+    assert_eq!(tagged(&server, "years:2012", LAYER).await, 5);
+
+    let resp = server
+        .client
+        .delete(server.control_url("/control/views/years/2012?wait=visible"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(drawn_on(&server, LAYER).await, every_view());
+    let server = restart(server, &built.dir).await;
+    assert_eq!(drawn_on(&server, LAYER).await, every_view(), "after a restart");
+    server.shutdown().await;
+}
+
+/// **A shape layer named on a group draws its shapes on a view created in the group later**, and
+/// counts the points there, before and after a restart: a group's views share its frame.
+#[tokio::test]
+async fn a_shape_layer_named_on_a_group_draws_on_a_view_created_in_it() {
+    const LAYER: &str = "regions/boxes";
+    let built = build_side("", &|_| true);
+    let server = open(&built.dir).await;
+    let (status, body) = put_layer(
+        &server,
+        json!({
+            "name": LAYER,
+            "title": LAYER,
+            "views": ["years"],
+            "membership": "spatial",
+            "shape": { "kind": "bbox" },
+            "visibility": "public",
+            "artifact_visibility": { "field": null, "default": "inherited" },
+            "require_member_visibility": null,
+            "hierarchy": { "kind": "flat", "prune_children": false },
+            "depends_on": [],
+            "levels": []
+        }),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let resp = server
+        .client
+        .put(server.control_url("/control/layers/regions%2Fboxes/artifacts"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&json!({
+            "artifacts": [{ "key": "box", "members": {}, "bbox": [0.0, 0.0, 1000.0, 1000.0] }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201, "{}", resp.text().await.unwrap());
+
+    create_year(&server, "2012").await;
+    place(&server, "into-2012", "years:2012", 1000..1006).await;
+    assert_eq!(browse(&server, "years:2012", LAYER).await.get("box"), Some(&6));
+    let server = restart(server, &built.dir).await;
+    assert_eq!(
+        browse(&server, "years:2012", LAYER).await.get("box"),
+        Some(&6),
+        "after a restart"
+    );
+    server.shutdown().await;
+}
+
 /// **A layer naming a group is drawn on every view of it, at both paths.**
 #[tokio::test]
 async fn a_layer_naming_a_group_is_drawn_on_every_view_of_it_at_both_paths() {

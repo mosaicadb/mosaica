@@ -293,11 +293,24 @@ impl ArtifactShapes {
     }
 
     /// The canonical bytes for one view, or `None` where the shape was not canonicalised for it.
+    ///
+    /// A view of a view group with none of its own, created after the shape was published, reads
+    /// the bytes a view of the same group holds: a group's views share its frame and projection,
+    /// which are all a canonical form is computed from, so the publication would have given it
+    /// those bytes.
     pub fn for_view(&self, view: &str) -> Option<&[u8]> {
+        if let Ok(i) = self.by_view.binary_search_by(|(v, _)| v.as_str().cmp(view)) {
+            return Some(self.by_view[i].1.as_slice());
+        }
+        fn group_of(id: &str) -> Option<&str> {
+            id.split_once(mosaica_types::view::GROUP_SEPARATOR)
+                .map(|(group, _)| group)
+        }
+        let group = group_of(view)?;
         self.by_view
-            .binary_search_by(|(v, _)| v.as_str().cmp(view))
-            .ok()
-            .map(|i| self.by_view[i].1.as_slice())
+            .iter()
+            .find(|(held, _)| group_of(held) == Some(group))
+            .map(|(_, bytes)| bytes.as_slice())
     }
 
     pub fn views(&self) -> impl Iterator<Item = (&str, &[u8])> {
