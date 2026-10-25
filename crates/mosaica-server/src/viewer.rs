@@ -1,6 +1,6 @@
 //! The viewer plane: `/v1/meta`, `/v1/categories`, `/v1/viewport`, `/v1/artifacts/viewport`,
-//! `/v1/items`, `/v1/items/{mosaica_id}`, `/v1/artifacts` and `/v1/aggregate`, plus `/healthz` and
-//! `/readyz`. Bearer auth is a session token minted by the session plane's `/session/authorise`.
+//! `/v1/items`, `/v1/items/{mosaica_id}`, `/v1/artifacts`, `/v1/aggregate` and
+//! `/v1/basemaps/world`, plus `/healthz` and `/readyz`. Bearer auth is a session token minted by the session plane's `/session/authorise`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -50,6 +50,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/aggregate", post(crate::aggregate::aggregate))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/v1/basemaps/world", get(crate::basemap::world))
         // Trims the allocator after responses; mounted on every plane, so a node that never
         // ingests still returns what serving grew.
         .layer(axum::middleware::from_fn_with_state(

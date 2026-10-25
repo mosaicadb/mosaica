@@ -101,6 +101,8 @@ tags:
     description: Logging in, and the corpus as one principal sees it. Authenticated by a session token.
   - name: probes
     description: Liveness and readiness, on the viewer and session listeners, unauthenticated, no body.
+  - name: basemaps
+    description: Map backgrounds compiled into the server, the same for every principal. Authenticated by a session token.
   - name: "control: ingest"
     description: Items, with their positions, labels and values, created and edited. Control plane.
   - name: "control: changes"
@@ -255,6 +257,63 @@ paths:
           description: Ready to serve.
         "503":
           description: Not ready. No body and no `Retry-After`, because a figure that varied with the write executor's state would tell an unauthenticated caller about it.
+
+  /v1/basemaps/world:
+    get:
+      tags: [basemaps]
+      operationId: basemapWorld
+      summary: The built-in world outline, the same bytes for every principal.
+      description: |
+        Land, coastlines and country borders from Natural Earth 1:50m, which is in the public
+        domain ("Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.").
+        The body is compiled into the server, says nothing about the corpus or the node, and is
+        the same for every session.
+
+        **The body is not JSON.** All integers are little-endian, with no padding:
+
+        - 4 bytes, `MBW1`. A change to the format changes the digit.
+        - Land: a `u32` polygon count; per polygon a `u16` ring count, the outer ring first and
+          then its holes; per ring a `u32` point count and then the points.
+        - Coastlines, then borders: a `u32` line count; per line a `u32` point count and then the
+          points.
+        - A point is `i16 x, i16 y`: longitude is `x * 180 / 32767` and latitude
+          `y * 90 / 32767`.
+      security:
+        - sessionToken: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: An `etag` this route sent. A match is answered `304` with no body; the token is checked first.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The outline.
+          headers:
+            etag:
+              description: A strong tag derived from the body, quoted. It changes only when the body does.
+              required: true
+              schema:
+                type: string
+            cache-control:
+              description: "`public, max-age=31536000, immutable`."
+              required: true
+              schema:
+                type: string
+                const: "public, max-age=31536000, immutable"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+                description: The `MBW1` outline.
+        "304":
+          description: "`If-None-Match` named this body's `etag`, or was `*`. No body; `etag` and `cache-control` as on the `200`."
+        "401":
+          $ref: "#/components/responses/BadCredential"
+        "403":
+          $ref: "#/components/responses/ExpiredToken"
 
   /v1/login:
     post:

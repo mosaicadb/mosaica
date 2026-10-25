@@ -491,6 +491,7 @@ fn the_description_names_every_route_on_the_three_planes_and_no_other() {
             "/v1/artifacts/browse",
             "/v1/artifacts/viewport",
             "/v1/artifacts/{mosaica_id}",
+            "/v1/basemaps/world",
             "/v1/categories/{column}",
             "/v1/categories/{column}/suggest",
             "/v1/items",
@@ -1396,6 +1397,48 @@ async fn the_probes_are_bare_status_codes_on_both_listeners() {
             "{url} carries no body"
         );
     }
+}
+
+#[tokio::test]
+async fn the_world_basemap_matches_the_description() {
+    let doc = description();
+    let f = fixture().await;
+    let responses = &doc["paths"]["/v1/basemaps/world"]["get"]["responses"];
+    let url = f.server.viewer_url("/v1/basemaps/world");
+    let auth = authorise_checked(&doc, &f.server, &["0"]).await;
+    let token = auth["token"].as_str().unwrap();
+
+    let resp = f.server.client.get(&url).bearer_auth(token).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(
+        resp.headers()["content-type"].to_str().unwrap(),
+        "application/octet-stream"
+    );
+    for (name, spec) in responses["200"]["headers"].as_object().unwrap() {
+        let value = resp
+            .headers()
+            .get(name.as_str())
+            .unwrap_or_else(|| panic!("response lacks the described header {name}"));
+        if let Some(fixed) = spec["schema"]["const"].as_str() {
+            assert_eq!(value.to_str().unwrap(), fixed, "{name}");
+        }
+    }
+    let etag = resp.headers()["etag"].to_str().unwrap().to_string();
+    assert!(resp.bytes().await.unwrap().starts_with(b"MBW1"));
+
+    let resp = f
+        .server
+        .client
+        .get(&url)
+        .bearer_auth(token)
+        .header("if-none-match", &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 304);
+    assert!(responses["304"].is_object(), "the 304 is described");
+    assert_eq!(resp.headers()["etag"].to_str().unwrap(), etag);
+    assert!(resp.bytes().await.unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2429,13 +2472,13 @@ async fn every_described_route_requires_its_planes_credential() {
         }
     }
 
-    // Non-vacuity, both halves: the loop must have found the seven gated routes and the two
+    // Non-vacuity, both halves: the loop must have found the gated routes and the two
     // probes, or it enumerated nothing and proved nothing.
     assert_eq!(
-        gated, 13,
+        gated, 14,
         "the viewer plane's gated operations are logout, meta, categories, suggest's two forms, \
          viewport, the artifacts viewport, the items read, items, the artifacts read, artifacts, \
-         artifacts/browse and the aggregate; a change to that set belongs in this test's \
+         artifacts/browse, the aggregate and the world basemap; a change to that set belongs in this test's \
          reasoning, not silently in its count"
     );
     assert_eq!(
@@ -2484,7 +2527,11 @@ enum Malformed {
 fn malformed_viewer_requests(method: &reqwest::Method, path: &str) -> Vec<(Malformed, u16)> {
     let mut kinds = Vec::new();
     if *method == reqwest::Method::GET {
-        let status = if path == "/v1/meta" { 200 } else { 422 };
+        let status = if matches!(path, "/v1/meta" | "/v1/basemaps/world") {
+            200
+        } else {
+            422
+        };
         kinds.push((Malformed::Query, status));
         kinds.push((Malformed::UnknownQuery, status));
     } else {

@@ -8,6 +8,7 @@
 mod address;
 mod aggregate;
 mod artifact_tiles;
+mod basemap;
 pub mod auth;
 pub mod control;
 pub mod cors;
