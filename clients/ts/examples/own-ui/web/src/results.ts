@@ -13,13 +13,11 @@ export function results(store: Store): void {
     count.textContent = `${matched} of the ${visible} papers in view match`;
   });
 
-  let cameraSet = false;
   let reading: AbortController | null = null;
   let timer = 0;
 
   // The titles of the first 20 of those papers, in the order they lie on the map.
   async function listFirst(): Promise<void> {
-    if (!cameraSet) return;
     reading?.abort();
     const controller = (reading = new AbortController());
     try {
@@ -38,9 +36,6 @@ export function results(store: Store): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(listFirst, 250);
   }
-  map.addEventListener('mosaica-viewchange', () => {
-    cameraSet = true;
-    soon();
-  });
+  map.addEventListener('mosaica-viewchange', soon);
   store.subscribe('filters', soon);
 }

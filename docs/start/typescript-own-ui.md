@@ -181,7 +181,7 @@ The count comes from subscribing to `view`. `formatMasked` writes a count with t
 
 For the list, `store.items` takes the fields to return, here only `title`. `inView: true` limits the read to the area the in-view counts cover, which is the part of the map on screen, so the list and the count agree. `pageRows: 20` and `pages: 1` ask for one page of twenty, and `order: 'map'` returns them in the order they lie on the map. We read that first page and stop the read with `read.return()`.
 
-The map fires `mosaica-viewchange` each time the camera moves, and the store publishes `filters` each time they change, so both ask for the list again. `soon` waits until they have been still for a quarter of a second before asking, so a pan sends one request rather than one per frame. An `AbortController` cancels a read the next one replaces. `inView` needs the camera, so nothing is read until the map has reported where it is looking.
+The map fires `mosaica-viewchange` each time the camera moves, and the store publishes `filters` each time they change, so both ask for the list again. `soon` waits until they have been still for a quarter of a second before asking, so a pan sends one request rather than one per frame. An `AbortController` cancels a read the next one replaces.
 
 Add it to `main.ts`:
 
