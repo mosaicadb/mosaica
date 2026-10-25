@@ -1346,6 +1346,12 @@ fn main() -> ExitCode {
                     }
                     ExitCode::SUCCESS
                 }
+                // A declaration the build refuses leaves no bundle, as one refused while the
+                // arguments were made does.
+                Err(e @ mosaica_build::error::BuildError::Declaration(_)) => {
+                    eprintln!("build refused: {e}");
+                    ExitCode::FAILURE
+                }
                 Err(e) => {
                     eprintln!("build FAILED: {e}");
                     ExitCode::FAILURE
