@@ -23,7 +23,7 @@ import {materialiseStandIn, type StandInBuffers} from './assemble.js';
 import {BACKING_HEIGHT_EM, backingAspect, backingAtlas, backingIcon} from './backing.js';
 import {DEFAULT_COLOURING, buildColourAttribute, encodingSignature, rgbOfHex, type Colouring, type Encoding, type Rgb} from './colour.js';
 import {shapeBbox, smoothRing, type ContourShape, type Part} from './contours.js';
-import {DEFAULT_DENSITY_SCALE, binDensity, contourThresholds, densityPaint, densityPosition, densitySteps, densityStops, drawnCells, filterDensity, gridImage, hexagons, maxCount, HEX_VERTICES, type DensityCell, type DensityColours, type DensityHexagons, type DensityCounts, type DensityMode, type DensityScale} from './density.js';
+import {DEFAULT_DENSITY_SCALE, binDensity, contourThresholds, densityPaint, densityStep, densitySteps, densityStops, drawnCells, filterDensity, gridImage, hexagons, maxCount, HEX_VERTICES, type DensityCell, type DensityColours, type DensityCounts, type DensityMode, type DensityScale} from './density.js';
 import {DEFAULT_DENSITY_CELL_PX, DensityCounter} from './density-counter.js';
 import {LABEL_LINE_HEIGHT, labelLine, labelSize, placeLabels, type LabelCandidate, type PlacedLabel} from './labels.js';
 import {importAggregation} from './aggregation-loader.js';
@@ -402,13 +402,6 @@ type WashState = {
 const sameWash = (a: WashKey | null, b: WashKey) => a !== null && a.counts === b.counts && a.kind === b.kind && a.scheme === b.scheme && a.colours === b.colours && a.scale === b.scale;
 /** The colours a hexagon or grid cell takes, sparse to dense, in equal steps of the scale. */
 const DENSITY_STEPS = 8;
-/** The hexagons as deck's binary data, one object per set of hexagons so deck keeps its attributes between paints. */
-const heldHexData = new WeakMap<DensityHexagons, {length: number; attributes: {getPosition: {value: Float64Array; size: 2}}}>();
-function hexData(hex: DensityHexagons) {
-  let data = heldHexData.get(hex);
-  if (!data) heldHexData.set(hex, (data = {length: hex.length, attributes: {getPosition: {value: hex.positions, size: 2}}}));
-  return data;
-}
 /** The share of a hexagon drawn, so neighbouring hexagons show a hairline gap. */
 const DENSITY_COVERAGE = 0.94;
 
@@ -1326,14 +1319,13 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const common = {opacity: strength, pickable: false, parameters: {depthCompare: 'always' as const}};
     if (mode === 'hex' && counts) {
       const hex = hexagons(counts);
-      let max = 0;
-      for (const c of hex.counts) if (c > max) max = c;
+      const max = maxCount(counts.cells);
       const steps = densitySteps(densityStops(colours, scheme), DENSITY_STEPS);
       layers.push(
         new ColumnLayer(this.getSubLayerProps({id: 'density-hex'}), {
           ...common,
-          data: hexData(hex),
-          getFillColor: (_: unknown, {index}: {index: number}) => steps[Math.min(DENSITY_STEPS - 1, Math.floor(densityPosition(hex.counts[index]!, max, scale) * DENSITY_STEPS))]!,
+          data: hex,
+          getFillColor: (_: unknown, {index}: {index: number}) => densityStep(steps, hex.counts[index]!, max, scale),
           updateTriggers: {getFillColor: `${scale}|${max}|${colours}|${scheme}`},
           vertices: HEX_VERTICES,
           diskResolution: 6,
@@ -1341,7 +1333,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
           coverage: DENSITY_COVERAGE,
           extruded: false,
           stroked: false
-        } as never)
+        })
       );
     } else if (mode === 'contours' && counts) {
       const aggregated = drawnCells(counts, mode);

@@ -267,11 +267,11 @@ export function drawnCells(counts: DensityCounts, mode: DensityMode): DensityCou
 }
 
 /**
- * The hexagons over a set of counts: `length` of them, each one's centre in world units at
- * `positions[2i]` and `positions[2i + 1]` and the count of the densest cell it takes at `counts[i]`,
- * with their radius, centre to corner, in world units.
+ * The hexagons over a set of counts, as deck's binary data: `length` of them, each one's centre in
+ * world units at `attributes.getPosition.value[2i]` and `[2i + 1]` and the count of the densest cell
+ * it takes at `counts[i]`, with their radius, centre to corner, in world units.
  */
-export type DensityHexagons = {radius: number; length: number; positions: Float64Array; counts: Float64Array};
+export type DensityHexagons = {radius: number; length: number; attributes: {getPosition: {value: Float64Array; size: 2}}; counts: Float64Array};
 
 /** A hexagon's radius, centre to corner, over its cells' width: a hexagon has one cell's area. */
 const HEX_RADIUS = Math.sqrt(2 / (3 * Math.sqrt(3)));
@@ -297,49 +297,43 @@ export function hexagons(counts: DensityCounts): DensityHexagons {
   const span = WORLD_SIZE / 2 ** counts.depth;
   const radius = span * HEX_RADIUS;
   const {cells} = counts;
-  let made: DensityHexagons = {radius, length: 0, positions: new Float64Array(0), counts: new Float64Array(0)};
-  if (cells.length > 0) {
-    // The hexagons the cells' extent can reach, one past each side, as a dense array of counts.
-    const {x0, y0, x1, y1} = extentOf(cells);
-    const unit = span / radius;
-    const j0 = Math.floor((y0 * unit) / HEX_DY) - 1;
-    const i0 = Math.floor((x0 * unit) / HEX_DX) - 1;
-    const rows = Math.ceil(((y1 + 1) * unit) / HEX_DY) + 2 - j0;
-    const columns = Math.ceil(((x1 + 1) * unit) / HEX_DX) + 2 - i0;
-    const best = new Float64Array(rows * columns);
-    let length = 0;
-    for (const c of cells) {
-      for (let q = 0; q < 4; q++) {
-        const at = hexAt((c.x + 0.25 + 0.5 * (q & 1)) * unit, (c.y + 0.25 + 0.5 * (q >> 1)) * unit);
-        const k = (hexRow - j0) * columns + (at - i0);
-        if (c.count > best[k]!) {
-          if (best[k] === 0) length++;
-          best[k] = c.count;
-        }
+  // The hexagons the cells' extent can reach, one past each side, as a dense array of counts.
+  const {x0, y0, x1, y1} = cells.length > 0 ? extentOf(cells) : {x0: 0, y0: 0, x1: -1, y1: -1};
+  const unit = span / radius;
+  const i0 = Math.floor((x0 * unit) / HEX_DX) - 1;
+  const j0 = Math.floor((y0 * unit) / HEX_DY) - 1;
+  const lattice: Lattice = {i0, j0, columns: Math.ceil(((x1 + 1) * unit) / HEX_DX) + 2 - i0};
+  const rows = Math.ceil(((y1 + 1) * unit) / HEX_DY) + 2 - j0;
+  const best = new Float64Array(cells.length > 0 ? rows * lattice.columns : 0);
+  let length = 0;
+  for (const c of cells) {
+    for (let q = 0; q < 4; q++) {
+      const k = hexAt((c.x + 0.25 + 0.5 * (q & 1)) * unit, (c.y + 0.25 + 0.5 * (q >> 1)) * unit, lattice);
+      if (c.count > best[k]!) {
+        if (best[k] === 0) length++;
+        best[k] = c.count;
       }
     }
-    made = {radius, length, positions: new Float64Array(2 * length), counts: new Float64Array(length)};
-    for (let k = 0, n = 0; n < length; k++) {
-      if (best[k] === 0) continue;
-      const j = Math.floor(k / columns) + j0;
-      const i = (k % columns) + i0;
-      made.positions[2 * n] = (i + (j & 1) / 2) * HEX_DX * radius;
-      made.positions[2 * n + 1] = j * HEX_DY * radius;
-      made.counts[n++] = best[k]!;
-    }
+  }
+  const positions = new Float64Array(2 * length);
+  const made: DensityHexagons = {radius, length, attributes: {getPosition: {value: positions, size: 2}}, counts: new Float64Array(length)};
+  for (let k = 0, n = 0; n < length; k++) {
+    if (best[k] === 0) continue;
+    const j = Math.floor(k / lattice.columns) + j0;
+    const i = (k % lattice.columns) + i0;
+    positions[2 * n] = (i + (j & 1) / 2) * HEX_DX * radius;
+    positions[2 * n + 1] = j * HEX_DY * radius;
+    made.counts[n++] = best[k]!;
   }
   heldHexagons.set(counts, made);
   return made;
 }
 
-/** The row of the hexagon {@link hexAt} last found. */
-let hexRow = 0;
+/** A window of the hexagon lattice held as a dense array: its first column and row, and its width. */
+type Lattice = {i0: number; j0: number; columns: number};
 
-/**
- * The column of the pointy-topped hexagon holding `(x, y)`, in units of the radius; its row is
- * left in {@link hexRow}, so the binning loop allocates nothing.
- */
-function hexAt(x: number, y: number): number {
+/** The index in `lattice` of the pointy-topped hexagon holding `(x, y)`, in units of the radius. */
+function hexAt(x: number, y: number, lattice: Lattice): number {
   const py = y / HEX_DY;
   let j = Math.round(py);
   const px = x / HEX_DX - (j & 1) / 2;
@@ -358,9 +352,14 @@ function hexAt(x: number, y: number): number {
       j = j2;
     }
   }
-  hexRow = j;
-  return i;
+  return (j - lattice.j0) * lattice.columns + (i - lattice.i0);
 }
+
+/** The colour of `steps` a count takes: the step its position on `scale` up to `max` falls in. */
+export function densityStep<T>(steps: readonly T[], count: number, max: number, scale: DensityScale): T {
+  return steps[Math.min(steps.length - 1, Math.floor(densityPosition(count, max, scale) * steps.length))]!;
+}
+
 /** The positions on the scale contour lines are drawn at. */
 const CONTOUR_POSITIONS = [0.2, 0.4, 0.6, 0.8];
 
@@ -591,7 +590,7 @@ export function gridImage(counts: DensityCounts, stops: readonly Rgb[], steps: n
   const width = columns * S;
   const data = new Uint8ClampedArray(width * rows * S * 4);
   for (const c of cells) {
-    const colour = colours[Math.min(steps - 1, Math.floor(densityPosition(c.count, max, scale) * steps))]!;
+    const colour = densityStep(colours, c.count, max, scale);
     for (let dy = 0; dy < fill; dy++) {
       let i = (((c.y - y0) * S + dy) * width + (c.x - x0) * S) * 4;
       for (let dx = 0; dx < fill; dx++, i += 4) {

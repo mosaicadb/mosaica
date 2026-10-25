@@ -142,7 +142,7 @@ describe('the modes on one scale', () => {
 describe('hexagons', () => {
   const SPAN = WORLD_SIZE / 2 ** 5;
   const at = (x: number, y: number, count: number): DensityCell => ({x, y, position: [(x + 0.5) * SPAN, (y + 0.5) * SPAN], count});
-  const centres = (h: ReturnType<typeof hexagons>) => Array.from({length: h.length}, (_, i) => ({position: [h.positions[2 * i]!, h.positions[2 * i + 1]!] as [number, number], count: h.counts[i]!}));
+  const centres = (h: ReturnType<typeof hexagons>) => Array.from({length: h.length}, (_, i) => ({position: [h.attributes.getPosition.value[2 * i]!, h.attributes.getPosition.value[2 * i + 1]!] as [number, number], count: h.counts[i]!}));
 
   it('takes the densest cell under each hexagon, not the sum of the cells it covers', () => {
     const h = hexagons({depth: 5, cells: [at(4, 4, 80_000), at(8, 4, 300), at(9, 4, 100)]});
