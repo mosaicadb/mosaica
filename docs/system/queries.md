@@ -89,7 +89,7 @@ A filter is a JSON expression over the declared fields. A field must be [indexed
 | Text | `match`, `phrase` | `{"abstract": {"match": "graph neural network"}}` |
 
 - **Keywords** are compared exactly, case included.
-- **Dates** are written as text or in microseconds since 1970: 1 January 2020 is `"2020-01-01"` or `1577836800000000`. A date alone is midnight UTC, and a date with a time needs an offset, as in `"2020-01-01T09:30:00Z"` or `"2020-01-01T10:30:00+01:00"`. A date in a range is its first instant, so a range covering 2020 ends at `"lt": "2021-01-01"`; `"lte": "2020-12-31"` would leave out most of 31 December. A string of digits, such as `"20200101"`, is microseconds.
+- **Dates** are written as text or in microseconds since 1970: 1 January 2020 is `"2020-01-01"` or `1577836800000000`. A date alone is midnight UTC, and a date with a time needs an offset, as in `"2020-01-01T09:30:00Z"` or `"2020-01-01 10:30:00+01:00"`; a space may stand for the `T`. A date in a range is its first instant, so a range covering 2020 ends at `"lt": "2021-01-01"`; `"lte": "2020-12-31"` would leave out most of 31 December. A string of digits, such as `"20200101"`, is microseconds.
 - **Text** is matched by word, ignoring case. `match` finds items containing every word, and `phrase` the words together, in order.
 - **A unique field**, such as a DOI, can be filtered with `eq` and `in` even when it is neither indexed nor rendered. This is the quick way to find a list of papers.
 

@@ -545,7 +545,7 @@ fn parse_range(
 
 /// A numeric comparand. An integer is carried exactly as `i128`; a fractional or out-of-range
 /// number becomes `f64`. A JSON boolean is accepted for a `bool` column, which stores as 0/1. On
-/// an integer or timestamp column a decimal string (`"-42"`) is an exact integer too, for a
+/// an integer or timestamp column a decimal string (`"-42"`, `"+42"`) is an exact integer too, for a
 /// client whose numbers are doubles and cannot carry one past 2^53, and on a timestamp column so
 /// is a date ([`WrittenAs`]).
 pub(crate) fn numeric_value(

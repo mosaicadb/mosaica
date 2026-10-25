@@ -2535,10 +2535,11 @@ paths:
         attribute, a group-scoped attribute of the view's group, or an enumerated layer; any other
         name is `422`. A category takes its vocabulary's key: under a `closed` vocabulary an
         unknown key is `422`, and under an `open` one it is added. An integer is read exactly,
-        from a JSON number or a string of digits; `timestamp_us` is microseconds since the Unix
-        epoch, as a number or a string of digits, or a string holding an RFC 3339 date
-        (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`,
-        `2020-01-01T10:30:00.25+01:00`). A date-time with no offset, or with more than six
+        from a JSON number or a string of digits, optionally after `-` or `+`; `timestamp_us` is
+        microseconds since the Unix epoch, as a number or a string of digits, or a string holding
+        an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset
+        (`2020-01-01T09:30:00Z`, `2020-01-01 10:30:00.25+01:00`), the date and time parted by `T`
+        or a space. A date-time with no offset, or with more than six
         fractional-second digits, is `422`; a leap second, `23:59:60`, is the second after
         `23:59:59`.
 
@@ -6172,11 +6173,11 @@ components:
         takes an object of `gte`, `gt`, `lte` and `lt`, at least one and at most one per side; a
         `text` column takes `match` with a string or `{"query", "minimum_should_match"}`, and
         `phrase` with a string. An integer or `timestamp_us` column also takes an integer as its
-        decimal digits in a string, optionally after `-` (`"1152921504606846976"`), which is exact
+        decimal digits in a string, optionally after `-` or `+` (`"1152921504606846976"`), which is exact
         where a JSON number read as a double is not, past 2^53. A `timestamp_us` column's values
         are microseconds since the Unix epoch, and it also takes an RFC 3339 date (`"2020-01-01"`,
-        midnight UTC) or date-time with an offset (`"2020-01-01T09:30:00Z"`) as a string; a
-        date-time with no offset, or with more than six fractional-second digits, is `422`. A date
+        midnight UTC) or date-time with an offset (`"2020-01-01T09:30:00Z"`, or with a space for
+        the `T`) as a string; a date-time with no offset, or with more than six fractional-second digits, is `422`. A date
         is its first instant, so `{"lt": "2021-01-01"}` ends a range with the last of 2020, and
         `{"lte": "2020-12-31"}` leaves out all of 31 December after midnight.
 
@@ -6334,11 +6335,11 @@ components:
       additionalProperties: false
 
     NumericComparand:
-      description: A number, or on an integer or `timestamp_us` column its decimal digits as a string, optionally after `-`, which is exact past 2^53. On a `timestamp_us` column, also an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) and at most six fractional-second digits.
+      description: A number, or on an integer or `timestamp_us` column its decimal digits as a string, optionally after `-` or `+`, which is exact past 2^53. On a `timestamp_us` column, also an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`, or with a space for the `T`) and at most six fractional-second digits.
       oneOf:
         - type: number
         - type: string
-          pattern: '^(-?[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}([Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?([Zz]|[+-][0-9]{2}:[0-9]{2}))?)$'
+          pattern: '^([-+]?[0-9]+|[0-9]{4}-[0-9]{2}-[0-9]{2}([Tt ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?([Zz]|[+-][0-9]{2}:[0-9]{2}))?)$'
 
     ItemsRequest:
       type: object

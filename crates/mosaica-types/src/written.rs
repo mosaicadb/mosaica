@@ -1,9 +1,9 @@
 //! An integer or timestamp field's value written as a string, as JSON and `corpus.toml` carry it.
 //!
-//! Digits, optionally after a `-`, are the integer itself, on a timestamp field too, where they
-//! count microseconds since the Unix epoch. A timestamp field also takes an RFC 3339 date
+//! Digits, optionally after a `-` or `+`, are the integer itself, on a timestamp field too, where
+//! they count microseconds since the Unix epoch. A timestamp field also takes an RFC 3339 date
 //! (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`,
-//! `2020-01-01T09:30:00.25+01:00`). A date-time with no offset names no instant and is refused, as
+//! `2020-01-01T09:30:00.25+01:00`), the date and time parted by `T`, `t` or a space. A date-time with no offset names no instant and is refused, as
 //! is a seventh fractional digit, which a microsecond cannot hold. A leap second, `23:59:60`, is
 //! the second after `23:59:59`.
 
@@ -33,7 +33,7 @@ impl fmt::Display for WrittenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             WrittenError::NotAnInteger => {
-                "is not an integer; write its decimal digits, optionally after a '-'"
+                "is not an integer; write its decimal digits, optionally after a '-' or '+'"
             }
             WrittenError::NotATimestamp => {
                 "is not a timestamp; write a date such as 2026-04-01, a date-time with an offset \
@@ -69,7 +69,7 @@ impl WrittenAs {
     /// The value `text` writes. Digits past what an `i128` holds are refused; whether the value
     /// fits the field's own width is the caller's question.
     pub fn parse(self, text: &str) -> Result<i128, WrittenError> {
-        let digits = text.strip_prefix('-').unwrap_or(text);
+        let digits = text.strip_prefix(['-', '+']).unwrap_or(text);
         if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
             return text.parse::<i128>().map_err(|_| WrittenError::OutOfRange);
         }
@@ -86,7 +86,7 @@ pub fn timestamp_us(text: &str) -> Result<i64, WrittenError> {
     i64::try_from(micros).map_err(|_| WrittenError::OutOfRange)
 }
 
-/// `YYYY-MM-DD`, or that, `T`, `hh:mm:ss`, an optional fraction and `Z` or `±hh:mm`.
+/// `YYYY-MM-DD`, or that, `T` or a space, `hh:mm:ss`, an optional fraction and `Z` or `±hh:mm`.
 fn rfc3339_micros(text: &str) -> Result<i64, WrittenError> {
     let b = text.as_bytes();
     let bad = WrittenError::NotATimestamp;
@@ -103,7 +103,7 @@ fn rfc3339_micros(text: &str) -> Result<i64, WrittenError> {
     if b.len() == 10 {
         return Ok(days * 86_400_000_000);
     }
-    if !matches!(b[10], b'T' | b't') {
+    if !matches!(b[10], b'T' | b't' | b' ') {
         return Err(bad);
     }
     let time = &b[11..];
@@ -216,9 +216,17 @@ mod tests {
     }
 
     #[test]
+    fn a_space_may_part_the_date_and_time() {
+        assert_eq!(ts("2026-04-01 00:00:00Z"), ts("2026-04-01T00:00:00Z"));
+        assert_eq!(ts("2026-04-01 01:00:00.5+01:00"), Ok(1_775_001_600_500_000));
+    }
+
+    #[test]
     fn digits_are_microseconds_whatever_they_look_like() {
         assert_eq!(ts("20200101"), Ok(20_200_101));
         assert_eq!(ts("-42"), Ok(-42));
+        assert_eq!(ts("+42"), Ok(42));
+        assert_eq!(WrittenAs::Integer.parse("+5"), Ok(5));
         assert_eq!(WrittenAs::Integer.parse("-42"), Ok(-42));
         assert_eq!(
             WrittenAs::Integer.parse("170141183460469231731687303715884105727"),
@@ -233,8 +241,10 @@ mod tests {
         assert_eq!(ts("2020-01-01T12:00:00.5"), Err(NoOffset));
         assert_eq!(ts("2020-01-01T12:00:00.1234567Z"), Err(TooPrecise));
         assert_eq!(ts("9223372036854775808"), Err(OutOfRange));
-        assert_eq!(ts("+5"), Err(NotATimestamp));
-        assert_eq!(WrittenAs::Integer.parse("+5"), Err(NotAnInteger));
+        assert_eq!(ts("2020-01-01 12:00:00"), Err(NoOffset));
+        for text in ["+", "-", "5+", "++5", "+-5", "-+5", " 5"] {
+            assert_eq!(WrittenAs::Integer.parse(text), Err(NotAnInteger), "{text:?}");
+        }
         assert_eq!(
             WrittenAs::Integer.parse("170141183460469231731687303715884105728"),
             Err(OutOfRange)
@@ -248,7 +258,6 @@ mod tests {
             "2020-01-00",
             "2020-1-01",
             "2020-01-01T12:00Z",
-            "2020-01-01 12:00:00Z",
             "2020-01-01T24:00:00Z",
             "2020-01-01T12:00:61Z",
             "2020-01-01T12:00:00.Z",
