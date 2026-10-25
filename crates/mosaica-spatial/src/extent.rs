@@ -230,13 +230,16 @@ fn spellings(projection: Projection) -> &'static str {
 }
 
 /// `auto` where there are no rows to fit a frame to: what is wrong, and the boxes to state
-/// instead. `subject` names the view or group, as `view 'world'`.
+/// instead, on one line. `subject` names the view or group, as `view 'world'`.
 pub fn auto_without_rows(subject: &str, projection: Projection) -> String {
+    let boxes = match projection {
+        Projection::None => "`{ min = <a>, max = <b> }` or `{ x = [<a>, <b>], y = [<c>, <d>] }`",
+        _ => "`{ lon = [<west>, <east>], lat = [<south>, <north>] }` in degrees",
+    };
     format!(
         "{subject}: `extent` is `auto`, which fits the frame to the view's rows, and there are no \
          rows to fit it to. A view that starts empty, or whose rows --limit excluded, needs its \
-         frame stated:{}",
-        spellings(projection)
+         frame stated, as {boxes}"
     )
 }
 

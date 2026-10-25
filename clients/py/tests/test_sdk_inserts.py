@@ -376,18 +376,28 @@ def test_a_second_views_insert_without_the_access_column_is_refused_naming_it(tm
 def test_a_first_commit_with_no_rows_refuses_every_fitted_frame(tmp_path):
     """The build refuses a frame fitted to no rows, and builds a stated one with none."""
     binary()
+
+    def empty():
+        return pd.DataFrame(
+            {
+                "id": pd.Series([], dtype=str),
+                "x": pd.Series([], dtype=float),
+                "y": pd.Series([], dtype=float),
+            }
+        )
+
     for extent in (None, "auto", {"auto": True, "margin": 0.1}):
         db = create(tmp_path / f"db{extent!s:.6}", replace=True)
         db.declare_view("s0", extent=extent)
         joined(db)
-        db.insert("s0", pd.DataFrame({"id": [], "x": [], "y": []}), x="x", y="y")
+        db.insert("s0", empty(), x="x", y="y")
         with pytest.raises(Refusal):
             db.commit()
     db = create(tmp_path / "stated")
     try:
         db.declare_view("s0", extent={"x": [0.0, 1.0], "y": [0.0, 1.0]})
         joined(db)
-        db.insert("s0", pd.DataFrame({"id": [], "x": [], "y": []}), x="x", y="y")
+        db.insert("s0", empty(), x="x", y="y")
         assert db.commit().ok
     finally:
         db.close()
