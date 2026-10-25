@@ -23,7 +23,9 @@ export type UseMosaicaStoreOptions = Omit<StoreOptions, 'authorise'> & {
  * Creates a store with {@link createStore} for the component's lifetime, and disposes of it on
  * unmount. The store is rebuilt when `viewerUrl`, `client`, `token` or `view` changes, or when
  * `authorise` is given or removed. A change to any other option takes effect at the next rebuild.
- * With a `client`, `viewerUrl` may be left out, as `createStore` allows.
+ * With a `client`, `viewerUrl` may be left out, as `createStore` allows. Keep the `client` the
+ * same object across renders, such as with `useMemo`: a new client each render rebuilds the store
+ * each render.
  *
  * The store is built in an effect, so the first render returns `null`. Options `createStore`
  * refuses, such as neither `viewerUrl` nor `client`, throw from that effect.

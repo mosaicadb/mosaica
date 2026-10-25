@@ -546,8 +546,8 @@ export type StoreItemsRequest = Omit<ItemsRequest, 'view' | 'filters'> & {
   /** The view to read. Defaults to the current view. */
   view?: string;
   /**
-   * Defaults to {@link Store.requestFilters}, so the read returns the items the map counts as
-   * matching. `null` reads every item this viewer may see.
+   * Unset or `undefined`, {@link Store.requestFilters}, so the read returns the items the map
+   * counts as matching. `null` reads every item this viewer may see.
    */
   filters?: FilterExpr | null;
   /**
@@ -653,8 +653,8 @@ export interface Store {
    * and parents, or a name search, each row with its masked count. An artifact this viewer was
    * never served answers an empty page. Waits for `/v1/meta`.
    *
-   * @param req - The page to ask for. `filters` defaults to {@link Store.requestFilters}, so the
-   *   tree counts what the map counts; pass `null` for unfiltered counts. `view` defaults to the
+   * @param req - The page to ask for. `filters` unset or `undefined` is {@link Store.requestFilters},
+   *   so the tree counts what the map counts; pass `null` for unfiltered counts. `view` defaults to the
    *   current view.
    * @throws {@link MosaicaError} where the server refuses the request, such as `422` for an unknown
    *   layer, or where the store's read of `/v1/meta` was refused.
@@ -2457,27 +2457,34 @@ export function createStore(options: StoreOptions): Store {
     askInView(false);
   }
 
-  async function browse(req: Omit<BrowseRequest, 'filters' | 'view'> & {filters?: FilterExpr | null; view?: string}): Promise<BrowsePage> {
+  /**
+   * The token, view and filters a read on request goes out with: the caller's `view`, else the
+   * current view, and the caller's `filters`, else {@link requestFilters}. `filters: null` reads
+   * everything visible; `filters: undefined` counts as not given. `own` says the caller gave them.
+   */
+  async function readDefaults(req: {view?: string; filters?: FilterExpr | null}) {
     const asked = await viewed();
-    // A caller's `filters: null` asks for the unfiltered counts.
-    const filters = 'filters' in req ? (req.filters ?? null) : requestFilters();
-    // Not a spread alone: a caller's `view: undefined` would replace the store's view.
-    return client.browse(asked.token, {...req, view: req.view ?? asked.view, filters});
+    const own = req.filters !== undefined;
+    return {token: asked.token, current: asked.view, view: req.view ?? asked.view, filters: own ? req.filters! : requestFilters(), own};
+  }
+
+  async function browse(req: Omit<BrowseRequest, 'filters' | 'view'> & {filters?: FilterExpr | null; view?: string}): Promise<BrowsePage> {
+    const {token, view, filters} = await readDefaults(req);
+    return client.browse(token, {...req, view, filters});
   }
 
   async function items(req: StoreItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>> {
-    const asked = await viewed();
-    const {inView, filters: given, view: named, ...rest} = req;
-    const view = named ?? asked.view;
-    let filters = 'filters' in req ? (given ?? null) : requestFilters();
+    const {inView, filters: _filters, view: _view, ...rest} = req;
+    const read = await readDefaults(req);
+    let filters = read.filters;
     if (inView) {
-      if (view !== asked.view) throw new Error(`\`inView\` reads the current view '${asked.view}': leave \`view\` out or set it to that.`);
+      if (read.view !== read.current) throw new Error(`\`inView\` reads the current view '${read.current}': leave \`view\` out or set it to that.`);
       const area = countedArea();
       if (area === null) throw new Error('`inView` reads the area the camera shows: call setView before reading it.');
       // A caller's own filters do not carry the selected region, so its leaf is joined to them.
-      filters = 'filters' in req ? withRegion(filters, area.operand, area.outside) : withArea(filters, area);
+      filters = read.own ? withRegion(filters, area.operand, area.outside) : withArea(filters, area);
     }
-    return client.items(asked.token, {...rest, view, ...(filters === null ? {} : {filters})}, signal);
+    return client.items(read.token, {...rest, view: read.view, ...(filters === null ? {} : {filters})}, signal);
   }
 
   function setMembers(clauses: readonly MemberClause[]): void {

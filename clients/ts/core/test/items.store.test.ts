@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {MosaicaClient} from '../src/client.js';
 import type {FilterDraft} from '../src/filters.js';
 import {withMember} from '../src/members.js';
-import {createStore} from '../src/store.js';
+import {createStore, type StoreOptions} from '../src/store.js';
 import type {FilterExpr} from '../src/types.js';
 import {camera, fakeClock, fakeScheduler, framed, meta, response, result, u64, view} from './support.js';
 
@@ -35,7 +35,7 @@ function itemsBody(ids: bigint[], next: string | null): Response {
 }
 
 /** A store over the fake server, the items requests it sends, and the filters each viewport request carried. */
-async function storeWith() {
+async function storeWith(auth: Pick<StoreOptions, 'token' | 'authorise'> = {token: 'tok'}) {
   const clock = fakeClock();
   const scheduler = fakeScheduler();
   const sent: {url: string; auth: string | null; body: Record<string, unknown>}[] = [];
@@ -57,9 +57,9 @@ async function storeWith() {
     // The counts in view, which these tests do not read, are left unanswered.
     aggregate: () => new Promise(() => {})
   });
-  const store = createStore({token: 'tok', client, clock, scheduler, prefetch: false});
+  const store = createStore({...auth, client, clock, scheduler, prefetch: false});
   await clock.advance(1);
-  return {store, sent, mapped, clock, scheduler};
+  return {store, client, sent, mapped, clock, scheduler};
 }
 
 const ids = (table: Table) => Array.from(table.getChild('mosaica_id')!.toArray() as BigUint64Array);
@@ -129,6 +129,39 @@ describe('Store.items', () => {
     expect(sent.at(-1)!.body).toEqual({view: 's0', fields: []});
     await store.items({fields: [], filters: {year: {range: {gte: 2020}}}, view: 'other'});
     expect(sent.at(-1)!.body).toEqual({view: 'other', fields: [], filters: {year: {range: {gte: 2020}}}});
+  });
+
+  it('sends the renewed token once the store has renewed it', async () => {
+    let issued = 0;
+    const {store, sent, clock} = await storeWith({authorise: async () => ({token: `t${++issued}`, expiresAt: (Date.now() + 60_000) / 1000})});
+    await store.items({fields: []});
+    expect(sent.at(-1)!.auth).toBe('Bearer t1');
+    // A minute's token is renewed within its minute.
+    await clock.advance(59_000);
+    expect(issued).toBe(2);
+    await store.items({fields: []});
+    expect(sent.at(-1)!.auth).toBe('Bearer t2');
+  });
+
+  it('takes `filters: undefined` as not given, the map’s filters, in items and browse alike', async () => {
+    const {store, client, sent} = await storeWith();
+    const browsed: unknown[] = [];
+    Object.assign(client, {
+      browse: async (_token: string, req: {filters?: FilterExpr | null}) => {
+        browsed.push(req.filters);
+        return {artifacts: [], parents: [], next: null};
+      }
+    });
+    store.setFilters(CS);
+    await store.items({fields: [], filters: undefined});
+    await store.browse({layer: 'clusters', filters: undefined});
+    expect(sent.at(-1)!.body.filters).toEqual(store.requestFilters());
+    expect(browsed).toEqual([store.requestFilters()]);
+    // Only `null` reads everything visible.
+    await store.items({fields: [], filters: null});
+    await store.browse({layer: 'clusters', filters: null});
+    expect(sent.at(-1)!.body.filters).toBeUndefined();
+    expect(browsed.at(-1)).toBeNull();
   });
 
   it('refuses `inView` before the camera is set, and for another view than the current one', async () => {
