@@ -336,6 +336,29 @@ def test_the_sweep_removes_only_directories_whose_owner_has_gone(tmp_path, monke
     assert not live.path.exists()
 
 
+def test_a_refused_start_leaves_the_temporary_database_to_retry_or_save(tmp_path, monkeypatch):
+    from conftest import binary
+
+    binary()
+    import pyarrow as pa
+
+    import mosaica
+
+    db = mosaica.create()
+    try:
+        db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+        db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
+        monkeypatch.setenv("MOSAICA_SERVE_TIMEOUT", "0")
+        with pytest.raises(_instance.ServeRefused):
+            db.commit()
+        assert (db.path / "mosaica.toml").exists() and (db.path / "sources").is_dir()
+        assert db.save(tmp_path / "kept") == tmp_path / "kept"
+        monkeypatch.delenv("MOSAICA_SERVE_TIMEOUT")
+        assert db.view("map").count() == 2
+    finally:
+        db.close()
+
+
 def test_a_database_nothing_refers_to_stops_its_server_and_removes_its_directory():
     from conftest import binary
 
