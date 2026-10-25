@@ -4,7 +4,9 @@
 
 `mosaica <subcommand> --help` prints the text on this page. `mosaica --version` prints the release version and the commit the binary was built from, as in `mosaica 0.1.0 (3c872b11a)`. It prints the release version alone when `MOSAICA_BUILD_COMMIT` was unset at build time and git could not name the commit, as in a build outside a git checkout.
 
-`build`, `check`, `health` and `serve` read the deployment file `mosaica.toml` from the working directory, or from the nearest directory above it that has one. `--deployment` names a different file.
+`build`, `check`, `health`, `serve`, and `declare` without a subcommand or `--config`, read the deployment file `mosaica.toml` from the working directory, or from the nearest directory above it that has one. `--deployment` names a different file.
+
+The commands that write to a running service, and the identity commands on its control plane, take its address as `--control` and read the credential from `MOSAICA_CREDENTIAL`. Where it is unset, the request is sent without a credential, as an open server serves it.
 
 ## `mosaica build`
 
@@ -204,6 +206,333 @@ For example, `mosaica aggregate --server http://127.0.0.1:8080 --view papers --g
 | `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is sent without one, as an open server serves it. |
 | `--out` | `PATH` |  | The file to write. Without it, or with `-`, the output goes to stdout. |
 | `--format` | `FORMAT` |  | `ipc` writes an Arrow IPC stream and `parquet` a Parquet file. Without it the format is the extension of `--out`, `.arrows` or `.parquet`; stdout and any other extension need it. A format that disagrees with the extension of `--out` is refused. |
+
+## `mosaica declare`
+
+```text
+mosaica declare [OPTIONS] --control <ADDRESS>
+       mosaica declare <COMMAND>
+```
+
+Declare views, view groups, attributes, vocabularies, layers and the shard size on a running service, through the control plane.
+
+With no subcommand, it declares every block of a corpus declaration: the file `--config` names, or else the one `mosaica.toml` names, found as `mosaica check` finds it. It sends the bodies `mosaica check --payloads` prints, in the order the routes need: the shard size, the vocabularies, each followed by the values its `source` names, the view groups, each after any group whose views it shares, the views, each group's own views, the attributes, then the layers. A group's views are read as `mosaica build` reads them: its `[[view_group.view]]` blocks, the rows of its `[view_group.views]` table, or the distinct values of its points file's view column. A declaration identical to one the service holds answers what exists, so running it again after adding a block declares only that block. It sends no rows. It prints one JSON object on stdout with each request, its status and the server's answer, goes on past a refused request, and exits 1 when any was refused.
+
+Each subcommand sends one declaration and prints the server's answer. Every declaration needs `write-all`. The credential is read from `MOSAICA_CREDENTIAL`, as `mosaica principal` reads it.
+
+For example, `mosaica declare --control http://127.0.0.1:8082 --config schema.toml`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--deployment` | `PATH` |  | Without `--config`, read this `mosaica.toml` instead of searching for one upward from the working directory. |
+| `--config` | `PATH` |  | Read this corpus declaration, and no `mosaica.toml`, instead of `[build] schema` in `mosaica.toml`. |
+| `--file` | `NAME=PATH` |  | Read the source NAME in the declaration's `[sources]` from PATH instead. Repeatable, and the same override `mosaica check` takes. Of the sources, only a vocabulary's values are read. |
+
+## `mosaica declare attribute`
+
+```text
+mosaica declare attribute --control <ADDRESS> <--body <JSON>|--body-file <PATH>>
+```
+
+Declare an attribute, a column the items carry, named in the body.
+
+The body is the `[[attribute]]` block as JSON, as `mosaica check --payloads` prints it under `attributes`, such as `{"name": "year", "type": "i32", "index": true}`. An attribute declared on a running service cannot be rendered.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+
+## `mosaica declare vocabulary`
+
+```text
+mosaica declare vocabulary --control <ADDRESS> <--body <JSON>|--body-file <PATH>> <NAME>
+```
+
+Declare a vocabulary, the values a category attribute draws on.
+
+The body is the `[[vocabulary]]` block as JSON without its name, as `mosaica check --payloads` prints it under `vocabularies`. Its `values`, each a `key` and an optional `title`, are added as `mosaica insert --vocabulary` adds them, and the server draws every code.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `NAME` |  |  | The vocabulary's name. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+
+## `mosaica declare view`
+
+```text
+mosaica declare view --control <ADDRESS> <--body <JSON>|--body-file <PATH>> <NAME>
+```
+
+Declare a view, or add a view to a view group.
+
+For a view, NAME is its name and the body is the `[[view]]` block as JSON without its name, as `mosaica check --payloads` prints it under `views`. For a view of a view group, NAME is `<group>:<key>` and the body is the view's record: its `metadata`, one value per name the group declares, and its `visibility` where it has one, such as `{"metadata": {"year": 2020}}`. The view takes the group's frame and projection, and its record cannot be changed once it exists.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `NAME` |  |  | The view's name, or `<group>:<key>` for a view of a view group. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+
+## `mosaica declare view-group`
+
+```text
+mosaica declare view-group --control <ADDRESS> <--body <JSON>|--body-file <PATH>> <NAME>
+```
+
+Declare a view group, with no views. `mosaica declare view <group>:<key>` adds each one.
+
+The body is the `[[view_group]]` block as JSON without its name, as `mosaica check --payloads` prints it under `view_groups`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `NAME` |  |  | The group's name. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+
+## `mosaica declare layer`
+
+```text
+mosaica declare layer --control <ADDRESS> <--body <JSON>|--body-file <PATH>>
+```
+
+Declare an annotation layer, named in the body.
+
+The body is the `[[layer]]` block as JSON, as `mosaica check --payloads` prints it under `layers`. The answer carries the layer's `mosaica_id`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+
+## `mosaica declare shards`
+
+```text
+mosaica declare shards --control <ADDRESS> --size <ITEMS>
+```
+
+Set the shard size: the high water at which the shard taking new items is sealed and the next one opened. A size at or below the open shard's high water seals it at once.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--size` | `ITEMS` |  | The size, a number of items above 0. |
+
+## `mosaica insert`
+
+```text
+mosaica insert [OPTIONS] --control <ADDRESS> <FILE>
+```
+
+Insert rows into a running service from a Parquet, Arrow IPC or NDJSON file, a page at a time, through `POST /control/ingest`.
+
+A row names items by its `mosaica_id` and its values of unique attributes. A row naming no item creates one at its coordinates: `x` and `y`, or `lon` and `lat` on a projected view. A row naming an item edits it, adds it to the view, or changes nothing. A column left out keeps what the item stores, and a null clears it. A row naming two items, or an item an earlier row of its page names, is refused and the page's other rows are applied. Columns go as the file names and types them, and the route refuses a column it does not know; `--columns` sends only those named.
+
+Each page is sent before the next is read, under a fresh batch id. A page the server answers with `429` is sent again, the same bytes under the same id, once the wait it names has passed, at least 1 second and at most 30, while the waits total at most five minutes. A page no answer came for is sent once more, a second later and outside that budget, which the server answers as a replay where the first arrived. Inserting a file again inserts its rows again, except that a row naming its item by a unique attribute is then answered as unchanged.
+
+It prints one JSON object on stdout totalling the answers: `pages` and `rows` sent; `created`, `edited`, `added`, `unchanged`, `joined`, `minted`, `clamped`, `clipped` and `over_bound`, summed; `replayed`, the requests the server had already applied; `refused`, each refused row by its position in the file, from 0, and its reason; `refused_pages`, each refused request by its first row, with its status and the server's answer; and `publication`, from which the rows are visible. A line on stderr says the same. It exits 1 when a request was refused or went unanswered, and a page unanswered twice stops the insert there, with `stopped` saying where. Rows refused inside an accepted request do not change the exit status. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+For example, `mosaica insert --control http://127.0.0.1:8082 --view papers papers.parquet`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `FILE` |  |  | The rows: a file, or `-` for stdin. |
+| `--view` | `VIEW` |  | The view the rows are for, sent as `x-mosaica-view`. Without it a deployment with one view takes the rows into that view, and one with several into no view, where they carry no coordinates and change only what the items store. |
+| `--vocabulary` | `NAME` |  | Add the rows to this vocabulary's values instead, through `PATCH /control/vocabularies/{name}/values`. Each row has a `key` and may have a `title`. A key the vocabulary does not hold is added with a code the server draws, and a title replaces a held key's title. The report counts `added`, `existing` and `titles` in place of the rows' counts. |
+| `--format` | `FORMAT` |  | `parquet`, `ipc` for an Arrow IPC stream or file, or `ndjson` for one JSON object per line. Without it the format is the file's extension: `.parquet`, `.arrows` or `.arrow`, `.ndjson` or `.jsonl`. Stdin needs it, and takes `ipc` as a stream, or `ndjson`. |
+| `--columns` | `NAMES` |  | Send only these columns, comma-separated. Without it every column is sent. A name the file has no column for is refused; in NDJSON, a row without one is sent without it. |
+| `--strict` |  |  | Refuse a whole page at its first refused row, with `409`, instead of applying its other rows. |
+| `--page-rows` | `N` | derived | The most rows in one request, above 0. Default: `limits.ingest.max_batch_rows` from `/control/status`, or 10,000 with `--vocabulary`; where the credential cannot read `/control/status`, the server's documented default, 10,000. The figures used are printed on stderr. |
+| `--page-bytes` | `SIZE` | derived | The most bytes in one request body, above 0, in bytes or with a `k`, `m` or `g` suffix. A page whose body is larger is split in half until each part fits. Default: `limits.ingest.max_batch_bytes` from `/control/status`, or `limits.declarations.max_body_bytes` with `--vocabulary`; where the credential cannot read `/control/status`, the server's documented default, 16 MiB, or 2 MiB with `--vocabulary`. |
+| `--wait` |  |  | Once every page is sent, send `POST /control/flush?wait=visible`, and end once readers see the rows, or after the server's `serve.visible_wait_max_secs` with `visible` false. Without it the rows become visible at the server's next publication. |
+| `--ids-out` | `PATH` |  | Write each row's `mosaica_id` to this file, ending in `.arrows` or `.parquet`: the columns `row`, its position in the input from 0, and `mosaica_id`, null for a row that was refused or whose page was. |
+
+## `mosaica delete`
+
+```text
+mosaica delete [OPTIONS] --control <ADDRESS> <--id <MOSAICA_ID>|--match <JSON>|--file <PATH>>
+```
+
+Delete items or annotations through `POST /control/changes`.
+
+Each is named by `--id`, by `--match` or by a row of `--file`. A deleted item stops being served at once, and the next compaction removes its rows from disc. A layer is removed with `mosaica drop layer`, not here.
+
+The changes are sent as many to a request as `/control/status` publishes under `limits.changes`, 10,000 where the credential cannot read it. A change naming no item, or two, is refused and the others are applied. It prints one JSON object on stdout: `pages` and `rows` sent; `accepted`; `refused`, each refused change by its position, counting the `--id`s, then the `--match`es, then the file's rows, from 0, with what it named and its reason; `refused_pages`; `ignored_columns`, the columns that name no item; and `publication`. It exits 1 when a request was refused or went unanswered. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--id` | `MOSAICA_ID` |  | An item or an annotation by its `mosaica_id`. Repeatable. |
+| `--match` | `JSON` |  | An item by the values that name it, as a JSON object of its `mosaica_id` and unique attributes, such as `{"doi": "10.1/x"}`. Repeatable. |
+| `--file` | `PATH` |  | A file whose every row names one item by its columns, `mosaica_id` and unique attributes, or `-` for stdin. A column that names no item is not read, and is listed in `ignored_columns`, as is a column of a type a change does not carry, such as a list, which is not sent. |
+| `--format` | `FORMAT` |  | `parquet`, `ipc` for an Arrow IPC stream or file, or `ndjson` for one JSON object per line. Without it the format is the file's extension: `.parquet`, `.arrows` or `.arrow`, `.ndjson` or `.jsonl`. Stdin needs it, and takes `ipc` as a stream, or `ndjson`. |
+| `--columns` | `NAMES` |  | Send only these columns, comma-separated. Without it every column is sent. A name the file has no column for is refused; in NDJSON, a row without one is sent without it. |
+| `--strict` |  |  | Refuse a whole request at its first change naming no item, with `404`, or naming two, with `409`, instead of applying its other changes. |
+| `--wait` |  |  | Once every change is sent, send `POST /control/flush?wait=visible`, and end once readers see the publication. A deletion or suppression is in force from the moment it is accepted either way. |
+
+## `mosaica suppress`
+
+```text
+mosaica suppress [OPTIONS] --control <ADDRESS> <--id <MOSAICA_ID>|--match <JSON>|--file <PATH>>
+```
+
+Suppress items, annotations or layers through `POST /control/changes`: each is left out of every answer from the moment the change is accepted until `mosaica unsuppress` lifts it.
+
+A layer's `mosaica_id` suppresses the layer with all its artifacts. It takes the same arguments and prints the same report as `mosaica delete`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--id` | `MOSAICA_ID` |  | An item or an annotation by its `mosaica_id`. Repeatable. |
+| `--match` | `JSON` |  | An item by the values that name it, as a JSON object of its `mosaica_id` and unique attributes, such as `{"doi": "10.1/x"}`. Repeatable. |
+| `--file` | `PATH` |  | A file whose every row names one item by its columns, `mosaica_id` and unique attributes, or `-` for stdin. A column that names no item is not read, and is listed in `ignored_columns`, as is a column of a type a change does not carry, such as a list, which is not sent. |
+| `--format` | `FORMAT` |  | `parquet`, `ipc` for an Arrow IPC stream or file, or `ndjson` for one JSON object per line. Without it the format is the file's extension: `.parquet`, `.arrows` or `.arrow`, `.ndjson` or `.jsonl`. Stdin needs it, and takes `ipc` as a stream, or `ndjson`. |
+| `--columns` | `NAMES` |  | Send only these columns, comma-separated. Without it every column is sent. A name the file has no column for is refused; in NDJSON, a row without one is sent without it. |
+| `--strict` |  |  | Refuse a whole request at its first change naming no item, with `404`, or naming two, with `409`, instead of applying its other changes. |
+| `--wait` |  |  | Once every change is sent, send `POST /control/flush?wait=visible`, and end once readers see the publication. A deletion or suppression is in force from the moment it is accepted either way. |
+
+## `mosaica unsuppress`
+
+```text
+mosaica unsuppress [OPTIONS] --control <ADDRESS> <--id <MOSAICA_ID>|--match <JSON>|--file <PATH>>
+```
+
+Lift the suppression of items, annotations or layers through `POST /control/changes`. It takes the same arguments and prints the same report as `mosaica delete`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--id` | `MOSAICA_ID` |  | An item or an annotation by its `mosaica_id`. Repeatable. |
+| `--match` | `JSON` |  | An item by the values that name it, as a JSON object of its `mosaica_id` and unique attributes, such as `{"doi": "10.1/x"}`. Repeatable. |
+| `--file` | `PATH` |  | A file whose every row names one item by its columns, `mosaica_id` and unique attributes, or `-` for stdin. A column that names no item is not read, and is listed in `ignored_columns`, as is a column of a type a change does not carry, such as a list, which is not sent. |
+| `--format` | `FORMAT` |  | `parquet`, `ipc` for an Arrow IPC stream or file, or `ndjson` for one JSON object per line. Without it the format is the file's extension: `.parquet`, `.arrows` or `.arrow`, `.ndjson` or `.jsonl`. Stdin needs it, and takes `ipc` as a stream, or `ndjson`. |
+| `--columns` | `NAMES` |  | Send only these columns, comma-separated. Without it every column is sent. A name the file has no column for is refused; in NDJSON, a row without one is sent without it. |
+| `--strict` |  |  | Refuse a whole request at its first change naming no item, with `404`, or naming two, with `409`, instead of applying its other changes. |
+| `--wait` |  |  | Once every change is sent, send `POST /control/flush?wait=visible`, and end once readers see the publication. A deletion or suppression is in force from the moment it is accepted either way. |
+
+## `mosaica publish`
+
+```text
+mosaica publish [OPTIONS] --control <ADDRESS> <--body <JSON>|--body-file <PATH>> <LAYER>
+```
+
+Publish annotations into one level of a layer through `PUT /control/layers/{name}/artifacts`, and print the server's answer.
+
+The body is the route's JSON: each artifact with its key and its members, each member naming an item by its `mosaica_id` and its values of unique attributes. A member naming no item, or two, is left out and listed in the answer's `refused`, and the rest is published whole or not at all. An artifact whose key the level holds gains the members and fills the parts it lacks. The answer gives each artifact's `mosaica_id`. A large membership is published with its first page here and the rest with `mosaica grow`. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `LAYER` |  |  | The layer's name. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+| `--strict` |  |  | Refuse the whole request at its first member naming no item, with `404`, or naming two, with `409`, instead of leaving the member out. |
+
+## `mosaica grow`
+
+```text
+mosaica grow [OPTIONS] --control <ADDRESS> <--body <JSON>|--body-file <PATH>> <LAYER>
+```
+
+Change annotations a level already holds through `PATCH /control/layers/{name}/artifacts`, and print the server's answer.
+
+It adds members, fills parts an annotation lacks, and takes items out of the set a text was written from. The body is the route's JSON. A member is refused as `mosaica publish` refuses one, and a part that differs from the one held is refused with `409`. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `LAYER` |  |  | The layer's name. |
+| `--body` | `JSON` |  | The request body as JSON. |
+| `--body-file` | `PATH` |  | Read the request body from this file, or from stdin with `-`. |
+| `--strict` |  |  | Refuse the whole request at its first member naming no item, with `404`, or naming two, with `409`, instead of leaving the member out. |
+
+## `mosaica drop`
+
+```text
+mosaica drop <COMMAND>
+```
+
+Drop an annotation layer or a view of a view group, through the control plane, and print the server's answer.
+
+These are the only two that can be dropped: no route drops an attribute, a vocabulary, a view outside a view group, a view group or the shard size. Needs `write-all`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+
+## `mosaica drop layer`
+
+```text
+mosaica drop layer [OPTIONS] --control <ADDRESS> <NAME>
+```
+
+Drop an annotation layer. It and its artifacts stop being served at once. Its name may be declared again, as a new layer that none of the dropped layer's `mosaica_id`s names.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `NAME` |  |  | The layer's name. |
+| `--wait` |  |  | Answer only once readers no longer see the layer, or after the server's `serve.visible_wait_max_secs` with `visible` false. |
+
+## `mosaica drop view`
+
+```text
+mosaica drop view [OPTIONS] --control <ADDRESS> <VIEW>
+```
+
+Drop a view of a view group. The items it leaves in no view are deleted, and the answer's `deleted` counts them. Its key may be created again, as a view with none of the old one's rows.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `VIEW` |  |  | The view, as `<group>:<key>`. |
+| `--wait` |  |  | Answer only once readers no longer see the view, or after the server's `serve.visible_wait_max_secs` with `visible` false. |
+
+## `mosaica flush`
+
+```text
+mosaica flush [OPTIONS] --control <ADDRESS>
+```
+
+Bring the next publication forward through `POST /control/flush`, and print the server's answer.
+
+A publication is when buffered writes become visible to readers. The answer's `publication` names the first one certain to include every write sent before this request. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--wait` |  |  | Answer only once readers see the publication, or after the server's `serve.visible_wait_max_secs` with `visible` false. |
+
+## `mosaica compact`
+
+```text
+mosaica compact --control <ADDRESS>
+```
+
+Ask for a compaction through `POST /control/compact`, and print the server's answer, the request's number in `request`.
+
+A compaction removes deleted items' rows from disc, one shard after another, and runs for minutes to hours on a large corpus. `mosaica status` reports it under `compaction.requests`, where `answered` reaches the request's number once it is answered. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+
+## `mosaica status`
+
+```text
+mosaica status --control <ADDRESS>
+```
+
+Print the server's status report, from `GET /control/status`: how far writes have got, queue depths, compaction, shards, and the limits on each write request. Needs `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
 
 ## `mosaica serve`
 
