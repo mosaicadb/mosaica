@@ -117,7 +117,8 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 /**
  * The map with its status strip, toolbar, field cards, display settings, layers, selection and item
  * card, laid out together. It builds its own store from `token` or an `authorise` property and
- * `viewer-url`, the page's own origin where unset, or takes a `store` property, and provides it by
+ * `viewer-url`, the page's own origin where unset, or from `viewer-url` alone for an open server,
+ * or takes a `store` property, and provides it by
  * context to everything inside it, including elements a host puts in its slots.
  *
  * The heading names what is shown: `dataset-title` where the host sets one, with the view's name

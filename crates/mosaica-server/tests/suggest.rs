@@ -339,7 +339,8 @@ async fn a_spent_walk_budget_reports_more_even_on_a_short_page() {
         ingest_admission: mosaica_server::state::IngestAdmission::new(64),
         catalogue,
         oidc: mosaica_server::oidc::Verifier::new(),
-        operator_credential: OPERATOR_CREDENTIAL.to_string(),
+        operator_credential: Some(OPERATOR_CREDENTIAL.to_string()),
+        open: None,
         request_log: None,
         faults: Arc::new(mosaica_lifecycle::faults::FaultSwitchboard::new()),
     });

@@ -150,14 +150,19 @@ pub fn same_secret(presented: &str, expected: &str) -> bool {
 }
 
 /// Authenticates a bearer credential of a kind `accepts` names. Anything not accepted is
-/// `401 bad-credential`, with one answer whatever the cause.
+/// `401 bad-credential`, with one answer whatever the cause. An open server answers the
+/// superuser for every request, whatever it sends.
 pub async fn authenticate(
     state: &AppState,
     bearer: Option<&str>,
     accepts: Accepts,
 ) -> Result<Caller, ApiError> {
+    if state.open.is_some() {
+        return Ok(Caller::superuser());
+    }
     let token = bearer.map(str::trim).ok_or(ApiError::BadCredential)?;
-    if accepts.operator && same_secret(token, &state.operator_credential) {
+    let operator = state.operator_credential.as_deref();
+    if accepts.operator && operator.is_some_and(|expected| same_secret(token, expected)) {
         return Ok(Caller::superuser());
     }
     if token.starts_with("msk_") {
@@ -283,6 +288,34 @@ pub fn every_item(catalogue: &Catalogue) -> Caller {
         resolution,
         expires_at: None,
         source,
+    }
+}
+
+/// The session an open server serves every viewer request under: [`every_item`], minted by
+/// [`mint`] as `POST /session/authorise` mints `read_all: true`, and minted again once it has
+/// ended or expired.
+#[derive(Default)]
+pub struct OpenSession {
+    /// The token of the session last minted. Held across a mint, so concurrent requests share one.
+    token: tokio::sync::Mutex<Option<String>>,
+}
+
+impl OpenSession {
+    pub async fn session(
+        &self,
+        state: &Arc<AppState>,
+    ) -> Result<Arc<mosaica_engine::Session>, ApiError> {
+        let mut held = self.token.lock().await;
+        if let Some(session) = held
+            .as_deref()
+            .and_then(|token| state.authenticated_session(token).ok())
+        {
+            return Ok(session);
+        }
+        let minted = mint(state, every_item(&state.catalogue), None).await?;
+        let session = state.authenticated_session(&minted.token)?;
+        *held = Some(minted.token);
+        Ok(session)
     }
 }
 

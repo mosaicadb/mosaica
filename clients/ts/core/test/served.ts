@@ -130,13 +130,14 @@ function listening(child: ChildProcess, errors: () => string, timeoutMs: number)
 }
 
 /**
- * Build a corpus into a temporary deployment and serve it: the notebook's, or `corpus`.
+ * Build a corpus into a temporary deployment and serve it: the notebook's, or `corpus`, and with
+ * `open`, as `mosaica serve --open`.
  *
  * Returns a string, the reason, where the binary or the notebook corpus is not on this machine. A
  * build or a serve that fails throws: those are failures, not absences.
  */
 export async function start(
-  options: {corpus?: {directory: string; schema: string}} = {}
+  options: {corpus?: {directory: string; schema: string}; open?: boolean} = {}
 ): Promise<Served | string> {
   let corpus = options.corpus;
   const found = findBinary();
@@ -166,7 +167,8 @@ export async function start(
     const build = spawnSync(binary, ['build', '--deployment', deployment], {cwd: directory, encoding: 'utf8'});
     if (build.status !== 0) throw new Error(`mosaica build failed (${build.status}):\n${build.stderr}${build.stdout}`);
 
-    const child = spawn(binary, ['serve', '--deployment', deployment], {cwd: directory, stdio: ['ignore', 'pipe', 'pipe']});
+    const flags = options.open ? ['--open'] : [];
+    const child = spawn(binary, ['serve', '--deployment', deployment, ...flags], {cwd: directory, stdio: ['ignore', 'pipe', 'pipe']});
     let stderr = '';
     child.stderr!.on('data', (chunk: Buffer) => {
       stderr = (stderr + chunk.toString()).slice(-8192);

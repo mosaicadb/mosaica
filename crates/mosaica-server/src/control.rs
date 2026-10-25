@@ -1,6 +1,7 @@
 //! The control (admin) plane: ingest, changes, declarations, status, flush and compact, and the
 //! catalogue's verbs ([`crate::identity`]). Every route requires a credential, checked once at the
-//! router by [`authenticate_control`]. Writes, flush and compaction need `write`, and status and
+//! router by [`authenticate_control`], except on an open server, which serves every request as the
+//! operator ([`crate::auth::authenticate`]). Writes, flush and compaction need `write`, and status and
 //! the catalogue's verbs `admin`. `/healthz` and `/readyz` are served
 //! on the viewer and session listeners, not here.
 //!
@@ -164,7 +165,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let administration = admin_routes
         .merge(crate::identity::routes())
         .route_layer(axum::middleware::from_fn(require_admin));
-    writes
+    let router = writes
         .merge(administration)
         // `Router::layer`, not `route_layer`, so every route, and every unrouted path, is behind
         // the credential.
@@ -177,7 +178,8 @@ pub fn router(state: Arc<AppState>) -> Router {
             Arc::clone(&state),
             crate::memory::trim_after_response,
         ))
-        .with_state(state)
+        .with_state(Arc::clone(&state));
+    crate::open::guarded(router, &state)
 }
 
 /// The credential check for every path on the control listener, routed or not, with no

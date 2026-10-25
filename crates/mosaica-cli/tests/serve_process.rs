@@ -131,3 +131,53 @@ fn the_server_stops_after_the_process_reading_its_stderr_has_gone() {
     drop(server.stderr.take());
     assert!(close_stdin(server).success());
 }
+
+/// `mosaica serve --open` refuses a deployment that listens off loopback. Over the smallest file
+/// that names a bundle and a loopback viewer, it serves, and the client commands need no token
+/// and no credential.
+#[test]
+fn an_open_server_is_read_and_authorised_with_no_credential() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path();
+    deployment(dir, &Ports::chosen());
+    let refused = mosaica()
+        .args(["serve", "--open"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+
+    // The smallest file an open server is built and served from: no cache, log, catalogue,
+    // token lifetime, credential, or session and control address.
+    std::fs::write(
+        dir.join("mosaica.toml"),
+        "[bundle]\npath = \"open-bundle\"\n[serve]\nviewer = \"127.0.0.1:0\"\n",
+    )
+    .unwrap();
+    let built = mosaica().arg("build").current_dir(dir).output().unwrap();
+    assert!(built.status.success(), "{built:?}");
+    let (_server, bound) = Server::announced_with(dir, &["--open"]);
+
+    let out = dir.join("open.parquet");
+    let read = mosaica()
+        .args(["items", "--view", "s0", "--fields", "id", "--server", &bound.viewer, "--out"])
+        .arg(&out)
+        .env_remove("MOSAICA_TOKEN")
+        .output()
+        .unwrap();
+    assert!(read.status.success(), "{read:?}");
+    assert!(out.exists());
+
+    let authorised = mosaica()
+        .args(["session", "authorise", "--session", &bound.session, "--read-all"])
+        .env_remove("MOSAICA_API_KEY")
+        .output()
+        .unwrap();
+    assert!(authorised.status.success(), "{authorised:?}");
+    let listed = mosaica()
+        .args(["session", "list", "--control", &bound.control])
+        .env_remove("MOSAICA_CREDENTIAL")
+        .output()
+        .unwrap();
+    assert!(listed.status.success(), "{listed:?}");
+}

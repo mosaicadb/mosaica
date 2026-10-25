@@ -77,11 +77,11 @@ def minted(source: TokenSource) -> Token:
 
 def _post(url: str, bearer: Optional[str], body: Optional[dict], timeout: float, verb: str):
     """One POST, answering the parsed JSON body, or `None` where there is none."""
-    headers = {} if bearer is None else {"authorization": f"Bearer {bearer}"}
-    data = None
-    if body is not None:
-        headers["content-type"] = "application/json"
-        data = json.dumps(body).encode()
+    # Named with no body too: an open server refuses a write with no content type.
+    headers = {"content-type": "application/json"}
+    if bearer is not None:
+        headers["authorization"] = f"Bearer {bearer}"
+    data = None if body is None else json.dumps(body).encode()
     request = urllib.request.Request(url, data=data, method="POST", headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:

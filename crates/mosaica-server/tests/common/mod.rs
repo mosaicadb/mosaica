@@ -1147,7 +1147,8 @@ async fn mount_server_with_flush(
         ingest_admission: IngestAdmission::new(ingest_limits.admission),
         catalogue,
         oidc: test_verifier(),
-        operator_credential: OPERATOR_CREDENTIAL.to_string(),
+        operator_credential: Some(OPERATOR_CREDENTIAL.to_string()),
+        open: None,
         request_log: None,
         faults,
     });

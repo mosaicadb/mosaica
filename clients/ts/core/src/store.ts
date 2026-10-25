@@ -94,8 +94,9 @@ export type ViewInput = {
 };
 
 /**
- * Options for {@link createStore}. One of `token`, `authorise` and `client` must be given. Requests
- * need a token: a store given only a `client` has every request refused as `bad-credential`.
+ * Options for {@link createStore}. A store given neither `token` nor `authorise` sends no
+ * `authorization` header, which an open server (`serve.open`) serves and any other refuses as
+ * `bad-credential`.
  *
  * @category Store
  */
@@ -973,15 +974,9 @@ const NO_STATUS: StatusProjection = {
  * publishes `status` as `refused`, and is tried again by the next call that waits for `/v1/meta`
  * and whenever `authorise` supplies a token.
  *
- * @throws `Error` where none of `options.token`, `options.authorise` and `options.client` is given.
- *
  * @category Store
  */
 export function createStore(options: StoreOptions): Store {
-  if (!options.token && !options.authorise && !options.client) {
-    throw new Error('createStore needs a token, an authorise supplier, or a client');
-  }
-
   const scheduler = options.scheduler ?? defaultFrameScheduler();
   const clock: Clock =
     options.clock ??

@@ -771,8 +771,9 @@ fn a_refused_request_part_of_the_way_keeps_the_pages_before_it() {
     }
 }
 
+/// A read with no token goes without one, which a server that is not open refuses.
 #[test]
-fn a_read_without_a_token_sends_nothing_and_writes_nothing() {
+fn a_read_without_a_token_is_refused_and_writes_nothing() {
     let served = serve();
     let out = served.dir.path().join("refused.parquet");
     let read = |token: Option<&str>| {
@@ -788,7 +789,6 @@ fn a_read_without_a_token_sends_nothing_and_writes_nothing() {
         run(command, served.dir.path()).status
     };
     assert!(!read(None).success());
-    assert!(served.proxy.bodies().is_empty());
     assert!(!out.exists());
 
     assert!(!read(Some("not-a-token")).success());

@@ -7,7 +7,7 @@ import {storeContext} from './context.js';
 
 /**
  * Where an element's store came from: its `store` property, a `<mosaica-store>` or
- * `<mosaica-explorer>` above it (`context`), one it built itself from `viewer-url` and `token` or
+ * `<mosaica-explorer>` above it (`context`), one it built itself from `viewer-url`, `token` or
  * `authorise` (`own`), or none (`detached`), in which case it renders its detached state.
  */
 export type StoreSource = 'property' | 'context' | 'own' | 'detached';
@@ -21,8 +21,8 @@ type OwnConfig = {viewerUrl: string; token: string; authorise: TokenSupplier | n
  * Store precedence: a `.store` property; else a context answer (a provider that connects after an
  * element built its own store is not adopted); else, for the map, the explorer and
  * `<mosaica-store>`, its own store from `token` or an `authorise` property, `viewer-url` (the
- * page's own origin where unset) and `artifacts-per-tile`; else
- * detached, which renders nothing. An own store is built once those attributes suffice, and
+ * page's own origin where unset) and `artifacts-per-tile`, built from `viewer-url` alone, with no
+ * token, for an open server (`serve.open`); else detached, which renders nothing. An own store is built once those attributes suffice, and
  * replaced when `viewer-url`, `token` or the `authorise` function changes. A store handed in by
  * property or context is not disposed here.
  *
@@ -46,7 +46,8 @@ export abstract class MosaicaElement extends LitElement {
   @property({attribute: 'viewer-url'}) accessor viewerUrl = '';
   /**
    * A viewer token for the store the element builds from `viewer-url`. Only the map, the explorer
-   * and `<mosaica-store>` read it. Changing it builds a new store.
+   * and `<mosaica-store>` read it. Without it or `authorise`, the store sends no token, which an
+   * open server (`serve.open`) serves. Changing it builds a new store.
    */
   @property() accessor token = '';
   /**
@@ -121,7 +122,7 @@ export abstract class MosaicaElement extends LitElement {
    */
   private resolve(): void {
     const wanted: OwnConfig | null =
-      this.canBuildOwn && (this.token || this.authorise)
+      this.canBuildOwn && (this.token || this.authorise || this.viewerUrl)
         ? {viewerUrl: this.viewerUrl, token: this.token, authorise: this.authorise, artifactsPerTile: this.artifactsPerTile}
         : null;
     const held = this.ownConfig;

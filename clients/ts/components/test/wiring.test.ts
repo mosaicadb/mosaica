@@ -100,16 +100,18 @@ describe('configuration after connection', () => {
     return {host, el, child: host.querySelector('mosaica-status') as MosaicaStatus};
   }
 
-  it('builds a store once viewer-url and a token arrive after insertion, and provides it', async () => {
+  it('builds a store from viewer-url alone, for an open server, and another once a token arrives', async () => {
     const {host, el, child} = await bare();
     expect(el.source).toBe('detached');
     el.setAttribute('viewer-url', 'http://127.0.0.1:1');
     await settle(host);
-    expect(el.source).toBe('detached');
+    expect(el.source).toBe('own');
+    const tokenless = el.activeStore;
+    expect(child.activeStore).toBe(tokenless);
     el.setAttribute('token', 't');
     await settle(host);
     expect(el.source).toBe('own');
-    expect(el.activeStore).not.toBeNull();
+    expect(el.activeStore).not.toBe(tokenless);
     expect(child.activeStore).toBe(el.activeStore);
     el.dispose();
   });
@@ -141,6 +143,39 @@ describe('configuration after connection', () => {
     }
   });
 
+  it('reads an open server from viewer-url alone, sending no authorization, and shows another server’s refusal', async () => {
+    const sent: (string | null)[] = [];
+    let open = true;
+    const before = globalThis.fetch;
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('authorization');
+      sent.push(authorization);
+      if (open) return new Response('{}', {status: 500});
+      return new Response(JSON.stringify({error: 'bad-credential', detail: 'send a session token as a bearer'}), {
+        status: 401,
+        headers: {'content-type': 'application/json'}
+      });
+    };
+    try {
+      let {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1"></mosaica-store>');
+      await settle(host);
+      expect(el.source).toBe('own');
+      await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+      expect(sent.every((header) => header === null)).toBe(true);
+      el.dispose();
+      document.body.innerHTML = '';
+
+      open = false;
+      ({host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:2"></mosaica-store>'));
+      await settle(host);
+      await vi.waitFor(() => expect(el.activeStore!.get('status').refusal).toMatchObject({code: 'bad-credential', detail: 'send a session token as a bearer'}));
+      el.dispose();
+      document.body.innerHTML = '';
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
   it('builds one from an authorise supplier set after insertion', async () => {
     const {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1"></mosaica-store>');
     el.authorise = async () => ({token: 't', expiresAt: 1});
@@ -165,9 +200,15 @@ describe('configuration after connection', () => {
       built.push(next);
       watch(next);
     }
-    // No token and no supplier: detached, and the last one disposed.
+    // No token and no supplier: a store that sends none, as an open server takes.
     el.token = '';
     el.authorise = null;
+    await settle(host);
+    expect(el.source).toBe('own');
+    built.push(el.activeStore!);
+    watch(el.activeStore!);
+    // Nothing to build from: detached, and the last one disposed.
+    el.viewerUrl = '';
     await settle(host);
     expect(el.source).toBe('detached');
     expect(el.activeStore).toBeNull();
@@ -231,6 +272,7 @@ describe('configuration after connection', () => {
     expect(map.activeStore).toBe(explorer.activeStore);
     expect(map.source).toBe('context');
     explorer.token = '';
+    explorer.viewerUrl = '';
     await settle(host);
     expect(explorer.source).toBe('detached');
     expect(map.activeStore).toBeNull();

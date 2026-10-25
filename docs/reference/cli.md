@@ -140,7 +140,7 @@ For example, `mosaica items --server http://127.0.0.1:8080 --view papers --field
 | `--cursor` | `CURSOR` |  | Start after the last page of an earlier read: the cursor a read cut short printed. |
 | `--compression` | `COMPRESSION` |  | `zstd` compresses the pages on their way from the server. The output is written uncompressed either way. |
 | `--server` | `URL` |  | The viewer plane's address, such as `http://127.0.0.1:8080`. |
-| `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is refused. |
+| `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is sent without one, as an open server serves it. |
 | `--out` | `PATH` |  | The file to write. Without it, or with `-`, the output goes to stdout. |
 | `--format` | `FORMAT` |  | `ipc` writes an Arrow IPC stream and `parquet` a Parquet file. Without it the format is the extension of `--out`, `.arrows` or `.parquet`; stdout and any other extension need it. A format that disagrees with the extension of `--out` is refused. |
 
@@ -174,7 +174,7 @@ For example, `mosaica artifacts --server http://127.0.0.1:8080 --view papers --l
 | `--cursor` | `CURSOR` |  | Start after the last page of an earlier read: the cursor a read cut short printed. |
 | `--compression` | `COMPRESSION` |  | `zstd` compresses the pages on their way from the server. The output is written uncompressed either way. |
 | `--server` | `URL` |  | The viewer plane's address, such as `http://127.0.0.1:8080`. |
-| `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is refused. |
+| `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is sent without one, as an open server serves it. |
 | `--out` | `PATH` |  | The file to write. Without it, or with `-`, the output goes to stdout. |
 | `--format` | `FORMAT` |  | `ipc` writes an Arrow IPC stream and `parquet` a Parquet file. Without it the format is the extension of `--out`, `.arrows` or `.parquet`; stdout and any other extension need it. A format that disagrees with the extension of `--out` is refused. |
 
@@ -201,7 +201,7 @@ For example, `mosaica aggregate --server http://127.0.0.1:8080 --view papers --g
 | `--cursor` | `CURSOR` |  | Start after the last page of an earlier read: the cursor a read cut short printed. |
 | `--compression` | `COMPRESSION` |  | `zstd` compresses the pages on their way from the server. The output is written uncompressed either way. |
 | `--server` | `URL` |  | The viewer plane's address, such as `http://127.0.0.1:8080`. |
-| `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is refused. |
+| `--token` | `TOKEN` |  | A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it the token is read from `MOSAICA_TOKEN`, and with neither the read is sent without one, as an open server serves it. |
 | `--out` | `PATH` |  | The file to write. Without it, or with `-`, the output goes to stdout. |
 | `--format` | `FORMAT` |  | `ipc` writes an Arrow IPC stream and `parquet` a Parquet file. Without it the format is the extension of `--out`, `.arrows` or `.parquet`; stdout and any other extension need it. A format that disagrees with the extension of `--out` is refused. |
 
@@ -217,12 +217,13 @@ Finds `mosaica.toml` as `mosaica build` does, opens the bundle at `[bundle] path
 
 SIGTERM or SIGINT stops the server at once, even while it opens the bundle, and it exits 0. Stopping ends every viewer session, because sessions are held in memory. A write is acknowledged only once the write-ahead log holds it on disc, so stopping loses no acknowledged write. A deletion or suppression answered with 500 because the log could not be written is in force but not on disc, and a restart undoes it until the change is sent again.
 
-It refuses to start, and exits 1, when `mosaica.toml` is refused as `mosaica build` would refuse it or lacks one of the three `[serve]` addresses. It refuses when the operator credential is not set, is empty, or its file cannot be read: under `[serve]`, `operator_credential_file` or `operator_credential_env` names the file or environment variable holding it. It refuses when `[catalogue] dir` is not set, or the catalogue there cannot be opened or is held open by another process. It also refuses when the bundle cannot be read and when the write-ahead log fails its checksum. An address that cannot be bound, such as one already in use, stops it with exit 1 after the bundle has opened.
+It refuses to start, and exits 1, when `mosaica.toml` is refused as `mosaica build` would refuse it or lacks one of the three `[serve]` addresses. It refuses, unless the server is open, when the operator credential is not set, and in any case when it is empty or its file cannot be read: under `[serve]`, `operator_credential_file` or `operator_credential_env` names the file or environment variable holding it. It refuses when `[catalogue] dir` is not set, or the catalogue there cannot be opened or is held open by another process. It also refuses when the bundle cannot be read and when the write-ahead log fails its checksum. An address that cannot be bound, such as one already in use, stops it with exit 1 after the bundle has opened.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--deployment` | `PATH` |  | Read this `mosaica.toml` instead of searching for one upward from the working directory. |
 | `--exit-on-stdin-close` |  |  | Stop, as SIGTERM stops it, when standard input reaches its end. A process that starts the server and holds a pipe to its standard input stops it by closing the pipe, and stops it too when that process ends in any way, a kill included. Standard input that is empty or `/dev/null` stops the server as soon as it starts. |
+| `--open` |  |  | Serve every request as the operator, with no credential, as `[serve] open = true` does: for one person on this machine. It refuses to start as that key does: off loopback, or beside settings or a catalogue for a server with users. The session and control addresses, the catalogue and the token lifetime take defaults where `mosaica.toml` names none. |
 
 ## `mosaica login`
 
@@ -263,7 +264,7 @@ mosaica session <COMMAND>
 
 Mint and revoke sessions on the session plane, and list and end sessions on the control plane.
 
-The session plane's verbs read their credential from `MOSAICA_API_KEY`: an API key holding `authorise-as`, or the operator credential, which alone may name the session's terms or ask for a session reading every item. The control plane's read their credential from `MOSAICA_CREDENTIAL` and need `admin`.
+The session plane's verbs read their credential from `MOSAICA_API_KEY`: an API key holding `authorise-as`, or the operator credential, which alone may name the session's terms or ask for a session reading every item. The control plane's read their credential from `MOSAICA_CREDENTIAL` and need `admin`. Either variable unset sends the request without a credential, as an open server serves it.
 
 
 ## `mosaica session authorise`

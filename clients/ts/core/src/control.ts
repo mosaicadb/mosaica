@@ -618,9 +618,10 @@ export type ControlOptions = {
    * The credential sent as the bearer token on every request: the operator credential, an API key
    * or an OIDC access token. Writes, flush and compaction need `write`; declarations and drops need
    * `write-all` beside it; status and the catalogue's verbs need `admin`. A writer without
-   * `write-all` writes only within its terms.
+   * `write-all` writes only within its terms. Unset, no credential is sent, which an open server
+   * (`serve.open`) serves.
    */
-  credential: string;
+  credential?: string;
   /** Used for every request in place of the global `fetch`. */
   fetch?: typeof fetch;
   /**
@@ -775,7 +776,7 @@ function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> 
  */
 export class Control {
   private readonly base: string;
-  private readonly credential: string;
+  private readonly credential: string | undefined;
   private readonly fetch: typeof fetch | undefined;
   private readonly headers: Record<string, string> | undefined;
 
@@ -796,8 +797,10 @@ export class Control {
     const url = this.base + path;
     // The route's own headers replace a host header of the same name in any case.
     const all = new Headers(this.headers);
-    all.set('authorization', `Bearer ${this.credential}`);
+    if (this.credential) all.set('authorization', `Bearer ${this.credential}`);
     for (const [name, value] of Object.entries(headers)) all.set(name, value);
+    // An open server refuses a write with no content type, so a route without a body names JSON.
+    if (method !== 'GET' && !all.has('content-type')) all.set('content-type', JSON_TYPE);
     const init: RequestInit = {method, headers: all};
     if (body !== undefined) init.body = body as BodyInit;
     if (options.signal) init.signal = options.signal;
@@ -1046,7 +1049,7 @@ export class Control {
    * is restarted, the answer is `503` with that detail and nothing is requested.
    */
   compact(options: CallOptions = {}): Promise<Answer> {
-    return this.send('POST', '/control/compact', options, '');
+    return this.send('POST', '/control/compact', options);
   }
 
   /**
@@ -1055,7 +1058,7 @@ export class Control {
    * with `wait`, the answer is held until it is published.
    */
   flush(options: WriteOptions = {}): Promise<Answer> {
-    return this.send('POST', withQuery('/control/flush', waiting(options)), options, '');
+    return this.send('POST', withQuery('/control/flush', waiting(options)), options);
   }
 
   // The catalogue's verbs. Each needs `admin`. A change answers how many live sessions it ended:

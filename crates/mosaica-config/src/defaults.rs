@@ -166,3 +166,13 @@ pub const DEFAULT_FRAGMENT_CACHE_BYTES: u64 = 1024 * 1024 * 1024;
 pub const DEFAULT_MIN_PASSWORD_LENGTH: usize = 15;
 pub const DEFAULT_FAILED_ATTEMPT_LIMIT: u32 = 10;
 pub const DEFAULT_FAILED_ATTEMPT_WINDOW_SECS: u64 = 900;
+
+/// `[bundle] cache` when the file names none, beside `mosaica.toml`.
+pub const DEFAULT_CACHE_DIR: &str = ".mosaica/cache";
+/// `[bundle] wal` when the file names none, beside `mosaica.toml`.
+pub const DEFAULT_WAL: &str = ".mosaica/wal.log";
+/// `[catalogue] dir` on an open server whose file names none, beside `mosaica.toml`.
+pub const DEFAULT_OPEN_CATALOGUE_DIR: &str = ".mosaica/catalogue";
+/// `[disclosure] token_max_lifetime` on an open server whose file names none: the life of its one
+/// session, which is minted again when it ends.
+pub const DEFAULT_OPEN_TOKEN_MAX_LIFETIME_SECS: u64 = 3_600;

@@ -161,7 +161,8 @@ struct Target {
     #[arg(long, value_name = "URL")]
     server: String,
     /// A session token, as `mosaica login` or `mosaica session authorise` prints one. Without it
-    /// the token is read from `MOSAICA_TOKEN`, and with neither the read is refused.
+    /// the token is read from `MOSAICA_TOKEN`, and with neither the read is sent without one, as
+    /// an open server serves it.
     #[arg(long)]
     token: Option<String>,
     /// The file to write. Without it, or with `-`, the output goes to stdout.
@@ -375,11 +376,10 @@ fn read(
     mut request: Map<String, Value>,
     target: &Target,
 ) -> Result<Summary, String> {
-    let token = match &target.token {
-        Some(token) => token.clone(),
-        None => std::env::var("MOSAICA_TOKEN")
-            .map_err(|_| "no session token: pass --token, or set MOSAICA_TOKEN".to_string())?,
-    };
+    let token = target
+        .token
+        .clone()
+        .or_else(|| std::env::var("MOSAICA_TOKEN").ok());
     let mut output = Output::new(target)?;
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
@@ -397,7 +397,7 @@ fn read(
         ..Summary::default()
     };
     let read = loop {
-        let response = match post(&client, &url, &token, &request) {
+        let response = match post(&client, &url, token.as_deref(), &request) {
             Ok(response) => response,
             Err(e) => break Err(e),
         };
@@ -439,12 +439,14 @@ fn read(
 fn post(
     client: &reqwest::blocking::Client,
     url: &str,
-    token: &str,
+    token: Option<&str>,
     request: &Map<String, Value>,
 ) -> Result<reqwest::blocking::Response, String> {
-    let response = client
-        .post(url)
-        .bearer_auth(token)
+    let mut post = client.post(url);
+    if let Some(token) = token {
+        post = post.bearer_auth(token);
+    }
+    let response = post
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(Value::Object(request.clone()).to_string())
         .send()

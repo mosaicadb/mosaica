@@ -68,6 +68,22 @@ info:
     is not UTF-8, `413` for a JSON body over its route's byte cap, and `415` for a JSON route
     called without `content-type: application/json`. Each route declares the ones it can return.
 
+    **An open server** (`serve.open`, or `mosaica serve --open`) serves every request on every
+    plane as the operator, for one person on this machine. No credential is needed, and one that
+    is sent changes nothing: a viewer route answers as a session minted with `read_all: true`
+    does, and a session or control route acts with every permission. Every plane answers `403
+    forbidden` to a request whose `Host`, or whose absolute-form request line, names anything but
+    `localhost` or a loopback address, or that carries no host or two. Every plane answers `403
+    forbidden` to a request by any method but `GET`, `HEAD`, `OPTIONS` and `TRACE` that has no
+    `content-type`, or whose `content-type` is `text/plain`, `application/x-www-form-urlencoded`
+    or `multipart/form-data`, whatever its case and parameters; a route that takes no body is sent
+    `content-type: application/json` with an empty one. Every plane answers `403 forbidden` to a
+    request whose `Origin` is not `http` or `https` on `localhost` or a loopback address, and to
+    one with no `Origin` whose `Sec-Fetch-Site` is `cross-site`. The viewer plane admits a page from `localhost`,
+    `127.0.0.1` or `[::1]` on any port, as `serve.cors_loopback` does, and the session and control
+    planes admit no page. `POST /control/principals` and `PUT /control/providers/{name}` answer `403
+    forbidden`, since an open server holds no principal and no provider.
+
     On the viewer plane a refusal depends on the request and the deployment's configuration, and
     never on the viewer's data. `404 unknown` there is one status, one code and one detail string
     for *no such identifier* and *exists but is not visible to this principal*.
@@ -4648,15 +4664,15 @@ components:
     authoriseAsKey:
       type: http
       scheme: bearer
-      description: "An API key, `msk_<prefix>_<secret>`, whose principal holds `authorise-as`, or the operator credential, which authenticates the superuser. It mints a session for any principal, so it belongs to an integrator's backend and is never handed to a browser. A key that is not accepted is `401`; an accepted key without `authorise-as` is `403 forbidden`. Checked before the body is read."
+      description: "An API key, `msk_<prefix>_<secret>`, whose principal holds `authorise-as`, or the operator credential, which authenticates the superuser. It mints a session for any principal, so it belongs to an integrator's backend and is never handed to a browser. A key that is not accepted is `401`; an accepted key without `authorise-as` is `403 forbidden`. Checked before the body is read. An open server needs none (`info.description`)."
     controlCredential:
       type: http
       scheme: bearer
-      description: "The operator credential, which authenticates the built-in superuser holding every permission; an API key; or an OIDC access token, whose permissions come from its provider's role mappings. Every path on the control listener requires one, checked before the request's query or body is read, so a caller without one is answered `401` ahead of any other refusal. Writes, flush and compaction need `write`; a declaration and a drop, the operations marked `x-mosaica-permission: write-all`, need `write-all` beside it; status and the catalogue's verbs need `admin`. A credential without them is `403 forbidden`. What a `write` caller may name is bounded by its terms (`Permission`)."
+      description: "The operator credential, which authenticates the built-in superuser holding every permission; an API key; or an OIDC access token, whose permissions come from its provider's role mappings. Every path on the control listener requires one, checked before the request's query or body is read, so a caller without one is answered `401` ahead of any other refusal. Writes, flush and compaction need `write`; a declaration and a drop, the operations marked `x-mosaica-permission: write-all`, need `write-all` beside it; status and the catalogue's verbs need `admin`. A credential without them is `403 forbidden`. What a `write` caller may name is bounded by its terms (`Permission`). An open server needs none (`info.description`)."
     sessionToken:
       type: http
       scheme: bearer
-      description: "The `token` `POST /v1/login` or `POST /session/authorise` minted. A missing, malformed or unrecognised token is `401 bad-credential`; a recognised token whose session has ended, by its deadline, a revocation, a logout or a catalogue change, is `403 expired-token`, and `401` once the registry has swept it. Either means the session has ended."
+      description: "The `token` `POST /v1/login` or `POST /session/authorise` minted. A missing, malformed or unrecognised token is `401 bad-credential`; a recognised token whose session has ended, by its deadline, a revocation, a logout or a catalogue change, is `403 expired-token`, and `401` once the registry has swept it. Either means the session has ended. An open server needs none (`info.description`)."
 
   parameters:
     PrincipalName:

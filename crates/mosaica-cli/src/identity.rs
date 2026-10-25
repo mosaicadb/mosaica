@@ -5,7 +5,8 @@
 //! Secrets are never arguments, which other users of the machine can read: a password, an API key
 //! or an access token to log in with is read from stdin, the session token to log out with from
 //! `MOSAICA_TOKEN`, the session plane's credential from `MOSAICA_API_KEY`, and the control plane's
-//! credential from `MOSAICA_CREDENTIAL`.
+//! credential from `MOSAICA_CREDENTIAL`. Where `MOSAICA_API_KEY` or `MOSAICA_CREDENTIAL` is unset,
+//! the request is sent without a credential, as an open server serves it.
 
 use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
@@ -54,14 +55,17 @@ fn send(
                 .build()
                 .map_err(|e| format!("starting the HTTP client: {e}"))?;
             let method = reqwest::Method::from_bytes(method.as_bytes()).expect("a known method");
+            let write = method != reqwest::Method::GET;
             let mut req = client.request(method, format!("{base}{path}"));
             if let Some(bearer) = bearer {
                 req = req.bearer_auth(bearer);
             }
+            // Named with no body too: an open server refuses a write with no content type.
+            if write {
+                req = req.header(reqwest::header::CONTENT_TYPE, "application/json");
+            }
             if let Some(body) = body {
-                req = req
-                    .header(reqwest::header::CONTENT_TYPE, "application/json")
-                    .body(body.to_string());
+                req = req.body(body.to_string());
             }
             let resp = req.send().map_err(|e| format!("{base}{path}: {e}"))?;
             let status = resp.status().as_u16();
@@ -89,7 +93,7 @@ fn unix_request(
     if let Some(bearer) = bearer {
         head.push_str(&format!("authorization: Bearer {bearer}\r\n"));
     }
-    if !body.is_empty() {
+    if method != "GET" {
         head.push_str("content-type: application/json\r\n");
     }
     head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
@@ -176,6 +180,15 @@ fn env_secret(name: &str, what: &str) -> Result<String, String> {
         .filter(|v| !v.trim().is_empty())
         .map(|v| v.trim().to_owned())
         .ok_or_else(|| format!("no {what}: set {name}"))
+}
+
+/// The bearer in the environment variable `name`, trimmed, or `None` where it is unset or blank,
+/// so the request goes without one, as an open server serves it.
+fn env_bearer(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
 }
 
 /// The first line of stdin, trimmed of its line ending.
@@ -341,8 +354,8 @@ pub(crate) struct Control {
 impl Control {
     fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<(u16, Vec<u8>), String> {
         let target = Target::parse(&self.control)?;
-        let credential = env_secret("MOSAICA_CREDENTIAL", "control-plane credential")?;
-        send(&target, method, path, Some(&credential), body.as_ref())
+        let credential = env_bearer("MOSAICA_CREDENTIAL");
+        send(&target, method, path, credential.as_deref(), body.as_ref())
     }
 }
 
@@ -350,7 +363,7 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
     let answer = match command {
         SessionCommand::Authorise { session, target } => (|| {
             let at = Target::parse(&session)?;
-            let key = env_secret("MOSAICA_API_KEY", "session-plane credential")?;
+            let key = env_bearer("MOSAICA_API_KEY");
             let body = match target {
                 AuthoriseTarget {
                     principal: Some(principal),
@@ -362,13 +375,13 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
                 AuthoriseTarget { read_all: true, .. } => json!({ "read_all": true }),
                 AuthoriseTarget { terms, .. } => json!({ "terms": terms }),
             };
-            send(&at, "POST", "/session/authorise", Some(&key), Some(&body))
+            send(&at, "POST", "/session/authorise", key.as_deref(), Some(&body))
         })(),
         SessionCommand::Revoke { session, token_id } => (|| {
             let target = Target::parse(&session)?;
-            let key = env_secret("MOSAICA_API_KEY", "session-plane credential")?;
+            let key = env_bearer("MOSAICA_API_KEY");
             let body = json!({ "token_id": token_id });
-            send(&target, "POST", "/session/revoke", Some(&key), Some(&body))
+            send(&target, "POST", "/session/revoke", key.as_deref(), Some(&body))
         })(),
         SessionCommand::List {
             control,

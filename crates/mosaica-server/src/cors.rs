@@ -4,7 +4,8 @@
 //!   can authorise and then use its token. It is off unless set, and warned about at startup.
 //! - `serve.cors_origins` names the pages that may present tokens, on the viewer plane only.
 //! - `serve.cors_loopback` admits any page served from a loopback address on the viewer plane,
-//!   for notebook front ends whose port no operator can know in advance.
+//!   for notebook front ends whose port no operator can know in advance. `serve.open` does the
+//!   same.
 //!
 //! An origin list is not an authorisation boundary: it decides which page a browser hands a
 //! response to, and the bearer token decides what the response contains.
@@ -26,7 +27,8 @@ const EXPOSED: [&str; 7] = [
     "x-mosaica-region",
 ];
 
-/// The viewer plane's layer, from the development and production lists together.
+/// The viewer plane's layer, from the development and production lists together. An open server
+/// admits loopback pages as `cors_loopback` does.
 pub fn viewer_layer(state: &AppState) -> Option<CorsLayer> {
     let origins: Vec<String> = state
         .limits
@@ -35,7 +37,7 @@ pub fn viewer_layer(state: &AppState) -> Option<CorsLayer> {
         .chain(state.limits.cors_origins.iter())
         .cloned()
         .collect();
-    layer(&origins, state.limits.cors_loopback)
+    layer(&origins, state.limits.cors_loopback || state.open.is_some())
 }
 
 /// The session plane's layer, from the development list only. The production list never reaches
@@ -78,46 +80,47 @@ fn layer(origins: &[String], loopback: bool) -> Option<CorsLayer> {
     )
 }
 
-/// Whether an `Origin` is `http` or `https` on exactly `localhost`, `127.0.0.1` or `[::1]`, with
-/// any port. The host is matched whole and byte-exact, so `localhost.evil.example`, an upper-case
-/// host and anything with a path, query or userinfo are refused.
-fn is_loopback_origin(origin: &HeaderValue) -> bool {
+/// Whether an `Origin` is `http` or `https` on an authority [`is_loopback_authority`] admits.
+pub(crate) fn is_loopback_origin(origin: &HeaderValue) -> bool {
     let Ok(origin) = origin.to_str() else {
         return false;
     };
-    let Some(authority) = origin
+    origin
         .strip_prefix("http://")
         .or_else(|| origin.strip_prefix("https://"))
-    else {
-        return false;
-    };
-    // Anything left after the host and port, such as a path or userinfo, refuses the origin.
-    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
-        let Some((inside, tail)) = rest.split_once(']') else {
-            return false;
-        };
-        if inside != "::1" {
-            return false;
+        .is_some_and(is_loopback_authority)
+}
+
+/// Whether an authority, a host with an optional port, names this machine: `localhost`, a
+/// loopback IPv4 address, or a loopback or IPv4-mapped loopback IPv6 address in brackets. The
+/// name is matched whole and byte-exact, so `localhost.evil.example`, `LOCALHOST`, `localhost.`
+/// and an authority with userinfo or a path are refused. An address literal cannot be rebound to
+/// another machine, so every spelling the standard parsers read is admitted.
+pub(crate) fn is_loopback_authority(authority: &str) -> bool {
+    let (host_ok, tail) = match authority.strip_prefix('[') {
+        Some(rest) => {
+            let Some((inside, tail)) = rest.split_once(']') else {
+                return false;
+            };
+            let loopback = inside.parse::<std::net::Ipv6Addr>().is_ok_and(|ip| {
+                ip.is_loopback() || ip.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+            });
+            (loopback, tail)
         }
-        let port = match tail {
-            "" => None,
-            tail => match tail.strip_prefix(':') {
-                Some(port) => Some(port),
-                None => return false,
-            },
-        };
-        (inside, port)
-    } else {
-        match authority.split_once(':') {
-            Some((host, port)) => (host, Some(port)),
-            None => (authority, None),
+        None => {
+            let (host, tail) = authority.split_at(authority.find(':').unwrap_or(authority.len()));
+            let loopback = host == "localhost"
+                || host
+                    .parse::<std::net::Ipv4Addr>()
+                    .is_ok_and(|ip| ip.is_loopback());
+            (loopback, tail)
         }
     };
-    let port_ok = match port {
-        None => true,
-        Some(port) => !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()),
-    };
-    port_ok && matches!(host, "localhost" | "127.0.0.1" | "::1")
+    let port_ok = tail.is_empty()
+        || tail
+            .strip_prefix(':')
+            .is_some_and(|port| !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()));
+    host_ok && port_ok
 }
 
 #[cfg(test)]
@@ -165,6 +168,9 @@ mod tests {
             "http://127.0.0.1:1",
             "http://[::1]",
             "http://[::1]:65535",
+            "http://127.0.0.2",
+            "http://[0:0:0:0:0:0:0:1]:8080",
+            "http://[::ffff:127.0.0.1]",
         ] {
             assert!(loopback(origin), "{origin} is a loopback origin");
         }
@@ -197,7 +203,6 @@ mod tests {
             "http://localhost:80x",
             "http://user@localhost",
             "http://localhost/path",
-            "http://127.0.0.2",
             "http://0.0.0.0:5173",
             "http://[::2]",
             // Authorities that are not origins are refused, not trimmed into one.
@@ -205,6 +210,10 @@ mod tests {
             "http://[::1]:x",
             "http://LOCALHOST",
             "http://127.0.0.1.",
+            "http://localhost.",
+            "http://127.1",
+            "http://0177.0.0.1",
+            "http://[::ffff:10.0.0.1]",
             "http://localhost:5173:1",
             "http://[::1]x",
         ] {

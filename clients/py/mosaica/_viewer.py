@@ -937,20 +937,18 @@ class Viewer:
     - `url`: the address of the database's viewer plane, where readers read.
     - `token`: a token as a string, a `Token`, or a function that returns either. A function is
       called again when the token it gave is close to expiry, and when the server says its
-      session has ended, as a catalogue change ends it.
+      session has ended, as a catalogue change ends it. `None` sends requests without one, which
+      a server started with `mosaica serve --open` answers as its operator.
     - `terms`: the access terms the token was made for, if known. It is kept for display.
     """
 
-    def __init__(self, url: str, token: TokenSource, *, terms: Optional[Sequence[str]] = None):
+    def __init__(
+        self, url: str, token: Optional[TokenSource] = None, *, terms: Optional[Sequence[str]] = None
+    ):
         if not url:
             raise Refusal("a viewer needs the address of the database's reading endpoint")
-        if token is None:
-            raise Refusal(
-                "a viewer needs a token: the token your deployment issued you, a Token, or a "
-                "function returning one"
-            )
         self.url = url.rstrip("/")
-        self._source: TokenSource = token
+        self._source: Optional[TokenSource] = token
         self._token: Optional[Token] = None
         #: Category keys already looked up, by `(column, view)` and then by code.
         self._keys: dict = {}
@@ -958,12 +956,15 @@ class Viewer:
         #: elsewhere and does not say.
         self.terms = None if terms is None else listed(terms)
 
-    def token(self) -> Token:
-        """The token this reader sends, replaced with a fresh one when it is close to expiry.
+    def token(self) -> Optional[Token]:
+        """The token this reader sends, replaced with a fresh one when it is close to expiry, or
+        `None` for a reader made without one.
 
         A `Token` from `login` or `authorise` renews itself. A function given as the token is
         called again. A plain string is sent as it is until the server refuses it.
         """
+        if self._source is None:
+            return None
         held = self._token
         if held is not None and (held.seconds_left is None or held.seconds_left > TOKEN_MARGIN):
             return held
@@ -1743,13 +1744,14 @@ class Viewer:
         more.
         """
         for attempt in (0, 1):
+            token = self.token()
             request = urllib.request.Request(
                 self.url + path,
                 data=None if body is None else self._encoded(body),
                 method=method,
                 headers={
-                    "authorization": f"Bearer {self.token().token}",
-                    **({} if body is None else {"content-type": "application/json"}),
+                    **({} if token is None else {"authorization": f"Bearer {token.token}"}),
+                    **({} if method == "GET" else {"content-type": "application/json"}),
                 },
             )
             try:
@@ -1823,12 +1825,14 @@ class Viewer:
         return f"Viewer(url={self.url!r}{terms})"
 
 
-def connect(url: str, token: TokenSource) -> Viewer:
+def connect(url: str, token: Optional[TokenSource] = None) -> Viewer:
     """A reader of a Mosaica database someone else runs.
 
     - `url`: the address of its viewer plane, where readers read.
     - `token`: the token its operator issued you, as a string, a `Token`, or a function that
-      returns either. A function is called again when its token is close to expiry.
+      returns either. A function is called again when its token is close to expiry. Leave it out
+      for a server started with `mosaica serve --open`, which answers every request as its
+      operator.
 
     The reader can read and map what the token's terms admit.
 

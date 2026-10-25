@@ -755,8 +755,10 @@ pub struct AppState {
     pub catalogue: mosaica_catalogue::Catalogue,
     /// Checks OIDC access tokens against their providers' published keys.
     pub oidc: crate::oidc::Verifier,
-    /// Authenticates the superuser on the control plane.
-    pub operator_credential: String,
+    /// Authenticates the superuser. `None` only on an open server whose deployment names none.
+    pub operator_credential: Option<String>,
+    /// `Some` on an open server (`[serve] open`), which serves every request as the operator.
+    pub open: Option<crate::auth::OpenSession>,
     /// `[serve] request_log`, open for appending. `None` mounts no logging at all.
     pub request_log: Option<crate::request_log::RequestLog>,
     /// The write executor's fault switchboard, in the faults build only. The executor holds the
@@ -774,7 +776,8 @@ pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
 }
 
 /// The viewer plane's authentication extractor: the bearer token, looked up by
-/// [`AppState::authenticated_session`]. Handlers take it first after the state, and axum runs
+/// [`AppState::authenticated_session`], or on an open server its one session, whatever was sent
+/// ([`crate::auth::OpenSession`]). Handlers take it first after the state, and axum runs
 /// extractors in order, so a bad token is refused before the path, query or body is read.
 pub struct ViewerSession(pub Arc<Session>);
 
@@ -795,8 +798,13 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for ViewerSession {
         parts: &mut axum::http::request::Parts,
         state: &Arc<AppState>,
     ) -> Result<Self, ApiError> {
-        let token = bearer_token(&parts.headers).ok_or(ApiError::BadCredential)?;
-        let session = state.authenticated_session(token)?;
+        let session = match &state.open {
+            Some(open) => open.session(state).await?,
+            None => {
+                let token = bearer_token(&parts.headers).ok_or(ApiError::BadCredential)?;
+                state.authenticated_session(token)?
+            }
+        };
         crate::request_log::note_token_id(session.token_id());
         Ok(ViewerSession(session))
     }

@@ -131,8 +131,14 @@ pub struct Bound {
 impl Server {
     /// Start the server and read the addresses it bound from the line it announces them on.
     pub fn announced(dir: &Path) -> (Server, Bound) {
+        Server::announced_with(dir, &[])
+    }
+
+    /// [`Server::announced`], with `flags` after `mosaica serve`.
+    pub fn announced_with(dir: &Path, flags: &[&str]) -> (Server, Bound) {
         let mut child = mosaica()
             .arg("serve")
+            .args(flags)
             .current_dir(dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

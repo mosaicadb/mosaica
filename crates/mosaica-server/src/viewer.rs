@@ -32,6 +32,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     // With neither CORS list set there is no CORS layer at all.
     let cors = crate::cors::viewer_layer(&state);
     let state_for_log = state.request_log.is_some().then(|| Arc::clone(&state));
+    let state_for_open = Arc::clone(&state);
     let router = Router::new()
         .route("/v1/login", post(crate::login::login))
         .route("/v1/logout", post(crate::login::logout))
@@ -63,6 +64,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         Some(layer) => router.layer(layer),
         None => router,
     };
+    // Outside CORS, so an open server refuses a preflight from a rebound name too.
+    let router = crate::open::guarded(router, &state_for_open);
     // Outermost, so a preflight the CORS layer answers is logged too.
     match state_for_log {
         Some(state) => router.layer(axum::middleware::from_fn_with_state(

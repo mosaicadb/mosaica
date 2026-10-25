@@ -15,8 +15,8 @@ The table is required.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `path` | string (a path) | required | The bundle directory, which `mosaica build` writes unless `--out` names another, and `mosaica serve` opens. |
-| `cache` | string (a path) | required | A directory outside the bundle for files the server derives: cached visibility masks, which survive a restart, and suggestion indexes and scratch files, which are rebuilt at each start. |
-| `wal` | string (a path) | required | The write-ahead log. Every write through the control plane is appended and synced to disc here before it is acknowledged, and the log is replayed when the server starts. The path names a series of files: `wal.log` is written as `wal-000001.log`, `wal-000002.log` and so on, and is never itself a file. |
+| `cache` | string (a path) | `".mosaica/cache"` | A directory outside the bundle for files the server derives: cached visibility masks, which survive a restart, and suggestion indexes and scratch files, which are rebuilt at each start. |
+| `wal` | string (a path) | `".mosaica/wal.log"` | The write-ahead log. Every write through the control plane is appended and synced to disc here before it is acknowledged, and the log is replayed when the server starts. The path names a series of files: `wal.log` is written as `wal-000001.log`, `wal-000002.log` and so on, and is never itself a file. |
 
 ## `[build]`
 
@@ -28,13 +28,11 @@ What `mosaica build` and `mosaica check` read.
 
 ## `[disclosure]`
 
-How long a viewer's token lasts.
-
-The table is required.
+How long a viewer's token lasts. `mosaica build` reads none of it, and `mosaica serve` refuses to start without it unless `[serve] open` is set.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `token_max_lifetime` | integer | required | The longest a session lasts, in seconds. A session ends sooner when the API key it was authorised with expires, or when the OIDC access token it was authorised with does. A token past its session's end is refused with 403. With `0`, a session has ended when it is issued. |
+| `token_max_lifetime` | integer | required | The longest a session lasts, in seconds. A session ends sooner when the API key it was authorised with expires, or when the OIDC access token it was authorised with does. A token past its session's end is refused with 403. With `0`, a session has ended when it is issued. An open server (`[serve] open`) serves every request through one session, minted again when it ends, and takes `3600` where the table is left out. |
 
 ## `[serve]`
 
@@ -43,13 +41,14 @@ How `mosaica serve` listens, whom it admits, and the limits on each request. `mo
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `viewer` | string | not set | The viewer plane's address and port, such as `"127.0.0.1:8141"`: `/v1/meta`, `/v1/viewport`, `/v1/items`, `/v1/artifacts` and `/v1/categories`, for requests carrying a viewer token. `mosaica serve` refuses to start without it, and `mosaica health` probes it. Port 0 takes a free port, which the server prints when it starts. |
-| `session` | string | not set | The session plane's address and port: `POST /session/authorise`, where a principal holding `authorise-as` mints a session for another principal by API key, and `POST /session/revoke`. `mosaica serve` refuses to start without it. |
-| `control` | string | not set | The control plane's address and port, or `"unix:<path>"` for a Unix socket: ingest, deletion and suppression, declarations, flush, compaction and status, all under `/control`. `mosaica serve` refuses to start without it. A relative socket path is read from the server's working directory, not from this file's directory, and a file already at the path is removed. |
-| `operator_credential_file` | string (a path) | not set | A file holding the operator credential. It authenticates the built-in superuser, which holds every permission, `read-all` and `write-all` among them, and is not in the catalogue, so an empty catalogue still has an administrator. Its contents are trimmed. Changing the file and restarting rotates it. `mosaica serve` refuses to start when the file cannot be read or holds only white space, and when neither this nor `operator_credential_env` is set. When both are set, the file is used. |
+| `session` | string | not set | The session plane's address and port: `POST /session/authorise`, where a principal holding `authorise-as` mints a session for another principal by API key, and `POST /session/revoke`. `mosaica serve` refuses to start without it, except an open server (`open`), which takes the viewer's address one port up, or port 0 where the viewer's port is 0. |
+| `control` | string | not set | The control plane's address and port, or `"unix:<path>"` for a Unix socket: ingest, deletion and suppression, declarations, flush, compaction and status, all under `/control`. `mosaica serve` refuses to start without it, except an open server (`open`), which takes the viewer's address two ports up, or port 0 where the viewer's port is 0. A relative socket path is read from the server's working directory, not from this file's directory, and a file already at the path is removed. |
+| `operator_credential_file` | string (a path) | not set | A file holding the operator credential. It authenticates the built-in superuser, which holds every permission, `read-all` and `write-all` among them, and is not in the catalogue, so an empty catalogue still has an administrator. Its contents are trimmed. Changing the file and restarting rotates it. `mosaica serve` refuses to start when the file cannot be read or holds only white space, and, unless the server is open (`open`), when neither this nor `operator_credential_env` is set. When both are set, the file is used. |
 | `operator_credential_env` | string | not set | An environment variable holding the operator credential, trimmed as the file is. `mosaica serve` refuses to start when it is unset or holds only white space. |
 | `cors_origins` | array of strings | `[]` | Browser origins, such as `"https://maps.example.org"`, whose pages may call the viewer plane with a viewer token. `"*"` is refused. |
 | `cors_loopback` | boolean | `false` | Admit a page served from `localhost`, `127.0.0.1` or `[::1]`, on any port, to the viewer plane, as for a notebook whose port is not known in advance. |
 | `dev_cors_origins` | array of strings | `[]` | Browser origins whose pages may call both the viewer plane and the session plane, so a page in development can hold an API key that mints sessions for other principals. The server logs a warning at start when it is set. `"*"` is refused. |
+| `open` | boolean | `false` | Serve every request on all three planes as the operator, with or without a credential: a read sees every item a `read_all` session sees, and a write may change anything. It is for one person on this machine. `mosaica serve` refuses to start with it when an address in this table is not loopback (`127.0.0.0/8` or `::1`; the control plane may also be a Unix socket), when `cors_origins`, `dev_cors_origins` or a `[catalogue]` provider is set, and when the catalogue holds a principal or a provider. The operator credential is optional with it. Every plane refuses with 403 a request whose `Host` is not `localhost` or a loopback address, a request from a browser page not served from this machine, and a request that changes state sent with no content type or as `text/plain`, `application/x-www-form-urlencoded` or `multipart/form-data`. Pages from `localhost`, `127.0.0.1` and `[::1]` are admitted to the viewer plane, as `cors_loopback` admits them. `mosaica serve --open` sets it too. |
 | `compute_threads` | integer | the number of CPUs the process may use | Threads in the pool that computes responses. |
 | `compute_admission` | integer | four per compute thread | Viewer requests computed at once. It admits `/v1/viewport`, the single-item and single-artifact reads, `/v1/artifacts/browse`, `/v1/aggregate` and a `/v1/categories/{column}/suggest` with `view` and `counts=true`, and never a control-plane or session-plane request. |
 | `compute_queue` | integer | twice `compute_admission` | Requests that may wait for an admission slot beyond those running. A request finding no place is refused with 429 at once. `compute_admission` and `compute_queue` together may not exceed 2305843009213693951. |
@@ -136,7 +135,7 @@ The identity catalogue: who may authenticate, with what, and the OIDC providers 
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `dir` | string (a path) | not set | The directory holding the catalogue, a SQLite database of local principals, their password hashes and API keys, groups, grants and the providers declared through the API. It lives outside the bundle, so principals and grants carry across a rebuild. It is created, readable by the service's user alone, when absent. `mosaica serve` refuses to start without it, or when another process holds it open. |
+| `dir` | string (a path) | not set | The directory holding the catalogue, a SQLite database of local principals, their password hashes and API keys, groups, grants and the providers declared through the API. It lives outside the bundle, so principals and grants carry across a rebuild. It is created, readable by the service's user alone, when absent. `mosaica serve` refuses to start without it, or when another process holds it open, except an open server (`[serve] open`), which takes `".mosaica/catalogue"`. |
 | `min_password_length` | integer | `15` | The fewest characters a password may hold when it is set. At least 1. |
 | `failed_attempt_limit` | integer | `10` | Failed password attempts for one name within `failed_attempt_window` after which further attempts for that name are refused, answered as a wrong password is, until the oldest leaves the window. |
 | `failed_attempt_window` | integer | `900` | The window, in seconds, over which failed password attempts are counted. |

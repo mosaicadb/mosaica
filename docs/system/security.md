@@ -31,6 +31,7 @@ A few facts bear on deploying it:
 
 - **The viewer address serves plain HTTP.** Passwords, API keys and session tokens all cross it, so put [TLS](../guides/tls.md) in front of it outside a private network.
 - **The operator credential** must not be empty, and the server refuses to start if it is.
+- **An open server** (`serve.open`) serves every request as the operator with no credential, so anything on its machine that can reach a loopback address reads and changes everything. It listens on loopback alone and starts only with no principal, provider or CORS origin list configured. It refuses a request whose `Host` does not name this machine, a request a browser sends from a page on another site, and a write sent with no content type or as plain text or form data, which such a page could send without the browser asking the server first.
 - **Password login** is limited per name: by default, ten wrong attempts in fifteen minutes lock that name out of password login until the oldest attempt leaves the window. Its API keys and sessions are unaffected. The count is held in memory, and starts again at a restart.
 
 ## What a viewer can still learn

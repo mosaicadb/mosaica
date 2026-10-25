@@ -28,8 +28,6 @@ const REGENERATE: &str =
 const MINIMAL: &str = "\
 [bundle]
 path = \"b\"
-cache = \"c\"
-wal = \"w\"
 
 [disclosure]
 token_max_lifetime = 3600

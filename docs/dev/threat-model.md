@@ -67,6 +67,28 @@ it. Failed password attempts are limited per name, so anyone who knows a princip
 lock it out of password login with ten wrong attempts every fifteen minutes; its API keys and
 sessions are unaffected.
 
+An open server (`serve.open`, or `mosaica serve --open`) is for one person on one machine. It
+serves every request on every plane as the superuser, whatever credential the request carries. A
+viewer request is served through one session minted as `POST /session/authorise` mints
+`read_all: true`, and a session or control request holds every permission. Anything on the
+machine that can reach a loopback address therefore reads and changes everything. The server
+refuses to start unless every address it listens on is loopback, and refuses to start beside
+anything that gives it users: a principal or an OIDC provider in its catalogue, an OIDC provider
+in its configuration, `cors_origins` or `dev_cors_origins`. While open it creates no principal and
+no provider. Two guards keep a web page on another site out. Every plane refuses a request whose
+`Host`, or absolute-form request line, names anything but `localhost` or a loopback address, or
+that carries no host or two. A site that rebinds its own name to 127.0.0.1 therefore gets nothing,
+since the browser sends that name. Every plane refuses a request by any method but `GET`, `HEAD`,
+`OPTIONS` and `TRACE` sent with no content type, or as `text/plain`,
+`application/x-www-form-urlencoded` or `multipart/form-data`, which is what a browser sends to
+another origin without a preflight. Any other type needs the server's CORS approval, which the
+viewer plane gives only to a page from a loopback origin and the session and control planes give
+to none. Every plane also refuses a request whose `Origin` is not a loopback origin, and one with
+no `Origin` whose `Sec-Fetch-Site` is `cross-site`, so a page on another site reads nothing even
+with a `GET`. A page on `localhost` calling `127.0.0.1` is cross-site to its browser, so a loopback
+`Origin` is admitted whatever `Sec-Fetch-Site` says. A client that is not a browser sends neither
+header and is unaffected.
+
 Every cache that holds a viewer's visible set, or a quantity computed from it, is keyed to one
 session and is never read by another session, with four exceptions, each keyed on the session's
 grant: the index keys it satisfies, or every key for a session that reads every item. The first is

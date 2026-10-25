@@ -29,6 +29,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     // browser, and `session_layer` reads only the development list.
     let dev_cors = crate::cors::session_layer(&state);
     let state_for_log = state.request_log.is_some().then(|| Arc::clone(&state));
+    let state_for_open = Arc::clone(&state);
     let router = Router::new()
         .route("/session/authorise", post(authorise))
         .route("/session/revoke", post(revoke))
@@ -44,6 +45,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         Some(layer) => router.layer(layer),
         None => router,
     };
+    let router = crate::open::guarded(router, &state_for_open);
     // Outermost, so a preflight the CORS layer answers is logged too.
     match state_for_log {
         Some(state) => router.layer(axum::middleware::from_fn_with_state(

@@ -36,9 +36,8 @@ struct RawConfig {
     /// What `mosaica build` and `mosaica check` read.
     #[serde(default)]
     build: RawBuild,
-    /// How long a viewer's token lasts.
-    ///
-    /// Required.
+    /// How long a viewer's token lasts. `mosaica build` reads none of it, and `mosaica serve`
+    /// refuses to start without it unless `[serve] open` is set.
     disclosure: Option<RawDisclosure>,
     /// How `mosaica serve` listens, whom it admits, and the limits on each request. `mosaica
     /// build` reads none of it, and a file for building alone may leave the table out.
@@ -61,7 +60,8 @@ struct RawCatalogue {
     /// password hashes and API keys, groups, grants and the providers declared through the API.
     /// It lives outside the bundle, so principals and grants carry across a rebuild. It is
     /// created, readable by the service's user alone, when absent. `mosaica serve` refuses to
-    /// start without it, or when another process holds it open.
+    /// start without it, or when another process holds it open, except an open server
+    /// (`[serve] open`), which takes `".mosaica/catalogue"`.
     ///
     /// Default: not set.
     dir: Option<PathBuf>,
@@ -130,12 +130,16 @@ struct RawBundle {
     /// A directory outside the bundle for files the server derives: cached visibility masks,
     /// which survive a restart, and suggestion indexes and scratch files, which are rebuilt at
     /// each start.
-    cache: PathBuf,
+    ///
+    /// Default: `".mosaica/cache"`.
+    cache: Option<PathBuf>,
     /// The write-ahead log. Every write through the control plane is appended and synced to disc
     /// here before it is acknowledged, and the log is replayed when the server starts. The path
     /// names a series of files: `wal.log` is written as `wal-000001.log`, `wal-000002.log` and so
     /// on, and is never itself a file.
-    wal: PathBuf,
+    ///
+    /// Default: `".mosaica/wal.log"`.
+    wal: Option<PathBuf>,
 }
 
 #[derive(Deserialize, Default)]
@@ -153,7 +157,8 @@ struct RawDisclosure {
     /// The longest a session lasts, in seconds. A session ends sooner when the API key it was
     /// authorised with expires, or when the OIDC access token it was authorised with does. A
     /// token past its session's end is refused with 403. With `0`, a session has ended when it
-    /// is issued.
+    /// is issued. An open server (`[serve] open`) serves every request through one session,
+    /// minted again when it ends, and takes `3600` where the table is left out.
     ///
     /// Required.
     token_max_lifetime: Option<u64>,
@@ -171,15 +176,18 @@ struct RawServe {
     viewer: Option<String>,
     /// The session plane's address and port: `POST /session/authorise`, where a principal holding
     /// `authorise-as` mints a session for another principal by API key, and
-    /// `POST /session/revoke`. `mosaica serve` refuses to start without it.
+    /// `POST /session/revoke`. `mosaica serve` refuses to start without it, except an open server
+    /// (`open`), which takes the viewer's address one port up, or port 0 where the viewer's port
+    /// is 0.
     ///
     /// Default: not set.
     session: Option<String>,
     /// The control plane's address and port, or `"unix:<path>"` for a Unix socket: ingest,
     /// deletion and suppression, declarations, flush, compaction and status, all under
-    /// `/control`. `mosaica serve` refuses to start without it. A relative socket path is read
-    /// from the server's working directory, not from this file's directory, and a file already
-    /// at the path is removed.
+    /// `/control`. `mosaica serve` refuses to start without it, except an open server (`open`),
+    /// which takes the viewer's address two ports up, or port 0 where the viewer's port is 0. A
+    /// relative socket path is read from the server's working directory, not from this file's
+    /// directory, and a file already at the path is removed.
     ///
     /// Default: not set.
     control: Option<String>,
@@ -187,8 +195,8 @@ struct RawServe {
     /// holds every permission, `read-all` and `write-all` among them, and is not in the catalogue,
     /// so an empty catalogue still has an administrator. Its contents are trimmed. Changing the
     /// file and restarting rotates it. `mosaica serve` refuses to start when the file cannot be
-    /// read or holds only white space, and when neither this nor `operator_credential_env` is set.
-    /// When both are set, the file is used.
+    /// read or holds only white space, and, unless the server is open (`open`), when neither this
+    /// nor `operator_credential_env` is set. When both are set, the file is used.
     ///
     /// Default: not set.
     operator_credential_file: Option<PathBuf>,
@@ -213,6 +221,21 @@ struct RawServe {
     ///
     /// Default: `[]`.
     dev_cors_origins: Option<Vec<String>>,
+    /// Serve every request on all three planes as the operator, with or without a credential:
+    /// a read sees every item a `read_all` session sees, and a write may change anything. It is
+    /// for one person on this machine. `mosaica serve` refuses to start with it when an address
+    /// in this table is not loopback (`127.0.0.0/8` or `::1`; the control plane may also be a
+    /// Unix socket), when `cors_origins`, `dev_cors_origins` or a `[catalogue]` provider is set,
+    /// and when the catalogue holds a principal or a provider. The operator credential is
+    /// optional with it. Every plane refuses with 403 a request whose `Host` is not `localhost`
+    /// or a loopback address, a request from a browser page not served from this machine, and a
+    /// request that changes state sent with no content type or as `text/plain`,
+    /// `application/x-www-form-urlencoded` or `multipart/form-data`. Pages from `localhost`,
+    /// `127.0.0.1` and `[::1]` are admitted to the viewer plane, as `cors_loopback` admits them.
+    /// `mosaica serve --open` sets it too.
+    ///
+    /// Default: `false`.
+    open: Option<bool>,
     /// Threads in the pool that computes responses.
     ///
     /// Default: the number of CPUs the process may use.
@@ -633,7 +656,9 @@ pub struct Config {
     pub wal_path: PathBuf,
     /// The corpus declaration `mosaica build` reads. The server reads its schema from the bundle.
     pub schema_path: PathBuf,
-    pub token_max_lifetime_secs: u64,
+    /// `[disclosure] token_max_lifetime`, which a build does not read;
+    /// [`Config::token_max_lifetime_secs`] refuses to serve without it.
+    pub token_max_lifetime: Option<u64>,
     /// `None` when the file declares no `[serve]` addresses; `prepare` refuses to serve then.
     pub viewer_addr: Option<SocketAddr>,
     pub session_addr: Option<SocketAddr>,
@@ -690,6 +715,9 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     pub visible_wait_max_secs: u64,
     pub cors_loopback: bool,
+    /// `[serve] open`, or [`load_serving`] asked to serve open: every request is served as the
+    /// operator. [`Config::open_locally`] sets it and refuses what it cannot run beside.
+    pub open: bool,
     pub operator_credential: Credential,
     /// `None` when the file declares no `[catalogue] dir`; `mosaica serve` refuses to start then.
     pub catalogue_dir: Option<PathBuf>,
@@ -828,8 +856,14 @@ pub fn discover(explicit: Option<&Path>, from: &Path) -> Result<PathBuf> {
 
 /// Parse the file at `path`, resolving every relative path in it against the file's directory.
 pub fn load(path: &Path) -> Result<Config> {
+    load_serving(path, false)
+}
+
+/// [`load`], serving open where `open` is true whatever `[serve] open` says, as
+/// `mosaica serve --open` does.
+pub fn load_serving(path: &Path, open: bool) -> Result<Config> {
     let text = fs::read_to_string(path)?;
-    let mut config = parse(&text)?;
+    let mut config = parse_serving(&text, open)?;
     let base = path.parent().unwrap_or(Path::new(""));
     for slot in [
         Some(&mut config.bundle_path),
@@ -857,7 +891,12 @@ pub fn open(explicit: Option<&Path>, from: &Path) -> std::result::Result<(PathBu
     Ok((path, config))
 }
 
+#[cfg(test)]
 fn parse(text: &str) -> Result<Config> {
+    parse_serving(text, false)
+}
+
+fn parse_serving(text: &str, open: bool) -> Result<Config> {
     let raw: RawConfig = toml::from_str(text).map_err(|e| {
         match toml::from_str::<toml::Table>(text) {
             Ok(table) if table.contains_key("plugin") => ConfigError::PluginTable,
@@ -865,11 +904,13 @@ fn parse(text: &str) -> Result<Config> {
         }
     })?;
 
-    let token_max_lifetime_secs = raw
+    let token_max_lifetime = raw
         .disclosure
-        .ok_or(ConfigError::MissingDisclosureSection)?
-        .token_max_lifetime
-        .ok_or(ConfigError::MissingDisclosureKey("token_max_lifetime"))?;
+        .map(|d| {
+            d.token_max_lifetime
+                .ok_or(ConfigError::MissingDisclosureKey("token_max_lifetime"))
+        })
+        .transpose()?;
 
     let schema_path = raw
         .build
@@ -1068,12 +1109,15 @@ fn parse(text: &str) -> Result<Config> {
         )?,
     };
 
-    Ok(Config {
+    let mut config = Config {
         bundle_path: raw.bundle.path,
-        cache_dir: raw.bundle.cache,
-        wal_path: raw.bundle.wal,
+        cache_dir: raw
+            .bundle
+            .cache
+            .unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_DIR)),
+        wal_path: raw.bundle.wal.unwrap_or_else(|| PathBuf::from(DEFAULT_WAL)),
         schema_path,
-        token_max_lifetime_secs,
+        token_max_lifetime,
         viewer_addr,
         session_addr,
         control_listen,
@@ -1146,6 +1190,7 @@ fn parse(text: &str) -> Result<Config> {
             .visible_wait_max_secs
             .unwrap_or(DEFAULT_VISIBLE_WAIT_MAX_SECS),
         cors_loopback: serve.cors_loopback.unwrap_or(false),
+        open: false,
         operator_credential: Credential {
             file: serve.operator_credential_file,
             env: serve.operator_credential_env,
@@ -1237,7 +1282,69 @@ fn parse(text: &str) -> Result<Config> {
         fragment_cache_bytes: serve
             .fragment_cache_bytes
             .unwrap_or(DEFAULT_FRAGMENT_CACHE_BYTES),
-    })
+    };
+    if open || serve.open.unwrap_or(false) {
+        config.open_locally()?;
+    }
+    Ok(config)
+}
+
+impl Config {
+    /// `[disclosure] token_max_lifetime`, which serving needs and a build does not.
+    pub fn token_max_lifetime_secs(&self) -> Result<u64> {
+        self.token_max_lifetime
+            .ok_or(ConfigError::MissingDisclosureSection)
+    }
+
+    /// Serve every request as the operator, as `[serve] open = true` does. Refused when an
+    /// address is not loopback, or beside a setting that is for a server with users: a page whose
+    /// token is lost must never see everything on such a server. What only tokens and the other
+    /// planes need takes a default: the session and control planes listen on the viewer's address
+    /// one and two ports up, or on free ports where the viewer's port is 0.
+    fn open_locally(&mut self) -> Result<()> {
+        for (key, set) in [
+            ("serve.cors_origins", !self.cors_origins.is_empty()),
+            ("serve.dev_cors_origins", !self.dev_cors_origins.is_empty()),
+            ("catalogue.providers", !self.oidc_providers.is_empty()),
+        ] {
+            if set {
+                return Err(ConfigError::OpenBeside {
+                    what: format!("`{key}`"),
+                });
+            }
+        }
+        if let Some(viewer) = self.viewer_addr {
+            let above = |n: u16| {
+                let port = match viewer.port() {
+                    0 => 0,
+                    port => port.saturating_add(n),
+                };
+                SocketAddr::new(viewer.ip(), port)
+            };
+            self.session_addr.get_or_insert(above(1));
+            self.control_listen
+                .get_or_insert(ControlListen::Tcp(above(2)));
+        }
+        self.catalogue_dir
+            .get_or_insert_with(|| PathBuf::from(DEFAULT_OPEN_CATALOGUE_DIR));
+        self.token_max_lifetime
+            .get_or_insert(DEFAULT_OPEN_TOKEN_MAX_LIFETIME_SECS);
+        let control = match &self.control_listen {
+            Some(ControlListen::Tcp(addr)) => Some(*addr),
+            Some(ControlListen::Unix(_)) | None => None,
+        };
+        for (key, addr) in [
+            ("viewer", self.viewer_addr),
+            ("session", self.session_addr),
+            ("control", control),
+        ] {
+            if let Some(addr) = addr.filter(|a| !a.ip().is_loopback()) {
+                return Err(ConfigError::OpenNotLoopback { key, addr });
+            }
+        }
+        self.open = true;
+        Ok(())
+    }
 }
 
 fn parse_control_listen(raw: &str) -> Result<ControlListen> {
@@ -1261,6 +1368,11 @@ pub struct Credential {
 }
 
 impl Credential {
+    /// Whether a file or an environment variable is named for the secret.
+    pub fn is_declared(&self) -> bool {
+        self.file.is_some() || self.env.is_some()
+    }
+
     /// Read the secret, trimmed, or refuse a credential that is declared nowhere, cannot be read
     /// or is empty.
     pub fn resolve(&self, name: &'static str) -> Result<String> {
@@ -1340,16 +1452,18 @@ mod tests {
         assert!(matches!(err, ConfigError::PluginTable));
     }
 
+    /// A build reads no `[disclosure]`; a server does, unless it is open.
     #[test]
-    fn missing_disclosure_section_refuses_to_start() {
+    fn missing_disclosure_section_refuses_to_serve() {
         let toml = r#"
             [bundle]
             path = "b"
-            cache = "c"
-            wal = "w"
         "#;
-        let err = parse(toml).unwrap_err();
-        assert!(matches!(err, ConfigError::MissingDisclosureSection));
+        let config = parse(toml).expect("a build needs no [disclosure]");
+        assert!(matches!(
+            config.token_max_lifetime_secs(),
+            Err(ConfigError::MissingDisclosureSection)
+        ));
     }
 
     #[test]
@@ -2022,5 +2136,93 @@ max_artifacts_per_tile = 20"))
         let pool = serving_blocking_threads(&config);
         assert!(pool >= config.compute_admission + config.ingest_admission);
         assert!(pool > 512);
+    }
+
+    #[test]
+    fn open_loads_on_loopback_addresses_and_a_unix_control_socket() {
+        let config = parse(&valid_toml("open = true")).expect("loopback must load open");
+        assert!(config.open);
+        let toml = valid_toml("open = true")
+            .replace("127.0.0.1:7407", "[::1]:7407")
+            .replace("127.0.0.1:7408", "127.0.0.9:7408")
+            .replace("\"127.0.0.1:7409\"", "\"unix:/tmp/control.sock\"");
+        assert!(parse(&toml).expect("every loopback form must load").open);
+        assert!(!parse(&valid_toml("")).unwrap().open);
+    }
+
+    #[test]
+    fn open_refuses_an_address_another_machine_can_reach() {
+        for (from, to) in [
+            ("127.0.0.1:7407", "0.0.0.0:7407"),
+            ("127.0.0.1:7408", "192.168.0.2:7408"),
+            ("127.0.0.1:7409", "[::]:7409"),
+            ("127.0.0.1:7409", "[::ffff:127.0.0.1]:7409"),
+        ] {
+            let toml = valid_toml("open = true").replace(from, to);
+            assert!(
+                matches!(parse(&toml), Err(ConfigError::OpenNotLoopback { .. })),
+                "{to} must be refused"
+            );
+            // The same file without `open` loads, and the CLI's switch refuses it as the key does.
+            let unopened = valid_toml("").replace(from, to);
+            assert!(!parse(&unopened).expect("loads unopened").open);
+            assert!(matches!(
+                parse_serving(&unopened, true),
+                Err(ConfigError::OpenNotLoopback { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn open_refuses_the_settings_of_a_server_with_users() {
+        let provider = "[catalogue]\n[[catalogue.providers]]\nname = \"idp\"\n\
+                        issuer = \"https://idp.example\"\naudience = \"mosaica\"\n\
+                        jwks_url = \"https://idp.example/jwks\"\n";
+        for toml in [
+            valid_toml("open = true\ncors_origins = [\"https://app.example\"]"),
+            valid_toml("open = true\ndev_cors_origins = [\"http://localhost:5173\"]"),
+            valid_toml("open = true") + provider,
+        ] {
+            assert!(
+                matches!(parse(&toml), Err(ConfigError::OpenBeside { .. })),
+                "{toml} must be refused"
+            );
+        }
+        assert!(parse(&(valid_toml("") + provider)).is_ok());
+        assert!(parse(&valid_toml("open = true\ncors_loopback = true")).is_ok());
+    }
+
+    /// An open server needs a bundle and a viewer address, and nothing that only tokens or the
+    /// other planes use.
+    #[test]
+    fn an_open_deployment_needs_only_a_bundle_and_a_viewer_address() {
+        let minimal = "[bundle]\npath = \"bundle\"\n[serve]\nviewer = \"127.0.0.1:9141\"\n";
+        let config = parse(&format!("{minimal}open = true\n")).expect("a minimal open file loads");
+        assert!(config.open);
+        assert_eq!(config.session_addr, Some("127.0.0.1:9142".parse().unwrap()));
+        assert!(matches!(
+            config.control_listen,
+            Some(ControlListen::Tcp(addr)) if addr == "127.0.0.1:9143".parse().unwrap()
+        ));
+        assert!(config.catalogue_dir.is_some());
+        assert!(config.token_max_lifetime_secs().is_ok());
+        assert_eq!(config.cache_dir, PathBuf::from(DEFAULT_CACHE_DIR));
+        assert_eq!(config.wal_path, PathBuf::from(DEFAULT_WAL));
+        let opened = parse_serving(minimal, true).expect("--open loads it too");
+        assert_eq!(opened.session_addr, config.session_addr);
+
+        // What is written is kept, and a viewer on port 0 puts the others on free ports.
+        let named = parse(
+            "[bundle]\npath = \"b\"\n[serve]\nviewer = \"127.0.0.1:0\"\n\
+             control = \"unix:/tmp/c.sock\"\nopen = true\n",
+        )
+        .unwrap();
+        assert_eq!(named.session_addr, Some("127.0.0.1:0".parse().unwrap()));
+        assert!(matches!(named.control_listen, Some(ControlListen::Unix(_))));
+
+        // Not open, the same file serves nothing it has not named.
+        let closed = parse(minimal).unwrap();
+        assert!(closed.session_addr.is_none() && closed.catalogue_dir.is_none());
+        assert!(closed.token_max_lifetime_secs().is_err());
     }
 }

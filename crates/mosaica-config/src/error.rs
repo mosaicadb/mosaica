@@ -23,6 +23,15 @@ pub enum ConfigError {
         value: String,
     },
     PluginTable,
+    /// `[serve] open` beside a setting for a server with users.
+    OpenBeside {
+        what: String,
+    },
+    /// `[serve] open` with a listen address another machine could reach.
+    OpenNotLoopback {
+        key: &'static str,
+        addr: std::net::SocketAddr,
+    },
     /// `tower_http`'s `AllowOrigin::list` panics on a wildcard.
     CorsWildcard {
         key: &'static str,
@@ -128,6 +137,17 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "mosaica.toml has a [plugin] table, which Mosaica does not read; delete the \
                  table and its `module` line"
+            ),
+            ConfigError::OpenBeside { what } => write!(
+                f,
+                "`open` serves every request as the operator, so it cannot run beside {what}, \
+                 which is for a server with users; remove {what}, or serve without `open`"
+            ),
+            ConfigError::OpenNotLoopback { key, addr } => write!(
+                f,
+                "serve.{key} = \"{addr}\" is not a loopback address, and `open` serves this \
+                 machine alone; write \"127.0.0.1:{}\" for serve.{key}, or serve without `open`",
+                addr.port()
             ),
             ConfigError::CorsWildcard { key } => write!(
                 f,

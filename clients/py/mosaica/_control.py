@@ -103,11 +103,11 @@ class Control:
     - `credential`: the operator credential, an API key or an OIDC access token. Writes, flush
       and compaction need `write`; declarations and drops need `write-all` beside it; status and
       the catalogue's verbs need `admin`. A writer without `write-all` writes only within its
-      terms.
+      terms. `None` sends none, which a server started with `mosaica serve --open` takes.
     - `timeout`: how long to wait for one answer, in seconds. The default is 300.
     """
 
-    def __init__(self, base: str, credential: str, timeout: float = 300.0) -> None:
+    def __init__(self, base: str, credential: str | None = None, timeout: float = 300.0) -> None:
         self.base = base.rstrip("/")
         self.credential = credential
         self.timeout = timeout
@@ -122,10 +122,15 @@ class Control:
         body: bytes | None = None,
         headers: dict | None = None,
     ) -> Answer:
-        head = {"authorization": f"Bearer {self.credential}"}
+        head = {} if self.credential is None else {"authorization": f"Bearer {self.credential}"}
         head.update(headers or {})
+        if method != "GET" and "content-type" not in head:
+            # An open server refuses a write with no content type, so a route without a body
+            # names JSON.
+            head["content-type"] = JSON
+        # An empty body goes as none: urllib labels any body it is given as form data.
         request = urllib.request.Request(
-            self.base + path, data=body, method=method, headers=head
+            self.base + path, data=body or None, method=method, headers=head
         )
         started = time.monotonic()
         attempts = 0

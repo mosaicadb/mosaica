@@ -1,4 +1,3 @@
-import {MosaicaError} from './client.js';
 import type {Clock} from './driver.js';
 import type {Refusal} from './presented.js';
 import type {Store} from './store.js';
@@ -54,14 +53,15 @@ export class TokenSupply {
     return this.token;
   }
 
-  /** The token to ask with: the one held while it has more than 5 s left, else the supplier's next. */
+  /**
+   * The token to ask with: the one held while it has more than 5 s left, else the supplier's next,
+   * or `''` where the store has neither.
+   */
   async get(): Promise<string> {
     if (this.disposed) throw disposedError();
     if (this.token && Date.now() < this.expiresAtMs - 5_000) return this.token;
-    if (!this.supplier) {
-      if (!this.token) throw new MosaicaError(401, 'bad-credential', 'no token');
-      return this.token;
-    }
+    // With neither a token nor a supplier, requests go without one, as an open server serves them.
+    if (!this.supplier) return this.token ?? '';
     return this.renew(this.supplier);
   }
 

@@ -345,8 +345,9 @@ enum Command {
     /// again.
     ///
     /// It refuses to start, and exits 1, when `mosaica.toml` is refused as `mosaica build` would
-    /// refuse it or lacks one of the three `[serve]` addresses. It refuses when the operator
-    /// credential is not set, is empty, or its file cannot be read: under `[serve]`,
+    /// refuse it or lacks one of the three `[serve]` addresses. It refuses, unless the server is
+    /// open, when the operator credential is not set, and in any case when it is empty or its
+    /// file cannot be read: under `[serve]`,
     /// `operator_credential_file` or `operator_credential_env` names the file or environment
     /// variable holding it. It refuses when `[catalogue] dir` is not set, or the catalogue there
     /// cannot be opened or is held open by another process. It also refuses when the bundle cannot be read
@@ -363,6 +364,13 @@ enum Command {
         /// is empty or `/dev/null` stops the server as soon as it starts.
         #[arg(long)]
         exit_on_stdin_close: bool,
+        /// Serve every request as the operator, with no credential, as `[serve] open = true`
+        /// does: for one person on this machine. It refuses to start as that key does: off
+        /// loopback, or beside settings or a catalogue for a server with users. The session and
+        /// control addresses, the catalogue and the token lifetime take defaults where
+        /// `mosaica.toml` names none.
+        #[arg(long)]
+        open: bool,
     },
     /// Log in on the viewer plane and print the session token and its `expires_at` as JSON.
     ///
@@ -382,6 +390,8 @@ enum Command {
     /// `authorise-as`, or the operator credential, which alone may name the session's terms or ask
     /// for a session reading every item.
     /// The control plane's read their credential from `MOSAICA_CREDENTIAL` and need `admin`.
+    /// Either variable unset sends the request without a credential, as an open server serves
+    /// it.
     Session {
         #[command(subcommand)]
         command: identity::SessionCommand,
@@ -1552,6 +1562,7 @@ fn main() -> ExitCode {
         Command::Serve {
             deployment,
             exit_on_stdin_close,
+            open,
         } => {
             // Diagnostics on stderr, because stdout carries one thing: the JSON line naming the
             // three bound addresses, which a supervisor reads as the process's first stdout line
@@ -1579,7 +1590,10 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            let prepared = match mosaica_server::prepare(&deployment) {
+            let prepared = match mosaica_config::load_serving(&deployment, open)
+                .map_err(mosaica_server::BoxError::from)
+                .and_then(mosaica_server::prepare_config)
+            {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("mosaica serve: refused to start: {e}");

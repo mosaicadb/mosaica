@@ -65,6 +65,18 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/control/sessions/end", post(end_sessions))
 }
 
+/// An open server starts only with no principal and no provider in its catalogue
+/// (`mosaica_server::prepare`), and adds neither while it runs, so it starts again.
+fn refuse_when_open(state: &AppState, what: &str) -> Result<(), ApiError> {
+    match state.open {
+        Some(_) => Err(ApiError::Forbidden(format!(
+            "this server is open, so it serves every request as the operator and holds no \
+             {what}; serve without `open` to add one"
+        ))),
+        None => Ok(()),
+    }
+}
+
 /// A catalogue refusal as the API answers it. A storage failure is logged and answered without
 /// its text, which can name the catalogue's path.
 fn refusal(e: CatalogueError) -> ApiError {
@@ -231,6 +243,7 @@ async fn create_principal(
     State(state): State<Arc<AppState>>,
     ApiJson(req): ApiJson<CreatePrincipal>,
 ) -> Result<Json<Change>, ApiError> {
+    refuse_when_open(&state, "principal")?;
     let kind = PrincipalKind::parse(&req.kind).ok_or_else(|| {
         ApiError::Contract(format!(
             "`{}` is not a kind of principal; write `person` or `service`",
@@ -530,6 +543,7 @@ async fn put_provider(
     Path(name): Path<String>,
     ApiJson(req): ApiJson<ProviderReq>,
 ) -> Result<Json<Change>, ApiError> {
+    refuse_when_open(&state, "provider")?;
     let provider = Provider {
         name,
         issuer: req.issuer,

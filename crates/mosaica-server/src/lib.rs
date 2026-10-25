@@ -20,6 +20,7 @@ pub mod identity;
 mod login;
 pub mod memory;
 pub mod oidc;
+mod open;
 mod records;
 pub mod request_log;
 pub mod session;
@@ -50,15 +51,33 @@ pub struct Prepared {
 /// Loads the config and opens the engine. A missing `[disclosure]` section, an unreadable bundle
 /// or a WAL that fails its CRC check returns `Err` here, before any socket is bound.
 pub fn prepare(config_path: &Path) -> Result<Prepared, BoxError> {
-    let config = mosaica_config::load(config_path)?;
+    prepare_config(mosaica_config::load(config_path)?)
+}
+
+/// [`prepare`], from a config already loaded, as `mosaica serve --open` loads one and opens it.
+pub fn prepare_config(config: Config) -> Result<Prepared, BoxError> {
     // Before the engine opens, and so before any thread that makes an arena exists: the cap
     // bounds arena creation and does nothing about arenas already made.
     memory::cap_arenas(config.compute_threads);
 
     // Read here rather than at parse, since a build reads the same file and needs no credential,
     // and before the bundle opens, so a missing credential refuses before the WAL is touched.
-    let operator_credential = config.operator_credential.resolve("operator")?;
+    let operator_credential = if config.open && !config.operator_credential.is_declared() {
+        None
+    } else {
+        Some(config.operator_credential.resolve("operator")?)
+    };
     let catalogue = open_catalogue(&config)?;
+    if config.open {
+        for (what, held) in [
+            ("the catalogue's principals", catalogue.principals().len()),
+            ("the catalogue's providers", catalogue.providers().len()),
+        ] {
+            if held > 0 {
+                return Err(mosaica_config::ConfigError::OpenBeside { what: what.into() }.into());
+            }
+        }
+    }
 
     // `[serve]` is optional because a build reads this file too, but a server needs all three
     // addresses and gets no default. Port 0 is allowed; the announce line reports the real port.
@@ -77,7 +96,7 @@ pub fn prepare(config_path: &Path) -> Result<Prepared, BoxError> {
     }
 
     let engine_config = EngineConfig {
-        token_max_lifetime_secs: config.token_max_lifetime_secs,
+        token_max_lifetime_secs: config.token_max_lifetime_secs()?,
         max_k: config.max_k,
         k_min: config.k_min,
         k_max_marks: config.k_max_marks,
@@ -180,6 +199,7 @@ pub fn prepare(config_path: &Path) -> Result<Prepared, BoxError> {
         catalogue,
         oidc: oidc::Verifier::new(),
         operator_credential,
+        open: config.open.then(auth::OpenSession::default),
         request_log,
         #[cfg(feature = "fault-injection")]
         faults,
@@ -204,6 +224,13 @@ pub fn prepare(config_path: &Path) -> Result<Prepared, BoxError> {
             "serve.dev_cors_origins is set: these browser origins may present session tokens and \
              API keys to the session plane of this process. This is a DEVELOPMENT affordance — do not \
              enable it in a deployment."
+        );
+    }
+
+    if config.open {
+        tracing::warn!(
+            "serve.open is set: this server is open to this machine, and every request, with or \
+             without a credential, sees and may change everything"
         );
     }
 

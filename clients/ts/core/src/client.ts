@@ -246,7 +246,8 @@ export type MosaicaClientOptions = {
    * principal holds `authorise-as`, or the operator credential, which alone may name a session's
    * terms. Either mints a session for any principal, so it belongs to an integrator's backend or an
    * operator's script. A browser page can reach the session listener only from an origin the
-   * deployment lists in `serve.dev_cors_origins`, a development setting.
+   * deployment lists in `serve.dev_cors_origins`, a development setting. Unset, they send no
+   * credential, which an open server (`serve.open`) serves.
    */
   sessionCredential?: string;
   /**
@@ -380,7 +381,8 @@ export class MosaicaClient {
   async logout(token: string, signal?: AbortSignal): Promise<void> {
     const response = await this.send(`${this.opts.viewerUrl}/v1/logout`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`},
+      // A write with no content type is refused by an open server, so the empty body is named.
+      headers: {...bearer(token), 'content-type': 'application/json'},
       signal
     });
     if (!response.ok) await fail(response);
@@ -397,14 +399,13 @@ export class MosaicaClient {
    *   passed on, or the terms the session holds.
    * @returns The session: `token` for the viewer methods, `tokenId` for `revoke`, and `expiresAt`
    *   in seconds since the Unix epoch.
-   * @throws `Error` when the options carry no `sessionCredential`.
    * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
    *   accept, `403` where the key's principal does not hold `authorise-as`, the target does not
    *   hold `read`, or a key names `terms`, `404` where `principal` names no enabled principal,
    *   `422` for an access token it does not accept, `429` under load, with the wait in `retryAfterS`.
    */
   async authorise(target: AuthoriseTarget, signal?: AbortSignal): Promise<Session> {
-    const credential = this.requireSessionCredential('authorise');
+    const credential = this.opts.sessionCredential;
     const body =
       'principal' in target
         ? {principal: target.principal}
@@ -415,7 +416,7 @@ export class MosaicaClient {
             : {access_token: target.accessToken};
     const response = await this.send(`${this.opts.sessionUrl}/session/authorise`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${credential}`, 'content-type': 'application/json'},
+      headers: {...bearer(credential), 'content-type': 'application/json'},
       body: JSON.stringify(body),
       signal
     });
@@ -429,30 +430,21 @@ export class MosaicaClient {
    * again. An API key ends a session a key of its own principal minted, and the operator credential
    * ends any session. An id naming no such live session is not refused.
    *
-   * @throws `Error` when the options carry no `sessionCredential`.
    * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
    *   accept, `403` where the key's principal does not hold `authorise-as`, `422` for a malformed
    *   request.
    */
   async revoke(tokenId: number, signal?: AbortSignal): Promise<void> {
-    const credential = this.requireSessionCredential('revoke');
+    const credential = this.opts.sessionCredential;
     const response = await this.send(`${this.opts.sessionUrl}/session/revoke`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${credential}`, 'content-type': 'application/json'},
+      headers: {...bearer(credential), 'content-type': 'application/json'},
       body: JSON.stringify({token_id: tokenId}),
       signal
     });
     if (!response.ok) await fail(response);
   }
 
-  private requireSessionCredential(verb: string): string {
-    if (!this.opts.sessionCredential) {
-      throw new Error(
-        `${verb} needs the sessionCredential option: an API key whose principal holds authorise-as, or the operator credential`
-      );
-    }
-    return this.opts.sessionCredential;
-  }
 
   /**
    * `GET /v1/basemaps/world`: the world outline a map draws under a geographic view, as the server
@@ -461,7 +453,7 @@ export class MosaicaClient {
    * @throws {@link MosaicaError} when the server refuses.
    */
   async basemapWorld(token: string, signal?: AbortSignal): Promise<ArrayBuffer> {
-    const response = await this.send(`${this.opts.viewerUrl}/v1/basemaps/world`, {headers: {authorization: `Bearer ${token}`}, signal});
+    const response = await this.send(`${this.opts.viewerUrl}/v1/basemaps/world`, {headers: bearer(token), signal});
     if (!response.ok) await fail(response);
     return response.arrayBuffer();
   }
@@ -477,7 +469,7 @@ export class MosaicaClient {
    */
   async meta(token: string, signal?: AbortSignal): Promise<Meta> {
     const response = await this.send(`${this.opts.viewerUrl}/v1/meta`, {
-      headers: {authorization: `Bearer ${token}`},
+      headers: bearer(token),
       signal
     });
     if (!response.ok) await fail(response);
@@ -637,7 +629,7 @@ export class MosaicaClient {
 
     const response = await this.send(`${this.opts.viewerUrl}/v1/viewport`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+      headers: {...bearer(token), 'content-type': 'application/json'},
       body: jsonBody(body),
       signal
     });
@@ -871,7 +863,7 @@ export class MosaicaClient {
     const started = performance.now();
     const response = await this.send(`${this.opts.viewerUrl}/v1/artifacts/viewport`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+      headers: {...bearer(token), 'content-type': 'application/json'},
       body: jsonBody(body),
       signal
     });
@@ -1003,7 +995,7 @@ export class MosaicaClient {
     url: string,
     signal: AbortSignal | undefined
   ): Promise<{values: CategoryValue[]; next: string | null}> {
-    const response = await this.send(url, {headers: {authorization: `Bearer ${token}`}, signal});
+    const response = await this.send(url, {headers: bearer(token), signal});
     if (!response.ok) await fail(response);
     const body = (await response.json()) as RawCategories;
     return {
@@ -1050,7 +1042,7 @@ export class MosaicaClient {
       if (opts.view !== undefined) body.view = opts.view;
       response = await this.send(route, {
         method: 'POST',
-        headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+        headers: {...bearer(token), 'content-type': 'application/json'},
         body: JSON.stringify(body),
         signal: opts.signal
       });
@@ -1060,7 +1052,7 @@ export class MosaicaClient {
       if (opts.counts) params.set('counts', 'true');
       if (opts.view !== undefined) params.set('view', opts.view);
       response = await this.send(`${route}?${params.toString()}`, {
-        headers: {authorization: `Bearer ${token}`},
+        headers: bearer(token),
         signal: opts.signal
       });
     }
@@ -1108,7 +1100,7 @@ export class MosaicaClient {
   async item(token: string, mosaicaId: bigint, signal?: AbortSignal): Promise<ItemDetail> {
     const response = await this.send(`${this.opts.viewerUrl}/v1/items/${mosaicaId.toString()}`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+      headers: {...bearer(token), 'content-type': 'application/json'},
       body: '{}',
       signal
     });
@@ -1152,7 +1144,7 @@ export class MosaicaClient {
     if (opts.zoom !== undefined) body.zoom = Math.max(0, Math.min(16, Math.floor(opts.zoom)));
     const response = await this.send(`${this.opts.viewerUrl}/v1/artifacts/${mosaicaId.toString()}`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+      headers: {...bearer(token), 'content-type': 'application/json'},
       body: jsonBody(body),
       signal: opts.signal
     });
@@ -1204,7 +1196,7 @@ export class MosaicaClient {
     if (req.paletteSize !== undefined) body.palette_size = req.paletteSize;
     const response = await this.send(`${this.opts.viewerUrl}/v1/artifacts/browse`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+      headers: {...bearer(token), 'content-type': 'application/json'},
       body: jsonBody(body),
       signal
     });
@@ -1311,7 +1303,7 @@ export class MosaicaClient {
     }
     const response = await this.send(`${this.opts.viewerUrl}/v1/${route}`, {
       method: 'POST',
-      headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'},
+      headers: {...bearer(token), 'content-type': 'application/json'},
       // A `mosaica_id` travels as a decimal string.
       body: jsonBody(body),
       signal
@@ -1368,6 +1360,11 @@ const GROUP_FIELDS = ['name', 'title', 'members_of', 'views'];
  * A request body as JSON, a `bigint` written as its decimal digits in a string: a filter
  * comparand past 2^53, which a JSON number read as a double would round, is sent that way.
  */
+/** The `authorization` header for `token`, or none where there is no token, as an open server takes. */
+function bearer(token: string | undefined): Record<string, string> {
+  return token ? {authorization: `Bearer ${token}`} : {};
+}
+
 function jsonBody(body: unknown): string {
   return JSON.stringify(body, (_, value) => (typeof value === 'bigint' ? value.toString() : value));
 }
