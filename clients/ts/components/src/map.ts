@@ -864,9 +864,8 @@ export class MosaicaMap extends MosaicaElement {
     if (!s) return;
     if (!this.metaSeen && s.get('meta')) {
       this.metaSeen = true;
-      // A camera no one has moved opens on the matches, where the map has a size to fit them in,
-      // or once it is back on the page.
-      if (!this.cameraSet && (!this.isConnected || (this.clientWidth > 0 && this.clientHeight > 0))) void this.fit();
+      // A camera no one has moved opens on the matches, where the map has a size to fit them in.
+      if (!this.cameraSet && this.clientWidth > 0 && this.clientHeight > 0) void this.fit();
       else this.pushView();
     }
     const view = s.get('view');
@@ -1531,15 +1530,17 @@ export class MosaicaMap extends MosaicaElement {
   /**
    * Fit a box `[x0, y0, x1, y1]` in data coordinates, the space `mosaica-viewchange` reports, into
    * the map. The camera keeps the canvas's aspect, so the box shown contains the one asked for,
-   * and the next `mosaica-viewchange` reports the box shown. Returns false before `meta`.
+   * and the next `mosaica-viewchange` reports the box shown. `fill` is the share of the map the
+   * box takes along the side that limits it, 2^-0.3 (about 81%) unless given; at 1 a box
+   * `mosaica-viewchange` reported is fitted back to the same camera. Returns false before `meta`.
    */
-  fitBbox(extent: [number, number, number, number]): boolean {
+  fitBbox(extent: [number, number, number, number], fill = 2 ** -0.3): boolean {
     const q = this.resolvedStore?.frame();
     if (!q) return false;
     const [x0, y0] = dataToWorldXY(extent[0], extent[1], q);
     const [x1, y1] = dataToWorldXY(extent[2], extent[3], q);
     const {width, height} = this.size;
-    this.setViewState(cameraFitting([Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)], width, height, 2 ** -0.3));
+    this.setViewState(cameraFitting([Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)], width, height, fill));
     return true;
   }
 

@@ -86,9 +86,12 @@ export abstract class MosaicaElement extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
-    // A reconnect keeps what was resolved; `resolve` then catches up with anything that changed
-    // while disconnected.
-    if (this.resolvedStore) this.subscribeTo(this.resolvedStore);
+    // A reconnect keeps what was resolved, and reads the store as it now stands, since no change
+    // reached the element while it was disconnected; `resolve` then catches up with a new store.
+    if (this.resolvedStore) {
+      this.subscribeTo(this.resolvedStore);
+      this.storeChanged(this.resolvedStore);
+    }
     // The request is synchronous: a provider above answers before this returns.
     this.consumer ??= new ContextConsumer(this, {
       context: storeContext,
@@ -189,14 +192,16 @@ export abstract class MosaicaElement extends LitElement {
 
   private subscribeTo(store: Store): void {
     this.unsubscribe?.();
-    this.unsubscribe = store.subscribe(() => {
-      // `meta` goes to `null` when the store forgets what the server answered: a `clear()` or an
-      // answer under another identity key.
-      const held = store.get('meta') !== null;
-      if (this.metaHeld && !held) this.resetServerData();
-      this.metaHeld = held;
-      this.onStoreChange();
-    });
+    this.unsubscribe = store.subscribe(() => this.storeChanged(store));
+  }
+
+  private storeChanged(store: Store): void {
+    // `meta` goes to `null` when the store forgets what the server answered: a `clear()` or an
+    // answer under another identity key.
+    const held = store.get('meta') !== null;
+    if (this.metaHeld && !held) this.resetServerData();
+    this.metaHeld = held;
+    this.onStoreChange();
   }
 
   /** A hook for an element that wires more than a render to its store; `null` when it detaches. */

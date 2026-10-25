@@ -352,6 +352,35 @@ describe('the down-sync', () => {
     }
   });
 
+  it('reopens on the same camera after reloads, from the box it wrote back', async () => {
+    const proto = customElements.get('mosaica-map')!.prototype as HTMLElement;
+    Object.defineProperty(proto, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(proto, 'clientHeight', {configurable: true, value: 800});
+    onTestFinished(() => {
+      delete (proto as {clientWidth?: number}).clientWidth;
+      delete (proto as {clientHeight?: number}).clientHeight;
+    });
+    /** A page loaded on a model holding `bbox`: the box its camera shows once meta has arrived. */
+    const load = async (bbox: number[]) => {
+      const {store, el, unmount, dispose} = setUp({bbox});
+      // The world square as the data extent, so a box reads the same in both.
+      store.setFrame({xMin: 0, xMax: 512, yMin: 0, yMax: 512});
+      await settle(document.body);
+      store.set('meta', {...META, selection: {...META.selection, maxAggregateCells: 1_048_576}} as never);
+      store.set('view', {...store.get('view'), id: 's0'});
+      await settle(document.body);
+      const shown = (store.calls.filter((c) => c.name === 'setView').at(-1)!.args[0] as ViewInput).bbox;
+      unmount();
+      dispose();
+      el.remove();
+      return shown;
+    };
+    const first = await load([100, 100, 200, 180]);
+    const second = await load(first);
+    const third = await load(second);
+    for (const [a, b] of [[first, second], [second, third]] as const) for (let i = 0; i < 4; i++) expect(b[i]).toBeCloseTo(a[i]!);
+  });
+
   it('layers null leaves the default and [] is none', () => {
     expect(setUp({layers: null}).store.calls.filter((c) => c.name === 'setLayers')).toHaveLength(0);
     expect(setUp({layers: []}).store.calls.filter((c) => c.name === 'setLayers').map((c) => c.args)).toEqual([[[]]]);

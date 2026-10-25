@@ -84,7 +84,11 @@ type ModelState = {
   views: Map<MosaicaExplorer, ViewState>;
   /** The view whose settles sync up: the last one mounted or moved. */
   active: ViewState | null;
-  /** A `bbox` the kernel set before any map could fit it (no view, or no meta yet); fitted at the first chance. */
+  /**
+   * A `bbox` the kernel set before any map could fit it (no view, or no meta yet); fitted at the
+   * first chance. A kernel's box is fitted to fill the map along its limiting side, with no margin,
+   * so a box the widget wrote back reopens on the same camera after a reload.
+   */
   pendingFit: [number, number, number, number] | null;
   syncingUp: boolean;
   dispose(): void;
@@ -380,7 +384,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
 
   const fit = (bbox: [number, number, number, number]) => {
     let done = false;
-    for (const v of state.views.values()) done = (v.explorer.map?.fitBbox(bbox) ?? false) || done;
+    for (const v of state.views.values()) done = (v.explorer.map?.fitBbox(bbox, 1) ?? false) || done;
     state.pendingFit = done ? null : bbox;
   };
 
@@ -660,7 +664,7 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
   if (state.pendingFit) {
     const pending = state.pendingFit;
     void explorer.updateComplete.then(() => {
-      if (state!.pendingFit === pending && explorer.map?.fitBbox(pending)) state!.pendingFit = null;
+      if (state!.pendingFit === pending && explorer.map?.fitBbox(pending, 1)) state!.pendingFit = null;
     });
   }
   const cleanup = () => {

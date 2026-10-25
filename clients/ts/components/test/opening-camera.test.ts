@@ -173,3 +173,23 @@ describe('a map taken off the page while its frame is pending', () => {
     expect(views(store).every((v) => v.width === 1000 && v.height === 800)).toBe(true);
   });
 });
+
+describe('a map taken off the page before meta arrives', () => {
+  it('reads the store as it stands when it is back, and opens framed on the matches', async () => {
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as MosaicaMap;
+    size(map, 1000, 800);
+    const store = fakeStore({status: status({})});
+    map.store = store;
+    await settle(host);
+    map.remove();
+    store.set('meta', meta());
+    store.set('view', {...store.get('view'), id: 's0'});
+    expect(framings(store)).toEqual([]);
+    host.append(map);
+    await settle(host);
+    expect(framings(store).length).toBe(1);
+    await answer(host, store, [cell(100, 60, 40)]);
+    expect(shows(views(store)[0]!, [100 * CELL, 60 * CELL, 101 * CELL, 61 * CELL])).toBe(true);
+  });
+});
