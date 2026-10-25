@@ -272,6 +272,15 @@ describe('a refusal on screen', () => {
     expect(await code('<mosaica-selection></mosaica-selection>', {region: {shape: box, status: 'refused', refusal, visible: null, matched: {value: 0, exact: false}, served: {shown: 0, total: 0, exact: false}, verdict: null, held}})).toBe('withheld');
     expect(await code('<mosaica-status></mosaica-status>', {status: status({status: 'refused', refusal})})).toBe('withheld');
   });
+
+  it('shows the server’s reason under Item unavailable on the item card', async () => {
+    const refusal = {code: 'not-found', detail: 'there is no item 7 that this session can see', status: 404};
+    const host = await mount('<mosaica-item-card></mosaica-item-card>');
+    const selection = {item: null, itemRefusal: refusal, artifact: null, artifactRefusal: null};
+    (host.firstElementChild as unknown as {store: unknown}).store = fakeStore({meta: META, status: status({}), selection});
+    await settle(host);
+    expect(deep(host, '[part="refusal"] + [part="reason"]')?.textContent).toBe(refusal.detail);
+  });
 });
 
 describe('a cluster named by the label attached to it', () => {

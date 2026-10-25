@@ -72,6 +72,7 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  *   was pressed under `chips-only`, naming the column and the position of its clause.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "View refused", with `data-code`, in the refused state.
+ * @csspart reason - The server's reason for a refusal, on a line under "View refused".
  * @csspart subject - The subject row.
  * @csspart subject-key - The subject's colour, as its bars are drawn.
  * @csspart subject-name - In view, or Highlighted while a highlight is set.

@@ -87,6 +87,14 @@ export function isUnanswered(refusal: Refusal | null | undefined): boolean {
   return refusal?.code === 'http-error' && (refusal.status ?? 0) >= 500;
 }
 
+/**
+ * Whether a refusal is the server shedding load: a `429 backpressure` still answered after the
+ * store's retries. It says nothing about what this viewer may see.
+ */
+export function isBusy(refusal: Refusal | null | undefined): boolean {
+  return refusal?.code === 'backpressure';
+}
+
 /** The driver's verdict; see `DriverEvents.onFrame`. */
 type Verdict = {tier: 'fold'; plan: Plan} | {tier: 'derive'; plan: Plan; frame: ReplicaFrame};
 

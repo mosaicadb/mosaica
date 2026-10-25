@@ -20,6 +20,7 @@ import {chrome, tokens} from './tokens.js';
  * @csspart title - The heading.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "View refused", with `data-code`, in the refused state.
+ * @csspart reason - The server's reason for a refusal, on a line under "View refused".
  * @csspart entry - One layer that draws, with `data-layer`.
  * @csspart name - A layer's title, or its name where it declares none.
  * @csspart note - The note naming the filter layers, such as "Venues can be used as a filter

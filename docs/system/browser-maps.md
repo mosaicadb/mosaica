@@ -106,7 +106,7 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 - **The level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
 - **Density shading**, counted with the aggregate route, so it follows the filter and the highlight as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
 - **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from a ramp: Viridis by default, Cividis, Magma, Greys or Red-blue. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
-- **Status in plain words**, on the status strip and over the map: Connecting or Updating, Up to date, Nothing in view, View refused, Server did not answer (with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
+- **Status in plain words**, on the status strip and over the map: Connecting or Updating, Up to date, Nothing in view, View refused with the server's reason under it, Server did not answer and Server busy (each with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
 
 ## Not built yet
 

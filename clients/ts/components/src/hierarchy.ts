@@ -53,6 +53,7 @@ const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
  * @csspart title - The heading.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "Layer unavailable", with `data-code` set to the refusal's code.
+ * @csspart reason - The server's reason for a refusal, on a line under "View refused".
  * @csspart layer - The layer select, shown where there are several layers.
  * @csspart search - The search box.
  * @csspart tree - The tree of rows.

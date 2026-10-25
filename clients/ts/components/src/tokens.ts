@@ -529,6 +529,26 @@ export const chrome = css`
     color: var(--_mosaica-refuse);
     font-weight: 500;
   }
+  /* A refusal's words with the server's reason on a line under them. */
+  [part='state'] .said {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  [part='reason'] {
+    max-width: 36ch;
+    color: var(--_mosaica-ink-2);
+    font-size: 12px;
+    font-weight: 400;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  /* A busy server refused nothing, so its words are not coloured as a refusal. */
+  [part='state'][data-state='busy'] [part='refusal'] {
+    color: inherit;
+    font-weight: inherit;
+  }
   .skel,
   .skeleton {
     display: inline-block;

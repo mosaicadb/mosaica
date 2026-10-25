@@ -5,7 +5,7 @@ import {GRID32} from '@mosaicajs/client';
 import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {refusedState, renderState, stateOf} from './states.js';
+import {reasonOf, refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
@@ -45,6 +45,8 @@ import {chrome, tokens} from './tokens.js';
  *   the cursor), `refused` or `detached`.
  * @csspart refusal - The words "Item unavailable", with `data-code` set to the refusal's code where
  *   the server refused the record. A broken pick's details are on the map's `lastPick`.
+ * @csspart reason - The server's reason for refusing the record, as it sent it, on a line under
+ *   "Item unavailable".
  * @csspart headline - The headline, with `data-name` set to the field it shows.
  * @csspart subtitle - The value of the `subtitle-field` field under the headline, under `compact`.
  * @csspart show-all - The "Show all N fields" button, under `compact`, with `aria-expanded`.
@@ -289,13 +291,13 @@ export class MosaicaItemCard extends MosaicaElement {
     const close = html`<slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'item'})}>${icon('close', 14)}</button>`;
     // The header row: what the card shows, and the close button where there is something to close.
     const head = (content: unknown, closable: boolean) => html`<div part="title" class="head">${content}${closable ? close : nothing}</div>`;
-    const unavailable = (code: string | null) =>
-      html`<div class="panel">${head(refusedState('Item unavailable', code), true)}</div>`;
-    if (refusal) return unavailable(refusal.code);
+    const unavailable = (code: string | null, reason: string | null) =>
+      html`<div class="panel">${head(refusedState('Item unavailable', code, null, reason), true)}</div>`;
+    if (refusal) return unavailable(refusal.code, reasonOf(refusal));
     if (!item) {
       const pick = this.pick;
       // A broken pick is a fault in the layer; its details stay on the map's `lastPick`.
-      if (pick?.kind === 'broken') return unavailable(null);
+      if (pick?.kind === 'broken') return unavailable(null, null);
       if (pick?.kind === 'miss') return html`<div class="panel">${head(html`<span part="state" data-state="empty">No item here</span>`, true)}</div>`;
       const state = stateOf(this.resolvedStore?.get('status'));
       if (state === 'detached') return html`<div class="panel">${head(renderState('detached', null), false)}</div>`;

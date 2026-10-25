@@ -31,8 +31,8 @@ const view = {
   inView: {status: 'shown' as const, visible: {value: 12_040, exact: true}, matched: {value: 3_210, exact: true}, highlighted: {value: 3_210, exact: true}, shown: 500}
 };
 
-describe('stateOf maps status onto the nine states exactly as the table says', () => {
-  it('detached, loading, retrying, shown, empty, refused, expired, stale', () => {
+describe('stateOf maps status onto the ten states exactly as the table says', () => {
+  it('detached, loading, retrying, shown, empty, refused, busy, expired, stale', () => {
     expect(stateOf(null)).toBe('detached');
     expect(stateOf(status({status: 'idle'}))).toBe('loading');
     expect(stateOf(status({status: 'loading'}))).toBe('loading');
@@ -40,6 +40,7 @@ describe('stateOf maps status onto the nine states exactly as the table says', (
     expect(stateOf(status({status: 'shown'}))).toBe('shown');
     expect(stateOf(status({status: 'empty'}))).toBe('empty');
     expect(stateOf(status({status: 'refused', refusal: {code: 'x', detail: 'y', status: 422}}))).toBe('refused');
+    expect(stateOf(status({status: 'refused', refusal: {code: 'backpressure', detail: 'shed', status: 429}}))).toBe('busy');
     expect(stateOf(status({status: 'refused', refusal: {code: 'expired-token', detail: '', status: 403}, expired: true}))).toBe('expired');
     expect(stateOf(status({status: 'shown', stale: true}))).toBe('stale');
   });
@@ -102,6 +103,57 @@ describe('a server error with no Mosaica body', () => {
   });
 });
 
+describe('a server still busy after the store’s retries', () => {
+  const busy = {code: 'backpressure', detail: 'the viewer is shedding load', status: 429};
+  const refused = {code: 'contract', detail: 'no', status: 422};
+
+  it('is its own state on the strip and over the map, in the same words, with Retry and the refusal’s code', async () => {
+    const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');
+    const changes: {to: string; refusal: unknown}[] = [];
+    host.addEventListener('mosaica-statechange', (e) => changes.push((e as CustomEvent).detail));
+    const store = fakeStore({status: status({status: 'refused', refusal: refused}), view});
+    for (const el of host.querySelectorAll('mosaica-status, mosaica-map')) (el as unknown as {store: unknown}).store = store;
+    await settle(host);
+    const strip = () => host.querySelector('mosaica-status')!.shadowRoot!.querySelector('[part="state"]')!;
+    const over = () => host.querySelector('mosaica-map')!.shadowRoot!.querySelector('[part="overlay"] [part="state"]')!;
+    const words = (el: Element) => el.querySelector('[part="refusal"]')?.textContent?.trim();
+    const refusedWords = words(strip());
+
+    store.set('status', status({status: 'refused', refusal: busy}));
+    await settle(host);
+    for (const state of [strip(), over()]) {
+      expect(state.getAttribute('data-state')).toBe('busy');
+      expect(state.querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('backpressure');
+      expect(state.querySelector('.dot.warn')).not.toBeNull();
+      expect(state.querySelector('[part="reason"]')).toBeNull();
+    }
+    expect(words(strip())).toBe(words(over()));
+    expect(words(strip())).not.toBe(refusedWords);
+    expect(changes.at(-1)).toEqual({from: 'refused', to: 'busy', refusal: busy});
+
+    (strip().querySelector('[part="retry"]') as HTMLButtonElement).click();
+    (over().querySelector('[part="retry"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'refresh')).toHaveLength(2);
+  });
+});
+
+describe('a refusal shows the server’s reason under its words', () => {
+  it('on the strip and over the map, as the server sent it, and no reason where no server refused', async () => {
+    const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');
+    const rejected = {code: 'bad-credential', detail: 'the token is not one this server issued', status: 401};
+    const store = fakeStore({status: status({status: 'refused', refusal: rejected}), view});
+    for (const el of host.querySelectorAll('mosaica-status, mosaica-map')) (el as unknown as {store: unknown}).store = store;
+    await settle(host);
+    const reasons = () => [host.querySelector('mosaica-status')!, host.querySelector('mosaica-map')!].map((el) => el.shadowRoot!.querySelector('[part="state"][data-state="refused"] [part="reason"]')?.textContent ?? null);
+    expect(reasons()).toEqual([rejected.detail, rejected.detail]);
+    expect(deep(host, '[part="refusal"]')?.getAttribute('data-code')).toBe('bad-credential');
+
+    store.set('status', status({status: 'refused', refusal: {code: 'fetch-failed', detail: 'TypeError: x is undefined', status: null}}));
+    await settle(host);
+    expect(reasons()).toEqual([null, null]);
+  });
+});
+
 describe('<mosaica-map> alone says over the canvas what the strip would', () => {
   // `words`: the overlay's words, or null for no overlay. `retry`: whether it offers Retry.
   const cases: [string, Parameters<typeof status>[0], {words: string | null; retry: boolean}][] = [
@@ -120,7 +172,8 @@ describe('<mosaica-map> alone says over the canvas what the strip would', () => 
       (map as unknown as {store: unknown}).store = store;
       await settle(host);
       const overlay = map.shadowRoot!.querySelector('[part="overlay"]');
-      expect(overlay?.textContent?.replace('Retry', '').trim() ?? null).toBe(want.words);
+      const reason = overlay?.querySelector('[part="reason"]')?.textContent ?? '';
+      expect(overlay?.textContent?.replace('Retry', '').replace(reason, '').trim() ?? null).toBe(want.words);
       const retry = (overlay?.querySelector('[part="retry"]') ?? null) as HTMLButtonElement | null;
       expect(retry !== null).toBe(want.retry);
       retry?.click();
@@ -139,6 +192,7 @@ describe('<mosaica-status> renders every state through part="state"', () => {
     ['empty', {status: 'empty'}, {count: false, action: null}],
     ['refused', {status: 'refused', refusal: {code: 'unauthorised', detail: 'no', status: 403}}, {count: true, action: 'retry'}],
     ['unanswered', {status: 'refused', refusal: {code: 'http-error', detail: '', status: 504}}, {count: true, action: 'retry'}],
+    ['busy', {status: 'refused', refusal: {code: 'backpressure', detail: 'shed', status: 429}}, {count: true, action: 'retry'}],
     ['expired', {status: 'refused', refusal: {code: 'expired-token', detail: '', status: 403}, expired: true}, {count: true, action: null}],
     ['stale', {status: 'shown', stale: true}, {count: false, action: 'refresh'}]
   ];
@@ -157,6 +211,7 @@ describe('<mosaica-status> renders every state through part="state"', () => {
       expect(counts.length > 0).toBe(want.count);
       for (const action of ['refresh', 'retry', 'reauthorise']) expect(deep(host, `[part="${action}"]`) !== null, action).toBe(want.action === action);
       if (name === 'refused') expect(deep(host, '[part="refusal"]')?.getAttribute('data-code')).toBe('unauthorised');
+      if (name === 'busy') expect(deep(host, '[part="refusal"]')?.getAttribute('data-code')).toBe('backpressure');
     });
   }
 

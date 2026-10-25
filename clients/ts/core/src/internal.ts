@@ -16,7 +16,7 @@ export {workerDecoder} from './decoder.js';
 export {hasValue, numericValues, rankedValues, sizesPoints} from './encoding.js';
 export {artifactColours, chosenColour, slottedColour, NEUTRAL} from './palette.js';
 export {worldBbox} from './prefetch.js';
-export {assertCompositionMatchesServed, isUnanswered, refusalOf} from './presented.js';
+export {assertCompositionMatchesServed, isBusy, isUnanswered, refusalOf} from './presented.js';
 export {gridOfData} from './projection.js';
 export type {TileRect} from './rects.js';
 export {regionOperand, withRegion} from './region.js';

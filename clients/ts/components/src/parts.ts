@@ -6,7 +6,7 @@
  */
 
 /** What `renderState` draws, in every element that shows a state. */
-const STATE = ['state', 'refusal', 'refresh', 'retry', 'reauthorise'];
+const STATE = ['state', 'refusal', 'reason', 'refresh', 'retry', 'reauthorise'];
 
 /**
  * The parts each element may render, by element name without `mosaica-`, as the lists an element

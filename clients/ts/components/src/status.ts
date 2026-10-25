@@ -17,16 +17,16 @@ import './count.js';
  * titled "Updating", so the strip keeps its width through a pan. Where the viewer can see no item in
  * the view at all, it is a grey dot alone titled "Nothing visible to you", which the map says in
  * words. Otherwise it names the state in two or three words beside its dot (Connecting,
- * Reconnecting, Server unreachable, Server did not answer, Nothing in view, Data updated, View
- * refused, Session expired) with the action the state offers: Refresh when the data changed, Retry
- * when the view was refused or the server did not answer, and Sign in on expiry where
- * `reauthorise` is set. The counts grey out while they are not current. The strip
+ * Reconnecting, Server unreachable, Server did not answer, Server busy, Nothing in view, Data
+ * updated, View refused, Session expired) with the action the state offers: Refresh when the data
+ * changed, Retry when the view was refused, the server did not answer or is too busy, and Sign in
+ * on expiry where `reauthorise` is set. View refused has the server's reason on a line under it. The counts grey out while they are not current. The strip
  * sizes to its content and does not wrap. `compact` shortens the figures (`16.8M of 21.4M match`)
  * and drops the shown count. `expanded` renders the figures again as a card below the strip.
  *
  * The state cell is an `aria-live` region, so a refusal, an expiry or a change of data is announced;
  * the counts are not, so a pan does not read them out. The
- * state is one of the nine panel states (see `PanelState`); what was refused and why stays in the
+ * state is one of the ten panel states (see `PanelState`); the refusal behind it stays in the
  * store's `status.refusal`, which `mosaica-statechange` carries, and the refusal's code is on the
  * refusal part's `data-code`.
  *
@@ -39,9 +39,13 @@ import './count.js';
  *   session expires.
  * @csspart strip - The one-line strip.
  * @csspart state - The state's dot and words, with `data-state` set to the panel state.
- * @csspart refusal - The words "View refused", with `data-code` set to the refusal's code.
+ * @csspart refusal - The words "View refused", or "Server busy", with `data-code` set to the
+ *   refusal's code.
+ * @csspart reason - The server's reason for a refusal, as it sent it, on a line under "View
+ *   refused".
  * @csspart refresh - The Refresh button, when the data changed under the view.
- * @csspart retry - The Retry button, when the view was refused or the server did not answer.
+ * @csspart retry - The Retry button, when the view was refused or the server did not answer or is
+ *   too busy.
  * @csspart reauthorise - The Sign in button, on expiry where `reauthorise` is set.
  * @csspart count-shown - The `<mosaica-count>` of marks shown.
  * @csspart count-matched - The `<mosaica-count>` matched by the filters.
