@@ -336,13 +336,13 @@ enum Command {
     /// Declare views, view groups, attributes, vocabularies, layers and the shard size on a running
     /// service, through the control plane.
     ///
-    /// With no subcommand, it declares every block of a corpus declaration. It finds
-    /// `mosaica.toml` and the declaration as `mosaica check` does, and sends the bodies `mosaica
-    /// check --payloads` prints, in the order the routes need: the shard size, the vocabularies,
-    /// each followed by the values its `source` names, the view groups, each after any group
-    /// whose views it shares, the views, the attributes, then the layers. A declaration identical to
-    /// one the service holds answers what exists, so running it again after adding a block
-    /// declares only that block. It sends no rows and creates no view of a view group, which
+    /// With no subcommand, it declares every block of a corpus declaration: the file `--config`
+    /// names, or else the one `mosaica.toml` names, found as `mosaica check` finds it. It sends
+    /// the bodies `mosaica check --payloads` prints, in the order the routes need: the shard
+    /// size, the vocabularies, each followed by the values its `source` names, the view groups,
+    /// each after any group whose views it shares, the views, the attributes, then the layers. A
+    /// declaration identical to one the service holds answers what exists, so running it again
+    /// after adding a block declares only that block. It sends no rows and creates no view of a view group, which
     /// `mosaica declare view <group>:<key>` does. It prints one JSON object on stdout with each
     /// request, its status and the server's answer, goes on past a refused request, and exits 1
     /// when any was refused.
@@ -846,10 +846,17 @@ fn resolve_declaration(
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let (_, deployment) = mosaica_config::open(deployment, &cwd)?;
     let schema_path = config.unwrap_or_else(|| deployment.schema_path.clone());
-    let bindings = collect_bindings(file)?;
-    let config = mosaica_build::config::Config::parse(&schema_path, &bindings)
-        .map_err(|e| e.to_string())?;
+    let config = parse_declaration(&schema_path, file)?;
     Ok(Declaration { deployment, config })
+}
+
+/// The declaration at `path`, with the `--file` overrides.
+fn parse_declaration(
+    path: &Path,
+    file: Vec<(String, PathBuf)>,
+) -> Result<mosaica_build::config::Config, String> {
+    let bindings = collect_bindings(file)?;
+    mosaica_build::config::Config::parse(path, &bindings).map_err(|e| e.to_string())
 }
 
 /// The `--file` bindings as one map, refusing a key bound twice.

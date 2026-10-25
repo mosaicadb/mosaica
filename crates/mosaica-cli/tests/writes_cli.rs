@@ -548,7 +548,8 @@ fn a_file_of_many_pages_lands_each_row_once() {
     let dir = served.dir.path();
     let control = served.bound.control.as_str();
 
-    // Fifty rows, three of them long enough that a page holding them is over the byte cap.
+    // Fifty rows, three of them long: a page of seven holding one fits the 4,096-byte cap, and
+    // the page holding the other two does not.
     write_parquet(
         &dir.join("rows.parquet"),
         vec![
@@ -565,7 +566,7 @@ fn a_file_of_many_pages_lands_each_row_once() {
                 "tag",
                 Arc::new(StringArray::from_iter_values((0..50).map(
                     |row| match row {
-                        20..=22 => "x".repeat(1500),
+                        20..=22 => "x".repeat(2500),
                         row => format!("t{row}"),
                     },
                 ))),

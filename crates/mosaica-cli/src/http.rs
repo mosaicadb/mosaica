@@ -12,7 +12,13 @@ use std::time::Duration;
 use clap::Args;
 use serde_json::Value;
 
-const TIMEOUT: Duration = Duration::from_secs(300);
+/// How long the identity verbs wait for an answer.
+const IDENTITY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long a write waits for an answer: the clients' figure, since a write may wait on the log's
+/// fsync behind a busy executor, and one sent with `?wait=visible` for
+/// `serve.visible_wait_max_secs` beside.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How long one `429` may hold a request, in seconds. The server's own figure is clamped to this.
 const MAX_BACKOFF: f64 = 30.0;
@@ -81,7 +87,7 @@ pub(crate) fn send_json(
     let body = bytes
         .as_deref()
         .map(|bytes| ("application/json", bytes.as_bytes()));
-    send(target, method, path, bearer, &[], body)
+    send(target, method, path, bearer, &[], body, IDENTITY_TIMEOUT)
 }
 
 /// One request, sent once.
@@ -92,21 +98,32 @@ pub(crate) fn send(
     bearer: Option<&str>,
     headers: &[(&str, &str)],
     body: Option<Body>,
+    timeout: Duration,
 ) -> Result<Answer, String> {
+    // A line break in a header would end it and start another, written as given into the
+    // request head over a Unix socket.
+    let broken = |text: &str| text.contains(['\r', '\n']);
+    if let Some((name, _)) = headers
+        .iter()
+        .find(|(name, value)| broken(name) || broken(value))
+    {
+        return Err(format!("the {name} header holds a line break; remove it"));
+    }
     match target {
         Target::Http(base) => {
             static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
             let client = CLIENT
                 .get_or_init(|| {
                     reqwest::blocking::Client::builder()
-                        .timeout(TIMEOUT)
                         .build()
                         .map_err(|e| format!("starting the HTTP client: {e}"))
                 })
                 .as_ref()
                 .map_err(Clone::clone)?;
             let method = reqwest::Method::from_bytes(method.as_bytes()).expect("a known method");
-            let mut req = client.request(method, format!("{base}{path}"));
+            let mut req = client
+                .request(method, format!("{base}{path}"))
+                .timeout(timeout);
             if let Some(bearer) = bearer {
                 req = req.bearer_auth(bearer);
             }
@@ -132,7 +149,7 @@ pub(crate) fn send(
                 retry_after,
             })
         }
-        Target::Unix(socket) => unix_request(socket, method, path, bearer, headers, body),
+        Target::Unix(socket) => unix_request(socket, method, path, bearer, headers, body, timeout),
     }
 }
 
@@ -144,11 +161,13 @@ fn unix_request(
     bearer: Option<&str>,
     headers: &[(&str, &str)],
     body: Option<Body>,
+    timeout: Duration,
 ) -> Result<Answer, String> {
     let at = || format!("unix:{}", socket.display());
     let mut stream = std::os::unix::net::UnixStream::connect(socket)
         .map_err(|e| format!("connecting to {}: {e}", at()))?;
-    stream.set_read_timeout(Some(TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
     let mut head = format!("{method} {path} HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n");
     if let Some(bearer) = bearer {
         head.push_str(&format!("authorization: Bearer {bearer}\r\n"));
@@ -279,18 +298,29 @@ pub(crate) struct Control {
 }
 
 impl Control {
-    pub(crate) fn plane(&self) -> Result<Plane, String> {
-        Plane::connect(&self.control)
+    /// The plane, for writes.
+    pub(crate) fn writer(&self) -> Result<Plane, String> {
+        Plane::writer(&self.control)
     }
 
-    /// One request with a JSON body, or none.
+    /// One request of an identity verb, with a JSON body or none.
     pub(crate) fn call(
         &self,
         method: &str,
         path: &str,
         body: Option<Value>,
     ) -> Result<Answer, String> {
-        self.plane()?.call(method, path, body.as_ref())
+        Plane::connect(&self.control, IDENTITY_TIMEOUT)?.call(method, path, body.as_ref())
+    }
+
+    /// One write request, with a JSON body or none.
+    pub(crate) fn write(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Answer, String> {
+        self.writer()?.call(method, path, body.as_ref())
     }
 }
 
@@ -298,13 +328,20 @@ impl Control {
 pub(crate) struct Plane {
     target: Target,
     credential: String,
+    timeout: Duration,
 }
 
 impl Plane {
-    pub(crate) fn connect(address: &str) -> Result<Plane, String> {
+    /// The plane at `address`, for writes.
+    pub(crate) fn writer(address: &str) -> Result<Plane, String> {
+        Plane::connect(address, WRITE_TIMEOUT)
+    }
+
+    fn connect(address: &str, timeout: Duration) -> Result<Plane, String> {
         Ok(Plane {
             target: Target::parse(address)?,
             credential: env_secret("MOSAICA_CREDENTIAL", "control-plane credential")?,
+            timeout,
         })
     }
 
@@ -340,6 +377,7 @@ impl Plane {
                 Some(&self.credential),
                 headers,
                 body,
+                self.timeout,
             )?;
             if answer.status != 429 || attempts >= MAX_ATTEMPTS {
                 return Ok(answer);

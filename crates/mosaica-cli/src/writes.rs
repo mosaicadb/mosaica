@@ -102,10 +102,12 @@ pub(crate) struct DeclareArgs {
     /// The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket.
     #[arg(long, value_name = "ADDRESS", required = true)]
     control: Option<String>,
-    /// Read this `mosaica.toml` instead of searching for one upward from the working directory.
-    #[arg(long, value_name = "PATH")]
+    /// Without `--config`, read this `mosaica.toml` instead of searching for one upward from the
+    /// working directory.
+    #[arg(long, value_name = "PATH", conflicts_with = "config")]
     deployment: Option<PathBuf>,
-    /// Read this corpus declaration instead of `[build] schema` in `mosaica.toml`.
+    /// Read this corpus declaration, and no `mosaica.toml`, instead of `[build] schema` in
+    /// `mosaica.toml`.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
     /// Read the source NAME in the declaration's `[sources]` from PATH instead. Repeatable, and
@@ -275,7 +277,8 @@ pub(crate) struct ChangeArgs {
     matches: Vec<String>,
     /// A file whose every row names one item by its columns, `mosaica_id` and unique
     /// attributes, or `-` for stdin. A column that names no item is not read, and is listed in
-    /// `ignored_columns`.
+    /// `ignored_columns`, as is a column of a type a change does not carry, such as a list, which
+    /// is not sent.
     #[arg(long, value_name = "PATH")]
     file: Option<PathBuf>,
     #[command(flatten)]
@@ -361,7 +364,7 @@ pub(crate) fn declare(args: DeclareArgs) -> ExitCode {
     };
     let put = |control: &Control, path: &str, body: &BodyArg| {
         body.value()
-            .and_then(|body| control.call("PUT", path, Some(body)))
+            .and_then(|body| control.write("PUT", path, Some(body)))
     };
     let answer = match command {
         DeclareCommand::Attribute { control, body } => put(&control, "/control/attributes", &body),
@@ -390,7 +393,7 @@ pub(crate) fn declare(args: DeclareArgs) -> ExitCode {
         ),
         DeclareCommand::Layer { control, body } => put(&control, "/control/layers", &body),
         DeclareCommand::Shards { control, size } => {
-            control.call("PUT", "/control/shards", Some(json!({ "size": size })))
+            control.write("PUT", "/control/shards", Some(json!({ "size": size })))
         }
     };
     finish("declare", answer)
@@ -405,7 +408,7 @@ pub(crate) fn artifacts(args: ArtifactArgs, method: &str, verb: &str) -> ExitCod
     let answer = args
         .body
         .value()
-        .and_then(|body| args.control.call(method, &path, Some(body)));
+        .and_then(|body| args.control.write(method, &path, Some(body)));
     finish(verb, answer)
 }
 
@@ -415,7 +418,7 @@ pub(crate) fn drop_command(command: DropCommand) -> ExitCode {
             control,
             name,
             wait,
-        } => control.call(
+        } => control.write(
             "DELETE",
             &format!("/control/layers/{}{}", segment(&name), query(false, wait)),
             None,
@@ -425,7 +428,7 @@ pub(crate) fn drop_command(command: DropCommand) -> ExitCode {
             view,
             wait,
         } => match view.split_once(mosaica_types::view::GROUP_SEPARATOR) {
-            Some(_) => control.call(
+            Some(_) => control.write(
                 "DELETE",
                 &format!("{}{}", view_path(&view), query(false, wait)),
                 None,
@@ -441,15 +444,15 @@ pub(crate) fn drop_command(command: DropCommand) -> ExitCode {
 
 pub(crate) fn flush(args: FlushArgs) -> ExitCode {
     let path = format!("/control/flush{}", query(false, args.wait));
-    finish("flush", args.control.call("POST", &path, None))
+    finish("flush", args.control.write("POST", &path, None))
 }
 
 pub(crate) fn compact(control: Control) -> ExitCode {
-    finish("compact", control.call("POST", "/control/compact", None))
+    finish("compact", control.write("POST", "/control/compact", None))
 }
 
 pub(crate) fn status(control: Control) -> ExitCode {
-    finish("status", control.call("GET", "/control/status", None))
+    finish("status", control.write("GET", "/control/status", None))
 }
 
 /// `?strict=true` and `?wait=visible`, where asked for; the routes' defaults are the reverse.
@@ -487,14 +490,12 @@ fn declare_all(
     file: Vec<(String, PathBuf)>,
 ) -> ExitCode {
     let requests = (|| {
-        let plane = Plane::connect(control.as_deref().unwrap_or_default())?;
-        let declaration = crate::resolve_declaration(
-            deployment.as_deref(),
-            config,
-            file,
-            mosaica_build::config::Strictness::Declared,
-        )?;
-        Ok::<_, String>((plane, declaration_requests(&declaration.config)?))
+        let plane = Plane::writer(control.as_deref().unwrap_or_default())?;
+        let config = match config {
+            Some(path) => crate::parse_declaration(&path, file)?,
+            None => crate::resolve_declaration(deployment.as_deref(), None, file)?.config,
+        };
+        Ok::<_, String>((plane, declaration_requests(&config)?))
     })();
     let (plane, requests) = match requests {
         Ok(found) => found,
@@ -573,9 +574,10 @@ fn declaration_requests(config: &mosaica_build::config::Config) -> Result<Vec<Re
         let mut pages = Vec::new();
         for (index, chunk) in rows.chunks(VALUES_PER_PAGE).enumerate() {
             let first = index * VALUES_PER_PAGE;
-            for (offset, many, _) in halved(chunk.len(), cap, |at, many| {
+            for piece in halved(chunk.len(), cap, |at, many| {
                 Ok(values_body(&chunk[at..at + many]))
-            })? {
+            }) {
+                let (offset, many, _) = piece?;
                 pages.push(&rows[first + offset..first + offset + many]);
             }
         }
@@ -644,7 +646,7 @@ fn values_body(rows: &[Value]) -> Vec<u8> {
 pub(crate) fn insert(args: InsertArgs) -> ExitCode {
     let report = args
         .control
-        .plane()
+        .writer()
         .and_then(|plane| match &args.vocabulary {
             Some(name) => insert_values(&plane, &args, name),
             None => insert_rows(&plane, &args),
@@ -655,7 +657,7 @@ pub(crate) fn insert(args: InsertArgs) -> ExitCode {
 pub(crate) fn change(args: ChangeArgs, op: &'static str) -> ExitCode {
     let report = args
         .control
-        .plane()
+        .writer()
         .and_then(|plane| changes(&plane, &args, op));
     print_report(op, report)
 }
@@ -674,13 +676,20 @@ fn insert_rows(plane: &Plane, args: &InsertArgs) -> Result<Report, String> {
     let mut ids = args.ids_out.clone().map(Ids::new).transpose()?;
     let rows = open_rows(&args.file, &args.input, limits.rows)?;
     let path = format!("/control/ingest{}", query(args.strict, false));
-    let stem = match args.file.file_stem().and_then(|s| s.to_str()) {
-        Some(stem) if args.file != Path::new("-") => stem.to_owned(),
+    // The file's name, for a server log to say which file a batch came from, reduced to what a
+    // header may carry.
+    let stem: String = match args.file.file_stem() {
+        Some(stem) if args.file != Path::new("-") => stem
+            .to_string_lossy()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+            .collect(),
         _ => "stdin".to_owned(),
     };
     let mut report = Report::default();
     let read = paged(rows, limits.rows, |first, page| {
-        for (offset, count, body) in halved(page.len(), limits.bytes, |o, n| page.encode(o, n))? {
+        for piece in halved(page.len(), limits.bytes, |o, n| page.encode(o, n)) {
+            let (offset, count, body) = piece?;
             let start = first + offset;
             // A fresh id per request, reused only when the same bytes go again after a `429`.
             let batch = format!("{stem}-{start}-{:032x}", rand::random::<u128>());
@@ -703,8 +712,8 @@ fn insert_rows(plane: &Plane, args: &InsertArgs) -> Result<Report, String> {
         report.stopped.get_or_insert(e);
     }
     report.close(plane, args.wait);
-    if let Some(ids) = ids {
-        ids.finish()?;
+    if let Some(Err(e)) = ids.map(Ids::finish) {
+        report.failed = Some(e);
     }
     Ok(report)
 }
@@ -725,11 +734,12 @@ fn insert_values(plane: &Plane, args: &InsertArgs, name: &str) -> Result<Report,
     let mut report = Report::default();
     let read = paged(rows, limits.rows, |first, page| {
         let objects = page.objects(first)?;
+        report.ignore(&objects.1);
         report.send_objects(
             plane,
             ("PATCH", &path),
             first,
-            &objects,
+            &objects.0,
             limits.bytes,
             VALUES_COUNTS,
             &values_body,
@@ -807,11 +817,12 @@ fn changes(plane: &Plane, args: &ChangeArgs, op: &'static str) -> Result<Report,
         let offset = named.len();
         let read = paged(rows, limits.rows, |first, page| {
             let objects = page.objects(offset + first)?;
+            report.ignore(&objects.1);
             report.send_objects(
                 plane,
                 ("POST", &path),
                 offset + first,
-                &objects,
+                &objects.0,
                 limits.bytes,
                 CHANGES_COUNTS,
                 &wrap,
@@ -861,13 +872,17 @@ impl Limits {
                 let found = key
                     .filter(|_| answer.ok())
                     .and_then(|key| published[key].as_u64());
-                *from = match (found, key, answer.ok()) {
-                    (Some(_), Some(key), _) => format!("limits.{route}.{key}"),
-                    (None, Some(_), false) => format!(
-                        "the server's documented default, since /control/status answered {}",
+                *from = match (key, found) {
+                    (Some(key), Some(_)) => format!("limits.{route}.{key} in /control/status"),
+                    (Some(key), None) if answer.ok() => format!(
+                        "the server's documented default; /control/status has no \
+                         limits.{route}.{key}"
+                    ),
+                    (Some(_), None) => format!(
+                        "the server's documented default; /control/status answered {}",
                         answer.status
                     ),
-                    _ => "the CLI's own figure, since the route publishes none".to_string(),
+                    (None, _) => "the CLI's own figure; the route has no row limit".to_string(),
                 };
                 *figure = found.map(|n| n as usize);
             }
@@ -902,6 +917,8 @@ struct Report {
     flush: Option<Value>,
     /// Where and why the write stopped before the end of its input.
     stopped: Option<String>,
+    /// What failed here once the requests were sent, such as writing `--ids-out`.
+    failed: Option<String>,
 }
 
 impl Report {
@@ -956,14 +973,23 @@ impl Report {
             }
             self.refused.push(entry);
         }
-        for column in body["ignored_columns"].as_array().into_iter().flatten() {
-            if let Some(column) = column.as_str() {
-                if !self.ignored_columns.iter().any(|held| held == column) {
-                    self.ignored_columns.push(column.to_owned());
-                }
+        let ignored: Vec<String> = body["ignored_columns"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|column| column.as_str().map(str::to_owned))
+            .collect();
+        self.ignore(&ignored);
+        Some(body)
+    }
+
+    /// Name columns the requests left out among the ignored ones.
+    fn ignore(&mut self, columns: &[String]) {
+        for column in columns {
+            if !self.ignored_columns.contains(column) {
+                self.ignored_columns.push(column.clone());
             }
         }
-        Some(body)
     }
 
     /// Send rows of JSON from row `first`, as many requests as the byte cap takes, each body
@@ -980,7 +1006,8 @@ impl Report {
         wrap: &dyn Fn(&[Value]) -> Vec<u8>,
         name_refused: bool,
     ) -> Result<bool, String> {
-        for (offset, count, body) in halved(rows.len(), cap, |o, n| Ok(wrap(&rows[o..o + n])))? {
+        for piece in halved(rows.len(), cap, |o, n| Ok(wrap(&rows[o..o + n]))) {
+            let (offset, count, body) = piece?;
             let answer = plane.send(method, path, &[], Some((JSON, &body)));
             let named = name_refused.then(|| &rows[offset..offset + count]);
             self.page(first + offset, count, keys, answer, named);
@@ -1010,7 +1037,10 @@ impl Report {
     }
 
     fn ok(&self) -> bool {
-        self.refused_pages.is_empty() && self.flush.is_none() && self.stopped.is_none()
+        self.refused_pages.is_empty()
+            && self.flush.is_none()
+            && self.stopped.is_none()
+            && self.failed.is_none()
     }
 
     fn json(&self) -> Value {
@@ -1086,6 +1116,9 @@ fn print_report(verb: &str, report: Result<Report, String>) -> ExitCode {
         Ok(report) => {
             println!("{}", report.json());
             eprintln!("mosaica {verb}: {}", report.line());
+            if let Some(failed) = &report.failed {
+                eprintln!("mosaica {verb}: {failed}");
+            }
             if report.ok() {
                 ExitCode::SUCCESS
             } else {
@@ -1107,27 +1140,58 @@ fn detail(answer: &Answer) -> Value {
     }
 }
 
-/// `(first, rows, body)` over `count` rows, every body at most `cap` bytes. A body over the cap
-/// is not sent: its rows are halved and each half encoded again, so the pieces come out in row
-/// order. A single row over the cap is sent as it is, for the route to refuse.
-fn halved(
-    count: usize,
-    cap: usize,
-    mut encode: impl FnMut(usize, usize) -> Result<Vec<u8>, String>,
-) -> Result<Vec<(usize, usize, Vec<u8>)>, String> {
-    let mut out = Vec::new();
-    let mut pending = vec![(0, count)];
-    while let Some((first, many)) = pending.pop() {
-        let body = encode(first, many)?;
-        if body.len() > cap && many > 1 {
-            let half = many / 2;
-            pending.push((first + half, many - half));
-            pending.push((first, half));
-            continue;
-        }
-        out.push((first, many, body));
+/// `(first, rows, body)` over `count` rows, every body at most `cap` bytes, each encoded as it
+/// is asked for. A body over the cap is not sent: its rows are halved and each half encoded again,
+/// so the pieces come out in row order. A single row over the cap is sent as it is, for the route
+/// to refuse.
+fn halved<F>(count: usize, cap: usize, encode: F) -> Halved<F>
+where
+    F: FnMut(usize, usize) -> Result<Vec<u8>, String>,
+{
+    let pending = if count > 0 {
+        vec![(0, count)]
+    } else {
+        Vec::new()
+    };
+    Halved {
+        pending,
+        cap,
+        encode,
     }
-    Ok(out)
+}
+
+struct Halved<F> {
+    /// The runs still to encode, the next on top.
+    pending: Vec<(usize, usize)>,
+    cap: usize,
+    encode: F,
+}
+
+impl<F> Iterator for Halved<F>
+where
+    F: FnMut(usize, usize) -> Result<Vec<u8>, String>,
+{
+    type Item = Result<(usize, usize, Vec<u8>), String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((first, many)) = self.pending.pop() {
+            let body = match (self.encode)(first, many) {
+                Ok(body) => body,
+                Err(e) => {
+                    self.pending.clear();
+                    return Some(Err(e));
+                }
+            };
+            if body.len() > self.cap && many > 1 {
+                let half = many / 2;
+                self.pending.push((first + half, many - half));
+                self.pending.push((first, half));
+                continue;
+            }
+            return Some(Ok((first, many, body)));
+        }
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1188,11 +1252,11 @@ impl Page {
         }
     }
 
-    /// The rows as JSON objects. `first` is the first row's position in the input, for a
-    /// refusal to name.
-    fn objects(&self, first: usize) -> Result<Vec<Value>, String> {
+    /// The rows as JSON objects, and the columns left out of them because JSON cannot carry
+    /// them here. `first` is the first row's position in the input, for a refusal to name.
+    fn objects(&self, first: usize) -> Result<(Vec<Value>, Vec<String>), String> {
         match self {
-            Page::Batch(batch) => row_objects(batch),
+            Page::Batch(batch) => Ok(row_objects(batch)),
             Page::Lines(lines) => lines
                 .iter()
                 .enumerate()
@@ -1200,7 +1264,8 @@ impl Page {
                     Ok(Value::Object(row)) => Ok(Value::Object(row)),
                     _ => Err(format!("row {} is not a JSON object", first + at)),
                 })
-                .collect(),
+                .collect::<Result<_, _>>()
+                .map(|rows| (rows, Vec::new())),
         }
     }
 }
@@ -1422,16 +1487,19 @@ fn kept(line: &str, columns: &[String]) -> Option<String> {
 }
 
 /// A batch's rows as JSON objects, as a change or a vocabulary value names them: an integer or a
-/// timestamp as its decimal digits, a string as itself.
-fn row_objects(batch: &RecordBatch) -> Result<Vec<Value>, String> {
+/// timestamp as its decimal digits, a string as itself. A column JSON cannot carry here, such as a
+/// list, is left out, and named in the second list.
+fn row_objects(batch: &RecordBatch) -> (Vec<Value>, Vec<String>) {
     let schema = batch.schema();
-    let columns = schema
-        .fields()
-        .iter()
-        .zip(batch.columns())
-        .map(|(field, column)| cells(field.name(), column).map(|cells| (field.name(), cells)))
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok((0..batch.num_rows())
+    let mut columns = Vec::new();
+    let mut skipped = Vec::new();
+    for (field, column) in schema.fields().iter().zip(batch.columns()) {
+        match cells(column) {
+            Some(cells) => columns.push((field.name(), cells)),
+            None => skipped.push(field.name().clone()),
+        }
+    }
+    let rows = (0..batch.num_rows())
         .map(|row| {
             Value::Object(
                 columns
@@ -1440,35 +1508,41 @@ fn row_objects(batch: &RecordBatch) -> Result<Vec<Value>, String> {
                     .collect(),
             )
         })
-        .collect())
+        .collect();
+    (rows, skipped)
 }
 
-fn cells(name: &str, column: &ArrayRef) -> Result<Vec<Value>, String> {
-    let cast = |array: &ArrayRef, to: &DataType| {
-        arrow::compute::cast(array, to).map_err(|e| format!("column `{name}`: {e}"))
-    };
-    let text = |array: &ArrayRef| -> Result<Vec<Value>, String> {
-        Ok(cast(array, &DataType::Utf8)?
-            .as_string::<i32>()
-            .iter()
-            .map(|cell| cell.map_or(Value::Null, |text| Value::String(text.to_owned())))
-            .collect())
+/// A column's cells as JSON, or `None` where JSON cannot carry them here.
+fn cells(column: &ArrayRef) -> Option<Vec<Value>> {
+    let cast = |array: &ArrayRef, to: &DataType| arrow::compute::cast(array, to).ok();
+    let text = |array: &ArrayRef| -> Option<Vec<Value>> {
+        Some(
+            cast(array, &DataType::Utf8)?
+                .as_string::<i32>()
+                .iter()
+                .map(|cell| cell.map_or(Value::Null, |text| Value::String(text.to_owned())))
+                .collect(),
+        )
     };
     match column.data_type() {
-        DataType::Null => Ok(vec![Value::Null; column.len()]),
-        DataType::Boolean => Ok(column
-            .as_boolean()
-            .iter()
-            .map(|cell| cell.map_or(Value::Null, Value::Bool))
-            .collect()),
-        DataType::Float32 | DataType::Float64 => Ok(cast(column, &DataType::Float64)?
-            .as_primitive::<Float64Type>()
-            .iter()
-            .map(|cell| {
-                cell.and_then(serde_json::Number::from_f64)
-                    .map_or(Value::Null, Value::Number)
-            })
-            .collect()),
+        DataType::Null => Some(vec![Value::Null; column.len()]),
+        DataType::Boolean => Some(
+            column
+                .as_boolean()
+                .iter()
+                .map(|cell| cell.map_or(Value::Null, Value::Bool))
+                .collect(),
+        ),
+        DataType::Float32 | DataType::Float64 => Some(
+            cast(column, &DataType::Float64)?
+                .as_primitive::<Float64Type>()
+                .iter()
+                .map(|cell| {
+                    cell.and_then(serde_json::Number::from_f64)
+                        .map_or(Value::Null, Value::Number)
+                })
+                .collect(),
+        ),
         DataType::Timestamp(TimeUnit::Microsecond, _) => text(&cast(column, &DataType::Int64)?),
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => text(column),
         DataType::Dictionary(_, values)
@@ -1477,10 +1551,7 @@ fn cells(name: &str, column: &ArrayRef) -> Result<Vec<Value>, String> {
             text(column)
         }
         integer if integer.is_integer() => text(column),
-        other => Err(format!(
-            "column `{name}` is {other}; send strings, integers, booleans or timestamps in \
-             microseconds"
-        )),
+        _ => None,
     }
 }
 
@@ -1493,11 +1564,16 @@ struct Ids {
 
 impl Ids {
     fn new(path: PathBuf) -> Result<Ids, String> {
-        if path == Path::new("-") {
-            return Err(
-                "--ids-out needs a file ending in .arrows or .parquet; stdout carries the report"
-                    .into(),
-            );
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default();
+        if !["arrows", "parquet"].contains(&extension.to_ascii_lowercase().as_str()) {
+            return Err(format!(
+                "--ids-out {} names no file ending in .arrows or .parquet; name one, since the \
+                 extension says which to write and stdout carries the report",
+                path.display()
+            ));
         }
         Ok(Ids {
             output: Output::file(path)?,
