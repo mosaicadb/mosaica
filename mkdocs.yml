@@ -136,6 +136,7 @@ nav:
       - Operate a deployment: guides/operating.md
       - Put Mosaica behind TLS: guides/tls.md
       - Rebuild and replace the bundle: guides/rebuild.md
+      - Troubleshooting: guides/troubleshooting.md
   - Reference:
       - reference/index.md
       - HTTP API: reference/http.md
