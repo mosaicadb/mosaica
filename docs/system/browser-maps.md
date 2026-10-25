@@ -118,7 +118,7 @@ A geographic view draws an outline of the world under its points unless you say 
 | `{tiles, attribution}` | Raster tiles from your own tile server: `tiles` is a URL template with `{z}`, `{x}` and `{y}`, and `attribution` is the credit shown in the map's corner. It needs a view whose frame lines up with web map tiles, as `tile_scheme` in `/v1/meta` says. There is no default tile server |
 | `{image, bounds}` | One image stretched over `bounds`, `[x0, y0, x1, y1]` in the view's own coordinates, or over the whole frame. The image isn't reprojected |
 
-To give each view its own basemap, pass an object keyed by view id. A view it leaves out gets the default.
+To give each view its own basemap, pass an object keyed by view id. A view it leaves out gets the default. In a notebook, `db.map`, `Selection.map` and `Viewer.map` take the same values as `basemap=`, and an image there can also be a local file, which Python reads and sends to the page.
 
 If the value doesn't fit the view the map opens on, the map says so and draws the points without it. A value that doesn't fit a view the viewer switches to later draws nothing there, with a note in the map's corner saying why. A basemap that fails to load shows a note too, and is tried again after one second, then two, doubling up to a minute. Each time a note appears, changes or goes, the map fires `mosaica-basemapchange`.
 
@@ -132,5 +132,4 @@ If the value doesn't fit the view the map opens on, the map says so and draws th
 
 - **Animating items between layouts.** A switch between views with different layouts redraws, rather than moving each item to its new position.
 - **Fetching a view before it is chosen.** A view the viewer has not visited is fetched when they switch to it.
-- **A basemap from Python.** The notebook map draws the default basemap, and takes no `basemap` argument yet.
 - **An adapter for tile-based map libraries.** The store asks for an area at a time, and nothing sits between it and a library that asks for one tile at a time.
