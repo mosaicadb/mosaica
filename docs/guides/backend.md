@@ -56,7 +56,7 @@ mosaica build 2>&1 | tail -n 3
 ```
 
 ```
-built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15025516 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
+built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024296 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
   view topics: 50000 row(s)
   view topics-wide: 50000 row(s)
 ```
@@ -94,7 +94,7 @@ umask 077; mosaica key create portal --control http://127.0.0.1:9143 > portal.ke
 ```
 {"sessions_ended":0}
 {"sessions_ended":0}
-{"key":"msk_ab824ddfa336_4150f39602b6ec27edcc0658b3751d8f37456f5132fd1a11cdcb476b69629ea1","prefix":"ab824ddfa336"}
+{"key":"msk_8be7dd8c7421_455e9cd873ab7c8fc9b5be94b5b80355f5f7eb5e7c5d0c751dc5146718985342","prefix":"8be7dd8c7421"}
 ```
 
 `ada` is a user. She holds `read`, and two terms, `cs.LG` and `stat.ML`. Each paper's access label lists its arXiv categories, and a viewer holding any one of them may see the paper, so Ada sees the machine learning papers and nothing else.
@@ -123,7 +123,7 @@ echo "$SESSION"
 ```
 
 ```
-{"token":"84d55c858f62d6b8ce1b1bc0a76a62b3f065c42ed7477628728f62c2fb4f4e58","token_id":0,"expires_at":1792898566}
+{"token":"5d8b7c7b1acae3c166d8988fdfa8b1e388f3eea4074d5e351cd344893b0a0c5f","token_id":0,"expires_at":1792903916}
 ```
 
 The session holds Ada's terms and her `read`. A session started this way never carries `read-all`, `write-all`, `admin` or `authorise-as`, even for a principal that holds them. It lasts until `expires_at`, in seconds since 1970, which is an hour away: the `token_max_lifetime` in `mosaica.toml`.
@@ -231,7 +231,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 {
     "artifacts": [
         {
-            "mosaica_id": "9880638538854942963",
+            "mosaica_id": "7833685504984576637",
             "key": "tp0-000014",
             "masked_count": 875,
             "rung": 0,
@@ -240,7 +240,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
             "slot": null
         },
         {
-            "mosaica_id": "17375019890995107651",
+            "mosaica_id": "10888414632840045748",
             "key": "tp0-000006",
             "masked_count": 575,
             "rung": 0,
@@ -249,7 +249,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
             "slot": null
         },
         {
-            "mosaica_id": "9016650185214543757",
+            "mosaica_id": "6588479137010385170",
             "key": "tp0-000015",
             "masked_count": 388,
             "rung": 0,
@@ -259,7 +259,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
         }
     ],
     "parents": [],
-    "next": "388:9016650185214543757"
+    "next": "388:6588479137010385170"
 }
 ```
 
@@ -276,7 +276,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 {
     "artifacts": [
         {
-            "mosaica_id": "16138676707608042943",
+            "mosaica_id": "14821018537041012599",
             "key": "tp3-000283",
             "name": "federated learning, malware detection, differential privacy",
             "masked_count": 38,
@@ -306,13 +306,13 @@ python3 -c 'import pyarrow.parquet as pq; print(pq.read_table("found.parquet").t
 
 ```
 mosaica items: 1 rows in 1 pages from 1 responses; head {"order":"map","page_rows":100000}
-[{'mosaica_id': 8190908901818807410, 'arxiv_id': '2405.13758'}]
+[{'mosaica_id': 5880092981833195251, 'arxiv_id': '2405.13758'}]
 ```
 
 Your `mosaica_id` will differ, because every build scrambles them with a new key. Use your own in the request.
 
 ```bash
-curl -s http://127.0.0.1:9141/v1/items/8190908901818807410 -H "$AUTH" -H "$JSON" -d '{}' | python3 -m json.tool
+curl -s http://127.0.0.1:9141/v1/items/5880092981833195251 -H "$AUTH" -H "$JSON" -d '{}' | python3 -m json.tool
 ```
 
 ```
