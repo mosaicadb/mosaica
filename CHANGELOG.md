@@ -17,7 +17,9 @@ records with a 2D layout, with several layouts over one corpus; filters, search 
 annotation layers with labels; item cards and bulk reads; live insert, delete and suppress, kept
 across a restart by a write-ahead log; per-viewer access control over every count, density,
 cluster, label and sample; and four ways in, which are the HTTP API, the Python package `mosaica`,
-the `@mosaicajs` npm packages and the `mosaica` command line.
+the `@mosaicajs` npm packages and the `mosaica` command line. The command line writes to a
+running server as the clients do: `declare`, `insert`, `delete`, `suppress`, `unsuppress`,
+`publish`, `grow`, `drop`, `flush`, `compact` and `status`.
 
 Install it with `pip install --pre mosaica`, `npm install @mosaicajs/client@next`,
 `cargo install mosaica --version 0.1.0-rc.1` or `docker pull ghcr.io/mosaicadb/mosaica:0.1.0-rc.1`.
@@ -66,8 +68,11 @@ any later release, and a bundle built by one version may be refused by the next.
     annotation layers; `@mosaicajs/deck` (a deck.gl layer); `@mosaicajs/components` (web
     components and a single-file bundle); and `@mosaicajs/react` (hooks and React wrappers);
   - the `mosaica` command line, which builds a bundle from a declaration and its source files,
-    checks, verifies and serves it; declares, inserts from Parquet, Arrow IPC or NDJSON, deletes,
-    suppresses and publishes annotation layers on a running server; reads items, annotations and
+    checks, verifies and serves it; on a running server, declares, inserts from Parquet, Arrow
+    IPC or NDJSON, deletes, suppresses and lifts suppressions, publishes and grows annotation
+    layers, drops a layer or a view of a view group, brings a publication forward, asks for a
+    compaction and reports status (`declare`, `insert`, `delete`, `suppress`, `unsuppress`,
+    `publish`, `grow`, `drop`, `flush`, `compact` and `status`); reads items, annotations and
     aggregates in bulk; and manages principals, groups, API keys, grants, sessions and OIDC
     providers.
 - **Distribution**: release binaries for Linux (glibc and musl, x86_64 and aarch64), macOS (arm64
