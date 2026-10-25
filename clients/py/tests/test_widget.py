@@ -170,6 +170,15 @@ def test_size_settings_are_synced_and_leave_the_map_s_choice_by_default(make):
         m.size_scale = "square"
 
 
+def test_a_map_asks_for_50_annotations_per_tile_unless_given_another_number(make):
+    assert make(token="t").get_state()["artifacts_per_tile"] == 50
+    assert make(token="t", artifacts_per_tile=None).get_state()["artifacts_per_tile"] == 50
+    m = make(token="t", artifacts_per_tile=7)
+    assert m.get_state()["artifacts_per_tile"] == 7
+    m.artifacts_per_tile = None
+    assert m.get_state()["artifacts_per_tile"] == 50
+
+
 def test_the_palette_is_synced_and_leaves_the_map_s_choice_by_default(make):
     assert make(token="t").get_state()["palette"] is None
     m = make(token="t", palette="kelly")
