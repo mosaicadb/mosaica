@@ -39,6 +39,8 @@ store.subscribe('meta', (meta) => {
 });
 ```
 
+For a picture of the world under the points, `basemapLayers(store, view, value)` returns the deck.gl layers to put before `MosaicaLayer`: `'world'` (the server's world outline, on a view with a map projection), `{tiles, attribution}` (a tile server of your choosing, on a view with a `tileScheme`), or `{image, bounds}`. Its code loads the first time it is called.
+
 deck.gl and luma.gl are peer dependencies.
 
 Documentation: [TypeScript client reference](https://github.com/mosaicadb/mosaica/blob/main/docs/reference/typescript.md). Licence: Apache-2.0.

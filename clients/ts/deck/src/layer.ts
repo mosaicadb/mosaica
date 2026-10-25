@@ -26,7 +26,7 @@ import {shapeBbox, smoothRing, type ContourShape, type Part} from './contours.js
 import {DEFAULT_DENSITY_SCALE, binDensity, contourThresholds, densityPaint, densityStep, densitySteps, densityStops, drawnCells, filterDensity, gridImage, hexagons, maxCount, HEX_VERTICES, type DensityCell, type DensityColours, type DensityCounts, type DensityMode, type DensityScale} from './density.js';
 import {DEFAULT_DENSITY_CELL_PX, DensityCounter} from './density-counter.js';
 import {LABEL_LINE_HEIGHT, labelLine, labelSize, placeLabels, type LabelCandidate, type PlacedLabel} from './labels.js';
-import {importAggregation} from './aggregation-loader.js';
+import {importAggregation} from './lazy.js';
 import {LookupTexture} from './lut.js';
 import {DULL_COLOUR, MarksLayer, type HighlightPass} from './marks-layer.js';
 import {deckOpacity, markStyle} from './marks-style.js';

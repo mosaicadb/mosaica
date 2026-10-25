@@ -137,6 +137,12 @@ export type MosaicaEventDetails = {
    * `<mosaica-explorer>` switches to the view and centres the map there.
    */
   'mosaica-viewfollow': {view: string; x: number; y: number};
+  /**
+   * What the map says about its basemap changed. `refusal` is why the value given cannot be drawn
+   * under the view it was given for, shown over the map; `note` is why nothing is drawn under this
+   * view, shown in its corner. Each is `null` where there is none.
+   */
+  'mosaica-basemapchange': {refusal: string | null; note: string | null};
   /** A card's close button was pressed: `what` says which card. */
   'mosaica-close': {what: 'item' | 'artifact'};
   /**

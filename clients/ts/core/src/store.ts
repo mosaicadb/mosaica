@@ -836,6 +836,15 @@ export interface Store {
    */
   clear(): void;
   /**
+   * The world outline from `GET /v1/basemaps/world` ({@link MosaicaClient.basemapWorld}), asked
+   * for under the store's token as every other request is. The body is the same for every viewer,
+   * so one answer is shared by every store on the page that reaches the same server; a store
+   * waiting on another's request that fails asks under its own token. Where the server answers
+   * `401` to a token that had worked, the store renews it as for any request and asks once more
+   * under the new one. A refused or failed fetch is not kept, so the next call asks again.
+   */
+  basemapWorld(): Promise<ArrayBuffer>;
+  /**
    * Ask again for the current camera, as after a refusal. The current view's artifacts are dropped
    * and fetched afresh, and the marks are fetched where the held tiles do not answer the view. A
    * selected region shows `loading` until the new frame lands.
@@ -846,6 +855,17 @@ export interface Store {
    * `client` is left open for the host to close. An answer that lands afterwards publishes nothing.
    */
   dispose(): void;
+}
+
+/** The world outline by server: the client a host shared between stores, else the URL a store's own client reaches, as {@link serverOf} names it. */
+const worldOutlines = new WeakMap<object, Promise<ArrayBuffer>>();
+const servers = new Map<string, object>();
+
+/** One object per server URL, so a URL keys {@link worldOutlines} as a shared client does. */
+function serverOf(url: string): object {
+  let server = servers.get(url);
+  if (!server) servers.set(url, (server = {}));
+  return server;
 }
 
 /** The `view` projection before a frame has been drawn in view `id`. */
@@ -2501,6 +2521,17 @@ export function createStore(options: StoreOptions): Store {
     return new DOMException('the identity key changed; the store asks again', 'AbortError');
   }
 
+  /** The world outline under the current token, for {@link Store.basemapWorld}. */
+  async function askWorld(): Promise<ArrayBuffer> {
+    const token = await tokens.get();
+    try {
+      return await client.basemapWorld(token);
+    } catch (error) {
+      if (!(error instanceof MosaicaError && error.status === 401) || tokens.current === token) throw error;
+      return client.basemapWorld(await tokens.get());
+    }
+  }
+
   /** Set by `dispose`: an answer that lands afterwards writes nothing. */
   let disposed = false;
 
@@ -2578,6 +2609,23 @@ export function createStore(options: StoreOptions): Store {
     },
     extentOf,
     dataXY,
+    async basemapWorld() {
+      const server = options.client ?? serverOf(options.viewerUrl);
+      const shared = worldOutlines.get(server);
+      if (shared) {
+        try {
+          return await shared;
+        } catch {
+          // Another store's request failed; this one asks under its own token.
+        }
+      }
+      const asked = askWorld();
+      worldOutlines.set(server, asked);
+      asked.catch(() => {
+        if (worldOutlines.get(server) === asked) worldOutlines.delete(server);
+      });
+      return asked;
+    },
     clear,
     refresh,
     dispose

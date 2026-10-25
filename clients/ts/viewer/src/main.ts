@@ -1,9 +1,7 @@
 import '@mosaicajs/components';
 import type {MosaicaExplorer, MapProbe} from '@mosaicajs/components';
-import {DEFAULT_BUDGET, MosaicaClient, colourLayers, createStore, dataToWorldXY, type Store as DataStore} from '@mosaicajs/client';
+import {DEFAULT_BUDGET, MosaicaClient, colourLayers, createStore, type Store as DataStore} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
-import type {ViewInfo} from '@mosaicajs/client';
-import {basemapLayer, coverFor, type BasemapCover, type Camera} from './basemap.js';
 import {loadDatasets, readConfig, type Dataset} from './config.js';
 import {esc} from './html.js';
 import {renderErrors} from './panels/errors.js';
@@ -87,106 +85,6 @@ declare global {
   }
 }
 
-/** How long the camera must be still before the basemap is recomposed, so a wheel gesture composes once. */
-const BASEMAP_SETTLE_MS = 180;
-
-/**
- * Draw a basemap under the points where the view declares a `tile_scheme`, and none where it does
- * not. A basemap that fails to load leaves the map as it was.
- */
-let basemapGeneration = 0;
-
-async function installBasemap(view: ViewInfo, camera?: Camera): Promise<void> {
-  // A basemap is installed only for the switch that asked for it; a faster later switch
-  // supersedes it through the generation.
-  const mine = ++basemapGeneration;
-  await explorer.updateComplete;
-  const map = explorer.map;
-  if (!map || mine !== basemapGeneration) return;
-  try {
-    const basemap = await basemapLayer(view, camera);
-    if (mine !== basemapGeneration) return;
-    map.basemap = basemap;
-    // OpenStreetMap's style is pale under a dark page, so the map's ground is light while it shows.
-    map.ground = basemap ? 'light' : '';
-  } catch (error) {
-    store.update((s) => {
-      s.failures = [...s.failures.slice(-19), {code: 'basemap', detail: String(error), at: Date.now()}];
-    });
-  }
-}
-
-/**
- * Keep the basemap at the camera's resolution. It is recomposed when the camera settles outside
- * the tiles last composed; a pan within them or a zoom at the same depth needs nothing. One
- * listener serves the page, reading the view to follow from `followedView`, which a switch
- * replaces.
- */
-let followedView: ViewInfo | null = null;
-let composed: BasemapCover | null = null;
-let lastCamera: Camera | null = null;
-let followTimer: ReturnType<typeof setTimeout> | null = null;
-let followListening = false;
-
-function followCameraWithBasemap(view: ViewInfo): void {
-  followedView = view;
-  composed = null;
-  if (followTimer !== null) {
-    clearTimeout(followTimer);
-    followTimer = null;
-  }
-  if (followListening) return;
-  followListening = true;
-  explorer.addEventListener('mosaica-viewchange', (event) => {
-    const followed = followedView;
-    // A view with no tiling (every embedding) has no basemap to follow.
-    if (!followed || followed.tileScheme === null || followed.tile === null) return;
-    const {bbox, zoom} = (event as CustomEvent<{bbox: [number, number, number, number]; zoom: number}>).detail;
-    const [x0, y0] = dataToWorldXY(bbox[0], bbox[1], followed.quantisation);
-    const [x1, y1] = dataToWorldXY(bbox[2], bbox[3], followed.quantisation);
-    const camera: Camera = {
-      worldBox: [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)],
-      zoom
-    };
-    lastCamera = camera;
-    const wanted = coverFor(followed, camera);
-    if (
-      composed &&
-      composed.level === wanted.level &&
-      composed.x0 === wanted.x0 &&
-      composed.y0 === wanted.y0 &&
-      composed.x1 === wanted.x1 &&
-      composed.y1 === wanted.y1
-    ) {
-      return;
-    }
-    if (followTimer !== null) clearTimeout(followTimer);
-    followTimer = setTimeout(() => {
-      followTimer = null;
-      composed = wanted;
-      void installBasemap(followed, camera);
-    }, BASEMAP_SETTLE_MS);
-  });
-}
-
-/**
- * Take the basemap down and cancel every fetch in flight. Called at the switch, since a view with
- * no `tile_scheme` has no basemap to replace the old one.
- */
-function dropBasemap(): void {
-  basemapGeneration += 1;
-  composed = null;
-  if (followTimer !== null) {
-    clearTimeout(followTimer);
-    followTimer = null;
-  }
-  const map = explorer.map;
-  if (map) {
-    map.basemap = null;
-    map.ground = '';
-  }
-}
-
 /**
  * Write a setting to the URL, as `?view=<id>` or `?per-tile=<n>`, so a link opens the same.
  * `replaceState`, so stepping through a roster does not fill the history.
@@ -198,28 +96,14 @@ function writeToUrl(name: 'view' | 'per-tile', value: string): void {
   history.replaceState(null, '', url);
 }
 
-/**
- * Follow a switch: decide the basemap from the new view's `tile_scheme` and write the view to the
- * URL. Within a group the camera does not move, so the basemap is composed for the last camera at
- * once; across frames the map refits and the next settle composes.
- */
+/** Follow a switch: write the view to the URL. */
 function onViewChanged(id: string): void {
   const meta = store.state.meta;
-  const view = meta?.views.find((v) => v.id === id);
-  if (!meta || !view) return;
-  const previous = meta.views.find((v) => v.id === store.state.view);
-  const p = previous?.quantisation;
-  const q = view.quantisation;
-  const keepsFrame = p !== undefined && p.xMin === q.xMin && p.xMax === q.xMax && p.yMin === q.yMin && p.yMax === q.yMax;
+  if (!meta || !meta.views.some((v) => v.id === id)) return;
   store.update((s) => {
     s.view = id;
   });
   writeToUrl('view', id);
-  dropBasemap();
-  followCameraWithBasemap(view);
-  const camera = keepsFrame && view.tileScheme !== null && view.tile !== null ? lastCamera : null;
-  if (camera) composed = coverFor(view, camera);
-  void installBasemap(view, camera ?? undefined);
 }
 
 /** Publish the first map's probe on `window` for the harness. */
@@ -397,7 +281,7 @@ function mirror(): void {
   const view = ds.get('view');
   const replica = ds.get('replica');
 
-  // The basemap and the URL follow the `view` projection, whichever control switched it.
+  // The URL follows the `view` projection, whichever control switched it.
   if (view.id && view.id !== store.state.view) onViewChanged(view.id);
 
   store.update((s) => {
@@ -631,8 +515,6 @@ async function activate(dataset: Dataset, requestedView: string | null = null): 
     // The heading names the dataset as the dataset picker does.
     explorer.datasetTitle = dataset.label;
     writeToUrl('view', opening.id);
-    followCameraWithBasemap(opening);
-    void installBasemap(opening);
     trace.event('session', {
       dataset: dataset.id,
       kMaxMarks: meta.selection.kMaxMarks,

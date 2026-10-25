@@ -95,6 +95,13 @@ export function refusalText(words: string, code: string | null | undefined): Tem
   return html`<span part="refusal" data-code=${code ?? nothing}>${words}</span>`;
 }
 
+/** The refused state: its dot, its words with the refusal's code, and Retry where `onRetry` is given. */
+export function refusedState(words: string, code: string | null | undefined, onRetry?: (() => void) | null): TemplateResult {
+  return html`<span part="state" data-state="refused"><span class="dot refuse"></span>${refusalText(words, code)}${onRetry
+      ? html`<button part="retry" class="btn small" type="button" @click=${onRetry}>Retry</button>`
+      : nothing}</span>`;
+}
+
 /**
  * The state region every panel renders: a `part="state"` carrying `data-state`, and the line the
  * state needs, such as a skeleton while loading or the refresh control when stale.
@@ -124,9 +131,7 @@ export function renderState(
     case 'empty':
       return html`<span part="state" data-state="empty">${stateWord(state, status)}</span>`;
     case 'refused':
-      return html`<span part="state" data-state="refused"><span class="dot refuse"></span>${refusalText(stateWord(state, status), refusal?.code)}${actions.onRetry
-          ? html`<button part="retry" class="btn small" type="button" @click=${actions.onRetry}>Retry</button>`
-          : nothing}</span>`;
+      return refusedState(stateWord(state, status), refusal?.code, actions.onRetry);
     case 'expired':
       return html`<span part="state" data-state="expired"><span class="dot refuse"></span>${stateWord(state, status)}${actions.onReauthorise
           ? html`<button part="reauthorise" class="btn small" type="button" @click=${actions.onReauthorise}>Sign in</button>`

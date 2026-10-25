@@ -44,6 +44,7 @@ export {MosaicaExplorer} from './explorer.js';
 export type {StoreSource} from './base.js';
 export type {SelectionShapeDetail, MosaicaEventDetails, MosaicaEventMap} from './events.js';
 export type {PanelState} from './states.js';
+export type {BasemapChoice} from './basemap.js';
 export {PARTS, type PartsOf} from './parts.js';
 export {storeContext} from './context.js';
 export {tokens} from './tokens.js';

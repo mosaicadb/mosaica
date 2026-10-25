@@ -5,7 +5,7 @@ import {isUnanswered} from '@mosaicajs/client/internal';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {renderState, stateOf} from './states.js';
+import {refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -119,7 +119,7 @@ export class MosaicaSelection extends MosaicaElement {
         : r.status === 'loading'
         ? html`<span part="state" data-state="loading"><span class="dot quiet"></span>Counting<span class="skel" aria-hidden="true"></span></span>`
         : r.status === 'refused'
-          ? html`<span part="state" data-state="refused"><span class="dot refuse"></span><span part="refusal" data-code=${r.refusal?.code ?? nothing}>Selection refused</span></span>`
+          ? refusedState('Selection refused', r.refusal?.code)
           : html`<span part="state" data-state=${state} title=${r.verdict === null ? 'Not counted yet' : r.verdict.exact ? 'Exact for the shape' : 'Approximate: counted over cells around the shape'}>${stale ? html`<span class="dot warn"></span>Data updated` : nothing}</span>`;
     const ids = Array.from(r.held.ids, idString);
     const waiting = (label: unknown, reason: string) => html`<button part="action" class="btn off" type="button" disabled title=${reason}>${label}</button>`;

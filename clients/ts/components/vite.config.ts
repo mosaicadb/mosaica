@@ -13,12 +13,12 @@ const licences = mosaicaLicences('mosaica-components.js');
 export default defineConfig({
   plugins: [mosaicaDecorators(), licences.main],
   // The workspace packages resolve to their sources, so the bundle needs no prior library build.
-  // The deck package's lazy loader of the aggregation layers becomes a static one here: one file
-  // holds them either way, and an inlined dynamic import makes the bundler wrap every module in a
-  // lazy initialiser, about 40 KB more.
+  // The deck package's lazy loaders of the aggregation layers and the basemap become static ones
+  // here: one file holds them either way, and an inlined dynamic import makes the bundler wrap
+  // every module in a lazy initialiser, about 40 KB more.
   resolve: {
     conditions: ['mosaica-source', ...defaultClientConditions],
-    alias: [{find: /^\.\/aggregation-loader\.js$/, replacement: fileURLToPath(new URL('../deck/src/aggregation-static.ts', import.meta.url))}]
+    alias: [{find: /^\.\/lazy\.js$/, replacement: fileURLToPath(new URL('../deck/src/lazy-static.ts', import.meta.url))}]
   },
   // deck.gl reads `process.env.NODE_ENV` unguarded, and library mode does not substitute it. A
   // host's bundler substitutes it, but this bundle is also loaded as-is from a

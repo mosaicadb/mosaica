@@ -1,26 +1,11 @@
 import {CELL_GRID, GRID32} from './coords.js';
-import type {MapProjection, Quantisation, TileScheme, ViewInfo} from './types.js';
+import type {MapProjection, Quantisation, ViewInfo} from './types.js';
 
 /**
- * What a view is a picture of, read from `/v1/meta`: whether a basemap may be drawn under it, and
- * how to invert a stored position to longitude and latitude.
- *
- * The host supplies the basemap; nothing here fetches a tile. The scheme is a name because a frame
- * that aligns with a square tiling may have no tile server: an equirectangular frame is a square
- * of a square tiling, and the published longitude and latitude schemes are 2:1 at their top level.
- * A `null` scheme means draw the points and no basemap.
+ * How a view's stored positions relate to longitude and latitude, read from `/v1/meta`: the
+ * inverse of the projection a position was stored under, and the forward projection a client
+ * places longitude and latitude with, as a basemap does.
  */
-
-/**
- * The tile scheme `view`'s frame is addressed in (`view.tileScheme`), or `null`. A tile basemap
- * lines up with the points only where this is not `null`; with `null`, draw the points and no
- * basemap. The server decides it from the view's projection and frame.
- *
- * @category Coordinates and colour
- */
-export function basemapScheme(view: ViewInfo): TileScheme | null {
-  return view.tileScheme;
-}
 
 /**
  * A stored position as `[longitude, latitude]` in degrees, or `null` for a view whose projection is

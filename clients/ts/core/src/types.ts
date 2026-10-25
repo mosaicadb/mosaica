@@ -438,8 +438,8 @@ export type TileScheme = 'xyz';
 
 /**
  * One view this principal may reach, as `/v1/meta` publishes it. The frame and projection fields
- * are the same for every principal, and a host decides from them whether to draw a basemap
- * ({@link ViewInfo.tileScheme}) and how to turn a position into longitude and latitude
+ * are the same for every principal, and a host decides from them which basemap fits
+ * ({@link ViewInfo.projection}, {@link ViewInfo.tileScheme}) and how to turn a position into longitude and latitude
  * ({@link lonLatOfCell}).
  *
  * @category Meta
@@ -466,9 +466,9 @@ export type ViewInfo = {
    */
   worldAspect: number | null;
   /**
-   * `xyz` where this view's frame lines up with the slippy-map tiling, so a tile basemap may be
-   * drawn under the points. `null` means draw the points and no basemap. Only an aligned
-   * `web_mercator` view has a scheme.
+   * `xyz` where this view's frame lines up with the slippy-map tiling, so raster tiles may be
+   * drawn under the points. `null` means no tiles line up with it; the world outline and an image
+   * need no scheme. Only an aligned `web_mercator` view has one.
    */
   tileScheme: TileScheme | null;
   /** The tile of {@link tileScheme} this view's frame covers; `null` exactly when `tileScheme` is. */

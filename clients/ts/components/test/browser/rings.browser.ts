@@ -26,7 +26,7 @@ beforeAll(async () => {
     logLevel: 'silent',
     resolve: {
       conditions: ['mosaica-source', ...defaultClientConditions],
-      alias: [{find: /^\.\/aggregation-loader\.js$/, replacement: join(here, '..', '..', '..', 'deck', 'src', 'aggregation-static.ts')}]
+      alias: [{find: /^\.\/lazy\.js$/, replacement: join(here, '..', '..', '..', 'deck', 'src', 'lazy-static.ts')}]
     },
     define: {'process.env.NODE_ENV': JSON.stringify('production')},
     build: {outDir: built, emptyOutDir: true, lib: {entry: join(here, 'rings-page.ts'), formats: ['es'], fileName: () => 'page.js'}, rolldownOptions: {output: {codeSplitting: false}}}

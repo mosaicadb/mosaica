@@ -17,7 +17,7 @@ export {hasValue, numericValues, rankedValues, sizesPoints} from './encoding.js'
 export {artifactColours, chosenColour, slottedColour, NEUTRAL} from './palette.js';
 export {worldBbox} from './prefetch.js';
 export {assertCompositionMatchesServed, isUnanswered, refusalOf} from './presented.js';
-export {basemapScheme} from './projection.js';
+export {gridOfData} from './projection.js';
 export type {TileRect} from './rects.js';
 export {regionOperand, withRegion} from './region.js';
 export type {ReplicaFrame} from './replica.js';

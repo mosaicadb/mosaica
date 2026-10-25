@@ -4,7 +4,7 @@ import {artifactName, isFilterLayer, withMember, withoutMember, type Artifact, t
 import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {refusalText, renderState} from './states.js';
+import {refusedState, renderState} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -232,7 +232,7 @@ export class MosaicaArtifactCard extends MosaicaElement {
         ? html`<slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'artifact'})}>${icon('close', 14)}</button>`
         : nothing}</h2>`;
     if (refusal) {
-      return html`<div class="panel">${heading(true)}<span part="state" data-state="refused"><span class="dot refuse"></span>${refusalText('Not available', refusal.code)}</span></div>`;
+      return html`<div class="panel">${heading(true)}${refusedState('Not available', refusal.code)}</div>`;
     }
     if (!artifact) {
       if (!this.resolvedStore) return html`<div class="panel">${heading(false)}${renderState('detached', null)}</div>`;

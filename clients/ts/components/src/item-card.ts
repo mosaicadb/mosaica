@@ -6,7 +6,7 @@ import {HeldAggregate, listedGroups} from './aggregate.js';
 import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {refusalText, renderState, stateOf} from './states.js';
+import {refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
@@ -300,7 +300,7 @@ export class MosaicaItemCard extends MosaicaElement {
     // The header row: what the card shows, and the close button where there is something to close.
     const head = (content: unknown, closable: boolean) => html`<div part="title" class="head">${content}${closable ? close : nothing}</div>`;
     const unavailable = (code: string | null) =>
-      html`<div class="panel">${head(html`<span part="state" data-state="refused"><span class="dot refuse"></span>${refusalText('Item unavailable', code)}</span>`, true)}</div>`;
+      html`<div class="panel">${head(refusedState('Item unavailable', code), true)}</div>`;
     if (refusal) return unavailable(refusal.code);
     if (!item) {
       const pick = this.pick;

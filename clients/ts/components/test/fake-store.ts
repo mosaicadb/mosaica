@@ -11,6 +11,8 @@ export type FakeStore = Store & {
   setFrame(q: Quantisation): void;
   /** Script one browse answer: `roots`, `roots:<cursor>`, `p:<id>`, `p:<id>:<cursor>`, `q:<text>`. */
   setBrowse(key: string, page: BrowsePage): void;
+  /** Answer `basemapWorld` with these bytes, reject with this error, or answer when this promise does. */
+  setWorld(answer: ArrayBuffer | Error | Promise<ArrayBuffer>): void;
   calls: {name: string; args: unknown[]}[];
 };
 
@@ -79,6 +81,11 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
   const perName = new Map<ProjectionName, Set<() => void>>();
   const calls: {name: string; args: unknown[]}[] = [];
   const browsePages = new Map<string, BrowsePage>();
+  let worldAnswer: ArrayBuffer | Error | Promise<ArrayBuffer> = new ArrayBuffer(0);
+  const world = () => {
+    if (worldAnswer instanceof Error) throw worldAnswer;
+    return worldAnswer;
+  };
   const spy =
     (name: string) =>
     (...args: unknown[]) => {
@@ -137,6 +144,9 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     setBrowse(key: string, page: BrowsePage) {
       browsePages.set(key, page);
     },
+    setWorld(answer: ArrayBuffer | Error | Promise<ArrayBuffer>) {
+      worldAnswer = answer;
+    },
     // The composed request, from the projections a test sets, through the client's own
     // composition: the filter-position expression, the clauses in that position, the region.
     requestFilters: () => {
@@ -163,6 +173,10 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     },
     select: spy('select'),
     extentOf: () => null,
+    basemapWorld: async () => {
+      calls.push({name: 'basemapWorld', args: []});
+      return world();
+    },
     dataXY: (x, y) => [x, y],
     clear: spy('clear'),
     refresh: spy('refresh'),

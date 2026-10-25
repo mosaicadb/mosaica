@@ -15,7 +15,7 @@ const STATE = ['state', 'refusal', 'refresh', 'retry', 'reauthorise'];
  * rendered.
  */
 export const PARTS = {
-  map: ['canvas', 'controls', 'density-key', 'overlay', 'region-tag', 'tooltip', ...STATE],
+  map: ['attribution', 'canvas', 'controls', 'density-key', 'note', 'overlay', 'region-tag', 'tooltip', ...STATE],
   status: ['card', 'strip', 'count-shown', 'count-matched', 'count-highlighted', 'count-of', 'count-visible', ...STATE],
   'view-picker': ['field', 'select'],
   'key-picker': ['entry', 'field', 'label', 'select', 'step'],

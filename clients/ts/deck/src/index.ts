@@ -5,7 +5,8 @@
  * {@link Colouring} chooses from, and {@link Sizing} the sizes a number column sizes marks
  * between. {@link viewInputOf} turns the host's camera into a view for the store,
  * {@link DensityCounter} keeps the counts density is drawn from, {@link frameMatches} and
- * {@link cameraFitting} open the camera on the matched items, and {@link resolvePick} reads a pick.
+ * {@link cameraFitting} open the camera on the matched items, {@link resolvePick} reads a pick, and
+ * {@link basemapLayers} draws a basemap under the points.
  *
  * @module @mosaicajs/deck
  */
@@ -39,3 +40,4 @@ export {
 export {cameraFitting, viewInputOf, type OrthographicCamera} from './camera.js';
 export {frameMatches} from './frame.js';
 export {resolvePick, type Picked, type PickInfo} from './pick.js';
+export {basemapLayers, basemapMisfit, type BasemapOptions, type BasemapValue, type WorldColours} from './basemap.js';

@@ -17,7 +17,8 @@ import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, Densit
 import type {PaletteName, Quantisation, Rgba} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {NOTHING_VISIBLE, renderState, seesNothing, stateOf, type PanelState} from './states.js';
+import {NOTHING_VISIBLE, refusedState, renderState, seesNothing, stateOf, type PanelState} from './states.js';
+import {MapBasemap, basemapChanged, type BasemapChoice} from './basemap.js';
 import {icon} from './icons.js';
 import {sameFrame} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
@@ -45,6 +46,8 @@ export type MapProbe = {
   /** Aggregate requests density has started. */
   densityRequests: number;
   encoding: string;
+  /** The ids of the basemap layers drawn under the points. */
+  basemap: string[];
   view: {depth: number; status: string; stale: boolean; visible: number; matched: number; served: number; provisional: number};
   /** `ms` is from the selection to its counts arriving, on the store's clock. */
   region: {verdict: string; exact: boolean; visible: number | null; matched: number; held: number; status: string; ms: number | null} | null;
@@ -141,6 +144,8 @@ let mapsMade = 0;
  * @slot tooltip - Replaces the hover tooltip's content.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewchange']>} mosaica-viewchange - The camera
  *   moved.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-basemapchange']>} mosaica-basemapchange - The
+ *   basemap's refusal or note appeared, changed or went.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-pick']>} mosaica-pick - A point was clicked, and
  *   again with its record once the record arrives.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click found no point
@@ -171,6 +176,9 @@ let mapsMade = 0;
  * @csspart density-key - The key to density's colours, items per cell from 0 to the largest count
  *   drawn with the count at the scale's midpoint, in the bottom-left corner while density is drawn
  *   in a ramp or without the points.
+ * @csspart note - Why no basemap is drawn under this view, in the bottom-right corner: the value
+ *   given does not fit it, or the basemap did not load.
+ * @csspart attribution - The tile server's credit, in the bottom-right corner while tiles are drawn.
  * @cssprop --mosaica-map-height - The map's height.
  * @cssprop --mosaica-map-bg - The canvas's background, behind the points and any basemap.
  * @cssprop --mosaica-map-inset-left - Extra space between the top-left corner's content and the
@@ -352,6 +360,22 @@ export class MosaicaMap extends MosaicaElement {
         color: var(--_mosaica-ink-2);
         pointer-events: auto;
       }
+      [part='note'],
+      [part='attribution'] {
+        pointer-events: auto;
+        max-width: 100%;
+        padding: 3px 8px;
+        background: var(--_mosaica-surface);
+        border: 1px solid var(--_mosaica-line);
+        border-radius: var(--_mosaica-radius-control);
+        font-size: 11px;
+        color: var(--_mosaica-ink-2);
+      }
+      [part='attribution'] {
+        padding: 1px 6px;
+        border: 0;
+        background: color-mix(in srgb, var(--_mosaica-surface) 80%, transparent);
+      }
       [part='density-key'] .ramp {
         display: block;
         width: 120px;
@@ -424,8 +448,27 @@ export class MosaicaMap extends MosaicaElement {
    * layer's top (coarsest) level. A `nested` or `dag` layer draws the cut served.
    */
   @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
-  /** A deck.gl layer drawn under the points, such as a basemap, in the map's 512-unit world. */
-  @property({attribute: false}) accessor basemap: Layer | null = null;
+  /**
+   * What is drawn under the points: `world` (the server's world outline: land, coastlines and
+   * country borders), `none`, `{tiles, attribution}` (a tile server's URL template, with `{z}`,
+   * `{x}` and `{y}`, and its credit, shown in the bottom-right corner), `{image, bounds}` (one
+   * image over `[x0, y0, x1, y1]` in the view's coordinates, degrees on a geographic view, or over
+   * the whole frame), a mapping from view id to one of those, or a deck.gl layer the host built in
+   * the map's 512-unit world. The attribute takes `world` and `none`. Unset, or for a view a
+   * mapping leaves out, `world` on a view with a map projection and nothing on one without.
+   *
+   * An object with a `tiles` or `image` key is one value, and takes only the keys its form names;
+   * any other object is a mapping. A mapping's keys are view ids as `meta.views` lists them, so a
+   * view named `tiles` or `image` cannot be named in one; a key that names no view this viewer may
+   * reach is ignored, and every value must be one of the forms.
+   *
+   * The world outline needs a projection and tiles need the view's `tileScheme`. A value that does
+   * not fit the view it was given on, or that a mapping names for a view, is refused over the map
+   * with what to write instead; one value that does not fit a view switched to later draws nothing
+   * there, and a note in the bottom-right corner says why. The points are drawn either way. The
+   * code that draws a basemap is loaded the first time one is drawn.
+   */
+  @property({hasChanged: basemapChanged}) accessor basemap: BasemapChoice | null = null;
   /**
    * The ground the map draws on, `light` or `dark`, where it differs from the page's, such as a
    * light basemap under a dark page. The labels and the density colours follow it, and the
@@ -579,6 +622,7 @@ export class MosaicaMap extends MosaicaElement {
     requests: 0,
     densityRequests: 0,
     encoding: 'uniform',
+    basemap: [],
     view: {depth: 0, status: 'idle', stale: false, visible: 0, matched: 0, served: 0, provisional: 0},
     region: null,
     timings: {slabMs: 0, densityMs: 0, lutMs: 0, outlinesMs: 0, labelsMs: 0, layersMs: 0, lutWrites: 0, outlines: 0, outlinesDrawn: 0, labels: 0, markRadius: 0, markAlpha: 0, markCount: 0, frame: {mean: 0, p95: 0, n: 0}, decodeMs: []},
@@ -610,6 +654,19 @@ export class MosaicaMap extends MosaicaElement {
   private frameGaps: number[] = [];
   private frameLoop: number | null = null;
   private lastFrameAt = 0;
+  private readonly drawnBasemap = new MapBasemap(() => {
+    const {layers, refusal, note} = this.drawnBasemap;
+    this.probe.basemap = layers.map((l) => l.id);
+    if (refusal !== this.basemapSaid.refusal || note !== this.basemapSaid.note) {
+      this.basemapSaid = {refusal, note};
+      emit(this, 'mosaica-basemapchange', {refusal, note});
+    }
+    this.paint();
+    this.requestUpdate();
+  });
+
+  /** What `mosaica-basemapchange` last said. */
+  private basemapSaid: {refusal: string | null; note: string | null} = {refusal: null, note: null};
 
   static override get observedAttributes(): string[] {
     return [...super.observedAttributes, 'tabindex', 'aria-label'];
@@ -639,6 +696,7 @@ export class MosaicaMap extends MosaicaElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.askPointColumns(this.resolvedStore);
+    this.syncBasemap();
     if (this.finalizeTimer) {
       clearTimeout(this.finalizeTimer);
       this.finalizeTimer = null;
@@ -659,6 +717,7 @@ export class MosaicaMap extends MosaicaElement {
       this.frameOnConnect = true;
     }
     this.askPointColumns(null);
+    this.drawnBasemap.dispose();
     if (this.describeTimer !== null) {
       clearTimeout(this.describeTimer);
       this.describeTimer = null;
@@ -679,6 +738,8 @@ export class MosaicaMap extends MosaicaElement {
       if (this.measure && this.resolvedStore) this.measureStore(this.resolvedStore);
     }
     if (changed.has('density') || changed.has('densityResolution')) this.pushDensity();
+    if (changed.has('basemap')) this.drawnBasemap.reset();
+    if (changed.has('basemap') || changed.has('ground')) this.syncBasemap();
     const repaint = ['mode', 'drag', 'dragPolygon', 'basemap', 'ground', 'radius', 'clusterLevel', 'hoveredArtifact', 'noPoints', 'pointOpacity', 'density', 'densityColours', 'densityStrength', 'densityScale'] as const;
     if (repaint.some((k) => changed.has(k))) this.paint();
   }
@@ -816,6 +877,7 @@ export class MosaicaMap extends MosaicaElement {
         })
       : null;
     this.slab.clear();
+    this.drawnBasemap.reset();
     this.metaSeen = false;
     // A new store opens framed on its matches, as the first did.
     this.cancelFraming();
@@ -893,6 +955,7 @@ export class MosaicaMap extends MosaicaElement {
       this.hover = null;
       this.hoveredArtifact = null;
     }
+    this.syncBasemap();
     // A switch to another frame frames the matches in it; a switch within a group, whose views
     // share a frame, keeps the camera. Compared on every change rather than on a new view id, so
     // the refit does not need the id and extent to change together. Before the first camera,
@@ -1101,13 +1164,25 @@ export class MosaicaMap extends MosaicaElement {
     this.densityCounter?.look({target: this.viewState.target, zoom: this.viewState.zoom, width, height});
     this.probe.densityRequests = this.densityCounter?.requests ?? 0;
     emit(this, 'mosaica-viewchange', {bbox: input.bbox, zoom: this.viewState.zoom, width, height});
+    this.drawnBasemap.moved(this.basemapInput());
+  }
+
+  private basemapInput() {
+    const {width, height} = this.size;
+    const sized = this.clientWidth > 0 && this.clientHeight > 0;
+    return {store: this.resolvedStore, choice: this.basemap, scheme: this.scheme(), camera: sized ? {target: this.viewState.target, zoom: this.viewState.zoom, width, height} : undefined};
+  }
+
+  private syncBasemap(): void {
+    this.drawnBasemap.sync(this.basemapInput());
   }
 
   private paint(): void {
     if (!this.deck) return;
     const s = this.resolvedStore;
     const layers: Layer[] = [];
-    if (this.basemap) layers.push(this.basemap);
+    // Clones, so a layer deck finalised when the map left the page is not handed to a new Deck.
+    layers.push(...this.drawnBasemap.layers.map((l) => l.clone({})));
     if (s) {
       layers.push(
         new MosaicaLayer({
@@ -1657,6 +1732,13 @@ export class MosaicaMap extends MosaicaElement {
     </div>`;
   }
 
+  /** The note saying why no basemap is drawn under this view, and the tile server's credit. */
+  private basemapCorner(): TemplateResult | typeof nothing {
+    const {note, attribution} = this.drawnBasemap;
+    if (!note && !attribution) return nothing;
+    return html`${note ? html`<span part="note" role="status">${note}</span>` : nothing}${attribution ? html`<span part="attribution">${attribution}</span>` : nothing}`;
+  }
+
   override render(): TemplateResult | typeof nothing {
     const status = this.resolvedStore?.get('status') ?? null;
     const state: PanelState = stateOf(status);
@@ -1669,7 +1751,9 @@ export class MosaicaMap extends MosaicaElement {
       ? html`<div part="overlay"><span part="state" data-state="empty" data-visible="none">${NOTHING_VISIBLE}</span></div>`
       : state === 'refused' || state === 'unanswered' || state === 'expired' || state === 'empty' || (state === 'retrying' && status?.unreachable)
         ? html`<div part="overlay">${renderState(state, status, {onRefresh: refresh, onRetry: refresh})}</div>`
-        : nothing;
+        : this.drawnBasemap.refusal
+          ? html`<div part="overlay">${refusedState(this.drawnBasemap.refusal, 'basemap')}</div>`
+          : nothing;
     const controls = this.noControls
       ? nothing
       : html`<div part="controls" role="toolbar" aria-label="Map tools">
@@ -1688,7 +1772,7 @@ export class MosaicaMap extends MosaicaElement {
       const top = at.startsWith('top');
       const own = this.controlsCorner === at ? controls : nothing;
       return html`<div class=${`corner ${at}`}>
-        ${top ? own : nothing}${at === 'bottom-left' ? this.densityKey() : nothing}${slots[at]}${top ? nothing : own}
+        ${top ? own : nothing}${at === 'bottom-left' ? this.densityKey() : nothing}${slots[at]}${at === 'bottom-right' ? this.basemapCorner() : nothing}${top ? nothing : own}
       </div>`;
     };
     const corners = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;

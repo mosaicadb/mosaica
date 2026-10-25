@@ -105,7 +105,7 @@ Things found during the cleanup that are not yet done. One line each; delete a l
 - *Save as artifact* from a drawn selection. The selection panel greys it; no route publishes a runtime artifact from a region.
 - A host cannot read or set the map's camera, selection mode or chosen cluster level: they are fields of `<mosaica-map>` and `<mosaica-explorer>`, not store state. Saving and restoring a view, linking two maps and keeping the view in a URL all need them.
 - A host cannot set how data is drawn or worded: the 12-colour categorical palette and two-colour numeric ramp (`clients/ts/deck/src/colour.ts`), value formatting, the interface's English strings, and the `en-GB` number format are fixed in code.
-- `MosaicaLayer` draws in a 512-unit orthographic world. A geographic host (a deck.gl `MapView`, MapLibre or Mapbox) needs a coordinate adapter that does not exist, and the OpenStreetMap basemap exists only in the demo viewer (`clients/ts/viewer/src/basemap.ts`).
+- `MosaicaLayer` draws in a 512-unit orthographic world. A geographic host (a deck.gl `MapView`, MapLibre or Mapbox) needs a coordinate adapter that does not exist.
 - The four TypeScript packages build and pack at version 0.1.0 and stay `private`. Publishing them to npm waits for a ruling.
 - Vue, Svelte and Angular hosts have notes in the clients README and no example or test.
 

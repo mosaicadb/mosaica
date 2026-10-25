@@ -18,6 +18,7 @@ import {icon, type IconName} from './icons.js';
 import {exportparts, forwarded} from './parts.js';
 import {sameFrame} from './view-switch.js';
 import {drawnDensityColours, drawnDensityScale, type MosaicaMap} from './map.js';
+import {basemapChanged, type BasemapChoice} from './basemap.js';
 import {chrome, tokens} from './tokens.js';
 import './map.js';
 import './status.js';
@@ -185,6 +186,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @slot top-right - Content in the map's top-right corner, above the selection's card.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewchange']>} mosaica-viewchange - The map's camera moved.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-pick']>} mosaica-pick - A point was clicked, and again with its record.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-basemapchange']>} mosaica-basemapchange - The map's basemap refusal or note changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click on the map found nothing; the explorer closes the card that is not pinned and drops the selection.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved over a point.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An artifact was opened and its drill-down arrived.
@@ -791,6 +793,13 @@ export class MosaicaExplorer extends MosaicaElement {
   @property({type: Number, attribute: 'cluster-budget-min'}) accessor clusterBudgetMin = 10;
   /** The most clusters Most clusters offers. */
   @property({type: Number, attribute: 'cluster-budget-max'}) accessor clusterBudgetMax = 10_000;
+  /**
+   * Passed to the map's `basemap`: `world`, `none`, `{tiles, attribution}`, `{image, bounds}`, a
+   * mapping from view id (as `meta.views` lists it, and not `tiles` or `image`) to one of those, or
+   * a deck.gl layer. The attribute takes `world` and `none`. Unset, the world outline under a view
+   * with a map projection and nothing under one without.
+   */
+  @property({hasChanged: basemapChanged}) accessor basemap: BasemapChoice | null = null;
   /** Passed to the map's `no-points`; the Points switch in the Layers popover changes it. */
   @property({type: Boolean, attribute: 'no-points'}) accessor noPoints = false;
   /** Passed to the map's `radius`; the Size slider in the Layers popover changes it. */
@@ -1115,6 +1124,7 @@ export class MosaicaExplorer extends MosaicaElement {
           .clusterBudget=${this.clusterBudget}
           controls-corner=${compact ? 'bottom-left' : 'top-left'}
           .clusterLevel=${level}
+          .basemap=${this.basemap}
           .noPoints=${this.noPoints}
           .radius=${this.radius}
           size-by=${this.sizeBy || nothing}

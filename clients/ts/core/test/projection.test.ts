@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {CELL_GRID} from '../src/coords.js';
-import {basemapScheme, lonLatOfCell} from '../src/projection.js';
+import {lonLatOfCell} from '../src/projection.js';
 import type {Quantisation, ViewInfo} from '../src/types.js';
 import {view as plain} from './support.js';
 
@@ -91,14 +91,5 @@ describe('what a client decides from the published projection fields', () => {
     const embedding: Quantisation = {xMin: -10, xMax: 10, yMin: 0, yMax: 1000};
     expect(lonLatOfCell(0, 0, view('none'), embedding)).toBeNull();
     expect(lonLatOfCell(CELL_GRID / 2, CELL_GRID / 2, view('none'), embedding)).toBeNull();
-  });
-
-  it('draws a basemap only where a scheme addresses the frame', () => {
-    // The equirectangular frame is the same aligned square as the Web Mercator one, and addresses
-    // no published scheme: the longitude and latitude schemes are 2:1 at their top level.
-    expect(basemapScheme(view('web_mercator', 'xyz', {z: 3, x: 5, y: 2}))).toBe('xyz');
-    expect(basemapScheme(view('equirectangular'))).toBeNull();
-    expect(basemapScheme(view('gall_isographic'))).toBeNull();
-    expect(basemapScheme(view('none'))).toBeNull();
   });
 });
