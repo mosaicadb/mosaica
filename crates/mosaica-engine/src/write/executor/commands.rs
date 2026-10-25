@@ -887,7 +887,10 @@ impl Executor {
             Ok(novel) => novel,
             Err(why) => {
                 reply.fail(ExecError::ViewRefused {
-                    detail: format!("view '{group}:{key}': {why}"),
+                    detail: format!(
+                        "view '{}': {why}",
+                        mosaica_store::group_view_id(&group, &key)
+                    ),
                 });
                 return;
             }

@@ -1386,7 +1386,7 @@ async fn create_view(
         })
         .await?;
     let body = serde_json::json!({
-        "view": format!("{group}:{key}"),
+        "view": mosaica_types::view::group_view_id(&group, &key),
         "group": group,
         "key": key,
         "existing": existing,
