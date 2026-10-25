@@ -29,7 +29,7 @@ members = [
 # The one version of the release: every crate, both Python wheels and the npm packages carry it.
 # `python3 scripts/version.py set X.Y.Z` writes it everywhere else, and `scripts/version.py check`
 # refuses a copy that differs.
-version = "0.1.0"
+version = "0.1.0-rc.1"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["Joe Ennis <joe.ennis0@gmail.com>"]
@@ -43,24 +43,24 @@ categories = ["database-implementations", "visualization", "web-programming::htt
 # The workspace's own crates. Each carries the release version, pinned exactly, so that `cargo publish`
 # accepts the path dependency and a published crate resolves only the set it was released with.
 # `scripts/version.py set` rewrites these pins with the version above.
-mosaica-access = { path = "crates/mosaica-access", version = "=0.1.0" }
-mosaica-types = { path = "crates/mosaica-types", version = "=0.1.0" }
-mosaica-roaring = { path = "crates/mosaica-roaring", version = "=0.1.0" }
-mosaica-cache = { path = "crates/mosaica-cache", version = "=0.1.0" }
-mosaica-analyse = { path = "crates/mosaica-analyse", version = "=0.1.0" }
-mosaica-catalogue = { path = "crates/mosaica-catalogue", version = "=0.1.0" }
-mosaica-authz = { path = "crates/mosaica-authz", version = "=0.1.0" }
-mosaica-filter = { path = "crates/mosaica-filter", version = "=0.1.0" }
-mosaica-store = { path = "crates/mosaica-store", version = "=0.1.0" }
-mosaica-spatial = { path = "crates/mosaica-spatial", version = "=0.1.0" }
-mosaica-lifecycle = { path = "crates/mosaica-lifecycle", version = "=0.1.0" }
-mosaica-engine = { path = "crates/mosaica-engine", version = "=0.1.0" }
-mosaica-wire = { path = "crates/mosaica-wire", version = "=0.1.0" }
-mosaica-config = { path = "crates/mosaica-config", version = "=0.1.0" }
-mosaica-server = { path = "crates/mosaica-server", version = "=0.1.0" }
-mosaica-filter-write = { path = "crates/mosaica-filter-write", version = "=0.1.0" }
-mosaica-build = { path = "crates/mosaica-build", version = "=0.1.0" }
-mosaica-corpus = { path = "crates/mosaica-corpus", version = "=0.1.0" }
+mosaica-access = { path = "crates/mosaica-access", version = "=0.1.0-rc.1" }
+mosaica-types = { path = "crates/mosaica-types", version = "=0.1.0-rc.1" }
+mosaica-roaring = { path = "crates/mosaica-roaring", version = "=0.1.0-rc.1" }
+mosaica-cache = { path = "crates/mosaica-cache", version = "=0.1.0-rc.1" }
+mosaica-analyse = { path = "crates/mosaica-analyse", version = "=0.1.0-rc.1" }
+mosaica-catalogue = { path = "crates/mosaica-catalogue", version = "=0.1.0-rc.1" }
+mosaica-authz = { path = "crates/mosaica-authz", version = "=0.1.0-rc.1" }
+mosaica-filter = { path = "crates/mosaica-filter", version = "=0.1.0-rc.1" }
+mosaica-store = { path = "crates/mosaica-store", version = "=0.1.0-rc.1" }
+mosaica-spatial = { path = "crates/mosaica-spatial", version = "=0.1.0-rc.1" }
+mosaica-lifecycle = { path = "crates/mosaica-lifecycle", version = "=0.1.0-rc.1" }
+mosaica-engine = { path = "crates/mosaica-engine", version = "=0.1.0-rc.1" }
+mosaica-wire = { path = "crates/mosaica-wire", version = "=0.1.0-rc.1" }
+mosaica-config = { path = "crates/mosaica-config", version = "=0.1.0-rc.1" }
+mosaica-server = { path = "crates/mosaica-server", version = "=0.1.0-rc.1" }
+mosaica-filter-write = { path = "crates/mosaica-filter-write", version = "=0.1.0-rc.1" }
+mosaica-build = { path = "crates/mosaica-build", version = "=0.1.0-rc.1" }
+mosaica-corpus = { path = "crates/mosaica-corpus", version = "=0.1.0-rc.1" }
 
 croaring = "2.8.0"
 rayon = "1"

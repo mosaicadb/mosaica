@@ -33,7 +33,7 @@ Used by:
   arrow-select 59.1.0
   arrow-string 59.1.0
   cmov 0.5.4
-  ctutils 0.4.2
+  ctutils 0.4.5
   parquet 59.1.0
   utf16_iter 1.0.5
   utf8_iter 1.0.4
@@ -3987,7 +3987,7 @@ Used by:
   rustc-hash 1.1.0
   rustc_version 0.4.1
   rustix 1.1.4
-  rustls 0.23.42
+  rustls 0.23.46
   scopeguard 1.2.0
   signal-hook-registry 1.4.8
   smallvec 1.15.2
@@ -5056,7 +5056,7 @@ Used by:
   blake2 0.10.6
   block-buffer 0.10.4
   block-buffer 0.12.1
-  chacha20 0.10.1
+  chacha20 0.10.2
   chacha20poly1305 0.11.0
   cipher 0.5.2
   const-oid 0.9.6
@@ -6728,7 +6728,7 @@ express Statement of Purpose.
 Community Data License Agreement Permissive 2.0 (CDLA-Permissive-2.0)
 
 Used by:
-  webpki-roots 1.0.9
+  webpki-roots 1.0.11
 
 # Community Data License Agreement - Permissive - Version 2.0
 
@@ -7320,7 +7320,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ISC License (ISC)
 
 Used by:
-  rustls-webpki 0.103.13
+  rustls-webpki 0.103.16
 
 Except as otherwise noted, this project is licensed under the following
 (ISC-style) terms:
@@ -8026,7 +8026,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 MIT License (MIT)
 
 Used by:
-  tokio 1.53.1
+  tokio 1.53.3
 
 MIT License
 

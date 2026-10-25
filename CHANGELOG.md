@@ -6,6 +6,23 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
+## [0.1.0-rc.1] - 2026-10-25
+
+A release candidate for 0.1.0, the first public release, published so that the packages and the
+release process can be tried before 0.1.0. Formats, the HTTP API and the client libraries may
+change before 0.1.0, and a bundle built by this version may be refused by the next.
+
+It holds what 0.1.0 describes: interactive maps over very large corpora from one machine; any
+records with a 2D layout, with several layouts over one corpus; filters, search and highlight;
+annotation layers with labels; item cards and bulk reads; live insert, delete and suppress, kept
+across a restart by a write-ahead log; per-viewer access control over every count, density,
+cluster, label and sample; and four ways in, which are the HTTP API, the Python package `mosaica`,
+the `@mosaicajs` npm packages and the `mosaica` command line.
+
+Install it with `pip install --pre mosaica`, `npm install @mosaicajs/client@next`,
+`cargo install mosaica --version 0.1.0-rc.1` or `docker pull ghcr.io/mosaicadb/mosaica:0.1.0-rc.1`.
+Binary archives for Linux and macOS are attached to the GitHub release.
+
 ## [0.1.0] - unreleased
 
 The first public release, an alpha. Formats, the HTTP API and the client libraries may change in
@@ -59,3 +76,4 @@ any later release, and a bundle built by one version may be refused by the next.
   carry no stable API.
 
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
+[0.1.0-rc.1]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.1

@@ -13,7 +13,7 @@ pip install -e 'clients/py[widget]'  # read, create, declare, insert, commit, an
 ```
 
 The order matters. On Linux or macOS on x86_64 or ARM64 (a `platform_machine` of `x86_64`,
-`aarch64` or `arm64`), `mosaica` depends on `mosaica-native==0.1.0`, and pip can satisfy that
+`aarch64` or `arm64`), `mosaica` depends on `mosaica-native==0.1.0-rc.1`, and pip can satisfy that
 only from the copy already installed. `mosaica-native`'s build hook runs cargo, so it needs a
 Rust toolchain. `mosaica`'s build hook (`hatch_build.py`) runs `npm ci` (when the install is
 stale) and `npm run bundle -w @mosaicajs/components` in `clients/ts`, and copies the single-file
