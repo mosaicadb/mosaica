@@ -941,11 +941,25 @@ fn drawn(engine: &Engine) -> (Vec<String>, Drawn) {
     (names, points)
 }
 
+/// Each segment of `s0` the bundle on disc serves, by id, and whether its row tail holds `heat`.
+fn heat_lanes(root: &Path) -> BTreeMap<String, bool> {
+    let bundle = open_bundle(root).expect("the bundle opens");
+    bundle
+        .partitions
+        .values()
+        .flat_map(|partition| partition.shards.iter())
+        .filter_map(|shard| shard.views.get("s0"))
+        .flat_map(|view| view.segments.iter())
+        .map(|segment| (segment.seg_id.clone(), segment.columns.scalar("heat").is_some()))
+        .collect()
+}
+
 /// **A rendered column declared at a running service is drawn from the next flush.** A row
 /// carrying it draws its value, and an edit gives a built item one. Every other item, built or
 /// flushed before the declaration, draws no value: a null for the number, code 0 for the
 /// category. Each stays so through a merge of segments written before and after the
-/// declaration, a fold and a restart, and the columns filter and reach the item card at each.
+/// declaration, a restart while segments without the lane are still served, a fold and a
+/// restart, and the columns filter and reach the item card at each.
 #[test]
 fn a_rendered_column_declared_at_runtime_draws_its_rows_and_earlier_rows_draw_absent() {
     let fx = fixture();
@@ -1078,6 +1092,7 @@ fn a_rendered_column_declared_at_runtime_draws_its_rows_and_earlier_rows_draw_ab
     };
     check(&engine, "flushed");
 
+    let before_merge = heat_lanes(&fx.root);
     let merges = engine.write_executor_stats().merges;
     engine.set_merge_for_test(true);
     engine.request_flush();
@@ -1085,7 +1100,33 @@ fn a_rendered_column_declared_at_runtime_draws_its_rows_and_earlier_rows_draw_ab
         engine.write_executor_stats().merges > merges
     });
     assert_eq!(engine.write_executor_stats().merge_failures, 0);
+    let after_merge = heat_lanes(&fx.root);
+    let taken: Vec<bool> = before_merge
+        .iter()
+        .filter(|(seg, _)| !after_merge.contains_key(*seg))
+        .map(|(_, lane)| *lane)
+        .collect();
+    assert!(
+        taken.contains(&false) && taken.contains(&true),
+        "the merge took segments written before and after the declaration: {before_merge:?} -> \
+         {after_merge:?}"
+    );
+    assert!(
+        after_merge
+            .iter()
+            .filter(|(seg, _)| !before_merge.contains_key(*seg))
+            .all(|(_, lane)| *lane),
+        "the merged segment holds the lane: {after_merge:?}"
+    );
     check(&engine, "merged");
+
+    // Reopened while segments written before the declaration are still served.
+    let engine = restart(&fx, engine);
+    assert!(
+        heat_lanes(&fx.root).values().any(|lane| !lane),
+        "a segment without the lane is still live"
+    );
+    check(&engine, "restarted before the fold");
 
     fold(&engine);
     check(&engine, "folded");

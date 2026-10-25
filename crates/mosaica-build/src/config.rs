@@ -1411,9 +1411,10 @@ impl ViewMetadata {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MetadataValue {
     Bool(bool),
-    /// Every integer width, and a category's key resolved to its code.
+    /// Every integer width.
     Int(i64),
     Float(f64),
+    /// A string, and a category's key.
     Text(String),
     /// Microseconds since the Unix epoch — the one time unit a `timestamp_us` may hold, so a
     /// declaration and a reader cannot disagree about it (`ScalarType::TimestampUs`).
@@ -3775,14 +3776,12 @@ fn compile_metadata_type(
             )))
         }
     };
-    mosaica_types::view::check_metadata_vocabulary(
-        name,
-        ty_name == "category",
-        vocabulary,
-        |vocabulary| vocabularies.contains_key(vocabulary),
-    )
+    let category = ty_name == "category";
+    mosaica_types::view::check_metadata_vocabulary(name, category, vocabulary, |vocabulary| {
+        vocabularies.contains_key(vocabulary)
+    })
     .map_err(|detail| declaration_error(format!("{object}: {detail}")))?;
-    if let Some(declared) = vocabulary.and_then(|vocabulary| vocabularies.get(vocabulary)) {
+    if let (true, Some(declared)) = (category, vocabulary.and_then(|v| vocabularies.get(v))) {
         return Ok(ViewMetadata {
             name: name.to_string(),
             ty: declared.width,

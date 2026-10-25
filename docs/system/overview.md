@@ -67,7 +67,7 @@ A running database takes new items, edits to existing ones, and deletions, which
 
 A deletion or a suppression applies to every request that starts after Mosaica accepts it. New and edited items appear at the next flush, which runs every 90 seconds by default, or sooner once 40,000 rows are waiting; an edited item leaves the map when the edit is accepted, and comes back, changed, at that flush. If you need to know when a write is visible, the write can ask to be answered only then. Because Mosaica records every write in a log before it answers, an accepted write survives a restart.
 
-Anything you can declare in the first load, you can also declare to a running database.
+Anything you can declare in the first load, you can also declare to a running database, with one exception: a running database has no data to fit a view's extent to, so a view declared there names its extent rather than asking for `auto`.
 
 [Changing data](write-path.md) covers ingest, flushes and compaction.
 

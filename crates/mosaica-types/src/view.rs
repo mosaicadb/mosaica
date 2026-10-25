@@ -50,9 +50,10 @@ pub const DECLARED_INCARNATION: ViewIncarnation = 0;
 #[serde(rename_all = "snake_case")]
 pub enum ViewMetadataValue {
     Bool(bool),
-    /// Every integer width, and a category's key resolved to its code.
+    /// Every integer width.
     Int(i64),
     Float(f64),
+    /// A string, and a category's key.
     Text(String),
     /// Microseconds since the Unix epoch — the one time unit a `timestamp_us` may hold, so a
     /// declaration and a reader cannot disagree about it.
@@ -94,7 +95,7 @@ pub enum ViewMetadataType {
     Float,
     Text,
     TimestampUs,
-    /// A category: the value is a key resolved to its vocabulary's code.
+    /// A category: the value is a key of its vocabulary.
     Category,
 }
 
