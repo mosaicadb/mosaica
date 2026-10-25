@@ -36,7 +36,7 @@ The names of the archives and subject classes, such as General Relativity and Qu
 
 - arXiv metadata: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), as published by Cornell University on Kaggle. Thank you to arXiv for use of its open access interoperability.
 - The names of arXiv's current archives and subject classes: the taxonomy page states no licence of its own. Its footer links to arXiv's [licence page](https://info.arxiv.org/help/license/index.html), which dedicates all metadata to the public domain under CC0 1.0. The same names are in arxiv-base.
-- The names of the eighteen retired archives: from [arxiv-base](https://github.com/arXiv/arxiv-base), MIT licence, copyright arXiv, Inc.
+- The names of the eighteen retired archives: from [arxiv-base](https://github.com/arXiv/arxiv-base), [MIT licence](https://github.com/arXiv/arxiv-base/blob/master/LICENSE), Copyright (c) 2026 arXiv, Inc.
 - arXiv-Topics-Embeddings, from which both layouts were computed: MIT licence, by Ali Maatouk. The embeddings themselves are not included.
 - The layouts, the Toponymy clusters and their names were made for Mosaica and are distributed with it under the repository's licence.
 
