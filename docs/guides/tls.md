@@ -30,14 +30,19 @@ server {
         client_max_body_size 2m;
     }
 
+    location = /readyz {
+        proxy_pass http://127.0.0.1:9151;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8080;
     }
 }
 ```
 
-`127.0.0.1:8080` stands for your application. The health checks are not under `/v1/`, so they stay
-private too.
+`127.0.0.1:8080` stands for your application. `/readyz` is passed through so that a load balancer
+or monitor outside the machine can check the server, as [Health and readiness](operating.md#health-and-readiness)
+describes. It needs no credential and answers with a status code alone.
 
 A map response is streamed. The counts for each tile come first and the points follow as they are
 found, with a final frame to mark the end. With `proxy_buffering off`, nginx passes each piece on as

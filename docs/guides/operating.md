@@ -50,7 +50,7 @@ When nothing is listening it says so and exits 1:
 mosaica health: no server answering at 127.0.0.1:9151: Connection refused (os error 111)
 ```
 
-The [TLS proxy](tls.md) doesn't pass the probes through, so run your load balancer's or monitor's check on the server's machine, or against the session address from inside your network.
+From outside the machine, check `/readyz` through the [TLS proxy](tls.md), whose example configuration passes it through, or against the session address from inside your network.
 
 For more than up or down, `mosaica status` prints the server's status report: how far writes have got, queue depths, compaction, memory and the limits on each write. `write_executor.posture` is the state of the write side, one of `not-started`, `running`, `wal-poisoned` or `dead`, and only `running` is ready.
 
