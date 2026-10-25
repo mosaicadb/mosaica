@@ -1531,8 +1531,11 @@ impl Executor {
         // Each layer naming a view group is drawn on the views the group holds in this
         // publication, before it is published, so no request sees a view without its layers.
         // Nothing is appended: the views follow from the roster, and a replay draws them again.
-        self.live.with_registry(|registry| {
-            registry.follow_groups(mosaica_store::manifest::group_views(&manifest.groups))
+        self.live.with_publication_state(|registry, store| {
+            let group = mosaica_store::manifest::group_views(&manifest.groups);
+            for (layer, view, siblings) in registry.follow_groups(group) {
+                store.draw_shapes_on(&layer, &view, &siblings);
+            }
         });
         let bundle = generation.bundle.with_views(manifest);
         let shards: Vec<(

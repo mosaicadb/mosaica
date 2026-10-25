@@ -1260,10 +1260,12 @@ impl Engine {
             &readers.prefix_dir,
         )?;
         let bundle = served_bundle(bundle, &state, &vocabularies);
-        // A layer naming a view group is drawn on the views the replayed roster leaves it.
-        state
-            .registry
-            .follow_groups(mosaica_store::manifest::group_views(&bundle.manifest.groups));
+        // A layer naming a view group is drawn on the views the replayed roster leaves it, and its
+        // shapes given a form on each, as the running service gave them.
+        let group = mosaica_store::manifest::group_views(&bundle.manifest.groups);
+        for (layer, view, siblings) in state.registry.follow_groups(group) {
+            state.artifacts.draw_shapes_on(&layer, &view, &siblings);
+        }
         // A dropped view's artifacts are deleted, with their keys free, wherever the log or the
         // deny state does not already hold the deletion.
         let dead =

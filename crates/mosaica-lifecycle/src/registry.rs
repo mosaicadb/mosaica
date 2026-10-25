@@ -1163,21 +1163,31 @@ impl LayerRegistry {
     }
 
     /// Draw each layer that named a view group on the views `group` answers it holds now, from
-    /// the names it was written with. Whether any layer's views changed.
-    pub fn follow_groups(&mut self, group: impl Fn(&str) -> Option<Vec<String>>) -> bool {
-        let mut changed = false;
-        for layer in self.layers.values_mut() {
+    /// the names it was written with. Returns every view a layer is drawn on through a group, as
+    /// `(layer, view, the group's views)`, for its shapes to be given a form there
+    /// ([`crate::membership::ArtifactStore::draw_shapes_on`]).
+    pub fn follow_groups(
+        &mut self,
+        group: impl Fn(&str) -> Option<Vec<String>>,
+    ) -> Vec<(String, String, Vec<String>)> {
+        let mut drawn = Vec::new();
+        for (name, layer) in self.layers.iter_mut() {
             if layer.written_views.is_empty() {
                 continue;
             }
-            let views = mosaica_types::layer::expand_views(&layer.written_views, &group, |_| true)
-                .expect("every name that is no group is kept as a view");
-            if views != layer.declaration.views {
-                layer.declaration.views = views;
-                changed = true;
+            layer.declaration.views =
+                mosaica_types::layer::expand_views(&layer.written_views, &group, |_| true)
+                    .expect("every name that is no group is kept as a view");
+            for written in &layer.written_views {
+                let Some(views) = group(written) else {
+                    continue;
+                };
+                for view in &views {
+                    drawn.push((name.clone(), view.clone(), views.clone()));
+                }
             }
         }
-        changed
+        drawn
     }
 
     /// Validates a batch of artifacts against the layer they are offered to, claims ordinals and

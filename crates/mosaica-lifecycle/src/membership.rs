@@ -293,24 +293,11 @@ impl ArtifactShapes {
     }
 
     /// The canonical bytes for one view, or `None` where the shape was not canonicalised for it.
-    ///
-    /// A view of a view group with none of its own, created after the shape was published, reads
-    /// the bytes a view of the same group holds: a group's views share its frame and projection,
-    /// which are all a canonical form is computed from, so the publication would have given it
-    /// those bytes.
     pub fn for_view(&self, view: &str) -> Option<&[u8]> {
-        if let Ok(i) = self.by_view.binary_search_by(|(v, _)| v.as_str().cmp(view)) {
-            return Some(self.by_view[i].1.as_slice());
-        }
-        fn group_of(id: &str) -> Option<&str> {
-            id.split_once(mosaica_types::view::GROUP_SEPARATOR)
-                .map(|(group, _)| group)
-        }
-        let group = group_of(view)?;
         self.by_view
-            .iter()
-            .find(|(held, _)| group_of(held) == Some(group))
-            .map(|(_, bytes)| bytes.as_slice())
+            .binary_search_by(|(v, _)| v.as_str().cmp(view))
+            .ok()
+            .map(|i| self.by_view[i].1.as_slice())
     }
 
     pub fn views(&self) -> impl Iterator<Item = (&str, &[u8])> {
@@ -1968,6 +1955,33 @@ impl ArtifactStore {
             shapes.resize(idx + 1, None);
         }
         shapes[idx] = shape.map(Box::new);
+    }
+
+    /// Give each shape of `layer` that holds no canonical form for `view` the form one of
+    /// `siblings` holds. `view` is one the layer is drawn on through a view group it names, and
+    /// `siblings` that group's views: they share its frame and projection, which are all a
+    /// canonical form is computed from, so these are the bytes a publication would give `view`.
+    /// A shape that already holds a form for `view` keeps it.
+    pub fn draw_shapes_on(&mut self, layer: &str, view: &str, siblings: &[String]) {
+        let Some(levels) = self.shapes.get_mut(layer) else {
+            return;
+        };
+        for slot in levels.values_mut().flatten().flatten() {
+            if slot.for_view(view).is_some() {
+                continue;
+            }
+            let Some(bytes) = siblings.iter().find_map(|sibling| slot.for_view(sibling)) else {
+                continue;
+            };
+            let mut by_view: Vec<(String, Vec<u8>)> = slot
+                .views()
+                .map(|(held, bytes)| (held.to_string(), bytes.to_vec()))
+                .collect();
+            by_view.push((view.to_string(), bytes.to_vec()));
+            if let Some(shapes) = ArtifactShapes::new(by_view) {
+                **slot = shapes;
+            }
+        }
     }
 
     /// The shapes the artifact at `ordinal` declared, or `None` where it declared none — which is

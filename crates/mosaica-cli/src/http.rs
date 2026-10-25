@@ -267,13 +267,14 @@ impl Retry {
 }
 
 /// The wait an answer asks for before the request is sent again, in seconds: its `retry-after`
-/// header, then its body's `retry_after_s`, then 1 second, and never less than 1 second.
+/// header where it has one, or else its body's `retry_after_s`; 1 second where neither names a
+/// number, and never less than 1 second.
 fn retry_after(answer: &Answer) -> f64 {
-    answer
-        .retry_after
-        .as_deref()
-        .and_then(|s| s.parse::<f64>().ok())
-        .or_else(|| answer.json()["retry_after_s"].as_f64())
+    let named = match answer.retry_after.as_deref() {
+        Some(header) => header.trim().parse::<f64>().ok(),
+        None => answer.json()["retry_after_s"].as_f64(),
+    };
+    named
         .filter(|seconds| seconds.is_finite())
         .map_or(MIN_BACKOFF, |seconds| seconds.max(MIN_BACKOFF))
 }
@@ -484,6 +485,11 @@ mod tests {
         assert_eq!(
             retry.after(&Err("no answer".to_string()), true),
             Some(MIN_BACKOFF)
+        );
+        assert_eq!(
+            retry.after(&Err("no answer".to_string()), true),
+            None,
+            "a second time without an answer ends the request"
         );
         let waits = std::iter::from_fn(|| retry.after(&busy, true)).count();
         assert_eq!(waits as f64, RETRY_BUDGET_S / MAX_BACKOFF);

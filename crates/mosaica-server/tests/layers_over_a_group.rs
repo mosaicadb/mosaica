@@ -543,6 +543,88 @@ async fn a_shape_layer_named_on_a_group_draws_on_a_view_created_in_it() {
     server.shutdown().await;
 }
 
+/// **A shape layer declared on one view of a group is drawn on that view and no other**: a
+/// sibling view of the same frame gets no form of its shapes, so no count and no member there.
+#[tokio::test]
+async fn a_shape_layer_on_one_view_of_a_group_draws_nothing_on_a_sibling() {
+    const LAYER: &str = "regions/one-year";
+    let built = build_side("", &|_| true);
+    let server = open(&built.dir).await;
+    let (status, body) = put_layer(
+        &server,
+        json!({
+            "name": LAYER,
+            "title": LAYER,
+            "views": ["years:2010"],
+            "membership": "spatial",
+            "shape": { "kind": "bbox" },
+            "visibility": "public",
+            "artifact_visibility": { "field": null, "default": "inherited" },
+            "require_member_visibility": null,
+            "hierarchy": { "kind": "flat", "prune_children": false },
+            "depends_on": [],
+            "levels": []
+        }),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let resp = server
+        .client
+        .put(server.control_url("/control/layers/regions%2Fone-year/artifacts"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&json!({
+            "artifacts": [{ "key": "box", "members": {}, "bbox": [0.0, 0.0, 1000.0, 1000.0] }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 201);
+    let published: Value = resp.json().await.unwrap();
+    let artifact = published["artifacts"][0]["mosaica_id"].as_str().unwrap().to_string();
+    let in_2010 = (0..ENTITIES).filter(|e| year_of(*e) == "2010").count() as u64;
+    assert_eq!(browse(&server, "years:2010", LAYER).await.get("box"), Some(&in_2010));
+
+    let auth = authorise(&server, &["0", "1"]).await;
+    let token = auth["token"].as_str().unwrap();
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/artifacts/browse"))
+        .bearer_auth(token)
+        .json(&json!({ "view": "years:2011", "layer": LAYER, "limit": 200 }))
+        .send()
+        .await
+        .unwrap();
+    if resp.status() == 200 {
+        let body: Value = resp.json().await.unwrap();
+        let counted = body["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["masked_count"].as_u64().unwrap_or(0) > 0);
+        assert!(!counted, "a sibling view counts nothing of the layer: {body}");
+    }
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/viewport"))
+        .bearer_auth(token)
+        .json(&json!({
+            "view": "years:2011", "zoom": 0, "bbox": [0.0, 0.0, 1000.0, 1000.0], "k": 1000,
+            "filters": { "member_of": { "layer": LAYER, "artifact": artifact } },
+        }))
+        .send()
+        .await
+        .unwrap();
+    if resp.status() == 200 {
+        let matched: u64 = decode_viewport_frames(&resp.bytes().await.unwrap())
+            .tiles
+            .iter()
+            .map(|(_, _, matched)| matched)
+            .sum();
+        assert_eq!(matched, 0, "no item of a sibling view is a member");
+    }
+    server.shutdown().await;
+}
+
 /// **A layer naming a group is drawn on every view of it, at both paths.**
 #[tokio::test]
 async fn a_layer_naming_a_group_is_drawn_on_every_view_of_it_at_both_paths() {
