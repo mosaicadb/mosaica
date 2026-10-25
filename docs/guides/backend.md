@@ -56,7 +56,7 @@ mosaica build 2>&1 | tail -n 3
 ```
 
 ```
-built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024296 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
+built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024856 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
   view topics: 50000 row(s)
   view topics-wide: 50000 row(s)
 ```
@@ -183,7 +183,7 @@ The fields are those a filter can name, with the operators each takes. A filter 
 
 ## Fill a filter list and a typeahead
 
-`GET /v1/categories/{field}` lists a category field's values, a page at a time. The `key` is what a filter names, and the `title` what you show. This vocabulary's titles are the same as its keys.
+`GET /v1/categories/{field}` lists a category field's values, a page at a time. The `key` is what a filter names, and the `title` what you show. Here a title is arXiv's name for the code, such as Machine Learning for `cs.LG`. The archives that come first in key order were retired before arXiv published its names, so their titles are their codes.
 
 ```bash
 curl -s "http://127.0.0.1:9141/v1/categories/archive?limit=4" -H "$AUTH"
@@ -202,7 +202,7 @@ curl -s "http://127.0.0.1:9141/v1/categories/primary_category/suggest?q=stat.m&v
 ```
 
 ```
-{"column":"primary_category","more":false,"q":"stat.m","total":4081,"values":[{"code":168,"count":48,"key":"stat.ME","match":{"field":"key","len":6,"start":0},"title":"stat.ME"},{"code":169,"count":347,"key":"stat.ML","match":{"field":"key","len":6,"start":0},"title":"stat.ML"}]}
+{"column":"primary_category","more":false,"q":"stat.m","total":4081,"values":[{"code":168,"count":48,"key":"stat.ME","match":{"field":"key","len":6,"start":0},"title":"Methodology"},{"code":169,"count":347,"key":"stat.ML","match":{"field":"key","len":6,"start":0},"title":"Machine Learning"}]}
 ```
 
 The counts are Ada's. `total` is the 4,081 papers she may see, out of 50,000. Of those, 347 have `stat.ML` as their subject class, and 48 have `stat.ME`, which she sees because they are cross-listed under one of her attributes. To count under a filter, send the same fields as a JSON body with `POST`, adding `filters`.
@@ -213,7 +213,7 @@ curl -s http://127.0.0.1:9141/v1/categories/primary_category/suggest -H "$AUTH" 
 ```
 
 ```
-{"column":"primary_category","more":false,"q":"stat.m","total":82,"values":[{"code":168,"count":6,"key":"stat.ME","match":{"field":"key","len":6,"start":0},"title":"stat.ME"},{"code":169,"count":18,"key":"stat.ML","match":{"field":"key","len":6,"start":0},"title":"stat.ML"}]}
+{"column":"primary_category","more":false,"q":"stat.m","total":82,"values":[{"code":168,"count":6,"key":"stat.ME","match":{"field":"key","len":6,"start":0},"title":"Methodology"},{"code":169,"count":18,"key":"stat.ML","match":{"field":"key","len":6,"start":0},"title":"Machine Learning"}]}
 ```
 
 Each session runs one suggestion at a time, and a second sent while the first is running is refused with `429`. Wait for each answer before sending the next.

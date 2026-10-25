@@ -898,7 +898,7 @@ paths:
                         {
                           "code": 5,
                           "key": "astro-ph",
-                          "title": "astro-ph"
+                          "title": "Astrophysics"
                         }
                       ]
                     }
@@ -913,17 +913,17 @@ paths:
                         {
                           "code": 33,
                           "key": "cs.CL",
-                          "title": "cs.CL"
+                          "title": "Computation and Language"
                         },
                         {
                           "code": 50,
                           "key": "cs.LG",
-                          "title": "cs.LG"
+                          "title": "Machine Learning"
                         },
                         {
                           "code": 164,
                           "key": "quant-ph",
-                          "title": "quant-ph"
+                          "title": "Quantum Physics"
                         }
                       ]
                     }
@@ -1069,7 +1069,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat"
+                          "title": "Condensed Matter"
                         },
                         {
                           "code": 19,
@@ -1080,7 +1080,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.dis-nn"
+                          "title": "Disordered Systems and Neural Networks"
                         },
                         {
                           "code": 20,
@@ -1091,7 +1091,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.mes-hall"
+                          "title": "Mesoscale and Nanoscale Physics"
                         },
                         {
                           "code": 21,
@@ -1102,7 +1102,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.mtrl-sci"
+                          "title": "Materials Science"
                         },
                         {
                           "code": 22,
@@ -1113,7 +1113,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.other"
+                          "title": "Other Condensed Matter"
                         }
                       ]
                     }
@@ -1228,7 +1228,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat"
+                          "title": "Condensed Matter"
                         },
                         {
                           "code": 19,
@@ -1239,7 +1239,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.dis-nn"
+                          "title": "Disordered Systems and Neural Networks"
                         },
                         {
                           "code": 20,
@@ -1250,7 +1250,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.mes-hall"
+                          "title": "Mesoscale and Nanoscale Physics"
                         },
                         {
                           "code": 21,
@@ -1261,7 +1261,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.mtrl-sci"
+                          "title": "Materials Science"
                         },
                         {
                           "code": 22,
@@ -1272,7 +1272,7 @@ paths:
                             "len": 8,
                             "start": 0
                           },
-                          "title": "cond-mat.other"
+                          "title": "Other Condensed Matter"
                         }
                       ]
                     }

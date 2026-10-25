@@ -8,7 +8,7 @@
 |---|---|---|
 | `points.parquet` | 50,000 | `entity_id`, `x`, `y` (the `topics` view), `categories` (the access terms), `arxiv_id`, `archive`, `primary_category`, `submitted_at`, `title` |
 | `points-umap200.parquet` | 50,000 | `entity_id`, `x`, `y`, `categories`: a second layout of the same papers (the `topics-wide` view) |
-| `archive.parquet`, `primary_category.parquet` | 38, 171 | arXiv's archives and subject classes, copied whole from the source |
+| `archive.parquet`, `primary_category.parquet` | 38, 171 | arXiv's archives and subject classes, copied whole from the source, each code titled with arXiv's name for it |
 | `clusters-toponymy.parquet` and members | 797 | Toponymy's four levels of clusters |
 | `taxonomy-arxiv.parquet` and members | 201 | arXiv's own classification: archives over subject classes |
 | `topics-toponymy.parquet` and members | 797 | a name for each Toponymy cluster |
@@ -30,9 +30,12 @@ The Toponymy names were written by a language model (Qwen3.6-35B-A3B) through th
 
 The sample keeps every Toponymy exemplar, 4,284 papers, so that each name ships with every paper it was written from. The other 45,716 papers are a uniform draw, with seed 0, from the rest of the corpus. Every clustering and member file is restricted to the sampled papers, and the taxonomy drops the 8 archives and subject classes with no sampled paper. The archive and subject-class vocabularies are copied whole.
 
+The names of the archives and subject classes, such as General Relativity and Quantum Cosmology for `gr-qc` and Machine Learning for `cs.LG`, are transcribed from arXiv's [category taxonomy](https://arxiv.org/category_taxonomy) into `test_corpora/arxiv/example.py`, as that page read on 25 October 2026. Eighteen archives retired before the page was written are not on it and are titled by their code: `acc-phys`, `adap-org`, `alg-geom`, `ao-sci`, `atom-ph`, `bayes-an`, `chao-dyn`, `chem-ph`, `cmp-lg`, `comp-gas`, `dg-ga`, `funct-an`, `mtrl-th`, `patt-sol`, `plasm-ph`, `q-alg`, `solv-int` and `supr-con`.
+
 ## Licences and attribution
 
 - arXiv metadata: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), as published by Cornell University on Kaggle. Thank you to arXiv for use of its open access interoperability.
+- The names of arXiv's archives and subject classes: the taxonomy page states no licence of its own. Its footer links to arXiv's [licence page](https://info.arxiv.org/help/license/index.html), which dedicates all metadata to the public domain under CC0 1.0. The same names are in arXiv's own code, [arxiv-base](https://github.com/arXiv/arxiv-base), under the MIT licence.
 - arXiv-Topics-Embeddings, from which both layouts were computed: MIT licence, by Ali Maatouk. The embeddings themselves are not included.
 - The layouts, the Toponymy clusters and their names were made for Mosaica and are distributed with it under the repository's licence.
 
@@ -46,4 +49,4 @@ From the repository root, with `data/notebook-2m4-live/`, `data/corpus.parquet` 
 python -m test_corpora.arxiv.example --source data/notebook-2m4-live --out examples/data/arxiv --papers 50000 --seed 0
 ```
 
-It takes about five minutes, most of it reading the 4.7 GB embedding file and laying out the second view. The first layout and the Toponymy clusters and names are copied from the source, which was made once and cannot be reproduced exactly, so the command makes this dataset again only from that same source directory.
+With pyarrow 26.0.0 it writes the same bytes as are committed here. It takes about five minutes, most of it reading the 4.7 GB embedding file and laying out the second view. The first layout and the Toponymy clusters and names are copied from the source, which was made once and cannot be reproduced exactly, so the command makes this dataset again only from that same source directory.
