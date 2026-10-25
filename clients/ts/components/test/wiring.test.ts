@@ -114,6 +114,33 @@ describe('configuration after connection', () => {
     el.dispose();
   });
 
+  it('builds one from a token alone, asking the page’s own origin, and joins a path or a full URL to each route', async () => {
+    const asked: string[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      throw new Error('no server in this test');
+    };
+    try {
+      for (const [attribute, prefix] of [
+        ['', '/v1/'],
+        ['viewer-url="/mosaica/"', '/mosaica/v1/'],
+        ['viewer-url="http://127.0.0.1:1/base"', 'http://127.0.0.1:1/base/v1/']
+      ] as const) {
+        asked.length = 0;
+        const {host, el} = await bare(`<mosaica-store ${attribute} token="t"></mosaica-store>`);
+        await settle(host);
+        expect(el.source).toBe('own');
+        await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
+        expect(asked.every((url) => url.startsWith(prefix))).toBe(true);
+        el.dispose();
+        document.body.innerHTML = '';
+      }
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
   it('builds one from an authorise supplier set after insertion', async () => {
     const {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1"></mosaica-store>');
     el.authorise = async () => ({token: 't', expiresAt: 1});
@@ -138,8 +165,9 @@ describe('configuration after connection', () => {
       built.push(next);
       watch(next);
     }
-    // Nothing that names a store left: detached, and the last one disposed.
-    el.viewerUrl = '';
+    // No token and no supplier: detached, and the last one disposed.
+    el.token = '';
+    el.authorise = null;
     await settle(host);
     expect(el.source).toBe('detached');
     expect(el.activeStore).toBeNull();
@@ -202,7 +230,7 @@ describe('configuration after connection', () => {
     const map = explorer.shadowRoot!.querySelector('mosaica-map') as unknown as Provider;
     expect(map.activeStore).toBe(explorer.activeStore);
     expect(map.source).toBe('context');
-    explorer.viewerUrl = '';
+    explorer.token = '';
     await settle(host);
     expect(explorer.source).toBe('detached');
     expect(map.activeStore).toBeNull();

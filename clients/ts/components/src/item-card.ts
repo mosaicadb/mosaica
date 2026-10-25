@@ -1,8 +1,9 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
-import type {DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal} from '@mosaicajs/client';
+import type {AggregateSpec, DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal} from '@mosaicajs/client';
 import {GRID32} from '@mosaicajs/client';
-import {MosaicaElement, columnCaption, emit, idString, timestampText, type PickOutcome} from './base.js';
+import {HeldAggregate, listedGroups} from './aggregate.js';
+import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
 import {refusalText, renderState, stateOf} from './states.js';
@@ -13,7 +14,9 @@ import {chrome, tokens} from './tokens.js';
  * grid, its group-scoped values, then Open and Copy id. Fields are listed by name in
  * declaration order, then any the schema does not declare; a field the record has no value for is
  * left out. A declared field is captioned in words (`published_at` as "Published at"). A category
- * field shows its key. A timestamp shows in full, as `14 March 2024, 12:00 UTC`.
+ * field shows its value's title where the vocabulary has one, else its key; the titles are asked
+ * for as a field card asks for its rows' (`Store.setAggregate`, over everything the viewer may
+ * see, naming the item's values). A timestamp shows in full, as `14 March 2024, 12:00 UTC`.
  * The close button appears only while the card shows something: an item, a refusal or a click's
  * result.
  *
@@ -212,15 +215,49 @@ export class MosaicaItemCard extends MosaicaElement {
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;
   private expandedFor: bigint | null = null;
+  /** The titles of the item's category values, asked of the store as the field cards ask for theirs. */
+  private readonly titles = new HeldAggregate('item-titles');
+  /** What `titles` asks for: the shown item's category fields, one grouping each, in this order. */
+  private titleAsk: {fields: string[]; spec: AggregateSpec | null} = {fields: [], spec: null};
 
-  /** Another item starts folded again; set before the render, so the render changes nothing it reads. */
+  /** A category value's title from the answer to `titles`, else from what the store already holds, else its key. */
+  private titleOf(field: string, key: string): string {
+    const table = this.titles.entryOf(this.resolvedStore, this.titleAsk.spec)?.result?.tables[this.titleAsk.fields.indexOf(field)];
+    return listedGroups(table).find((g) => g.key === key)?.title ?? keyTitle(this.resolvedStore, field, key);
+  }
+
+  /** A field's value as text: a category value by its title, anything else by its declared type. */
+  private text(name: string, value: unknown, column: DeclaredScalar | undefined): string {
+    return column?.category && typeof value === 'string' ? this.titleOf(name, value) : present(value, column);
+  }
+
+  protected override updated(changed: PropertyValues<this>): void {
+    super.updated(changed);
+    this.titles.set(this.isConnected ? this.resolvedStore : null, this.isConnected ? this.titleAsk.spec : null);
+  }
+
+  override disconnectedCallback(): void {
+    this.titles.set(null, null);
+    super.disconnectedCallback();
+  }
+
+  /**
+   * Another item starts folded again, and its category values are what the titles are asked for;
+   * set before the render, so the render changes nothing it reads.
+   */
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
-    const id = this.shown.item?.id ?? null;
+    const {item, meta} = this.shown;
+    const id = item?.id ?? null;
     if (id !== this.expandedFor) {
       this.expandedFor = id;
       this.expanded = false;
     }
+    const values = item?.detail.fields ?? {};
+    const countable = new Set((meta?.filterOperands ?? []).filter((o) => o.family === 'category' && !o.scope).map((o) => o.column));
+    const fields = (meta?.declaredScalars ?? []).filter((c) => c.category && countable.has(c.name) && typeof values[c.name] === 'string').map((c) => c.name);
+    const groupings = fields.map((field) => ({count: true as const, by: {field, values: [values[field] as string]}}));
+    this.titleAsk = {fields, spec: fields.length === 0 ? null : {groupings, subject: 'visible'}};
   }
 
   private get shown(): {item: {id: bigint; detail: ItemDetail} | null; refusal: Refusal | null; meta: Meta | null} {
@@ -262,7 +299,7 @@ export class MosaicaItemCard extends MosaicaElement {
     return html`<div class="panel">
       ${head(
         titleName
-          ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${present(fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
+          ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${this.text(titleName, fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
           : html`<div part="headline" class="card-title mono" data-name="mosaica_id">${id}</div>`,
         true
       )}
@@ -291,10 +328,10 @@ export class MosaicaItemCard extends MosaicaElement {
     const total = others.length + (titleName ? 1 : 0);
     const shown = this.expanded ? others : others.slice(0, 3);
     const headline = titleName
-      ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${present(fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
+      ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${this.text(titleName, fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
       : html`<div part="headline" class="card-title mono" data-name="mosaica_id">${id}</div>`;
     const subtitle = subtitleName
-      ? html`<div part="subtitle" data-name=${subtitleName}><slot name=${`field-${subtitleName}`}>${present(fields[subtitleName], declared.find((c) => c.name === subtitleName))}</slot></div>`
+      ? html`<div part="subtitle" data-name=${subtitleName}><slot name=${`field-${subtitleName}`}>${this.text(subtitleName, fields[subtitleName], declared.find((c) => c.name === subtitleName))}</slot></div>`
       : nothing;
     return html`<div class="panel">
       <div part="title" class="head"><div class="headline">${headline}${subtitle}</div><slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'item'})}>${icon('close', 14)}</button></div>
@@ -374,7 +411,7 @@ export class MosaicaItemCard extends MosaicaElement {
 
   /** One field, presented by its declared type; prose spans the grid. */
   private field(name: string, value: unknown, column: DeclaredScalar | undefined) {
-    const text = present(value, column);
+    const text = this.text(name, value, column);
     const prose = text.length > 60;
     return html`<div part="field" data-name=${name} ?data-prose=${prose} style=${prose ? nothing : 'display:contents'}>
       <span part="label" class="k">${column ? columnCaption(name) : name}</span>
@@ -383,7 +420,7 @@ export class MosaicaItemCard extends MosaicaElement {
   }
 }
 
-/** A value as text, by the column's declared type; a category is already its key. */
+/** A value as text, by the column's declared type. */
 function present(value: unknown, column: DeclaredScalar | undefined): string {
   if (value === null || value === undefined) return '—';
   if (column?.arrowType === 'timestamp_us' && (typeof value === 'number' || typeof value === 'bigint')) return timestampText(value);

@@ -100,7 +100,10 @@ export type ViewInput = {
  * @category Store
  */
 export type StoreOptions = {
-  /** The viewer server's base URL. Unused where `client` is given. */
+  /**
+   * The viewer server's base URL, joined to each route as {@link MosaicaClientOptions.viewerUrl}
+   * says: an empty string is the page's own origin. Unused where `client` is given.
+   */
   viewerUrl: string;
   /**
    * A viewer token used for every request and never renewed. Where `token` and `authorise` are both

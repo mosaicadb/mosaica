@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {Meta, RegionProjection} from '@mosaicajs/client';
 import '../src/explorer.js';
 import {aggregateEntry, answerAggregate, deep, deepAll, fakeStore, mount, registered, settle, status, meta, scalar, type FakeStore} from './fake-store.js';
@@ -112,6 +112,26 @@ describe('<mosaica-explorer> parts', () => {
   });
 });
 
+describe('<mosaica-explorer colour-by>', () => {
+  it('writes the colour to its store once, before its map renders, so no element updates twice for it', async () => {
+    const warn = vi.spyOn(console, 'warn');
+    const store = fakeStore({meta: META, status: status({})});
+    // As the store does, the legend is published at once.
+    store.setColourBy = (column: string | null) => {
+      store.calls.push({name: 'setColourBy', args: [column]});
+      store.set('legend', {...store.get('legend'), colourBy: column});
+    };
+    const el = document.createElement('mosaica-explorer') as HTMLElement & {store: unknown};
+    el.setAttribute('colour-by', 'archive');
+    el.store = store;
+    document.body.append(el);
+    await settle(document.body);
+    expect(store.calls.filter((c) => c.name === 'setColourBy').map((c) => c.args)).toEqual([['archive']]);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
 describe('<mosaica-explorer title-field>', () => {
   it('reaches the map’s hover and the default item card', async () => {
     const {host, shadow, store} = await explorer('<mosaica-explorer title-field="author"></mosaica-explorer>');
@@ -134,6 +154,15 @@ describe('<mosaica-explorer> narrow layout', () => {
     await settle(host);
     // The sheet's filter panel folds its cards to a line, so they ask for their counts in view alone.
     expect([...registered(store).keys()].map((id) => id.split('#')[0]).sort()).toEqual(['field-subject', 'fields-match']);
+  });
+
+  it('shows the dataset title in a bar above the map', async () => {
+    const titled = await explorer('<mosaica-explorer dataset-title="GeoNames places"></mosaica-explorer>');
+    (titled.el as unknown as {narrow: boolean}).narrow = true;
+    await settle(titled.host);
+    const bar = titled.shadow.querySelector('[part="title-bar"]');
+    expect(bar?.hasAttribute('hidden')).toBe(false);
+    expect(bar?.querySelector('[part="dataset-title"]')?.textContent).toBe('GeoNames places');
   });
 
   it('gives the Layers sheet the Points, Colour and Density sections over the layer picker', async () => {

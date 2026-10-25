@@ -10,8 +10,8 @@ import {attachContextRoot, defineOnce} from './define.js';
  * An overview beside a detail is two of these. `<mosaica-explorer>` is its own provider and needs
  * none.
  *
- * Takes a `store` property, or builds a store from `viewer-url` and `token` or an `authorise`
- * property. It renders its children and nothing else (`display: contents`).
+ * Takes a `store` property, or builds a store from `token` or an `authorise` property and
+ * `viewer-url`, the page's own origin where unset. It renders its children and nothing else (`display: contents`).
  *
  * @summary Provides one store to the elements inside it.
  * @tagname mosaica-store

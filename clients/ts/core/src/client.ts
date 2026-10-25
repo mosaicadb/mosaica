@@ -234,9 +234,13 @@ async function fail(response: Response): Promise<never> {
  * @category HTTP client
  */
 export type MosaicaClientOptions = {
-  /** The viewer listener's base URL, without a trailing slash. Routes under `/v1/` are appended to it. */
+  /**
+   * The viewer listener's base URL. Routes under `/v1/` are appended to it, after any trailing
+   * slash is dropped: `https://maps.example.org` and `/mosaica` work, and an empty string sends
+   * each request to `/v1/...` on the page's own origin.
+   */
   viewerUrl: string;
-  /** The session listener's base URL, without a trailing slash. Routes under `/session/` are appended to it. */
+  /** The session listener's base URL. Routes under `/session/` are appended to it, after any trailing slash is dropped. */
   sessionUrl: string;
   /**
    * The bearer token `authorise` and `revoke` send; no other method uses it. It is an API key whose
@@ -313,7 +317,11 @@ export class MosaicaClient {
    */
   private decoder: Decoder | null = null;
 
-  constructor(private readonly opts: MosaicaClientOptions) {}
+  private readonly opts: MosaicaClientOptions;
+
+  constructor(opts: MosaicaClientOptions) {
+    this.opts = {...opts, viewerUrl: opts.viewerUrl.replace(/\/+$/, ''), sessionUrl: opts.sessionUrl.replace(/\/+$/, '')};
+  }
 
   /**
    * One request, through the host's `fetch`, with the host's headers and then the route's own,

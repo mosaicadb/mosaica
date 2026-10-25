@@ -163,6 +163,27 @@ describe('<mosaica-field-card> on a category', () => {
     expect(lastFilters(store)).toEqual({filter: {archive: {family: 'category', keys: []}}, highlight: {}});
   });
 
+  it('filters to a value from a click on its row, or Enter or Space on the focused row, and leaves the highlight to its button', async () => {
+    const {host, store} = await mountCard('archive');
+    await answer(host, store, [{rows: [{key: 'cs', count: 10}], total: 10}], [{rows: [{key: 'cs', count: 20}], total: 20}]);
+    const row = rows(host)[0]!;
+    expect(row.tabIndex).toBe(0);
+    (row.querySelector('[part="name"]') as HTMLElement).click();
+    expect(lastFilters(store)).toEqual({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
+    store.set('filters', filtersOf({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}}));
+    await settle(host);
+    rows(host)[0]!.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    expect(lastFilters(store)).toEqual({filter: {archive: {family: 'category', keys: []}}, highlight: {}});
+    store.set('filters', filtersOf({filter: {}, highlight: {}}));
+    await settle(host);
+    rows(host)[0]!.dispatchEvent(new KeyboardEvent('keydown', {key: ' ', bubbles: true}));
+    expect(lastFilters(store)).toEqual({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
+    const before = store.calls.filter((c) => c.name === 'setFilters').length;
+    (rows(host)[0]!.querySelector('[part="highlight"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setFilters').length).toBe(before + 1);
+    expect(lastFilters(store)).toEqual({filter: {}, highlight: {archive: {family: 'category', keys: ['cs']}}});
+  });
+
   it('greys the values its filter leaves out, showing only how many they would add, and shares the rest within it', async () => {
     const {host, store} = await mountCard('archive', {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
     await answer(

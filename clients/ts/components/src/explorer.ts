@@ -115,9 +115,9 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 
 /**
  * The map with its status strip, toolbar, field cards, display settings, layers, selection and item
- * card, laid out together. It builds its own store from `viewer-url` and `token` or an `authorise`
- * property, or takes a `store` property, and provides it by context to everything inside it,
- * including elements a host puts in its slots.
+ * card, laid out together. It builds its own store from `token` or an `authorise` property and
+ * `viewer-url`, the page's own origin where unset, or takes a `store` property, and provides it by
+ * context to everything inside it, including elements a host puts in its slots.
  *
  * The heading names what is shown: `dataset-title` where the host sets one, with the view's name
  * under it, else the view's name alone. A view's name that is only its id is left out. With
@@ -165,10 +165,10 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * In a container narrower than 1000 px, either layout takes the overlay's form with a narrower card
  * of 264 px, every field card folded to one line until one is opened, and opening one folds the
  * one open before; the tools move to the bottom-left and the strip shortens its figures. In a
- * container 720 px wide or narrower, the status strip runs full width above a tab bar (Fields,
- * Layers, Item), and each tab opens its panel as a sheet: the filter panel, folded as in the
- * compact form; the Layers popover's sections; and the item card. The cards over the map are not
- * drawn there.
+ * container 720 px wide or narrower, the heading sits in a bar above the map, the status strip
+ * runs full width above a tab bar (Fields, Layers, Item), and each tab opens its panel as a sheet:
+ * the filter panel, folded as in the compact form; the Layers popover's sections; and the item
+ * card. The cards over the map are not drawn there.
  *
  * Every event its elements fire bubbles out of it, since each is composed.
  *
@@ -214,6 +214,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart sidebar - The sidebar, in the docked layout.
  * @csspart panel - The card over the map's top-left, in the overlay layout and in a container
  *   narrower than 1000 px.
+ * @csspart title-bar - The heading, above the map in the narrow layout.
  * @csspart dataset-title - The heading's dataset title, where `dataset-title` is set.
  * @csspart view-name - The view's name in the heading, where there is one view to show and its name
  *   is not its id.
@@ -408,7 +409,8 @@ export class MosaicaExplorer extends MosaicaElement {
         border-bottom: 0;
       }
       .head[hidden],
-      .pickers[hidden] {
+      .pickers[hidden],
+      [part='title-bar'][hidden] {
         display: none;
       }
       /* The filter panel's subject row draws the rule under the heading. */
@@ -633,16 +635,26 @@ export class MosaicaExplorer extends MosaicaElement {
       .right > * {
         pointer-events: auto;
       }
-      /* The narrow container: the strip full width, a tab bar, sheets. */
+      /* The narrow container: the heading above the map, the strip full width, a tab bar, sheets. */
       [part='tabs'],
       [part='strip-row'] {
         display: none;
+      }
+      [part='title-bar'] {
+        background: var(--_mosaica-surface);
+        border-bottom: 1px solid var(--_mosaica-line);
+      }
+      [part='title-bar'] .head {
+        padding: 10px 16px;
       }
       @container explorer (max-width: 720px) {
         [part='frame'],
         [part='frame'].docked {
           grid-template-columns: minmax(0, 1fr);
           grid-template-rows: minmax(0, 1fr) auto;
+        }
+        [part='frame'].titled {
+          grid-template-rows: auto minmax(0, 1fr) auto;
         }
         [part='sidebar'],
         [part='panel'],
@@ -1082,12 +1094,13 @@ export class MosaicaExplorer extends MosaicaElement {
 
     // The tooltip slot is forwarded only when the host supplied one: a slot assigned another slot
     // counts as filled even when that slot is empty, which would hide the map's own tooltip.
-    return html`<div part="frame" class=${`${floating ? 'floating' : 'docked'}${compact ? ' compact' : ''}`}
+    return html`<div part="frame" class=${`${floating ? 'floating' : 'docked'}${compact ? ' compact' : ''}${narrow && this.has('toolbar') && named ? ' titled' : ''}`}
       @mosaica-levelchange=${(e: CustomEvent<{level: number | null}>) => (this.level = e.detail.level)}
       @mosaica-artifactfit=${(e: CustomEvent<{id: string}>) => this.map?.fitTo(BigInt(e.detail.id))}
       @mosaica-viewfollow=${(e: CustomEvent<{view: string; x: number; y: number}>) => this.followItem(e.detail)}
       @mosaica-close=${(e: Event) => this.closeDetail(e)}>
       ${floating || narrow ? nothing : docked}
+      ${narrow && this.has('toolbar') ? html`<div part="title-bar" ?hidden=${!named}>${head}</div>` : nothing}
       <div class="stage">
         ${floating && !narrow ? panel : nothing}
         <mosaica-map

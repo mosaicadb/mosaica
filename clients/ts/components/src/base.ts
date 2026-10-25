@@ -20,8 +20,8 @@ type OwnConfig = {viewerUrl: string; token: string; authorise: TokenSupplier | n
  *
  * Store precedence: a `.store` property; else a context answer (a provider that connects after an
  * element built its own store is not adopted); else, for the map, the explorer and
- * `<mosaica-store>`, its own store from `viewer-url`, `token` or an `authorise` property, and
- * `artifacts-per-tile`; else
+ * `<mosaica-store>`, its own store from `token` or an `authorise` property, `viewer-url` (the
+ * page's own origin where unset) and `artifacts-per-tile`; else
  * detached, which renders nothing. An own store is built once those attributes suffice, and
  * replaced when `viewer-url`, `token` or the `authorise` function changes. A store handed in by
  * property or context is not disposed here.
@@ -38,8 +38,10 @@ export abstract class MosaicaElement extends LitElement {
   @property({attribute: false}) accessor store: Store | null = null;
   /**
    * The viewer plane's base URL. Only `<mosaica-map>`, `<mosaica-explorer>` and `<mosaica-store>`
-   * read it, to build their own store where no `store` property or context supplies one. Changing
-   * it builds a new store.
+   * read it, to build their own store where no `store` property or context supplies one. Each route
+   * is appended to it after any trailing slash is dropped, so a full URL such as
+   * `https://maps.example.org` and a path on the page's own server such as `/mosaica` both work.
+   * Unset, requests go to `/v1/...` on the page's own origin. Changing it builds a new store.
    */
   @property({attribute: 'viewer-url'}) accessor viewerUrl = '';
   /**
@@ -119,7 +121,7 @@ export abstract class MosaicaElement extends LitElement {
    */
   private resolve(): void {
     const wanted: OwnConfig | null =
-      this.canBuildOwn && this.viewerUrl && (this.token || this.authorise)
+      this.canBuildOwn && (this.token || this.authorise)
         ? {viewerUrl: this.viewerUrl, token: this.token, authorise: this.authorise, artifactsPerTile: this.artifactsPerTile}
         : null;
     const held = this.ownConfig;

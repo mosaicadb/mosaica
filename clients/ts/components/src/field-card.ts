@@ -120,7 +120,8 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * of the whole match, each a share of its own total, and the two counts. Under a filter on the
  * field, the values it leaves out are greyed and show only how many items they would add, and the
  * shares are of what the filter keeps. Hovering or focusing a row shows Highlight and Filter, which
- * put the value in or out of the field's clause in that position. Over the rows is the field's
+ * put the value in or out of the field's clause in that position. On a category card, a click on
+ * the row, or Enter or Space on the focused row, does what its Filter button does. Over the rows is the field's
  * search box, the typeahead of `<mosaica-filter>` or `<mosaica-cluster-filter>`, whose choice joins
  * the filter. A levelled layer's card has a Level choice in its heading, the top (coarsest) level
  * by default, which fires `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's
@@ -354,6 +355,9 @@ export class MosaicaFieldCard extends MosaicaElement {
       [part~='row']:focus-within,
       [part~='row'][data-shown] {
         background: var(--_mosaica-surface-2);
+      }
+      [part~='row'][tabindex] {
+        cursor: pointer;
       }
       [part~='row'][data-state='out'] {
         opacity: 0.55;
@@ -1025,10 +1029,22 @@ export class MosaicaFieldCard extends MosaicaElement {
       const counts = out
         ? html`<span part="count">${r.all === null ? '' : countText(r.all)}</span>`
         : html`<span part="count"><span class="sub">${r.sub === null ? '' : countText(r.sub)}</span>${same || r.all === null ? '' : ` / ${countText(r.all)}`}</span>`;
-      return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key}
+      // A category's row filters to its value, as its Filter button does, and shows its buttons.
+      const filters = kind === 'category';
+      return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key} tabindex=${filters ? '0' : nothing}
         @click=${(e: Event) => {
           if ((e.target as HTMLElement).closest('button')) return;
-          this.shownRow = this.shownRow === r.key ? null : r.key;
+          if (!filters) {
+            this.shownRow = this.shownRow === r.key ? null : r.key;
+            return;
+          }
+          this.shownRow = r.key;
+          verb('filter')();
+        }}
+        @keydown=${(e: KeyboardEvent) => {
+          if (!filters || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          verb('filter')();
         }}>
         <span class="mark">${mark}</span>
         <span class="label">

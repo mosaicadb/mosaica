@@ -99,6 +99,30 @@ describe('<mosaica-item-card>', () => {
     await settle(host);
     expect(deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent).toBe('cs');
   });
+
+  it('shows a category value by its title, asked of the store for the item’s values over what the viewer may see', async () => {
+    const host = await mount('<mosaica-item-card></mosaica-item-card>');
+    const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+    const store = fakeStore({meta: META, status: status({})});
+    el.store = store;
+    store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs', title: 'A title'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    const asked = [...registered(store)].find(([id]) => id.startsWith('item-titles'))?.[1];
+    expect(asked).toEqual({groupings: [{count: true, by: {field: 'archive', values: ['cs']}}], subject: 'visible'});
+    const shown = () => deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent;
+    expect(shown()).toBe('cs');
+    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', title: 'Computer science', count: 3}]}]));
+    await settle(host);
+    expect(shown()).toBe('Computer science');
+    // A value whose vocabulary holds no title keeps its key.
+    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', count: 3}]}]));
+    await settle(host);
+    expect(shown()).toBe('cs');
+    // Closed, the card asks for nothing.
+    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    expect([...registered(store).keys()].some((id) => id.startsWith('item-titles'))).toBe(false);
+  });
 });
 
 /** A filters projection over `draft`, with whatever else `over` names. */

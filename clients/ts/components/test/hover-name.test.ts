@@ -142,6 +142,27 @@ describe('a hover across a change of viewer', () => {
   });
 });
 
+describe('a hover over the selected item', () => {
+  const selected = (id: bigint) => ({item: {id, detail: {fields: {}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+
+  it('shows no tooltip over the point whose card is open, and one over any other', async () => {
+    const {el, store} = await map([]);
+    store.set('selection', selected(7n));
+    el.onHover(markAt(7n));
+    expect(el.hover).toBeNull();
+    el.onHover(markAt(8n));
+    expect(el.hover?.title).toBe('#8');
+  });
+
+  it('drops the tooltip when the record of the point under the pointer arrives', async () => {
+    const {el, store} = await map([]);
+    el.onHover(markAt(7n));
+    expect(el.hover?.title).toBe('#7');
+    store.set('selection', selected(7n));
+    expect(el.hover).toBeNull();
+  });
+});
+
 describe('a hover under a highlight', () => {
   it('reads a lit mark, and a dulled one, from the pass that drew it', async () => {
     const {el} = await map([{name: 'name', arrowType: 'utf8'}], 'title-field="name"');

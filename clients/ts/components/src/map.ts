@@ -121,7 +121,8 @@ let mapsMade = 0;
  * counts are drawn at their own positions until the next land. Keys, with the map focused: the
  * arrow keys pan, `+` and `-` zoom, and Escape cancels a shape being drawn, else
  * clears the selected region, else drops the picked point or artifact and its ring. A press hides
- * the hover tooltip until the pointer is released. The canvas is one tab stop, after the toolbar
+ * the hover tooltip until the pointer is released, and the point whose record is selected, which
+ * its item card shows, has no tooltip. The canvas is one tab stop, after the toolbar
  * and before the content of the other corners: it carries `role="application"`, the `tabindex`
  * the host set on the map, else 0, and the host's `aria-label` where the host set one, else one
  * naming the keys. A `tabindex` the host sets moves to the canvas, leaving -1 on the map, so the
@@ -550,7 +551,7 @@ export class MosaicaMap extends MosaicaElement {
   @property({attribute: 'controls-corner'}) accessor controlsCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'top-left';
 
   /** @internal */
-  @state() accessor hover: {x: number; y: number; title: string; lines: string[]} | null = null;
+  @state() accessor hover: {id: bigint; x: number; y: number; title: string; lines: string[]} | null = null;
   /** The artifact under the pointer (its outline, label or a mark it holds), whose outline is drawn. @internal */
   @state() accessor hoveredArtifact: bigint | null = null;
   /** @internal */
@@ -676,25 +677,6 @@ export class MosaicaMap extends MosaicaElement {
       if (this.measure && this.isConnected) this.startFrameLoop();
       else this.stopFrameLoop();
       if (this.measure && this.resolvedStore) this.measureStore(this.resolvedStore);
-    }
-    const s = this.resolvedStore;
-    if (s) {
-      if (changed.has('colourBy') && this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
-      this.pushSizing(s, changed);
-      if (changed.has('sizeBy')) this.pushSizeBy(s);
-      if (changed.has('layers') && this.layers) {
-        s.setLayers(this.layers);
-        emit(this, 'mosaica-layerchange', {layers: this.layers});
-      }
-      if (changed.has('budget') && this.budget > 0) s.setBudget(this.budget);
-      if (changed.has('clusterBudget')) {
-        if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
-        else if ((changed.get('clusterBudget') ?? 0) > 0) s.setClusterBudget(null);
-      }
-      if (changed.has('palette') && this.palette !== '') s.setPalette(this.palette);
-      if (changed.has('clusterColours')) this.pushClusterColours(s);
-      if (changed.has('tooltipFields') || changed.has('titleField')) this.askPointColumns(s);
-      this.pushColouring(s, changed);
     }
     if (changed.has('density') || changed.has('densityResolution')) this.pushDensity();
     const repaint = ['mode', 'drag', 'dragPolygon', 'basemap', 'ground', 'radius', 'clusterLevel', 'hoveredArtifact', 'noPoints', 'pointOpacity', 'density', 'densityColours', 'densityStrength', 'densityScale'] as const;
@@ -842,21 +824,54 @@ export class MosaicaMap extends MosaicaElement {
     this.pickedAt = null;
     this.regionWorld = null;
     this.regionPolygon = null;
-    this.askPointColumns(store);
-    if (!store) {
-      this.paint();
+    if (!store) this.askPointColumns(null);
+    this.unpushed = store;
+    this.paint();
+  }
+
+  /** A store adopted since the last update, to which the host's settings are not yet written. */
+  private unpushed: Store | null = null;
+
+  /**
+   * Write the host's settings to the store before the render: every one to a store adopted since
+   * the last update, else those that changed. The store answers synchronously, so a write here
+   * lands in this update; one written while another element renders, or after this one has,
+   * schedules a second update.
+   */
+  protected override willUpdate(changed: PropertyValues<this>): void {
+    super.willUpdate(changed);
+    const s = this.resolvedStore;
+    if (!s) return;
+    if (this.unpushed === s) {
+      this.unpushed = null;
+      this.askPointColumns(s);
+      if (this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
+      if (this.layers) s.setLayers(this.layers);
+      if (this.budget > 0) s.setBudget(this.budget);
+      if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
+      if (this.palette !== '') s.setPalette(this.palette);
+      this.pushClusterColours(s);
+      this.pushColouring(s);
+      this.pushSizing(s);
+      this.pushSizeBy(s);
       return;
     }
-    if (this.colourBy !== '') store.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
-    if (this.layers) store.setLayers(this.layers);
-    if (this.budget > 0) store.setBudget(this.budget);
-    if (this.clusterBudget > 0) store.setClusterBudget(this.clusterBudget);
-    if (this.palette !== '') store.setPalette(this.palette);
-    this.pushClusterColours(store);
-    this.pushColouring(store);
-    this.pushSizing(store);
-    this.pushSizeBy(store);
-    this.paint();
+    if (changed.has('colourBy') && this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
+    this.pushSizing(s, changed);
+    if (changed.has('sizeBy')) this.pushSizeBy(s);
+    if (changed.has('layers') && this.layers) {
+      s.setLayers(this.layers);
+      emit(this, 'mosaica-layerchange', {layers: this.layers});
+    }
+    if (changed.has('budget') && this.budget > 0) s.setBudget(this.budget);
+    if (changed.has('clusterBudget')) {
+      if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
+      else if ((changed.get('clusterBudget') ?? 0) > 0) s.setClusterBudget(null);
+    }
+    if (changed.has('palette') && this.palette !== '') s.setPalette(this.palette);
+    if (changed.has('clusterColours')) this.pushClusterColours(s);
+    if (changed.has('tooltipFields') || changed.has('titleField')) this.askPointColumns(s);
+    this.pushColouring(s, changed);
   }
 
   protected override onStoreChange(): void {
@@ -905,6 +920,7 @@ export class MosaicaMap extends MosaicaElement {
     const sel = s.get('selection');
     if (sel.item && sel.item !== this.announcedItem) {
       this.announcedItem = sel.item;
+      if (this.hover?.id === sel.item.id) this.hover = null;
       emit(this, 'mosaica-pick', {id: idString(sel.item.id), record: sel.item.detail});
     }
     if (sel.artifact && sel.artifact !== this.announcedArtifact) {
@@ -1198,7 +1214,7 @@ export class MosaicaMap extends MosaicaElement {
     this.hoveredArtifact = world ? this.artifactAt(world, own) : null;
     // The viewport carries no shapes; fetch the hovered one. `needShape` asks once per artifact.
     if (this.hoveredArtifact !== null) this.resolvedStore?.needShape(this.hoveredArtifact);
-    if (picked.kind !== 'mark' || this.pressed) {
+    if (picked.kind !== 'mark' || this.pressed || picked.id === this.resolvedStore?.get('selection').item?.id) {
       if (this.hover) this.hover = null;
       return;
     }
@@ -1216,7 +1232,7 @@ export class MosaicaMap extends MosaicaElement {
       .map((name) => carried(name, 'absent'))
       .filter((v): v is string => v !== null);
     const title = this.titleField ? carried(this.titleField, null) : null;
-    this.hover = {x: info.x, y: info.y, title: title ?? `#${idString(picked.id)}`, lines};
+    this.hover = {id: picked.id, x: info.x, y: info.y, title: title ?? `#${idString(picked.id)}`, lines};
     if (this.titleField && title === null) this.describeHovered(picked.id, info.x, info.y);
     emit(this, 'mosaica-hover', {id: idString(picked.id), x: info.x, y: info.y});
   }
