@@ -2645,6 +2645,33 @@ describe('the item a click opens and the record a hover names', () => {
     expect(store.get('selection')).toEqual({item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
   });
 
+  it('shows the pick asked for after clearSelection, not the one asked for before it', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {client} = fakeClient(() => response('ck'));
+    const answers = new Map<bigint, () => void>();
+    const item = vi.fn(async (_token: string, id: bigint) => {
+      await new Promise<void>((resolve) => answers.set(id, resolve));
+      return {fields: {title: `paper ${id}`}, views: [], scoped: {}, labels: []};
+    });
+    (client as unknown as {item: typeof item}).item = item;
+    const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10}});
+    await clock.advance(1);
+
+    const first = store.pick(7n);
+    await clock.advance(1);
+    store.clearSelection();
+    const second = store.pick(8n);
+    await clock.advance(1);
+    expect([...answers.keys()]).toEqual([7n, 8n]);
+    // The later pick answers first; the earlier one lands after it.
+    answers.get(8n)!();
+    await second;
+    answers.get(7n)!();
+    await first;
+    expect(store.get('selection').item?.id).toBe(8n);
+  });
+
   it('writes no projection for a hovered record, and asks again after a clear', async () => {
     const clock = fakeClock();
     const scheduler = fakeScheduler();
