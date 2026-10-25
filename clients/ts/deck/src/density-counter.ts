@@ -177,11 +177,11 @@ const WORLD: Box = [0, 0, WORLD_SIZE, WORLD_SIZE];
 /**
  * The levels asked for at `camera` with `depth` the finest: `depth` over the viewport and its
  * margin, then up to {@link RINGS} each a depth coarser over twice the reach, while the cells fit
- * `limit` and the last level does not already hold the world.
+ * `limit`, the groupings fit `groupings` and the last level does not already hold the world.
  */
-function levelsAt(camera: DensityCamera, depth: number, limit: number): Level[] {
+function levelsAt(camera: DensityCamera, depth: number, limit: number, groupings: number): Level[] {
   const levels: Level[] = [{depth, area: areaOf(camera, MARGIN)}];
-  for (let ring = 1; ring <= RINGS && depth - ring >= 0; ring++) {
+  for (let ring = 1; ring <= Math.min(RINGS, groupings - 1) && depth - ring >= 0; ring++) {
     if (contains(levels[ring - 1]!.area, WORLD)) break;
     const area = areaOf(camera, MARGIN * 2 ** ring);
     if (cellsIn(area, depth - ring) > limit) break;
@@ -323,7 +323,7 @@ export class DensityCounter {
     const view = this.store.get('view').id;
     const a = this.asked;
     if (!force && a && a.view === view && a.levels[0]!.depth === depth && contains(a.levels[0]!.area, areaOf(camera, 1))) return;
-    this.register({view, levels: levelsAt(camera, depth, meta.selection.maxAggregateCells), tries: 0});
+    this.register({view, levels: levelsAt(camera, depth, meta.selection.maxAggregateCells, meta.selection.maxAggregateGroupings), tries: 0});
   }
 
   private register(asked: Asked): void {

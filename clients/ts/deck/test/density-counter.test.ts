@@ -22,7 +22,7 @@ const camera = (target: [number, number], zoom: number): DensityCamera => ({targ
  * A store whose `aggregate` answers each grouping with one cell at its depth, of 9 items in the
  * first grouping and one more in each after, unless told to refuse.
  */
-async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: MosaicaClient['viewport'] = async () => response(viewportResult())) {
+async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: MosaicaClient['viewport'] = async () => response(viewportResult()), maxAggregateGroupings = SELECTION.maxAggregateGroupings) {
   const asked: AggregateRequest[] = [];
   const refusals: Error[] = [];
   const aggregate = vi.fn(async (_token: string, req: AggregateRequest): Promise<AggregateResult> => {
@@ -49,7 +49,7 @@ async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: 
       meta({
         views: [view('s0', {quantisation: {xMin: 0, xMax: 512, yMin: 0, yMax: 512}}), view('s1', {quantisation: {xMin: 0, xMax: 1024, yMin: 0, yMax: 1024}})],
         filterOperands: [{column: 'year', family: 'numeric', operands: ['range']}],
-        selection: {...SELECTION, maxAggregateCells}
+        selection: {...SELECTION, maxAggregateCells, maxAggregateGroupings}
       }),
     viewport,
     aggregate,
@@ -236,6 +236,14 @@ describe('DensityCounter', () => {
     expect(width(0)).toBeCloseTo(1.5 * 62.5);
     expect(width(1)).toBeCloseTo(2 * width(0));
     expect(width(2)).toBeCloseTo(4 * width(0));
+  });
+
+  it('asks for no more levels than the server takes groupings in one request', async () => {
+    const {counter, asked, settle} = await setUp(SELECTION.maxAggregateCells, undefined, 2);
+    counter.set(ON);
+    counter.look(camera([256, 256], 4));
+    await settle();
+    expect(asked[0]!.groupings).toHaveLength(2);
   });
 
   it('asks for no coarser level past the one that holds the world', async () => {

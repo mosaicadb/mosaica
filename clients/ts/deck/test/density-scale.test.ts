@@ -174,6 +174,36 @@ describe('hexagons', () => {
     expect(among).toEqual(alone);
   });
 
+  it('puts each point in the hexagon whose centre is nearest it', () => {
+    // One cell per depth-12 position, so each hexagon's quarter centres can be checked one at a time.
+    const span = WORLD_SIZE / 4096;
+    let seed = 7;
+    const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let n = 0; n < 2000; n++) {
+      const x = Math.floor(random() * 4000);
+      const y = Math.floor(random() * 4000);
+      const h = hexagons({depth: 12, cells: [{x, y, position: [0, 0], count: 1}]});
+      const r = h.radius;
+      // Each quarter centre's nearest lattice centre, found by search, is among the hexagons drawn.
+      for (const [qx, qy] of [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]] as const) {
+        const px = (x + qx) * span;
+        const py = (y + qy) * span;
+        let best: [number, number] = [0, 0];
+        let bestD = Infinity;
+        const j0 = Math.round(py / (1.5 * r));
+        for (let j = j0 - 2; j <= j0 + 2; j++) {
+          const i0 = Math.round(px / (Math.sqrt(3) * r));
+          for (let i = i0 - 2; i <= i0 + 2; i++) {
+            const c: [number, number] = [(i + (j & 1) / 2) * Math.sqrt(3) * r, j * 1.5 * r];
+            const d = Math.hypot(px - c[0], py - c[1]);
+            if (d < bestD) [best, bestD] = [c, d];
+          }
+        }
+        expect(centres(h).some((hex) => Math.hypot(hex.position[0] - best[0], hex.position[1] - best[1]) < 1e-9)).toBe(true);
+      }
+    }
+  });
+
   it('is empty without cells', () => {
     expect(hexagons({depth: 5, cells: []}).length).toBe(0);
   });

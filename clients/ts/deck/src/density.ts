@@ -345,14 +345,15 @@ function hexAt(x: number, y: number): number {
   const px = x / HEX_DX - (j & 1) / 2;
   let i = Math.round(px);
   const dy1 = py - j;
-  // Near a row's slanted edges the hexagon is the nearer of this row's and the next row's centres.
+  // Near a row's slanted edges the hexagon is the nearer of this row's and the next row's centres,
+  // measured in radii: a column is HEX_DX radii wide and a row HEX_DY high.
   if (Math.abs(dy1) * 3 > 1) {
     const dx1 = px - i;
     const i2 = i + (px < i ? -1 : 1) / 2;
     const j2 = j + (py < j ? -1 : 1);
     const dx2 = px - i2;
     const dy2 = py - j2;
-    if (dx1 * dx1 + dy1 * dy1 > dx2 * dx2 + dy2 * dy2) {
+    if (HEX_DX ** 2 * (dx1 * dx1 - dx2 * dx2) + HEX_DY ** 2 * (dy1 * dy1 - dy2 * dy2) > 0) {
       i = i2 + (j & 1 ? 1 : -1) / 2;
       j = j2;
     }
