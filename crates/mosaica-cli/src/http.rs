@@ -405,7 +405,8 @@ impl Plane {
                 self.timeout,
             );
             let again = match &sent {
-                Ok(answer) => answer.status == 429 && attempts < MAX_ATTEMPTS,
+                // The resend of an unanswered request is not one of a `429`'s attempts.
+                Ok(answer) => answer.status == 429 && attempts - u32::from(resent) < MAX_ATTEMPTS,
                 Err(_) => replayable && !resent,
             };
             if !again {

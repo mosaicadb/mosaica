@@ -795,3 +795,116 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     ));
     assert_eq!(nowhere["refused_pages"][0]["status"], 404, "{nowhere}");
 }
+
+/// A control plane that answers each request as `plan` says, in order: `None` closes the
+/// connection without an answer, and `Some(body)` answers `200` with it. It records each
+/// request's batch id and body.
+struct Planned {
+    url: String,
+    seen: Seen,
+}
+
+/// Each request a [`Planned`] plane received: its batch id and its body.
+type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+fn planned(plan: Vec<Option<&'static str>>) -> Planned {
+    use std::io::{BufRead, Read};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let seen: Seen = Default::default();
+    let recorded = std::sync::Arc::clone(&seen);
+    std::thread::spawn(move || {
+        let mut plan = plan.into_iter();
+        for stream in listener.incoming().flatten() {
+            let mut reader = std::io::BufReader::new(stream);
+            let (mut batch, mut length) = (String::new(), 0);
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                    break;
+                }
+                let line = line.trim_end();
+                if line.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':') {
+                    match name.to_ascii_lowercase().as_str() {
+                        "content-length" => length = value.trim().parse().unwrap_or(0),
+                        "x-mosaica-batch-id" => batch = value.trim().to_owned(),
+                        _ => {}
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            let _ = reader.read_exact(&mut body);
+            recorded.lock().unwrap().push((batch, body));
+            let mut stream = reader.into_inner();
+            match plan.next().flatten() {
+                Some(answer) => {
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: \
+                         {}\r\nconnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    );
+                }
+                None => {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                }
+            }
+        }
+    });
+    Planned { url, seen }
+}
+
+#[test]
+fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
+    let dir = TempDir::new().unwrap();
+    let rows = b"{\"id\": 1, \"x\": 1.0, \"y\": 1.0}\n";
+    let insert = |url: &str| {
+        run(
+            dir.path(),
+            &[
+                "insert",
+                "-",
+                "--format",
+                "ndjson",
+                "--page-rows",
+                "10",
+                "--page-bytes",
+                "1m",
+                "--control",
+                url,
+            ],
+            &[("MOSAICA_CREDENTIAL", "credential")],
+            rows,
+        )
+    };
+
+    // Answered on the resend: the same bytes under the same batch id, and the row lands once.
+    let answered = planned(vec![
+        None,
+        Some(r#"{"rows": 1, "created": 1, "mosaica_ids": ["7"], "refused": [], "publication": 3}"#),
+    ]);
+    let report = answer(insert(&answered.url));
+    assert_eq!(report["pages"], 1, "{report}");
+    assert_eq!(report["created"], 1, "{report}");
+    assert_eq!(report["refused_pages"], serde_json::json!([]), "{report}");
+    let seen = answered.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0], seen[1]);
+    assert_eq!(seen[0].1, rows);
+
+    // Unanswered twice: the insert stops there, having sent the page twice and no more.
+    let silent = planned(Vec::new());
+    let report = refused(insert(&silent.url));
+    assert!(report["stopped"].is_string(), "{report}");
+    assert_eq!(
+        report["refused_pages"][0]["status"],
+        Value::Null,
+        "{report}"
+    );
+    let seen = silent.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0], seen[1]);
+}
