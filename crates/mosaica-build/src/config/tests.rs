@@ -3156,9 +3156,10 @@ fn a_roster_entry_carries_every_declared_metadata_name() {
 
 #[test]
 fn a_metadata_value_is_typed_against_its_declaration() {
-    let text = with_group("").replace("starts = 2026-04-01T00:00:00Z", "starts = \"April\"");
+    let text = with_group("").replace("starts = 2026-04-01T00:00:00Z", "starts = true");
     let message = err(&text);
     assert!(message.contains("timestamp_us"), "{message}");
+    err(&with_group("").replace("starts = 2026-04-01T00:00:00Z", "starts = \"April\""));
 
     let text = with_group("").replace("label = \"text\"", "label = \"u8\"");
     let message = err(&text);
@@ -3175,15 +3176,13 @@ fn a_metadata_value_is_typed_against_its_declaration() {
     assert!(message.contains("unknown type 'nonesuch'"), "{message}");
 }
 
-/// A local date-time names an instant only against a time zone nobody declared.
+/// A local date-time names an instant only against a time zone nobody declared, so it is refused
+/// whether written as a TOML date-time or a string; a date alone is midnight UTC.
 #[test]
 fn a_metadata_timestamp_needs_an_offset() {
-    let text = with_group("").replace("2026-04-01T00:00:00Z", "2026-04-01T00:00:00");
-    let message = err(&text);
-    assert!(
-        message.contains("needs a date, a time and an offset"),
-        "{message}"
-    );
+    err(&with_group("").replace("2026-04-01T00:00:00Z", "2026-04-01T00:00:00"));
+    err(&with_group("").replace("2026-04-01T00:00:00Z", "\"2026-04-01T00:00:00\""));
+    ok(&with_group("").replace("2026-04-01T00:00:00Z", "2026-04-01"));
 }
 
 /// A group's own gate and a roster record's own are stored where the evaluation reads them: the
