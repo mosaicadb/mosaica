@@ -335,7 +335,7 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
         population = pc.fill_null(places["population"], 0)
         big = pc.sum(pc.greater_equal(population, 1_000_000)).as_py()
         san = sum("san" in words for words in tokens(places["name"].to_pylist()))
-        in_region = pc.equal(places["admin1"], "ID.18")
+        in_region = pc.equal(places["division"], "East Nusa Tenggara, Indonesia")
         assert counts == [big, san, pc.sum(in_region).as_py()]
         assert namespace["db"].view("world").count() == places.num_rows
 
@@ -360,7 +360,7 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
         assert [widget.filters for _, widget in maps] == [
             None,
             {"population": {"range": {"gte": 1_000_000}}},
-            {"admin1": {"eq": "ID.18"}},
+            {"division": {"eq": "East Nusa Tenggara, Indonesia"}},
         ]
     finally:
         if "db" in namespace:

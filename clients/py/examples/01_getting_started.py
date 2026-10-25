@@ -106,11 +106,11 @@ def _(geonames):
 def _(mo):
     mo.md(r"""
     Each row is one place: its GeoNames id, its longitude and latitude, its name, the kind of
-    feature it is, its country, the region it is filed under, and its population.
-    `feature_class` holds one of nine words, such as `settlement`, `water` or `mountain`.
-    `admin1` is GeoNames' code for the place's first-level region, such as a state or a
-    province, after its country's code. Most places have no population figure, and pandas
-    shows `<NA>` for them.
+    feature it is, its country, the region it is filed under, its population and its country's
+    code. `feature_class` holds one of nine words, such as `settlement`, `water` or `mountain`.
+    `division` is the place's first-level division, such as a state or a province, followed by
+    its country, because division names repeat across countries. Most places have no population
+    figure, and pandas shows `<NA>` for them.
 
     `dtype_backend="numpy_nullable"` asks pandas for its types that allow a missing value.
     Without it, the gaps would turn `population` into a column of floats.
@@ -152,9 +152,9 @@ def _(db, places):
     db.declare_view("world", projection="web_mercator")
     db.declare_columns(
         places,
-        category=["feature_class", "country", "admin1"],
+        category=["feature_class", "country", "division"],
         render=["feature_class"],
-        index=["name", "feature_class", "admin1", "population"],
+        index=["name", "feature_class", "division", "population"],
     )
     # --8<-- [end:declare]
     return
@@ -169,7 +169,7 @@ def _(mo):
 
     `declare_columns` reads the data frame's column types, not its values, and declares every
     column. A column is a detail unless `render`, `index` or `category` names it. We name
-    `feature_class`, `country` and `admin1` as categories. Each holds a short list of values
+    `feature_class`, `country` and `division` as categories. Each holds a short list of values
     repeated across many rows, and a category is what the map colours by and counts by. The
     other string columns are declared as text, `geonameid` and `population` as 64-bit
     integers, and `lon` and `lat` as 64-bit floats.
@@ -182,7 +182,7 @@ def _(mo):
     Each has a cost. A rendered column makes every point the server sends larger, so render
     only what the map needs, which here is the feature class for colour. An index takes disk
     and build time, so index the columns people will filter on. We index `name` to search it,
-    `population` to filter on a range, and `feature_class` and `admin1` to filter and count by
+    `population` to filter on a range, and `feature_class` and `division` to filter and count by
     them. The rest are details, which cost least.
 
     The report under the cell lists every column and what it was declared as. Its second line
@@ -365,8 +365,8 @@ def _(mo):
 
     ## Find a misfiled place
 
-    East Nusa Tenggara is a chain of islands at the south-eastern end of Indonesia, and GeoNames
-    codes it `ID.18`. Filter to it, count it and draw it.
+    East Nusa Tenggara is a chain of islands at the south-eastern end of Indonesia. Filter to
+    it, count it and draw it.
     """)
     return
 
@@ -374,7 +374,7 @@ def _(mo):
 @app.cell
 def _(db):
     # --8<-- [start:outlier]
-    nusa_tenggara = db.view("world").filter({"admin1": {"eq": "ID.18"}})
+    nusa_tenggara = db.view("world").filter({"division": {"eq": "East Nusa Tenggara, Indonesia"}})
     nusa_tenggara.count()
     # --8<-- [end:outlier]
     return (nusa_tenggara,)
