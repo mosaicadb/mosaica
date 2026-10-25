@@ -1545,19 +1545,16 @@ struct Ids {
 
 impl Ids {
     fn new(path: PathBuf) -> Result<Ids, String> {
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or_default();
-        if !["arrows", "parquet"].contains(&extension.to_ascii_lowercase().as_str()) {
-            return Err(format!(
+        // `Output::file` refuses only a path whose extension names no format.
+        let output = Output::file(path.clone()).map_err(|_| {
+            format!(
                 "--ids-out {} names no file ending in .arrows or .parquet; name one, since the \
                  extension says which to write and stdout carries the report",
                 path.display()
-            ));
-        }
+            )
+        })?;
         Ok(Ids {
-            output: Output::file(path)?,
+            output,
             schema: Arc::new(Schema::new(vec![
                 Field::new("row", DataType::UInt64, false),
                 Field::new("mosaica_id", DataType::UInt64, true),
