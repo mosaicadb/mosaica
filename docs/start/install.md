@@ -17,7 +17,7 @@ cargo install --locked --path crates/mosaica-cli
 
 This installs the `mosaica` command, which both builds databases and serves them. To run the server as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md).
 
-Mosaica runs on Linux and macOS. It doesn't run on Windows yet.
+Mosaica runs on Linux and macOS, but not yet on Windows.
 
 ??? info "Supported platforms"
     Release builds are made for Linux on x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on Apple silicon, and macOS 10.12 or later on Intel. The tests run on Linux x86_64.
@@ -65,9 +65,9 @@ flowchart LR
     Not built yet: starting from an empty database. For now, a database starts with a build that loads at least one view's data.
 
 ??? info "Where Mosaica looks for the two files"
-    Mosaica reads `mosaica.toml` from the directory you run it in, or the nearest directory above it that has one, and `--deployment` names another. The schema is the file `[build] schema` names, `schema.toml` by default, and `--config` names another. Relative paths are read from the directory of the file they're in.
+    Mosaica looks for `mosaica.toml` in the directory you run it from, then in each directory above, unless you name one with `--deployment`. It finds the schema through `[build] schema`, which defaults to `schema.toml`, the name the examples in the repository and the Python client use, or through `--config`. A relative path in either file is read from that file's own directory.
 
-    The examples in the repository and the Python client call the schema `schema.toml`. `mosaica check --payloads` prints a schema as the requests that would declare it at a running server.
+    If you'd rather declare a schema at a running server, `mosaica check --payloads` prints it as the requests to send.
 
 ## Try it
 
@@ -133,7 +133,7 @@ operator_credential_file = "operator.secret"
 dir = "catalogue"
 ```
 
-Check, build and serve:
+Check that the schema matches the file, then build the database:
 
 ```bash
 mosaica check 2>&1 | tail -n 1
@@ -152,6 +152,8 @@ built /home/you/places/bundle (v00000): 150000 items, 1 terms, 150000 pairs, 116
   view world: 150000 row(s)
 ```
 
+Make the operator credential and start the server:
+
 ```bash
 openssl rand -hex 16 > operator.secret; chmod 600 operator.secret
 mosaica serve
@@ -162,18 +164,18 @@ mosaica serve
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-The server is running. To open the map in a browser, follow [Open the map](first-map.md#open-the-map) in the tutorial, with `~/places` in place of `~/ireland`.
+You now have a server with 150,000 places in it. To see them on a map, follow the tutorial's [Open the map](first-map.md#open-the-map) step, using `~/places` where it says `~/ireland`.
 
-The [corpus.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references list every key. [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) covers what the server keeps on disc.
+Every key this example leaves out is in the [corpus.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the server keeps on disc and how to back it up.
 
 ## From Python
 
-The Python client writes both files for you. `mosaica.create("~/maps/places")` makes a database in that directory, and its first commit builds the database and starts a server. `mosaica serve --deployment ~/maps/places/mosaica.toml` serves it again later, without Python.
+In Python you don't write either file yourself. `mosaica.create("~/maps/places")` makes a database in that directory and writes both files there, and its first commit builds the database and starts a server for it. Because everything lives in that one directory, you can serve the database later without Python, with `mosaica serve --deployment ~/maps/places/mosaica.toml`.
 
-`mosaica.create()` with no path makes a temporary database, deleted when Python exits. The [Python reference](../reference/python/connecting.md) covers `create()`, `open()` and `save()`.
+Leave out the path and you get a temporary database, which is deleted when Python exits. The [Python reference](../reference/python/connecting.md) has the details of `create()`, `open()` and `save()`.
 
 ## Next
 
-- [Your first map from files](first-map.md) builds a map of Ireland step by step.
-- [Your first map in Python](python.md) does the same from a data frame.
-- [Users and roles](../system/users-and-roles.md) covers who can sign in, and what each may see and do.
+- [Your first map from files](first-map.md) walks through a map of Ireland, from downloading the data to filtering it in the browser.
+- [Your first map in Python](python.md), if you'd rather start from a data frame.
+- Before other people use your server, read [Users and roles](../system/users-and-roles.md) to set up who can sign in and what each of them may see.
