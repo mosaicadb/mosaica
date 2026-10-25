@@ -8,202 +8,12 @@
 //! credential from `MOSAICA_CREDENTIAL`. Where `MOSAICA_API_KEY` or `MOSAICA_CREDENTIAL` is unset,
 //! the request is sent without a credential, as an open server serves it.
 
-use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
-use std::time::Duration;
 
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
-const TIMEOUT: Duration = Duration::from_secs(120);
-
-/// Where a request goes: `http://host:port`, or `unix:<path>` for a control plane on a Unix
-/// socket.
-#[derive(Clone, Debug)]
-enum Target {
-    Http(String),
-    Unix(std::path::PathBuf),
-}
-
-impl Target {
-    fn parse(raw: &str) -> Result<Target, String> {
-        if let Some(path) = raw.strip_prefix("unix:") {
-            return Ok(Target::Unix(path.into()));
-        }
-        if raw.starts_with("http://") || raw.starts_with("https://") {
-            return Ok(Target::Http(raw.trim_end_matches('/').to_owned()));
-        }
-        Err(format!(
-            "`{raw}` is not an address; write `http://<host>:<port>`, or `unix:<path>` for a Unix \
-             socket"
-        ))
-    }
-}
-
-/// One request and its answer's status and body.
-fn send(
-    target: &Target,
-    method: &str,
-    path: &str,
-    bearer: Option<&str>,
-    body: Option<&Value>,
-) -> Result<(u16, Vec<u8>), String> {
-    match target {
-        Target::Http(base) => {
-            let client = reqwest::blocking::Client::builder()
-                .timeout(TIMEOUT)
-                .build()
-                .map_err(|e| format!("starting the HTTP client: {e}"))?;
-            let method = reqwest::Method::from_bytes(method.as_bytes()).expect("a known method");
-            let write = method != reqwest::Method::GET;
-            let mut req = client.request(method, format!("{base}{path}"));
-            if let Some(bearer) = bearer {
-                req = req.bearer_auth(bearer);
-            }
-            // Named with no body too: an open server refuses a write with no content type.
-            if write {
-                req = req.header(reqwest::header::CONTENT_TYPE, "application/json");
-            }
-            if let Some(body) = body {
-                req = req.body(body.to_string());
-            }
-            let resp = req.send().map_err(|e| format!("{base}{path}: {e}"))?;
-            let status = resp.status().as_u16();
-            let bytes = resp.bytes().map_err(|e| format!("{base}{path}: {e}"))?;
-            Ok((status, bytes.to_vec()))
-        }
-        Target::Unix(socket) => unix_request(socket, method, path, bearer, body),
-    }
-}
-
-/// HTTP/1.1 over a Unix socket, one request per connection.
-fn unix_request(
-    socket: &std::path::Path,
-    method: &str,
-    path: &str,
-    bearer: Option<&str>,
-    body: Option<&Value>,
-) -> Result<(u16, Vec<u8>), String> {
-    let at = || format!("unix:{}", socket.display());
-    let mut stream = std::os::unix::net::UnixStream::connect(socket)
-        .map_err(|e| format!("connecting to {}: {e}", at()))?;
-    stream.set_read_timeout(Some(TIMEOUT)).ok();
-    let body = body.map(Value::to_string).unwrap_or_default();
-    let mut head = format!("{method} {path} HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n");
-    if let Some(bearer) = bearer {
-        head.push_str(&format!("authorization: Bearer {bearer}\r\n"));
-    }
-    if method != "GET" {
-        head.push_str("content-type: application/json\r\n");
-    }
-    head.push_str(&format!("content-length: {}\r\n\r\n", body.len()));
-    stream
-        .write_all(head.as_bytes())
-        .and_then(|()| stream.write_all(body.as_bytes()))
-        .map_err(|e| format!("writing to {}: {e}", at()))?;
-    let mut raw = Vec::new();
-    stream
-        .read_to_end(&mut raw)
-        .map_err(|e| format!("reading from {}: {e}", at()))?;
-    let split = raw
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| format!("{} answered without a complete header", at()))?;
-    let headers = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
-    let status = headers
-        .split_whitespace()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| format!("{} answered without a status", at()))?;
-    let rest = &raw[split + 4..];
-    let body = if headers.contains("transfer-encoding: chunked") {
-        dechunk(rest).ok_or_else(|| format!("{} answered a malformed chunked body", at()))?
-    } else {
-        rest.to_vec()
-    };
-    Ok((status, body))
-}
-
-fn dechunk(mut rest: &[u8]) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    loop {
-        let end = rest.windows(2).position(|w| w == b"\r\n")?;
-        let size = std::str::from_utf8(&rest[..end]).ok()?;
-        let size = usize::from_str_radix(size.split(';').next()?.trim(), 16).ok()?;
-        rest = &rest[end + 2..];
-        if size == 0 {
-            return Some(out);
-        }
-        out.extend_from_slice(rest.get(..size)?);
-        rest = rest.get(size + 2..)?;
-    }
-}
-
-/// A path segment, percent-encoded so a name holding `/` or a space reaches the route whole.
-fn segment(raw: &str) -> String {
-    raw.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                (b as char).to_string()
-            }
-            other => format!("%{other:02X}"),
-        })
-        .collect()
-}
-
-/// Prints the answer, or the refusal, and exits accordingly.
-fn finish(verb: &str, answer: Result<(u16, Vec<u8>), String>) -> ExitCode {
-    match answer {
-        Ok((status, body)) if (200..300).contains(&status) => {
-            if !body.is_empty() {
-                println!("{}", String::from_utf8_lossy(&body).trim_end());
-            }
-            ExitCode::SUCCESS
-        }
-        Ok((status, body)) => {
-            eprintln!(
-                "mosaica {verb}: the server answered {status}: {}",
-                String::from_utf8_lossy(&body).trim_end()
-            );
-            ExitCode::FAILURE
-        }
-        Err(e) => {
-            eprintln!("mosaica {verb}: {e}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn env_secret(name: &str, what: &str) -> Result<String, String> {
-    std::env::var(name)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .map(|v| v.trim().to_owned())
-        .ok_or_else(|| format!("no {what}: set {name}"))
-}
-
-/// The bearer in the environment variable `name`, trimmed, or `None` where it is unset or blank,
-/// so the request goes without one, as an open server serves it.
-fn env_bearer(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|v| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
-}
-
-/// The first line of stdin, trimmed of its line ending.
-fn stdin_secret(what: &str) -> Result<String, String> {
-    let mut line = String::new();
-    std::io::stdin()
-        .lock()
-        .read_line(&mut line)
-        .map_err(|e| format!("reading the {what} from stdin: {e}"))?;
-    let line = line.trim_end_matches(['\r', '\n']).to_owned();
-    if line.is_empty() {
-        return Err(format!("no {what}: write it on stdin"));
-    }
-    Ok(line)
-}
+use crate::http::{env_secret, finish, segment, send_json, stdin_secret, Control, Target};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -240,7 +50,7 @@ pub(crate) fn login(args: LoginArgs) -> ExitCode {
             (None, true, _) => json!({ "api_key": stdin_secret("API key")? }),
             _ => json!({ "access_token": stdin_secret("access token")? }),
         };
-        send(&target, "POST", "/v1/login", None, Some(&body))
+        send_json(&target, "POST", "/v1/login", None, Some(&body))
     })();
     finish("login", answer)
 }
@@ -257,7 +67,7 @@ pub(crate) fn logout(args: LogoutArgs) -> ExitCode {
     let answer = (|| {
         let target = Target::parse(&args.server)?;
         let token = env_secret("MOSAICA_TOKEN", "session token")?;
-        send(&target, "POST", "/v1/logout", Some(&token), None)
+        send_json(&target, "POST", "/v1/logout", Some(&token), None)
     })();
     finish("logout", answer)
 }
@@ -342,28 +152,11 @@ pub(crate) struct EndWhich {
     provider: Option<String>,
 }
 
-/// The control plane's address. The credential is read from `MOSAICA_CREDENTIAL`: the operator
-/// credential, an API key or an OIDC access token.
-#[derive(Args)]
-pub(crate) struct Control {
-    /// The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket.
-    #[arg(long, value_name = "ADDRESS")]
-    control: String,
-}
-
-impl Control {
-    fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<(u16, Vec<u8>), String> {
-        let target = Target::parse(&self.control)?;
-        let credential = env_bearer("MOSAICA_CREDENTIAL");
-        send(&target, method, path, credential.as_deref(), body.as_ref())
-    }
-}
-
 pub(crate) fn session(command: SessionCommand) -> ExitCode {
     let answer = match command {
         SessionCommand::Authorise { session, target } => (|| {
             let at = Target::parse(&session)?;
-            let key = env_bearer("MOSAICA_API_KEY");
+            let key = env_secret("MOSAICA_API_KEY", "session-plane credential")?;
             let body = match target {
                 AuthoriseTarget {
                     principal: Some(principal),
@@ -375,13 +168,13 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
                 AuthoriseTarget { read_all: true, .. } => json!({ "read_all": true }),
                 AuthoriseTarget { terms, .. } => json!({ "terms": terms }),
             };
-            send(&at, "POST", "/session/authorise", key.as_deref(), Some(&body))
+            send_json(&at, "POST", "/session/authorise", Some(&key), Some(&body))
         })(),
         SessionCommand::Revoke { session, token_id } => (|| {
             let target = Target::parse(&session)?;
-            let key = env_bearer("MOSAICA_API_KEY");
+            let key = env_secret("MOSAICA_API_KEY", "session-plane credential")?;
             let body = json!({ "token_id": token_id });
-            send(&target, "POST", "/session/revoke", key.as_deref(), Some(&body))
+            send_json(&target, "POST", "/session/revoke", Some(&key), Some(&body))
         })(),
         SessionCommand::List {
             control,
@@ -779,24 +572,4 @@ pub(crate) fn provider(command: ProviderCommand) -> ExitCode {
         ProviderCommand::Delete { control, name } => control.call("DELETE", &at(&name), None),
     };
     finish("provider", answer)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_chunked_body_is_joined_and_a_cut_one_refused() {
-        assert_eq!(
-            dechunk(b"3\r\nabc\r\n2;x=y\r\nde\r\n0\r\n\r\n").as_deref(),
-            Some(&b"abcde"[..])
-        );
-        assert_eq!(dechunk(b"3\r\nab"), None);
-    }
-
-    #[test]
-    fn a_segment_keeps_unreserved_bytes_and_encodes_the_rest() {
-        assert_eq!(segment("ann.b-c_d~"), "ann.b-c_d~");
-        assert_eq!(segment("a/b c"), "a%2Fb%20c");
-    }
 }

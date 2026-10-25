@@ -21,8 +21,9 @@ pub enum Permission {
     /// With `read`, a session whose authorised set is the whole corpus and which satisfies every
     /// label gate.
     ReadAll,
-    /// With `write`, writes against the whole corpus, and every declaration and drop: attributes,
-    /// vocabularies, layers, views, view groups and shards.
+    /// With `write`, writes against the whole corpus; every declaration, of attributes,
+    /// vocabularies, layers, views, view groups and shards; and the drops, of a layer and of a view
+    /// of a view group, which are the only ones there are.
     WriteAll,
 }
 

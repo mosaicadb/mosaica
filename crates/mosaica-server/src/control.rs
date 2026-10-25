@@ -274,15 +274,15 @@ fn layer_frames(
 
 /// `/control/changes`'s body limit, stated so the 422 can name it. At about 200 bytes an item it
 /// admits roughly ten thousand changes; a caller with more splits them across requests.
-const CHANGES_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+pub const CHANGES_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 /// `/control/changes`'s item count per request. Over it is a 422 naming the limit; a caller
 /// pages its denies, and none is refused.
-const CHANGES_MAX_ITEMS: usize = 10_000;
+pub const CHANGES_MAX_ITEMS: usize = 10_000;
 
 /// A declaration's body cap: axum's `Json` default, which declaration routes inherit, named so
 /// `/control/status` can publish it.
-const DECLARATION_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+pub const DECLARATION_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 /// What an over-cap `/control/ingest` caller does next.
 const INGEST_BODY_REMEDY: &str = " (ingest.ingest_max_batch_bytes); send fewer rows per batch";

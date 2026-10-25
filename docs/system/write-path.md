@@ -45,16 +45,14 @@ Writes go to the control address, set by `[serve] control`. It is separate from 
 
 === "CLI"
 
-    The `mosaica` command cannot write items, changes, declarations or annotations to a running server.
-
     | Write | Command | Viewers see it |
     |---|---|---|
-    | Insert new items | Not built yet | at the next flush |
-    | Add existing items to another view | Not built yet | at the next flush |
-    | Edit items | Not built yet | at the next flush. The item leaves the map until then |
-    | Delete items | Not built yet | on the next request |
-    | Suppress items, and lift a suppression | Not built yet | on the next request |
-    | Declare fields, views, layers and vocabularies, and publish annotations | Only in a new database: the declaration file, built by `mosaica build` | once Mosaica answers |
+    | Insert new items | `mosaica insert` | at the next flush |
+    | Add existing items to another view | `mosaica insert --view` | at the next flush |
+    | Edit items | `mosaica insert` | at the next flush. The item leaves the map until then |
+    | Delete items | `mosaica delete` | on the next request |
+    | Suppress items, and lift a suppression | `mosaica suppress`, `mosaica unsuppress` | on the next request |
+    | Declare fields, views, layers and vocabularies, and publish annotations | `mosaica declare`, `mosaica publish` | once the server answers |
 
 New and edited items reach the map at the next **flush**, which runs every 90 seconds by default, or sooner once 40,000 items are waiting. [When new data appears](#when-new-data-appears) explains how to see a write sooner.
 

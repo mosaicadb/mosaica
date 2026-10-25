@@ -22,9 +22,12 @@ release version and the commit the binary was built from, as in `mosaica 0.1.0 (
 prints the release version alone when `MOSAICA_BUILD_COMMIT` was unset at build time and git could \
 not name the commit, as in a build outside a git checkout.
 
-`build`, `check`, `health` and `serve` read the deployment file `mosaica.toml` from the working \
-directory, or from the nearest directory above it that has one. `--deployment` names a different \
-file.
+`build`, `check`, `health`, `serve`, and `declare` without a subcommand, read the deployment file \
+`mosaica.toml` from the working directory, or from the nearest directory above it that has one. \
+`--deployment` names a different file.
+
+The commands that write to a running service, and the identity commands on its control plane, \
+take its address as `--control` and read the credential from `MOSAICA_CREDENTIAL`.
 ";
 
 fn page_path() -> PathBuf {

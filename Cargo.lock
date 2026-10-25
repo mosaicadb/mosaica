@@ -1992,6 +1992,7 @@ dependencies = [
  "mosaica-types",
  "mosaica-wire",
  "parquet",
+ "rand 0.8.7",
  "reqwest",
  "serde_json",
  "tempfile",

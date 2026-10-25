@@ -6124,21 +6124,7 @@ fn vocabulary_payloads(config: &Config) -> Vec<serde_json::Value> {
                 entry.insert("values_source".to_string(), source.clone().into());
             }
             None if vocabulary.values.bindings().next().is_some() => {
-                // **No `code` anywhere.** Codes are the server's to assign
-                // (`per-point-attributes.md` §3.1), and the route refuses a body that names one —
-                // so an inline `key = code` table reaches the wire as its keys and titles, and the
-                // running service draws the codes.
-                let values: Vec<serde_json::Value> = vocabulary
-                    .values
-                    .bindings()
-                    .map(|(key, _)| {
-                        let mut row = serde_json::Map::new();
-                        row.insert("key".to_string(), key.into());
-                        let title = vocabulary.values.title_of(key).map(str::to_string);
-                        insert_some(&mut row, "title", title);
-                        serde_json::Value::Object(row)
-                    })
-                    .collect();
+                let values = vocabulary_value_rows(vocabulary);
                 // **On the declaration body and beside it.** A closed set with no values is
                 // refused at the route — an authored set of nothing refuses every ingest — so the
                 // values travel with the declaration that needs them; the page is the same rows
@@ -6156,6 +6142,25 @@ fn vocabulary_payloads(config: &Config) -> Vec<serde_json::Value> {
         out.push(serde_json::Value::Object(entry));
     }
     out
+}
+
+/// A vocabulary's values as the rows `PATCH /control/vocabularies/{name}/values` takes, in
+/// declaration order, whether the declaration wrote them inline or read them from a source.
+///
+/// No `code` anywhere: codes are the server's to assign, and the route refuses a body that names
+/// one, so a `key = code` table reaches the wire as its keys and titles.
+pub fn vocabulary_value_rows(vocabulary: &Vocabulary) -> Vec<serde_json::Value> {
+    vocabulary
+        .values
+        .bindings()
+        .map(|(key, _)| {
+            let mut row = serde_json::Map::new();
+            row.insert("key".to_string(), key.into());
+            let title = vocabulary.values.title_of(key).map(str::to_string);
+            insert_some(&mut row, "title", title);
+            serde_json::Value::Object(row)
+        })
+        .collect()
 }
 
 /// One `PUT /control/views/{name}` body per plain `[[view]]` block, in declaration order.

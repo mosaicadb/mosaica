@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod http;
 mod identity;
 mod records;
+mod writes;
 
 use clap::{Parser, Subcommand};
 use mosaica_spatial::Bounds;
@@ -331,6 +333,129 @@ enum Command {
     /// '{"count": true, "by": {"field": "submitted_at", "bins": 12}}' --format ipc >
     /// submitted.arrows`.
     Aggregate(records::AggregateArgs),
+    /// Declare views, view groups, attributes, vocabularies, layers and the shard size on a running
+    /// service, through the control plane.
+    ///
+    /// With no subcommand, it declares every block of a corpus declaration. It finds
+    /// `mosaica.toml` and the declaration as `mosaica check` does, and sends the bodies `mosaica
+    /// check --payloads` prints, in the order the routes need: the shard size, the vocabularies,
+    /// each followed by the values its `source` names, the view groups, each after any group
+    /// whose views it shares, the views, the attributes, then the layers. A declaration identical to
+    /// one the service holds answers what exists, so running it again after adding a block
+    /// declares only that block. It sends no rows and creates no view of a view group, which
+    /// `mosaica declare view <group>:<key>` does. It prints one JSON object on stdout with each
+    /// request, its status and the server's answer, goes on past a refused request, and exits 1
+    /// when any was refused.
+    ///
+    /// Each subcommand sends one declaration and prints the server's answer. Every declaration
+    /// needs `write-all`. The credential is read from `MOSAICA_CREDENTIAL`, as `mosaica
+    /// principal` reads it.
+    ///
+    /// For example, `mosaica declare --control http://127.0.0.1:8082 --config schema.toml`.
+    Declare(writes::DeclareArgs),
+    /// Insert rows into a running service from a Parquet, Arrow IPC or NDJSON file, a page at a
+    /// time, through `POST /control/ingest`.
+    ///
+    /// A row names items by its `mosaica_id` and its values of unique attributes. A row naming no
+    /// item creates one at its coordinates: `x` and `y`, or `lon` and `lat` on a projected view.
+    /// A row naming an item edits it, adds it to the view, or changes nothing. A column left out
+    /// keeps what the item stores, and a null clears it. A row naming two items, or an item an
+    /// earlier row of its page names, is refused and the page's other rows are applied. Columns
+    /// go as the file names and types them, and the route refuses a column it does not know;
+    /// `--columns` sends only those named.
+    ///
+    /// Each page is sent before the next is read, under a fresh batch id. A page the server
+    /// answers with `429` is sent again, the same bytes under the same id, once the wait it names
+    /// has passed. Inserting a file again inserts its rows again, except that a row naming its
+    /// item by a unique attribute is then answered as unchanged.
+    ///
+    /// It prints one JSON object on stdout totalling the answers: `pages` and `rows` sent;
+    /// `created`, `edited`, `added`, `unchanged`, `joined`, `minted`, `clamped`, `clipped` and
+    /// `over_bound`, summed; `replayed`, the requests the server had already applied; `refused`,
+    /// each refused row by its position in the file, from 0, and its reason; `refused_pages`, each
+    /// refused request by its first row, with its status and the server's answer; and
+    /// `publication`, from which the rows are visible. A line on stderr says the same. It exits
+    /// 1 when a request was refused or went unanswered, and an unanswered request stops the
+    /// insert there, with `stopped` saying where. Rows refused inside an accepted request do not
+    /// change the exit status. Needs `write`, and the credential is read from
+    /// `MOSAICA_CREDENTIAL`.
+    ///
+    /// For example, `mosaica insert --control http://127.0.0.1:8082 --view papers
+    /// papers.parquet`.
+    Insert(writes::InsertArgs),
+    /// Delete items or annotations through `POST /control/changes`.
+    ///
+    /// Each is named by `--id`, by `--match` or by a row of `--file`. A deleted item stops being
+    /// served at once, and the next compaction removes its rows from disc. A layer is removed
+    /// with `mosaica drop layer`, not here.
+    ///
+    /// The changes are sent as many to a request as `/control/status` publishes under
+    /// `limits.changes`, 10,000 where the credential cannot read it. A change naming no item, or
+    /// two, is refused and the others are applied. It prints one JSON object on stdout: `pages`
+    /// and `rows` sent; `accepted`; `refused`, each refused change by its position, counting the
+    /// `--id`s, then the `--match`es, then the file's rows, from 0, with what it named and its
+    /// reason; `refused_pages`; `ignored_columns`, the columns that name no item; and
+    /// `publication`. It exits 1 when a request was refused or went unanswered. Needs `write`, and
+    /// the credential is read from `MOSAICA_CREDENTIAL`.
+    Delete(writes::ChangeArgs),
+    /// Suppress items, annotations or layers through `POST /control/changes`: each is left out
+    /// of every answer from the moment the change is accepted until `mosaica unsuppress` lifts
+    /// it.
+    ///
+    /// A layer's `mosaica_id` suppresses the layer with all its artifacts. It takes the same
+    /// arguments and prints the same report as `mosaica delete`.
+    Suppress(writes::ChangeArgs),
+    /// Lift the suppression of items, annotations or layers through `POST /control/changes`. It
+    /// takes the same arguments and prints the same report as `mosaica delete`.
+    Unsuppress(writes::ChangeArgs),
+    /// Publish annotations into one level of a layer through `PUT
+    /// /control/layers/{name}/artifacts`, and print the server's answer.
+    ///
+    /// The body is the route's JSON: each artifact with its key and its members, each member
+    /// naming an item by its `mosaica_id` and its values of unique attributes. A member naming no
+    /// item, or two, is left out and listed in the answer's `refused`, and the rest is published
+    /// whole or not at all. An artifact whose key the level holds gains the members and fills
+    /// the parts it lacks. The answer gives each artifact's `mosaica_id`. A large membership is
+    /// published with its first page here and the rest with `mosaica grow`. Needs `write`, and
+    /// the credential is read from `MOSAICA_CREDENTIAL`.
+    Publish(writes::ArtifactArgs),
+    /// Change annotations a level already holds through `PATCH
+    /// /control/layers/{name}/artifacts`, and print the server's answer.
+    ///
+    /// It adds members, fills parts an annotation lacks, and takes items out of the set a text
+    /// was written from. The body is the route's JSON. A member is refused as `mosaica publish`
+    /// refuses one, and a part that differs from the one held is refused with `409`. Needs
+    /// `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+    Grow(writes::ArtifactArgs),
+    /// Drop an annotation layer or a view of a view group, through the control plane, and print
+    /// the server's answer.
+    ///
+    /// These are the only two that can be dropped: no route drops an attribute, a vocabulary, a
+    /// view outside a view group, a view group or the shard size. Needs `write-all`, and the
+    /// credential is read from `MOSAICA_CREDENTIAL`.
+    Drop {
+        #[command(subcommand)]
+        command: writes::DropCommand,
+    },
+    /// Bring the next publication forward through `POST /control/flush`, and print the server's
+    /// answer.
+    ///
+    /// A publication is when buffered writes become visible to readers. The answer's
+    /// `publication` names the first one certain to include every write sent before this
+    /// request. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+    Flush(writes::FlushArgs),
+    /// Ask for a compaction through `POST /control/compact`, and print the server's answer, the
+    /// request's number in `request`.
+    ///
+    /// A compaction removes deleted items' rows from disc, one shard after another, and runs for
+    /// minutes to hours on a large corpus. `mosaica status` reports it under
+    /// `compaction.requests`, where `answered` reaches the request's number once it is answered.
+    /// Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+    Compact(http::Control),
+    /// Print the server's status report, from `GET /control/status`: how far writes have got,
+    /// queue depths, compaction, shards, and the limits on each write request. Needs `admin`, and
+    /// the credential is read from `MOSAICA_CREDENTIAL`.
+    Status(http::Control),
     /// Serve the bundle that `mosaica.toml` names.
     ///
     /// Finds `mosaica.toml` as `mosaica build` does, opens the bundle at `[bundle] path` and
@@ -1540,6 +1665,17 @@ fn main() -> ExitCode {
         Command::Items(args) => records::items(args),
         Command::Artifacts(args) => records::artifacts(args),
         Command::Aggregate(args) => records::aggregate(args),
+        Command::Declare(args) => writes::declare(args),
+        Command::Insert(args) => writes::insert(args),
+        Command::Delete(args) => writes::change(args, "delete"),
+        Command::Suppress(args) => writes::change(args, "suppress"),
+        Command::Unsuppress(args) => writes::change(args, "unsuppress"),
+        Command::Publish(args) => writes::artifacts(args, "PUT", "publish"),
+        Command::Grow(args) => writes::artifacts(args, "PATCH", "grow"),
+        Command::Drop { command } => writes::drop_command(command),
+        Command::Flush(args) => writes::flush(args),
+        Command::Compact(control) => writes::compact(control),
+        Command::Status(control) => writes::status(control),
         Command::Health {
             deployment,
             timeout,

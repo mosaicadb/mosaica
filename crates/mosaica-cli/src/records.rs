@@ -526,7 +526,7 @@ fn decode(payload: &[u8]) -> Result<RecordBatch, String> {
 }
 
 /// Where the pages go, opened when the first page arrives so that a refused read writes nothing.
-struct Output {
+pub(crate) struct Output {
     format: Format,
     path: Option<PathBuf>,
     writer: Option<Writer>,
@@ -548,7 +548,17 @@ impl Output {
         })
     }
 
-    fn write(&mut self, batch: &RecordBatch) -> Result<(), String> {
+    /// A file whose format is its extension, `.arrows` or `.parquet`.
+    pub(crate) fn file(path: PathBuf) -> Result<Output, String> {
+        let format = output_format(Some(&path), None)?;
+        Ok(Output {
+            format,
+            path: Some(path),
+            writer: None,
+        })
+    }
+
+    pub(crate) fn write(&mut self, batch: &RecordBatch) -> Result<(), String> {
         if self.writer.is_none() {
             self.writer = Some(self.open(&batch.schema())?);
         }
@@ -561,7 +571,7 @@ impl Output {
 
     /// Close the output. Every read is answered with at least one page, which opened it: a read
     /// that found no row, with a page of no rows that gives its columns.
-    fn finish(mut self) -> Result<(), String> {
+    pub(crate) fn finish(mut self) -> Result<(), String> {
         let Some(writer) = self.writer.take() else {
             return Err(format!(
                 "the read ended without a page, so its columns are not known and {} was not \
