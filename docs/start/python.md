@@ -89,7 +89,7 @@ and 3 open vocabularies, public, so every reader may list their values: feature_
 
 `projection="web_mercator"` says the view's coordinates are longitude and latitude, to be drawn with the projection web maps use. Without it, a view takes plain x and y coordinates, such as the output of UMAP or t-SNE, and draws them as they are.
 
-`declare_columns` reads the data frame's column types, not its values, and declares every column. We name `feature_class`, `country` and `division` as categories, because each holds a short list of values repeated across many rows. A category can colour the map and be counted by group once it is rendered or indexed. The other string columns are declared as text, `geonameid` and `population` as 64-bit integers, and `lon` and `lat` as 64-bit floats.
+`declare_columns` reads the data frame's column types, not its values, and declares every column. We name `feature_class`, `country` and `division` as categories, because each holds a short list of values repeated across many rows. A category can be counted by group once it is rendered or indexed, and can colour the map once it is rendered. The other string columns are declared as text, `geonameid` and `population` as 64-bit integers, and `lon` and `lat` as 64-bit floats.
 
 Every declared column is stored, and shown when someone opens a place. A column can also be **rendered**: its value is sent with every point drawn, so the map can colour or size points by it, and it can be filtered and counted. It can be **indexed**: Mosaica builds an index on it, so it can be filtered and counted without being sent with every point. A column that is neither is a detail.
 
@@ -138,7 +138,7 @@ From now on the notebook talks to that server, the same way a browser or another
 
 The map appears under the cell, with every place coloured by feature class. Drag to pan and scroll to zoom. A map of more points than it can draw at once shows a sample at a wide zoom, chosen so that dense and sparse areas both show, and more points as you zoom in.
 
-The panel on the left counts the places in view. Its Feature class card lists the five largest classes, each with two counts: the places in view and all that match. Below them, a link opens the card to show up to twenty. Hover over a class and two buttons take the place of its counts. The highlighter picks out that class's places on the map and dims the rest, and the funnel filters the map to that class. Click the coloured square beside a class to change its colour.
+The panel on the left counts the places in view. Its Feature class card lists the five largest classes, each with two counts: the places in view and all that match. Below them, "N more" opens the card to show up to twenty. Hover over a class and two buttons take the place of its counts. The highlighter picks out that class's places on the map and dims the rest, and the funnel filters the map to that class. Click the coloured square beside a class to change its colour.
 
 ## Filter from Python
 
