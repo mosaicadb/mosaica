@@ -96,7 +96,7 @@ impl Engine {
         let resolved = ResolvedLeaves::new(mask);
         let mut rows = vec![Bitmap::new(); served.sides.len()];
         let mut region = None;
-        for (place, side, leaf) in served.filtered_sides(mask) {
+        for (place, side, _) in served.filtered_sides(mask) {
             let total_rows = side.data.row_space.total_rows();
             let (side_rows, verdict) =
                 self.route_filters(served, side, &resolved, cancel, |route| {
@@ -114,7 +114,7 @@ impl Engine {
                             )
                             .collect::<Vec<_>>();
                             let rows = self
-                                .evaluate_row_route(&tree, side, leaf, &whole, total_rows, false)?
+                                .evaluate_row_route(&tree, side, &whole, total_rows, false)?
                                 .rows()
                                 .clone();
                             (rows, region)
