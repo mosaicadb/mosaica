@@ -2,7 +2,8 @@
 //! the control plane's credential, and printing an answer.
 //!
 //! Secrets are never arguments, which other users of the machine can read: the control plane's
-//! credential is read from `MOSAICA_CREDENTIAL`.
+//! credential is read from `MOSAICA_CREDENTIAL`. Where it is unset, the request is sent without a
+//! credential, as an open server serves it.
 
 use std::io::{BufRead, Read, Write};
 use std::process::ExitCode;
@@ -126,6 +127,8 @@ pub(crate) fn send(
                 })
                 .as_ref()
                 .map_err(Clone::clone)?;
+            // A write with no body names a type too: an open server refuses a write without one.
+            let (content_type, bytes) = body.unwrap_or((written_type(method), &[]));
             let method = reqwest::Method::from_bytes(method.as_bytes()).expect("a known method");
             let mut req = client
                 .request(method, format!("{base}{path}"))
@@ -136,10 +139,11 @@ pub(crate) fn send(
             for (name, value) in headers {
                 req = req.header(*name, *value);
             }
-            if let Some((content_type, bytes)) = body {
-                req = req
-                    .header(reqwest::header::CONTENT_TYPE, content_type)
-                    .body(bytes.to_vec());
+            if !content_type.is_empty() {
+                req = req.header(reqwest::header::CONTENT_TYPE, content_type);
+            }
+            if body.is_some() {
+                req = req.body(bytes.to_vec());
             }
             let resp = req.send().map_err(|e| format!("{base}{path}: {e}"))?;
             let status = resp.status().as_u16();
@@ -181,7 +185,7 @@ fn unix_request(
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
-    let (content_type, bytes) = body.unwrap_or(("", &[]));
+    let (content_type, bytes) = body.unwrap_or((written_type(method), &[]));
     if !content_type.is_empty() {
         head.push_str(&format!("content-type: {content_type}\r\n"));
     }
@@ -315,6 +319,23 @@ pub(crate) fn finish(verb: &str, answer: Result<Answer, String>) -> ExitCode {
     }
 }
 
+/// The content type a request with no body names: JSON for a write, none for a `GET`.
+fn written_type(method: &str) -> &'static str {
+    match method {
+        "GET" => "",
+        _ => "application/json",
+    }
+}
+
+/// The bearer in the environment variable `name`, trimmed, or `None` where it is unset or blank,
+/// so the request goes without one, as an open server serves it.
+pub(crate) fn env_bearer(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+}
+
 pub(crate) fn env_secret(name: &str, what: &str) -> Result<String, String> {
     std::env::var(name)
         .ok()
@@ -338,7 +359,7 @@ pub(crate) fn stdin_secret(what: &str) -> Result<String, String> {
 }
 
 /// The control plane's address. The credential is read from `MOSAICA_CREDENTIAL`: the operator
-/// credential, an API key or an OIDC access token.
+/// credential, an API key or an OIDC access token, or none where it is unset.
 #[derive(Args)]
 pub(crate) struct Control {
     /// The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket.
@@ -376,7 +397,7 @@ impl Control {
 /// The control plane, with its credential read.
 pub(crate) struct Plane {
     target: Target,
-    credential: String,
+    credential: Option<String>,
     timeout: Duration,
 }
 
@@ -389,7 +410,7 @@ impl Plane {
     fn connect(address: &str, timeout: Duration) -> Result<Plane, String> {
         Ok(Plane {
             target: Target::parse(address)?,
-            credential: env_secret("MOSAICA_CREDENTIAL", "control-plane credential")?,
+            credential: env_bearer("MOSAICA_CREDENTIAL"),
             timeout,
         })
     }
@@ -448,7 +469,7 @@ impl Plane {
                 &self.target,
                 method,
                 path,
-                Some(&self.credential),
+                self.credential.as_deref(),
                 headers,
                 body,
                 self.timeout,

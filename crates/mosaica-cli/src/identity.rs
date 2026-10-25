@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
-use crate::http::{env_secret, finish, segment, send_json, stdin_secret, Control, Target};
+use crate::http::{env_bearer, env_secret, finish, segment, send_json, stdin_secret, Control, Target};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -156,7 +156,7 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
     let answer = match command {
         SessionCommand::Authorise { session, target } => (|| {
             let at = Target::parse(&session)?;
-            let key = env_secret("MOSAICA_API_KEY", "session-plane credential")?;
+            let key = env_bearer("MOSAICA_API_KEY");
             let body = match target {
                 AuthoriseTarget {
                     principal: Some(principal),
@@ -168,13 +168,13 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
                 AuthoriseTarget { read_all: true, .. } => json!({ "read_all": true }),
                 AuthoriseTarget { terms, .. } => json!({ "terms": terms }),
             };
-            send_json(&at, "POST", "/session/authorise", Some(&key), Some(&body))
+            send_json(&at, "POST", "/session/authorise", key.as_deref(), Some(&body))
         })(),
         SessionCommand::Revoke { session, token_id } => (|| {
             let target = Target::parse(&session)?;
-            let key = env_secret("MOSAICA_API_KEY", "session-plane credential")?;
+            let key = env_bearer("MOSAICA_API_KEY");
             let body = json!({ "token_id": token_id });
-            send_json(&target, "POST", "/session/revoke", Some(&key), Some(&body))
+            send_json(&target, "POST", "/session/revoke", key.as_deref(), Some(&body))
         })(),
         SessionCommand::List {
             control,

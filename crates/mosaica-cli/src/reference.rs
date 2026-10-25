@@ -27,7 +27,8 @@ deployment file `mosaica.toml` from the working directory, or from the nearest d
 `--deployment` names a different file.
 
 The commands that write to a running service, and the identity commands on its control plane, \
-take its address as `--control` and read the credential from `MOSAICA_CREDENTIAL`.
+take its address as `--control` and read the credential from `MOSAICA_CREDENTIAL`. Where it is \
+unset, the request is sent without a credential, as an open server serves it.
 ";
 
 fn page_path() -> PathBuf {
