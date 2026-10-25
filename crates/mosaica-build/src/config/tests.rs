@@ -783,27 +783,20 @@ fn a_projected_view_states_its_frame_in_degrees() {
     assert_eq!(view.extent, Extent::AutoLonLat);
 }
 
-/// **The three other spellings are refused on a projected view**, each naming the one to write.
-///
-/// `min`/`max` and `x`/`y` state a frame in the space the projection *produces*, which is the
-/// output of a calculation nobody should do by hand; `margin` is headroom the outward snap already
-/// supplies, and a margin inside an aligned square would only shrink the frame away from the
-/// alignment it exists to have.
+/// A projected view takes a box in the frame the projection produces as written, and refuses
+/// `auto` as a table, a box in degrees and in frame coordinates together, and half a box.
 #[test]
-fn the_unprojected_extent_spellings_are_refused_on_a_projected_view() {
-    let refused = |extent: &str| {
-        err(&projected(&format!(
-            "projection = \"web_mercator\"\n{extent}"
-        )))
-    };
+fn a_projected_view_takes_frame_coordinates_and_refuses_a_table_auto() {
+    let declared = |extent: &str| projected(&format!("projection = \"web_mercator\"\n{extent}"));
+    let refused = |extent: &str| err(&declared(extent));
 
-    let message = refused("extent = { min = -25.0, max = 25.0 }");
-    assert!(message.contains("names min, max"), "{message}");
-    assert!(message.contains("lon = ["), "{message}");
-
-    let message = refused("extent = { x = [-18, 19], y = [-22, 24] }");
-    assert!(message.contains("names x, y"), "{message}");
-    assert!(message.contains("lon = ["), "{message}");
+    for extent in [
+        "extent = { min = 0.25, max = 0.5 }",
+        "extent = { x = [0.5, 0.75], y = [0.25, 0.5] }",
+    ] {
+        parse_str(&declared(extent)).expect(extent);
+    }
+    refused("extent = { x = [0.5, 0.75], y = [0.25, 0.5], lon = [0.0, 1.0], lat = [0.0, 1.0] }");
 
     let message = refused("extent = { auto = true, margin = 0.25 }");
     assert!(message.contains("outward snap"), "{message}");

@@ -871,23 +871,7 @@ async fn auto_is_refused_on_both_routes() {
 /// built view's frame, as does a view of a group declared with it.
 #[tokio::test]
 async fn a_degree_box_declared_here_is_the_frame_a_build_gives_it() {
-    let mut served = Served::build(|dir| {
-        let path = dir.join("corpus.toml");
-        std::fs::write(
-            &path,
-            r#"
-[[view]]
-name             = "built"
-projection       = "web_mercator"
-extent           = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }
-point_visibility = { default = "public" }
-"#,
-        )
-        .unwrap();
-        mosaica_build::build(&args_from_declaration(&path, &dir.join("bundle")))
-            .expect("a declaration naming no file builds");
-    })
-    .await;
+    let mut served = Served::build(build_projected).await;
     let degrees = json!({
         "projection": "web_mercator",
         "extent": { "lon": [-8.6, 1.8], "lat": [49.9, 60.9] },
@@ -915,6 +899,59 @@ point_visibility = { default = "public" }
     };
     assert_eq!(frame("declared"), frame("built"));
     assert_eq!(frame("regions:north"), frame("built"));
+}
+
+/// A bundle built with one projected view, `built`, framed by a box in degrees and holding no
+/// rows.
+fn build_projected(dir: &std::path::Path) {
+    let path = dir.join("corpus.toml");
+    std::fs::write(
+        &path,
+        r#"
+[[view]]
+name             = "built"
+projection       = "web_mercator"
+extent           = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }
+point_visibility = { default = "public" }
+"#,
+    )
+    .unwrap();
+    mosaica_build::build(&args_from_declaration(&path, &dir.join("bundle")))
+        .expect("a declaration naming no file builds");
+}
+
+/// A projected view takes its frame in the coordinates the projection produces, as `/v1/meta`
+/// reports a view's `quantisation`, so a view declared with the built view's reported frame gets
+/// exactly that frame, and the built view declared again with it is the no-op an identical
+/// declaration is.
+#[tokio::test]
+async fn a_projected_view_declared_with_another_views_frame_gets_that_frame() {
+    let mut served = Served::build(build_projected).await;
+    let frame = |meta: &Value, id: &str| {
+        meta["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["id"] == id)
+            .unwrap_or_else(|| panic!("view '{id}' is served: {meta}"))["quantisation"]
+            .clone()
+    };
+    let built = frame(&meta(&served).await, "built");
+    let declared = json!({
+        "projection": "web_mercator",
+        "extent": {
+            "x": [built["x_min"], built["x_max"]],
+            "y": [built["y_min"], built["y_max"]],
+        },
+        "point_visibility": { "default": "public" },
+    });
+    let (status, body) = declare_view(&served, "built", declared.clone()).await;
+    assert_eq!(status, 200, "the built view's own frame: {body}");
+    let (status, body) = declare_view(&served, "copied", declared).await;
+    assert_eq!(status, 201, "{body}");
+
+    served.reauthorise().await;
+    assert_eq!(frame(&meta(&served).await, "copied"), built);
 }
 
 /// A declaration's answer with `publication` taken out, so a whole-object comparison stays a

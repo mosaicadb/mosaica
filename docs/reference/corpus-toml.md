@@ -60,14 +60,15 @@ extent = { min = -25.0, max = 25.0 }      # one range for both axes
 extent = { x = [-18, 19], y = [-22, 24] } # a range for each axis
 ```
 
-A projected view takes two, in degrees, and widens the box to the smallest aligned square that contains it:
+A projected view takes `auto` and a box in degrees, which it widens to the smallest aligned square that contains it, or a box in the coordinates the projection produces, taken as written. The last is the frame `/v1/meta` reports for a view, which gives a new view another's frame:
 
 ```toml
 extent = "auto"                                     # the data's own longitude and latitude
-extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }  # a box
+extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }  # a box in degrees
+extent = { x = [0.5, 0.75], y = [0.25, 0.5] }       # a box in the projected frame
 ```
 
-`auto` reads the view's points to fit the frame, so it is refused where the points source holds no rows. Any other word, an empty table, half a box, a number that is not finite, and a spelling of the other kind of view are refused.
+`auto` reads the view's points to fit the frame, so it is refused where the points source holds no rows. Any other word, an empty table, half a box, a number that is not finite, a box in degrees on a view with no projection, and `auto` as a table on a projected view are refused.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |

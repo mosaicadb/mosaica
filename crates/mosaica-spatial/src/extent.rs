@@ -5,10 +5,10 @@
 //! Both hand what they read to [`Extent::compile`] and both turn the result into a frame with
 //! [`Extent::stated_frame`] where there are no rows to fit one to.
 //!
-//! The projection decides the spellings, and the two sets do not overlap. An unprojected view
-//! takes `auto` or a box in the coordinates its rows already carry; a projected view takes `auto`
-//! or a box in longitude and latitude, which is snapped outward to the smallest aligned square
-//! holding it.
+//! The projection decides the spellings. Every view takes `auto`, or a box in the coordinates it
+//! quantises across, which for a projected view are those the projection produces, as `/v1/meta`
+//! reports them. A projected view also takes a box in longitude and latitude, which is snapped
+//! outward to the smallest aligned square holding it, and an unprojected view refuses one.
 
 use crate::frame::{snap_outward, Snap};
 use crate::morton::Bounds;
@@ -26,7 +26,8 @@ pub enum Extent {
     /// `"auto"`, or `{ auto = true, margin = f }`: the square box around the view's rows, with
     /// `margin` of the data span added on each side.
     Auto { margin: f64 },
-    /// `{ min, max }` or `{ x = [a, b], y = [c, d] }`, stated outright.
+    /// `{ min, max }` or `{ x = [a, b], y = [c, d] }`, stated outright in the coordinates the view
+    /// quantises across, which for a projected view are those the projection produces.
     Fixed(Bounds),
     /// `{ lon = [a, b], lat = [c, d] }` on a projected view, snapped outward to the enclosing
     /// aligned square.
@@ -82,17 +83,19 @@ pub fn snap_lon_lat(projection: Projection, asked: &LonLatBox) -> Snap {
 /// extent = { x = [-18, 19], y = [-22, 24] } # a range for each axis
 /// ```
 ///
-/// A projected view takes two, in degrees, and widens the box to the smallest aligned square that
-/// contains it:
+/// A projected view takes `auto` and a box in degrees, which it widens to the smallest aligned
+/// square that contains it, or a box in the coordinates the projection produces, taken as written.
+/// The last is the frame `/v1/meta` reports for a view, which gives a new view another's frame:
 ///
 /// ```toml
 /// extent = "auto"                                     # the data's own longitude and latitude
-/// extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }  # a box
+/// extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }  # a box in degrees
+/// extent = { x = [0.5, 0.75], y = [0.25, 0.5] }       # a box in the projected frame
 /// ```
 ///
 /// `auto` reads the view's points to fit the frame, so it is refused where the points source
-/// holds no rows. Any other word, an empty table, half a box, a number that is not finite, and a
-/// spelling of the other kind of view are refused.
+/// holds no rows. Any other word, an empty table, half a box, a number that is not finite, a box
+/// in degrees on a view with no projection, and `auto` as a table on a projected view are refused.
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExtentKeys {
@@ -209,7 +212,8 @@ impl<'de> serde::Deserialize<'de> for WrittenExtent {
 /// A projected view's two spellings, appended to every `extent` refusal it earns.
 const LON_LAT_SPELLINGS: &str = "\n  \
      extent = \"auto\"                                         # the data's own box, snapped\n  \
-     extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }      # stated in degrees, snapped outward";
+     extent = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }      # stated in degrees, snapped outward\n  \
+     extent = { x = [0.5, 0.75], y = [0.25, 0.5] }           # the projected frame, as written";
 
 /// An unprojected view's four spellings, appended to every `extent` refusal it earns.
 const EXTENT_SPELLINGS: &str = "\n  \
@@ -324,48 +328,13 @@ impl Extent {
                  author wanted:{EXTENT_SPELLINGS}"
             ));
         }
-        let bounds = match (keys.min, keys.max, keys.x, keys.y) {
-            (Some(min), Some(max), None, None) => Bounds {
-                x_min: min,
-                x_max: max,
-                y_min: min,
-                y_max: max,
-            },
-            (None, None, Some([x_min, x_max]), Some([y_min, y_max])) => Bounds {
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-            },
-            (None, None, None, None) => {
-                return Err(format!(
-                    "{object}: `extent` is an empty table, so it declares no frame at \
-                     all:{EXTENT_SPELLINGS}"
-                ))
-            }
-            (min, max, x, y) => {
-                let named = [
-                    min.map(|_| "min"),
-                    max.map(|_| "max"),
-                    x.map(|_| "x"),
-                    y.map(|_| "y"),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(", ");
-                return Err(format!(
-                    "{object}: `extent` names {named}, which is half a frame. `min` and `max` \
-                     give one range to both axes and preserve the aspect ratio; `x` and `y` give \
-                     a range each, where stretching is meant. Neither half stands \
-                     alone:{EXTENT_SPELLINGS}"
-                ));
-            }
-        };
-        bounds
-            .validate()
-            .map_err(|detail| format!("{object}: `extent`: {detail}"))?;
-        Ok(Extent::Fixed(bounds))
+        match stated_box(object, &keys, EXTENT_SPELLINGS)? {
+            Some(bounds) => Ok(Extent::Fixed(bounds)),
+            None => Err(format!(
+                "{object}: `extent` is an empty table, so it declares no frame at \
+                 all:{EXTENT_SPELLINGS}"
+            )),
+        }
     }
 
     /// The frame this extent states, with no rows to fit one to: a stated box as written, and a
@@ -381,8 +350,51 @@ impl Extent {
     }
 }
 
-/// A projected view's `extent`: `auto`, or the box in longitude and latitude. Every other
-/// spelling is refused here, naming this one.
+/// A box stated in frame coordinates, `min`/`max` or `x`/`y`, or `None` where the keys state none.
+/// Half a box, and one that is not finite or is inverted, are refused, listing `spellings`.
+fn stated_box(object: &str, keys: &ExtentKeys, spellings: &str) -> Result<Option<Bounds>, String> {
+    let bounds = match (keys.min, keys.max, keys.x, keys.y) {
+        (Some(min), Some(max), None, None) => Bounds {
+            x_min: min,
+            x_max: max,
+            y_min: min,
+            y_max: max,
+        },
+        (None, None, Some([x_min, x_max]), Some([y_min, y_max])) => Bounds {
+            x_min,
+            x_max,
+            y_min,
+            y_max,
+        },
+        (None, None, None, None) => return Ok(None),
+        (min, max, x, y) => {
+            let named = [
+                min.map(|_| "min"),
+                max.map(|_| "max"),
+                x.map(|_| "x"),
+                y.map(|_| "y"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+            return Err(format!(
+                "{object}: `extent` names {named}, which is half a frame. `min` and `max` \
+                 give one range to both axes and preserve the aspect ratio; `x` and `y` give \
+                 a range each, where stretching is meant. Neither half stands \
+                 alone:{spellings}"
+            ));
+        }
+    };
+    bounds
+        .validate()
+        .map_err(|detail| format!("{object}: `extent`: {detail}"))?;
+    Ok(Some(bounds))
+
+}
+
+/// A projected view's `extent`: `auto`, a box in longitude and latitude, or a box in the frame the
+/// projection produces. A table with `auto` is refused, naming the spellings.
 fn compile_lon_lat(object: &str, projection: Projection, keys: &ExtentKeys) -> Result<Extent, String> {
     let name = projection.name();
     if keys.auto.is_some() || keys.margin.is_some() {
@@ -393,22 +405,16 @@ fn compile_lon_lat(object: &str, projection: Projection, keys: &ExtentKeys) -> R
              longitude/latitude box and snaps it:{LON_LAT_SPELLINGS}"
         ));
     }
-    if keys.min.is_some() || keys.max.is_some() || keys.x.is_some() || keys.y.is_some() {
-        let named = [
-            keys.min.map(|_| "min"),
-            keys.max.map(|_| "max"),
-            keys.x.map(|_| "x"),
-            keys.y.map(|_| "y"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(", ");
-        return Err(format!(
-            "{object}: `extent` names {named}, and this view is projected ({name}). Those \
-             spellings state a frame in the space the projection produces, which nobody should \
-             work out by hand. A projected view's frame is written in degrees:{LON_LAT_SPELLINGS}"
-        ));
+    // A box in the frame the projection produces, as `/v1/meta` reports a view's, is taken as
+    // written: it is how a view is given another view's exact frame.
+    if let Some(bounds) = stated_box(object, keys, LON_LAT_SPELLINGS)? {
+        if keys.lon.is_some() || keys.lat.is_some() {
+            return Err(format!(
+                "{object}: `extent` states a box in degrees and in frame coordinates together. \
+                 One or the other:{LON_LAT_SPELLINGS}"
+            ));
+        }
+        return Ok(Extent::Fixed(bounds));
     }
     let (Some(lon), Some(lat)) = (keys.lon, keys.lat) else {
         let half = match (keys.lon, keys.lat) {
@@ -524,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_of_view_refuses_the_other_kinds_spelling() {
+    fn degrees_need_a_projection_and_frame_coordinates_suit_any_view() {
         let degrees = || {
             keys(|k| {
                 k.lon = Some([0.0, 1.0]);
@@ -538,7 +544,16 @@ mod tests {
             })
         };
         assert!(Extent::compile("v", Projection::None, degrees()).is_err());
-        assert!(Extent::compile("v", Projection::WebMercator, frame()).is_err());
+        assert_eq!(
+            Extent::compile("v", Projection::WebMercator, frame())
+                .and_then(|extent| extent.stated_frame("v", Projection::WebMercator)),
+            Ok(Bounds {
+                x_min: 0.0,
+                x_max: 1.0,
+                y_min: 0.0,
+                y_max: 1.0
+            })
+        );
         assert!(Extent::compile("v", Projection::None, None).is_err());
         assert!(Extent::compile("v", Projection::None, Some(WrittenExtent::Neither)).is_err());
     }

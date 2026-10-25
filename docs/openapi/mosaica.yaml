@@ -3247,7 +3247,7 @@ paths:
             - An unknown field
             - A name that is not a valid key, or a plain view's
             - An unknown projection
-            - An extent that is not finite, has a maximum below its minimum, is written for the other kind of view, or is `auto`
+            - An extent that is not finite, has a maximum below its minimum, is in degrees on a view with no projection, or is `auto`
             - `members` naming a group that takes its own views from another, or with `metadata`
             - A metadata name declared twice, or of type `category`
             - A `visibility` label or point default that is not an access expression
@@ -3326,7 +3326,7 @@ paths:
             - An unknown field
             - A name that is not a valid key, or a view group's
             - An unknown projection
-            - An extent that is not finite, has a maximum below its minimum, is written for the other kind of view, or is `auto`
+            - An extent that is not finite, has a maximum below its minimum, is in degrees on a view with no projection, or is `auto`
             - A `visibility` label or point default that is not an access expression
           content:
             application/json:
@@ -7383,12 +7383,14 @@ components:
     DeclaredExtent:
       description: |
         The frame a view's positions are quantised over. It cannot be changed after it is declared.
-        It takes the spellings a corpus declaration's `extent` takes, under the same rules. A view
-        with no projection states a box in its own coordinates, as `x` and `y` or as `min` and
-        `max`; a projected view states a box in degrees, as `lon` and `lat`, which is widened to
-        the smallest aligned square that holds it, the square a build gives the same box. `auto`,
-        as the string or as `{"auto": true}`, fits the frame to a view's rows, and a view declared
-        here has none, so it is refused.
+        It takes the spellings a corpus declaration's `extent` takes, under the same rules. Any
+        view takes a box in the coordinates it quantises across, as `x` and `y` or as `min` and
+        `max`, taken as written; for a projected view those are the coordinates the projection
+        produces, so the `quantisation` `/v1/meta` reports for one view gives another its exact
+        frame. A projected view also takes a box in degrees, as `lon` and `lat`, which is widened
+        to the smallest aligned square that holds it, the square a build gives the same box.
+        `auto`, as the string or as `{"auto": true}`, fits the frame to a view's rows, and a view
+        declared here has none, so it is refused.
       oneOf:
         - type: string
         - $ref: "#/components/schemas/Extent"
