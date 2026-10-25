@@ -39,15 +39,14 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, Ma
  *
  * A `kept` placement is taken first, slid along its side to stay inside the map: always where it is
  * `firm` and the card stays inside the map across the side, else only where it meets nothing in
- * `avoid`, if need be shortened as below. Otherwise the sides are tried in the order of the room each leaves once the card is in
- * it, most first; along a side the card is centred on the point and slid to stay inside the map, or
- * slid further, still level with the point, to clear a rectangle in the way. Beside the point, a
- * card that fits nowhere at its own height is shortened, down to `minHeight`, to the clear span
- * level with the point. The first side where the card fits inside the map and meets no rectangle
- * in `avoid` wins. Where none does, the card is slid along a side, most room first, to the clear
- * place nearest the point, level with it or not, shortened as above where it must be. Where there
- * is none, the card takes the side with
- * most room, kept inside the map.
+ * `avoid`, if need be shortened as below. Otherwise the sides are tried in the order of the room
+ * each leaves once the card is in it, most first; along a side the card is centred on the point and
+ * slid to stay inside the map, or slid further, still level with the point, to clear a rectangle in
+ * the way. Beside the point, a card that fits nowhere at its own height is shortened, down to
+ * `minHeight`, to the clear span level with the point. The first side where the card fits inside
+ * the map and meets no rectangle in `avoid` wins. Where none does, the card goes to the clear place
+ * nearest the point over every side, level with it or not, shortened as above where it must be.
+ * Where there is none, the card takes the side with most room, kept inside the map.
  */
 export function placeCallout(
   point: readonly [number, number],
@@ -127,11 +126,10 @@ export function placeCallout(
       const r = shortened(s);
       if (r) return {side: s.side, rect: r};
     }
-    for (const s of ranked) {
-      const r = fitted(s, false) ?? shortened(s, false);
-      if (r) return {side: s.side, rect: r};
-    }
-    return ranked[0]!;
+    // The clear place nearest the point over every side, by the length of the leader to it.
+    const reach = (r: Rect) => Math.hypot(Math.max(r.left - px, 0, px - r.left - r.width), Math.max(r.top - py, 0, py - r.top - r.height));
+    const loose = ranked.flatMap((s) => [fitted(s, false), shortened(s, false)].flatMap((r) => (r ? [{side: s.side, rect: r}] : [])));
+    return loose.sort((a, b) => reach(a.rect) - reach(b.rect))[0] ?? ranked[0]!;
   };
   const chosen = pick();
   const height = chosen.rect.height;

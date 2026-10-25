@@ -10,7 +10,7 @@ import {mosaicaDecorators} from '../../vite-plugin-decorators.js';
 
 /**
  * The item card's Show all, in Chromium's layout: on its own, and beside a point in the explorer,
- * where it keeps clear of the map's tools.
+ * where it keeps clear of the cards and tools over the map.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -53,7 +53,7 @@ afterAll(async () => {
 });
 
 describe('Show all on a compact item card', () => {
-  it('grows the card to hold every field, and the card beside a point up to the height of the map, clear of the tools', async () => {
+  it('grows the card to hold every field, and the card beside a point up to the height of the map, clear of the cards and tools over the map', async () => {
     const page = await browser.newPage({viewport: {width: 1200, height: 800}});
     const failed = new Promise<never>((_, reject) => page.on('pageerror', reject));
     await page.goto(origin);
@@ -65,7 +65,8 @@ describe('Show all on a compact item card', () => {
     expect(r.after).toBeGreaterThan(Math.max(r.before, 300));
     expect(r.after).toBeLessThanOrEqual(r.mapHeight);
     expect(r.inside).toBe(true);
-    // Wherever a point is picked, its card keeps clear of the map's tools and the Layers button.
+    // Wherever a point is picked, its card keeps clear of the panel, the status strip, the map's
+    // tools and the Layers button.
     expect(r.covered).toEqual([]);
     expect(r.coveredToolsAlone).toEqual([]);
   }, 90_000);

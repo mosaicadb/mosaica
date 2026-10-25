@@ -103,6 +103,19 @@ describe('placing a card beside its point', () => {
     expect(at.top + at.height).toBeLessThanOrEqual(map.height - 8);
   });
 
+  it('takes the clear place nearest the point over every side, not the first side with one', () => {
+    const map = {width: 1200, height: 700};
+    const avoid = [
+      {left: 8, top: 8, width: 352, height: 480},
+      {left: 372, top: 16, width: 40, height: 142},
+      {left: 900, top: 8, width: 292, height: 200}
+    ];
+    const at = placeCallout([630, 30], {width: 300, height: 684}, map, avoid, undefined, null, 180)!;
+    const r = {left: at.left, top: at.top, width: 300, height: at.height};
+    for (const a of avoid) expect(r.left < a.left + a.width && a.left < r.left + r.width && r.top < a.top + a.height && a.top < r.top + r.height).toBe(false);
+    expect(Math.hypot(at.leader.x2 - 630, at.leader.y2 - 30)).toBeLessThanOrEqual(190);
+  });
+
   it('hides while its point is off the map', () => {
     expect(placeCallout([-1, 300], CARD, MAP)).toBeNull();
     expect(placeCallout([300, 901], CARD, MAP)).toBeNull();

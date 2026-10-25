@@ -41,8 +41,9 @@ const box = callout.getBoundingClientRect();
 const mapBox = map.getBoundingClientRect();
 const overlapping = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 /**
- * Pick points across the map's top-left, the card expanded, and list those whose card is shown over the map's
- * tools or the Layers button. A point under a card over the map cannot be clicked, so is skipped.
+ * Pick points across the map's top-left, the card expanded, and list those whose card is shown
+ * over the panel, the status strip, the map's tools or the Layers button. A point under one of
+ * these cannot be clicked, so is skipped.
  */
 async function covering(): Promise<string[]> {
   const tools = [map.shadowRoot!.querySelector('[part="controls"]'), explorer.shadowRoot!.querySelector('.layers .group')].flatMap((e) => (e ? [e.getBoundingClientRect()] : []));
@@ -62,7 +63,7 @@ async function covering(): Promise<string[]> {
       const card = explorer.shadowRoot!.querySelector('[part~="callout"]') as HTMLElement | null;
       if (!card || card.hidden) continue;
       const r = card.getBoundingClientRect();
-      if (tools.some((t) => overlapping(r, t))) covered.push(`${sx},${sy}`);
+      if (over.some((t) => overlapping(r, t))) covered.push(`${sx},${sy}`);
     }
   return covered;
 }

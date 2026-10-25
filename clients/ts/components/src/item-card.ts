@@ -31,13 +31,14 @@ import {chrome, tokens} from './tokens.js';
  * beside a point, scrolls past it. A host's buttons in the `actions` slot sit beside the close
  * button.
  *
- * What Open does is the host's to say, and Open is shown only where it says. The `open` property
- * is called with the item's `mosaica_id` and fields. Otherwise `open-url` is a link template, such
- * as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for the
+ * What Open does is the host's to say, and Open is shown only where it says. The `open` property is
+ * called with the item's `mosaica_id` and fields. Otherwise `open-url` is a link template, such as
+ * `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for the
  * field `name`, URL-encoded, and `{mosaica_id}` by its id where the record has no field of that
  * name. Open is then a link to that address, opening in a new tab. An item with no value, or an
- * empty one, for a field the template names, or whose address is not `http:` or `https:` once filled and resolved
- * against the page, has no Open. Where both are set, `open` is called and `open-url` is unused.
+ * empty one, for a field the template names, or whose address is not `http:` or `https:` once
+ * filled and resolved against the page, has no Open. Where both are set, `open` is called and
+ * `open-url` is unused.
  *
  * @summary The selected item's fields, with Open and Copy id.
  * @tagname mosaica-item-card
