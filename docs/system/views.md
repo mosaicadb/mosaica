@@ -14,7 +14,7 @@ If your items have longitude and latitude, use a **geographic view**, which draw
 
 All three store the same positions, so they differ only in the width-to-height a client draws the world at.
 
-Any other two coordinates go in a **plain view**, which draws its x and y as they are. Most often these come from reducing embeddings to two dimensions, with UMAP or t-SNE, so that similar items sit together: a corpus of documents or images, the cells of a single-cell atlas, or a compound library laid out by chemical similarity. A sky survey's catalogue, placed by right ascension and declination, is another.
+Any other two coordinates go in a **plain view**, which draws its x and y as they are. Most often these come from reducing embeddings to two dimensions, with UMAP or t-SNE, so that similar items sit together: a corpus of documents or images, the cells of a single-cell atlas, or a compound library laid out by chemical similarity.
 
 ## The frame
 
