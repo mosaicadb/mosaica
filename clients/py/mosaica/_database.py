@@ -2209,12 +2209,19 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
     A committed database reopens ready to read, and its next commit adds to it. One saved before
     its first commit reopens with its declarations and inserts as they were left.
 
+    A temporary database's directory left behind by a process that ended without closing it, as a
+    crashed kernel leaves one, opens too, and stays a temporary directory. It is locked while it
+    is open here, so no `create()` removes it meanwhile; once it is closed, the next `create()`
+    removes it as a leftover. `save(path)` keeps a copy. One another live process holds open is
+    refused.
+
         db = mosaica.open("~/maps/papers")
         db.view("papers").count()
     """
     directory = Path(path).expanduser()
     if not (directory / "mosaica.toml").exists():
         raise Refusal(f"open: {directory} holds no mosaica.toml. create() makes a new database")
+    _instance.hold(directory)
     database = Database(directory)
     state = directory / ".mosaica" / "declaration.json"
     if state.exists():

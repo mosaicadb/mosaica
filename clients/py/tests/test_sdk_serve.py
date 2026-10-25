@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from mosaica import _instance
+from mosaica import Refusal, _instance
 
 ANNOUNCE = (
     '{"event": "listening", "viewer": "127.0.0.1:38001", "session": "127.0.0.1:38002", '
@@ -383,6 +383,43 @@ def test_a_copy_saved_where_temporary_databases_live_is_never_swept(tmp_path, mo
         assert again.view("map").count() == 2
     finally:
         again.close()
+
+
+def test_a_left_temporary_database_reopened_is_kept_while_open_and_swept_once_closed(
+    tmp_path, monkeypatch
+):
+    """A crashed kernel's database, rescued with open(): no sweep removes it while it is open,
+    and the next create() after it is closed removes it, since it is still a temporary one."""
+    from conftest import binary
+
+    binary()
+    import mosaica
+    from mosaica import _database
+
+    where = tmp_path / "shm"
+    where.mkdir()
+    monkeypatch.setattr(_database, "RAM_BACKED", where)
+    process, left = ended("SIGKILL", where)
+    try:
+        with pytest.raises(Refusal):
+            mosaica.open(left["path"])
+        os.kill(process.pid, signal.SIGKILL)
+        process.wait(timeout=30)
+        assert stopped(left["pid"])
+        rescued = mosaica.open(left["path"])
+        try:
+            mosaica.create().close()
+            assert rescued.view("map").count() == 2
+            assert rescued.save(tmp_path / "rescued") == tmp_path / "rescued"
+        finally:
+            rescued.close()
+        assert os.path.exists(left["path"]), "closing leaves it for the next sweep"
+        mosaica.create().close()
+        assert not os.path.exists(left["path"])
+        assert mosaica.open(tmp_path / "rescued").path.exists()
+    finally:
+        if process.poll() is None:
+            process.kill()
 
 
 def test_a_refused_start_leaves_the_temporary_database_to_retry_or_save(tmp_path, monkeypatch):

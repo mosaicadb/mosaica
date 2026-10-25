@@ -120,6 +120,30 @@ def make_temporary(parent: Path | None) -> Path:
     return directory
 
 
+def hold(directory: Path) -> None:
+    """Lock the lock file a temporary directory left behind holds, for as long as this process
+    has the database open, so no sweep removes it meanwhile. A directory holding no lock file is
+    left as it is; one whose lock another live process holds is refused."""
+    lock = directory / LOCK
+    if lock.is_symlink() or not lock.is_file():
+        return
+    descriptor = os.open(lock, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    if not _take(descriptor):
+        os.close(descriptor)
+        raise Refusal(
+            f"open: {directory} is a temporary database another live process holds open; use "
+            f"it from that process, or keep a copy of it there with save(path)"
+        )
+    _locks[directory] = descriptor
+
+
+def let_go(directory: Path) -> None:
+    """Unlock a lock file `hold` locked, leaving the directory for the next sweep."""
+    descriptor = _locks.pop(directory, None)
+    if descriptor is not None:
+        os.close(descriptor)
+
+
 def sweep(parent: Path | None) -> None:
     """Remove each temporary database directory under `parent` whose lock file can be locked,
     the process that made it having ended. Nothing else is touched: a candidate is a directory,
@@ -190,6 +214,8 @@ def release(held: Held) -> None:
         held.child = None
     if held.temporary and held.path in temporary:
         remove(held.path)
+    else:
+        let_go(held.path)
 
 
 def remove(directory: Path) -> None:
