@@ -10,10 +10,10 @@ id. The bodies are therefore built once, by the plan, and this module sends the 
 given. Two requests carrying the same rows are two requests: nothing derives an id from what
 a page contains, so a frame inserted and committed twice lands twice.
 
-**A `429` is backpressure.** The buffer-occupancy refusal carries `Retry-After`, and the caller
-waits that long and sends the same bytes again. Every other status is an answer: a `409` on a
-differing part is reported and not retried, since an edit is a delete and a re-ingest, and the
-SDK does not do that on the user's behalf.
+**A `429` is backpressure.** Every `429` carries `Retry-After`, whatever shed the request, and
+the client waits that long and sends the same bytes again. Every other status is an answer: a
+`409` on a differing part is reported and not retried, since an edit is a delete and a re-ingest,
+and the SDK does not do that on the user's behalf.
 
 The transport is `urllib`, so the SDK's only dependency outside the standard library stays
 pyarrow.
@@ -35,8 +35,8 @@ from typing import Any, Sequence
 ARROW = "application/vnd.apache.arrow.stream"
 JSON = "application/json"
 
-#: How long a `429` may hold one page, in seconds. The server's own figure is clamped to 1 to
-#: 300 s, and the SDK waits at most this long between attempts.
+#: The longest wait between attempts after a `429`, in seconds. A longer `Retry-After` is cut to
+#: this, and a negative one is taken as 0.
 MAX_BACKOFF = 30.0
 
 #: How many times one page is re-sent after a `429` before the SDK reports it as a refusal.
@@ -91,10 +91,9 @@ class Control:
 
     `Database.control` returns one, and `Control(base, credential)` makes one for a database
     someone else runs. Each route method sends one request with the credential and returns its
-    `Answer`. `status()` and `limits()` return dictionaries, and
-    `limits()` sends its request once and keeps the answer. A `429` is sent again after the wait
-    it names, at most 30 seconds, up to 600 attempts in all. Every other status is returned as
-    it came.
+    `Answer`; `status()` and `limits()` return dictionaries, and `limits()` keeps the first
+    answer it gets. A request the server answers `429` is sent again after the wait it names, at
+    most 30 seconds, up to 600 attempts in all. Every other status is returned as it came.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token. Writes, flush

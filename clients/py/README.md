@@ -292,11 +292,12 @@ counting rows it did not land. That is what a retry inside one commit gets.
 A page carries a fresh random batch id, made once when the request is built, and a retry of that
 request carries it again. A server too busy to take a page answers `429` with `Retry-After`, and
 the page is sent again after that many seconds, at most 30, with the same id and identical bytes,
-up to 600 attempts in all. A page still refused then is listed as refused in the report. Nothing
-is kept beyond the commit, and no id is derived from what a page contains, so the same frame
-inserted and committed five times is five loads: on the second, rows carrying a unique value name
-the items the first created and change nothing, and points rows carrying none are loaded again. A request that reached no server is a refusal of that page;
-whether it landed is the database's to say.
+up to 600 attempts in all. A page still refused then is listed in the report's `refusals`.
+Nothing is kept beyond the commit, and no id is derived from what a page contains, so the same
+frame inserted and committed five times is five loads: on the second, rows carrying a unique value
+name the items the first created and change nothing, and points rows carrying none are loaded
+again. A request that reached no server is a refusal of that page; whether it landed is the
+database's to say.
 
 The pre-flight runs before a byte is sent and it sends nothing while a finding stands: `check()`
 reports the finding and `commit()` raises with it, and neither drops or rewrites a row. It finds:
@@ -371,8 +372,8 @@ items it may see, so two readers can get different answers from the same databas
 deleted or suppressed. `db.viewer(terms)` is a reader holding exactly the terms named. A term no row
 carries is accepted and reaches nothing, and an empty list is refused.
 
-A read is sent once. A server too busy to take it answers `429`, and the read raises `Refusal` with
-`status` 429; call it again after a wait. The `Refusal` does not carry the server's
+A server too busy to take a read answers `429`. The read is not sent again: it raises `Refusal`
+with `status` 429, and you call it again after a wait. The `Refusal` does not carry the server's
 `Retry-After`. A later request of `items`, `artifacts` or `aggregate` that is refused raises
 `PartialRead`, described below, whose `cursor` is where to read on.
 

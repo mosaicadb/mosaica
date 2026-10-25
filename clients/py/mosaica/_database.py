@@ -1320,7 +1320,7 @@ class Database:
 
         A request the server answers `429`, being busy, is sent again unchanged after its
         `Retry-After`, waiting at most 30 seconds each time, up to 600 attempts. One still refused
-        then is listed as refused.
+        then is listed in the report's `refusals`.
 
             db.commit()
         """

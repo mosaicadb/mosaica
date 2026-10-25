@@ -921,8 +921,8 @@ class Viewer:
     Get one with `connect(url, token)` for a database someone else runs, or with
     `db.viewer(terms)` for one of your own.
 
-    Each read is sent once. A server too busy to take it answers `429`, which raises `Refusal`
-    with `status` 429; call the read again after a wait. The `Refusal` does not carry the
+    A server too busy to take a read answers `429`. The read is not sent again: it raises
+    `Refusal` with `status` 429, and the caller calls it again after a wait. The `Refusal` does not carry the
     server's `Retry-After`.
 
     - `url`: the address of the database's viewer plane, where readers read.
