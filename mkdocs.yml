@@ -121,7 +121,7 @@ nav:
       - Security: system/security.md
   - Guides:
       - guides/index.md
-      - Query Mosaica over HTTP: guides/http.md
+      - Call Mosaica from a backend: guides/backend.md
       - Run Mosaica under systemd: guides/systemd.md
       - Run Mosaica with Docker: guides/docker.md
       - Operate a deployment: guides/operating.md

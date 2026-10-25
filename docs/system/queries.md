@@ -52,7 +52,7 @@ A client builds everything it shows from a handful of requests: the points of th
     | [A table or an export](#reading-records) | every matching item or artifact | `mosaica items`, `mosaica artifacts` |
     | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `mosaica aggregate` |
 
-Every answer is computed from the items the viewer may see, as [access control](access-control.md) decides them. A count never includes a hidden item, and a filter can only narrow what the viewer sees. The Python and TypeScript clients wrap each route. [Query Mosaica over HTTP](../guides/http.md) sends each request with curl, and the [HTTP API reference](../reference/http.md) gives every field of every request, with worked examples.
+Every answer is computed from the items the viewer may see, as [access control](access-control.md) decides them. A count never includes a hidden item, and a filter can only narrow what the viewer sees. The Python and TypeScript clients wrap each route. The [HTTP API reference](../reference/http.md) gives every field of every request, with worked examples.
 
 ## Drawing the map
 
