@@ -13,7 +13,7 @@ import {
   type TokenSupplier
 } from '@mosaicajs/client';
 import type {Sizing} from '@mosaicajs/deck';
-import {basemapValueError, hexOf} from '@mosaicajs/deck/internal';
+import {hexOf} from '@mosaicajs/deck/internal';
 import {idString} from './base.js';
 import {colouringOf, setSizing, sizingOf} from './colouring.js';
 import type {MosaicaExplorer} from './explorer.js';
@@ -46,13 +46,16 @@ import './explorer.js';
  * round trip. Up-syncs come from the active view, the one whose camera last moved; down-syncs go
  * to every view.
  *
- * `basemap` comes down and is handed to the explorer as it is, except that an image the kernel read
- * from a local path arrives as a `basemap-image` message carrying its bytes, which `_basemap_images`
- * lists by path and digest. The page asks for them at the start with `basemap-images`, makes an
- * object URL of each, and gives the explorer that URL in the path's place; until every image listed
- * has arrived the explorer draws no basemap. An object URL is revoked when its path's bytes are
- * replaced or no longer listed, and when the model is torn down. A basemap the map refuses goes to
- * the kernel as an `error` message.
+ * The basemap comes down as `_basemap`: the value, in which an image named by a local path is
+ * `{local: path}`, and the images it names that way, each with the number of the kernel's read of
+ * the file. The two arrive in one update, so the page never
+ * hands the explorer a path. Whenever the listing names reads the page does not hold, the page asks
+ * for them with `basemap-images`, and the kernel answers with a `basemap-image` message per read,
+ * carrying its bytes; one for a read not listed is dropped. The page makes an object URL of each
+ * and gives the explorer that URL in the path's place. A path still listed keeps its URL until its
+ * new read arrives, and the explorer is given `none` while a listed path has none at all. An
+ * object URL is revoked when its path's new read arrives or the path is no longer listed, and
+ * when the model is torn down. A basemap the map refuses goes to the kernel as an `error` message.
  *
  * Backbone fires `change:<key>` for a `model.set` made here as well as one from the kernel, so
  * each up-sync sets a flag the down-sync handlers check. Without it a `bbox` from Python would fit
@@ -74,10 +77,10 @@ export type WidgetModel = {
 export type KernelMessage =
   | {type: 'token'; token: string; expires_at: number | null}
   | {type: 'refused'; detail: string}
-  | {type: 'basemap-image'; path: string; digest: string; mime: string};
+  | {type: 'basemap-image'; path: string; read: number; mime: string};
 
 /** What the page sends the kernel. */
-export type PageMessage = {type: 'ready'} | {type: 'reauthorise'} | {type: 'basemap-images'} | {type: 'error'; what: string; detail: string};
+export type PageMessage = {type: 'ready'} | {type: 'reauthorise'} | {type: 'basemap-images'; reads: Record<string, number>} | {type: 'error'; what: string; detail: string};
 
 type ViewState = {
   explorer: MosaicaExplorer;
@@ -100,8 +103,8 @@ type ModelState = {
    */
   pendingFit: [number, number, number, number] | null;
   syncingUp: boolean;
-  /** The local images the kernel sent, by path: the digest of their bytes and their object URL. */
-  images: Map<string, {digest: string; url: string}>;
+  /** The object URL of each local image's bytes, by the path `_basemap` names it by, with the read they came from. */
+  images: Map<string, {read: number; url: string}>;
   dispose(): void;
 };
 
@@ -314,30 +317,44 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   };
   states.set(model, state);
 
-  // The local images: kept while `_basemap_images` lists them with these bytes.
+  // The local images: kept while `_basemap` lists them under the read they came from.
+  const showBasemap = () => {
+    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
+  };
+  /** The reads asked for and not yet arrived, as `<read>:<path>`, so none is asked for twice. */
+  const requested = new Set<string>();
   listeners.push((msg, buffers) => {
-    if (msg.type !== 'basemap-image' || listedImages(model)[msg.path] !== msg.digest) return;
-    if (state.images.get(msg.path)?.digest === msg.digest) return;
+    if (msg.type !== 'basemap-image' || basemapOf(model).images[msg.path] !== msg.read) return;
+    if (state.images.get(msg.path)?.read === msg.read) return;
     const bytes = buffers[0];
     if (!(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes))) return;
     const held = state.images.get(msg.path);
     if (held) URL.revokeObjectURL(held.url);
-    state.images.set(msg.path, {digest: msg.digest, url: URL.createObjectURL(new Blob([bytes as BlobPart], {type: msg.mime}))});
-    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
+    state.images.set(msg.path, {read: msg.read, url: URL.createObjectURL(new Blob([bytes as BlobPart], {type: msg.mime}))});
+    requested.delete(`${msg.read}:${msg.path}`);
+    showBasemap();
   });
-  model.on('change:_basemap_images', () => {
-    const listed = listedImages(model);
-    for (const [path, {digest, url}] of state.images) {
-      if (listed[path] === digest) continue;
+  /** Drop the images no longer listed, and ask for the reads listed, not held and not asked for. */
+  const pullImages = () => {
+    const listed = basemapOf(model).images;
+    for (const [path, {url}] of state.images) {
+      if (Object.hasOwn(listed, path)) continue;
       URL.revokeObjectURL(url);
       state.images.delete(path);
     }
-    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
+    for (const pending of requested) {
+      const at = pending.indexOf(':');
+      if (listed[pending.slice(at + 1)] !== Number(pending.slice(0, at))) requested.delete(pending);
+    }
+    const reads = Object.fromEntries(Object.entries(listed).filter(([path, read]) => state.images.get(path)?.read !== read && !requested.has(`${read}:${path}`)));
+    for (const [path, read] of Object.entries(reads)) requested.add(`${read}:${path}`);
+    if (Object.keys(reads).length > 0) model.send({type: 'basemap-images', reads} satisfies PageMessage);
+  };
+  model.on('change:_basemap', () => {
+    pullImages();
+    showBasemap();
   });
-  model.on('change:basemap', () => {
-    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
-  });
-  if (Object.keys(listedImages(model)).length > 0) model.send({type: 'basemap-images'} satisfies PageMessage);
+  pullImages();
 
   const report = (what: string, e: unknown) => {
     model.send({type: 'error', what, detail: e instanceof Error ? e.message : String(e)} satisfies PageMessage);
@@ -686,32 +703,32 @@ function applyColours(explorer: MosaicaExplorer, model: WidgetModel): void {
   if (clusters && typeof clusters === 'object') explorer.clusterColours = clusters as Record<string, Record<string, string>>;
 }
 
-/** The local images `basemap` names, by path, to the digest of the bytes the kernel read. */
-function listedImages(model: WidgetModel): Readonly<Record<string, string>> {
-  const listed = model.get('_basemap_images');
-  return listed && typeof listed === 'object' ? (listed as Record<string, string>) : {};
+/** The basemap the kernel set, and the local images it names, by path, to the number of the read. */
+function basemapOf(model: WidgetModel): {value: unknown; images: Readonly<Record<string, number>>} {
+  const synced = model.get('_basemap') as {value?: unknown; images?: Record<string, number>} | null | undefined;
+  return {value: synced?.value ?? null, images: synced?.images ?? {}};
 }
 
 /**
- * The basemap the kernel set, given to the explorer with each local image's object URL in place of
- * its path, or `none` while a listed image has not arrived. `null` leaves the map's default.
+ * Give the explorer the basemap the kernel set, with each local image's object URL in place of its
+ * path, or `none` while a listed path has no bytes yet. `null` leaves the map's default.
  */
 function applyBasemap(explorer: MosaicaExplorer, model: WidgetModel, images: ReadonlyMap<string, {url: string}>): void {
-  const basemap = model.get('basemap') as MosaicaExplorer['basemap'] | undefined;
-  const listed = listedImages(model);
+  const {value, images: listed} = basemapOf(model);
   let waiting = false;
-  const local = (value: unknown): unknown => {
-    if (typeof value !== 'object' || value === null || !('image' in value)) return value;
-    const image = (value as {image: unknown}).image;
-    if (typeof image !== 'string' || !(image in listed)) return value;
-    const held = images.get(image);
+  // A local image's `image` is `{local: path}`, which no other value holds.
+  const local = (one: unknown): unknown => {
+    const image = typeof one === 'object' && one !== null ? (one as {image?: unknown}).image : undefined;
+    const path = typeof image === 'object' && image !== null ? (image as {local?: unknown}).local : undefined;
+    if (typeof path !== 'string') return one;
+    const held = Object.hasOwn(listed, path) ? images.get(path) : undefined;
     if (!held) waiting = true;
-    return {...value, image: held?.url ?? ''};
+    return {...(one as object), image: held?.url ?? ''};
   };
-  // A mapping as the map reads one: an object every one of whose values is a basemap value.
-  const isMapping = typeof basemap === 'object' && basemap !== null && Object.getPrototypeOf(basemap) === Object.prototype && Object.values(basemap).every((v) => basemapValueError(v) === null);
-  const given = !isMapping ? local(basemap) : Object.fromEntries(Object.entries(basemap as Record<string, unknown>).map(([view, value]) => [view, local(value)]));
-  explorer.basemap = waiting ? 'none' : ((given ?? null) as MosaicaExplorer['basemap']);
+  // A mapping as the map reads one: an object with neither `tiles` nor `image`.
+  const mapping = typeof value === 'object' && value !== null && !('tiles' in value) && !('image' in value);
+  const given = mapping ? Object.fromEntries(Object.entries(value).map(([view, one]) => [view, local(one)])) : local(value);
+  explorer.basemap = (waiting ? 'none' : given) as MosaicaExplorer['basemap'];
 }
 
 const mounts = new WeakMap<ModelState, (explorer: MosaicaExplorer) => () => void>();

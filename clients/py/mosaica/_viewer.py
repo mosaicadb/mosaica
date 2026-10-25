@@ -870,10 +870,7 @@ class Selection:
         - `palette`: the palette clusters are coloured from, as `Map` takes it.
         - `value_colours`, `cluster_colours`: colours for single category values and single
           clusters in place of their palette colours, as `Map` takes them.
-        - `basemap`: what is drawn under the points: `"world"`, `"none"`, `{"tiles": ...,
-          "attribution": ...}`, `{"image": url_or_path, "bounds": ...}`, or a dictionary from
-          view id to one of those, as `Map` takes it. `None`, the default, is `"world"` on a view
-          with a map projection and nothing on one without.
+        - `basemap`: what is drawn under the points, as `Map` takes it.
 
         Items outside the box are still drawn when they are in frame. A layer, a `colour_by` or
         a `size_by` this reader cannot see is refused, as `Viewer.map` says.
@@ -1002,10 +999,7 @@ class Viewer:
         - `filters`: a filter expression to apply, as `Selection.filter` takes one.
         - `height`: the widget's height in pixels.
         - `size_by`: a number column to size points by; `None` draws them at one size.
-        - `basemap`: what is drawn under the points: `"world"`, `"none"`, `{"tiles": ...,
-          "attribution": ...}`, `{"image": url_or_path, "bounds": ...}`, or a dictionary from
-          view id to one of those, as `Map` takes it. `None`, the default, is `"world"` on a view
-          with a map projection and nothing on one without.
+        - `basemap`: what is drawn under the points, as `Map` takes it.
 
         Other keywords go to `Map` unchanged, such as `bbox` to frame the camera on a box, and
         `artifacts_per_tile`, without which the map draws no annotation and colouring by a layer

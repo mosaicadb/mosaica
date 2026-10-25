@@ -530,29 +530,12 @@ describe('the basemap', () => {
   type Basemapped = {basemap: unknown};
   const explorerOf = (el: HTMLElement) => el.querySelector('mosaica-explorer') as unknown as Basemapped;
   const bytes = (text: string) => new TextEncoder().encode(text).buffer;
-  const image = (path: string, digest: string) => ({type: 'basemap-image', path, digest, mime: 'image/png'}) satisfies KernelMessage;
+  const image = (path: string, read: number) => ({type: 'basemap-image', path, read, mime: 'image/png'}) satisfies KernelMessage;
+  const synced = (value: unknown, images: Record<string, number> = {}) => ({_basemap: {value, images}});
+  const asked = (model: {sent: Sent[]}) => model.sent.filter((s) => (s.content as {type: string}).type === 'basemap-images').length;
 
-  it('is handed to every view’s explorer as the kernel set it, and follows a change', () => {
-    const {model, el} = setUp();
-    expect(explorerOf(el).basemap).toBeNull();
-    const plan = {image: 'https://example.org/plan.png', bounds: [0, 0, 1, 1]};
-    model.set('basemap', plan);
-    expect(explorerOf(el).basemap).toEqual(plan);
-    model.set('basemap', {s0: 'none', geo: 'world'});
-    expect(explorerOf(el).basemap).toEqual({s0: 'none', geo: 'world'});
-    // A mapping for the view `image`, not an image.
-    model.set('basemap', {image: 'world'});
-    expect(explorerOf(el).basemap).toEqual({image: 'world'});
-    model.set('basemap', {s0: 'none', geo: 'world'});
-    const other = document.createElement('div');
-    render({model, el: other});
-    expect(explorerOf(other).basemap).toEqual({s0: 'none', geo: 'world'});
-    model.set('basemap', null);
-    expect(explorerOf(el).basemap).toBeNull();
-    expect(model.sent).toEqual([]);
-  });
-
-  it('draws a local image from the bytes the kernel sends, as an object URL revoked when it is replaced or torn down', () => {
+  /** Object URLs made and revoked, in place of the browser's. */
+  function objectUrls() {
     const made: string[] = [];
     const revoked: string[] = [];
     const create = URL.createObjectURL;
@@ -566,39 +549,117 @@ describe('the basemap', () => {
       URL.createObjectURL = create;
       URL.revokeObjectURL = revoke;
     });
+    return {made, revoked};
+  }
+
+  it('is handed to every view’s explorer as the kernel set it, and follows a change', () => {
+    const {model, el} = setUp(synced(null));
+    const explorer = explorerOf(el);
+    expect(explorer.basemap).toBeNull();
+    const plan = {image: 'https://example.org/plan.png', bounds: [0, 0, 1, 1]};
+    model.set('_basemap', {value: plan, images: {}});
+    expect(explorer.basemap).toEqual(plan);
+    model.set('_basemap', {value: {s0: 'none', geo: 'world'}, images: {}});
+    expect(explorer.basemap).toEqual({s0: 'none', geo: 'world'});
+    const other = document.createElement('div');
+    render({model, el: other});
+    expect(explorerOf(other).basemap).toEqual({s0: 'none', geo: 'world'});
+    model.set('_basemap', {value: null, images: {}});
+    expect(explorer.basemap).toBeNull();
+    expect(model.sent).toEqual([]);
+  });
+
+  it('draws a local image from the bytes it asks for, as an object URL revoked when it is replaced or torn down', () => {
+    const {made, revoked} = objectUrls();
     const bounds = [0, 0, 4, 3];
-    const {model, el, dispose} = setUp({basemap: {s0: {image: 'plan.png', bounds}, geo: 'world'}, _basemap_images: {'plan.png': 'd1'}});
+    const {model, el, dispose} = setUp(synced({s0: {image: {local: 'plan.png'}, bounds}, geo: 'world'}, {'plan.png': 1}));
     // The page asks for the bytes, and draws no basemap until they come.
-    expect(model.sent.map((s) => s.content)).toEqual([{type: 'basemap-images'}]);
+    expect(model.sent.map((s) => s.content)).toEqual([{type: 'basemap-images', reads: {'plan.png': 1}}]);
     expect(explorerOf(el).basemap).toBe('none');
-    // Bytes for a digest the model does not list are dropped.
-    model.fire('msg:custom', image('plan.png', 'stale'), [bytes('old')]);
+    // Bytes from a read the model does not list are dropped.
+    model.fire('msg:custom', image('plan.png', 0), [bytes('old')]);
     expect(made).toEqual([]);
-    model.fire('msg:custom', image('plan.png', 'd1'), [new DataView(bytes('pixels'))]);
+    model.fire('msg:custom', image('plan.png', 1), [new DataView(bytes('pixels'))]);
     expect(made).toEqual(['blob:test/0:image/png:6']);
     expect(explorerOf(el).basemap).toEqual({s0: {image: made[0], bounds}, geo: 'world'});
-    // The same bytes again make no new URL; new bytes for the path replace the old URL.
-    model.fire('msg:custom', image('plan.png', 'd1'), [bytes('pixels')]);
+    // The same read again makes no new URL. A new read of the path is asked for by name, and the
+    // old URL is drawn until it arrives, then revoked.
+    model.fire('msg:custom', image('plan.png', 1), [bytes('pixels')]);
     expect(made).toHaveLength(1);
-    model.set('_basemap_images', {'plan.png': 'd2'});
+    model.set('_basemap', {value: {image: {local: 'plan.png'}}, images: {'plan.png': 2}});
+    expect(model.sent.at(-1)!.content).toEqual({type: 'basemap-images', reads: {'plan.png': 2}});
+    expect(revoked).toEqual([]);
+    expect(explorerOf(el).basemap).toEqual({image: made[0]});
+    model.fire('msg:custom', image('plan.png', 2), [bytes('pixels2')]);
     expect(revoked).toEqual([made[0]]);
-    expect(explorerOf(el).basemap).toBe('none');
-    model.fire('msg:custom', image('plan.png', 'd2'), [bytes('pixels2')]);
-    expect(explorerOf(el).basemap).toEqual({s0: {image: made[1], bounds}, geo: 'world'});
-    // A single value names the image as a mapping's entry does.
-    model.set('basemap', {image: 'plan.png'});
     expect(explorerOf(el).basemap).toEqual({image: made[1]});
-    // An image URL is the kernel's to give as it is.
-    model.set('basemap', {image: 'https://example.org/plan.png'});
+    // A string is a URL, even one spelt as a listed path.
+    model.set('_basemap', {value: {s0: {image: 'plan.png'}, geo: {image: {local: 'plan.png'}}}, images: {'plan.png': 2}});
+    expect(explorerOf(el).basemap).toEqual({s0: {image: 'plan.png'}, geo: {image: made[1]}});
+    // An image URL is the kernel's to give as it is, and the image no longer listed is revoked.
+    model.set('_basemap', {value: {image: 'https://example.org/plan.png'}, images: {}});
     expect(explorerOf(el).basemap).toEqual({image: 'https://example.org/plan.png'});
+    expect(revoked).toEqual([made[0], made[1]]);
+    expect(asked(model)).toBe(2);
     dispose();
     expect(revoked).toEqual([made[0], made[1]]);
   });
 
+  it('never hands the explorer a local path, even as the value moves away from it', () => {
+    objectUrls();
+    const {model, el} = setUp(synced({image: {local: 'plan.png'}}, {'plan.png': 1}));
+    const seen: unknown[] = [];
+    const explorer = el.querySelector('mosaica-explorer')!;
+    // Watch the element's own accessor, on its prototype, where Lit keeps it.
+    const proto = Object.getPrototypeOf(explorer) as object;
+    const own = Object.getOwnPropertyDescriptor(proto, 'basemap')!;
+    Object.defineProperty(proto, 'basemap', {
+      ...own,
+      set(this: unknown, v: unknown) {
+        if (this === explorer) seen.push(v);
+        own.set!.call(this, v);
+      }
+    });
+    onTestFinished(() => void Object.defineProperty(proto, 'basemap', own));
+    model.set('_basemap', {value: 'world', images: {}});
+    model.set('_basemap', {value: {image: {local: 'plan.png'}}, images: {'plan.png': 2}});
+    model.fire('msg:custom', image('plan.png', 2), [bytes('pixels')]);
+    expect(seen.map((v) => JSON.stringify(v)).join()).not.toContain('local');
+    expect(seen).toEqual(['world', 'none', {image: 'blob:test/0:image/png:6'}]);
+  });
+
+  it('an image sent before the listing that names it is asked for again once the listing arrives', () => {
+    const {made} = objectUrls();
+    const {model, el} = setUp(synced('world'));
+    expect(asked(model)).toBe(0);
+    model.fire('msg:custom', image('plan.png', 1), [bytes('pixels')]);
+    expect(made).toEqual([]);
+    model.set('_basemap', {value: {image: {local: 'plan.png'}}, images: {'plan.png': 1}});
+    expect(asked(model)).toBe(1);
+    model.fire('msg:custom', image('plan.png', 1), [bytes('pixels')]);
+    expect(explorerOf(el).basemap).toEqual({image: made[0]});
+  });
+
+  it('asks once for a read in flight, and again once the path was dropped and listed anew', () => {
+    const {made} = objectUrls();
+    const {model, el} = setUp(synced({image: {local: 'plan.png'}}, {'plan.png': 1}));
+    expect(asked(model)).toBe(1);
+    model.set('_basemap', {value: {image: {local: 'plan.png'}, bounds: [0, 0, 2, 2]}, images: {'plan.png': 1}});
+    expect(asked(model)).toBe(1);
+    model.set('_basemap', {value: 'world', images: {}});
+    model.set('_basemap', {value: {image: {local: 'plan.png'}}, images: {'plan.png': 1}});
+    expect(asked(model)).toBe(2);
+    model.fire('msg:custom', image('plan.png', 1), [bytes('pixels')]);
+    expect(explorerOf(el).basemap).toEqual({image: made[0]});
+    model.set('_basemap', {value: {image: {local: 'plan.png'}}, images: {'plan.png': 2}});
+    expect(asked(model)).toBe(3);
+  });
+
   it('a message carrying an image does not settle a token request', async () => {
-    const {model, supplier} = setUp({_basemap_images: {'plan.png': 'd1'}});
+    const {model, supplier} = setUp(synced({image: {local: 'plan.png'}}, {'plan.png': 1}));
+    objectUrls();
     const p = supplier()();
-    model.fire('msg:custom', image('plan.png', 'd1'), [bytes('pixels')]);
+    model.fire('msg:custom', image('plan.png', 1), [bytes('pixels')]);
     model.fire('msg:custom', {type: 'token', token: 'tok-1', expires_at: null});
     expect((await p).token).toBe('tok-1');
   });

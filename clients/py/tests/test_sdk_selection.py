@@ -11,6 +11,7 @@ import json
 import numpy as np
 import pyarrow as pa
 import pytest
+import traitlets
 
 from mosaica import Refusal
 
@@ -401,7 +402,7 @@ def test_every_route_to_a_map_takes_the_basemap_as_given(db, stub_bundle, tmp_pa
         assert route().basemap is None
         assert route(basemap="none").basemap == "none"
         m = route(basemap={"s0": {"image": image, "bounds": [0, 0, 1, 1]}})
-        assert m.basemap == {"s0": {"image": str(image), "bounds": [0.0, 0.0, 1.0, 1.0]}}
-        assert list(m.get_state()["_basemap_images"]) == [str(image)]
-        with pytest.raises(FileNotFoundError):
+        assert m.basemap == {"s0": {"image": image, "bounds": [0.0, 0.0, 1.0, 1.0]}}
+        assert m.get_state()["_basemap"] == {"value": {"s0": {"image": {"local": str(image)}, "bounds": [0.0, 0.0, 1.0, 1.0]}}, "images": {str(image): 1}}
+        with pytest.raises(traitlets.TraitError):
             route(basemap={"image": tmp_path / "missing.png"})

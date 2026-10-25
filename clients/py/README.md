@@ -667,8 +667,10 @@ control for it, and neither changes `cluster_budget`.
 `basemap` is what is drawn under the points: `"world"` (land, coastlines and borders, on a view
 with a map projection), `"none"`, `{"tiles": url_template, "attribution": text}`, or
 `{"image": url_or_path, "bounds": [x0, y0, x1, y1]}`, or a dictionary from view id to one of
-those. An image given as a local path is read by Python and sent to the page, and never saved with
-the notebook. `None`, the default, is `"world"` on a geographic view and nothing on an x/y one.
+those. A dictionary with a `tiles` or `image` key is always one value, so a mapping cannot name a
+view called `tiles` or `image`. An image given as a local path is read by Python each time it is
+set and sent to the page, and never saved with the notebook. `None`, the default, is `"world"` on a geographic view
+and nothing on an x/y one.
 `db.map`, `viewer.map` and `selection.map` all take it.
 
 `palette` is the palette annotations are coloured from under `colour_by="cluster:<layer>"`:
@@ -735,14 +737,15 @@ skipped and `Map(url)` takes no `token`.
 | page → kernel | `{type: "reauthorise"}` | before expiry; after a session-ended refusal |
 | kernel → page | `{type: "refused", detail}` | the token source raised |
 | page → kernel | `{type: "error", what, detail}` | a `filters` expression the panel cannot hold, a `colour_by` naming no layer, a `basemap` the map refuses |
-| page → kernel | `{type: "basemap-images"}` | at the start, where `_basemap_images` lists any |
-| kernel → page | `{type: "basemap-image", path, digest, mime}` and the bytes as a buffer | a local image when `basemap` is set, and in answer to `basemap-images` |
+| page → kernel | `{type: "basemap-images", reads: {path: read}}` | whenever `_basemap` lists local images' reads the page does not hold, naming them |
+| kernel → page | `{type: "basemap-image", path, read, mime}` and the bytes as a buffer | in answer to `basemap-images`, for each read it names that the kernel holds |
 
 Traitlets: `url`, `explorer_layout`, `height`, `title_field`, `artifacts_per_tile`,
-`budget_min`, `budget_max`, `cluster_budget_min`, `cluster_budget_max`, `basemap` and
-`_basemap_images` (each local image's path and digest, never its bytes) down; `view`, `bbox`,
+`budget_min`, `budget_max`, `cluster_budget_min`, `cluster_budget_max` and `_basemap` (the
+`basemap` value with each local image as `{"local": path}`, the path as written, and that path's
+read number, never its bytes) down; `view`, `bbox`,
 `layers`, `colour_by`, `palette`, `size_by`, `size_min`, `size_max`, `size_scale` and `filters`
 both ways, synced up at the settle; `budget` and `cluster_budget` both ways, up when the map's
 slider is let go; `value_colours` and `cluster_colours` both ways, up as each colour is chosen
 in the map, as `palette` also is; `selected`, `selected_artifact`, `region` up.
-`last_error` is kernel-side only. The JavaScript half is `clients/ts/components/src/widget.ts`.
+`last_error` and `basemap` are kernel-side only. The JavaScript half is `clients/ts/components/src/widget.ts`.

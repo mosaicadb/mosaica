@@ -28,9 +28,8 @@ def make(monkeypatch, tmp_path):
 
     def build(**kw):
         m = Map(kw.pop("url", "http://viewer.test"), **kw)
-        sent, buffers = [], []
-        monkeypatch.setattr(m, "send", lambda content, buffers=None: (sent.append(content), m.buffers.append(buffers)))
-        m.sent, m.buffers = sent, buffers
+        m.sent, m.buffers = [], []
+        monkeypatch.setattr(m, "send", lambda content, buffers=None: (m.sent.append(content), m.buffers.append(buffers)))
         return m
 
     return build
@@ -155,7 +154,7 @@ def test_the_synced_surface_is_exactly_the_design_s(make):
     assert synced == {
         "url", "view", "explorer_layout", "height", "title_field", "artifacts_per_tile",
         "budget", "budget_min", "budget_max", "cluster_budget", "cluster_budget_min", "cluster_budget_max", "bbox", "layers", "colour_by", "palette", "value_colours", "cluster_colours", "size_by", "size_min", "size_max", "size_scale", "filters",
-        "selected", "selected_artifact", "region", "basemap",
+        "selected", "selected_artifact", "region",
     }
 
 
@@ -243,8 +242,13 @@ def test_the_cluster_budget_and_its_range_are_synced_down_with_their_defaults(ma
     assert m.get_state()["cluster_budget"] == 40
 
 
-def test_the_basemap_is_synced_down_exactly_as_given_and_defaults_to_the_map_s_own(make):
-    assert make(token="t").get_state()["basemap"] is None
+def synced_basemap(m):
+    """What the page reads: the value and the local images it names, in one trait."""
+    return m.get_state()["_basemap"]
+
+
+def test_the_basemap_goes_down_as_given_and_defaults_to_the_map_s_own(make):
+    assert synced_basemap(make(token="t")) == {"value": None, "images": {}}
     for value in (
         "world",
         "none",
@@ -253,16 +257,19 @@ def test_the_basemap_is_synced_down_exactly_as_given_and_defaults_to_the_map_s_o
         {"image": "data:image/png;base64,iVBORw0KGgo="},
         {"geo": "world", "xy": "none"},
         {},
-        # Every value a basemap value: a mapping, here for the views `image` and `tiles`.
-        {"image": "world", "tiles": {"image": "https://example.org/a.png"}},
     ):
         m = make(token="t", basemap=value)
-        assert m.basemap == value and m.get_state()["basemap"] == value
+        assert m.basemap == value and synced_basemap(m) == {"value": value, "images": {}}
     m = make(token="t")
-    m.basemap = {"xy": {"image": "http://example.org/a.png", "bounds": (0, 0, 1, 1)}}
-    assert m.get_state()["basemap"] == {"xy": {"image": "http://example.org/a.png", "bounds": [0.0, 0.0, 1.0, 1.0]}}
+    np = pytest.importorskip("numpy")
+    m.basemap = {"xy": {"image": "http://example.org/a.png", "bounds": np.array([0, 0, 1, 2.5])}, "geo": {"tiles": "https://t.example.org/{z}/{x}/{y}.png", "attribution": None}}
+    want = {"xy": {"image": "http://example.org/a.png", "bounds": [0.0, 0.0, 1.0, 2.5]}, "geo": {"tiles": "https://t.example.org/{z}/{x}/{y}.png"}}
+    assert m.basemap == want and synced_basemap(m)["value"] == want
+    m.basemap = {"image": "http://example.org/a.png", "bounds": (np.float32(1), np.int64(2), 3, 4.5)}
+    assert m.basemap["bounds"] == [1.0, 2.0, 3.0, 4.5]
     m.basemap = None
-    assert m.get_state()["basemap"] is None
+    assert synced_basemap(m) == {"value": None, "images": {}}
+    assert "basemap" not in m.get_state()
 
 
 def test_a_basemap_of_the_wrong_shape_is_refused_at_the_call(make):
@@ -276,60 +283,135 @@ def test_a_basemap_of_the_wrong_shape_is_refused_at_the_call(make):
         {"tiles": "https://tiles.example.org/{z}/{x}/{y}.png", "credit": "Example"},
         {"image": ""},
         {"image": 4},
+        {"image": "file:///home/me/plan.png"},
         {"image": "http://example.org/a.png", "bounds": [0, 0, 1]},
         {"image": "http://example.org/a.png", "bounds": [0, 0, 1, float("nan")]},
+        {"image": "http://example.org/a.png", "bounds": [0, 0, 1, 10**400]},
+        {"image": "http://example.org/a.png", "bounds": [0, 0, 1, True]},
         {"image": "http://example.org/a.png", "bounds": "0,0,1,1"},
+        {"image": "http://example.org/a.png", "bounds": 4},
+        {"image": "http://example.org/a.png", "bounds": {0, 1, 2, 3}},
         {"image": "http://example.org/a.png", "tiles": "https://t.example.org/{z}/{x}/{y}.png"},
+        {"image": {"image": "https://example.org/a.png"}},
+        {"tiles": {"tiles": "https://t.example.org/{z}/{x}/{y}.png"}},
+        {"image": "world", "tiles": {"image": "https://example.org/a.png"}},
         {"geo": "osm"},
         {"geo": {"imgae": "a.png"}},
         {1: "world"},
-        {"image": "none", "bounds": [0, 0, 1, 1]},
     ):
         with pytest.raises(traitlets.TraitError):
             m.basemap = bad
     assert m.basemap == "world"
 
 
-def test_a_local_image_goes_to_the_page_as_a_message_and_never_into_saved_state(make, tmp_path, monkeypatch):
+def test_a_key_holding_none_is_left_out_at_either_level(make):
+    m = make(token="t")
+    m.basemap = {"image": "https://example.org/a.png", "tiles": None}
+    assert m.basemap == {"image": "https://example.org/a.png"}
+    m.basemap = {"tiles": None, "geo": "world"}
+    assert m.basemap == {"geo": "world"}
+    m.basemap = {"geo": None, "xy": {"image": "https://example.org/a.png", "bounds": None}}
+    assert m.basemap == {"xy": {"image": "https://example.org/a.png"}}
+    assert synced_basemap(m)["value"] == {"xy": {"image": "https://example.org/a.png"}}
+
+
+def test_a_dict_with_tiles_or_image_is_one_value_and_world_is_a_path_there(make, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    m = make(token="t")
+    with pytest.raises(traitlets.TraitError):
+        m.basemap = {"image": "world"}
+    (tmp_path / "world").write_bytes(b"png")
+    m.basemap = {"image": "world"}
+    assert synced_basemap(m) == {"value": {"image": {"local": "world"}}, "images": {"world": 1}}
+
+
+def asks(m, reads):
+    page_says(m, {"type": "basemap-images", "reads": reads})
+
+
+def test_a_local_image_goes_to_the_page_when_it_asks_and_never_into_saved_state(make, tmp_path, monkeypatch):
     png = b"\x89PNG\r\n\x1a\n" + b"pixels" * 50
     (tmp_path / "plan.png").write_bytes(png)
     monkeypatch.chdir(tmp_path)
-    m = make(token="t", basemap={"geo": "world", "xy": {"image": pathlib.Path("plan.png"), "bounds": [0, 0, 4, 3]}})
-    assert m.basemap == {"geo": "world", "xy": {"image": "plan.png", "bounds": [0.0, 0.0, 4.0, 3.0]}}
-    state = m.get_state()
-    assert "pixels" not in json.dumps({k: v for k, v in state.items() if k != "_esm"})
+    plan = "plan.png"
+    given = {"geo": "world", "xy": {"image": pathlib.Path("plan.png"), "bounds": [0, 0, 4, 3]}}
+    m = make(token="t", basemap=given)
+    assert m.basemap == {"geo": "world", "xy": {"image": pathlib.Path("plan.png"), "bounds": [0.0, 0.0, 4.0, 3.0]}}
+    assert synced_basemap(m) == {"value": {"geo": "world", "xy": {"image": {"local": plan}, "bounds": [0.0, 0.0, 4.0, 3.0]}}, "images": {plan: 1}}
+    saved = json.dumps({k: v for k, v in m.get_state().items() if k != "_esm"})
+    assert "pixels" not in saved and str(tmp_path) not in saved
+    # Nothing is pushed: the page asks for the reads it lacks, and gets only those it names.
     assert m.sent == []
-    # The page asks when it starts, and again after a reload.
-    page_says(m, {"type": "basemap-images"})
-    page_says(m, {"type": "basemap-images"})
-    message, again = m.sent
-    assert message == again and m.buffers == [[png], [png]]
-    assert message["type"] == "basemap-image" and message["path"] == "plan.png" and message["mime"] == "image/png"
-    assert state["_basemap_images"] == {"plan.png": message["digest"]}
-    # Set again in a later cell, the file is read again, and sent only where its bytes changed.
+    asks(m, {plan: 1})
+    asks(m, {plan: 0, "elsewhere.png": 1})
+    assert m.sent == [{"type": "basemap-image", "path": plan, "read": 1, "mime": "image/png"}]
+    assert m.buffers == [[png]]
+    # A change elsewhere, or the same bytes read again, keeps the read; edited bytes move it on,
+    # even under the same value.
+    m.basemap = {"geo": "none", "xy": {"image": "plan.png"}}
+    m.basemap = {"xy": {"image": "plan.png"}}
+    assert synced_basemap(m)["images"] == {plan: 1}
+    (tmp_path / "plan.png").write_bytes(png + b"more")
+    m.basemap = {"xy": {"image": "plan.png"}}
+    assert synced_basemap(m) == {"value": {"xy": {"image": {"local": plan}}}, "images": {plan: 2}}
     m.sent.clear()
     m.buffers.clear()
-    m.basemap = {"image": "plan.png"}
-    assert m.sent == []
-    (tmp_path / "plan.png").write_bytes(png + b"more")
-    m.basemap = {"image": str(tmp_path / "plan.png")}
-    [message] = m.sent
-    assert message["path"] == str(tmp_path / "plan.png") and m.buffers == [[png + b"more"]]
-    assert m.get_state()["_basemap_images"] == {str(tmp_path / "plan.png"): message["digest"]}
+    asks(m, {plan: 1})
+    asks(m, {plan: 2})
+    assert m.sent == [{"type": "basemap-image", "path": plan, "read": 2, "mime": "image/png"}]
+    assert m.buffers == [[png + b"more"]]
     m.basemap = "world"
-    assert m.get_state()["_basemap_images"] == {}
+    assert synced_basemap(m) == {"value": "world", "images": {}}
+    m.sent.clear()
+    asks(m, {plan: 2})
+    assert m.sent == []
 
 
-def test_a_local_image_that_is_not_a_file_raises_at_the_call(make, tmp_path):
-    with pytest.raises(FileNotFoundError):
+def test_a_path_stays_a_path_even_where_it_reads_as_a_url(make, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "https:").mkdir()
+    (tmp_path / "https:" / "plan.png").write_bytes(b"png")
+    m = make(token="t", basemap={"image": pathlib.Path("https:/plan.png")})
+    plan = "https:/plan.png"
+    assert synced_basemap(m) == {"value": {"image": {"local": plan}}, "images": {plan: 1}}
+    # Read back and set again, it is still the file.
+    m.basemap = m.basemap
+    assert m.basemap == {"image": pathlib.Path("https:/plan.png")} and synced_basemap(m)["images"] == {plan: 1}
+    with pytest.raises(traitlets.TraitError):
+        m.basemap = {"image": pathlib.Path("~/plan.png")}
+
+
+def test_a_local_image_that_cannot_be_read_is_refused_and_the_value_kept(make, tmp_path):
+    with pytest.raises(traitlets.TraitError):
         make(token="t", basemap={"image": tmp_path / "missing.png"})
     m = make(token="t", basemap="world")
-    with pytest.raises(FileNotFoundError):
-        m.basemap = {"geo": {"image": str(tmp_path)}}
-    assert m.basemap == "world" and m.get_state()["_basemap_images"] == {}
+    for unreadable in ({"geo": {"image": str(tmp_path)}}, {"image": tmp_path / "missing.png"}):
+        with pytest.raises(traitlets.TraitError):
+            m.basemap = unreadable
+    assert m.basemap == "world" and synced_basemap(m) == {"value": "world", "images": {}}
+    # Inside a hold the refusal rolls back too.
+    with pytest.raises(traitlets.TraitError):
+        with m.hold_trait_notifications():
+            m.basemap = {"image": tmp_path / "missing.png"}
+    assert m.basemap == "world" and synced_basemap(m) == {"value": "world", "images": {}}
+
+
+def test_a_held_change_that_fails_keeps_the_images_the_page_may_still_ask_for(make, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "plan.png").write_bytes(b"old")
+    (tmp_path / "other.png").write_bytes(b"new")
+    m = make(token="t", basemap={"image": "plan.png"})
+    with pytest.raises(traitlets.TraitError):
+        with m.hold_trait_notifications():
+            m.basemap = {"image": "other.png"}
+            m.layers = ["all"]
+    assert m.basemap == {"image": "plan.png"} and synced_basemap(m)["images"] == {"plan.png": 1}
+    asks(m, {"plan.png": 1})
+    assert m.sent == [{"type": "basemap-image", "path": "plan.png", "read": 1, "mime": "image/png"}]
+    assert m.buffers == [[b"old"]]
 
 
 def test_an_image_url_is_not_read_here(make):
     m = make(token="t", basemap={"image": "HTTPS://example.org/plan.png"})
-    page_says(m, {"type": "basemap-images"})
-    assert m.sent == [] and m.get_state()["_basemap_images"] == {}
+    asks(m, {"HTTPS://example.org/plan.png": 1})
+    assert m.sent == [] and synced_basemap(m)["images"] == {}
