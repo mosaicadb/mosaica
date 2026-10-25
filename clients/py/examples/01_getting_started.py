@@ -260,11 +260,11 @@ def _(mo):
     chosen so that dense and sparse areas both show, and the server sends only the points in
     view.
 
-    The panel on the left counts the places in view. Open the Feature class card with the arrow
-    on its right, and it lists the classes with a count for each, largest first. Hover over a
-    class and two buttons appear beside it. The highlighter picks out that class's places on the
-    map and dims the rest, and the funnel filters the map to that class. Click the coloured
-    square beside a class to change its colour.
+    The panel on the left counts the places in view. Its Feature class card lists the classes
+    with a count for each, largest first. Hover over a class and two buttons appear beside it.
+    The highlighter picks out that class's places on the map and dims the rest, and the funnel
+    filters the map to that class. Click the coloured square beside a class to change its
+    colour.
 
     ## Filter from Python
 
@@ -391,9 +391,9 @@ def _(nusa_tenggara):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The map opens on the whole world, where the region is a small cluster of points. Scroll to
-    zoom in on it. The islands of East Nusa Tenggara lie east of longitude 118°, but one point
-    sits on its own far to the west of them. To find out which place it is, read the region's
+    The map opens framed on all 314 places. The islands of East Nusa Tenggara are the cluster at
+    the bottom right, east of longitude 118°. One point sits on its own at the top left, far to
+    the west of them. To find out which place it is, read the region's
     places into pandas with their longitude and latitude, and sort them from west to east.
     """)
     return
