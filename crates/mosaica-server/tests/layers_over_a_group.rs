@@ -594,15 +594,11 @@ async fn a_shape_layer_on_one_view_of_a_group_draws_nothing_on_a_sibling() {
         .send()
         .await
         .unwrap();
-    if resp.status() == 200 {
-        let body: Value = resp.json().await.unwrap();
-        let counted = body["artifacts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| row["masked_count"].as_u64().unwrap_or(0) > 0);
-        assert!(!counted, "a sibling view counts nothing of the layer: {body}");
-    }
+    // A layer is unknown on a view it is not drawn on, as one never registered is.
+    assert_eq!(resp.status(), 422, "{}", resp.text().await.unwrap());
+
+    // The layer is reachable, so a `member_of` naming it is admitted on any view; its artifact is
+    // not drawn on the sibling, so it is the empty operand there and matches nothing.
     let resp = server
         .client
         .post(server.viewer_url("/v1/viewport"))
@@ -614,14 +610,12 @@ async fn a_shape_layer_on_one_view_of_a_group_draws_nothing_on_a_sibling() {
         .send()
         .await
         .unwrap();
-    if resp.status() == 200 {
-        let matched: u64 = decode_viewport_frames(&resp.bytes().await.unwrap())
-            .tiles
-            .iter()
-            .map(|(_, _, matched)| matched)
-            .sum();
-        assert_eq!(matched, 0, "no item of a sibling view is a member");
-    }
+    assert_eq!(resp.status(), 200);
+    let tiles = decode_viewport_frames(&resp.bytes().await.unwrap()).tiles;
+    let visible: u64 = tiles.iter().map(|(_, visible, _)| visible).sum();
+    let matched: u64 = tiles.iter().map(|(_, _, matched)| matched).sum();
+    assert!(visible > 0, "the sibling view holds items");
+    assert_eq!(matched, 0, "no item of a sibling view is a member");
     server.shutdown().await;
 }
 
