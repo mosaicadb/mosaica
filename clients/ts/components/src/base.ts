@@ -13,7 +13,10 @@ import {storeContext} from './context.js';
 export type StoreSource = 'property' | 'context' | 'own' | 'detached';
 
 /** What an own store was built from; a change in any of these rebuilds it. */
-type OwnConfig = {viewerUrl: string; token: string; authorise: TokenSupplier | null; artifactsPerTile: number | null};
+type OwnConfig = {viewerUrl: string; token: string; authorise: TokenSupplier | null; artifactsPerTile: number};
+
+/** The `artifacts-per-tile` an own store asks with where the page sets none. */
+const DEFAULT_ARTIFACTS_PER_TILE = 50;
 
 /**
  * What every element shares: how it finds its store, and how it follows it.
@@ -61,8 +64,7 @@ export abstract class MosaicaElement extends LitElement {
   /**
    * The most artifacts one level of a drawn layer shows in one tile, for the store the element
    * builds; at most `/v1/meta`'s `selection.max_artifacts_per_tile`. Only the map, the explorer
-   * and `<mosaica-store>` read it. Unset, a drawn layer shows nothing, colouring by a layer has no
-   * colours, and the store says why.
+   * and `<mosaica-store>` read it. Unset or null, the store asks for 50.
    * Changing it builds a new store.
    */
   @property({type: Number, attribute: 'artifacts-per-tile'}) accessor artifactsPerTile: number | null = null;
@@ -125,7 +127,7 @@ export abstract class MosaicaElement extends LitElement {
   private resolve(): void {
     const wanted: OwnConfig | null =
       this.canBuildOwn && (this.token || this.authorise || this.viewerUrl)
-        ? {viewerUrl: this.viewerUrl, token: this.token, authorise: this.authorise, artifactsPerTile: this.artifactsPerTile}
+        ? {viewerUrl: this.viewerUrl, token: this.token, authorise: this.authorise, artifactsPerTile: this.artifactsPerTile ?? DEFAULT_ARTIFACTS_PER_TILE}
         : null;
     const held = this.ownConfig;
     const same =
@@ -148,7 +150,7 @@ export abstract class MosaicaElement extends LitElement {
           : createStore({
               viewerUrl: wanted.viewerUrl,
               ...(wanted.authorise ? {authorise: wanted.authorise} : {token: wanted.token}),
-              ...(wanted.artifactsPerTile === null ? {} : {artifacts: {perTile: wanted.artifactsPerTile}})
+              artifacts: {perTile: wanted.artifactsPerTile}
             });
       source = 'own';
     } else if (this.contextStore) {

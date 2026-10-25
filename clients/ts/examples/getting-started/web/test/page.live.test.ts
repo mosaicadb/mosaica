@@ -93,3 +93,25 @@ it.skipIf(!binary)('draws every place with no token, in an explorer that fills i
   expect(box!.x + box!.width).toBeCloseTo(aside!.x, 0);
   expect(errors).toEqual([]);
 });
+
+it.skipIf(!binary)('names the countries when the Countries and regions layer is ticked', async () => {
+  const page = await browser!.newPage({viewport: {width: 1440, height: 900}});
+  await page.route(`${pageViewer}/**`, async (route) => {
+    const url = viewer + route.request().url().slice(pageViewer.length);
+    await route.fulfill({response: await route.fetch({url})});
+  });
+  await page.goto(vite!.resolvedUrls!.local[0]!);
+  const explorer = page.locator('mosaica-explorer');
+  await explorer.locator('[part~="layers-toggle"]').click();
+  await explorer.locator('mosaica-layer-picker [data-layer="admin/hierarchy"] input').check();
+  // The map's probe is internal; it is read here to see that names were placed.
+  const placed = await page.waitForFunction(
+    () => {
+      const map = (document.querySelector('mosaica-explorer') as unknown as {map: {probe: {timings: {labels: number}}} | null}).map;
+      return (map?.probe.timings.labels ?? 0) > 0 ? map!.probe.timings.labels : null;
+    },
+    undefined,
+    {timeout: 60_000, polling: 250}
+  );
+  expect(await placed.jsonValue()).toBeGreaterThan(20);
+});

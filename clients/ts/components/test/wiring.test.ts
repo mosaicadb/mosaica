@@ -1,4 +1,5 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
+import META_FIXTURE from '../../core/test/fixtures/meta.json' with {type: 'json'};
 import type {Store, TokenSupplier} from '@mosaicajs/client';
 import '../src/store-element.js';
 import '../src/status.js';
@@ -171,6 +172,35 @@ describe('configuration after connection', () => {
       await vi.waitFor(() => expect(el.activeStore!.get('status').refusal).toMatchObject({code: 'bad-credential', detail: 'send a session token as a bearer'}));
       el.dispose();
       document.body.innerHTML = '';
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('asks for 50 artifacts per tile where the page sets no artifacts-per-tile, and the number the page sets otherwise', async () => {
+    const meta = JSON.stringify(META_FIXTURE);
+    const before = globalThis.fetch;
+    const perTile: unknown[] = [];
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.endsWith('/v1/meta')) return new Response(meta, {headers: {'content-type': 'application/json'}});
+      if (url.endsWith('/v1/artifacts/viewport')) perTile.push(JSON.parse(String(init?.body)).per_tile);
+      return new Response('{}', {status: 500});
+    };
+    try {
+      for (const [attribute, asked] of [['', 50], [' artifacts-per-tile="7"', 7]] as const) {
+        perTile.length = 0;
+        const {host, el} = await bare(`<mosaica-store viewer-url="http://127.0.0.1:1"${attribute}></mosaica-store>`);
+        await settle(host);
+        const store = el.activeStore!;
+        await vi.waitFor(() => expect(store.get('meta')).not.toBeNull());
+        store.setLayers(['clusters/x']);
+        store.setView({bbox: [0, 0, 1000, 1000], zoom: 0, width: 512, height: 512});
+        await vi.waitFor(() => expect(perTile).toContain(asked), {timeout: 4_000});
+        expect(store.get('artifacts').refusal?.code).not.toBe('per-tile');
+        el.dispose();
+        document.body.innerHTML = '';
+      }
     } finally {
       globalThis.fetch = before;
     }

@@ -19,4 +19,4 @@ npm run dev
 
 The tutorial explains each step. `mosaica/.gitignore` keeps what the build and the server write out of git.
 
-`npm run test:live` in `web/` builds the sample into a temporary directory, serves it in open mode on ports the system chooses, sends the page's requests for port 9141 there, and checks in headless Chromium that the page draws every place and that the explorer fills its part of the layout. It needs `npm run build` in `clients/ts` and a `mosaica` binary in `MOSAICA_BIN`, this checkout's `target/release`, or on `PATH`.
+`npm run test:live` in `web/` builds the sample into a temporary directory, serves it in open mode on ports the system chooses, sends the page's requests for port 9141 there, and checks in headless Chromium that the page draws every place, that the explorer fills its part of the layout, and that ticking Countries and regions names the countries. It needs `npm run build` in `clients/ts` and a `mosaica` binary in `MOSAICA_BIN`, this checkout's `target/release`, or on `PATH`.
