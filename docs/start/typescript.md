@@ -76,7 +76,7 @@ mosaica build --config ~/mosaica/examples/data/geonames/schema.toml
 
 ```
 ...
-built /home/you/places/mosaica/bundle (v00000): 150000 items, 245 terms, 150000 pairs, 18101144 bytes on disk, 0 artifact(s) minted, 3 unclustered member row(s), 0 row(s) refused
+built /home/you/places/mosaica/bundle (v00000): 150000 items, 245 terms, 150000 pairs, 18092224 bytes on disk, 0 artifact(s) minted, 3 unclustered member row(s), 0 row(s) refused
   view world: 150000 row(s)
 ```
 
@@ -90,14 +90,15 @@ mosaica serve
 
 ```
 ...
+2026-10-25T14:08:28.958802Z  WARN mosaica_server: serve.open is set: this server is open to this machine, and every request, with or without a credential, sees and may change everything
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-The line of JSON is the one to wait for. It means the server is ready.
+The `WARN` line is the server confirming `open = true`. The line of JSON is the one to wait for. It means the server is ready. Besides the viewer address it lists two more, the session and control addresses, which a server with users relies on and this tutorial doesn't need.
 
 ## Make a web project
 
-Open a second terminal. We'll use Vite, a build tool with a development server, and its plain TypeScript template. `--no-interactive` stops it asking whether to install and start the template's demo straight away.
+Open a second terminal. We'll use Vite, a build tool with a development server, and its plain TypeScript template. `--no-interactive` stops it asking whether to install and start the template's demo straight away. If npm hasn't fetched Vite's project creator before, it asks `Ok to proceed? (y)` first. Press Enter.
 
 ```bash
 cd ~/places
@@ -162,13 +163,13 @@ npm run dev
 > vite
 
 
-  VITE v8.3.5  ready in 380 ms
+  VITE v8.3.5  ready in 191 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
 ```
 
-Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm. The strip at the bottom right counts them. The panel on the left has a count at the top and an "Add field" button, and nothing else yet.
+Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm, drawn over the outlines of the countries. The strip at the bottom right counts them. The panel on the left is headed GeoNames, the title the declaration gives this map, and under the counts it has an "Add field" button and nothing else yet.
 
 Vite copies the browser's console to the terminal, so you'll see `Lit is in dev mode` there each time the page loads. Lit says that about any page served by a development server, and it goes away in a production build.
 
@@ -196,7 +197,7 @@ Save the file. Vite reloads the page.
 
 `pinned-filters` names the fields whose cards are in the panel from the start, so nobody has to find them under "Add field". `colour-by` colours the places by a field. A category gets a colour per value, and a number gets a ramp from its lowest value to its highest. Settlements are blue, and most of Asia is blue. In the United States most dots are orange and red, because GeoNames lists many streams, farms and buildings there. Someone using the map can still change the colouring, with the Layers button on the map or the paint button on a field's card.
 
-`title-field` says which field names a place. Hover over one. The label that follows the pointer is the place's name. Without `title-field` the explorer doesn't know which field that is, and shows a long number such as `#4040127343466120394`, the `mosaica_id` that Mosaica gives each place it serves. Click a place, and the card that opens beside it is headed by the name too. `card-fields` chooses what the card lists under the name, here the place's kind, its country and its population.
+`title-field` says which field names a place. Hover over one and wait a moment. The label that follows the pointer becomes the place's name, such as Central Heights Shopping Mall. Until the name arrives from Mosaica, the label is a long number such as `#14815421504304620377`. That is the place's `mosaica_id`, the number Mosaica gives each place it serves, and without `title-field` the label would stay that way. Click a place, and the card that opens beside it is headed by the name too. `card-fields` chooses what the card lists under the name, here the place's kind, its country and its population.
 
 The [components reference](../reference/components/mosaica-explorer.md) lists the explorer's other attributes, from the most points it draws to how density is shaded.
 
