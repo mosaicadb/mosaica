@@ -3,7 +3,7 @@
 This page shows how to install Mosaica as a standalone database server and configure it. Once it is running, you can reach it over its HTTP API, with the `mosaica` command line, or from the TypeScript and Python clients.
 
 !!! tip "Prototyping in Python"
-    For local prototyping and analysis, you don't need a separate server. The Python client can run Mosaica itself, starting a private server for your notebook or script. The [Python client](../reference/python/index.md) shows how.
+    For local prototyping and analysis, you don't need a separate server. The Python client can run Mosaica itself, starting a private server for your notebook or script. [Your first map in Python](python.md) shows how.
 
 ## Install the server
 
