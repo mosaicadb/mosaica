@@ -103,6 +103,7 @@ const CALLS: Record<string, (c: MosaicaClient, signal?: AbortSignal) => Promise<
   authorise: (c, signal) => c.authorise({principal: 'ann'}, signal),
   revoke: (c, signal) => c.revoke(7, signal),
   meta: (c, signal) => c.meta('tok', signal),
+  basemapWorld: (c, signal) => c.basemapWorld('tok', signal),
   categories: (c, signal) => c.categories('tok', 'archive', {signal}),
   suggest: (c, signal) => c.suggest('tok', 'archive', 'cs', {signal}),
   suggestCategoryValuesFiltered: (c, signal) =>

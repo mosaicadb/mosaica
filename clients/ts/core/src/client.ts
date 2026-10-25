@@ -422,6 +422,18 @@ export class MosaicaClient {
   }
 
   /**
+   * `GET /v1/basemaps/world`: the world outline a map draws under a geographic view, as the server
+   * encodes it (`MBW1`: land, coastlines and country borders).
+   *
+   * @throws {@link MosaicaError} when the server refuses.
+   */
+  async basemapWorld(token: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+    const response = await this.send(`${this.opts.viewerUrl}/v1/basemaps/world`, {headers: {authorization: `Bearer ${token}`}, signal});
+    if (!response.ok) await fail(response);
+    return response.arrayBuffer();
+  }
+
+  /**
    * `GET /v1/meta`: the deployment's views, groups, columns, filter operands and selection limits,
    * and the layers this token's session may know of. The layers differ between principals, so a
    * result is not shared across tokens.
