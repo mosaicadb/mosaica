@@ -118,6 +118,31 @@ describe('<mosaica-item-card>', () => {
     expect([...registered(store).keys()].some((id) => id.startsWith('item-titles'))).toBe(false);
   });
 
+  it('drops the titles when the store forgets what the server answered, whether or not the card was attached then', async () => {
+    for (const attached of [true, false]) {
+      const host = await mount('<mosaica-item-card></mosaica-item-card>');
+      const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+      const store = fakeStore({meta: META, status: status({})});
+      el.store = store;
+      store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+      await settle(host);
+      answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', title: 'Computer science', count: 3}]}]));
+      await settle(host);
+      const shown = () => deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent;
+      expect(shown()).toBe('Computer science');
+      if (!attached) el.remove();
+      // The store forgets, as on a renewal under other terms, and answers `meta` again.
+      store.set('aggregates', new Map());
+      store.set('meta', null);
+      store.set('meta', {...META});
+      if (!attached) host.append(el);
+      await settle(host);
+      expect(shown()).toBe('cs');
+      expect([...registered(store)].find(([id]) => id.startsWith('item-titles'))?.[1]).toEqual({groupings: [{count: true, by: {field: 'archive', values: ['cs']}}], subject: 'visible'});
+      document.body.innerHTML = '';
+    }
+  });
+
   it('asks for at most the server’s groupings at a time, and asks again for nothing it was answered', async () => {
     const category = {category: {vocabulary: 'v', kind: 'declared' as const, visibility: 'public' as const}, render: true, homes: ['rendered' as const]};
     const names = ['a', 'b', 'c'];
