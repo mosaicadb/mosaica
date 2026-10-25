@@ -428,6 +428,25 @@ describe('<mosaica-field-card> on a layer', () => {
     expect(clauses).toEqual([{id: '8', layer: 'topics', outside: false, verb: 'highlight', on: true}]);
   });
 
+  it('filters to a cluster from a click on its row and shows its buttons, the row taking no focus', async () => {
+    const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
+    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
+    const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    card.store = store;
+    await settle(host);
+    answerAggregate(store, 'field-subject', aggregateEntry([{rows: [{key: 7n, count: 9, title: 'optics'}], total: 9}]));
+    await settle(host);
+    const clauses: unknown[] = [];
+    host.addEventListener('mosaica-clausechange', (e) => clauses.push((e as CustomEvent).detail));
+    (rows(host)[0]!.querySelector('[part="name"]') as HTMLElement).click();
+    await settle(host);
+    expect(store.calls.filter((c) => c.name === 'setMembers').map((c) => c.args[0])).toEqual([[{layer: 'topics', artifact: 7n, outside: false, verb: 'filter', label: 'optics'}]]);
+    expect(clauses).toEqual([{id: '7', layer: 'topics', outside: false, verb: 'filter', on: true}]);
+    expect(rows(host)[0]!.hasAttribute('data-shown')).toBe(true);
+    expect(rows(host)[0]!.hasAttribute('tabindex')).toBe(false);
+  });
+
   it('colours each cluster’s swatch from the slot its row carries, a chosen colour over it, in the store’s palette', async () => {
     const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;

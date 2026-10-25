@@ -120,12 +120,13 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * of the whole match, each a share of its own total, and the two counts. Under a filter on the
  * field, the values it leaves out are greyed and show only how many items they would add, and the
  * shares are of what the filter keeps. Hovering or focusing a row shows Highlight and Filter, which
- * put the value in or out of the field's clause in that position. On a category card, a click on
- * the row does what its Filter button does. Over the rows is the field's
- * search box, the typeahead of `<mosaica-filter>` or `<mosaica-cluster-filter>`, whose choice joins
- * the filter. A levelled layer's card has a Level choice in its heading, the top (coarsest) level
- * by default, which fires `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's
- * clusters at the cut the map draws (`cut: 'drawn'`), and a flat or levelled layer's at its level.
+ * put the value in or out of the field's clause in that position. A click or tap on the row does
+ * what its Filter button does and shows its buttons; the row takes no focus, and the keyboard
+ * reaches the buttons. Over the rows is the field's search box, the typeahead of
+ * `<mosaica-filter>` or `<mosaica-cluster-filter>`, whose choice joins the filter. A levelled
+ * layer's card has a Level choice in its heading, the top (coarsest) level by default, which fires
+ * `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's clusters at the cut the
+ * map draws (`cut: 'drawn'`), and a flat or levelled layer's at its level.
  * A cluster is named as the aggregate's table names it, which is the name the layer's browse pages
  * give the same viewer. On a `nested` or `dag` layer its path is named from a browse page of its
  * parents and one of its first parent's.
@@ -158,7 +159,7 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A row's
  *   Highlight or Filter, or the range box, changed the field's clause.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A cluster
- *   row's Highlight or Filter put a `member_of` clause on or took it off.
+ *   row, its Highlight or its Filter put a `member_of` clause on or took it off.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-colourchange']>} mosaica-colourchange - The paint
  *   button changed what the map is coloured by.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-levelchange']>} mosaica-levelchange - The Level
@@ -350,14 +351,12 @@ export class MosaicaFieldCard extends MosaicaElement {
         padding: 4px 6px;
         margin: 0 -6px;
         border-radius: 6px;
+        cursor: pointer;
       }
       [part~='row']:hover,
       [part~='row']:focus-within,
       [part~='row'][data-shown] {
         background: var(--_mosaica-surface-2);
-      }
-      [part~='row'][data-presses] {
-        cursor: pointer;
       }
       [part~='row'][data-state='out'] {
         opacity: 0.55;
@@ -1029,16 +1028,11 @@ export class MosaicaFieldCard extends MosaicaElement {
       const counts = out
         ? html`<span part="count">${r.all === null ? '' : countText(r.all)}</span>`
         : html`<span part="count"><span class="sub">${r.sub === null ? '' : countText(r.sub)}</span>${same || r.all === null ? '' : ` / ${countText(r.all)}`}</span>`;
-      // A press on a category's row filters to its value, as its Filter button does, and shows its
+      // A press on a row filters to its value or cluster, as its Filter button does, and shows its
       // buttons; the keyboard reaches the buttons.
-      const filters = kind === 'category';
-      return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key} ?data-presses=${filters}
+      return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key}
         @click=${(e: Event) => {
           if ((e.target as HTMLElement).closest('button')) return;
-          if (!filters) {
-            this.shownRow = this.shownRow === r.key ? null : r.key;
-            return;
-          }
           this.shownRow = r.key;
           verb('filter')();
         }}>
