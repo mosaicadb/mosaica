@@ -64,9 +64,9 @@ Mosaica reads its settings from `mosaica.toml`. This one says:
 --8<-- "clients/ts/examples/getting-started/mosaica/mosaica.toml"
 ```
 
-`[bundle]` names what the server keeps on disc. `path` is the bundle, Mosaica's own copy of the data, arranged so that any part of the map can be read quickly. `[serve]` gives the addresses the server listens on. The page will read the map from the first, the viewer address, on port 9141.
+`[bundle]` names the bundle, Mosaica's own copy of the data, arranged so that any part of the map can be read quickly. `[serve]` gives the address the page will read the map from, port 9141 on this machine.
 
-`open = true` lets anything on this machine read the map without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token that says what they may see, and the third tutorial sets that up.
+`open = true` lets anything on this machine read and change the data without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token that says what they may see, and the third tutorial sets that up.
 
 Now build the bundle. The repository's sample comes with a declaration, `schema.toml`, which tells Mosaica what each column of the data means. `name` is text to search, for instance, and `feature_class` and `country` are categories. `--config` points the build at it.
 

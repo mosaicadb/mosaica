@@ -1,16 +1,6 @@
 [bundle]
-path  = "bundle"
-cache = "cache"
-wal   = "wal.log"
-
-[disclosure]
-token_max_lifetime = 3600
+path = "bundle"
 
 [serve]
-viewer  = "127.0.0.1:9141"
-session = "127.0.0.1:9142"
-control = "127.0.0.1:9143"
-open    = true
-
-[catalogue]
-dir = "catalogue"
+viewer = "127.0.0.1:9141"
+open   = true
