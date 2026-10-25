@@ -134,6 +134,7 @@ nav:
       - Run Mosaica under systemd: guides/systemd.md
       - Run Mosaica with Docker: guides/docker.md
       - Operate a deployment: guides/operating.md
+      - Size a deployment: guides/sizing.md
       - Put Mosaica behind TLS: guides/tls.md
       - Rebuild and replace the bundle: guides/rebuild.md
       - Troubleshooting: guides/troubleshooting.md
