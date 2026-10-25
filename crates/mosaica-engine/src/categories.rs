@@ -582,7 +582,7 @@ impl Engine {
     /// order — which is the whole of the difference, as it is on the enumeration.
     ///
     /// The walk's cost grows with how many values sit under the prefix, hidden ones included. The
-    /// timing row of `docs/system/security.md` accepts that channel.
+    /// timing row of `docs/dev/threat-model.md` accepts that channel.
     ///
     /// # Errors
     ///

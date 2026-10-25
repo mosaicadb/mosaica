@@ -826,7 +826,7 @@ a shard is the one-shard build's, restricted to the shard's items and renumbered
   catalogue's first shard, of 131,073 items, holds numbers at or above the floor, so the floored
   sweeps cover that shard's numbers from 100,000 and nothing of the other corpora. Every entity id
   below the floor, an item's or an artifact's, is swept for in identifier columns and cursors only
-  ([security](system/security.md#evidence)).
+  ([security](dev/threat-model.md#evidence)).
 - The kind, the shard, the tenancy and the layer space sit inside the keyed permutation. A viewer
   cannot read them, order identifiers by them or count gaps between them. The permutation is a
   blinding, not encryption, and a holder of the bundle inverts it, as today.
@@ -849,7 +849,7 @@ a shard is the one-shard build's, restricted to the shard's items and renumbered
   number, so it appears in stored order where a deleted item was, and a viewer who sees the items
   either side learns that an item between them was deleted, though they may never have seen it.
   That is accepted, and stage 1 adds it to the threat model's residual disclosure
-  ([security](system/security.md#residual-disclosure)) beside its account of stored order.
+  ([security](dev/threat-model.md#residual-disclosure)) beside its account of stored order.
 - The removal rules for deletions and suppressions hold per shard (§4.4). An artifact's deletion
   holds until every shard has removed the artifact (§2.2).
 - A row projection becomes a cache shared by every session with the same grant (§3.2), as a level's
