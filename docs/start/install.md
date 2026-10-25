@@ -1,7 +1,5 @@
 # Install and configure
 
-Mosaica is one program, `mosaica`, which builds a database from your files and serves it. Beside it are a Python client and a set of TypeScript packages for the browser. A deployment is configured with two files, one describing your data and one describing the deployment.
-
 ## What to install
 
 | To | Install |
