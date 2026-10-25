@@ -129,6 +129,18 @@ def test_a_shared_title_and_none_read_into_a_data_frame(served, corpus):
     assert {k: None if pd.isna(t) else t for k, t in zip(frame["key"], frame["title"])} == titles
 
 
+def test_a_vocabulary_without_titles_gives_no_title_column(db):
+    """No venue has a title, so the table has no `title` column, in pyarrow or in pandas; a
+    layer's table keeps its artifacts' names."""
+    venues, clusters = db.aggregate(
+        "map",
+        [{"count": True, "by": {"field": "venue", "top": 4}}, {"count": True, "by": {"layer": "clusters", "top": 5}}],
+    )
+    assert venues.column_names == ["group", "key", "count"]
+    assert "title" not in venues.to_pandas().columns
+    assert "title" in clusters.column_names
+
+
 def test_a_selection_counts_what_count_counts(db):
     """The selection's filters and box are the request's filters."""
     part = db.view("map").filter({"n": {"range": {"gte": 3}}}).within((0.0, 0.0, 12.0, 1.0))

@@ -481,7 +481,9 @@ impl Plan {
                 let (groups, served) = match &self.outer {
                     Outer::None => (Groups::whole(cx), None),
                     Outer::Field(field) => {
-                        (field.groups(cx, position.chosen.as_deref(), timings)?, None)
+                        let titled = position.chosen.is_some().then_some(position.titled);
+                        let chosen = position.chosen.as_deref();
+                        (field.groups(cx, chosen, titled, timings)?, None)
                     }
                     Outer::Bins(bins) => (bins.groups(cx, timings)?, None),
                     Outer::Layer(layer) => {
@@ -652,6 +654,7 @@ impl Plan {
             Position {
                 table: position.table,
                 chosen: Some(groups.chosen.clone()),
+                titled: groups.titles.is_some(),
                 group: if self.cells.is_some() {
                     last.group
                 } else {

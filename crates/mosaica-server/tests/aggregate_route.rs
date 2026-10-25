@@ -393,9 +393,9 @@ async fn a_value_grouping_counts_each_value_the_viewer_sees() {
 }
 
 /// **The body and its columns are the contract's**: a table head before each table's first page,
-/// then its pages, then the trailer; `group` a dictionary of `int8`, a field's `key` and `title`
-/// dictionaries of `int32`, a layer's `key` a `uint64`, `cell`, `count` and `reference_count`
-/// `uint64` and `lift` `float64`.
+/// then its pages, then the trailer; `group` a dictionary of `int8`, a field's `key` a dictionary
+/// of `int32` with no `title` where its vocabulary holds no title, a layer's `key` a `uint64` with
+/// its `title`, `cell`, `count` and `reference_count` `uint64` and `lift` `float64`.
 #[tokio::test]
 async fn the_body_and_its_columns_are_the_contracts() {
     let f = fixture().await;
@@ -438,7 +438,6 @@ async fn the_body_and_its_columns_are_the_contracts() {
         vec![
             ("group".into(), dictionary(DataType::Int8)),
             ("key".into(), dictionary(DataType::Int32)),
-            ("title".into(), dictionary(DataType::Int32)),
             ("cell".into(), DataType::UInt64),
             ("count".into(), DataType::UInt64),
             ("reference_count".into(), DataType::UInt64),
@@ -471,6 +470,81 @@ async fn the_body_and_its_columns_are_the_contracts() {
         .sum();
     assert_eq!(trailer["rows"], rows);
     assert_eq!(trailer["pages"], 3);
+}
+
+/// The column names of every page of grouping 0 in `responses`.
+fn columns_of(responses: &[DecodedAggregate]) -> Vec<Vec<String>> {
+    responses
+        .iter()
+        .flat_map(|r| &r.tables)
+        .filter(|(head, _)| head["grouping"] == 0)
+        .flat_map(|(_, pages)| pages)
+        .map(|(batch, _)| batch.schema().fields().iter().map(|f| f.name().clone()).collect())
+        .collect()
+}
+
+/// **A field's table has `title` exactly where its vocabulary holds a title**: `archive` holds
+/// none, so its table has no `title` column; once a title is declared for one value, a new read
+/// has the column, null on the values without one. A read begun before the title keeps its first
+/// page's columns through its cursor.
+#[tokio::test]
+async fn a_field_table_has_a_title_column_where_its_vocabulary_holds_a_title() {
+    let f = fixture().await;
+    let token = token_for(&f.server, &["0"]).await;
+    let body = json!({
+        "view": "s0",
+        "groupings": [{ "count": true, "by": { "field": "archive", "top": 3 } }],
+    });
+    let untitled = ["group", "key", "count"].map(String::from).to_vec();
+    let (_, before) = aggregate_ok(&f.server, &token, &body).await;
+    assert_eq!(columns_of(std::slice::from_ref(&before)), vec![untitled.clone()]);
+
+    let mut first = body.clone();
+    first["page_rows"] = json!(1);
+    first["pages"] = json!(1);
+    let (_, begun) = aggregate_ok(&f.server, &token, &first).await;
+    let cursor = begun.trailer["next"].as_str().expect("the read goes on").to_string();
+
+    let resp = f
+        .server
+        .client
+        .patch(f.server.control_url("/control/vocabularies/archive/values"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&json!({ "values": [{ "key": "astro", "title": "Astrophysics" }] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200, "{}", resp.text().await.unwrap());
+    tick(&f.server).await;
+
+    let mut rest = first.clone();
+    rest["cursor"] = json!(cursor);
+    let mut read = vec![begun];
+    read.extend(read_all(&f.server, &token, &rest).await);
+    let pages = columns_of(&read);
+    assert!(pages.len() > 1, "the read spans pages");
+    assert!(pages.iter().all(|columns| *columns == untitled), "{pages:?}");
+
+    let (_, after) = aggregate_ok(&f.server, &token, &body).await;
+    assert_eq!(
+        columns_of(std::slice::from_ref(&after)),
+        vec![["group", "key", "title", "count"].map(String::from).to_vec()]
+    );
+    let titles: BTreeMap<String, Option<String>> = table(&[after], 0)
+        .into_iter()
+        .filter_map(|row| match row.key {
+            Some(AggregateKey::Text(key)) => Some((key, row.title)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        titles,
+        BTreeMap::from([
+            ("astro".to_string(), Some("Astrophysics".to_string())),
+            ("cond".to_string(), None),
+            ("hep".to_string(), None),
+        ])
+    );
 }
 
 /// **A density table is the viewport's tiles**: at a depth the viewport can draw, every non-empty

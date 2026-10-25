@@ -2540,8 +2540,8 @@ fn a_region_in_the_reference_gives_the_coarsest_verdict() {
 }
 
 /// **Every column has the contract's type**, on a table with no rows too: a field's key and title
-/// dictionaries of text keyed by `int32`, a layer's key `uint64`; and a field's titles are the
-/// ones `/v1/categories` gives.
+/// dictionaries of text keyed by `int32`, a layer's key `uint64`; a field whose vocabulary holds no
+/// title has no `title` column; and a field's titles are the ones `/v1/categories` gives.
 #[test]
 fn every_column_has_its_type_and_a_title_is_the_vocabularys() {
     use mosaica_types::layer::ServingLayout;
@@ -2553,6 +2553,7 @@ fn every_column_has_its_type_and_a_title_is_the_vocabularys() {
         field("mark", Pick::Top(3)),
         with_cells(layer("topics/major", Pick::Top(2)), 4),
         size(),
+        field("kind", Pick::Top(3)),
     ];
     for (broad, filter, reference) in [
         (true, None, Some(Reference::Visible)),
@@ -2606,6 +2607,10 @@ fn every_column_has_its_type_and_a_title_is_the_vocabularys() {
             ])
         );
         assert_eq!(schema(2), with(vec![]));
+        assert_eq!(
+            schema(3),
+            with(vec![("group", text(DataType::Int8)), ("key", text(DataType::Int32))])
+        );
         if !broad {
             let rows: usize = collect
                 .pages

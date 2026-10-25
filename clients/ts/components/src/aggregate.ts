@@ -3,8 +3,9 @@ import {topLevelServed} from '@mosaicajs/client/internal';
 
 /**
  * One listed group of an aggregate table: its key (a vocabulary key for a field, an artifact's
- * `mosaica_id` in decimal for a layer), its title (a field value's, else `null`), its count, and
- * on a layer asked with a palette size its slot (else `null`).
+ * `mosaica_id` in decimal for a layer), its title (a value's title or an artifact's name, `null`
+ * where it has none and on a field whose vocabulary holds no title, whose table has no `title`
+ * column), its count, and on a layer asked with a palette size its slot (else `null`).
  */
 export type GroupCount = {key: string; title: string | null; count: number; slot: number | null};
 

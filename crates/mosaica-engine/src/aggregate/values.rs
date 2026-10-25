@@ -73,10 +73,16 @@ impl Field {
 
     /// The table's groups under `cx`: the listed values, `chosen` where the table has begun, and
     /// each group's counts in the set and the reference.
+    ///
+    /// The groups carry titles where the vocabulary holds a title for any value, or as `titled`
+    /// says where the table has begun. A title comes only from a vocabulary's declaration or a
+    /// page of its values, never from an item, so whether a table has the `title` column does not
+    /// depend on which items it counts.
     pub(super) fn groups(
         &self,
         cx: &Cx<'_>,
         chosen: Option<&[u64]>,
+        titled: Option<bool>,
         timings: &mut AggregateTimings,
     ) -> Result<Groups> {
         let counting = std::time::Instant::now();
@@ -124,21 +130,23 @@ impl Field {
             .iter()
             .map(|&code| Key::Text(vocabulary.key_of(code).unwrap_or_default().to_string()))
             .collect();
-        let titles = codes
-            .iter()
-            .map(|&code| {
-                vocabulary
-                    .key_of(code)
-                    .and_then(|key| vocabulary.title_of(key))
-                    .map(str::to_string)
-            })
-            .collect();
+        let titles = titled.unwrap_or_else(|| vocabulary.has_titles()).then(|| {
+            codes
+                .iter()
+                .map(|&code| {
+                    vocabulary
+                        .key_of(code)
+                        .and_then(|key| vocabulary.title_of(key))
+                        .map(str::to_string)
+                })
+                .collect()
+        });
         Ok(Groups {
             chosen: codes.iter().map(|&code| u64::from(code)).collect(),
             sizes,
             always,
             keys,
-            titles: Some(titles),
+            titles,
             slots: None,
             distinct: set.by_code.len() as u64,
             sample: None,

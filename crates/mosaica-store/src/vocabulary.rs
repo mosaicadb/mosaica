@@ -501,6 +501,11 @@ impl VocabularyMinter {
         self.titles.get(key).map(String::as_str)
     }
 
+    /// Whether any value holds a title. A title is never removed, so once true this stays true.
+    pub fn has_titles(&self) -> bool {
+        !self.titles.is_empty()
+    }
+
     /// Give a bound value the title its author supplied, replacing any title it holds
     /// (`ingest.md` §1.3; decision 0136's amendment).
     ///

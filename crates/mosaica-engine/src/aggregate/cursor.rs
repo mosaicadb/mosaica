@@ -15,6 +15,9 @@ pub(super) struct Position {
     /// The groups the table in progress lists, fixed at its first page: codes, or artifacts'
     /// entities. `None` before the table's first page.
     pub(super) chosen: Option<Vec<u64>>,
+    /// Whether the table in progress has the `title` column, fixed at its first page with
+    /// `chosen`, so every page of a table has one shape.
+    pub(super) titled: bool,
     /// The next group to send, as a position in `chosen` followed by the rest and none.
     pub(super) group: u32,
     /// The last cell of `group` sent, on a table with cells.
@@ -29,6 +32,7 @@ impl Position {
         Position {
             table: 0,
             chosen: None,
+            titled: false,
             group: 0,
             after_cell: None,
             stamp: None,
@@ -40,6 +44,7 @@ impl Position {
         Position {
             table: self.table + 1,
             chosen: None,
+            titled: false,
             group: 0,
             after_cell: None,
             stamp: self.stamp,
@@ -50,7 +55,7 @@ impl Position {
 pub(super) struct AggregateCursor;
 
 impl AggregateCursor {
-    /// `table u32, group u32, flags u8 (1 chosen, 2 after_cell, 4 stamp), after_cell u64,
+    /// `table u32, group u32, flags u8 (1 chosen, 2 after_cell, 4 stamp, 8 titled), after_cell u64,
     /// stamp 3 × u64, chosen count u32, chosen u64 each`, little-endian.
     pub(super) fn encode(position: &Position) -> Vec<u8> {
         let chosen = position.chosen.as_deref().unwrap_or(&[]);
@@ -59,7 +64,8 @@ impl AggregateCursor {
         out.extend_from_slice(&position.group.to_le_bytes());
         let flags = u8::from(position.chosen.is_some())
             | u8::from(position.after_cell.is_some()) << 1
-            | u8::from(position.stamp.is_some()) << 2;
+            | u8::from(position.stamp.is_some()) << 2
+            | u8::from(position.titled) << 3;
         out.push(flags);
         out.extend_from_slice(&position.after_cell.unwrap_or(0).to_le_bytes());
         let (a, b, w) = position.stamp.unwrap_or((0, 0, 0));
@@ -76,7 +82,7 @@ impl AggregateCursor {
     /// A payload that opened and does not parse is refused like one that did not open.
     pub(super) fn decode(payload: &[u8]) -> Result<Position> {
         const FIXED: usize = 4 + 4 + 1 + 8 + 24 + 4;
-        if payload.len() < FIXED || payload[8] > 7 {
+        if payload.len() < FIXED || payload[8] > 15 {
             return Err(EngineError::CursorRefused);
         }
         let u32_at = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().expect("4"));
@@ -90,6 +96,7 @@ impl AggregateCursor {
             table: u32_at(0),
             group: u32_at(4),
             chosen: (flags & 1 == 1).then(|| (0..count).map(|i| u64_at(FIXED + 8 * i)).collect()),
+            titled: flags & 8 == 8,
             after_cell: (flags & 2 == 2).then(|| u64_at(9)),
             stamp: (flags & 4 == 4).then(|| (u64_at(17), u64_at(25), u64_at(33))),
         })
@@ -165,6 +172,7 @@ mod tests {
             Position {
                 table: 3,
                 chosen: Some(vec![7, 1 << 40 | 9, 0]),
+                titled: true,
                 group: 2,
                 after_cell: Some(u64::MAX),
                 stamp: Some((12, 40, 7)),
@@ -172,6 +180,7 @@ mod tests {
             Position {
                 table: 1,
                 chosen: Some(Vec::new()),
+                titled: false,
                 group: 0,
                 after_cell: None,
                 stamp: Some((1, 2, 3)),

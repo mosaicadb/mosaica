@@ -2319,9 +2319,12 @@ paths:
         **Columns**, in this order, each only where stated: `group` (`dictionary<int8, utf8>`, with
         `by`): `listed`, `rest` or `none`. `key` (with `by`): a field's vocabulary key as
         `dictionary<int32, utf8>`, or an artifact's `mosaica_id` as `uint64`; null on `rest` and
-        `none`. `title` (`dictionary<int32, utf8>`, with `by` on a field or a layer): a value's
-        title as `/v1/categories` gives it, or an artifact's name as `/v1/artifacts/browse` gives
-        it to this principal; null where it has none. `slot` (`uint8`, with `by` on a layer): this
+        `none`. `title` (`dictionary<int32, utf8>`, with `by` on a layer, and with `by` on a field
+        whose vocabulary holds a title for any value): a value's title as `/v1/categories` gives
+        it, or an artifact's name as `/v1/artifacts/browse` gives it to this principal; null where
+        it has none. A field's vocabulary holds a title once one is declared for any of its values,
+        and holds one from then on; a table read through a cursor keeps the columns of its first
+        page. `slot` (`uint8`, with `by` on a layer): this
         principal's palette slot for the artifact among the grouping's `palette_size` colours, as
         `POST /v1/artifacts/viewport` serves it; null on `rest` and `none` and where the grouping
         names no `palette_size`. `lower` and `upper` (with `bins`, in

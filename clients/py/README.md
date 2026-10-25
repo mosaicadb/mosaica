@@ -472,7 +472,9 @@ groups by count or the groups named in `values` or `artifacts`; `rest` and `none
 items in no listed group and in none. `"cells"` divides the set, or each group, into the view's
 cells at a depth from 0 to 32, each row's `cell` being the cell's Morton prefix. `reference` is a
 second set to compare with, `{}` for everything the reader may see in the view; each row with a
-count then adds `reference_count` and `lift`. The table's schema metadata `mosaica.head` holds
+count then adds `reference_count` and `lift`. A grouping by a layer has each artifact's name in
+`title`, and one by a category field has each value's title there only where the vocabulary holds a
+title for any value; a vocabulary of keys alone gives no `title` column. The table's schema metadata `mosaica.head` holds
 `total`, and `reference_total` and `groups` where they apply. The call follows each response's
 cursor until every table is whole. On a selection, `aggregate(groupings, reference=None)` sends the
 selection's filters and box as `filters`.

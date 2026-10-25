@@ -248,9 +248,10 @@ export function aggregateEntry(tables: AggregateTableSpec[], view = 's0', summar
     const columns: Record<string, {get(i: number): unknown; toArray(): unknown[]}> = {
       group: column((r) => r.group ?? 'listed'),
       key: column((r) => r.key ?? null),
-      title: column((r) => r.title ?? null),
       count: column((r) => BigInt(r.count))
     };
+    // As the server: a field whose vocabulary holds no title has no `title` column.
+    if (rows.some((r) => r.title !== undefined)) columns.title = column((r) => r.title ?? null);
     if (rows.some((r) => r.slot !== undefined)) columns.slot = column((r) => r.slot ?? null);
     if (rows.some((r) => r.cell !== undefined)) columns.cell = column((r) => r.cell);
     if (rows.some((r) => r.lower !== undefined)) {
