@@ -580,6 +580,152 @@ metadata         = { region = { type = "category", vocabulary = "regions" } }
     assert_eq!(roster_regions(&built).await, expected, "as built");
 }
 
+/// The keys `/v1/categories/area` lists: the values of vocabulary `areas`, public, so every one.
+async fn area_keys(served: &Served) -> Vec<String> {
+    let resp = served
+        .server
+        .client
+        .get(served.server.viewer_url("/v1/categories/area"))
+        .bearer_auth(&served.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: Value = resp.json().await.unwrap();
+    body["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["key"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// A category column over `areas`, whose values `/v1/categories/area` lists.
+fn area_column() -> Value {
+    json!({ "name": "area", "type": "category", "vocabulary": "areas", "index": true })
+}
+
+/// A declaration of the `zones` group over a closed `regions` and an open `areas`, with one view
+/// `east` carrying `region` and `area`.
+fn zones_declaration(region: &str, area: &str) -> String {
+    format!(
+        r#"
+[sources]
+points = "points.parquet"
+
+[defaults]
+allocation_view = "world"
+
+[[vocabulary]]
+name       = "regions"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+values     = ["north", "south"]
+
+[[vocabulary]]
+name       = "areas"
+width      = "u8"
+value_set  = "open"
+visibility = "public"
+
+[[view]]
+name             = "world"
+source           = "points"
+extent           = {{ x = [0.0, 1000.0], y = [0.0, 1000.0] }}
+point_visibility = {{ default = "public" }}
+
+[[view_group]]
+name             = "zones"
+extent           = {{ x = [0.0, 1000.0], y = [0.0, 1000.0] }}
+point_visibility = {{ default = "public" }}
+metadata         = {{ region = {{ type = "category", vocabulary = "regions" }}, area = {{ type = "category", vocabulary = "areas" }} }}
+
+[[view_group.view]]
+key    = "east"
+source = "points"
+region = "{region}"
+area   = "{area}"
+"#
+    )
+}
+
+/// **A category roster value follows its vocabulary's value set on both paths**, as a row's
+/// category value does: a key a closed vocabulary does not list is refused, by a build and by a
+/// create, and a key an open vocabulary does not hold is added to it, served among its values and
+/// kept across a restart.
+#[tokio::test]
+async fn a_roster_category_key_follows_its_vocabulary_value_set_on_both_paths() {
+    let mut served = Served::build(|dir| build_fixture(dir, N)).await;
+    for (name, body) in [
+        (
+            "regions",
+            json!({ "value_set": "closed", "visibility": "public", "width": "u8",
+                    "values": [{ "key": "north" }, { "key": "south" }] }),
+        ),
+        (
+            "areas",
+            json!({ "value_set": "open", "visibility": "public", "width": "u8" }),
+        ),
+    ] {
+        let (status, answer) = put(&served, &format!("/control/vocabularies/{name}"), body).await;
+        assert_eq!(status, 201, "{name}: {answer}");
+    }
+    let (status, answer) = put(&served, "/control/attributes", area_column()).await;
+    assert_eq!(status, 201, "{answer}");
+    let group = json!({
+        "extent": frame(),
+        "point_visibility": { "default": "public" },
+        "metadata": [
+            { "name": "region", "type": "category", "vocabulary": "regions" },
+            { "name": "area", "type": "category", "vocabulary": "areas" },
+        ]
+    });
+    assert_eq!(declare_group(&served, "zones", group).await.0, 201);
+    let (status, answer) = put(
+        &served,
+        "/control/views/zones/west",
+        json!({ "metadata": { "region": "nowhere", "area": "unseen" } }),
+    )
+    .await;
+    assert_eq!(status, 422, "a key the closed vocabulary does not list: {answer}");
+    let (status, answer) = put(
+        &served,
+        "/control/views/zones/east",
+        json!({ "metadata": { "region": "north", "area": "fresh" } }),
+    )
+    .await;
+    assert_eq!(status, 201, "{answer}");
+
+    served.reauthorise().await;
+    assert_eq!(area_keys(&served).await, ["fresh"], "the open vocabulary took the key");
+    let mut served = served.restart().await;
+    served.reauthorise().await;
+    assert_eq!(area_keys(&served).await, ["fresh"], "after a restart");
+
+    let built = Served::build(|dir| {
+        write_points_n(&dir.join("points.parquet"), N);
+        let path = dir.join("corpus.toml");
+        std::fs::write(&path, zones_declaration("north", "fresh")).unwrap();
+        mosaica_build::build(&args_from_declaration(&path, &dir.join("bundle")))
+            .expect("the build runs");
+    })
+    .await;
+    // The column that lists the vocabulary's values, declared as the running service's was.
+    let (status, answer) = put(&built, "/control/attributes", area_column()).await;
+    assert_eq!(status, 201, "{answer}");
+    assert_eq!(area_keys(&built).await, ["fresh"], "as built");
+
+    let dir = tempfile::TempDir::new().unwrap();
+    write_points_n(&dir.path().join("points.parquet"), N);
+    let path = dir.path().join("corpus.toml");
+    std::fs::write(&path, zones_declaration("nowhere", "fresh")).unwrap();
+    assert!(
+        mosaica_build::build(&args_from_declaration(&path, &dir.path().join("bundle"))).is_err(),
+        "a build refuses a key the closed vocabulary does not list"
+    );
+}
+
 /// **A plain view created at runtime takes rows at its first flush and serves a viewport**
 /// (decision 0136, R9). Its answers are the group route's, and it shares a namespace with the
 /// groups.

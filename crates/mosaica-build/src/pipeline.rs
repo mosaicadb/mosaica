@@ -1717,6 +1717,7 @@ fn build_bundle(
     // pins; the scan mints into it for every novel key, and its final state — carried past this
     // call — is what step 11 below records into `MANIFEST.vocabularies`.
     let mut minters = args.schema.open_minters();
+    crate::mint_metadata_keys(args, &mut minters)?;
     // The columns' files live in the same `.build-tmp/` as the spill and band files, so a killed
     // build leaves them to the next `TmpDir::create` exactly as it leaves those.
     let scratch = crate::column::ColumnScratch::new(tmp.path());

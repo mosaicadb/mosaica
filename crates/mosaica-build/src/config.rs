@@ -3949,8 +3949,8 @@ fn compile_metadata_value(
                 value.type_str()
             ))
         })?;
-        // Stored as the key, as a create at a running service stores it. Neither checks the key
-        // against the vocabulary.
+        // Stored as the key, as a create at a running service stores it; the build resolves it
+        // against the vocabulary as a row's category value is (`crate::mint_metadata_keys`).
         return Ok(MetadataValue::Text(key.to_string()));
     }
     Ok(match declared.ty {

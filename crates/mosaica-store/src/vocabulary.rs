@@ -131,6 +131,37 @@ impl std::fmt::Display for Unresolved {
 
 impl std::error::Error for Unresolved {}
 
+/// The keys a view's category metadata adds to its vocabularies, as `(vocabulary, key)`. Each
+/// value is resolved as a row's category cell is ([`VocabularyMinter::resolve`]): a closed
+/// vocabulary refuses a key it does not list, naming the metadata, and an open one answers a key it
+/// does not hold, which the caller mints. A value that is not a key, or names a vocabulary
+/// `minter_of` does not hold, adds nothing.
+pub fn novel_metadata_keys<'m>(
+    fields: &[mosaica_types::view::GroupMetadataField],
+    values: &BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
+    minter_of: impl Fn(&str) -> Option<&'m VocabularyMinter>,
+) -> Result<Vec<(String, String)>, String> {
+    let mut novel = Vec::new();
+    for field in fields {
+        let Some(vocabulary) = field.vocabulary.as_deref() else {
+            continue;
+        };
+        let Some(mosaica_types::view::ViewMetadataValue::Text(key)) = values.get(&field.name)
+        else {
+            continue;
+        };
+        let Some(minter) = minter_of(vocabulary) else {
+            continue;
+        };
+        match minter.resolve(Some(key)) {
+            Ok(Resolved::Novel(key)) => novel.push((vocabulary.to_string(), key.to_string())),
+            Ok(Resolved::Code(_)) => {}
+            Err(why) => return Err(format!("metadata '{}' {why}", field.name)),
+        }
+    }
+    Ok(novel)
+}
+
 /// A code at the width its category column is declared at: `u8`, `u16` or `u32`, into which the
 /// vocabulary's codes fit.
 pub fn code_value(width: ScalarType, code: u32) -> ScalarValue {

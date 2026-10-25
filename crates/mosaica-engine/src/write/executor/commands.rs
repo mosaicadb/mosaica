@@ -850,10 +850,61 @@ impl Executor {
                 return;
             }
         };
-        if let Err(e) = self.make_durable(&[&record], "a view creation") {
+        // A category value is resolved as a row's category cell is: a closed vocabulary refuses a
+        // key it does not list, and an open one binds it, durably before the view.
+        let WalRecord::ViewCreate { view } = &record else {
+            unreachable!("prepare_create returns a ViewCreate")
+        };
+        let novel = match mosaica_store::vocabulary::novel_metadata_keys(
+            &descriptor.metadata,
+            &view.metadata,
+            |name| generation.vocabularies.get(name),
+        ) {
+            Ok(novel) => novel,
+            Err(why) => {
+                reply.fail(ExecError::ViewRefused {
+                    detail: format!("view '{group}:{key}': {why}"),
+                });
+                return;
+            }
+        };
+        let mut by_vocabulary: std::collections::BTreeMap<String, Vec<_>> = Default::default();
+        for (vocabulary, key) in novel {
+            by_vocabulary
+                .entry(vocabulary)
+                .or_default()
+                .push(mosaica_lifecycle::DeclaredValue { key, title: None });
+        }
+        let mut pages = Vec::new();
+        for (vocabulary, values) in &by_vocabulary {
+            let held = generation
+                .vocabularies
+                .get(vocabulary)
+                .expect("novel_metadata_keys names only vocabularies it was given");
+            match mint_page(held, values, 0) {
+                Ok(page) => pages.push(page),
+                Err(e) => {
+                    reply.fail(e);
+                    return;
+                }
+            }
+        }
+        let mut records: Vec<&WalRecord> = pages.iter().filter_map(|p| p.record.as_ref()).collect();
+        records.push(&record);
+        if let Err(e) = self.make_durable(&records, "a view creation") {
             reply.fail(e);
             return;
         }
+        let generation = match pages.is_empty() {
+            true => generation,
+            false => {
+                let mut vocabularies: Vocabularies = (*generation.vocabularies).clone();
+                for page in pages {
+                    vocabularies.insert(page.minter);
+                }
+                Arc::new(generation.with(|g| g.vocabularies = Arc::new(vocabularies)))
+            }
+        };
         self.live.with_roster(|roster| roster.apply(&record));
         self.publish_roster(&generation, started, &[]);
         // Durable in the log and not yet in a manifest, and a rotation reclaims the log: so the
@@ -1301,36 +1352,19 @@ impl Executor {
                 return;
             }
         };
-        let mut minter = held.clone();
-        let mut codes = Vec::with_capacity(values.len());
-        let mut added = 0u64;
-        let mut existing = 0u64;
-        for value in &values {
-            match minter.mint(&value.key) {
-                Ok(mosaica_store::vocabulary::Minted::Fresh(code)) => {
-                    added += 1;
-                    codes.push((value.key.clone(), code));
-                }
-                Ok(mosaica_store::vocabulary::Minted::Existing(code)) => {
-                    existing += 1;
-                    codes.push((value.key.clone(), code));
-                }
-                Err(e) => {
-                    reply.fail(ExecError::VocabularyRefused {
-                        detail: e.to_string(),
-                    });
-                    return;
-                }
+        let page = match mint_page(held, &values, titles) {
+            Ok(page) => page,
+            Err(e) => {
+                reply.fail(e);
+                return;
             }
-            if let Some(title) = &value.title {
-                minter.set_title(&value.key, title.clone());
-            }
-        }
+        };
+        let (added, existing) = (page.added, page.existing);
         // Nothing to append where the page bound nothing and changed no title. A repeat of a page
         // already applied is a no-op, and an fsync for it would be a durable record of a decision
         // nothing made. `titles` counts the held keys whose title this page changes, so a page
         // restating the titles a deployment holds appends nothing.
-        if added == 0 && titles == 0 {
+        let Some(record) = page.record else {
             reply.ack(answer(VocabularyValues {
                 added,
                 existing,
@@ -1338,32 +1372,12 @@ impl Executor {
                 withheld: false,
             }));
             return;
-        }
-        let declaration = mosaica_lifecycle::wal::VocabularyDeclaration {
-            name: vocabulary.clone(),
-            title: None,
-            kind: minter.kind(),
-            visibility: minter.visibility(),
-            width: minter.width().arrow_type_name().to_string(),
-            values: codes
-                .iter()
-                .map(
-                    |(key, code)| mosaica_lifecycle::wal::DeclaredVocabularyValue {
-                        key: key.clone(),
-                        code: Some(*code),
-                        title: minter.title_of(key).map(str::to_string),
-                    },
-                )
-                .collect(),
-            reserved: Vec::new(),
-        };
-        let record = WalRecord::VocabularyDeclare {
-            declaration: Box::new(declaration),
         };
         if let Err(e) = self.make_durable(&[&record], "a page of vocabulary values") {
             reply.fail(e);
             return;
         }
+        let minter = page.minter;
         let mut vocabularies: Vocabularies = (*generation.vocabularies).clone();
         vocabularies.insert(minter);
         let next = generation.with(|g| {
@@ -1525,4 +1539,72 @@ impl Executor {
             .store(next.buffered(), Ordering::SeqCst);
         self.publish(next, started);
     }
+}
+
+/// A page of values minted into a copy of `held`: the copy, how many keys it bound and how many it
+/// already held, and the record that makes the page durable, `None` where it binds nothing and
+/// `titles` is 0.
+struct MintedPage {
+    minter: mosaica_store::vocabulary::VocabularyMinter,
+    added: u64,
+    existing: u64,
+    record: Option<WalRecord>,
+}
+
+/// `values` minted against `held`, as [`MintedPage`] says.
+fn mint_page(
+    held: &mosaica_store::vocabulary::VocabularyMinter,
+    values: &[mosaica_lifecycle::DeclaredValue],
+    titles: u64,
+) -> Result<MintedPage, ExecError> {
+    let mut minter = held.clone();
+    let mut codes = Vec::with_capacity(values.len());
+    let mut added = 0u64;
+    let mut existing = 0u64;
+    for value in values {
+        match minter.mint(&value.key) {
+            Ok(mosaica_store::vocabulary::Minted::Fresh(code)) => {
+                added += 1;
+                codes.push((value.key.clone(), code));
+            }
+            Ok(mosaica_store::vocabulary::Minted::Existing(code)) => {
+                existing += 1;
+                codes.push((value.key.clone(), code));
+            }
+            Err(e) => {
+                return Err(ExecError::VocabularyRefused {
+                    detail: e.to_string(),
+                })
+            }
+        }
+        if let Some(title) = &value.title {
+            minter.set_title(&value.key, title.clone());
+        }
+    }
+    let record = (added > 0 || titles > 0).then(|| WalRecord::VocabularyDeclare {
+        declaration: Box::new(mosaica_lifecycle::wal::VocabularyDeclaration {
+            name: minter.name().to_string(),
+            title: None,
+            kind: minter.kind(),
+            visibility: minter.visibility(),
+            width: minter.width().arrow_type_name().to_string(),
+            values: codes
+                .iter()
+                .map(
+                    |(key, code)| mosaica_lifecycle::wal::DeclaredVocabularyValue {
+                        key: key.clone(),
+                        code: Some(*code),
+                        title: minter.title_of(key).map(str::to_string),
+                    },
+                )
+                .collect(),
+            reserved: Vec::new(),
+        }),
+    });
+    Ok(MintedPage {
+        minter,
+        added,
+        existing,
+        record,
+    })
 }

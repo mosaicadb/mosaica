@@ -1730,6 +1730,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
     // `MANIFEST.vocabularies` below, so a rebuild and the serving path see exactly what this
     // build minted.
     let mut minters = args.schema.open_minters();
+    mint_metadata_keys(args, &mut minters)?;
     // Hoisted out of the block below so the report can carry it: what the join met is a figure of
     // the build, not of the pass.
     let mut attribute_coverage: Vec<AttributeCoverage> = Vec::new();
@@ -2293,6 +2294,39 @@ pub(crate) fn scalar_schema_of(
         .filter(|a| a.render)
         .map(|a| (a.name.clone(), a.ty))
         .collect()
+}
+
+/// Each view's category metadata resolved against its vocabulary as a row's category value is
+/// ([`mosaica_store::vocabulary::novel_metadata_keys`]), the keys an open vocabulary does not hold
+/// minted into `minters`. A key a closed vocabulary does not list refuses the build.
+pub(crate) fn mint_metadata_keys(
+    args: &BuildArgs,
+    minters: &mut HashMap<String, mosaica_store::vocabulary::VocabularyMinter>,
+) -> Result<()> {
+    for group in &args.groups {
+        for view in &group.views {
+            let novel = mosaica_store::vocabulary::novel_metadata_keys(
+                &group.metadata,
+                &view.metadata,
+                |name| {
+                    minters
+                        .get(name)
+                        .or_else(|| args.schema.vocabularies.get(name).map(|v| &v.values))
+                },
+            )
+            .map_err(|why| {
+                BuildError::Invalid(format!("view group '{}', view '{}': {why}", group.name, view.key))
+            })?;
+            for (vocabulary, key) in novel {
+                if let Some(minter) = minters.get_mut(&vocabulary) {
+                    minter
+                        .mint(&key)
+                        .map_err(|e| BuildError::Invalid(e.to_string()))?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The schema's vocabularies as `MANIFEST.vocabularies` records them, with the values `minters`

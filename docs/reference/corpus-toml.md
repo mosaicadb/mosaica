@@ -112,7 +112,7 @@ Writing both rosters is refused. `[defaults].source` does not reach a group, so 
 | `point_visibility` | table | required | As on `[[view]]`, for every view of the group. |
 | `visibility` | string or array of strings | `"public"` | As on `[[view]]`, for every view of the group. A view of the group may narrow it with a `visibility` of its own. |
 | `members` | string | not set | Another group's name: this group's views are that group's, and its own `source` holds their points. The group named may not itself name `members`, and a roster or `metadata` beside `members` is refused. |
-| `metadata` | table | not set | The values each view carries, served with it on `/v1/meta`: `name = "type"` over the `[[attribute]]` types, or `name = { type = "category", vocabulary = "<name>" }`. Every view must carry every name. `key`, `source`, `visibility` and the group's `view` column are refused as names, and so is `metadata` on a group with no roster or one that names `members`. |
+| `metadata` | table | not set | The values each view carries, served with it on `/v1/meta`: `name = "type"` over the `[[attribute]]` types, or `name = { type = "category", vocabulary = "<name>" }`, whose value is a key taken as an attribute's category value is: a closed vocabulary refuses a key it does not list, and an open one adds it. Every view must carry every name. `key`, `source`, `visibility` and the group's `view` column are refused as names, and so is `metadata` on a group with no roster or one that names `members`. |
 | `view` | array of tables | `[]` | The roster as one block per view: keys under `[[view_group.view]]`. |
 | `views` | table | not set | The roster as a file: keys under `[view_group.views]`. |
 
