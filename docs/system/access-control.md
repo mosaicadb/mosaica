@@ -30,27 +30,11 @@ Mosaica stores each label in a canonical form, so equivalent labels are the same
 
 ## Where a viewer's terms come from
 
-Viewers and their access are kept in the identity catalogue, a SQLite database in the directory `[catalogue] dir` names, which the server holds in memory. `mosaica serve` needs one. It records:
+A viewer's terms and permissions come from the identity catalogue, which [Users and roles](users-and-roles.md) describes. In brief:
 
-- **principals**: people and services, with their passwords and API keys;
-- **groups** of principals;
-- **grants**: the terms and permissions given to each principal and group;
-- **OIDC providers** whose access tokens the server accepts, with rules that turn a token's claims into terms, and mappings from a provider's roles to local groups. Providers declared under `[catalogue]` in the configuration cannot be changed through the control routes.
-
-A principal's terms are those granted to it and to each group it belongs to. An OIDC identity's terms are those its provider's rules produce from the token, together with the terms of each group a role mapping names. Its permissions come only from those groups, so an identity needs a role mapping to a group that grants `read` before it can log in. The `mosaica` command, the Python and TypeScript `Control` clients and the control routes all manage the catalogue.
-
-Terms say what a principal may see. Permissions say what it may do, and each is granted on its own:
-
-| Permission | Allows |
-|---|---|
-| `read` | starting a session for itself, and reading within its terms. A principal another acts as must hold it too |
-| `read-all` | with `read`, a session that sees every item and satisfies every label |
-| `write` | inserting, deleting, suppressing and annotating within its own terms, flushes and compactions |
-| `write-all` | with `write`, writing anywhere, and declaring and dropping |
-| `authorise-as` | starting a session for another principal |
-| `admin` | changing the catalogue |
-
-`admin` implies neither `read` nor `write`, so an account that manages users can be one that sees nothing. An API key can hold fewer permissions than its principal, and a session it starts holds only those.
+- A local principal holds the terms and permissions granted to it and to each group it belongs to.
+- An OIDC identity holds the terms its provider's claim rules produce from its token, and the terms and permissions of each group a role mapping names.
+- Terms say what a principal may see. Permissions say what it may do: `read`, `read-all`, `write`, `write-all`, `authorise-as` and `admin`.
 
 Writes go to the control address with the operator credential, an API key or an OIDC access token. A session token is for reading only.
 

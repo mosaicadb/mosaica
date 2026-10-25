@@ -43,7 +43,7 @@ It is designed to hold billions of points on one machine and to serve them to ma
 
 ## About these pages
 
-- [Start](start/index.md) has tutorials, which take you from nothing to a working map.
+- [Start](start/index.md) covers installing and configuring Mosaica, and has tutorials, which take you from nothing to a working map.
 - [How it works](system/overview.md) explains the design: how data is stored, how a map is answered, how changes reach a running server, and how each viewer's map is kept to what they may see.
 - [Guides](guides/index.md) cover particular jobs, such as running Mosaica under Docker or behind TLS.
 - [Reference](reference/index.md) lists every route, command, setting and client call.

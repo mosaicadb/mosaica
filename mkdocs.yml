@@ -107,6 +107,7 @@ nav:
   - Home: index.md
   - Start:
       - start/index.md
+      - Install and configure: start/install.md
       - Your first map from files: start/first-map.md
   - How it works:
       - Overview: system/overview.md
@@ -118,6 +119,7 @@ nav:
       - Maps in the browser: system/browser-maps.md
       - Annotations: system/annotations.md
       - Access control: system/access-control.md
+      - Users and roles: system/users-and-roles.md
       - Security: system/security.md
   - Guides:
       - guides/index.md
