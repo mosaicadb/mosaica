@@ -234,7 +234,7 @@ a content gated `all` was written from.
 Which declarations are new is read from `/v1/meta`, and a vocabulary reaches it through the column
 that names it. A vocabulary no attribute names yet is therefore declared again at each commit; the
 route answers an identical redeclaration as held, applies its values as a page and changes nothing,
-and the report counts it under the parts already present.
+and the report counts it under the declarations and vocabulary keys already present.
 
 ## The commit after the first
 
@@ -317,8 +317,8 @@ table, or a dict of columns) whose columns are `mosaica_id` and unique attribute
 one item. A unique attribute is read from the column an insert reads it from. A column that is
 neither is not sent, and the report names it in `ignored_columns`; a table with no other column is
 refused before anything is sent, as is a list of dicts, or a dict whose columns differ in length.
-A bare string or number is one item's `mosaica_id`. A row naming no item, or two, is refused and listed in the report's `refused` by
-its position, and the other rows are applied; a `None` in a list, or a row whose cells are all
+A bare string or number is one item's `mosaica_id`. A row naming no item, or two, is refused and
+listed in the report's `refused` by its position, and the other rows are applied; a `None` in a list, or a row whose cells are all
 null, names no item; with `strict=True` the whole request is refused instead. A call whose every
 request the server refused raises `Refusal`, with the report as its `report`; a strict call naming
 a row it refuses is one. A removed item names nothing after, so its value inserted again creates a
@@ -347,7 +347,7 @@ The child is killed by its pid at `close()` and at interpreter exit, and is star
 `--exit-on-stdin-close`, so it also stops when the Python process ends in any other way. A
 database `create()` made with no path is removed at both, after its child has stopped. Its
 directory holds a lock file the process keeps locked while it lives, and `create()` removes every
-other temporary database directory whose lock it can take, its owner having gone. A directory the
+other temporary database directory beside it whose lock it can take, its owner having gone. A directory the
 user named, through `create(path)`, `open(path)` or `save(path)`, is never removed.
 
 The deployment file the SDK writes sets `serve.cors_loopback`, which admits a page served from a
