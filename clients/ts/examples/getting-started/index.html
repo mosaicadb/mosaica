@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Places of the world</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      body { margin: 0; height: 100vh; display: flex; flex-direction: column; font-family: 'Instrument Sans', system-ui, sans-serif; }
+      mosaica-explorer { flex: 1; min-height: 0; }
+      p { margin: 0; padding: 12px 16px; }
+    </style>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <!-- --8<-- [start:explorer] -->
+    <mosaica-explorer
+      viewer-url="/mosaica"
+      dataset-title="Places of the world"
+      pinned-filters="name feature_class country"
+    ></mosaica-explorer>
+    <!-- --8<-- [end:explorer] -->
+  </body>
+</html>

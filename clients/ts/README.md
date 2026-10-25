@@ -1,6 +1,6 @@
 # TypeScript clients
 
-This directory holds the browser side of Mosaica: the client library, a deck.gl layer, the web components, React bindings, the demo viewer and four example pages. It is one npm workspace. This page is for someone working on these packages or embedding them in a page. What each package exports, and every element's attributes, events and parts, is in the reference on the documentation site: [TypeScript client](../../docs/reference/typescript.md) and [Components](../../docs/reference/components.md). How the client works, and why, is in [Clients](../../docs/system/clients.md).
+This directory holds the browser side of Mosaica: the client library, a deck.gl layer, the web components, React bindings, the demo viewer and five example pages. It is one npm workspace. This page is for someone working on these packages or embedding them in a page. What each package exports, and every element's attributes, events and parts, is in the reference on the documentation site: [TypeScript client](../../docs/reference/typescript.md) and [Components](../../docs/reference/components.md). How the client works, and why, is in [Clients](../../docs/system/clients.md).
 
 ## The packages
 
@@ -11,7 +11,7 @@ This directory holds the browser side of Mosaica: the client library, a deck.gl 
 | `components/` | `@mosaicajs/components` | The `mosaica-*` custom elements, built with Lit, drawing through `@mosaicajs/deck`. A subpath for each element, and a single-file bundle. |
 | `react/` | `@mosaicajs/react` | `useMosaicaStore` and `useProjection`. `@mosaicajs/react/components` wraps every element as a React component, behind optional peer dependencies, so the hooks alone pull in neither Lit nor deck.gl. |
 | `viewer/` | `@mosaicajs/viewer` | The demo: `<mosaica-explorer>` with dataset and principal pickers and measurement panels. Private. |
-| `examples/` | | Four host pages, described below. |
+| `examples/` | | Five host pages, described below. |
 | `harness/` | | Checks the elements' behaviour in a browser against a running page. |
 | `wire-example/` | | Decodes a `/v1/viewport` body with `apache-arrow` and no Mosaica code. [Wire framing](../../docs/openapi/README.md) walks through it. |
 | `spike/` | | Tests that deck.gl's tile indices match Mosaica's tile grid. |
@@ -116,7 +116,9 @@ The viewer's Vite server listens on 5173, or on `VITE_PORT` where that is set, a
 
 ## The examples
 
-Each example is a workspace that `npm run typecheck` checks. They expect the demo's `2m4` scale, started with `./run_demo.sh --scale 2m4`: its viewer listener on `127.0.0.1:37585` and its session listener on `127.0.0.1:49303`. The plain-HTML app server takes an API key holding `authorise-as` in `MOSAICA_API_KEY`; `run_demo.sh` writes one to `mosaica-demo/presets/2m4.key`. The users in `examples/plain-html/users.json` read as the principals `run_demo.sh` creates for that bundle's presets. `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL` point the examples at another deployment, whose principals `users.json` then has to name.
+[`getting-started`](examples/getting-started/README.md) is the first tutorial. It needs no demo: `npm start` in its directory builds the GeoNames sample in `examples/data/geonames/`, starts `mosaica serve` over it on ports the system chooses, and serves the page on port 5310. `npm run test:live` there serves it the same way and checks in headless Chromium that the page draws.
+
+Every example is a workspace that `npm run typecheck` checks. The other four expect the demo's `2m4` scale, started with `./run_demo.sh --scale 2m4`: its viewer listener on `127.0.0.1:37585` and its session listener on `127.0.0.1:49303`. The plain-HTML app server takes an API key holding `authorise-as` in `MOSAICA_API_KEY`; `run_demo.sh` writes one to `mosaica-demo/presets/2m4.key`. The users in `examples/plain-html/users.json` read as the principals `run_demo.sh` creates for that bundle's presets. `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL` point the examples at another deployment, whose principals `users.json` then has to name.
 
 The plain-HTML example's app server mints the tokens for all four, so start it after the demo and before the others. It listens on port 5180. The other three are Vite dev servers that proxy `/token` and `/users` to it and `/v1/*` to the viewer listener.
 

@@ -2,7 +2,8 @@
 # The TypeScript half of the gate: typecheck every package and the operator scripts, build the four
 # library packages and import each from `dist/` in Node, run the unit suites, run core's live test
 # against a real `mosaica serve`, then the components' browser suite in headless Chromium, which
-# also decodes through the built worker and renders the built elements.
+# also decodes through the built worker and renders the built elements, and last the
+# getting-started example's page, served as `npm start` serves it and drawn in headless Chromium.
 #
 # It starts by checking that every copy of the release version (the pyprojects, the npm manifests
 # and lockfile, the crates' pins) matches `[workspace.package] version` in Cargo.toml.
@@ -51,5 +52,8 @@ if ! (cd clients/ts && node -e "require('playwright').chromium.launch().then((b)
   exit 1
 fi
 npm --prefix clients/ts/components run test:browser --silent
+
+echo "check-clients: serving the getting-started example and drawing its page"
+npm --prefix clients/ts/examples/getting-started run test:live --silent
 
 echo "check-clients: ok"
