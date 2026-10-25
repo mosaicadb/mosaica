@@ -134,7 +134,10 @@ def test_a_vocabulary_without_titles_gives_no_title_column(db):
     layer's table keeps its artifacts' names."""
     venues, clusters = db.aggregate(
         "map",
-        [{"count": True, "by": {"field": "venue", "top": 4}}, {"count": True, "by": {"layer": "clusters", "top": 5}}],
+        [
+            {"count": True, "by": {"field": "venue", "top": 4}},
+            {"count": True, "by": {"layer": "clusters", "top": 5}},
+        ],
     )
     assert venues.column_names == ["group", "key", "count"]
     assert "title" not in venues.to_pandas().columns

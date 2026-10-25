@@ -1395,13 +1395,13 @@ class Viewer:
         A table's columns are, where they apply: `group` (`listed`, `rest` or `none`), `key` (a
         category's key or an artifact's `mosaica_id`), `title` (an artifact's name as
         `browse_artifacts` gives it, or a category's title, present on a category field only where
-        its vocabulary holds a title for any value), `slot` (with a layer, an artifact's palette slot under
-        its `palette_size`, null without one and on the `rest` and `none` rows), `lower` and `upper`
-        (a bin's edges: an integer on an integer field, exactly, a float on a float field or on an
-        integer field whose range has a fractional bound and a UTC timestamp on a timestamp field; a
-        bin holds `lower` up to but not including `upper`, and the last bin also holds its `upper`),
-        `cell` (the cell's Morton prefix), `count`, `reference_count` and `lift`, then the field
-        figures in the order values, missing, min, max, mean. Each figure's columns run over the
+        its vocabulary holds a title for any value), `slot` (with a layer, an artifact's palette slot
+        under its `palette_size`, null without one and on the `rest` and `none` rows), `lower` and
+        `upper` (a bin's edges: an integer on an integer field, exactly, a float on a float field or
+        on an integer field whose range has a fractional bound and a UTC timestamp on a timestamp
+        field; a bin holds `lower` up to but not including `upper`, and the last bin also holds its
+        `upper`), `cell` (the cell's Morton prefix), `count`, `reference_count` and `lift`, then the
+        field figures in the order values, missing, min, max, mean. Each figure's columns run over the
         fields of its own list in order, then over those of `"summary"` not already listed, a field
         named twice giving one column; `min_<field>` and `max_<field>` are typed as a histogram's
         edges on the field. Its schema metadata `mosaica.head` is the table's figures as JSON:

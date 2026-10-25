@@ -75,9 +75,8 @@ impl Field {
     /// each group's counts in the set and the reference.
     ///
     /// The groups carry titles where the vocabulary holds a title for any value, or as `titled`
-    /// says where the table has begun. A title comes only from a vocabulary's declaration or a
-    /// page of its values, never from an item, so whether a table has the `title` column does not
-    /// depend on which items it counts.
+    /// says where the table has begun. Whether a table has the `title` column must not depend on
+    /// which items it counts.
     pub(super) fn groups(
         &self,
         cx: &Cx<'_>,
