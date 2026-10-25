@@ -62,9 +62,9 @@ impl FoldPlan {
     }
 }
 
-/// Why a tick planned no fold.
+/// Why a compaction was refused: the gates `fold_refusals_by_gate` counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NoFold {
+pub enum NoFold {
     /// A fold would write overlay dispositions that no durable record backs.
     WalPoisoned,
     /// The in-memory overlay no longer matches the durable WAL.

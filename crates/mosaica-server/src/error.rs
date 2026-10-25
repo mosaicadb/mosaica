@@ -45,7 +45,7 @@ pub enum ApiError {
     NotReady,
     /// 503 `not-ready` with a detail: this node cannot do what an authenticated control caller
     /// asked until an operator acts, and the detail says what is wrong and what to do.
-    Unavailable(String),
+    Unavailable(&'static str),
 }
 
 /// Which bound shed a request. Every cause answers `backpressure`; they differ in the `detail`
@@ -168,9 +168,11 @@ impl ApiError {
                 "this node is not accepting writes; nothing in this request was applied"
                     .to_string(),
             ),
-            ApiError::Unavailable(detail) => {
-                (StatusCode::SERVICE_UNAVAILABLE, "not-ready", detail.clone())
-            }
+            ApiError::Unavailable(detail) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "not-ready",
+                detail.to_string(),
+            ),
         }
     }
 

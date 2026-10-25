@@ -2857,10 +2857,23 @@ paths:
         one runs is held until it lands.
 
         A compaction can still be refused when its turn comes: for want of memory or disc, while
-        the write-ahead log is poisoned, or where the shard holds nothing to compact.
-        `compaction.requests` on `/control/status` reports it. The request is answered once
-        `requests.answered` reaches its number. If `requests.last_refusal.request` is at least
-        that number, a shard of it was refused, and `detail` says why and what to do.
+        the write-ahead log is poisoned, where the shard holds nothing to compact, or because the
+        node has since reached one of the states the `503` below names (`overlay_diverged`,
+        `prefix_diverged`, `stepped_down`). `compaction.requests` on `/control/status` reports it.
+
+        The request is answered once `requests.answered` reaches its number: every shard it asked
+        for has been compacted, has failed or been discarded, or has been refused.
+        `requests.last_refusal` holds only the latest refusal that answered a request, and its
+        `request` is the highest request that refusal answered. Read after the request is
+        answered, a `last_refusal.request` below its number means none of its shards was refused;
+        equal to it, a shard was refused while answering it, and `detail` says why and what to
+        do; above it, a later request's refusal has replaced the record, which then says nothing
+        about this one. A request answered without a refusal may still have failed: to confirm
+        the deleted rows were removed, check that `compaction.folds` rose and `overlay.retirable`
+        fell, and see `compaction.fold_failures` for a compaction that failed or was discarded.
+
+        If the write executor stops after the `202`, the request is never answered, and
+        `write_executor.posture` reads `dead`.
 
         Where no compaction could start before the node is restarted, the request is refused at
         once with `503` and nothing is requested. The query string is not read.
@@ -8960,7 +8973,7 @@ components:
             answered:
               type: integer
               minimum: 0
-              description: The highest request number every shard of which has published, been discarded or been refused.
+              description: The highest request number every shard of which has published, failed, been discarded or been refused. A request answered without a refusal was not necessarily compacted; `fold_failures` counts the compactions that failed or were discarded.
             last_refusal:
               description: The latest refusal that answered a request, or `null` where there has been none.
               oneOf:
@@ -8976,7 +8989,7 @@ components:
                     shard:
                       type: [integer, "null"]
                       minimum: 0
-                      description: The shard refused, or `null` where the request was refused before any shard was chosen.
+                      description: The shard refused, or `null` where the request was refused because this node may not publish (`overlay_diverged` or `prefix_diverged`), whether or not some of its shards had been compacted before.
                     gate:
                       type: string
                       description: One of `fold_refusals_by_gate`'s names.

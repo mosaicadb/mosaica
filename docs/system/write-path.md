@@ -155,7 +155,7 @@ Compaction never removes three things: an access-label term that only deleted it
 To remove a deleted item's values without a rebuild, send `POST /control/compact` after the deletion.
 
 !!! note "Confirming that a compaction ran"
-    `POST /control/compact` answers 202 with the request's number once it has asked for a compaction, and the compaction can still be refused, for example for lack of disc space. Check `/control/status` until `compaction.requests.answered` reaches that number. If `compaction.requests.last_refusal.request` is below it, the compaction ran. If it is at or above it, a shard was refused, and `detail` says why. Where no compaction could start until the server is restarted, the request is answered 503 with the reason.
+    `POST /control/compact` answers 202 with the request's number once it has asked for a compaction, and the compaction can still be refused, for example for lack of disc space, or fail. Check `/control/status` until `compaction.requests.answered` reaches that number. If `compaction.requests.last_refusal.request` then equals it, a shard was refused and `detail` says why; below it, nothing was refused; above it, a later request's refusal has replaced the record. To confirm the deleted rows are gone, check that `compaction.folds` has risen and `overlay.retirable` has fallen; `compaction.fold_failures` counts compactions that failed or were discarded. Where no compaction could start until the server is restarted, the request is answered 503 with the reason.
 
 Copies outside Mosaica are yours to remove: backups, filesystem snapshots, the build's source files, and the request log if `[serve] request_log` is set.
 

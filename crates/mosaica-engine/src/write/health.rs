@@ -163,8 +163,8 @@ pub struct ExecutorHealth {
     /// Compaction requests numbered since the executor started. Raised under
     /// [`Self::compaction_request`]'s lock.
     pub(crate) compaction_requests_accepted: AtomicU64,
-    /// The highest request number every shard of which has published, been discarded or been
-    /// refused.
+    /// The highest request number every shard of which has published, failed, been discarded or
+    /// been refused.
     pub(crate) compaction_requests_answered: AtomicU64,
     /// The last refusal that answered a request, which a scheduled or closing refusal does not
     /// replace.
@@ -401,13 +401,24 @@ impl ExecutorHealth {
     pub(crate) fn take_compaction_request(&self) -> Option<CompactionRequest> {
         lock_recover(&self.compaction_request).take()
     }
+
+    /// Which of the two states that hold until a restart stops this node publishing, if either.
+    pub(crate) fn unpublishable(&self) -> Option<crate::compact::NoFold> {
+        if self.overlay_diverged.load(Ordering::SeqCst) {
+            Some(crate::compact::NoFold::OverlayDiverged)
+        } else if self.prefix_diverged.load(Ordering::SeqCst) {
+            Some(crate::compact::NoFold::PrefixDiverged)
+        } else {
+            None
+        }
+    }
 }
 
-/// The gates `plan_fold` can refuse on, in the order [`ExecutorStats::fold_refusals_by_gate`]
+/// The gates a compaction can be refused on, in the order [`ExecutorStats::fold_refusals_by_gate`]
 /// counts them. Literals from a closed list, so no corpus-derived text reaches a status response.
 pub const FOLD_GATES: [&str; crate::compact::NoFold::GATES.len()] = crate::compact::NoFold::GATES;
 
-/// A fold that was asked for and `plan_fold` would not plan. `gate` is the
+/// A compaction that was asked for and refused. `gate` is the
 /// [`crate::compact::NoFold`] variant in snake case. For `insufficient_disc`, `need_bytes` is 150%
 /// of the live bytes and `had_bytes` is what `statvfs` answered; nothing but a fold reclaims, so
 /// that gap does not close on its own.
@@ -425,22 +436,26 @@ pub struct FoldRefusal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactionRefused {
     NotRunning,
-    OverlayDiverged,
-    PrefixDiverged,
-    SteppedDown,
+    /// Only a gate that holds until a restart: overlay or prefix diverged, or stepped down.
+    Gate(crate::compact::NoFold),
+}
+
+impl CompactionRefused {
+    /// What is wrong and what to do, in a sentence from a fixed list.
+    pub fn detail(self) -> &'static str {
+        match self {
+            CompactionRefused::NotRunning => {
+                "the write executor is not running, so nothing can be compacted; restart the \
+                 server, which starts it"
+            }
+            CompactionRefused::Gate(gate) => gate.detail(),
+        }
+    }
 }
 
 impl std::fmt::Display for CompactionRefused {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use crate::compact::NoFold;
-        f.write_str(match self {
-            CompactionRefused::NotRunning => {
-                "the write executor is not running, so nothing is compacted; restart the node"
-            }
-            CompactionRefused::OverlayDiverged => NoFold::OverlayDiverged.detail(),
-            CompactionRefused::PrefixDiverged => NoFold::PrefixDiverged.detail(),
-            CompactionRefused::SteppedDown => NoFold::SteppedDown.detail(),
-        })
+        f.write_str(self.detail())
     }
 }
 
@@ -451,7 +466,8 @@ impl std::error::Error for CompactionRefused {}
 pub struct RequestRefusal {
     /// The highest request number it answered: requests made before a tick takes them are merged.
     pub request: u64,
-    /// The shard refused, or `None` where the request was refused before it named any.
+    /// The shard refused, or `None` where the request was refused because this node may not
+    /// publish, whether or not some of its shards were compacted first.
     pub shard: Option<ShardId>,
     pub refusal: FoldRefusal,
     /// What the gate means and what to do, from a fixed list.

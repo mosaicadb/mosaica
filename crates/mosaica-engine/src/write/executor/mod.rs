@@ -332,8 +332,7 @@ impl Executor {
     /// Whether this executor may still write durable state, asked in one place. Excludes the
     /// WAL's poison flag, which is recoverable; these two are terminal until a restart.
     pub(super) fn may_publish(&self) -> bool {
-        !self.health.overlay_diverged.load(Ordering::SeqCst)
-            && !self.health.prefix_diverged.load(Ordering::SeqCst)
+        self.health.unpublishable().is_none()
     }
 
     /// Block until something may be waiting, and report whether the executor should keep running.

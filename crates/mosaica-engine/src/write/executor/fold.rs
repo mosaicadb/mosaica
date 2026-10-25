@@ -493,7 +493,8 @@ pub(in crate::write) struct Compactions {
     /// The shards a request named and no compaction has been dispatched for, in order. `Some`
     /// until the request is answered: [`ExecutorHealth::fold_requested`] stays raised.
     requested: Option<std::collections::VecDeque<ShardId>>,
-    /// The number of the last request taken into `requested`.
+    /// The number of the last request a tick took: what a refusal answers, and what
+    /// [`ExecutorHealth::compaction_requests_answered`] rises to when `requested` empties.
     requested_through: u64,
     /// The shards sealed since their last compaction, each due one closing compaction, with the
     /// WAL position of the last record the append that sealed it wrote.
@@ -1248,18 +1249,14 @@ impl Executor {
         }
     }
 
-    /// Answer the request held or being worked through with a refusal, while this node may not
-    /// publish.
-    fn refuse_request_unpublishable(&mut self) {
+    /// Answer the request held or being worked through with `reason`, a state that stops this node
+    /// publishing until a restart.
+    fn refuse_request_unpublishable(&mut self, reason: crate::compact::NoFold) {
         if let Some(request) = self.health.take_compaction_request() {
             self.compactions.requested_through = request.request;
         } else if self.compactions.requested.is_none() {
             return;
         }
-        let reason = match self.health.overlay_diverged.load(Ordering::SeqCst) {
-            true => crate::compact::NoFold::OverlayDiverged,
-            false => crate::compact::NoFold::PrefixDiverged,
-        };
         self.health
             .record_fold_refusal(reason, Some((self.compactions.requested_through, None)));
         self.compactions.requested = None;
@@ -1282,8 +1279,8 @@ impl Executor {
         // A compaction this node could not publish is hours of IO spent to produce an orphan. The
         // planner's own gates cover the recoverable postures; this one covers the two that latch,
         // and answers a request with a refusal, since neither clears before a restart.
-        if !self.may_publish() {
-            self.refuse_request_unpublishable();
+        if let Some(reason) = self.health.unpublishable() {
+            self.refuse_request_unpublishable(reason);
             return;
         }
         // At most one compaction is in flight, and a completed one not yet drained is one pass

@@ -189,6 +189,7 @@ pub use mosaica_store::utf8;
 // is how to answer: `AcceptError` for the status mapping, and `ExecutorPosture`/`ExecutorStats`
 // for `readyz` and `/control/status`.
 pub use bundle_lock::BundleLockError;
+pub use compact::NoFold;
 pub use write::{
     AcceptError, CompactionRefused, ExecutorHealth, ExecutorPosture, ExecutorStartError,
     ExecutorStats, FoldRefusal, PendingChange, PublishGeometryError, RequestRefusal,

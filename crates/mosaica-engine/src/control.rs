@@ -1,7 +1,5 @@
 //! The control-plane calls: resolving, writing, declaring and publishing.
 
-use std::sync::atomic::Ordering;
-
 use mosaica_lifecycle::wal::ChangeOp;
 use mosaica_store::StoreError;
 use mosaica_types::{EntityId, ItemAt, LayerSpace, MosaicaId, ShardId, Target, TermId};
@@ -202,14 +200,11 @@ impl Engine {
         ) {
             return Err(CompactionRefused::NotRunning);
         }
-        if health.overlay_diverged.load(Ordering::SeqCst) {
-            return Err(CompactionRefused::OverlayDiverged);
-        }
-        if health.prefix_diverged.load(Ordering::SeqCst) {
-            return Err(CompactionRefused::PrefixDiverged);
+        if let Some(gate) = health.unpublishable() {
+            return Err(CompactionRefused::Gate(gate));
         }
         if self.any_partition_stepped_down() {
-            return Err(CompactionRefused::SteppedDown);
+            return Err(CompactionRefused::Gate(crate::compact::NoFold::SteppedDown));
         }
         let request = health.request_compaction(shard);
         self.write.wake();

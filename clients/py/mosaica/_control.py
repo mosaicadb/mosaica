@@ -346,12 +346,16 @@ class Control:
         its next cycle, compacts every shard with something to reclaim, one after another. A
         request made while a compaction runs is held until that compaction lands.
 
-        A compaction can still be refused when its turn comes, for example for want of disc. In
-        `status()`, `compaction.requests.answered` reaches the request's number once it is
-        answered; where `compaction.requests.last_refusal.request` is at least that number, a shard
-        of it was refused, and `detail` says why and what to do. Where no compaction could start
-        before the server is restarted, the answer is `503` with that detail and nothing is
-        requested.
+        A compaction can still be refused when its turn comes, for example for want of disc, or
+        fail. In `status()`, `compaction.requests.answered` reaches the request's number once it
+        is answered. `compaction.requests.last_refusal` holds only the latest refusal that
+        answered a request: once yours is answered, its `request` equal to your number means a
+        shard was refused while answering yours, and `detail` says why and what to do; below it,
+        none was; above it, a later request's refusal has replaced the record. To confirm the
+        deleted rows are gone, check that `compaction.folds` rose and `overlay.retirable` fell;
+        `compaction.fold_failures` counts compactions that failed or were discarded. Where no
+        compaction could start before the server is restarted, the answer is `503` with that
+        detail and nothing is requested.
         """
         return self._send("POST", "/control/compact", b"")
 

@@ -326,11 +326,21 @@ mosaica$ curl -sS --unix-socket /run/mosaica/control.sock \
 ```
 
 The request is answered once `answered` reaches its number: every shard it asked for has been
-compacted, or has failed or been refused. If `last_refusal.request` is at least its number, a shard
-of it was refused. `last_refusal` then names the shard and the reason in `gate`, gives the bytes
-needed and available for a memory or disc refusal, and says what to do in `detail`. A compaction
-the schedule started and the server refused is not recorded there, only under
-`compaction.last_refusal`.
+compacted, has failed or been discarded, or has been refused. `last_refusal` holds only the latest
+refusal that answered a request, and its `request` is the highest request that refusal answered.
+Read after your request is answered:
+
+- `last_refusal.request` below your number: none of your request's shards was refused.
+- Equal to it: a shard was refused while answering it. `last_refusal` names the shard and the
+  reason in `gate`, gives the bytes needed and available for a memory or disc refusal, and says
+  what to do in `detail`.
+- Above it: a later request's refusal has replaced the record, and it says nothing about yours.
+
+A request answered without a refusal may still have failed. To confirm that the deleted rows are
+gone, check that `folds` rose and `overlay.retirable` fell; `fold_failures` counts the compactions
+that failed or were discarded. A compaction the schedule started and the server refused is not
+recorded under `requests`, only under `compaction.last_refusal`. If the write executor stops after
+the 202, the request is never answered, and `write_executor.posture` reads `dead`.
 
 When no compaction could start until the server is restarted, the request is refused straight
 away with `503 not-ready` and nothing is requested. That happens when the write executor is not

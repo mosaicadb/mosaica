@@ -948,7 +948,7 @@ async fn compact(
             Json(serde_json::json!({ "request": request })),
         )),
         Err(mosaica_engine::CompactionRefused::NotRunning) => Err(ApiError::NotReady),
-        Err(refused) => Err(ApiError::Unavailable(refused.to_string())),
+        Err(refused) => Err(ApiError::Unavailable(refused.detail())),
     }
 }
 

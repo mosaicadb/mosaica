@@ -2171,6 +2171,166 @@ async fn a_compaction_no_tick_could_start_is_refused_at_once() {
     refused(&mount_server(engine, 200, generous_test_gate()).await).await;
 }
 
+/// `POST /control/compact`, answered 202 with the request's number.
+async fn ask_for_compaction(server: &TestServer) -> u64 {
+    let resp = server
+        .client
+        .post(server.control_url("/control/compact"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 202);
+    resp.json::<serde_json::Value>().await.unwrap()["request"]
+        .as_u64()
+        .expect("a 202 carries the request's number")
+}
+
+/// Wait until `done` holds of the executor's counters, pulling a tick forward at each look.
+async fn ticking_until(
+    server: &TestServer,
+    what: &str,
+    done: impl Fn(&mosaica_engine::ExecutorStats) -> bool,
+) {
+    wait_until(what, std::time::Duration::from_secs(180), async || {
+        let resp = server
+            .client
+            .post(server.control_url("/control/flush"))
+            .bearer_auth(OPERATOR_CREDENTIAL)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 202);
+        let stats = server.state.engine.write_executor_stats();
+        match done(&stats) {
+            true => Ok(()),
+            false => Err(format!("{stats:?}")),
+        }
+    })
+    .await
+}
+
+/// Hold a compaction, ask for a second, diverge the overlay with a deletion whose every sync fails,
+/// check that a third is refused at once, then release the first. Answers the second request's
+/// number and the status once it is answered.
+async fn compact_refused_by_divergence(
+    server: &TestServer,
+    faults: &mosaica_lifecycle::faults::FaultSwitchboard,
+) -> (u64, serde_json::Value) {
+    let engine = &server.state.engine;
+    engine.set_fold_paused_for_test(true);
+    ask_for_compaction(server).await;
+    wait_until(
+        "the compaction held",
+        std::time::Duration::from_secs(180),
+        async || {
+            let status = control_status(server).await;
+            match status["shards"]["records"][0]["compacting"] == true {
+                true => Ok(()),
+                false => Err(status["shards"].to_string()),
+            }
+        },
+    )
+    .await;
+    let second = ask_for_compaction(server).await;
+
+    faults.fail_next_fsyncs(mosaica_engine::DENY_DURABILITY_ATTEMPTS);
+    let resp = server
+        .client
+        .post(server.control_url("/control/changes"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&serde_json::json!([change(7, "delete")]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 500);
+    wait_for_executor(server, "the overlay diverged", |now| now.overlay_diverged).await;
+
+    // From here no compaction could start before a restart, so a request is refused at once.
+    let resp = server
+        .client
+        .post(server.control_url("/control/compact"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 503);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "not-ready");
+    assert_eq!(
+        engine.write_executor_stats().compaction_requests_accepted,
+        second,
+        "the refused request raised nothing"
+    );
+
+    engine.set_fold_paused_for_test(false);
+    ticking_until(server, "the second request answered", |now| {
+        now.compaction_requests_answered >= second
+    })
+    .await;
+    (second, control_status(server).await)
+}
+
+/// A request held while the node reaches a state no compaction can start in is answered with a
+/// refusal naming that state and no shard, rather than held for ever.
+#[tokio::test]
+async fn a_request_held_when_the_overlay_diverges_is_refused() {
+    let tmp = TempDir::new().unwrap();
+    let (server, faults) = serve_with_faults(&tmp).await;
+    let (second, status) = compact_refused_by_divergence(&server, &faults).await;
+    let compaction = &status["compaction"];
+    assert_eq!(compaction["fold_requested"], false, "{compaction}");
+    let requests = &compaction["requests"];
+    assert!(
+        requests["answered"].as_u64().unwrap() >= second,
+        "{requests}"
+    );
+    let refusal = &requests["last_refusal"];
+    assert_eq!(refusal["request"], second, "{requests}");
+    assert_eq!(refusal["gate"], "overlay_diverged");
+    assert!(refusal["shard"].is_null());
+    assert!(refusal["detail"].as_str().is_some_and(|d| !d.is_empty()));
+}
+
+/// A refusal of a compaction the schedule started does not replace the one that answered a
+/// request.
+#[tokio::test]
+async fn a_scheduled_refusal_leaves_the_requests_refusal() {
+    let tmp = TempDir::new().unwrap();
+    let mut config = default_engine_config();
+    config.compaction.after_deletions = Some(1);
+    let (server, _faults) = serve_with_faults_and_config(&tmp, config).await;
+    let (_, requested) = compact_refused_for_memory(&server).await;
+    let before = server.state.engine.write_executor_stats().fold_refusals;
+
+    // One deletion is enough for the schedule to call for a compaction, which is refused too.
+    let resp = server
+        .client
+        .post(server.control_url("/control/changes"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&serde_json::json!([change(7, "delete")]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status().as_u16(),
+        200,
+        "{}",
+        resp.text().await.unwrap()
+    );
+    ticking_until(&server, "a scheduled refusal", |now| {
+        now.fold_refusals > before
+    })
+    .await;
+
+    let status = control_status(&server).await;
+    assert_eq!(
+        status["compaction"]["last_refusal"]["gate"],
+        "insufficient_memory"
+    );
+    assert_eq!(status["compaction"]["requests"], requested, "{status}");
+}
+
 /// **The stage barriers of `/control/status` move when their stages run** (contracts §3.4's
 /// per-partition block; correctness-suite §12.3). A presence check would be satisfied by a field
 /// wired to a constant, and a barrier that never moves is worse than none — a harness would wait
@@ -4322,11 +4482,6 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/write_executor/work_submitted", "integer"),
 ];
 
-/// Types in [`STATUS_SHAPE`] that no read in the test shows: a request names no shard only when
-/// it is refused because this node may not publish, which no request reaches through the route.
-const STATUS_TYPES_UNREACHED: &[(&str, &str)] =
-    &[("/compaction/requests/last_refusal/shard", "null")];
-
 type Shape = std::collections::BTreeMap<String, std::collections::BTreeSet<&'static str>>;
 
 /// Records each key path under `path` in `value` with the JSON type found there.
@@ -4481,6 +4636,12 @@ async fn control_status_serves_its_pinned_shape() {
     .await;
     reads.push(control_status(&server).await);
 
+    // A request refused because the node may not publish names no shard. The overlay diverges only
+    // on a log that recovers, which the torn one above does not, so on a second server.
+    let diverging = TempDir::new().unwrap();
+    let (diverged, faults) = serve_with_faults(&diverging).await;
+    reads.push(compact_refused_by_divergence(&diverged, &faults).await.1);
+
     let pinned: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> = STATUS_SHAPE
         .iter()
         .map(|(path, kinds)| (*path, kinds.split('|').collect()))
@@ -4530,7 +4691,7 @@ async fn control_status_serves_its_pinned_shape() {
         for kind in kinds {
             let shown = seen.get(*path).is_some_and(|k| k.contains(kind));
             assert!(
-                shown || STATUS_TYPES_UNREACHED.contains(&(*path, *kind)),
+                shown,
                 "no read serves {path} as {kind}; every read:\n{listing}"
             );
         }
