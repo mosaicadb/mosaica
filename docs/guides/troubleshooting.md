@@ -9,7 +9,7 @@ This page starts from what you see and points to the cause. Most problems fall i
 Mosaica draws only what the viewer may see, so a blank map usually means the viewer's session admits none of the items. Check, in this order:
 
 1. **The items' access labels.** If your data has no access rules, every item needs the label `public`, which every session holds. The build's report says how many rows took the view's default label and how many carried one of their own.
-2. **The viewer's access attributes.** A user sees an item only when their attributes satisfy its label. List what they hold with `mosaica principal show <name>`.
+2. **The viewer's access attributes.** A user sees an item only when their attributes satisfy its label. `mosaica principal show <name>` lists what is granted to a user directly, and `mosaica group show <group>` what each of their groups holds.
 3. **The view's own label.** A view that the viewer may not see answers as if it didn't exist.
 4. **The filter.** Clear it, to rule it out.
 
@@ -23,11 +23,11 @@ A view's frame is fixed at its first load, and a point outside it is drawn on it
 
 New and edited items appear at the next flush, which runs every 90 seconds by default, or sooner once 40,000 rows are waiting. To wait for a write to be visible, ask for it in the write itself, as [When new data appears](../system/write-path.md#when-new-data-appears) describes.
 
-If the items carry an access attribute that no item carried before, a viewer whose session started earlier doesn't see them until they start a new session.
+If the items' labels use an access attribute, or a combination of attributes, that no label used before, a viewer whose session started before that flush doesn't see them until they start a new session.
 
 ### A user sees fewer items than their attributes admit
 
-The same cause: their session started before the first item with one of their attributes was flushed. Signing in again fixes it.
+The same cause: their session started before the flush that brought in a label they now satisfy. Signing in again fixes it.
 
 ## A request is refused
 
@@ -39,13 +39,13 @@ Every refusal carries an error code and a `detail` that says what was wrong.
 | `403 expired-token` | The session has ended: it reached its lifetime, was revoked, or a catalogue change affected it | Start a new session |
 | `403 forbidden` | The credential lacks a permission, such as a key without `authorise-as`, or a user without `read` | Grant the permission. [Permissions](../system/users-and-roles.md#permissions) lists what each one allows |
 | `404 unknown` | No such view, item or artifact, or one the session may not see. The two answer the same | Check the name, then the viewer's access |
-| `409 conflict` | A write clashes with what the database holds, such as a unique value another item has | Read the detail, which names the row |
-| `422 contract` | The request is malformed, such as a filter on a field that isn't indexed | Change the request. The detail says what is wrong |
+| `409 conflict` | A write clashes with what the database holds, such as a unique value another item has | Read the detail, which says what clashed |
+| `422 contract` | The request is malformed, such as a filter on a field that isn't declared filterable, or a JSON body with an unknown or missing field | Change the request. The detail says what is wrong |
 | `429 backpressure` | The server is busy | Send the same request again after `Retry-After` seconds |
 | `500 fail-closed` | The server couldn't complete the request | Send it again. For a write, the detail says whether part of it may already be in force |
-| `503 not-ready` | The part of the server that takes writes isn't running | Read the detail, and check `/control/status`. Some causes last until a restart |
+| `503 not-ready` | A write or compaction at the control address was refused, because the part of the server that takes writes isn't running, or the server is in a state that lasts until a restart | Read the detail, which says which, and check `/control/status` |
 
-A `400`, `413` or `415` comes back as plain text rather than a JSON error. It means the body isn't valid JSON, is too large for the route, or was sent without `content-type: application/json`.
+A `400`, `413` or `415` comes back as plain text rather than a JSON error. It means the body isn't valid JSON, is too large for the route, or was sent without `content-type: application/json`. Valid JSON of the wrong shape is a `422`.
 
 ### The browser reports a CORS error
 
@@ -53,7 +53,13 @@ A page can call the viewer address only from an origin the server admits. Add th
 
 ### The server won't start
 
-The server logs why, in one line, and exits. The commonest causes are an address already in use, an operator credential file it can't read, and a bundle built by a different version of Mosaica, which it refuses. Rebuild the bundle with the version you serve it with.
+`mosaica serve` prints why on one line and exits. The commonest causes are:
+
+- **another server already running on the same deployment**, which holds its catalogue open;
+- **an address already in use**, which the message doesn't name, so check each of `viewer`, `session` and `control` under `[serve]`;
+- **an operator credential file it can't read**;
+- **no `mosaica.toml` found**, searching from the directory you ran it in and upwards; name it with `--deployment`;
+- **a bundle whose file formats this version doesn't read**, which the message says to rebuild.
 
 ## The server is slow
 
@@ -67,7 +73,7 @@ Mosaica maps its files rather than loading them, so the parts in use sit in the 
 
 ### A build runs out of memory
 
-Set `--memory-budget`, such as `mosaica build --memory-budget 24g`. Without it, a build sizes itself from the machine's free memory, which is too much when a server runs beside it.
+Set `--memory-budget`, such as `mosaica build --memory-budget 24g`. Without it, a build sizes itself at 80% of the memory available when it starts, which leaves too little for a server running beside it. A build that can't fit its budget is refused early, before it does most of its work.
 
 ## When the log fails
 

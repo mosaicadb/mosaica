@@ -10,7 +10,7 @@ With the default limits, the caches and the paged reads add up to about 7.7 GiB.
 
 The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap above the cache limits, and every gigabyte beyond that keeps more of the bundle in memory. A cap that's too low makes the server slower before it makes it fail, so if the whole bundle fits in memory alongside the caches, that's the fastest a server gets.
 
-A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build within 24 GiB. Without it, the build works out a budget from the machine's free memory, so set one when a server runs on the same machine.
+A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine.
 
 ## Disc
 
