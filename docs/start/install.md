@@ -1,28 +1,34 @@
 # Install and configure
 
-## Install
+This page shows how to install Mosaica as a standalone database server and configure it. Once it is running, you can reach it over its HTTP API, with the `mosaica` command line, or from the TypeScript and Python clients.
 
-!!! note "Not published yet"
-    Release binaries, the Docker image and the packages on PyPI and npm come with the first release. Until then, install from a clone of the repository:
+!!! tip "Prototyping in Python"
+    For local prototyping and analysis, you don't need a separate server. The Python client can run Mosaica itself, starting a private server for your notebook or script. The [Python client](../reference/python/index.md) shows how.
 
-    ```bash
-    git clone https://github.com/mosaicadb/mosaica ~/mosaica
-    ```
+## Install the server
 
-=== "Server"
+Release binaries and a Docker image will come with the first release. Until then, build the server from source. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu).
 
-    The `mosaica` binary builds a database and serves it. It needs Rust and a C compiler (`build-essential` on Debian and Ubuntu).
+```bash
+git clone https://github.com/mosaicadb/mosaica ~/mosaica
+cd ~/mosaica
+cargo install --locked --path crates/mosaica-cli
+```
 
-    ```bash
-    cd ~/mosaica
-    cargo install --locked --path crates/mosaica-cli
-    ```
+This installs the `mosaica` command, which both builds databases and serves them. To run the server as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md).
 
-    To run it as a service, see [systemd](../guides/systemd.md) or [Docker](../guides/docker.md).
+Mosaica runs on Linux and macOS. It doesn't run on Windows yet.
+
+??? info "Supported platforms"
+    Release builds are made for Linux on x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on Apple silicon, and macOS 10.12 or later on Intel. The tests run on Linux x86_64.
+
+## Install a client
+
+The clients aren't on PyPI or npm yet either, so install them from the same clone.
 
 === "Python"
 
-    The Python package runs a database in your notebook or connects to a server. It brings the binary with it, and needs Python 3.10 or later, Rust, a C compiler and Node.js 22.15 or later.
+    You'll need Python 3.10 or later, Rust, a C compiler and Node.js 22.15 or later. The first package carries the server, which the client uses when it runs Mosaica itself.
 
     ```bash
     cd ~/mosaica
@@ -30,23 +36,17 @@
     pip install -e 'clients/py[widget]'
     ```
 
+    On Windows, the Python client installs without the server, and connects to one running on another machine.
+
 === "TypeScript"
 
-    The `@mosaicajs` packages put a map in a web page or app. Pack them from `clients/ts` and install the packed files, as the [TypeScript client's README](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/README.md#using-the-packages-in-another-project) describes. They need Node.js 22.15 or later.
+    You'll need Node.js 22.15 or later. Pack the packages from `clients/ts` and install the packed files in your project, as the [TypeScript client's README](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/README.md#using-the-packages-in-another-project) describes.
 
-    `npm install @mosaicajs/client` currently installs an empty placeholder without an error.
-
-Mosaica runs on Linux and macOS. It doesn't run on Windows yet, though the Python client installs there and connects to a server on another machine.
-
-??? info "Platform details"
-    Release builds are made for Linux on x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on Apple silicon, and macOS 10.12 or later on Intel. The tests run on Linux x86_64.
+    The npm registry holds empty placeholders under the `@mosaicajs` names, so `npm install @mosaicajs/client` succeeds but installs no code.
 
 ## Configure
 
-Two files configure a database:
-
-- **`corpus.toml` is the schema.** It declares the views, the fields and whether each is rendered or indexed, the vocabularies, the annotation layers, and who may see what. Its `[sources]` table names the files for the first load. A running server accepts the same declarations, so the schema can grow while it serves.
-- **`mosaica.toml` holds the server's settings**: where its files live, which schema to start from, its three addresses, the operator credential, and its limits. The server reads it at start.
+You configure a deployment with two files. In `corpus.toml` you describe the database's schema: its views, its fields and whether each is rendered or indexed, its vocabularies and annotation layers, and who may see what. Its `[sources]` table also names the files to load first. In `mosaica.toml` you set up the server: where it keeps its files, which schema it starts from, the addresses it listens on, the operator credential and its limits.
 
 ```mermaid
 flowchart LR
@@ -59,16 +59,15 @@ flowchart LR
   serve --- viewer["viewer address<br/>reads"]
 ```
 
-`mosaica build` creates the database and loads the first data in one pass, which is the quick way to load a lot at once. After that, every change goes through the server's control address, from the clients, the command line or the HTTP API.
+`mosaica build` creates the database and loads your files into it in one pass, which is the fastest way to load a lot of data at once. From then on, the server takes every change: you can declare new fields, views and layers, and insert or delete items, through its control address. The server reads `mosaica.toml` when it starts, so restart it after you change a setting.
 
 !!! note ""
-    Not built yet: an empty database. A database starts with a build of at least one view's data.
+    Not built yet: starting from an empty database. For now, a database starts with a build that loads at least one view's data.
 
 ??? info "Where Mosaica looks for the two files"
-    - `mosaica.toml`: the current directory, or the nearest one above it. `--deployment` names another. Its relative paths are read from its own directory.
-    - The schema: the file `[build] schema` names, or `schema.toml`. `--config` names another. Paths in `[sources]` are read from the schema's directory.
+    Mosaica reads `mosaica.toml` from the directory you run it in, or the nearest directory above it that has one, and `--deployment` names another. The schema is the file `[build] schema` names, `schema.toml` by default, and `--config` names another. Relative paths are read from the directory of the file they're in.
 
-    The examples in the repository and the Python client name the schema `schema.toml`. `mosaica check --payloads` prints a schema as the requests that declare it at a running server.
+    The examples in the repository and the Python client call the schema `schema.toml`. `mosaica check --payloads` prints a schema as the requests that would declare it at a running server.
 
 ## Try it
 
