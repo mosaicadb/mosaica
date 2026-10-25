@@ -257,6 +257,10 @@ def _(mo):
     picks out that class's places on the map and dims the rest, and the funnel filters the map
     to that class. Click the coloured square beside a class to change its colour.
 
+    The outline of the world under the points is drawn because the view is in longitude and
+    latitude. `basemap=` on `map` chooses something else: `"none"`, tiles from a web map
+    server, or an image of your own.
+
     ## Filter from Python
 
     The filters you click on the map can be written in Python too. `db.view("world")` is a
