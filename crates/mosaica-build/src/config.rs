@@ -5677,7 +5677,7 @@ impl Config {
                 // Form A gives each view its own file, so there is nothing to select on; a group
                 // carrying its own `source` — form B, and every `members` group — holds every
                 // view's points in one file and selects by key.
-                let id = format!("{}:{}", group.name, view.key);
+                let id = mosaica_store::group_view_id(&group.name, &view.key);
                 let (source, select) = match (&group.source, &view.source) {
                     (Some(shared), _) => (
                         Some(shared.clone()),

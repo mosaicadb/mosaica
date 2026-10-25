@@ -1856,26 +1856,6 @@ pub fn check_drawn_on(declaration: &LayerDeclaration, views: &[String]) -> Resul
     Ok(())
 }
 
-/// [`expand_views`] over every view id there is, a name standing for a group where an id is
-/// `<name>:<key>`, and any other name kept as a view.
-pub fn expand_views_over(declared: &[String], ids: &[&str]) -> Vec<String> {
-    expand_views(declared, |name| group_of_ids(name, ids), |_| true)
-        .expect("every name that is no group is kept as a view")
-}
-
-/// The ids among `ids` of the views of the group `name`, `None` where it holds none.
-fn group_of_ids(name: &str, ids: &[&str]) -> Option<Vec<String>> {
-    let views: Vec<String> = ids
-        .iter()
-        .filter(|id| {
-            id.split_once(crate::view::GROUP_SEPARATOR)
-                .is_some_and(|(group, _)| group == name)
-        })
-        .map(|id| id.to_string())
-        .collect();
-    (!views.is_empty()).then_some(views)
-}
-
 /// The names a layer's `views` was declared with, kept where one names a view group, which stands
 /// for every view the group holds, now and later; empty where every name is a view. `is_group`
 /// answers whether a name is a group.
@@ -1885,11 +1865,6 @@ pub fn written_views(declared: &[String], is_group: impl Fn(&str) -> bool) -> Ve
     } else {
         Vec::new()
     }
-}
-
-/// [`written_views`] over every view id there is, as [`expand_views_over`] reads them.
-pub fn written_views_over(declared: &[String], ids: &[&str]) -> Vec<String> {
-    written_views(declared, |name| group_of_ids(name, ids).is_some())
 }
 
 /// A name a group-scoped layer's `views` gives outside the scope's key set, and the groups that

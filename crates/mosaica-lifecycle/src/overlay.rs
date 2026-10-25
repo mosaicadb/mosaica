@@ -307,10 +307,7 @@ pub(crate) fn as_u32(entity: EntityId) -> u32 {
 /// which is the definition (`views.md` §3.3, decision 0115); this is not a second one, it is the
 /// same expansion over an empty relation.
 pub fn owner_id_only(group: &str, key: &str) -> Vec<String> {
-    vec![format!(
-        "{group}{}{key}",
-        mosaica_types::view::GROUP_SEPARATOR
-    )]
+    vec![mosaica_types::view::group_view_id(group, key)]
 }
 
 /// Replays a WAL's records into the overlays and an `IngestBuffer` per point shard, one record at

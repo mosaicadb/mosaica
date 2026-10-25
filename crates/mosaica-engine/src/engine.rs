@@ -1263,7 +1263,7 @@ impl Engine {
         // A layer naming a view group is drawn on the views the replayed roster leaves it.
         state
             .registry
-            .follow_groups(crate::control::group_views(&bundle.manifest));
+            .follow_groups(mosaica_store::manifest::group_views(&bundle.manifest.groups));
         // A dropped view's artifacts are deleted, with their keys free, wherever the log or the
         // deny state does not already hold the deletion.
         let dead =

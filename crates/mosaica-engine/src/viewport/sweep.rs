@@ -892,7 +892,7 @@ pub(crate) fn scoped_family_views(
         .flat_map(|g| {
             g.views
                 .iter()
-                .map(move |v| format!("{}{}{}", g.name, mosaica_store::GROUP_SEPARATOR, v.key))
+                .map(move |v| mosaica_store::group_view_id(&g.name, &v.key))
         })
         .filter(|view| scoped_column_under(manifest, family, view))
         .collect()
@@ -927,13 +927,7 @@ fn scoped_column_under(
             .as_deref()
     };
     // A view of the group with no column — created since the build — carries none.
-    owning_key_of(roster, members_of, &family.group).is_some_and(|key| {
-        family.views.contains(&format!(
-            "{}{}{key}",
-            family.group,
-            mosaica_store::GROUP_SEPARATOR
-        ))
-    })
+    family_view(family, roster, members_of).is_some()
 }
 
 /// Resolve `declared` against one segment's columns, once.

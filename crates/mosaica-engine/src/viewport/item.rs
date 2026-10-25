@@ -538,7 +538,7 @@ pub(crate) fn stored_field_out(
 /// Every group-scoped attribute value one item carries that this session may see — one entry per
 /// family, keyed by the owning group's key, values read from the per-view entity-space columns. A
 /// scoped family has one column per view but the value belongs to the `(entity, key)` pair, so the
-/// address is the key, resolved through [`owning_key_of`] from each visible view id to the key it
+/// address is the key, resolved through [`family_view`] from each visible view id to the key it
 /// holds in this family's group.
 /// The gate is two tests. First, the owning group's gate, for the whole family: a principal who
 /// cannot reach it gets the attribute undeclared, and a leaf naming it takes the unknown-column
@@ -577,7 +577,7 @@ fn scoped_values_of(
                 .map(move |v| (g.name.as_str(), v.key.as_str()))
         })
         .filter(|(group, key)| {
-            visible.contains_view(&format!("{group}{}{key}", mosaica_store::GROUP_SEPARATOR))
+            visible.contains_view(&mosaica_store::group_view_id(group, key))
         })
         .collect();
 
@@ -594,15 +594,11 @@ fn scoped_values_of(
         let mut values: std::collections::BTreeMap<String, ScalarOut> =
             std::collections::BTreeMap::new();
         for &(group, key) in &reachable {
-            let Some(owned) = owning_key_of((group, key), members_of, &family.group) else {
-                continue;
-            };
-            let id = format!("{}{}{owned}", family.group, mosaica_store::GROUP_SEPARATOR);
             // The family's own list, not the roster: a view created since the build has no column
             // until one is written for it.
-            if !family.views.contains(&id) {
+            let Some((id, owned)) = family_view(family, (group, key), members_of) else {
                 continue;
-            }
+            };
             let column = crate::filter::scoped_column_name(&family.name, &id);
             let Some(stored) = shard.filter_columns.stored_value(&column, entity) else {
                 continue;

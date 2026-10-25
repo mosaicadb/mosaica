@@ -577,6 +577,27 @@ pub struct GroupDescriptor {
     pub scoped_scalars: Vec<ScopedScalar>,
 }
 
+impl GroupDescriptor {
+    /// This group's views, by id, in roster order.
+    pub fn view_ids(&self) -> Vec<String> {
+        self.views
+            .iter()
+            .map(|view| crate::group_view_id(&self.name, &view.key))
+            .collect()
+    }
+}
+
+/// The views of the group `name` among `groups`, by id in roster order, `None` where no group has
+/// the name: what a layer naming a group is drawn on, at a build and at a running service.
+pub fn group_views(groups: &[GroupDescriptor]) -> impl Fn(&str) -> Option<Vec<String>> + '_ {
+    move |name| {
+        groups
+            .iter()
+            .find(|group| group.name == name)
+            .map(GroupDescriptor::view_ids)
+    }
+}
+
 /// `groups[..].scoped_scalars` entry: one group-scoped attribute's column family (`views.md` §5).
 ///
 /// The declaration is an ordinary attribute's — same types, same `index` and `render` — and what
@@ -862,7 +883,7 @@ impl Manifest {
                 ));
             }
             for view in &group.views {
-                let id = format!("{}{}{}", group.name, crate::GROUP_SEPARATOR, view.key);
+                let id = crate::group_view_id(&group.name, &view.key);
                 let Some(descriptor) = self.views.iter().find(|v| v.id == id) else {
                     return Err(format!(
                         "the roster of group '{}' names view '{id}', which the manifest does not \
@@ -981,7 +1002,7 @@ impl Manifest {
         self.groups
             .iter()
             .filter(|g| g.name == owner || g.members_of.as_deref() == Some(owner))
-            .map(|g| format!("{}{}{}", g.name, crate::GROUP_SEPARATOR, key))
+            .map(|g| crate::group_view_id(&g.name, key))
             .collect()
     }
 
@@ -1016,7 +1037,7 @@ impl Manifest {
             // applied again at every roster publication and every open, so it goes on naming
             // earlier incarnations of a key created again; the recreated key keeps its place and
             // its families' columns.
-            let owner_id = format!("{}{}{}", stone.group, crate::GROUP_SEPARATOR, stone.key);
+            let owner_id = crate::group_view_id(&stone.group, &stone.key);
             if manifest
                 .incarnation_of(&owner_id)
                 .is_some_and(|live| live != stone.incarnation)
@@ -1038,7 +1059,7 @@ impl Manifest {
                     // behind with the prefix, exactly as the view's segments are: §3.4's
                     // reclamation is by omission, and the incarnation is what keeps a key created
                     // again from adopting them.
-                    let dropped = format!("{}{}{}", group.name, crate::GROUP_SEPARATOR, stone.key);
+                    let dropped = crate::group_view_id(&group.name, &stone.key);
                     for family in &mut group.scoped_scalars {
                         family.views.retain(|v| *v != dropped);
                     }
@@ -1080,7 +1101,7 @@ impl Manifest {
                 });
                 let (quantisation, projection) = (group.quantisation, group.projection);
                 let point_default = group.point_default.clone();
-                let id = format!("{group_name}{}{}", crate::GROUP_SEPARATOR, view.key);
+                let id = crate::group_view_id(&group_name, &view.key);
                 if !manifest.views.iter().any(|v| v.id == id) {
                     manifest.views.push(ViewDescriptor {
                         display_name: id.clone(),
@@ -1122,7 +1143,7 @@ impl Manifest {
 
     /// [`Self::incarnation_of`] for the view `key` of `group`.
     pub fn incarnation_of_key(&self, group: &str, key: &str) -> Option<ViewIncarnation> {
-        self.incarnation_of(&format!("{group}{}{key}", crate::GROUP_SEPARATOR))
+        self.incarnation_of(&crate::group_view_id(group, key))
     }
 
     /// Is this artifact's `(view, incarnation)` stamp the live one?
@@ -1281,7 +1302,7 @@ impl Manifest {
             if position.as_ref().is_none_or(|(held, _)| *held != g) {
                 let ids = group.views.iter().enumerate().map(|(i, v)| {
                     (
-                        format!("{}{}{}", group.name, crate::GROUP_SEPARATOR, v.key),
+                        crate::group_view_id(&group.name, &v.key),
                         i,
                     )
                 });

@@ -94,7 +94,7 @@ pub(crate) use artifacts::{
 pub(crate) use item::{
     category_code, category_key, flushed_row_scalar, slice_value, stored_field_out,
 };
-pub(crate) use meta::{meta_of, owning_key_of, Resolution};
+pub(crate) use meta::{family_view, meta_of, Resolution};
 pub(crate) use row_filter::{
     crossing_domain, filter_refusal, predicate_source, predicate_vocabulary, unique_holders,
     ResolvedLeaves, RoutedRows,

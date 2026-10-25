@@ -736,21 +736,6 @@ fn store_refusal(e: StoreError) -> crate::write::AcceptError {
     })
 }
 
-/// The views of the view group `name` in `manifest`, by id in roster order, `None` where it names
-/// no group: what a layer naming the group is drawn on.
-pub(crate) fn group_views(
-    manifest: &mosaica_store::manifest::Manifest,
-) -> impl Fn(&str) -> Option<Vec<String>> + '_ {
-    move |name| {
-        manifest.groups.iter().find(|g| g.name == name).map(|g| {
-            g.views
-                .iter()
-                .map(|v| format!("{}{}{}", g.name, mosaica_store::GROUP_SEPARATOR, v.key))
-                .collect()
-        })
-    }
-}
-
 /// A layer declaration's views as `meta` holds them, as a build takes them: a view group named
 /// stands for every view the group holds now ([`mosaica_types::layer::expand_views`]), a layer
 /// scoped to a group names only views holding its keys, and a shape layer's views share one
@@ -763,7 +748,7 @@ pub(crate) fn declared_views(
 ) -> std::result::Result<Vec<String>, String> {
     let name = declaration.name.clone();
     let declared_views = std::mem::take(&mut declaration.views);
-    let group = group_views(manifest);
+    let group = mosaica_store::manifest::group_views(&manifest.groups);
     declaration.views = mosaica_types::layer::expand_views(
         &declared_views,
         &group,

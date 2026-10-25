@@ -599,11 +599,9 @@ fn declaration_requests(config: &mosaica_build::config::Config) -> Result<Vec<Re
         put(&mut requests, path, &entry["body"]);
     }
     for entry in mosaica_build::config::group_view_payloads(config).map_err(|e| e.to_string())? {
-        let view = format!(
-            "{}{}{}",
+        let view = mosaica_store::group_view_id(
             entry["group"].as_str().unwrap_or_default(),
-            mosaica_types::view::GROUP_SEPARATOR,
-            entry["key"].as_str().unwrap_or_default()
+            entry["key"].as_str().unwrap_or_default(),
         );
         put(&mut requests, view_path(&view), &entry["body"]);
     }

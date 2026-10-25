@@ -1786,6 +1786,7 @@ fn build_bundle(
             // own projection and extent, so a layer spanning frames stores a different
             // canonical form under each view's name.
             &view_frames,
+            &args.groups,
             mosaica_types::layer::DEFAULT_MAX_SHAPE_VERTICES,
             // The build's own `.build-tmp/`, which the member spill writes its runs into —
             // still open here, and swept by the `close` below whether this stage succeeds or

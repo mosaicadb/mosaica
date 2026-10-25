@@ -1292,7 +1292,7 @@ fn check_scoped_render_lanes(
             .filter(|f| {
                 f.group == owner
                     && f.views
-                        .contains(&format!("{owner}{}{key}", mosaica_store::GROUP_SEPARATOR))
+                        .contains(&mosaica_store::group_view_id(owner, key))
             })
             .collect();
         if owed.is_empty() {

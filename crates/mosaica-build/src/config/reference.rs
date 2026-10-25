@@ -634,6 +634,7 @@ fn the_space_of_an_inline_row_defaults_to_the_one_the_page_states() {
             &crate::ids::Numbering::empty(),
             &BTreeMap::new(),
             std::slice::from_ref(&frame),
+            &[],
             mosaica_types::layer::DEFAULT_MAX_SHAPE_VERTICES,
             scratch.path(),
             1 << 30,

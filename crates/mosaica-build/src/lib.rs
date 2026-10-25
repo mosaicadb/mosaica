@@ -2080,6 +2080,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
                     view.projection,
                     view.extent,
                 )],
+                &args.groups,
                 mosaica_types::layer::DEFAULT_MAX_SHAPE_VERTICES,
                 tmp.path(),
                 args.memory_budget

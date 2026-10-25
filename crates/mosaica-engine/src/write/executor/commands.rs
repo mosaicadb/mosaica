@@ -954,7 +954,7 @@ impl Executor {
     /// views follow from the roster, which the log already holds, and a replay draws them again.
     fn follow_groups(&mut self) {
         let generation = self.generation.load_full();
-        let group = crate::control::group_views(&generation.bundle.manifest);
+        let group = mosaica_store::manifest::group_views(&generation.bundle.manifest.groups);
         if self
             .live
             .with_registry(|registry| registry.follow_groups(&group))

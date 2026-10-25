@@ -2300,22 +2300,16 @@ fn layer_views(args: &crate::BuildArgs, layer: &mosaica_types::layer::LayerDecla
     if layer.views.is_empty() {
         return total;
     }
+    let group = mosaica_store::manifest::group_views(&args.groups);
     layer
         .views
         .iter()
         .map(|name| {
-            let drawn = args
-                .views
-                .iter()
-                .filter(|view| {
-                    // The view's own id, or the group's — a group name draws the layer on every
-                    // view of it, and `<group>` is the first component of `group:key`.
-                    &view.view_id == name
-                        || mosaica_store::view_path_components(&view.view_id)
-                            .first()
-                            .is_some_and(|head| head == name)
-                })
-                .count() as u64;
+            // A group's name draws the layer on every view of it; any other name is one view.
+            let drawn = match group(name) {
+                Some(views) => views.len() as u64,
+                None => u64::from(args.views.iter().any(|view| &view.view_id == name)),
+            };
             match drawn {
                 0 => total,
                 drawn => drawn,
@@ -3465,6 +3459,30 @@ mod tests {
                 ..view.clone()
             })
             .collect();
+        args.groups = vec![mosaica_store::manifest::GroupDescriptor {
+            title: None,
+            name: "g".into(),
+            members_of: None,
+            point_default: None,
+            visibility: None,
+            views: ["a", "b", "c"]
+                .iter()
+                .map(|key| mosaica_store::manifest::GroupViewDescriptor {
+                    key: (*key).into(),
+                    visibility: None,
+                    metadata: Default::default(),
+                })
+                .collect(),
+            quantisation: mosaica_store::manifest::Quantisation {
+                x_min: 0.0,
+                x_max: 1.0,
+                y_min: 0.0,
+                y_max: 1.0,
+            },
+            projection: mosaica_spatial::Projection::None,
+            metadata: Vec::new(),
+            scoped_scalars: Vec::new(),
+        }];
 
         args.layers[0].views = vec!["g".into()];
         assert_eq!(

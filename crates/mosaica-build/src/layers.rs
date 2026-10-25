@@ -629,17 +629,20 @@ pub(crate) fn read(
     // layer is canonicalised against the frame of each view it is drawn in, and a layer spanning
     // views whose frames differ therefore stores a different canonical form under each name.
     frames: &[mosaica_store::derived::ViewFrame],
+    // The view groups this build writes, whose views a layer naming one is drawn on.
+    groups: &[mosaica_store::manifest::GroupDescriptor],
     max_shape_vertices: u64,
     scratch: &Path,
     memory_budget: u64,
 ) -> Result<LayerPlan> {
     // **A layer naming a view group is drawn on every view of it this build writes**, and keeps
     // the names it was written with, so that a view the group gains later is drawn on too.
-    let ids: Vec<&str> = frames.iter().map(|frame| frame.view.as_str()).collect();
+    let group = mosaica_store::manifest::group_views(groups);
     let written_views = declarations
         .iter()
         .map(|d| {
-            let written = mosaica_types::layer::written_views_over(&d.views, &ids);
+            let written =
+                mosaica_types::layer::written_views(&d.views, |name| group(name).is_some());
             (d.name.clone(), written)
         })
         .filter(|(_, written)| !written.is_empty())
@@ -647,7 +650,8 @@ pub(crate) fn read(
     let drawn: Vec<LayerDeclaration> = declarations
         .iter()
         .map(|d| LayerDeclaration {
-            views: mosaica_types::layer::expand_views_over(&d.views, &ids),
+            views: mosaica_types::layer::expand_views(&d.views, &group, |_| true)
+                .expect("every name that is no group is kept as a view"),
             ..d.clone()
         })
         .collect();
@@ -1649,7 +1653,7 @@ impl mosaica_lifecycle::GroupViews for DeclaredViews<'_> {
         group: &str,
         key: &str,
     ) -> Option<mosaica_types::view::ViewIncarnation> {
-        let id = format!("{group}{}{key}", mosaica_store::GROUP_SEPARATOR);
+        let id = mosaica_store::group_view_id(group, key);
         self.0
             .contains(&id)
             .then_some(mosaica_types::view::DECLARED_INCARNATION)
@@ -4462,6 +4466,7 @@ mod tests {
             &[mosaica_store::derived::ViewFrame::new(
                 "world", projection, extent,
             )],
+            &[],
             DEFAULT_MAX_SHAPE_VERTICES,
             scratch.path(),
             1 << 30,
@@ -4579,6 +4584,7 @@ mod tests {
                 Projection::None,
                 AlignedSquare::WORLD.bounds(),
             )],
+            &[],
             DEFAULT_MAX_SHAPE_VERTICES,
             scratch.path(),
             1 << 30,
@@ -4649,6 +4655,7 @@ mod tests {
                     },
                 ),
             ],
+            &[],
             DEFAULT_MAX_SHAPE_VERTICES,
             scratch.path(),
             1 << 30,
@@ -4677,6 +4684,7 @@ mod tests {
             &[mosaica_store::derived::ViewFrame::new(
                 "world", projection, extent,
             )],
+            &[],
             DEFAULT_MAX_SHAPE_VERTICES,
             scratch.path(),
             1 << 30,

@@ -278,7 +278,7 @@ pub(crate) struct ServedViews<'a>(
 impl ServedViews<'_> {
     fn reaches(&self, group: &str, key: &str) -> bool {
         self.1.is_none_or(|views| {
-            views.contains_view(&format!("{group}{}{key}", mosaica_store::GROUP_SEPARATOR))
+            views.contains_view(&mosaica_store::group_view_id(group, key))
         })
     }
 }

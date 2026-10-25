@@ -23,6 +23,11 @@ use crate::scalar::ScalarType;
 /// separator is how the two halves come to disagree about what a view id is.
 pub const GROUP_SEPARATOR: char = ':';
 
+/// The id of the view `key` of the group `group`: `<group>:<key>`.
+pub fn group_view_id(group: &str, key: &str) -> String {
+    format!("{group}{GROUP_SEPARATOR}{key}")
+}
+
 /// Which incarnation of a key an artifact belongs to (decision 0115).
 ///
 /// A counter rather than a random nonce: replay applies what was decided — the minted value

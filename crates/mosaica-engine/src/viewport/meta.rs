@@ -108,6 +108,20 @@ pub(crate) fn owning_key_of<'a>(
     (members_of(own_group)? == group).then_some(key)
 }
 
+/// The view of `family` that the view `roster` (its group and key) reads, and the key it holds in
+/// the family's group: its own key, or the one its group shares through `members`, where the
+/// family has a column for that key. The one resolution a scoped field takes under a view, bare
+/// or pinned, and the drill-down's.
+pub(crate) fn family_view<'a>(
+    family: &mosaica_store::manifest::ScopedScalar,
+    roster: (&'a str, &'a str),
+    members_of: impl FnOnce(&str) -> Option<&'a str>,
+) -> Option<(String, &'a str)> {
+    let owned = owning_key_of(roster, members_of, &family.group)?;
+    let id = mosaica_store::group_view_id(&family.group, owned);
+    family.views.contains(&id).then_some((id, owned))
+}
+
 /// What a filter leaf's column spelling resolves to — see [`EngineMeta::resolve_filter_column`].
 /// Four outcomes, three of them refusals with different codes: an ambiguous leaf is a `422`, and
 /// a pin naming nothing is the `404` an unknown view already gets, indistinguishably.
@@ -316,24 +330,45 @@ impl EngineMeta {
         if !visible.contains_group(&family.group) {
             return Resolution::Unknown;
         }
-        let group_view = |key: &str| format!("{}{}{key}", family.group, mosaica_store::GROUP_SEPARATOR);
+        let members_of = |name: &str| {
+            self.groups
+                .iter()
+                .find(|g| g.name == name)?
+                .members_of
+                .as_deref()
+        };
+        fn roster_of(view: &MetaView) -> Option<(&str, &str)> {
+            view.roster
+                .as_ref()
+                .map(|roster| (roster.group.as_str(), roster.key.as_str()))
+        }
+        // The request's own view, where it is one of the family's own group or a sharing one.
+        let through = self
+            .resolve_view(view)
+            .and_then(roster_of)
+            .filter(|&roster| owning_key_of(roster, members_of, &family.group).is_some());
         match pin {
-            Some(pin) => match self.resolve_visible_view(&group_view(pin), visible) {
-                // A view with no column reads the same as a key nobody declared or a gate-failed
-                // one: the pin names nothing to read either way.
-                Some(view) if family.views.contains(&view.id) => Resolution::Scoped {
-                    family,
-                    view: view.id.clone(),
-                },
-                _ => Resolution::UnknownPin {
-                    group: family.group.clone(),
-                    pin: pin.to_string(),
-                },
-            },
-            // The request's own view, where it is one of the family's own group or a sharing one.
-            None => match self.owning_key(view, &family.group).map(group_view) {
-                Some(id) if family.views.contains(&id) => Resolution::Scoped { family, view: id },
-                _ => Resolution::Unpinned {
+            // A pin's key is a key of the group being viewed, as the bare spelling's is: the
+            // request's own group where it holds the family's keys, the family's group otherwise.
+            // A key that group does not hold, or one the viewer cannot reach in it, or a view
+            // with no column, all read as a key nobody declared: the pin names nothing to read.
+            Some(pin) => {
+                let group = through.map_or(family.group.as_str(), |(group, _)| group);
+                let pinned = self
+                    .resolve_visible_view(&mosaica_store::group_view_id(group, pin), visible)
+                    .and_then(roster_of)
+                    .and_then(|roster| family_view(family, roster, members_of));
+                match pinned {
+                    Some((id, _)) => Resolution::Scoped { family, view: id },
+                    None => Resolution::UnknownPin {
+                        group: group.to_string(),
+                        pin: pin.to_string(),
+                    },
+                }
+            }
+            None => match through.and_then(|roster| family_view(family, roster, members_of)) {
+                Some((id, _)) => Resolution::Scoped { family, view: id },
+                None => Resolution::Unpinned {
                     group: family.group.clone(),
                 },
             },
@@ -463,7 +498,7 @@ pub(crate) fn meta_of(generation: &Generation) -> EngineMeta {
     let rostered: std::collections::HashSet<String> = manifest
         .groups
         .iter()
-        .flat_map(|g| g.views.iter().map(move |v| format!("{}:{}", g.name, v.key)))
+        .flat_map(|g| g.views.iter().map(move |v| mosaica_store::group_view_id(&g.name, &v.key)))
         .collect();
     let mut views: Vec<MetaView> = manifest
         .views
@@ -475,7 +510,7 @@ pub(crate) fn meta_of(generation: &Generation) -> EngineMeta {
     for group in &manifest.groups {
         let mut ids = Vec::with_capacity(group.views.len());
         for entry in &group.views {
-            let id = format!("{}:{}", group.name, entry.key);
+            let id = mosaica_store::group_view_id(&group.name, &entry.key);
             // A roster entry with no declared view is refused at open, so this cannot
             // silently drop one.
             let Some(descriptor) = manifest.views.iter().find(|v| v.id == id) else {

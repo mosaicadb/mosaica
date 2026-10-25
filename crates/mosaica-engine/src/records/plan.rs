@@ -135,10 +135,9 @@ fn resolve_field(
             field: spelling.to_string(),
             group,
         }),
-        Resolution::UnknownPin { group, pin } => Err(EngineError::UnknownView(format!(
-            "{group}{}{pin}",
-            mosaica_store::GROUP_SEPARATOR
-        ))),
+        Resolution::UnknownPin { group, pin } => Err(EngineError::UnknownView(
+            mosaica_store::group_view_id(&group, &pin),
+        )),
         Resolution::PinOnUnscoped { column } => refused(RecordsRefused::PinOnUnscoped(column)),
         Resolution::Unknown => refused(RecordsRefused::UnknownField(spelling.to_string())),
     }

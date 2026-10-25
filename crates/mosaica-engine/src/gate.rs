@@ -109,12 +109,7 @@ pub(crate) fn resolve<'m>(
         }
         for view in &group.views {
             owner.insert(
-                format!(
-                    "{}{}{}",
-                    group.name,
-                    mosaica_store::GROUP_SEPARATOR,
-                    view.key
-                ),
+                mosaica_store::group_view_id(&group.name, &view.key),
                 group.name.as_str(),
             );
         }

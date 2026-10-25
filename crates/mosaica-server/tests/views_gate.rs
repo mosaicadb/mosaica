@@ -1540,6 +1540,26 @@ async fn a_sealed_familys_values_need_the_groups_gate_and_not_only_a_reachable_v
         .contains(&"sealed:s2".to_string()));
 }
 
+/// **A pin's key is a key of the group being viewed**, as the bare spelling's is: under the public
+/// sharer's view of `s2`, a principal who reaches `sealed` but not `sealed:s2` filters on
+/// `sentiment` and on `sentiment@s2` alike, and a pin to a key the sharer does not hold names
+/// nothing.
+#[tokio::test]
+async fn a_pin_through_a_sharing_group_resolves_in_the_group_being_viewed() {
+    let served = Served::build(build_shared_sealed).await;
+    let holder = token(&served, &["finance"]).await;
+    let leaf = |name: &str| json!({ name: { "range": { "gte": 0.0 } } });
+    let (status, bare) = viewport(&served, &holder, "sealed_map:s2", Some(leaf("sentiment"))).await;
+    assert_eq!(status, 200, "{bare}");
+    let (status, pinned) =
+        viewport(&served, &holder, "sealed_map:s2", Some(leaf("sentiment@s2"))).await;
+    assert_eq!(status, 200, "the pin resolves through the sharer: {pinned}");
+    assert_eq!(pinned, bare, "both spellings read one column");
+    let (status, body) =
+        viewport(&served, &holder, "sealed_map:s2", Some(leaf("sentiment@s9"))).await;
+    assert_eq!(status, 404, "a key the viewed group does not hold: {body}");
+}
+
 /// The entities of each key of the shared fixture below: one shared layout's points, labelled by
 /// [`label_of`], in `sealed_map`'s file.
 const SHARED_KEYS: [(&str, std::ops::Range<u64>); 2] = [("s1", 0..9), ("s2", 9..21)];

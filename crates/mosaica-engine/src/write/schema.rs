@@ -35,12 +35,7 @@ pub(crate) fn scoped_families_by_view(
         FxHashMap::default();
     for group in &manifest.groups {
         for view in &group.views {
-            let id = format!(
-                "{}{}{}",
-                group.name,
-                mosaica_store::GROUP_SEPARATOR,
-                view.key
-            );
+            let id = mosaica_store::group_view_id(&group.name, &view.key);
             let families = scoped_families_of_view(manifest, &id);
             if families.is_empty() {
                 continue;
@@ -92,7 +87,7 @@ pub(crate) fn scoped_owner_view_of(
         .find(|g| g.name == group)
         .and_then(|g| g.members_of.as_deref())
         .unwrap_or(group);
-    format!("{owner}{}{key}", mosaica_store::GROUP_SEPARATOR)
+    mosaica_store::group_view_id(owner, key)
 }
 
 /// One view's writer schema: the bundle-wide render tail, then the group-scoped render lanes.

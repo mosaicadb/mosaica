@@ -69,7 +69,9 @@ pub use entity_terms::{
 pub use error::{Result, StoreError};
 pub use flush::{digest_of, write_flush_segment, FlushInput, FlushOutput, FlushRow};
 pub use fold::{fold_row_space, FoldRowSpaceOutput, FoldRowSpaceSpec, FoldSegmentInput};
-pub use layout::{view_path_components, LayerSpaceLayout, ShardLayout, GROUP_SEPARATOR};
+pub use layout::{
+    group_view_id, view_path_components, LayerSpaceLayout, ShardLayout, GROUP_SEPARATOR,
+};
 pub use manifest_write::{
     fsync_dir, fsync_written, prune_superseded_segments_manifests, stage_publication,
     write_and_fsync, write_current, write_manifest_json, write_publication, StagedPublication,

@@ -9,7 +9,7 @@ use mosaica_types::{LayerSpace, ShardId};
 use crate::edited::Direction;
 use crate::manifest::RecordExtent;
 
-pub use mosaica_types::view::GROUP_SEPARATOR;
+pub use mosaica_types::view::{group_view_id, GROUP_SEPARATOR};
 
 pub const DICTIONARY_DIR: &str = "dictionary";
 
