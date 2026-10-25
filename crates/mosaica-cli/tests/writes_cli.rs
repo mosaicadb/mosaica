@@ -125,6 +125,73 @@ fn run(dir: &Path, args: &[&str], env: &[(&str, &str)], stdin: &[u8]) -> Output 
 }
 
 /// The JSON a command that succeeded printed.
+/// A declare report's requests, each with the status it was answered.
+fn requests(report: &Value) -> Vec<(String, u64)> {
+    report["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r["request"].as_str().unwrap().to_owned(),
+                r["status"].as_u64().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// A view group whose views carry a category from a closed vocabulary, written in the declaration.
+const ZONES: &str = r#"
+[[vocabulary]]
+name       = "regions"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+values     = ["north", "south"]
+
+[[view_group]]
+name             = "zones"
+projection       = "none"
+extent           = { x = [0.0, 100.0], y = [0.0, 100.0] }
+point_visibility = { default = "public" }
+metadata         = { region = { type = "category", vocabulary = "regions" } }
+
+[[view_group.view]]
+key    = "east"
+region = "north"
+
+[[view_group.view]]
+key    = "west"
+region = "south"
+"#;
+
+#[test]
+fn a_group_with_category_metadata_declared_again_answers_its_views_as_held() {
+    let served = serve(false, "");
+    let dir = served.dir.path().to_owned();
+    std::fs::write(dir.join("zones.toml"), ZONES).unwrap();
+    let declare = |served: &Served| {
+        let control = served.bound.control.as_str();
+        let args = ["declare", "--config", "zones.toml", "--control", control];
+        answer(run(&dir, &args, &[OPERATOR], b""))
+    };
+    let first = declare(&served);
+    assert_eq!(first["refused"], 0, "{first}");
+    for view in ["east", "west"] {
+        let created = (format!("PUT /control/views/zones/{view}"), 201);
+        assert!(requests(&first).contains(&created), "{first}");
+    }
+    let again = declare(&served);
+    for (request, status) in requests(&again) {
+        assert_eq!(status, 200, "{request}: {again}");
+    }
+    let served = restart(served);
+    let after = declare(&served);
+    for (request, status) in requests(&after) {
+        assert_eq!(status, 200, "after a restart, {request}: {after}");
+    }
+}
+
 fn answer(output: Output) -> Value {
     assert!(
         output.status.success(),
@@ -416,19 +483,6 @@ fn a_declaration_and_what_is_written_into_it_are_served_and_survive_a_restart() 
     // Declared again, every request finds what it declares already there.
     let first = answer(write(&["declare", "--config", "more.toml"], b""));
     assert_eq!(first["refused"], 0, "{first}");
-    let requests = |report: &Value| -> Vec<(String, u64)> {
-        report["requests"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|r| {
-                (
-                    r["request"].as_str().unwrap().to_owned(),
-                    r["status"].as_u64().unwrap(),
-                )
-            })
-            .collect()
-    };
     let roster_view = ("PUT /control/views/years/2020".to_string(), 201);
     assert!(requests(&first).contains(&roster_view), "{first}");
     let again = answer(write(&["declare", "--config", "more.toml"], b""));
@@ -774,7 +828,8 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     let token = self::token(&served);
     assert_eq!(served_ids(&served, &token, "s0", &first), vec![4, 5, 6]);
 
-    // Without a credential nothing is sent; a view the service lacks refuses the page.
+    // Without a credential the request goes bare and a server with users refuses it; a view the
+    // service lacks refuses the page.
     let control = served.bound.control.clone();
     let bare = run(&dir, &["status", "--control", &control], &[], b"");
     assert!(!bare.status.success() && bare.stdout.is_empty(), "{bare:?}");

@@ -623,10 +623,11 @@ mod tests {
                 [("tier".to_string(), ViewMetadataValue::Text("gold".to_string()))]
                     .into_iter()
                     .collect(),
+                None,
             )
             .expect("a key is what a build stores");
         match record {
-            WalRecord::ViewCreate { view } => assert_eq!(
+            Some(WalRecord::ViewCreate { view }) => assert_eq!(
                 view.metadata.get("tier"),
                 Some(&ViewMetadataValue::Text("gold".to_string()))
             ),
