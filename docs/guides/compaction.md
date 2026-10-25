@@ -10,11 +10,11 @@ Each time the server makes new items visible, it adds a segment to the bundle, a
 
 - during a four-hour window from midnight UTC, a view has 8 segments or more;
 - at any hour, a view has 64 segments;
-- 500,000 deleted items and annotations are waiting to be removed;
+- 500,000 deleted items and annotations are waiting to be removed, or whatever `overlay_soft_limit` is set to;
 - deleted items are a fifth or more of all rows;
 - files the bundle no longer uses take as much space as the files it does.
 
-Set `compaction_window_start` under `[ingest]` to the start of your quietest hours, in UTC as `"HH:MM"`. Once one compaction starts, none starts again for a day (`compaction_min_interval_secs`), whatever else holds. The [mosaica.toml reference](../reference/mosaica-toml.md) lists the key for each condition, and writing `"off"` for one turns it off and leaves the others.
+Set `compaction_window_start` under `[ingest]` to the start of your quietest hours, in UTC as `"HH:MM"`. Once a compaction starts, the schedule starts no other compaction of that shard for a day (`compaction_min_interval_secs`), and never two at once. A compaction you ask for yourself doesn't wait for the interval. The [mosaica.toml reference](../reference/mosaica-toml.md) lists the key for each condition, and writing `"off"` for one turns it off and leaves the others.
 
 Viewers are answered as usual while a compaction runs. When it finishes, every session's cached view of the map is out of date at once. A background pass rebuilds them, and a session it hasn't reached yet pays for its own on its next request, so expect some slower requests straight after a compaction.
 
@@ -25,7 +25,7 @@ Viewers are answered as usual while a compaction runs. When it finishes, every s
 
 ## What a compaction needs
 
-A compaction needs free space on the bundle's disc of one and a half times the bundle's current size, or of its largest shard, and enough memory for its own estimate, within the cap you set. Without either it is refused, and `/control/status` records why under `compaction.last_refusal`. [Disc](sizing.md#disc) explains how to plan disc space for it.
+A compaction needs free space on the bundle's disc of one and a half times the size of the files the bundle uses, not counting the ones it has left behind, and enough memory for its own estimate, within the cap you set. Without either it is refused, and `/control/status` records why under `compaction.last_refusal`. In a bundle of several shards, the rule applies to the shard being compacted, so plan for the largest. [Disc](sizing.md#disc) explains how to plan disc space for it.
 
 ## Start one yourself
 
@@ -39,7 +39,7 @@ mosaica$ mosaica compact --control unix:/run/mosaica/control.sock
 
 The server compacts every shard with something to reclaim, one after another. The answer is the request's number, counted from 1 each time the server starts. A request made while a compaction is running waits for it to finish. Over HTTP, the same request is `POST /control/compact`, and the Python and TypeScript clients have `compact`.
 
-To see how it went, read `compaction` in `mosaica status`:
+To see how it went, read `compaction` in `mosaica status`, which needs `admin`, as the operator credential has:
 
 ```console
 mosaica$ mosaica status --control unix:/run/mosaica/control.sock | jq '.compaction | {folds, requests}'
@@ -64,7 +64,9 @@ Your request is finished once `answered` reaches its number. If `last_refusal` i
 
     A request answered without a refusal may still have failed: `fold_failures` counts the compactions that failed or were discarded. A compaction the schedule started and the server refused is recorded only under `compaction.last_refusal`, not under `requests`. If the write side stops after the request was accepted, the request is never answered, and `write_executor.posture` reads `dead`.
 
-When no compaction can start until the server restarts, the request is refused at once with `503 not-ready`. That happens when the write side isn't running, when the record of deletions no longer matches the log, when a compaction finished on disc but the server couldn't switch to it, or when part of the server is serving an older state of the bundle than the newest on disc. The detail says which, and what to do.
+When no compaction can start until the server restarts, the request is refused at once with `503 not-ready`. That happens when the write side isn't running, when the record of deletions no longer matches the log, when a compaction finished on disc but the server couldn't switch to it, or when part of the server is serving an older state of the bundle than the newest on disc. Except when the write side isn't running, the detail says which, and what to do.
+
+[Background maintenance](../system/write-path.md#background-maintenance) in Changing data explains how compaction fits with flushes and merges.
 
 ## A write that holds up other writes
 

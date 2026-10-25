@@ -27,7 +27,7 @@ Both installs keep the operator credential in a file called `operator.secret`: u
     mosaica serve: refused to start: there is no operator credential; set `operator_credential_file` or `operator_credential_env` under [serve] and put the secret in that file or variable
     ```
 
-A viewer's session lasts at most `token_max_lifetime` seconds, set under `[disclosure]`, and a change in the catalogue that affects a user ends their sessions, so their next request starts a new one. [When a session ends](../system/access-control.md#when-a-session-ends) lists every cause.
+A viewer's session lasts at most `token_max_lifetime` seconds, set under `[disclosure]`, and a change in the catalogue that could change what a user may see or do ends their sessions. Their next request is refused, and the client starts a new session. [When a session ends](../system/access-control.md#when-a-session-ends) lists every cause.
 
 ## Memory
 
@@ -52,7 +52,7 @@ mosaica health: no server answering at 127.0.0.1:9151: Connection refused (os er
 
 From outside the machine, check `/readyz` through the [TLS proxy](tls.md), whose example configuration passes it through, or against the session address from inside your network.
 
-For more than up or down, `mosaica status` prints the server's status report: how far writes have got, queue depths, compaction, memory and the limits on each write. `write_executor.posture` is the state of the write side, one of `not-started`, `running`, `wal-poisoned` or `dead`, and only `running` is ready.
+For more than up or down, `mosaica status`, which needs `admin`, prints the server's status report: how far writes have got, queue depths, compaction, memory and the limits on each write. `write_executor.posture` is the state of the write side, one of `not-started`, `running`, `wal-poisoned` or `dead`, and only `running` is ready.
 
 A disc that hangs on a write, rather than failing it, leaves the posture at `running` and `/readyz` at 200 while nothing is written. [Health and readiness](../system/serving.md#health-and-readiness) covers what the probe can and cannot see.
 

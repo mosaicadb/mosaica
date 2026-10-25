@@ -204,7 +204,7 @@ WantedBy=multi-user.target
 `UMask=0077` means the socket, and every file the server writes, can be opened by the `mosaica` user
 alone.
 
-`MemoryMax` caps the service's memory, and 24G is a placeholder; [Memory](operating.md#memory)
+`MemoryMax` caps the service's memory, and 24G is a placeholder; [Memory](sizing.md#memory)
 explains how to choose the figure. `MemorySwapMax=0` keeps the service out of swap, so it meets the
 cap rather than being paged out.
 

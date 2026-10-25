@@ -89,7 +89,7 @@ Mosaica is designed to serve billions of points from one machine, by keeping the
 - **What's reused stays warm.** Each viewer's visible set and the counts of each annotation level are cached, within limits you set, and also kept on disc, so a restart reads them back.
 - **Loading streams.** A build reads its input in passes sized to a memory budget, so your source files don't need to fit in memory either.
 
-The [queries](queries.md) and [serving](serving.md) chapters explain these in full, and the [operating guide](../guides/operating.md#memory) explains how to size the caches and the cap.
+The [queries](queries.md) and [serving](serving.md) chapters explain these in full, and the [sizing guide](../guides/sizing.md#memory) explains how to size the caches and the cap.
 
 ## What is built
 
