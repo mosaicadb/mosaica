@@ -1319,8 +1319,8 @@ class Database:
         some requests succeeded returns its report, with the refusals listed.
 
         A request the server answers `429`, being busy, is sent again unchanged after its
-        `Retry-After`, waiting at least 1 second and at most 30 each time, while the waits so far
-        total less than five minutes. One still refused then is listed in the report's
+        `Retry-After`, waiting at least 1 second and at most 30 each time, while the waits total
+        at most five minutes. One whose wait would take them past it is listed in the report's
         `refusals`.
 
             db.commit()

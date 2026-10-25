@@ -16,7 +16,6 @@ import pytest
 
 from mosaica import _control
 from mosaica._control import (
-    MAX_BACKOFF,
     RETRY_BUDGET_S,
     UNANSWERED,
     Control,
@@ -68,7 +67,7 @@ def waits(monkeypatch):
     """The waits `Control` sleeps between attempts, recorded and not slept, and the fake plane
     set to its defaults."""
     slept: list = []
-    monkeypatch.setattr(_control.time, "sleep", slept.append)
+    monkeypatch.setattr(_control, "sleep", slept.append)
     _Backpressure.refusals = 2
     _Backpressure.retry_after = "0.01"
     _Backpressure.retry_after_s = 0.01
@@ -161,11 +160,11 @@ def serving():
     return server, f"http://127.0.0.1:{server.server_port}"
 
 
-def test_a_429_that_never_lets_up_is_answered_once_the_waits_reach_the_budget(waits):
-    """The request is sent again while the waits so far total less than `RETRY_BUDGET_S`, each
-    wait cut to `MAX_BACKOFF`; then the last `429` is the answer, which a commit's report lists."""
+def test_a_429_that_never_lets_up_is_answered_before_the_waits_pass_the_budget(waits):
+    """The request is sent again while the waits total at most `RETRY_BUDGET_S`; the `429` whose
+    wait would take them past it is the answer, which a commit's report lists."""
     _Backpressure.refusals = 1_000
-    _Backpressure.retry_after = "100"
+    _Backpressure.retry_after = "7"
     server, base = serving()
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
@@ -173,7 +172,7 @@ def test_a_429_that_never_lets_up_is_answered_once_the_waits_reach_the_budget(wa
         server.shutdown()
         server.server_close()
     assert not answer.ok and answer.status == 429
-    assert waits == [MAX_BACKOFF] * int(RETRY_BUDGET_S / MAX_BACKOFF)
+    assert waits == [7.0] * int(RETRY_BUDGET_S // 7)
     assert answer.attempts == len(waits) + 1 == len(_Backpressure.bodies)
     assert len(set(_Backpressure.batches)) == 1
 

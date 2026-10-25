@@ -170,10 +170,20 @@ describe('<mosaica-selection> on a busy server', () => {
     expect(state('mosaica-selection').querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('backpressure');
     expect(words('mosaica-selection')).toBe(words('mosaica-status'));
 
+    (state('mosaica-selection').querySelector('[part="retry"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'refresh')).toHaveLength(1);
+
     // The strip still shown, and only the selection's count shed.
     store.set('status', status({status: 'shown'}));
     await settle(host);
     expect(state('mosaica-selection').getAttribute('data-state')).toBe('busy');
+
+    // The view busy, and the selection refused for its own reason: the selection's state and code.
+    store.set('status', status({status: 'refused', refusal: busy}));
+    store.set('region', {shape, status: 'refused' as const, refusal: {code: 'contract', detail: 'the shape has too many vertices', status: 422}, visible: null, matched: {value: 0, exact: false}, served: {shown: 1, total: 0, exact: false}, verdict: null, held});
+    await settle(host);
+    expect(state('mosaica-selection').getAttribute('data-state')).toBe('refused');
+    expect(state('mosaica-selection').querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('contract');
   });
 });
 
@@ -389,7 +399,10 @@ describe('<mosaica-selection> — a panel renders the states the same way', () =
     const held = {ids: BigUint64Array.from([1n]), positions: new Float32Array(2), count: 1};
     const shape = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
     const region = (over: object) => ({shape, status: 'loading' as const, refusal: null, visible: null, matched: {value: 0, exact: false}, served: {shown: 1, total: 0, exact: false}, verdict: null, held, ...over});
-    const said = (tag: string) => deep(host.querySelector(tag)!.shadowRoot!, '[part="state"]')?.textContent?.replace('Retry', '').trim();
+    const said = (tag: string) => {
+      const state = deep(host.querySelector(tag)!.shadowRoot!, '[part="state"]');
+      return state?.textContent?.replace('Retry', '').replace(state.querySelector('[part="reason"]')?.textContent ?? '', '').trim();
+    };
 
     const gateway = {code: 'http-error', detail: 'Gateway Timeout', status: 504};
     store.set('status', status({status: 'refused', refusal: gateway}));

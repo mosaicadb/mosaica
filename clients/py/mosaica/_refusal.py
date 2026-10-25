@@ -42,8 +42,8 @@ class Refusal(ValueError):
     The package raises it for a call it will not make, and for a request the server refused, in
     which case the message carries what the server said and `status` its HTTP status, which is
     `None` otherwise. `retry_after_s` is the wait in seconds the server asked for before the
-    request is sent again, read by `retry_after`: on a `429`, and on any refusal that names a
-    wait. It is `None` otherwise. A `commit()` that did nothing carries its report as `report`, which is
+    request is sent again, read by `retry_after`: on a `429`, and on any refusal that names a wait.
+    It is `None` otherwise. A `commit()` that did nothing carries its report as `report`, which is
     `None` otherwise. `authorise` and `revoke` raise `PermissionError` for a refused request
     instead.
 

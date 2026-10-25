@@ -109,10 +109,11 @@ let mapsMade = 0;
  * The map: the points, the density wash, the artifacts' outlines and labels, hover, pick and the
  * selection, drawn with deck.gl in an orthographic view. The refused, expired and empty states, and
  * a server that cannot be reached, did not answer or is too busy, are drawn over the canvas, so
- * none of them reads as an empty corpus. A refusal shows the server's reason under its words. The toolbar switches between pan, box select and lasso select, and
- * fits the camera to the items the filters match; shift-drag in pan mode draws a box.
- * A settled box or lasso becomes the store's selection, a filter every count narrows to; a tag on
- * its top-left corner gives the count matched inside it and a button that clears it.
+ * none of them reads as an empty corpus. A refusal shows the server's reason under its words. The
+ * toolbar switches between pan, box select and lasso select, and fits the camera to the items the
+ * filters match; shift-drag in pan mode draws a box. A settled box or lasso becomes the store's
+ * selection, a filter every count narrows to; a tag on its top-left corner gives the count matched
+ * inside it and a button that clears it.
  *
  * The map owns the camera and tells the store where it is looking on every move. When it is given
  * a store, and when the store switches to a view with another extent, it opens framed on the items

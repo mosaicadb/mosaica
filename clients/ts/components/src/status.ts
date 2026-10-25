@@ -20,9 +20,10 @@ import './count.js';
  * Reconnecting, Server unreachable, Server did not answer, Server busy, Nothing in view, Data
  * updated, View refused, Session expired) with the action the state offers: Refresh when the data
  * changed, Retry when the view was refused, the server did not answer or is too busy, and Sign in
- * on expiry where `reauthorise` is set. View refused has the server's reason on a line under it. The counts grey out while they are not current. The strip
- * sizes to its content and does not wrap. `compact` shortens the figures (`16.8M of 21.4M match`)
- * and drops the shown count. `expanded` renders the figures again as a card below the strip.
+ * on expiry where `reauthorise` is set. View refused has the server's reason on a line under it.
+ * The counts grey out while they are not current. The strip sizes to its content and does not
+ * wrap. `compact` shortens the figures (`16.8M of 21.4M match`) and drops the shown count.
+ * `expanded` renders the figures again as a card below the strip.
  *
  * The state cell is an `aria-live` region, so a refusal, an expiry or a change of data is announced;
  * the counts are not, so a pan does not read them out. The

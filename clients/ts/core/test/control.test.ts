@@ -220,17 +220,17 @@ describe('an answer', () => {
     expect((await pending).attempts).toBe(2);
   });
 
-  it('is the last 429 once the waits so far reach the budget', async () => {
+  it('is the 429 whose wait would take the waits past the budget', async () => {
     vi.useFakeTimers();
-    const sent = recording({status: 429, headers: {'retry-after': '100'}, body: {error: 'backpressure'}});
+    const sent = recording({status: 429, headers: {'retry-after': '7'}, body: {error: 'backpressure'}});
     const started = Date.now();
     const pending = control.ingest(rows);
     await vi.runAllTimersAsync();
     const answer = await pending;
-    const waits = RETRY_BUDGET_S / MAX_BACKOFF;
+    const waits = Math.floor(RETRY_BUDGET_S / 7);
     expect(answer).toMatchObject({status: 429, ok: false, attempts: waits + 1, body: {error: 'backpressure'}});
     expect(sent).toHaveLength(waits + 1);
-    expect(Date.now() - started).toBe(RETRY_BUDGET_S * 1000);
+    expect(Date.now() - started).toBe(waits * 7 * 1000);
     expect(new Set(sent.map((s) => s.headers['x-mosaica-batch-id'])).size).toBe(1);
   });
 

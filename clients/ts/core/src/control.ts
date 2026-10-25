@@ -19,9 +19,9 @@ export const MIN_BACKOFF = 1;
 export const MAX_BACKOFF = 30;
 
 /**
- * How long one call keeps sending its request again after a `429`, in seconds. While the waits so
- * far total less than this, a `429` is waited out and the request sent again; after that the last
- * `429` is returned as the answer.
+ * The most one call waits in all between attempts after a `429`, in seconds. A `429` is waited out
+ * and the request sent again while the waits stay within this; the `429` whose wait would take
+ * them past it is returned as the answer.
  */
 export const RETRY_BUDGET_S = 300;
 
@@ -759,8 +759,8 @@ function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> 
  * call, so every attempt of one call sends the same bytes.
  *
  * A `429` is backpressure. The call waits the `Retry-After` it carries, between 1 and 30 seconds,
- * and sends the request again while the waits so far total less than five minutes
- * ({@link RETRY_BUDGET_S}); then the last `429` is returned. Every other status is returned as an {@link Answer}, neither
+ * and sends the request again while the waits total at most five minutes ({@link RETRY_BUDGET_S});
+ * the `429` whose wait would take them past it is returned. Every other status is returned as an {@link Answer}, neither
  * thrown nor retried. A request that reaches no server is returned with status
  * {@link UNANSWERED}. A call whose `signal` aborts rejects with the signal's reason.
  *
@@ -817,8 +817,8 @@ export class Control {
         return {status: UNANSWERED, ok: false, body: {}, text: `${url} did not answer: ${String(error)}`, attempts, seconds: seconds()};
       }
       const answered = decoded(text);
-      if (response.status === 429 && waited < RETRY_BUDGET_S) {
-        const wait = Math.min(retryAfterOf(429, response.headers.get('retry-after'), answered)!, MAX_BACKOFF);
+      const wait = response.status === 429 ? Math.min(retryAfterOf(429, response.headers.get('retry-after'), answered)!, MAX_BACKOFF) : 0;
+      if (response.status === 429 && waited + wait <= RETRY_BUDGET_S) {
         await pause(wait, options.signal);
         waited += wait;
         continue;

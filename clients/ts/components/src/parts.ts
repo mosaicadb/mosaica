@@ -60,7 +60,7 @@ export const PARTS = {
   ],
   'colour-editor': ['changed', 'check', 'choice', 'close', 'colour-popover', 'columns', 'count', 'deselect', 'dialog', 'done', 'hex', 'hue', 'name', 'path', 'reset', 'reset-all', 'row', 'rows', 'selected', 'set-colour', 'sub', 'sv', 'swatch', 'title'],
   hierarchy: ['actions', 'also', 'children', 'count-masked', 'count-matched', 'counts', 'dismiss', 'expander', 'filter', 'fit', 'highlight', 'layer', 'more', 'name', 'row', 'search', 'title', 'tree', ...STATE],
-  selection: ['action', 'actions', 'count-matched', 'count-served', 'count-visible', 'counts', 'item', 'items', 'label', 'refusal', 'state', 'title'],
+  selection: ['action', 'actions', 'count-matched', 'count-served', 'count-visible', 'counts', 'item', 'items', 'label', 'reason', 'refusal', 'retry', 'state', 'title'],
   'item-card': ['close', 'copy', 'field', 'headline', 'key', 'label', 'open', 'scoped', 'show-all', 'subtitle', 'title', 'value', 'view-chip', ...STATE],
   'artifact-card': ['child', 'children', 'close', 'content', 'count', 'filter', 'fit', 'headline', 'highlight', 'label', 'name', 'outside', 'parent', 'parents', 'shape', 'title', 'value', 'verbs', ...STATE]
 } as const satisfies Record<string, readonly string[]>;

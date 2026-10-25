@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import time
+from time import sleep
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -39,9 +40,9 @@ JSON = "application/json"
 #: this.
 MAX_BACKOFF = 30.0
 
-#: How long one request keeps being sent again after a `429`, in seconds. While the waits so far
-#: total less than this, a `429` is waited out and the request sent again; after that the last
-#: `429` is the answer.
+#: The most one request waits in all between attempts after a `429`, in seconds. A `429` is waited
+#: out and the request sent again while the waits stay within this; the `429` whose wait would take
+#: them past it is the answer.
 RETRY_BUDGET_S = 300.0
 
 #: The status an answer carries when the request reached no server at all. Not an HTTP status: the
@@ -95,8 +96,8 @@ class Control:
     someone else runs. Each route method sends one request with the credential and returns its
     `Answer`; `status()` and `limits()` return dictionaries, and `limits()` keeps the first
     answer it gets. A request the server answers `429` is sent again after the wait it names, at
-    least 1 second and at most 30, while the waits so far total less than five minutes; then the
-    last `429` is returned. Every other status is returned as it came.
+    least 1 second and at most 30, while the waits total at most five minutes; the `429` whose wait
+    would take them past it is returned. Every other status is returned as it came.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token. Writes, flush
@@ -143,11 +144,12 @@ class Control:
                     )
             except urllib.error.HTTPError as refusal:
                 text = refusal.read().decode(errors="replace")
-                if refusal.code == 429 and waited < RETRY_BUDGET_S:
+                if refusal.code == 429:
                     wait = min(retry_after(429, refusal.headers, _decoded(text)), MAX_BACKOFF)
-                    time.sleep(wait)
-                    waited += wait
-                    continue
+                    if waited + wait <= RETRY_BUDGET_S:
+                        sleep(wait)
+                        waited += wait
+                        continue
                 return Answer(
                     refusal.code, _decoded(text), text, attempts, time.monotonic() - started
                 )

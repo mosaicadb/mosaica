@@ -5,7 +5,7 @@ import {isBusy, isUnanswered} from '@mosaicajs/client/internal';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {refusedState, renderState, stateOf} from './states.js';
+import {reasonOf, refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -17,9 +17,10 @@ import './count.js';
  * other filter narrows the view. Clicking a listed mark picks it. *Outside* flips the selection to its
  * complement, and *Clear* drops it.
  *
- * While its counts are not shown and the server cannot be reached, did not answer or is too busy,
- * the state line says so in the status strip's words, Server unreachable, Server did not answer or
- * Server busy, in place of Counting or Selection refused.
+ * While its counts are not shown and the server cannot be reached or did not answer, the state line
+ * says so in the status strip's words, Server unreachable or Server did not answer, in place of
+ * Counting or Selection refused. Where the server was too busy to count the selection, it says
+ * Server busy, with Retry.
  *
  * A selection is a filter: the map and every count narrow to it once it settles. Not built yet:
  * *Export* and *Save as artifact*, which need server routes; their buttons are disabled with the
@@ -34,7 +35,10 @@ import './count.js';
  * @csspart title - The heading, with the shape's kind.
  * @csspart state - The state line, with `data-state`; its tooltip says whether the counts are
  *   exact for the shape or for a cover.
- * @csspart refusal - The words "Selection refused", with `data-code` set to the refusal's code.
+ * @csspart refusal - The words "Selection refused", or "Server busy", with `data-code` set to the
+ *   refusal's code.
+ * @csspart reason - The server's reason for the refusal, on a line under "Selection refused".
+ * @csspart retry - The Retry button, when the selection's count was refused by a server too busy.
  * @csspart counts - The counts.
  * @csspart count-served - The `<mosaica-count>` of marks shown inside.
  * @csspart count-matched - The `<mosaica-count>` matched inside (or outside).
@@ -113,14 +117,17 @@ export class MosaicaSelection extends MosaicaElement {
     // names it, since nothing about the selection was refused.
     const unreachable = stateOf(status) === 'retrying' && status?.unreachable === true;
     const unanswered = (r.status === 'refused' && isUnanswered(r.refusal)) || stateOf(status) === 'unanswered';
-    const busy = (r.status === 'refused' && isBusy(r.refusal)) || stateOf(status) === 'busy';
+    // Busy only where the selection's own count was shed, so the code shown is its own.
+    const busy = r.status === 'refused' && isBusy(r.refusal);
     const stateRegion =
-      r.status !== 'shown' && (unreachable || unanswered || busy)
-        ? renderState(unreachable ? 'retrying' : unanswered ? 'unanswered' : 'busy', status && r.status === 'refused' ? {...status, refusal: r.refusal} : status)
+      r.status !== 'shown' && (unreachable || unanswered)
+        ? renderState(unreachable ? 'retrying' : 'unanswered', status)
+        : busy && status
+        ? renderState('busy', {...status, refusal: r.refusal}, {onRetry: () => this.resolvedStore?.refresh()})
         : r.status === 'loading'
         ? html`<span part="state" data-state="loading"><span class="dot quiet"></span>Counting<span class="skel" aria-hidden="true"></span></span>`
         : r.status === 'refused'
-          ? refusedState('Selection refused', r.refusal?.code)
+          ? refusedState('Selection refused', r.refusal?.code, null, reasonOf(r.refusal))
           : html`<span part="state" data-state=${state} title=${r.verdict === null ? 'Not counted yet' : r.verdict.exact ? 'Exact for the shape' : 'Approximate: counted over cells around the shape'}>${stale ? html`<span class="dot warn"></span>Data updated` : nothing}</span>`;
     const ids = Array.from(r.held.ids, idString);
     const waiting = (label: unknown, reason: string) => html`<button part="action" class="btn off" type="button" disabled title=${reason}>${label}</button>`;

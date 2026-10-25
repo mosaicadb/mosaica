@@ -4,7 +4,7 @@ import {artifactName, isFilterLayer, withMember, withoutMember, type Artifact, t
 import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {refusedState, renderState} from './states.js';
+import {reasonOf, refusedState, renderState} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -55,6 +55,7 @@ const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
  * @csspart close - The close button.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "Not available", with `data-code` set to the refusal's code.
+ * @csspart reason - The server's reason for the refusal, on a line under "Not available".
  * @csspart headline - The artifact's name, with `data-unnamed` where it has none.
  * @csspart count - The masked count.
  * @csspart content - The artifact's description, or its attached topic.
@@ -232,7 +233,7 @@ export class MosaicaArtifactCard extends MosaicaElement {
         ? html`<slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'artifact'})}>${icon('close', 14)}</button>`
         : nothing}</h2>`;
     if (refusal) {
-      return html`<div class="panel">${heading(true)}${refusedState('Not available', refusal.code)}</div>`;
+      return html`<div class="panel">${heading(true)}${refusedState('Not available', refusal.code, null, reasonOf(refusal))}</div>`;
     }
     if (!artifact) {
       if (!this.resolvedStore) return html`<div class="panel">${heading(false)}${renderState('detached', null)}</div>`;

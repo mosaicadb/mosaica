@@ -273,13 +273,22 @@ describe('a refusal on screen', () => {
     expect(await code('<mosaica-status></mosaica-status>', {status: status({status: 'refused', refusal})})).toBe('withheld');
   });
 
-  it('shows the server’s reason under Item unavailable on the item card', async () => {
-    const refusal = {code: 'not-found', detail: 'there is no item 7 that this session can see', status: 404};
-    const host = await mount('<mosaica-item-card></mosaica-item-card>');
-    const selection = {item: null, itemRefusal: refusal, artifact: null, artifactRefusal: null};
-    (host.firstElementChild as unknown as {store: unknown}).store = fakeStore({meta: META, status: status({}), selection});
-    await settle(host);
-    expect(deep(host, '[part="refusal"] + [part="reason"]')?.textContent).toBe(refusal.detail);
+  it('shows the server’s reason under the refusal, in every element that shows one', async () => {
+    const refusal = {code: 'not-found', detail: 'there is nothing with that id that this session can see', status: 404};
+    const reason = async (markup: string, over: Parameters<typeof fakeStore>[0]) => {
+      const host = await mount(markup);
+      (host.firstElementChild as unknown as {store: unknown}).store = fakeStore({meta: META, status: status({}), ...over});
+      await settle(host);
+      const found = deep(host, '[part="refusal"] + [part="reason"]')?.textContent ?? null;
+      host.remove();
+      return found;
+    };
+    const selection = {item: null, itemRefusal: null, artifact: null, artifactRefusal: null};
+    expect(await reason('<mosaica-item-card></mosaica-item-card>', {selection: {...selection, itemRefusal: refusal}})).toBe(refusal.detail);
+    expect(await reason('<mosaica-artifact-card></mosaica-artifact-card>', {selection: {...selection, artifactRefusal: refusal}})).toBe(refusal.detail);
+    const box = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
+    const held = {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0};
+    expect(await reason('<mosaica-selection></mosaica-selection>', {region: {shape: box, status: 'refused', refusal, visible: null, matched: {value: 0, exact: false}, served: {shown: 0, total: 0, exact: false}, verdict: null, held}})).toBe(refusal.detail);
   });
 });
 

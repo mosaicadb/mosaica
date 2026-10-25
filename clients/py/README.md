@@ -292,8 +292,8 @@ counting rows it did not land. That is what a retry inside one commit gets.
 A page carries a fresh random batch id, made once when the request is built, and a retry of that
 request carries it again. A server too busy to take a page answers `429` with `Retry-After`, and
 the page is sent again after that many seconds, at least 1 and at most 30, with the same id and
-identical bytes, while the waits so far total less than five minutes. A page still refused then is
-listed in the report's `refusals`.
+identical bytes, while the waits total at most five minutes. A page whose wait would take them past
+it is listed in the report's `refusals`.
 Nothing is kept beyond the commit, and no id is derived from what a page contains, so the same
 frame inserted and committed five times is five loads: on the second, rows carrying a unique value
 name the items the first created and change nothing, and points rows carrying none are loaded
@@ -614,7 +614,8 @@ db.drop_view("slices", "a")                    # remove one view of a view group
 sessions it ended. A database you read alone needs none of it. `mosaica.Control(url,
 credential)` is the same client for a database somebody else runs, with the operator credential,
 an API key or an OIDC access token. A request on it that the server answers `429` is sent again as
-a commit's page is, and the call returns the last `429` once the waits total five minutes.
+a commit's page is, and the call returns the `429` whose wait would take the waits past five
+minutes.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call
