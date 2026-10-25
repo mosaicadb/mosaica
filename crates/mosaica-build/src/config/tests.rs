@@ -2880,22 +2880,22 @@ fn metadata_with_no_roster_is_refused() {
     assert!(message.contains("`metadata` with no roster"), "{message}");
 }
 
-/// A group with no source and no roster is declared and empty under `mosaica check`, and its
-/// metadata is what the views a running service creates will carry; `mosaica build` refuses it,
-/// having no points to read.
+/// A group with no source and no roster is declared and empty, at a check and at a build alike, and
+/// its metadata is what the views a running service creates will carry. It has no views of its own.
 #[test]
-fn a_group_declared_empty_takes_metadata_under_check_alone() {
+fn a_group_declared_empty_takes_metadata_and_has_no_views() {
     let text = format!(
         "{SEVERITY}\n[[view_group]]\nname = \"quarter\"\nextent = {{ min = 0.0, max = 1.0 }}\n\
          metadata = {{ label = \"text\" }}\npoint_visibility = {{ default = \"public\" }}\n"
     );
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("config.toml");
-    std::fs::write(&path, &text).expect("write config");
-    let config = Config::parse_declared(&path, &HashMap::new()).expect("declared and empty");
+    let config = ok(&text);
     assert_eq!(config.view_groups[0].metadata.len(), 1);
     assert!(config.view_groups[0].declared_keys().is_empty());
-    assert!(Config::parse(&path, &HashMap::new()).is_err());
+    let registry = config.registry().expect("the registry a check and a build share");
+    assert!(
+        !registry.views.iter().any(|view| view.id.starts_with("quarter:")),
+        "a group declared empty materialises no view"
+    );
 }
 
 /// **Chains are refused, so the owner of a key set is always one hop away** (§3.3).

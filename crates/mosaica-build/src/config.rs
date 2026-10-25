@@ -3587,8 +3587,8 @@ fn compile_view_group(
         // **A group declaring neither form carries no metadata where it has a source**: its views
         // are minted from the discriminator's distinct values as the points are read, so there is
         // no roster record for a per-view value to sit on (views §3.1). One with no source is
-        // declared and empty, which only `Strictness::Declared` reaches: its views are created at
-        // a running service, each with its own metadata.
+        // declared and empty: its views are created at a running service, each with its own
+        // metadata.
         if block.metadata.is_some() && block.source.is_some() {
             return Err(declaration_error(format!(
                 "{object}: `metadata` with no roster. The views here are minted from the \
