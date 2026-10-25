@@ -49,6 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      pep440: ${{ steps.version.outputs.pep440 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,6 +69,7 @@ jobs:
           python3 scripts/version.py check --tag "$GITHUB_REF_NAME"
           version=$(python3 scripts/version.py)
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "pep440=$(python3 scripts/version.py pep440)" >> "$GITHUB_OUTPUT"
           echo "prerelease=$([[ "$version" == *-* ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       # The gate (ci.yml) runs on every push to main. Only a passing run for a push to main counts,
       # not one for a pull request, so tag after the gate is green on main.
@@ -175,15 +177,13 @@ jobs:
       # mosaica pins mosaica-native exactly, so it goes up only once PyPI serves the version it pins.
       - name: wait until PyPI serves mosaica-native
         env:
-          VERSION: ${{ needs.verify.outputs.version }}
+          VERSION: ${{ needs.verify.outputs.pep440 }}
         run: |
-          pip install packaging==26.3
-          normalised=$(python3 -c "import sys; from packaging.version import Version; print(Version(sys.argv[1]))" "$VERSION")
           for _ in $(seq 60); do
-            if curl -sf "https://pypi.org/pypi/mosaica-native/$normalised/json" >/dev/null; then exit 0; fi
+            if curl -sf "https://pypi.org/pypi/mosaica-native/$VERSION/json" >/dev/null; then exit 0; fi
             sleep 10
           done
-          echo "PyPI does not serve mosaica-native $normalised after ten minutes" >&2
+          echo "PyPI does not serve mosaica-native $VERSION after ten minutes" >&2
           exit 1
       - name: mosaica
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
