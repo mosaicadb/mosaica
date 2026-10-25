@@ -112,7 +112,7 @@ fn view_args(view: &str, points: &Path, pairs: &Path) -> ViewArgs {
         title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
-        points: points.to_path_buf(),
+        points: Some(points.to_path_buf()),
         point_fields: Default::default(),
         select: None,
         access: mosaica_build::config::AccessInput::relation(pairs.to_path_buf()),
@@ -271,7 +271,7 @@ fn a_label_that_disagrees_between_views_refuses() {
         title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
-        points: points.to_path_buf(),
+        points: Some(points.to_path_buf()),
         point_fields: Default::default(),
         select: None,
         access: mosaica_build::config::AccessInput {

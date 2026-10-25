@@ -297,12 +297,19 @@ pub fn check(config: &Config) -> CheckReport {
         check_view_group(config, group, &mut report);
     }
     check_layers(config, &mut report);
+    // The views the build would materialise and the anchor among them, by the build's own rule.
+    // It reads a roster table or a discriminator column where a group mints its views from one,
+    // so it waits for a clean schema, as the shape report does.
+    //
     // **The shape report is the one part of a check that reads rows**, deliberately: the
     // decomposition's size is what an operator sizing a world-scale boundary set needs, and it is
     // known from the geometry alone. A finding above means the file the shapes would be read from
     // may not open, so the rows are read only on a clean schema.
     if report.is_clean() {
-        report.shapes = crate::shapes::check_reports(config);
+        match config.registry() {
+            Ok(_) => report.shapes = crate::shapes::check_reports(config),
+            Err(e) => report.note(&Object::new("declaration", "views"), e.to_string()),
+        }
     }
     report
 }

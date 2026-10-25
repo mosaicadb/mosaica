@@ -25,6 +25,7 @@ mod assembly;
 pub mod check;
 mod column;
 pub mod config;
+pub mod declared;
 pub mod deep;
 pub mod disclosure;
 pub mod error;
@@ -258,9 +259,9 @@ pub struct ViewArgs {
     /// frame without one of them wasting most of the grid.
     pub extent: Bounds,
     /// Parquet file of this view's points: `entity_id` plus either `x`/`y` or `morton` (see
-    /// [`input`]). The view's own `source` (`configuration.md` §1), overridable by
-    /// `--file NAME=PATH`.
-    pub points: PathBuf,
+    /// [`input`]). The view's own `source`, overridable by `--file NAME=PATH`. `None` for a view
+    /// that names no file, which has no rows.
+    pub points: Option<PathBuf>,
     /// Where the view's identity and geometry fields sit in that file — the view's `fields` map,
     /// resolved. [`config::Fields::default`] is canonical names throughout.
     pub point_fields: crate::config::Fields,
@@ -340,9 +341,8 @@ pub struct BuildArgs {
     /// Index into [`BuildArgs::views`] of the **anchor view**: the one whose Morton code orders
     /// entity ids within a signature group (decision 0112, extending 0073).
     ///
-    /// `[defaults].allocation_view` names it, and it is **required when the declaration carries
-    /// more than one view** — explicit rather than positional, so reordering declaration blocks
-    /// cannot silently re-key a rebuild, the ids being permanent (I9).
+    /// `[defaults].allocation_view` names it, and it is required where more than one view reads
+    /// points from a file ([`config::Config::anchor_view`]). With no view it is 0 and unread.
     pub anchor: usize,
     /// The view groups and their rosters (`views.md` §3.1), in declaration order — what the
     /// manifest publishes so a client can order and name a group's views. Empty for a
@@ -805,7 +805,7 @@ pub(crate) fn view_source<'a>(
 ) -> input::Source<'a> {
     let args_view = &args.views[view];
     input::Source::new(
-        &args_view.points,
+        args_view.points.as_deref(),
         &args_view.point_fields,
         numbering.points(view),
     )
@@ -996,7 +996,7 @@ pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>
         let rows = numbering
             .of(ids::ReadKind::Access)
             .expect("the access relation is numbered");
-        input::scan_pairs(input::Source::new(path, &fields, rows), |id, term| {
+        input::scan_pairs(input::Source::new(Some(path), &fields, rows), |id, term| {
             visit(0, id, term)
         })?;
         return Ok(input::AccessFill::default());
@@ -1161,10 +1161,13 @@ pub(crate) fn attribute_scans<'a>(
         Ok(())
     };
     for (index, view) in args.views.iter().enumerate() {
+        let Some(points) = &view.points else {
+            continue;
+        };
         let rows = numbering.points(index);
         let mut own: Vec<usize> = Vec::new();
         for (group_index, group) in args.attribute_sources.iter().enumerate() {
-            if group.path != view.points {
+            if &group.path != points {
                 continue;
             }
             own.extend(&group.attributes);
@@ -1176,7 +1179,7 @@ pub(crate) fn attribute_scans<'a>(
                 group: Some(group_index),
             });
         }
-        extra(&mut scans, &view.points, &view.point_fields, rows, &own)?;
+        extra(&mut scans, points, &view.point_fields, rows, &own)?;
     }
     for (group_index, group) in args.attribute_sources.iter().enumerate() {
         let Some(rows) = numbering.of(ids::ReadKind::Attributes(group_index)) else {
@@ -1236,16 +1239,9 @@ pub fn describe_refused(refused: &[RefusedRows]) -> Vec<String> {
 
 /// Argument and destination checks shared by both build implementations.
 fn validate_args(args: &BuildArgs) -> Result<()> {
-    if args.views.is_empty() {
-        return Err(BuildError::Invalid(
-            "this build materialises no view, so it has no coordinate system to write a row \
-             space in (views §7)"
-                .into(),
-        ));
-    }
-    if args.anchor >= args.views.len() {
+    if args.anchor >= args.views.len().max(1) {
         return Err(BuildError::Invalid(format!(
-            "the anchor view is index {} of {} declared (decision 0112)",
+            "the anchor view is index {} of {} declared",
             args.anchor,
             args.views.len()
         )));
@@ -1280,7 +1276,6 @@ fn validate_args(args: &BuildArgs) -> Result<()> {
         ));
     }
     // The declaration's rules, for the callers that build these arguments directly.
-    config::require_sources(&args.schema, &args.attribute_sources)?;
     if let Some(size) = args.shard_size {
         mosaica_types::check_shard_size(size)
             .map_err(|e| config::declaration_error(format!("[shards] size: {e}")))?;
@@ -1379,14 +1374,14 @@ pub(crate) fn fit_frames(
         let sources: Vec<config::FrameSource> = framing
             .views
             .iter()
-            .map(|&index| {
+            .filter_map(|&index| {
                 let view = &args.views[index];
-                config::FrameSource {
-                    points: &view.points,
+                Some(config::FrameSource {
+                    points: view.points.as_deref()?,
                     fields: &view.point_fields,
                     select: view.select.as_ref(),
                     kept: Some(input::KeptRows(numbering.points(index))),
-                }
+                })
             })
             .collect();
         let frame = config::frame_of(
@@ -1488,6 +1483,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
     // **Which item each row of each file names, by the rule an ingest applies** (`crate::ids`),
     // decided here by the rule itself over maps, file by file.
     let numbering = ids::number_linear(args)?;
+    config::require_sources(&args.schema, &args.attribute_sources, numbering.items)?;
     let mut points = input::read_points(
         view_source(args, 0, &numbering),
         view.projection,
@@ -1749,7 +1745,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
                 .map(|&i| &args.schema.attributes[i])
                 .collect();
             input::scan_attributes(
-                input::Source::new(scan.path, scan.fields, scan.rows),
+                input::Source::new(Some(scan.path), scan.fields, scan.rows),
                 &columns,
                 &mut minters,
                 |batch| {

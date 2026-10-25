@@ -702,7 +702,6 @@ fn resolve_declaration(
     deployment: Option<&Path>,
     config: Option<PathBuf>,
     file: Vec<(String, PathBuf)>,
-    strictness: mosaica_build::config::Strictness,
 ) -> Result<Declaration, String> {
     // **The deployment file first, because everything else is read through it**: where the
     // declaration is and where the bundle goes. A missing one is a refusal naming what to create
@@ -711,7 +710,7 @@ fn resolve_declaration(
     let (_, deployment) = mosaica_config::open(deployment, &cwd)?;
     let schema_path = config.unwrap_or_else(|| deployment.schema_path.clone());
     let bindings = collect_bindings(file)?;
-    let config = mosaica_build::config::Config::parse_with(&schema_path, &bindings, strictness)
+    let config = mosaica_build::config::Config::parse(&schema_path, &bindings)
         .map_err(|e| e.to_string())?;
     Ok(Declaration { deployment, config })
 }
@@ -1204,7 +1203,6 @@ fn main() -> ExitCode {
                 deployment.as_deref(),
                 config,
                 file,
-                mosaica_build::config::Strictness::Build,
             ) {
                 Ok(resolved) => resolved,
                 Err(detail) => {
@@ -1214,268 +1212,37 @@ fn main() -> ExitCode {
             };
             let out = out.unwrap_or_else(|| deployment.bundle_path.clone());
 
-            // **A build materialises every declared view and every view of every group**
-            // (`views.md` §7). `--view` is withdrawn with the refusal it went with: there is
-            // nothing to choose between when the answer is all of them.
-            let registry = match config.build_views() {
-                Ok(registry) => registry,
-                Err(e) => {
-                    eprintln!("build refused: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            // The anchor decides which view's Morton code orders ids within a signature group
-            // (decision 0112). Resolved before any file is read: it is a permanent property of
-            // the corpus (I9), so a declaration that has not said which view it is refuses here
-            // rather than after a multi-minute build.
-            let anchor = match config.anchor_view(&registry) {
-                Ok(anchor) => anchor,
-                Err(e) => {
-                    eprintln!("build refused: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            // `--limit`'s attribute: the declaration's one unique integer attribute, refused
-            // before any file is read where there is not exactly one.
-            let limited = match mosaica_build::ids::Limit::of(&config.schema, limit) {
-                Ok(found) => found.is_some(),
-                Err(e) => {
-                    eprintln!("build refused: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            // The files this build reads, resolved from the declaration and any overrides — and
-            // every absence a refusal here rather than an empty read (configuration.md §8).
-            let acquired = match config.acquire() {
-                Ok(acquired) => acquired,
-                Err(e) => {
-                    eprintln!("build refused: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            // **The frame, resolved before any work — and surveyed in the same pass, per view.**
-            // `auto` fits the box; every other spelling is already the answer and the pass is
-            // what establishes how much of the corpus that frame clamps. Printed for every view,
-            // because the extent is the view's (decision 0040) and four plausible-looking numbers
-            // are only checkable beside the data's own box.
-            let mut acquired_views = Vec::with_capacity(registry.len());
-            for view in &registry {
-                match mosaica_build::config::acquire_view(view) {
-                    Ok(acquired) => acquired_views.push(acquired),
-                    Err(e) => {
-                        eprintln!("build refused: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                }
-            }
-            // **One frame per view, except on a group, where one frame covers every view of it**
-            // (`views.md` §3.1): a group's views differ by a key and by per-view metadata and by
-            // nothing else, so `auto` is fitted over the union of their sources and a stated
-            // extent is surveyed against every one of them. The views of a group are contiguous
-            // in the registry, so the fold is a scan.
-            //
-            // Under `--limit` the build fits each frame once the identity pass has decided which
-            // rows it keeps, and each view holds a placeholder until then.
-            let mut framings: Vec<mosaica_build::Framing> = Vec::new();
-            let mut extents: Vec<mosaica_spatial::Bounds> = Vec::with_capacity(registry.len());
-            let mut frame_of: std::collections::BTreeMap<&str, usize> =
-                std::collections::BTreeMap::new();
-            for (index, view) in registry.iter().enumerate() {
-                let owner = match &view.group {
-                    Some(membership) => membership.group.as_str(),
-                    None => view.id.as_str(),
-                };
-                match frame_of.get(owner) {
-                    Some(&first) => {
-                        extents.push(extents[first]);
-                        continue;
-                    }
-                    None => frame_of.insert(owner, index),
-                };
-                let members: Vec<usize> = registry
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, v)| match (&v.group, &view.group) {
-                        (Some(a), Some(b)) => a.group == b.group,
-                        _ => v.id == view.id,
-                    })
-                    .map(|(i, _)| i)
-                    .collect();
-                let subject = match &view.group {
-                    Some(membership) => format!("view group '{}'", membership.group),
-                    None => format!("view '{}'", view.id),
-                };
-                if limited {
-                    framings.push(mosaica_build::Framing {
-                        subject,
-                        projection: view.projection,
-                        extent: view.extent,
-                        views: members,
-                    });
-                    extents.push(mosaica_spatial::Bounds {
-                        x_min: 0.0,
-                        x_max: 1.0,
-                        y_min: 0.0,
-                        y_max: 1.0,
-                    });
-                    continue;
-                }
-                let sources: Vec<mosaica_build::config::FrameSource> = members
-                    .iter()
-                    .map(|&i| mosaica_build::config::FrameSource {
-                        points: &acquired_views[i].points,
-                        fields: &acquired_views[i].point_fields,
-                        select: acquired_views[i].select.as_ref(),
-                        kept: None,
-                    })
-                    .collect();
-                let frame = match mosaica_build::config::frame_of(
-                    &subject,
-                    view.projection,
-                    &view.extent,
-                    &sources,
-                ) {
-                    Ok(frame) => frame,
-                    Err(e) => {
-                        eprintln!("build refused: {e}");
-                        return ExitCode::FAILURE;
-                    }
-                };
-                eprintln!("{}", frame.report());
-                extents.push(frame.extent);
-            }
-
-            let view_args: Vec<mosaica_build::ViewArgs> = registry
-                .iter()
-                .zip(acquired_views)
-                .zip(&extents)
-                .map(|((view, acquired_view), extent)| mosaica_build::ViewArgs {
-                    // **This view's own gate** (`views.md` §6), as the declaration compiled it:
-                    // the plain view's `visibility`, or — for a view of a group — its roster
-                    // record's own. The group's half travels on the group descriptor beside it.
-                    visibility: view.visibility.clone(),
-                    view_id: view.id.clone(),
-                    title: view.title.clone(),
-                    projection: view.projection,
-                    extent: *extent,
-                    points: acquired_view.points,
-                    point_fields: acquired_view.point_fields,
-                    select: acquired_view.select,
-                    access: acquired_view.access,
-                })
-                .collect();
-            // **One column per view of the group** (`views.md` §5), resolved against the registry
-            // the build just enumerated: the views a family covers are the ones its group owns,
-            // and each of them already says where its rows are.
-            let scoped_attributes: Vec<mosaica_build::ScopedColumnFamily> = config
-                .scoped_attributes
-                .iter()
-                .map(|scoped| mosaica_build::ScopedColumnFamily {
-                    attribute: scoped.attribute.clone(),
-                    group: scoped.group.clone(),
-                    views: registry
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, view)| {
-                            view.group
-                                .as_ref()
-                                .is_some_and(|group| group.group == scoped.group)
-                        })
-                        .map(|(index, _)| index)
-                        .collect(),
-                    source: scoped.source.clone(),
-                })
-                .collect();
-            // **A layer naming a group is drawn on every view of it** (`views.md` §2, §3.5),
-            // and the expansion happens here, against the registry the build just enumerated: a
-            // build materialises the views that exist, and a layer's extents are per row space.
-            // The rule itself is [`Config::expand_layer_views`], which `mosaica check` sizes its
-            // shape layers through so that the two entry points cannot disagree about which views
-            // a layer is drawn on.
-            let mut config = config;
-            for layer in &mut config.layers {
-                layer.views =
-                    mosaica_build::config::Config::expand_layer_views(&registry, &layer.views);
-            }
-            // **A scoped layer is a different artifact set per view of one group** (§3.5): its
-            // rows say which view each artifact belongs to, under the layer's own `fields.view`,
-            // and the group's keys are what a stray value is refused against.
-            let scoped_layers: std::collections::BTreeMap<String, mosaica_build::ScopedLayer> =
-                config
-                    .scopes
-                    .layers
-                    .iter()
-                    .map(|(layer, group)| {
-                        let mut keys: Vec<String> = registry
-                            .iter()
-                            .filter_map(|view| view.group.as_ref())
-                            .filter(|membership| {
-                                &membership.group == group
-                                    || membership.members_of.as_ref() == Some(group)
-                            })
-                            .map(|membership| membership.key.clone())
-                            .collect();
-                        keys.sort();
-                        keys.dedup();
-                        let column = config
-                            .layer_sources
-                            .iter()
-                            .find(|source| &source.name == layer)
-                            .and_then(|source| match &source.artifacts {
-                                Some(mosaica_build::config::ArtifactSource::File {
-                                    fields,
-                                    ..
-                                }) => Some(fields.of("view").to_string()),
-                                _ => None,
-                            })
-                            .unwrap_or_else(|| "view".to_string());
-                        (
-                            layer.clone(),
-                            mosaica_build::ScopedLayer {
-                                group: group.clone(),
-                                column,
-                                keys,
-                            },
-                        )
-                    })
-                    .collect();
-            // Read out before the declaration is broken up into build arguments: it is a
-            // property of the declaration, and every value in it exists by now.
-            let disclosure = mosaica_build::disclosure::Disclosure::of(&config);
-            // The group registry beside it, and before the declaration is broken up for the same
-            // reason: it reads the declaration's groups and the frames the views resolved to
-            // (`views.md` §3.2).
-            let groups = config.group_registry(&registry, &view_args);
-            let schema = config.schema;
-            // §2.3: the cost is reported, never hidden — a hot column is baked into every row and
-            // is unalterable without rewriting the corpus, so the operator sees the per-row and
-            // total figures at the moment they can still change the declaration. Reported and
-            // **never refused**: Appendix A is a sizing table with no deployment ceiling, and
-            // giving this a refusal means giving Appendix A a ceiling first, which is an owner
-            // decision rather than a derivable number.
-            if !schema.is_empty() {
-                report_residency(&schema, limit);
-            }
-
-            let args = mosaica_build::BuildArgs {
-                views: view_args,
-                anchor,
-                groups,
-                scoped_attributes,
-                attribute_sources: acquired.attribute_sources,
-                out: out.clone(),
+            // Every view, group, attribute and layer the declaration carries, every frame resolved
+            // and reported, and any refusal before a file is read past its frame survey. A
+            // declaration naming no file is a build of no rows.
+            let mosaica_build::declared::DeclaredBuild {
+                args,
+                framings,
+                disclosure,
+            } = match mosaica_build::declared::declared_build(
+                config,
+                out.clone(),
                 limit,
+                IdentityKey::generate(),
+            ) {
+                Ok(declared) => declared,
+                Err(e) => {
+                    eprintln!("build refused: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            // The cost is reported, never hidden: a hot column is baked into every row and is
+            // unalterable without rewriting the corpus, so the operator sees the per-row and total
+            // figures while they can still change the declaration. Reported and never refused.
+            if !args.schema.is_empty() {
+                report_residency(&args.schema, limit);
+            }
+            let args = mosaica_build::BuildArgs {
                 strict,
-                identity_key: IdentityKey::generate(),
                 emit_oracle_pairs: !no_oracle_pairs,
                 batch_items,
                 memory_budget,
-                band_rows: None,
-                schema,
-                layers: config.layers,
-                layer_inputs: acquired.layers,
-                scoped_layers,
-                shard_size: config.shard_size,
+                ..args
             };
             let observer = StageTimings {
                 print: stage_timings,
@@ -1712,7 +1479,6 @@ fn main() -> ExitCode {
                 deployment.as_deref(),
                 config,
                 file,
-                mosaica_build::config::Strictness::Declared,
             ) {
                 Ok(resolved) => resolved,
                 Err(detail) => {

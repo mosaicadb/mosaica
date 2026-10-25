@@ -203,11 +203,11 @@ fn args(dir: &Path, budget: Option<u64>) -> crate::BuildArgs {
     let config = Config::parse(&dir.join("corpus.toml"), &HashMap::new()).expect("parses");
     let registry = config.build_views().expect("the views compile");
     let anchor = config.anchor_view(&registry).expect("an anchor");
-    let acquired = config.acquire().expect("the files acquire");
+    let acquired = config.acquire();
     let views: Vec<crate::ViewArgs> = registry
         .iter()
         .map(|view| {
-            let acquired = crate::config::acquire_view(view).expect("the view acquires");
+            let acquired = crate::config::acquire_view(view);
             crate::ViewArgs {
                 visibility: None,
                 view_id: view.id.clone(),
@@ -241,7 +241,7 @@ fn args(dir: &Path, budget: Option<u64>) -> crate::BuildArgs {
             source: scoped.source.clone(),
         })
         .collect();
-    let groups = config.group_registry(&registry, &views);
+    let groups = config.group_registry(&registry, &views).expect("the groups resolve");
     let mut layers = config.layers.clone();
     for layer in &mut layers {
         layer.views = Config::expand_layer_views(&registry, &layer.views);

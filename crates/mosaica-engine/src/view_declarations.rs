@@ -6,8 +6,8 @@
 //! carry an **empty row space** until their first flush, which is what a view created under a
 //! group already gets (`views.md` §3.2).
 //!
-//! A declaration here gives the frame in frame coordinates and never `auto`: there is no data to
-//! fit a frame to.
+//! A declaration here states its frame in any spelling a build takes, by the rule a build compiles
+//! it by ([`declared_frame`]). `auto` is refused: a view declared here has no rows to fit one to.
 
 use mosaica_lifecycle::wal::{DeclaredFrame, PlainViewDeclaration, ViewGroupDeclaration};
 use mosaica_lifecycle::ExecError;
@@ -72,6 +72,26 @@ impl RuntimeViewDeclarations {
         self.groups.retain(|g| !groups.contains(&g.name));
         self.plain.retain(|v| !plain.contains(&v.id));
     }
+}
+
+/// The frame `extent` states for `object`, a view or group spelled as a message names it
+/// (`view 'atlas'`), under the projection named `projection`: a box as written, or a degree box
+/// snapped to the square a build snaps it to. `auto` is refused, having no rows to fit.
+pub fn declared_frame(
+    object: &str,
+    projection: &str,
+    extent: Option<mosaica_spatial::extent::WrittenExtent>,
+) -> Result<DeclaredFrame, String> {
+    let projection = mosaica_spatial::Projection::from_name(projection)
+        .ok_or_else(|| format!("{object}: no projection named '{projection}'"))?;
+    let frame = mosaica_spatial::extent::Extent::compile(object, projection, extent)?
+        .stated_frame(object, projection)?;
+    Ok(DeclaredFrame {
+        x_min: frame.x_min,
+        x_max: frame.x_max,
+        y_min: frame.y_min,
+        y_max: frame.y_max,
+    })
 }
 
 /// What resolving a declaration against the served manifest decided.

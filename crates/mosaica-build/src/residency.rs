@@ -3716,7 +3716,7 @@ require_member_visibility = "none"
                     y_min: 0.0,
                     y_max: 1024.0,
                 },
-                points: points.clone(),
+                points: Some(points.clone()),
                 point_fields: parsed.views[0].fields.clone(),
                 select: None,
                 access: crate::config::AccessInput::relation(pairs.clone()),

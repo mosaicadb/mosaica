@@ -233,7 +233,7 @@ pub fn run_build(
                         y_min: 0.0,
                         y_max: 65536.0,
                     },
-                    points: geometry.clone(),
+                    points: Some(geometry.clone()),
                     point_fields: Default::default(),
                     select: None,
                     access: mosaica_build::config::AccessInput::relation(pairs.clone()),

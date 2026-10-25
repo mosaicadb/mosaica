@@ -187,13 +187,10 @@ fn the_corpus_schema_parses_under_the_builds_parser() {
     // The declaration also has to *acquire*: the generator's view name, its geometry source and
     // its label relation must be the ones the build asks for. Checked here rather than left to
     // the suite, which cannot run without a corpus on disk.
-    let acquired = config
-        .acquire()
-        .expect("the corpus config acquires its own inputs");
+    let acquired = config.acquire();
     let registry = config.build_views().expect("the registry compiles");
-    let view = mosaica_build::config::acquire_view(&registry[0])
-        .expect("the view acquires its own inputs");
-    assert_eq!(view.points, dir.path().join("points.parquet"));
+    let view = mosaica_build::config::acquire_view(&registry[0]);
+    assert_eq!(view.points, Some(dir.path().join("points.parquet")));
     assert!(
         matches!(
             &view.access.source,

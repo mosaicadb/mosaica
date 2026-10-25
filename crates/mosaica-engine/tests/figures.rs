@@ -272,7 +272,7 @@ fn build(dir: &Path, corpus: Corpus, shard_size: Option<u64>) -> PathBuf {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: AccessInput {

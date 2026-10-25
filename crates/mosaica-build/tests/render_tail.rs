@@ -233,7 +233,7 @@ fn args(points: &Path, pairs: &Path, out: PathBuf) -> BuildArgs {
                 y_min: 0.0,
                 y_max: 1000.0,
             },
-            points: points.to_path_buf(),
+            points: Some(points.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs.to_path_buf()),

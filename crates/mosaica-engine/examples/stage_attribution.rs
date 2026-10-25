@@ -71,7 +71,7 @@ fn ensure_bundle() -> PathBuf {
                 title: None,
                 projection: mosaica_spatial::Projection::None,
                 extent: extent(),
-                points: root.join("data/scaled/geometry.parquet"),
+                points: Some(root.join("data/scaled/geometry.parquet")),
                 point_fields: Default::default(),
                 select: None,
                 access: mosaica_build::config::AccessInput::relation(

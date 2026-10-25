@@ -167,7 +167,7 @@ fn refuse(py: Python<'_>, findings: Vec<Finding>) -> PyErr {
 }
 
 /// The deployment file at `deployment_path`, and the declaration it names, read as `mosaica check`
-/// reads them: a block that names no file is declared and empty rather than refused.
+/// and `mosaica build` read them.
 fn declaration(deployment_path: &str) -> Result<(Object, mosaica_build::config::Config), Finding> {
     let path = Path::new(deployment_path);
     let from = path.parent().unwrap_or(Path::new("."));
@@ -177,15 +177,11 @@ fn declaration(deployment_path: &str) -> Result<(Object, mosaica_build::config::
             detail,
         })?;
     let named = Object::file("declaration", deployment.schema_path.display());
-    let config = mosaica_build::config::Config::parse_with(
-        &deployment.schema_path,
-        &HashMap::new(),
-        mosaica_build::config::Strictness::Declared,
-    )
-    .map_err(|e| Finding {
-        object: named.clone(),
-        detail: e.to_string(),
-    })?;
+    let config = mosaica_build::config::Config::parse(&deployment.schema_path, &HashMap::new())
+        .map_err(|e| Finding {
+            object: named.clone(),
+            detail: e.to_string(),
+        })?;
     Ok((named, config))
 }
 

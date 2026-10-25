@@ -443,7 +443,7 @@ pub fn view_args(view_id: &str, points: &Path, access: AccessInput) -> ViewArgs 
         title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
-        points: points.to_path_buf(),
+        points: Some(points.to_path_buf()),
         point_fields: Default::default(),
         select: None,
         access,
@@ -470,98 +470,16 @@ pub fn build_declared(out: &Path, points: &Path, pairs: &Path, schema_toml: &str
 }
 
 /// The build arguments `mosaica build` derives from the declaration at `path`, building into `out`
-/// under the test identity key with no oracle pairs. Each frame is fitted as the CLI fits it: one
-/// per plain view, and one over every view of a group. A declaration that scopes a layer is
-/// refused, since the CLI's split of a scoped layer by view is not repeated here.
+/// under the test identity key with no oracle pairs.
 pub fn args_from_declaration(path: &Path, out: &Path) -> BuildArgs {
-    use mosaica_build::config::{acquire_view, frame_of, Config, FrameSource};
-    let config = Config::parse(path, &Default::default()).expect("the declaration parses");
-    assert!(
-        config.scopes.layers.is_empty(),
-        "the declaration scopes a layer, which these build arguments do not split by view"
-    );
-    let registry = config.build_views().expect("the views compile");
-    let anchor = config
-        .anchor_view(&registry)
-        .expect("the declaration names an anchor view");
-    let acquired = config
-        .acquire()
-        .expect("the declaration's files are present");
-    let inputs: Vec<_> = registry
-        .iter()
-        .map(|view| acquire_view(view).expect("the view's files are present"))
-        .collect();
-    let owner = |i: usize| match &registry[i].group {
-        Some(membership) => format!("view group '{}'", membership.group),
-        None => format!("view '{}'", registry[i].id),
-    };
-    let extents: Vec<Bounds> = (0..registry.len())
-        .map(|i| {
-            let sources: Vec<FrameSource> = (0..registry.len())
-                .filter(|&j| owner(j) == owner(i))
-                .map(|j| FrameSource {
-                    points: &inputs[j].points,
-                    fields: &inputs[j].point_fields,
-                    select: inputs[j].select.as_ref(),
-                    kept: None,
-                })
-                .collect();
-            frame_of(
-                &owner(i),
-                registry[i].projection,
-                &registry[i].extent,
-                &sources,
-            )
-            .expect("the frame fits")
-            .extent
-        })
-        .collect();
-    let views: Vec<ViewArgs> = registry
-        .iter()
-        .zip(inputs)
-        .zip(extents)
-        .map(|((view, inputs), extent)| ViewArgs {
-            visibility: view.visibility.clone(),
-            view_id: view.id.clone(),
-            title: view.title.clone(),
-            projection: view.projection,
-            extent,
-            points: inputs.points,
-            point_fields: inputs.point_fields,
-            select: inputs.select,
-            access: inputs.access,
-        })
-        .collect();
-    let scoped_attributes = config
-        .scoped_attributes
-        .iter()
-        .map(|scoped| mosaica_build::ScopedColumnFamily {
-            attribute: scoped.attribute.clone(),
-            group: scoped.group.clone(),
-            views: registry
-                .iter()
-                .enumerate()
-                .filter(|(_, view)| view.group.as_ref().is_some_and(|g| g.group == scoped.group))
-                .map(|(index, _)| index)
-                .collect(),
-            source: scoped.source.clone(),
-        })
-        .collect();
-    let groups = config.group_registry(&registry, &views);
-    let mut layers = config.layers.clone();
-    for layer in &mut layers {
-        layer.views = Config::expand_layer_views(&registry, &layer.views);
-    }
+    let config = mosaica_build::config::Config::parse(path, &Default::default())
+        .expect("the declaration parses");
+    let declared =
+        mosaica_build::declared::declared_build(config, out.to_path_buf(), None, test_key())
+            .expect("the declaration builds");
     BuildArgs {
-        anchor,
-        groups,
-        scoped_attributes,
-        attribute_sources: acquired.attribute_sources,
-        layers,
-        layer_inputs: acquired.layers,
-        schema: config.schema,
-        shard_size: config.shard_size,
-        ..build_args(out, views)
+        emit_oracle_pairs: false,
+        ..declared.args
     }
 }
 /// Build `n` items placed by [`scatter`], each with a non-null `f32` `score` of `e % 7`, into

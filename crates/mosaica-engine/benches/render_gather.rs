@@ -119,7 +119,7 @@ fn bundle(dir: &Path, absent_every: Option<u64>) -> Engine {
             title: None,
             projection: Projection::None,
             extent: extent(),
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

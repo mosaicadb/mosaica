@@ -113,7 +113,7 @@ fn args(points: &Path, out: &Path, default: Option<&str>) -> BuildArgs {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.to_path_buf(),
+            points: Some(points.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: AccessInput {

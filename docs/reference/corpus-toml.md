@@ -24,7 +24,7 @@ What a block takes when it names no source of its own. `source` reaches a `[[vie
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `source` | string | not set | A name in `[sources]`, read by a `[[view]]` and an entity-scoped `[[attribute]]` that name no `source`. A name `[sources]` does not have is refused. |
-| `allocation_view` | string | not set | The view whose map positions order the entity ids a build assigns to items with the same access labels. A build of more than one view, counting each view of a group, is refused without it. A view of a group is named `<group>:<key>`, and a name that is not one of the build's views is refused. |
+| `allocation_view` | string | not set | The view whose map positions order the entity ids a build assigns to items with the same access labels. Where more than one view, counting each view of a group, reads points from a file, it is required; with one such view it is that view. A view of a group is named `<group>:<key>`, and a name that is not one of the build's views is refused. |
 
 ## `[shards]`
 
@@ -43,7 +43,7 @@ One coordinate system: a position for each item it holds, the frame those positi
 | `name` | string | required | The view's name, which a request names it by. ASCII letters, digits, `_` and `-`, unique among views and view groups. |
 | `title` | string | not set | A display title, served on `/v1/meta` as the view's `display_name`. Without one the view's name is served. |
 | `projection` | string | `"none"` | How a longitude and latitude become a position on the map: `web_mercator`, `equirectangular` (also written `plate_carree`), `gall_isographic`, or `none` for coordinates that are not places on the Earth. It decides which spellings `extent` and `fields` take. Any other name is refused. |
-| `source` | string | the value of `[defaults].source` | A name in `[sources]`: the file holding the view's points, one row per item. A build refuses a view with no source; `mosaica check` accepts one. |
+| `source` | string | the value of `[defaults].source` | A name in `[sources]`: the file holding the view's points, one row per item. A view with no source is built with no rows, and takes its rows at a running service. |
 | `fields` | table of strings | not set | Where the points file keeps each field, as `field = "column"`. The fields are either `x` and `y` or `morton` and `residual`, or on a projected view `lon` and `lat`, and each attribute declared `unique`, whose column is its `field` or its name where this map does not move it. A field not named here is read from the column of its own name. A field the view does not have, both kinds of position, `residual` without `morton`, and `fields` where the view has no source are refused. |
 | `extent` | string or table | required | The frame positions are stored across, as a 32-bit position on each axis. A point outside it is stored on its edge, and a build reports how many points that moved but never refuses the frame. The spellings are under `[view.extent]`. |
 | `point_visibility` | table | required | Where each point's access label comes from: keys under `[view.point_visibility]`. |
@@ -122,7 +122,7 @@ One view of a group, written in the declaration. Beside these keys the block tak
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `key` | string | required | The view's key: its id is `<group>:<key>`. ASCII letters, digits, `_` and `-`, and no two views of the group may share one. |
-| `source` | string | not set | A name in `[sources]`: the file holding this view's points. A build refuses a view with none. |
+| `source` | string | not set | A name in `[sources]`: the file holding this view's points. A view with none is built with no rows. |
 | `visibility` | string or array of strings | not set | The label, or list of labels of which a viewer must hold one, to reach this view as well as the group. Without it, or with `public` alone, the group's `visibility` is the view's only gate. |
 
 ## `[view_group.views]`
@@ -159,7 +159,7 @@ A column each item carries. `render` and `index` decide where its value is kept,
 | `name` | string | required | The column's name, which filters and `/v1/categories/{column}` use. ASCII letters, digits, `_` and `-`, unique among attributes. `mosaica_id`, `residual`, `x`, `y`, `access`, `node_id`, `record`, `all_of`, `any_of`, `none_of`, `region`, `member_of` and `highlighted` are refused. |
 | `title` | string | not set | A display title. Not built yet: the title is accepted and not published. |
 | `field` | string | the attribute's `name` | The column of the source file holding the values. An empty name is refused. |
-| `source` | string | the value of `[defaults].source` | A name in `[sources]`: the file the values are read from. A file other than a view's points names the item each row belongs to by the columns of the attributes declared `unique`. A build refuses an entity-scoped attribute with no source here or in `[defaults]`. A group-scoped attribute with none reads each view's own points file, and `[defaults]` does not reach it. |
+| `source` | string | the value of `[defaults].source` | A name in `[sources]`: the file the values are read from. A file other than a view's points names the item each row belongs to by the columns of the attributes declared `unique`. An entity-scoped attribute with no source here or in `[defaults]` is built with no values, and a build whose views create items refuses it. A group-scoped attribute with none reads each view's own points file, and `[defaults]` does not reach it. |
 | `type` | string | required | The type of value the column holds, one of the types below. |
 | `vocabulary` | string | not set | The `[[vocabulary]]` a `category` draws on. Required on a `category`, refused on every other type, and a name no `[[vocabulary]]` declares is refused. |
 | `render` | boolean | `false` | Store the value beside each point's position. Refused on `keyword` and `text`. |

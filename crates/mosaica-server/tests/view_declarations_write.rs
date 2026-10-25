@@ -850,6 +850,83 @@ async fn the_declarations_survive_a_restart_and_a_fold() {
     );
 }
 
+/// `auto` fits a frame to a view's rows, and a view or group declared here has none. Each
+/// spelling of it is refused, on both routes and under a projection.
+#[tokio::test]
+async fn auto_is_refused_on_both_routes() {
+    let served = Served::build(|dir| build_fixture(dir, N)).await;
+    let declared = |projection: &str, extent: Value| {
+        json!({
+            "projection": projection,
+            "extent": extent,
+            "point_visibility": { "default": "public" },
+        })
+    };
+    for (projection, extent) in [
+        ("none", json!("auto")),
+        ("none", json!({ "auto": true })),
+        ("none", json!({ "auto": true, "margin": 0.25 })),
+        ("web_mercator", json!("auto")),
+    ] {
+        let (status, body) = declare_view(&served, "fitted", declared(projection, extent.clone())).await;
+        assert_eq!(status, 422, "{projection} {extent}: {body}");
+        let (status, body) = declare_group(&served, "fitted", declared(projection, extent.clone())).await;
+        assert_eq!(status, 422, "{projection} {extent}: {body}");
+    }
+}
+
+/// A box in degrees is a projected view's frame here as at a build: the route snaps it to the
+/// square a build of the same box quantises against. Declaring the built view again with the box
+/// is the no-op an identical declaration is, and a view declared with it beside it gets the
+/// built view's frame, as does a view of a group declared with it.
+#[tokio::test]
+async fn a_degree_box_declared_here_is_the_frame_a_build_gives_it() {
+    let mut served = Served::build(|dir| {
+        let path = dir.join("corpus.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[view]]
+name             = "built"
+projection       = "web_mercator"
+extent           = { lon = [-8.6, 1.8], lat = [49.9, 60.9] }
+point_visibility = { default = "public" }
+"#,
+        )
+        .unwrap();
+        mosaica_build::build(&args_from_declaration(&path, &dir.join("bundle")))
+            .expect("a declaration naming no file builds");
+    })
+    .await;
+    let degrees = json!({
+        "projection": "web_mercator",
+        "extent": { "lon": [-8.6, 1.8], "lat": [49.9, 60.9] },
+        "point_visibility": { "default": "public" },
+    });
+    let (status, body) = declare_view(&served, "built", degrees.clone()).await;
+    assert_eq!(status, 200, "the box is the built view's own frame: {body}");
+    let (status, body) = declare_view(&served, "declared", degrees.clone()).await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = declare_group(&served, "regions", degrees).await;
+    assert_eq!(status, 201, "{body}");
+    let (status, body) = put(&served, "/control/views/regions/north", json!({})).await;
+    assert_eq!(status, 201, "{body}");
+
+    served.reauthorise().await;
+    let meta = meta(&served).await;
+    let frame = |id: &str| {
+        meta["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["id"] == id)
+            .unwrap_or_else(|| panic!("view '{id}' is served: {meta}"))["quantisation"]
+            .clone()
+    };
+    assert_eq!(frame("declared"), frame("built"));
+    assert_eq!(frame("regions:north"), frame("built"));
+}
+
 /// A declaration's answer with `publication` taken out, so a whole-object comparison stays a
 /// whole-object comparison. The number is a running count and a test cannot name it, but its
 /// absence would be a route that stopped telling a caller when its declaration becomes visible

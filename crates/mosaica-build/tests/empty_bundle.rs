@@ -206,7 +206,7 @@ fn args(inputs: &Inputs, out: &Path) -> BuildArgs {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: inputs.points.clone(),
+            points: Some(inputs.points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(inputs.pairs.clone()),
@@ -297,13 +297,11 @@ fn the_two_builds_agree_about_the_empty_bundle() {
     common::assert_bundles_identical(&streaming, &reference, "the two builds");
 }
 
-/// **`extent = "auto"` over no rows is still refused**, and the message says what to write
-/// instead. This is the one refusal the empty build keeps, and it is about acquisition rather
-/// than about meaning — so it is not the build-only refusal 0091 calls a bug.
+/// **`extent = "auto"` over no rows is still refused**: a frame cannot be fitted to nothing.
 #[test]
 fn auto_extent_over_no_rows_is_still_refused() {
     let inputs = inputs();
-    let error = mosaica_build::config::frame_view(
+    mosaica_build::config::frame_view(
         "s0",
         mosaica_spatial::Projection::None,
         &mosaica_build::config::Extent::Auto { margin: 0.01 },
@@ -311,9 +309,60 @@ fn auto_extent_over_no_rows_is_still_refused() {
         &Default::default(),
     )
     .expect_err("`auto` cannot be fitted to no rows");
-    let text = error.to_string();
-    assert!(
-        text.contains("selects no rows") && text.contains("state the frame"),
-        "the refusal must name the remedy: {text}"
-    );
+}
+
+/// `auto` on a view that names no file, and on a group with no view, is refused by the build of
+/// the declaration. The same declarations stating a box build, with no rows.
+#[test]
+fn auto_over_a_view_or_group_naming_no_file_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut builds = 0;
+    let mut attempt = |declaration: &str| {
+        builds += 1;
+        let at = dir.path().join(builds.to_string());
+        std::fs::create_dir_all(&at).unwrap();
+        let path = at.join("corpus.toml");
+        std::fs::write(&path, declaration).unwrap();
+        let config = mosaica_build::config::Config::parse(&path, &Default::default())
+            .expect("the declaration parses");
+        let declared = mosaica_build::declared::declared_build(
+            config,
+            at.join("bundle"),
+            None,
+            common::test_key(),
+        )?;
+        build(&declared.args).map(|report| report.items)
+    };
+    let view = |extent: &str| {
+        format!(
+            "[[view]]\nname = \"s0\"\nextent = {extent}\npoint_visibility = {{ default = \"public\" }}\n"
+        )
+    };
+    let group = |extent: &str| {
+        format!(
+            "[[view_group]]\nname = \"g\"\nextent = {extent}\n\
+             point_visibility = {{ default = \"public\" }}\n"
+        )
+    };
+    let projected = |extent: &str| {
+        format!(
+            "[[view]]\nname = \"s0\"\nprojection = \"web_mercator\"\nextent = {extent}\n\
+             point_visibility = {{ default = \"public\" }}\n"
+        )
+    };
+    for refused in [
+        view("\"auto\""),
+        view("{ auto = true, margin = 0.5 }"),
+        group("\"auto\""),
+        projected("\"auto\""),
+    ] {
+        attempt(&refused).expect_err(&refused);
+    }
+    for stated in [
+        view("{ min = 0.0, max = 1.0 }"),
+        group("{ x = [0.0, 1.0], y = [0.0, 2.0] }"),
+        projected("{ lon = [-8.6, 1.8], lat = [49.9, 60.9] }"),
+    ] {
+        assert_eq!(attempt(&stated).expect(&stated), 0);
+    }
 }

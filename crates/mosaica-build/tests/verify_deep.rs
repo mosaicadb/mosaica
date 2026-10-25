@@ -147,7 +147,7 @@ fn built_bundle_with(root: &Path, n: u64, score: Option<Score>) {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points,
+            points: Some(points),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),
@@ -822,7 +822,7 @@ fn a_missing_scoped_render_lane_is_refused_and_an_intact_one_is_counted() {
         title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
-        points: points.clone(),
+        points: Some(points.clone()),
         point_fields: Default::default(),
         select: Some(mosaica_build::config::ViewSelector {
             column: "quarter".to_string(),

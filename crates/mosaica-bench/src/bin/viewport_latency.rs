@@ -107,7 +107,7 @@ fn ensure_bundle(bundle_root: &Path) -> Result<(), String> {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: geometry,
+            points: Some(geometry),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

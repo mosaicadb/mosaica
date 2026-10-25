@@ -251,7 +251,7 @@ fn args(dir: &Path, out: PathBuf) -> BuildArgs {
                 y_min: 0.0,
                 y_max: 1000.0,
             },
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(dir.join("pairs.parquet")),

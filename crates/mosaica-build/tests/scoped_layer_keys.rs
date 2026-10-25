@@ -293,7 +293,7 @@ fn build_with_labels(
         title: None,
         projection: mosaica_spatial::Projection::None,
         extent: extent(),
-        points: dir.join(points),
+        points: Some(dir.join(points)),
         point_fields: Default::default(),
         select: None,
         access: mosaica_build::config::AccessInput::relation(dir.join("pairs.parquet")),

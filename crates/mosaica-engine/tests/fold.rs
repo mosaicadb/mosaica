@@ -110,7 +110,7 @@ fn build_fixture_with_sparse_term(out: &Path, points_path: &Path, pairs_path: &P
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points_path.to_path_buf(),
+            points: Some(points_path.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs_path.to_path_buf()),

@@ -177,7 +177,7 @@ pub fn view_args(view: &str, points: &Path, pairs: &Path) -> ViewArgs {
         title: None,
         projection: Projection::None,
         extent: extent(),
-        points: points.to_path_buf(),
+        points: Some(points.to_path_buf()),
         point_fields: Fields::default(),
         select: None,
         access: mosaica_build::config::AccessInput::relation(pairs.to_path_buf()),

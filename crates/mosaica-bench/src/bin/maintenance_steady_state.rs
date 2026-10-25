@@ -256,7 +256,7 @@ fn build_fixture(tmp: &Path, out: &Path) -> Result<(), Box<dyn std::error::Error
                 y_min: 0.0,
                 y_max: 1000.0,
             },
-            points,
+            points: Some(points),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

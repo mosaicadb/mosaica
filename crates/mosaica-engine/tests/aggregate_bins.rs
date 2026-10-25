@@ -341,7 +341,7 @@ fn build_gated_views(dir: &Path, items: &[Item], views: &[GatedView<'_>]) -> Pat
                 title: None,
                 projection: mosaica_spatial::Projection::None,
                 extent: extent(),
-                points,
+                points: Some(points),
                 point_fields: Default::default(),
                 select: None,
                 access: mosaica_build::config::AccessInput::relation(pairs.clone()),

@@ -1247,13 +1247,13 @@ render = true
             title: view.title.clone(),
             projection: view.projection,
             extent: extent(),
-            points: view.source.clone().expect("every view names its points"),
+            points: view.source.clone(),
             point_fields: view.fields.clone(),
             select: view.select.clone(),
             access: mosaica_build::config::AccessInput::relation(pairs.clone()),
         })
         .collect();
-    let groups = config.group_registry(&registry, &views);
+    let groups = config.group_registry(&registry, &views).expect("the groups resolve");
     let out = dir.join("bundle");
     build(&BuildArgs {
         anchor,

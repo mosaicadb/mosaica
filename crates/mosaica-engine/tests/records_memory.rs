@@ -187,7 +187,7 @@ fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
             title: None,
             projection: Projection::None,
             extent: extent(),
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Fields::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

@@ -186,10 +186,11 @@ pub(crate) fn selected_rows(
     })
 }
 
-/// One file and the number of each of its rows: everything a reader needs to name a row.
+/// One file and the number of each of its rows: everything a reader needs to name a row. No file
+/// is a source of no rows, which every reader reads as such.
 #[derive(Clone, Copy)]
 pub struct Source<'a> {
-    path: &'a Path,
+    path: Option<&'a Path>,
     fields: &'a Fields,
     rows: &'a ReadRows,
 }
@@ -203,14 +204,14 @@ static EVERY_ROW: ReadRows = ReadRows {
 };
 
 impl<'a> Source<'a> {
-    pub(crate) fn new(path: &'a Path, fields: &'a Fields, rows: &'a ReadRows) -> Source<'a> {
+    pub(crate) fn new(path: Option<&'a Path>, fields: &'a Fields, rows: &'a ReadRows) -> Source<'a> {
         Source { path, fields, rows }
     }
 
     /// Every row of the file, numbered by its position: for a caller reading a file on its own.
     pub fn every_row(path: &'a Path, fields: &'a Fields) -> Source<'a> {
         Source {
-            path,
+            path: Some(path),
             fields,
             rows: &EVERY_ROW,
         }
@@ -274,6 +275,9 @@ pub fn scan_points<F: FnMut(PointRow) -> ControlFlow<()>>(
     mut visit: F,
 ) -> Result<()> {
     let Source { path, fields, .. } = src;
+    let Some(path) = path else {
+        return Ok(());
+    };
     let groups = FileGroups::open(path)?;
     let schema = groups.schema().clone();
     let geometry_kind = geometry_kind(path, &schema, fields)?;
@@ -446,6 +450,9 @@ pub fn scan_pairs<F: FnMut(u64, u64) -> ControlFlow<()>>(
     mut visit: F,
 ) -> Result<()> {
     let Source { path, fields, .. } = src;
+    let Some(path) = path else {
+        return Ok(());
+    };
     let groups = FileGroups::open(path)?;
     let term_idx = field_index(path, groups.schema(), fields, TERM_ID)?;
     let term_name = fields.of(TERM_ID);
@@ -600,8 +607,10 @@ pub fn scan_access_field<F: FnMut(u64, &[u64]) -> ControlFlow<()>>(
     default_term: Option<u64>,
     mut visit: F,
 ) -> Result<AccessFill> {
-    let points = src.path;
     let mut fill = AccessFill::default();
+    let Some(points) = src.path else {
+        return Ok(fill);
+    };
     let Some(field) = field else {
         let Some(default_term) = default_term else {
             return Err(BuildError::Invalid(format!(
@@ -698,7 +707,10 @@ pub struct AccessFill {
 
 /// Every row with a number, in file order, with nothing decoded: the numbers are the rows.
 fn scan_identity<F: FnMut(u64) -> ControlFlow<()>>(src: Source<'_>, mut visit: F) -> Result<()> {
-    let groups = FileGroups::open(src.path)?;
+    let Some(path) = src.path else {
+        return Ok(());
+    };
+    let groups = FileGroups::open(path)?;
     for group in src.groups(&groups) {
         let first = groups.start(group);
         let len = groups.group_rows(group) as usize;
@@ -735,6 +747,9 @@ fn scan_access_column<F: FnMut(&[u64], &[u32], &AccessBatch<'_>) -> ControlFlow<
     mut visit: F,
 ) -> Result<()> {
     let Source { path, fields, .. } = src;
+    let Some(path) = path else {
+        return Ok(());
+    };
     let plain = FileGroups::open(path)?;
     // The access field is named directly by `point_visibility.field` rather than through the map:
     // it is the declaration, not a relocation of a canonical name. Absent is the same refusal a
@@ -854,7 +869,7 @@ pub enum PointSurvey {
 /// **A clamp is `v < min` or `v > max`, and `v == max` is not one.** Cells are half-open and the
 /// maximum lands in the top cell by construction (`mosaica_spatial::morton`), so counting the
 /// boundary value as a clamp would report every tightly-fitted corpus as damaged.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CoordinateSurvey {
     /// Rows the build would place: where the survey is given the rows kept, those.
     pub rows: u64,
@@ -1516,10 +1531,10 @@ pub fn scan_attributes<F: FnMut(AttributeBatch<'_>) -> Result<()>>(
     minters: &mut HashMap<String, VocabularyMinter>,
     mut visit: F,
 ) -> Result<()> {
-    if columns.is_empty() {
-        return Ok(());
-    }
     let Source { path, fields, .. } = src;
+    let (Some(path), false) = (path, columns.is_empty()) else {
+        return Ok(());
+    };
     // A unique attribute sits where this file's map moved it; any other in its own column.
     let named: Vec<&str> = columns
         .iter()

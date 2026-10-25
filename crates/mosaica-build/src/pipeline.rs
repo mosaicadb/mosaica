@@ -946,6 +946,7 @@ fn build_bundle(
     crate::residency::report_identity_disk(args, available_disk(&args.out))?;
     let mut numbering = crate::ids::number_streaming(args, tmp.path())?;
     let n = numbering.items;
+    crate::config::require_sources(&args.schema, &args.attribute_sources, n)?;
     let refused = std::mem::take(&mut numbering.refused);
     // The frames fitted over the rows the pass kept, which every view reads from here on.
     let fitted;
@@ -1253,7 +1254,9 @@ fn build_bundle(
     // so a view whose row count is the union's is a view holding every ordinal. That is every
     // single-view corpus and every multi-view one whose anchor covers the union — 8 B/item of
     // reserved disk and an `n`-length copy, both for a file byte-identical to one already written.
-    let anchor_fallback_reaches_an_item = geometry[args.anchor].rows != n;
+    // A build of no view has no anchor, and no item to order.
+    let anchor = geometry.get(args.anchor);
+    let anchor_fallback_reaches_an_item = anchor.map_or(0, |g| g.rows) != n;
     let anchor_maps = if anchor_fallback_reaches_an_item {
         let mut anchor_x_map = spill::MappedU32::zeroed(tmp.path(), "x-anchor.u32", n as usize)?;
         let mut anchor_y_map = spill::MappedU32::zeroed(tmp.path(), "y-anchor.u32", n as usize)?;
@@ -1277,12 +1280,10 @@ fn build_bundle(
     } else {
         None
     };
-    let (x_of_ordinal, y_of_ordinal) = match &anchor_maps {
-        Some((x, y)) => (x.as_slice(), y.as_slice()),
-        None => (
-            geometry[args.anchor].x.as_slice(),
-            geometry[args.anchor].y.as_slice(),
-        ),
+    let (x_of_ordinal, y_of_ordinal): (&[u32], &[u32]) = match (&anchor_maps, anchor) {
+        (Some((x, y)), _) => (x.as_slice(), y.as_slice()),
+        (None, Some(anchor)) => (anchor.x.as_slice(), anchor.y.as_slice()),
+        (None, None) => (&[], &[]),
     };
     timer.end(BuildStage::GeometryRead, n);
 
@@ -1440,7 +1441,10 @@ fn build_bundle(
                          this build reads are {}",
                         args.views
                             .iter()
-                            .map(|v| format!("'{}' ({})", v.view_id, v.points.display()))
+                            .map(|v| match &v.points {
+                                Some(points) => format!("'{}' ({})", v.view_id, points.display()),
+                                None => format!("'{}'", v.view_id),
+                            })
                             .collect::<Vec<_>>()
                             .join(", ")
                     )));
@@ -2859,7 +2863,7 @@ fn read_one_attribute_scan(
     };
 
     input::scan_attributes(
-        input::Source::new(scan.path, scan.fields, scan.rows),
+        input::Source::new(Some(scan.path), scan.fields, scan.rows),
         attributes,
         minters,
         |batch| {
@@ -3328,8 +3332,8 @@ fn read_scoped_column(
 ) -> Result<ScopedColumn> {
     let attribute = &family.attribute;
     let (path, fields) = match &family.source {
-        Some(source) => (&source.path, &source.fields),
-        None => (&view.points, &view.point_fields),
+        Some(source) => (Some(source.path.as_path()), &source.fields),
+        None => (view.points.as_deref(), &view.point_fields),
     };
     let mut values = EntityColumn::filled(scratch, attribute.ty, n as usize)?;
     let columns = [attribute];

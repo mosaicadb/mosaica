@@ -115,7 +115,7 @@ fn build_fixture(out: &Path, points_path: &Path, pairs_path: &Path, points: &[(f
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: frame(),
-            points: points_path.to_path_buf(),
+            points: Some(points_path.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs_path.to_path_buf()),

@@ -1143,7 +1143,7 @@ fn built_fixture() -> Fixture {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

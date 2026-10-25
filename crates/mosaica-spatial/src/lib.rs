@@ -1,6 +1,7 @@
 //! Quantisation, Morton codes, tile addressing, shapes over the grid, and the projections that
 //! put a place on the Earth into the grid in the first place.
 
+pub mod extent;
 pub mod frame;
 pub mod morton;
 pub mod projection;

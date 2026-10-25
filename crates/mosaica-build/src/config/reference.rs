@@ -49,8 +49,8 @@ struct RosterViewBlock {
     /// The view's key: its id is `<group>:<key>`. ASCII letters, digits, `_` and `-`, and no two
     /// views of the group may share one.
     key: String,
-    /// A name in `[sources]`: the file holding this view's points. A build refuses a view with
-    /// none.
+    /// A name in `[sources]`: the file holding this view's points. A view with none is built
+    /// with no rows.
     ///
     /// Default: not set.
     source: Option<String>,

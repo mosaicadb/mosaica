@@ -361,7 +361,7 @@ fn args_for(points: &Path, pairs: &Path, out: PathBuf) -> BuildArgs {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.to_path_buf(),
+            points: Some(points.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs.to_path_buf()),
@@ -933,7 +933,7 @@ fn reference_build_at_scale() {
                 y_min: 0.0,
                 y_max: 65536.0,
             },
-            points: PathBuf::from("data/scaled/geometry.parquet"),
+            points: Some(PathBuf::from("data/scaled/geometry.parquet")),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(PathBuf::from(

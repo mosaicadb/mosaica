@@ -119,10 +119,10 @@ unique = true
 "#;
 
 fn args(dir: &Path, config: &Config, out: PathBuf) -> BuildArgs {
-    let acquired = config.acquire().expect("the view acquires its inputs");
+    let acquired = config.acquire();
     let registry = config.build_views().expect("the registry compiles");
     let acquired_view =
-        mosaica_build::config::acquire_view(&registry[0]).expect("the view acquires its inputs");
+        mosaica_build::config::acquire_view(&registry[0]);
     let _ = dir;
     BuildArgs {
         views: vec![mosaica_build::ViewArgs {

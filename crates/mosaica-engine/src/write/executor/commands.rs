@@ -829,8 +829,8 @@ impl Executor {
             // existence oracle over the roster.
             reply.fail(ExecError::ViewUnknown {
                 detail: format!(
-                    "unknown view group '{group}': a group is declared at a build and its views \
-                     grow at a running service; there is no create that mints a group"
+                    "unknown view group '{group}'. Declare it with PUT /control/view_groups/{group} \
+                     or at a build, then create its views"
                 ),
             });
             return;

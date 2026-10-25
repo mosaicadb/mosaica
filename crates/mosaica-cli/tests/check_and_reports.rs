@@ -451,10 +451,9 @@ type  = "f32"
 }
 
 /// **A view group that names no points file and no roster is declared and empty** on the same
-/// rule. `mosaica build` refuses it, the points having to come from somewhere, and the refusal
-/// names the two roster forms.
+/// rule, and its views are created at a running service.
 #[test]
-fn a_view_group_naming_no_source_is_a_note_at_check_and_a_refusal_at_build() {
+fn a_view_group_naming_no_source_is_a_note_and_a_payload() {
     let tmp = tempfile::tempdir().unwrap();
     project(tmp.path());
     std::fs::write(
@@ -476,14 +475,83 @@ point_visibility = { default = "public" }
     let groups = payloads["view_groups"].as_array().unwrap();
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0]["name"], "quarters");
+}
 
-    let built = run(tmp.path(), &["build"]);
-    assert!(!built.status.success(), "{}", stderr(&built));
-    assert!(
-        stderr(&built).contains("no `source` and no `[[view_group.view]]` roster"),
-        "{}",
-        stderr(&built)
-    );
+/// **`mosaica check` accepts what `mosaica build` builds and refuses what it refuses**, through
+/// one rule below both. Declarations naming no file, and an empty one, build with no rows. Several
+/// views reading files need `allocation_view`, and it must name one of them. A file's rows are
+/// the build's alone to judge, so a declaration is chosen here whose answer needs none.
+#[test]
+fn check_and_build_accept_and_refuse_the_same_declarations() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    let view = |name: &str, source: &str| {
+        format!(
+            "[[view]]\nname = \"{name}\"\nextent = {{ min = -25.0, max = 50.0 }}\n{source}\
+             point_visibility = {{ default = \"public\" }}\n"
+        )
+    };
+    let read = "source = \"points\"\n";
+    let sources = "[sources]\npoints = \"points.parquet\"\n";
+    let attribute = "[[attribute]]\nname = \"sentiment\"\ntype = \"f32\"\n";
+    let group = "[[view_group]]\nname = \"quarters\"\nextent = { min = -25.0, max = 25.0 }\n\
+                 point_visibility = { default = \"public\" }\n";
+    let cases: Vec<(&str, String, bool)> = vec![
+        ("an empty declaration", String::new(), true),
+        (
+            "a view and an attribute naming no file",
+            format!("{}{attribute}", view("s0", "")),
+            true,
+        ),
+        ("a group naming no file and no roster", group.to_string(), true),
+        (
+            "two views naming no file, and no allocation view",
+            format!("{}{}", view("s0", ""), view("s1", "")),
+            true,
+        ),
+        (
+            "two views, one reading a file, and no allocation view",
+            format!("{sources}{}{}", view("s0", read), view("s1", "")),
+            true,
+        ),
+        (
+            "two views reading files, and no allocation view",
+            format!("{sources}{}{}", view("s0", read), view("s1", read)),
+            false,
+        ),
+        (
+            "two views reading files, and an allocation view",
+            format!(
+                "{sources}[defaults]\nallocation_view = \"s1\"\n{}{}",
+                view("s0", read),
+                view("s1", read)
+            ),
+            true,
+        ),
+        (
+            "an allocation view naming no view",
+            format!("[defaults]\nallocation_view = \"s9\"\n{}", view("s0", "")),
+            false,
+        ),
+    ];
+    for (n, (what, declaration, accepted)) in cases.iter().enumerate() {
+        std::fs::write(tmp.path().join("schema.toml"), declaration).unwrap();
+        let checked = run(tmp.path(), &["check"]);
+        let out = format!("bundles/case-{n}");
+        let built = run(tmp.path(), &["build", "--out", &out]);
+        assert_eq!(
+            checked.status.success(),
+            *accepted,
+            "check, {what}: {}",
+            stderr(&checked)
+        );
+        assert_eq!(
+            built.status.success(),
+            *accepted,
+            "build, {what}: {}",
+            stderr(&built)
+        );
+    }
 }
 
 /// **Never a payload out of a declaration that failed its check.** The stream is what a CI job

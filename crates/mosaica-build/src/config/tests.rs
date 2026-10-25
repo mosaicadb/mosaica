@@ -2520,10 +2520,10 @@ fn a_label_layer_sharing_a_name_with_a_layer_is_refused() {
 fn acquisition_names_the_files_this_build_reads() {
     let dir = tempfile::tempdir().expect("tempdir");
     let config = parse_at(dir.path(), ACQUIRED, &HashMap::new()).unwrap();
-    let acquired = config.acquire().expect("the entity-space inputs acquire");
+    let acquired = config.acquire();
     let registry = config.build_views().expect("the registry compiles");
-    let view = crate::config::acquire_view(&registry[0]).expect("the view is declared");
-    assert_eq!(view.points, dir.path().join("geometry.parquet"));
+    let view = crate::config::acquire_view(&registry[0]);
+    assert_eq!(view.points, Some(dir.path().join("geometry.parquet")));
     assert!(
         matches!(&view.access.source, crate::config::AccessSource::Relation(p) if *p == dir.path().join("pairs.parquet")),
         "{:?}",
@@ -2555,7 +2555,7 @@ fn a_layer_names_its_artifacts_and_its_members() {
     );
     let config =
         parse_at(dir.path(), &text, &HashMap::new()).expect("the layer's two sources are declared");
-    let acquired = config.acquire().unwrap();
+    let acquired = config.acquire();
     assert_eq!(
         artifact_path(&acquired.layers[0]),
         Some(dir.path().join("hdbscan.parquet"))
@@ -2567,7 +2567,7 @@ fn a_layer_names_its_artifacts_and_its_members() {
     // And the members source is overridable on its own name, without disturbing the roster.
     let config = parse_at(dir.path(), &text, &files(&["hdbscan_members"]))
         .expect("one source staged elsewhere");
-    let acquired = config.acquire().unwrap();
+    let acquired = config.acquire();
     assert_eq!(
         artifact_path(&acquired.layers[0]),
         Some(dir.path().join("hdbscan.parquet"))
@@ -2601,7 +2601,7 @@ fn two_layers_read_their_own_files() {
     let dir = tempfile::tempdir().expect("tempdir");
     let text = format!("{ACQUIRED}{first}{second}");
     let config = parse_at(dir.path(), &text, &HashMap::new()).expect("both layers parse");
-    let acquired = config.acquire().expect("both sources acquire");
+    let acquired = config.acquire();
     let paths: Vec<Option<PathBuf>> = acquired.layers.iter().map(artifact_path).collect();
     assert_eq!(
         paths,
@@ -2633,23 +2633,16 @@ fn a_build_refuses_an_anchor_the_config_does_not_declare() {
     );
 }
 
-/// ⊘ A view declaring no source **and reaching no `[defaults].source`** is legal and means the
-/// view is declared and empty — a bundle with no rows in it, which is not built.
+/// A view declaring no source and reaching no `[defaults].source` is declared and empty: it
+/// acquires no file, and a build writes it with no rows.
 #[test]
-fn a_build_refuses_a_view_with_no_source() {
+fn a_view_with_no_source_acquires_no_file() {
     let text = ACQUIRED
         .replace("source           = \"geometry\"\n", "")
         .replace("[defaults]\nsource = \"corpus\"\n", "");
     let config = parse_bound(&text, &HashMap::new()).unwrap();
     let registry = config.build_views().unwrap();
-    let message = format!(
-        "{}",
-        crate::config::acquire_view(&registry[0]).expect_err("expected a refusal")
-    );
-    assert!(
-        message.contains("`source` is required to build"),
-        "{message}"
-    );
+    assert_eq!(crate::config::acquire_view(&registry[0]).points, None);
 }
 
 /// All three label routes acquire: a field of the view's own source, a separate exploded relation,
@@ -2663,7 +2656,7 @@ fn every_label_route_acquires() {
     );
     let config = parse_bound(&field, &HashMap::new()).unwrap();
     let registry = config.build_views().unwrap();
-    let acquired = crate::config::acquire_view(&registry[0]).expect("a field route acquires");
+    let acquired = crate::config::acquire_view(&registry[0]);
     assert!(
         matches!(&acquired.access.source, AccessSource::Field(f) if f == "categories"),
         "{:?}",
@@ -2677,7 +2670,7 @@ fn every_label_route_acquires() {
     );
     let config = parse_bound(&only_default, &HashMap::new()).unwrap();
     let registry = config.build_views().unwrap();
-    let acquired = crate::config::acquire_view(&registry[0]).expect("a default alone acquires");
+    let acquired = crate::config::acquire_view(&registry[0]);
     assert!(
         matches!(acquired.access.source, AccessSource::Default),
         "{:?}",
@@ -2686,24 +2679,23 @@ fn every_label_route_acquires() {
     assert_eq!(acquired.access.default.as_deref(), Some("ir:analyst"));
 }
 
-/// An attribute with no source at all: legal to **declare** (§2), and refused at the build that
-/// would have to read the column — naming the columns rather than a block, which is what one
-/// corpus file for all of them could never do.
+/// An attribute with no source at all is declared and empty. A build of no items writes it, and
+/// a build of items refuses them, as an ingest refuses a row creating an item without a declared
+/// column.
 #[test]
-fn a_build_refuses_an_attribute_with_no_source() {
+fn an_attribute_with_no_source_is_refused_only_over_items() {
     let text = ACQUIRED.replace("[defaults]\nsource = \"corpus\"\n", "");
     let config = parse_bound(&text, &HashMap::new())
         .expect("a column with no source is a legal declaration");
+    let acquired = config.acquire();
     assert!(
-        config.attribute_sources.is_empty(),
+        acquired.attribute_sources.is_empty(),
         "no source named, so no group to read"
     );
-    let message = format!("{}", config.acquire().expect_err("expected a refusal"));
-    assert!(message.contains("name no `source`"), "{message}");
-    assert!(
-        message.contains("severity"),
-        "the refusal names the column: {message}"
-    );
+    crate::config::require_sources(&config.schema, &acquired.attribute_sources, 0)
+        .expect("no item lacks the column");
+    crate::config::require_sources(&config.schema, &acquired.attribute_sources, 3)
+        .expect_err("three items lack the column");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2859,17 +2851,18 @@ fn declaring_both_roster_forms_is_refused() {
     assert!(message.contains("Write one of them"), "{message}");
 }
 
-/// Neither form and no `source`: the group's points come from nowhere, and `[defaults].source`
-/// deliberately does not reach a group.
+/// Neither form and no `source`: the group is declared and empty, and its views are created at a
+/// running service. `[defaults].source` does not reach a group.
 #[test]
-fn a_group_with_no_roster_and_no_source_is_refused() {
+fn a_group_with_no_roster_and_no_source_has_no_views() {
     let text = format!(
-        "{SEVERITY}\n[[view_group]]\nname = \"quarter\"\nextent = \"auto\"\n\
+        "{SEVERITY}\n[[view_group]]\nname = \"quarter\"\nextent = {{ min = 0.0, max = 1.0 }}\n\
          point_visibility = {{ default = \"public\" }}\n"
     );
-    let message = err(&text);
-    assert!(message.contains("come from nowhere"), "{message}");
-    assert!(message.contains("`[defaults].source`"), "{message}");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = parse_at(dir.path(), &text, &HashMap::new()).expect("the declaration parses");
+    assert_eq!(config.view_groups.len(), 1);
+    assert!(config.build_views().unwrap().iter().all(|v| v.group.is_none()));
 }
 
 /// Form B is two files, and the group needs both: the roster lists the views, and the group's own
@@ -2986,6 +2979,7 @@ fn a_members_groups_title_is_its_own_and_is_never_the_owners() {
         let resolved = stub_view_args(&registry);
         config
             .group_registry(&registry, &resolved)
+            .expect("the groups resolve")
             .into_iter()
             .map(|group| (group.name, group.title))
             .collect::<Vec<_>>()
@@ -3029,7 +3023,7 @@ fn stub_view_args(registry: &[BuildView]) -> Vec<crate::ViewArgs> {
                 y_min: -40.0,
                 y_max: 40.0,
             },
-            points: PathBuf::new(),
+            points: Some(PathBuf::new()),
             point_fields: Fields::default(),
             select: None,
             access: AccessInput {
@@ -3626,16 +3620,11 @@ fn a_minted_key_outside_the_charset_is_refused() {
     assert!(message.contains("ASCII letters"), "{message}");
 }
 
-/// **A source with no rows mints no views**, and a group with none is a declaration promising
-/// coordinate systems the bundle would not carry — the refusal a roster table with no rows earns.
+/// A source with no rows mints no views: the group is declared and empty.
 #[test]
-fn a_group_with_no_roster_and_no_rows_is_refused() {
-    let message = format!(
-        "{}",
-        minted_registry(&[]).expect_err("expected a refusal")
-    );
-    assert!(message.contains("carries no rows"), "{message}");
-    assert!(message.contains("view group 'quarter'"), "{message}");
+fn a_group_with_no_roster_and_no_rows_has_no_views() {
+    let registry = minted_registry(&[]).expect("an empty source mints nothing");
+    assert!(registry.iter().all(|v| v.group.is_none()), "{registry:?}");
 }
 
 /// A `members` group whose **owner** declares no roster: the only arrangement where the mint runs

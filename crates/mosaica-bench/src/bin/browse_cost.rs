@@ -357,7 +357,7 @@ fn build_scan_fixture(dir: &Path, rows: u64) -> PathBuf {
                 y_min: 0.0,
                 y_max: 1000.0,
             },
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs.clone()),

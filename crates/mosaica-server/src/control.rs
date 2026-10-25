@@ -1197,24 +1197,25 @@ async fn mint_vocabulary_values(
     acknowledge(&state, &wait, StatusCode::OK, body).await
 }
 
-/// The frame a view or group declares, in frame coordinates: the bounds a Morton code is a
-/// fraction of. There is no `auto` or degree box, which a build resolves to this same box.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExtentBody {
-    x: [f64; 2],
-    y: [f64; 2],
-}
-
-impl ExtentBody {
-    fn frame(&self) -> mosaica_engine::DeclaredFrame {
-        mosaica_engine::DeclaredFrame {
-            x_min: self.x[0],
-            x_max: self.x[1],
-            y_min: self.y[0],
-            y_max: self.y[1],
-        }
-    }
+/// The frame a view or group's `extent` states, in any spelling a build's declaration takes, by
+/// the rule a build compiles it by. Absent, `auto`, and a spelling of the wrong kind of view are
+/// refused naming the spellings to write.
+fn declared_frame(
+    object: &str,
+    projection: &str,
+    extent: Option<serde_json::Value>,
+) -> Result<mosaica_engine::DeclaredFrame, ApiError> {
+    use mosaica_engine::WrittenExtent;
+    let written = match extent {
+        None => None,
+        Some(serde_json::Value::String(word)) => Some(WrittenExtent::Word(word)),
+        Some(keys @ serde_json::Value::Object(_)) => Some(WrittenExtent::Keys(
+            serde_json::from_value(keys)
+                .map_err(|e| ApiError::Contract(format!("{object}: `extent`: {e}")))?,
+        )),
+        Some(_) => Some(WrittenExtent::Neither),
+    };
+    mosaica_engine::declared_frame(object, projection, written).map_err(ApiError::Contract)
 }
 
 /// `point_visibility` at a running service: only the `default` a point with no label is given,
@@ -1247,7 +1248,8 @@ struct ViewGroupBody {
     title: Option<String>,
     #[serde(default = "projection_none")]
     projection: String,
-    extent: ExtentBody,
+    #[serde(default)]
+    extent: Option<serde_json::Value>,
     /// One label or a list, each element one term. Absent is `public`.
     #[serde(default)]
     visibility: Option<mosaica_types::view::DeclaredGate>,
@@ -1268,7 +1270,8 @@ struct PlainViewBody {
     title: Option<String>,
     #[serde(default = "projection_none")]
     projection: String,
-    extent: ExtentBody,
+    #[serde(default)]
+    extent: Option<serde_json::Value>,
     #[serde(default)]
     visibility: Option<mosaica_types::view::DeclaredGate>,
     #[serde(default)]
@@ -1290,11 +1293,16 @@ async fn create_view_group(
     body: ApiJson<ViewGroupBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let body = body.0;
+    let frame = declared_frame(
+        &format!("view group '{name}'"),
+        &body.projection,
+        body.extent,
+    )?;
     let declaration = mosaica_engine::ViewGroupDeclaration {
         name: name.clone(),
         title: body.title,
         projection: body.projection,
-        frame: body.extent.frame(),
+        frame,
         visibility: body
             .visibility
             .map(mosaica_types::view::DeclaredGate::into_labels),
@@ -1326,11 +1334,12 @@ async fn create_plain_view(
     body: ApiJson<PlainViewBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let body = body.0;
+    let frame = declared_frame(&format!("view '{name}'"), &body.projection, body.extent)?;
     let declaration = mosaica_engine::PlainViewDeclaration {
         name: name.clone(),
         title: body.title,
         projection: body.projection,
-        frame: body.extent.frame(),
+        frame,
         visibility: body
             .visibility
             .map(mosaica_types::view::DeclaredGate::into_labels),

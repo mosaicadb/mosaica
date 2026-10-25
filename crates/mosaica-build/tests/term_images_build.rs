@@ -163,7 +163,7 @@ fn args_for(points: &Path, pairs: &Path, out: PathBuf) -> BuildArgs {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.to_path_buf(),
+            points: Some(points.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs.to_path_buf()),

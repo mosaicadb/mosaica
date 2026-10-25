@@ -156,21 +156,25 @@ pub(crate) fn reads(args: &crate::BuildArgs) -> Result<Vec<Read>> {
             .unwrap_or_else(|| path.display().to_string())
     };
     let mut reads = Vec::new();
+    // A view that names no file has no rows to number.
     for (index, view) in args.views.iter().enumerate() {
+        let Some(points) = &view.points else {
+            continue;
+        };
         reads.push(Read {
             kind: ReadKind::Points(index),
             batch: Batch::Creates,
             input: ReadInput::File {
-                path: view.points.clone(),
+                path: points.clone(),
                 fields: view.point_fields.clone(),
                 select: view.select.clone(),
             },
-            source: file_name(&view.points),
+            source: file_name(points),
             object: format!("view '{}'", view.view_id),
         });
     }
     for (index, group) in args.attribute_sources.iter().enumerate() {
-        if args.views.iter().any(|view| view.points == group.path) {
+        if args.views.iter().any(|view| view.points.as_ref() == Some(&group.path)) {
             continue;
         }
         reads.push(Read {
@@ -354,10 +358,15 @@ impl Numbering {
             .map(|(_, rows)| rows)
     }
 
-    /// A view's points.
+    /// A view's points: none, for a view that names no file.
     pub(crate) fn points(&self, view: usize) -> &ReadRows {
-        self.of(ReadKind::Points(view))
-            .expect("every view's points are numbered")
+        static NO_ROWS: ReadRows = ReadRows {
+            numbers: Numbers::Offset { base: 0 },
+            groups: None,
+            named: 0,
+            mixed: 0,
+        };
+        self.of(ReadKind::Points(view)).unwrap_or(&NO_ROWS)
     }
 
     /// The disk every file's numbers hold until the build ends.

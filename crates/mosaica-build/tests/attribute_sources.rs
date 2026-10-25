@@ -174,10 +174,10 @@ fn project(dir: &Path, ids: &[u64], covered: &[u64]) -> Config {
 }
 
 fn args(config: &Config, out: PathBuf) -> BuildArgs {
-    let acquired = config.acquire().expect("the declaration acquires");
+    let acquired = config.acquire();
     let registry = config.build_views().expect("the registry compiles");
     let acquired_view =
-        mosaica_build::config::acquire_view(&registry[0]).expect("the view acquires its inputs");
+        mosaica_build::config::acquire_view(&registry[0]);
     BuildArgs {
         views: vec![mosaica_build::ViewArgs {
             visibility: None,

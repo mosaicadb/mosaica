@@ -211,13 +211,13 @@ fn build_side(layers: &str, keyed: &dyn Fn(u64) -> bool) -> Built {
             title: view.title.clone(),
             projection: view.projection,
             extent: extent(),
-            points: view.source.clone().expect("every view names its points"),
+            points: view.source.clone(),
             point_fields: view.fields.clone(),
             select: view.select.clone(),
             access: mosaica_build::config::AccessInput::relation(dir.join("pairs.parquet")),
         })
         .collect();
-    let groups = config.group_registry(&registry, &views);
+    let groups = config.group_registry(&registry, &views).expect("the groups resolve");
     for layer in &mut config.layers {
         layer.views = mosaica_build::config::Config::expand_layer_views(&registry, &layer.views);
     }

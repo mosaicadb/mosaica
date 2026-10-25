@@ -344,7 +344,7 @@ fn args(inputs: &Inputs, out: &Path) -> BuildArgs {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: inputs.points.clone(),
+            points: Some(inputs.points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(inputs.pairs.clone()),

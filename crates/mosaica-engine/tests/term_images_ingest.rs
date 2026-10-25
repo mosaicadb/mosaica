@@ -202,7 +202,7 @@ fn build_bundle(dir: &Path, name: &str, entities: u64) -> std::path::PathBuf {
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs.clone()),

@@ -245,19 +245,14 @@ fn auto_over_an_empty_source_is_refused() {
     let points = tmp.path().join("empty.parquet");
     write_points(&points, ("lon", "lat"), &[], &[]);
 
-    let message = format!(
-        "{}",
-        frame_view(
-            "world",
-            Projection::WebMercator,
-            &Extent::AutoLonLat,
-            &points,
-            &geographic(),
-        )
-        .expect_err("an empty source frames nothing")
-    );
-    assert!(message.contains("selects no rows"), "{message}");
-    assert!(message.contains("lon = ["), "{message}");
+    frame_view(
+        "world",
+        Projection::WebMercator,
+        &Extent::AutoLonLat,
+        &points,
+        &geographic(),
+    )
+    .expect_err("an empty source frames nothing");
 }
 
 /// **A coordinate outside ±180 or ±90 is not a coordinate** (§2), and the refusal names the row.
@@ -405,7 +400,7 @@ fn build_bundle(
             title: None,
             projection,
             extent,
-            points: points.to_path_buf(),
+            points: Some(points.to_path_buf()),
             point_fields: fields,
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

@@ -527,6 +527,30 @@ require_member_visibility = "any"
     }
 }
 
+/// `declaration` with every key naming a file taken out: `[sources]`, each `source`, an
+/// attribute's `fields`, the access relation and the layer's members. What is left declares the
+/// same objects, each with no rows.
+fn without_files(declaration: &str) -> String {
+    let stripped: Vec<&str> = declaration
+        .lines()
+        .filter(|line| {
+            let key = line.trim_start();
+            !(key.starts_with("source ")
+                || key.starts_with("source=")
+                || key.starts_with("fields ")
+                || key == "[sources]"
+                || key == "[layer.members]"
+                || key.ends_with(".parquet\""))
+        })
+        .collect();
+    let stripped = stripped.join("\n") + "\n";
+    assert!(!stripped.contains("parquet"), "{stripped}");
+    stripped.replace(
+        "{ source = \"access\", default = \"public\" }",
+        "{ default = \"public\" }",
+    )
+}
+
 /// Every build argument the declaration implies.
 fn args(dir: &Path, declaration: &str, out: &Path) -> BuildArgs {
     let path = dir.join("corpus.toml");
@@ -935,11 +959,17 @@ async fn build_equals_ingest(seed: u64, thirds: bool) -> Vec<String> {
         "seed {seed} plants refusals"
     );
 
-    // Path B: the same declaration built empty, and each file sent in declaration order.
+    // Path B: the same declaration built empty, and each file sent in declaration order. Built
+    // from each file with no rows at odd seeds, and at even seeds from the declaration with every
+    // key naming a file taken out, so from no file at all.
     let empty = tmp.path().join("empty");
     corpus.write(&empty, true, size);
     let empty_root = empty.join("bundle");
-    build(&args(&empty, &declaration, &empty_root)).expect("the empty build runs");
+    let empty_declaration = match seed % 2 {
+        0 => without_files(&declaration),
+        _ => declaration.clone(),
+    };
+    build(&args(&empty, &empty_declaration, &empty_root)).expect("the empty build runs");
     trace(&format!("seed {seed}: built; spawning"));
     let ingested = spawn_server(&empty_root, &empty.join("cache"), &empty.join("wal.log")).await;
     trace(&format!("seed {seed}: spawned"));

@@ -159,7 +159,7 @@ fn build_fixture_declaring(root: &Path, tmp: &Path, shard_size: Option<u64>, lat
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.clone(),
+            points: Some(points.clone()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs),

@@ -78,11 +78,11 @@ pub fn args_from_declaration(path: &Path, out: &Path, extent: Bounds) -> BuildAr
     let config = Config::parse(path, &Default::default()).expect("the declaration parses");
     let registry = config.build_views().expect("the views compile");
     let anchor = config.anchor_view(&registry).expect("an anchor");
-    let acquired = config.acquire().expect("the files acquire");
+    let acquired = config.acquire();
     let views: Vec<mosaica_build::ViewArgs> = registry
         .iter()
         .map(|view| {
-            let acquired = mosaica_build::config::acquire_view(view).expect("the view acquires");
+            let acquired = mosaica_build::config::acquire_view(view);
             mosaica_build::ViewArgs {
                 visibility: view.visibility.clone(),
                 view_id: view.id.clone(),
@@ -115,7 +115,7 @@ pub fn args_from_declaration(path: &Path, out: &Path, extent: Bounds) -> BuildAr
     for layer in &mut layers {
         layer.views = Config::expand_layer_views(&registry, &layer.views);
     }
-    let groups = config.group_registry(&registry, &views);
+    let groups = config.group_registry(&registry, &views).expect("the groups resolve");
     BuildArgs {
         views,
         anchor,

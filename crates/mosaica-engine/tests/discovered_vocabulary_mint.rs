@@ -136,7 +136,7 @@ fn build_args(points: &Path, pairs: &Path, out: &Path, schema: Schema) -> BuildA
             title: None,
             projection: mosaica_spatial::Projection::None,
             extent: extent(),
-            points: points.to_path_buf(),
+            points: Some(points.to_path_buf()),
             point_fields: Default::default(),
             select: None,
             access: mosaica_build::config::AccessInput::relation(pairs.to_path_buf()),
