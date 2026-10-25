@@ -1151,7 +1151,9 @@ const WAL_MAGIC: [u8; 4] = *b"MWAL";
 // its batch id. A log at 39 is refused.
 // **42**: a receipt's refused row may give `value_held` or `label_not_held`, and the variant table
 // gained `BatchesCarried`. A log at 41 is refused.
-const WAL_VERSION: u16 = 42;
+// **43**: `LayerCreate` carries the names the layer's views were written with, where one names a
+// view group. A log at 42 is refused.
+const WAL_VERSION: u16 = 43;
 /// Header size in bytes: `WAL_MAGIC` ‖ `WAL_VERSION` LE ‖ member number LE ‖ base position LE.
 /// Every *offset* in this module is a byte offset from the start of its own file, so it already
 /// accounts for the header living at the front; every *position* is sequence-global and counts
