@@ -3121,7 +3121,7 @@ async fn declarations_match_the_description() {
     .unwrap();
     assert_refusal_to(&doc, Some(&put), resp, 409, "conflict").await;
     for refused in [
-        json!({ "name": "flag", "type": "bool", "render": true }),
+        json!({ "name": "flag", "type": "keyword", "render": true }),
         json!({ "name": "flag", "type": "bool", "unknown": 1 }),
         json!({ "name": "flag", "type": "category" }),
     ] {
