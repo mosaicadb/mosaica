@@ -37,52 +37,45 @@ pip install -e 'clients/py[widget]'
 
 ## Platforms
 
-Mosaica's release builds, and the Python package that carries the binary, are made for:
+Release builds of Mosaica, and the Python package that carries them, are made for Linux on x86_64 and aarch64, with glibc 2.28 or later or musl 1.2 or later, and for macOS 11 or later on Apple silicon and 10.12 or later on Intel. The tests run on Linux x86_64, and the Linux x86_64 and Apple silicon builds are started once each to check they run.
 
-- Linux on x86_64 and aarch64, with glibc 2.28 or later, or musl 1.2 or later;
-- macOS 11 or later on Apple silicon (arm64);
-- macOS 10.12 or later on Intel (x86_64).
+Mosaica doesn't run on Windows yet. The Python client installs there, and connects to a Mosaica server on another machine.
 
-The test suite runs on Linux x86_64. The release builds for Linux x86_64 and macOS arm64 are also started once each to check they run.
+## The schema and the server's settings
 
-There is no Windows build. On Windows, the Python package installs without the binary. It connects to a server running elsewhere, but cannot build or serve a database itself.
+Two files configure Mosaica.
 
-## How a deployment fits together
+`corpus.toml` is the database's schema. It declares the views that place items on a map, the fields each item carries and whether each is rendered or indexed, the vocabularies behind category fields, the annotation layers, and who may see what. A running server takes the same declarations at its control address, so the schema can grow while the database serves, and the [data model](../system/data-model.md#what-can-change-while-it-runs) lists what can change. The schema also has a `[sources]` table, naming the Parquet files a first load reads.
 
-A deployment is a directory holding two files you write, and the files Mosaica makes from them.
+`mosaica.toml` holds the server's settings: where the database and the server's working files live, which schema to start from, the three addresses, the operator credential, how long a viewer's session lasts, and the limits on requests and writes. The server reads it when it starts, so a change takes effect at the next restart.
+
+## Putting data in
 
 ```mermaid
 flowchart LR
-  sources["Your Parquet files"] --> build
-  corpus["corpus.toml<br/>what the data is"] --> build["mosaica build"]
-  deployment["mosaica.toml<br/>where and how it runs"] --> build
-  build --> bundle[("bundle")]
-  deployment --> serve["mosaica serve"]
-  bundle --> serve
-  serve -.->|flushes and compactions| bundle
-  serve --- disc[("write-ahead log<br/>cache<br/>catalogue")]
-  serve --> viewer["viewer address<br/>browsers and notebooks"]
-  serve --> session["session address<br/>your app's server"]
-  serve --> control["control address<br/>writes and users"]
+  schema["corpus.toml<br/>the schema"] --> build["mosaica build"]
+  files["Parquet files"] --> build
+  build -->|first load| db[("database")]
+  settings["mosaica.toml<br/>server settings"] --> serve["mosaica serve"]
+  db <--> serve
+  serve --- viewer["viewer address<br/>reads"]
+  serve --- session["session address<br/>sessions for your users"]
+  serve --- control["control address<br/>declarations, inserts, deletions, users"]
 ```
 
-*`mosaica build` reads both files and your data, and writes the bundle. `mosaica serve` reads `mosaica.toml`, the bundle and its own files, and never the declaration or your data.*
+*A build makes the database and its first load in one pass. Every change after that goes through the server.*
 
-- **The declaration**, `corpus.toml` on these pages, describes your data. It names the files to read, the views that place each item on a map, the fields each item carries and what each is for, the vocabularies of category fields, and the annotation layers over the items.
-- **The deployment file**, `mosaica.toml`, describes one running deployment: where the bundle and the server's own files go, which declaration to build, the three addresses, the operator's credential, how long a viewer's session lasts, and the limits on requests and writes.
-- **The bundle** is the database itself, which the build writes from your files. From then on the server reads the bundle, and never your files.
+`mosaica build` creates the database from the schema and the files `[sources]` names. It is the quick way to load a lot of data at once: it sorts every item into map order and writes each index in one go, where the server takes rows in batches and merges them in as it runs. Once the server is up, everything else goes to it. New declarations, inserts, deletions and suppressions arrive at the control address, from the Python and TypeScript clients, the command line or the HTTP API, and the server applies them to the same database.
 
-| | `corpus.toml` | `mosaica.toml` |
-|---|---|---|
-| Describes | The data: what each column means and how it is used | One deployment: where it keeps its files and how it serves |
-| Read by | `mosaica check` and `mosaica build` | `mosaica check`, `mosaica build`, `mosaica serve` and `mosaica health` |
-| Found | Where `[build] schema` in `mosaica.toml` points, `schema.toml` if it says nothing. `--config` names another | In the directory the command runs in, or the nearest directory above it that has one. `--deployment` names another |
-| Relative paths are read from | The declaration's own directory. An absolute path in `[sources]` is refused | The directory `mosaica.toml` is in |
-| After the build | Not read again. Declare new fields, views, vocabularies and layers at the running server through the control address | Read each time the server starts, so a change takes effect at the next restart |
+!!! note ""
+    Not built yet: creating an empty database and filling it entirely through the server. A database starts with a build, which needs at least one view with data.
 
-The declaration's file can have any name, since `mosaica.toml` names it. The examples in the repository and the Python client call it `schema.toml`.
+Where Mosaica finds the two files:
 
-What the declaration holds is also what a running server can be told: `mosaica check --payloads` prints the declaration as the requests that would declare it at a running service. The [data model](../system/data-model.md#what-can-change-while-it-runs) lists what can change after the build.
+- **`mosaica.toml`** is read from the directory a command runs in, or the nearest directory above it that has one. `--deployment` names another. A relative path in it is read from its own directory.
+- **The schema** is the file `[build] schema` names, `schema.toml` if it names none, and `--config` names another. A path in `[sources]` is read from the schema's own directory, and an absolute one is refused.
+
+The schema's file can have any name, since `mosaica.toml` names it. These pages call it `corpus.toml`, and the examples in the repository and the Python client call it `schema.toml`. `mosaica check --payloads` prints a schema as the requests that would declare it at a running server.
 
 ## A small deployment
 
@@ -118,9 +111,9 @@ type   = "i64"
 render = true
 ```
 
-`[sources]` names the file, and `[defaults]` makes it the source of everything below. The view places each row on a Web Mercator world map from its `lon` and `lat` columns, and gives every place the access label `public`, which every viewer holds. `index = true` makes the names searchable, and `render = true` sends each place's population with every point drawn. The [tutorial](first-map.md#describe-the-data) explains each of these choices, and the [corpus.toml reference](../reference/corpus-toml.md) lists every key.
+`[sources]` names the file for the first load, and `[defaults]` makes it the source of everything below. The view places each row on a Web Mercator world map from its `lon` and `lat` columns, and gives every place the access label `public`, which every viewer holds. `index = true` makes the names searchable, and `render = true` sends each place's population with every point drawn. The [tutorial](first-map.md#describe-the-data) explains each of these choices, and the [corpus.toml reference](../reference/corpus-toml.md) lists every key.
 
-Save this as `mosaica.toml`. `mosaica serve` refuses to start without each of these keys, apart from `[build]`, which the build reads and the server does not. It is there because the declaration is not called `schema.toml`. The operator credential can come from an environment variable instead of a file, with `operator_credential_env`.
+Save this as `mosaica.toml`. `mosaica serve` refuses to start without each of these keys, apart from `[build]`, which the build reads and the server does not. It is there because the schema is not called `schema.toml`. The operator credential can come from an environment variable instead of a file, with `operator_credential_env`.
 
 ```toml
 [bundle]
@@ -144,15 +137,15 @@ operator_credential_file = "operator.secret"
 dir = "catalogue"
 ```
 
-- `[bundle]` names the bundle's directory, a cache of work the server can redo, and the write-ahead log, where every write is recorded before it is applied.
-- `[build] schema` names the declaration.
+- `[bundle]` names the database's directory, which Mosaica calls the bundle, a cache of work the server can redo, and the write-ahead log, where every write is recorded before it is applied.
+- `[build] schema` names the schema.
 - `token_max_lifetime` is the longest a viewer's session lasts, in seconds.
 - `[serve]` gives the three addresses, and a file holding the operator credential, which holds every permission.
 - `[catalogue] dir` is where the server keeps its users, their passwords and keys, and what each may see and do. [Users and roles](../system/users-and-roles.md) explains them.
 
 The [mosaica.toml reference](../reference/mosaica-toml.md) lists every other key, with its default.
 
-Check the declaration against the file, build, make the operator credential and serve.
+Check the schema against the file, build, make the operator credential and serve.
 
 ```bash
 mosaica check 2>&1 | tail -n 1
@@ -212,7 +205,7 @@ wal-000001.sync
 
 ## From Python
 
-The Python client writes both files for you. `mosaica.create("~/maps/places")` makes a database in that directory. The client writes the declaration, `schema.toml`, from what you declare and insert, and a `mosaica.toml` of its own, which keeps the cache, the write-ahead log, the catalogue and the operator credential under `.mosaica/` and the tables you insert under `sources/`. The first commit builds the bundle and starts a server on that directory, listening on free ports on this machine only. Call `write()` to see the two files before then.
+The Python client writes both files for you. `mosaica.create("~/maps/places")` makes a database in that directory. The client writes the schema, `schema.toml`, from what you declare and insert, and a `mosaica.toml` of its own, which keeps the cache, the write-ahead log, the catalogue and the operator credential under `.mosaica/` and the tables you insert under `sources/`. The first commit builds the database and starts a server on that directory, listening on free ports on this machine only. Call `write()` to see the two files before then.
 
 Since the directory holds everything, `mosaica serve --deployment ~/maps/places/mosaica.toml` serves the same database without Python, on new free ports each time, which it prints when it starts. `mosaica.create()` with no path puts the database in a temporary directory and deletes it when the database is closed or Python exits. `save(path)` copies it somewhere lasting. The [Python reference](../reference/python/connecting.md) covers `create()`, `open()` and `save()`.
 
