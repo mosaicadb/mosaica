@@ -10,17 +10,20 @@ You reach Mosaica over its HTTP API, with the `mosaica` command line, or from th
 
 ```mermaid
 flowchart LR
-  py["Python client"] --> server
-  ts["TypeScript client<br/>and web components"] --> server
-  cli["mosaica command line"] --> server
-  http["your own code,<br/>over HTTP"] --> server
-  server["Mosaica server"] <--> db[("database")]
+  py["Python client"] --> db
+  ts["TypeScript client<br/>and web components"] --> db
+  cli["mosaica command line"] --> db
+  http["your own code,<br/>over HTTP"] --> db
+  db[("Mosaica")]
 ```
 
-You create a database by loading your first data into it, either with `mosaica build`, which loads a set of Parquet files in one pass, or from the Python client. From then on the server takes every change, and you can declare new fields and views and insert or delete records while it serves.
+You load data over the HTTP API or from either client, and you can declare new fields and views and insert or delete records while the database serves. For a large first load, `mosaica build` loads a set of Parquet files in one pass, which is much faster than sending the same rows in batches.
+
+!!! note ""
+    Not built yet: starting from an empty database. A database's first load comes from `mosaica build`, or from the Python client's first commit, which runs one. Every load after that can come from anywhere.
 
 !!! tip "Prototyping in Python"
-    For analysis on your own machine, you don't need to run a server yourself. The Python client can start a private one for your notebook, with the same reads and map as a shared server.
+    For analysis on your own machine, you don't need to set up a database yourself. The Python client can run a private one for your notebook, with the same reads and map as a shared one.
 
 The [clients](clients.md) chapter compares the four ways in, and the [capabilities](../reference/capabilities.md) table names the call for each capability on each of them.
 
@@ -65,11 +68,11 @@ Besides drawing the map, you can ask for numbers and records directly. A **break
 
 ## Changing data while it serves
 
-A running server takes new items, edits to existing ones, and deletions, which are permanent. You can also suppress an item to hide it and lift the suppression later, and declare new views, fields and annotation layers.
+A running database takes new items, edits to existing ones, and deletions, which are permanent. You can also suppress an item to hide it and lift the suppression later, and declare new views, fields and annotation layers.
 
-A deletion or a suppression applies to every request that starts after the server accepts it. New and edited items appear at the next flush, which runs every 90 seconds by default, or sooner once 40,000 rows are waiting; an edited item leaves the map when the edit is accepted, and comes back, changed, at that flush. If you need to know when a write is visible, the write can ask to be answered only then. Because the server records every write in a log before it answers, an accepted write survives a restart.
+A deletion or a suppression applies to every request that starts after Mosaica accepts it. New and edited items appear at the next flush, which runs every 90 seconds by default, or sooner once 40,000 rows are waiting; an edited item leaves the map when the edit is accepted, and comes back, changed, at that flush. If you need to know when a write is visible, the write can ask to be answered only then. Because Mosaica records every write in a log before it answers, an accepted write survives a restart.
 
-Anything you can declare in the first load, you can also declare to a running server, apart from one thing. Not built yet: declaring a rendered field at a running server, so declare those in the first load.
+Anything you can declare in the first load, you can also declare to a running database, apart from one thing. Not built yet: declaring a rendered field while the database runs, so declare those in the first load.
 
 [Changing data](write-path.md) covers ingest, flushes and compaction.
 
@@ -87,7 +90,7 @@ Mosaica is designed to serve billions of points from one machine, by keeping the
 
 - **A tile is a run of rows.** Mosaica stores each view's items in Morton order, which puts points that are near each other on the map near each other on disc. Every map tile, at every zoom, is then one contiguous run of rows.
 - **Counts are set arithmetic.** What a viewer may see is a compressed bitmap of row numbers, and a filter is another. A tile's count is the size of their intersection within the tile's rows.
-- **The data stays on disc.** The server maps its files rather than loading them, so the operating system keeps the parts people are looking at in memory and drops the rest when memory runs short. A memory cap that's too low makes the server slower before it makes it fail.
+- **The data stays on disc.** Mosaica maps its files rather than loading them, so the operating system keeps the parts people are looking at in memory and drops the rest when memory runs short. A memory cap that's too low makes it slower before it makes it fail.
 - **What's reused stays warm.** Each viewer's visible set and the counts of each annotation level are cached, within limits you set, and also kept on disc, so a restart reads them back.
 - **Loading streams.** A build reads its input in passes sized to a memory budget, so your source files don't need to fit in memory either.
 
@@ -102,9 +105,9 @@ The [queries](queries.md) and [serving](serving.md) chapters explain these in fu
 | Several views over one set of items, and view groups | Built |
 | Annotation layers: clusters, hierarchies, regions and hulls | Built |
 | Reading records and annotations in bulk | Built, on all four surfaces. A read pinned to one version of the data is not built yet |
-| Declaring a rendered field at a running server | Not built yet. Declare it in the first load |
+| Declaring a rendered field while the database runs | Not built yet. Declare it in the first load |
 | Starting from an empty database | Not built yet. A database starts with a first load of at least one view's data |
-| Writing to a running server, and drawing a map, from the command line | Not built yet |
+| Writing to a running database, and drawing a map, from the command line | Not built yet |
 | Python and TypeScript packages | Built. Not yet published to PyPI or npm |
-| A conformance suite that checks a running server's answers against an independent reference implementation | Built |
+| A conformance suite that checks a running database's answers against an independent reference implementation | Built |
 | Running across several machines, and replicas | Not built |

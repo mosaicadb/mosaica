@@ -1,13 +1,13 @@
 # Install and configure
 
-This page shows how to install Mosaica as a standalone database server and configure it. Once it is running, you can reach it over its HTTP API, with the `mosaica` command line, or from the TypeScript and Python clients.
+This page shows how to install Mosaica as a standalone database and configure it. Once it is running, you can reach it over its HTTP API, with the `mosaica` command line, or from the TypeScript and Python clients.
 
 !!! tip "Prototyping in Python"
-    For local prototyping and analysis, you don't need a separate server. The Python client can run Mosaica itself, starting a private server for your notebook or script. [Your first map in Python](python.md) shows how.
+    For local prototyping and analysis, you don't need a separate database. The Python client can run one itself, privately, for your notebook or script. [Your first map in Python](python.md) shows how.
 
-## Install the server
+## Install Mosaica
 
-Release binaries and a Docker image will come with the first release. Until then, build the server from source. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu).
+Release binaries and a Docker image will come with the first release. Until then, build Mosaica from source. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu).
 
 ```bash
 git clone https://github.com/mosaicadb/mosaica ~/mosaica
@@ -15,7 +15,7 @@ cd ~/mosaica
 cargo install --locked --path crates/mosaica-cli
 ```
 
-This installs the `mosaica` command, which both builds databases and serves them. To run the server as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md).
+This installs the `mosaica` command, which creates databases and runs them. To run a database as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md).
 
 Mosaica runs on Linux and macOS, but not yet on Windows.
 
@@ -28,7 +28,7 @@ The clients aren't on PyPI or npm yet either, so install them from the same clon
 
 === "Python"
 
-    You'll need Python 3.10 or later, Rust, a C compiler and Node.js 22.15 or later. The first package carries the server, which the client uses when it runs Mosaica itself.
+    You'll need Python 3.10 or later, Rust, a C compiler and Node.js 22.15 or later. The first package carries Mosaica itself, which the client uses when it runs a database of its own.
 
     ```bash
     cd ~/mosaica
@@ -36,7 +36,7 @@ The clients aren't on PyPI or npm yet either, so install them from the same clon
     pip install -e 'clients/py[widget]'
     ```
 
-    On Windows, the Python client installs without the server, and connects to one running on another machine.
+    On Windows, the Python client installs without Mosaica, and connects to a database running on another machine.
 
 === "TypeScript"
 
@@ -46,20 +46,19 @@ The clients aren't on PyPI or npm yet either, so install them from the same clon
 
 ## Configure
 
-You configure a deployment with two files. In `corpus.toml` you describe the database's schema: its views, its fields and whether each is rendered or indexed, its vocabularies and annotation layers, and who may see what. Its `[sources]` table also names the files to load first. In `mosaica.toml` you set up the server: where it keeps its files, which schema it starts from, the addresses it listens on, the operator credential and its limits.
+You configure a deployment with two files. In `corpus.toml` you describe the database's schema: its views, its fields and whether each is rendered or indexed, its vocabularies and annotation layers, and who may see what. Its `[sources]` table also names the files to load first. In `mosaica.toml` you set up how the database runs: where it keeps its files, which schema it starts from, the addresses it listens on, the operator credential and its limits.
 
 ```mermaid
 flowchart LR
   schema["corpus.toml<br/>the schema"] --> build["mosaica build"]
   files["Parquet files"] --> build
-  build -->|first load| db[("database")]
-  settings["mosaica.toml<br/>server settings"] --> serve["mosaica serve"]
-  db <--> serve
-  serve --- control["control address<br/>declarations, inserts, deletions"]
-  serve --- viewer["viewer address<br/>reads"]
+  build -->|first load| db[("Mosaica")]
+  settings["mosaica.toml<br/>how it runs"] -->|mosaica serve| db
+  db --- control["control address<br/>declarations, inserts, deletions"]
+  db --- viewer["viewer address<br/>reads"]
 ```
 
-`mosaica build` creates the database and loads your files into it in one pass, which is the fastest way to load a lot of data at once. From then on, the server takes every change: you can declare new fields, views and layers, and insert or delete items, through its control address. The server reads `mosaica.toml` when it starts, so restart it after you change a setting.
+`mosaica build` creates the database and loads your files into it in one pass, which is the fastest way to load a lot of data at once, and `mosaica serve` starts it. From then on it takes every change: you can declare new fields, views and layers, and insert or delete items, through its control address. It reads `mosaica.toml` when it starts, so restart it after you change a setting.
 
 !!! note ""
     Not built yet: starting from an empty database. For now, a database starts with a build that loads at least one view's data.
@@ -67,7 +66,7 @@ flowchart LR
 ??? info "Where Mosaica looks for the two files"
     Mosaica looks for `mosaica.toml` in the directory you run it from, then in each directory above, unless you name one with `--deployment`. It finds the schema through `[build] schema`, which defaults to `schema.toml`, the name the examples in the repository and the Python client use, or through `--config`. A relative path in either file is read from that file's own directory.
 
-    If you'd rather declare a schema at a running server, `mosaica check --payloads` prints it as the requests to send.
+    If you'd rather declare a schema to a running database, `mosaica check --payloads` prints it as the requests to send.
 
 ## Try it
 
@@ -109,7 +108,7 @@ render = true
 Save this as `mosaica.toml`:
 
 ```toml
-# The database, the server's cache and its write-ahead log.
+# Where the database keeps its data, its cache and its write-ahead log.
 [bundle]
 path  = "bundle"
 cache = "cache"
@@ -152,7 +151,7 @@ built /home/you/places/bundle (v00000): 150000 items, 1 terms, 150000 pairs, 116
   view world: 150000 row(s)
 ```
 
-Make the operator credential and start the server:
+Make the operator credential and start the database:
 
 ```bash
 openssl rand -hex 16 > operator.secret; chmod 600 operator.secret
@@ -164,13 +163,13 @@ mosaica serve
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-You now have a server with 150,000 places in it. To see them on a map, follow the tutorial's [Open the map](first-map.md#open-the-map) step, using `~/places` where it says `~/ireland`.
+You now have a running database with 150,000 places in it. To see them on a map, follow the tutorial's [Open the map](first-map.md#open-the-map) step, using `~/places` where it says `~/ireland`.
 
-Every key this example leaves out is in the [corpus.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the server keeps on disc and how to back it up.
+Every key this example leaves out is in the [corpus.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the database keeps on disc and how to back it up.
 
 ## From Python
 
-In Python you don't write either file yourself. `mosaica.create("~/maps/places")` makes a database in that directory and writes both files there, and its first commit builds the database and starts a server for it. Because everything lives in that one directory, you can serve the database later without Python, with `mosaica serve --deployment ~/maps/places/mosaica.toml`.
+In Python you don't write either file yourself. `mosaica.create("~/maps/places")` makes a database in that directory and writes both files there, and its first commit builds the database and starts it. Because everything lives in that one directory, you can serve the database later without Python, with `mosaica serve --deployment ~/maps/places/mosaica.toml`.
 
 Leave out the path and you get a temporary database, which is deleted when Python exits. The [Python reference](../reference/python/connecting.md) has the details of `create()`, `open()` and `save()`.
 
@@ -178,4 +177,4 @@ Leave out the path and you get a temporary database, which is deleted when Pytho
 
 - [Your first map from files](first-map.md) walks through a map of Ireland, from downloading the data to filtering it in the browser.
 - [Your first map in Python](python.md), if you'd rather start from a data frame.
-- Before other people use your server, read [Users and roles](../system/users-and-roles.md) to set up who can sign in and what each of them may see.
+- Before other people use your database, read [Users and roles](../system/users-and-roles.md) to set up who can sign in and what each of them may see.
