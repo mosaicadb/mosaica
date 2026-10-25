@@ -10,7 +10,7 @@
 mod common;
 
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufReader, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Command, ExitStatus};
@@ -132,24 +132,9 @@ fn forward(
     plan: &Mutex<VecDeque<Option<Step>>>,
 ) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    let path = line.split_whitespace().nth(1).unwrap().to_owned();
-    let (mut length, mut bearer) = (0, String::new());
-    loop {
-        let mut header = String::new();
-        reader.read_line(&mut header).unwrap();
-        let Some((name, value)) = header.trim_end().split_once(':') else {
-            break;
-        };
-        match name.to_ascii_lowercase().as_str() {
-            "content-length" => length = value.trim().parse().unwrap(),
-            "authorization" => bearer = value.trim().to_owned(),
-            _ => {}
-        }
-    }
-    let mut body = vec![0; length];
-    reader.read_exact(&mut body).unwrap();
+    let request = common::read_request(&mut reader).expect("a whole request");
+    let bearer = request.header("authorization").to_owned();
+    let common::Request { path, body, .. } = request;
     bodies.lock().unwrap().push(serde_json::from_slice(&body).unwrap());
     let step = plan.lock().unwrap().pop_front().flatten();
 

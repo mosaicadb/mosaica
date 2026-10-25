@@ -1,10 +1,11 @@
 //! What the CLI's tests of a served bundle share: the binary, a generated deployment built into a
-//! bundle, and a server process stopped when its test ends.
+//! bundle, a server process stopped when its test ends, and the request a stand-in server reads.
 
 // Each test binary compiles this module on its own, so a helper one binary does not use is dead
 // code there.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
@@ -197,4 +198,47 @@ impl Drop for Server {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+/// One HTTP request as a stand-in server reads it.
+pub struct Request {
+    pub path: String,
+    /// Each header, its name lower-cased.
+    pub headers: HashMap<String, String>,
+    pub body: Vec<u8>,
+}
+
+impl Request {
+    /// The header `name`, written lower-case, or empty where the request has none.
+    pub fn header(&self, name: &str) -> &str {
+        self.headers.get(name).map_or("", String::as_str)
+    }
+}
+
+/// The next request on `reader`, or `None` where the connection ends before its head does.
+pub fn read_request(reader: &mut impl BufRead) -> Option<Request> {
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let path = line.split_whitespace().nth(1)?.to_owned();
+    let mut headers = HashMap::new();
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).ok()? == 0 {
+            return None;
+        }
+        let Some((name, value)) = line.trim_end().split_once(':') else {
+            break;
+        };
+        headers.insert(name.to_ascii_lowercase(), value.trim().to_owned());
+    }
+    let length = headers
+        .get("content-length")
+        .map_or(0, |length| length.parse().unwrap_or(0));
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).ok()?;
+    Some(Request {
+        path,
+        headers,
+        body,
+    })
 }

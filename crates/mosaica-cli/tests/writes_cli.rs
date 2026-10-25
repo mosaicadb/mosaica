@@ -865,7 +865,6 @@ struct Planned {
 type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 fn planned(plan: Vec<Option<&'static str>>) -> Planned {
-    use std::io::{BufRead, Read};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let seen: Seen = Default::default();
@@ -874,27 +873,10 @@ fn planned(plan: Vec<Option<&'static str>>) -> Planned {
         let mut plan = plan.into_iter();
         for stream in listener.incoming().flatten() {
             let mut reader = std::io::BufReader::new(stream);
-            let (mut batch, mut length) = (String::new(), 0);
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).unwrap_or(0) == 0 {
-                    break;
-                }
-                let line = line.trim_end();
-                if line.is_empty() {
-                    break;
-                }
-                if let Some((name, value)) = line.split_once(':') {
-                    match name.to_ascii_lowercase().as_str() {
-                        "content-length" => length = value.trim().parse().unwrap_or(0),
-                        "x-mosaica-batch-id" => batch = value.trim().to_owned(),
-                        _ => {}
-                    }
-                }
+            if let Some(request) = common::read_request(&mut reader) {
+                let batch = request.header("x-mosaica-batch-id").to_owned();
+                recorded.lock().unwrap().push((batch, request.body));
             }
-            let mut body = vec![0; length];
-            let _ = reader.read_exact(&mut body);
-            recorded.lock().unwrap().push((batch, body));
             let mut stream = reader.into_inner();
             match plan.next().flatten() {
                 Some(answer) => {
