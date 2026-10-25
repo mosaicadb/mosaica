@@ -1,6 +1,6 @@
 # Security
 
-When you give items access labels, Mosaica computes every figure a viewer receives from the items that viewer may see. That covers every count, density, cluster, label, sample and breakdown, not only which items they can open. This chapter sets out exactly what that guarantees, whom it trusts, what a viewer can still learn, and how the claims are checked. [Access control](access-control.md) describes the labels, terms and sessions themselves, and the full [threat model](https://github.com/mosaicadb/mosaica/blob/main/docs/dev/threat-model.md) states each claim in detail, with its evidence.
+Mosaica computes every figure a viewer receives from the items that viewer may see: every count, density, cluster, label, sample and breakdown, not only which items they can open. This chapter sets out exactly what that guarantees, whom it trusts, what a viewer can still learn, what is not claimed, and how the claims are checked. [Access control](access-control.md) describes the labels, terms and sessions themselves, and the full [threat model](https://github.com/mosaicadb/mosaica/blob/main/docs/dev/threat-model.md) states each claim in detail, with its evidence.
 
 ## What is guaranteed
 

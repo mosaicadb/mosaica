@@ -1,6 +1,6 @@
 # Users and roles
 
-Every request to Mosaica is made as someone, whether that's a person reading the map, your app's server or a script loading data. Most are principals, the accounts Mosaica keeps in its catalogue, though Mosaica also accepts identities your OpenID Connect provider vouches for, and it has one built-in superuser, the operator. This chapter covers what each of them holds and how each proves who it is. [Access control](access-control.md) explains how what they hold meets the labels on items.
+Every request to Mosaica is made as someone, whether that's a person reading the map, your app's server or a script loading data. It may be a principal, one of the accounts Mosaica keeps in its catalogue, or an identity your OpenID Connect provider vouches for, or the operator, Mosaica's one built-in superuser. This chapter covers what each of them holds and how each proves who it is. [Access control](access-control.md) explains how what they hold meets the labels on items.
 
 ## Who can make a request
 
@@ -46,7 +46,7 @@ OIDC identities can't be members of a group, but a provider's role mappings give
 
 API keys are what scripts and services use. A key looks like `msk_92ce602a0958_c37c…`: the twelve hex digits after `msk_` are a public prefix, by which you list and revoke it, and the 64 after the next underscore are the secret. Mosaica shows the whole key once, when it makes it, and keeps only a hash of the secret. You can give a key an expiry, at which every session started with it ends, and you can limit the permissions it holds. A limited key holds only those of its permissions its principal also holds, so a principal that both administers and writes can give a loading script a key that only writes. Revoking a key ends every session started with it.
 
-A session token is none of these credentials. It's what a credential gets you when it starts a session, it only reads, and the [access control chapter](access-control.md#getting-a-token) describes how each credential starts one.
+A session token is none of these credentials. It's what a credential gets you when it starts a session, and it only reads, at the viewer address. The [access control chapter](access-control.md#getting-a-token) describes how each credential starts one, and how an access token is checked against its provider's published keys, issuer, audience and expiry.
 
 ??? info "Password limits"
     Passwords are at least 15 characters by default, set by `min_password_length`. After 10 failed attempts for one name within 15 minutes, further attempts for that name are refused as a wrong password is, until the oldest leaves the window. `failed_attempt_limit` and `failed_attempt_window` under `[catalogue]` set both.
@@ -139,7 +139,7 @@ Each of these needs the `admin` permission, and goes to the control address with
 | A script that loads anything, and declares | A service, with an API key | `write` and `write-all` |
 | An administrator | A person or a service | `admin`, and `read` if they also read |
 
-When your server starts a session for a user, the session holds that user's terms and `read`, but never `read-all`, `write-all`, `admin` or `authorise-as`, even for a user who holds them, so your server's key can't read the whole database by acting as a user who may. If you need a session that reads everything through the session address, ask for one with the operator credential.
+When your server starts a session for a user, the session holds that user's terms, `read` and `write`, but never `read-all`, `write-all`, `admin` or `authorise-as`, even for a user who holds them. Your server's key can therefore read whatever any one user's terms admit, but it can't read everything through a user who holds `read-all`. If you need a session that reads everything through the session address, ask for one with the operator credential.
 
 [Call Mosaica from a backend](../guides/backend.md) sets up the server's role, and a user for it to act as, step by step.
 

@@ -2,7 +2,7 @@
 
 Annotation layers let you put structure over your items: clusters, a hierarchy of topics, regions such as country borders, and the names that label them. The examples here continue with the research papers of the [data model](data-model.md), with a `topics` layer over them.
 
-Mosaica calls each annotation in a layer an **artifact**. A topic is an artifact, for instance, and its members are the papers on that topic. Like an item, an artifact has a `mosaica_id`, which clients use to name it.
+Each annotation in a layer, such as one topic, is an **artifact**, and its members are the items it covers, such as the papers on that topic. Like an item, an artifact has a `mosaica_id`, which clients use to name it.
 
 ## Declaring a layer
 

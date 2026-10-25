@@ -14,7 +14,7 @@ Results come back as pyarrow tables, and the map is a Jupyter widget built from 
 
 ### TypeScript: applications in the browser
 
-The TypeScript client is for maps that other people use. If you want a map as an application of its own, the `<mosaica-explorer>` element gives you a whole map, with filters, layers and record cards, on any page, and the single-file bundle needs no build step. If you already have an application, the map, its panels, the store or the deck.gl layer fit into your own page, in any framework, with React wrappers. [Maps in the browser](browser-maps.md) explains the pieces and how to build on them.
+The TypeScript client is for maps that other people use. For a map that is an application of its own, the `<mosaica-explorer>` element gives you a whole map, with filters, layers and record cards, on any page, and the single-file bundle needs no build step. To add a map to an application you already have, the map, its panels, the store or the deck.gl layer fit into your own page, in any framework, with React wrappers. [Maps in the browser](browser-maps.md) explains the pieces and how to build on them.
 
 ### The command line: operators and scripts
 
@@ -28,7 +28,7 @@ From any other language, call the HTTP API directly. The [HTTP API reference](..
 
 Every read carries a token for one viewer, which the client sends to the viewer address. The viewer can get that token by logging in there, with a password, an API key or an OIDC access token. Or, if your own server has already signed them in, it can ask the session address for a token on their behalf. The session address takes an API key that may act as any viewer, so only your server should reach it.
 
-Writes go to the control address, with the operator's credential. A browser can call the viewer address only from the origins the deployment lists, and by default it lists none. [Access control](access-control.md#getting-a-token) describes each route in full.
+Writes go to the control address, with the operator credential, an API key or an OIDC access token. A browser can call the viewer address only from the origins the deployment lists, and by default it lists none. [Access control](access-control.md#getting-a-token) describes each route in full.
 
 ## Reading data out
 
@@ -41,7 +41,7 @@ Each client sends a read as you wrote it, choosing no fields, order or figures f
 | CLI | `mosaica items`, `mosaica artifacts`: Arrow IPC or Parquet, written page by page | `mosaica aggregate`, one grouping a run |
 
 ??? info "When a read stops part of the way"
-    A read that stops early gives back what it read and the cursor to continue from. In Python, a bulk read raises `PartialRead`. In TypeScript, a bulk read hands back the cursor after each page, and an aggregate raises `PartialAggregate`. The command line prints the cursor on stderr.
+    A read that stops early gives back what it read and the cursor to continue from. In Python, a bulk read or an aggregate raises `PartialRead`. In TypeScript, a bulk read hands back the cursor after each page, and an aggregate raises `PartialAggregate`. The command line prints the cursor on stderr.
 
 ## Not built yet
 

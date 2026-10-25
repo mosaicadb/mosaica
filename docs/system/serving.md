@@ -28,7 +28,7 @@ A bulk read arrives in pages, each followed by a page end. A response stops when
 
 Each kind of request has its own limit on how many run at once, so a long export can't starve the map. Map and item requests wait briefly for computing capacity, and are refused at once only when every place is taken. Bulk reads run two at a time by default, and a third is refused at once. Annotations by tile run one per compute thread by default, with as many again waiting.
 
-A request refused for load is answered `429` with a one-second wait. An insert refused because too many items are already waiting gets a longer wait, worked out from how fast those items are being written. Deletions and suppressions are never refused for load, as [changing data](write-path.md#deleting-and-suppressing) explains.
+A request refused for load is answered `429` with a one-second wait. An insert refused because too many items are already waiting gets a wait worked out from how fast those items are being written, which can also be a second. Deletions and suppressions are never refused for load, as [changing data](write-path.md#deleting-and-suppressing) explains.
 
 ??? info "Two `429`s you can see on a quiet server"
     Both ask the client to retry after the wait given:
@@ -44,9 +44,9 @@ A map request keeps its place until its whole answer has been sent, but it gives
 
 Viewers who hold the same access labels share a **grant**, and Mosaica keeps its expensive state per grant, not per viewer or per request. For each grant it keeps the visible set, which items the grant may see, arranged over the map's stored rows, built on the grant's first request. It also keeps each annotation level's figures, every artifact's count, centre and box over that visible set, built the first time the grant reads the level.
 
-Every later request, from any session with the grant, reuses them, and each request corrects them for whatever has been deleted, suppressed or ingested since they were built. Both survive a restart in part: the figures and the visible set's list of items are written to disc and read back, but the visible set's arrangement over the rows is held in memory only, so each grant's first request after a restart builds that again.
+Every later request, from any session with the grant, reuses them, and each request corrects them for whatever has been deleted, suppressed or ingested since they were built. The figures and the visible set's list of items are written to disc and read back after a restart. The visible set's arrangement over the rows is held in memory only, so each grant's first request after a restart builds that again.
 
-So the first request from a new grant is the slow one, and its cost grows with how much of the data the grant may see. If your viewers fall into a few groups, you pay it a few times. If every user has labels of their own, you pay it once per user. The [operating guide](../guides/operating.md#annotation-layers-and-new-viewers) explains how to plan for it.
+So the first request from a new grant is the slow one, and its cost grows with how much of the data the grant may see. You pay it once for each grant, so a few groups of viewers cost a few first requests, while users who each hold terms of their own cost one each. The [operating guide](../guides/operating.md#annotation-layers-and-new-viewers) explains how to plan for it.
 
 ??? info "After a flush, a merge or a compaction"
     When new data is flushed or segments are merged, a background pass brings each grant's visible set up to date. Until it reaches a grant, a viewer already shown the view is answered from the previous version after a flush, so new items appear a moment later, and is asked to retry after a merge. A session's first read in the view does the update itself. After a [compaction](write-path.md#background-maintenance), the same pass rebuilds each grant's visible set, and each level's figures are rebuilt for the compacted part of the data the next time they are read.

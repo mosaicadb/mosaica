@@ -40,7 +40,7 @@ Every session gives the viewer a token, a random string that carries nothing its
 
 The viewer can log in, with `POST /v1/login` at the viewer address, using a password, an API key or an OIDC access token. The session then holds the principal's terms, and `read-all` if the principal has it.
 
-More often, your own server starts the session for the viewer. It calls `POST /session/authorise` at the session address with an API key whose principal holds `authorise-as`, naming the principal to act as: a local one by name, or an OIDC identity by its access token. That session holds the principal's terms and never its `read-all`. Because the session address takes a key that can act as any viewer, it has a listener of its own, which only your server reaches.
+Or your own server starts the session for the viewer. It calls `POST /session/authorise` at the session address with an API key whose principal holds `authorise-as`, naming the principal to act as: a local one by name, or an OIDC identity by its access token. That session holds the principal's terms and never its `read-all`. Because the session address takes a key that can act as any viewer, it has a listener of its own, which only your server reaches.
 
 Finally, the operator credential can start a session at the session address that holds exactly a list of terms, belonging to no principal, or one that sees everything.
 
@@ -55,9 +55,14 @@ Mosaica checks OIDC access tokens, but it doesn't run a sign-in itself: your app
 
 ## When a session ends
 
-A session ends `token_max_lifetime` after it started, or sooner if the API key it was started with expires, or the `exp` of its access token passes. It also ends whenever the catalogue changes in a way that could change what it may see or do. That covers a grant or a membership changing, the principal being disabled or deleted, a password being set or cleared, its key being revoked, its provider changing or being dropped, and a change to a group that one of the provider's role mappings names. A change that widens access ends sessions too, so that they pick it up. For a session your server started, the same changes to your server's own principal end it as well, so a change to the integrator's principal ends every session it started.
+A session ends at the first of these:
 
-You can also end a session directly, with `POST /v1/logout`, with `POST /session/revoke`, or as an administrator. And because sessions are held only in memory, a restart ends them all.
+- `token_max_lifetime` after it started;
+- the expiry of the API key it was started with, or the `exp` of its access token;
+- a change to the catalogue that could change what it may see or do: a grant or a membership changed, the principal disabled or deleted, a password set or cleared, its key revoked, its provider changed or dropped, or a change to a group one of the provider's role mappings names. A change that widens access ends sessions too, so that they pick it up;
+- for a session your server started, the same changes to your server's own principal;
+- `POST /v1/logout`, `POST /session/revoke`, or an administrator ending it;
+- a restart, since sessions are held only in memory.
 
 A request with an ended session's token is answered `403 expired-token`, or `401` once Mosaica has forgotten the session, and after a restart. Either way, the client starts a new session.
 

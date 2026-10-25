@@ -1,6 +1,6 @@
 # Changing data
 
-You change a Mosaica database while it serves: you insert and edit items, delete or suppress them, and declare new fields, views and layers, all without stopping the map. A database's first load can come from `mosaica build`, which is the fast way to load a large set of files at once, but every change after that goes to the running database. The examples here continue with the research papers of the [data model](data-model.md).
+You change a Mosaica database while it serves: you insert and edit items, delete or suppress them, and declare new fields, views and layers, all without stopping the map. A database's first load comes from `mosaica build`, or from the Python client's first commit, which runs one, and is the fast way to load a large set of files at once. Every change after that goes to the running database. The examples here continue with the research papers of the [data model](data-model.md).
 
 Writes go to the control address, set by `[serve] control`. It is separate from the address viewers use, so you can keep it private or put it on a Unix socket. The tables below name each write's route, call or command on each surface.
 
@@ -32,7 +32,7 @@ Writes go to the control address, set by `[serve] control`. It is separate from 
 
 === "TypeScript"
 
-    `Control` sends each write with the operator's credential.
+    `Control` sends each write with the credential you give it: the operator credential, an API key or an OIDC access token.
 
     | Write | Call | Viewers see it |
     |---|---|---|
@@ -84,7 +84,7 @@ The answer lists each row's `mosaica_id`, counts the rows in `created`, `added`,
 
 ### Retrying safely
 
-Every batch carries an id of your choosing, in the `x-mosaica-batch-id` header, so that a client which loses an answer to a timeout can simply send the batch again. Ids belong to the caller that sends them. If the same caller sends the same bytes again under that id, Mosaica writes nothing and answers `replayed: true`, with the first answer's `mosaica_id`s and refused rows and every count 0. Different bytes under an id already used are refused with 409.
+Every batch must carry an id of your choosing, in the `x-mosaica-batch-id` header, so that a client which loses an answer to a timeout can simply send the batch again. Ids belong to the caller that sends them. If the same caller sends the same bytes again under that id, Mosaica writes nothing and answers `replayed: true`, with the first answer's `mosaica_id`s and refused rows and every count 0. Different bytes under an id already used are refused with 409.
 
 !!! note "How long a batch id is remembered"
     A batch id is remembered while the log holds the batch's record. Once the log rotates past it, which can happen soon after a flush, the id is remembered until `flush_max_age_secs` after the batch was accepted, and no longer once `flush_max_items` items of later batches have arrived. A retry after that is a new batch. Retry promptly.
@@ -135,10 +135,10 @@ A deletion or suppression applies to every request that starts after Mosaica ans
 
 A deleted item is hidden at once, but its values stay in the database's files until a [compaction](#background-maintenance) rewrites them, and so do the values an edit replaces. To remove them without waiting for the schedule, send `POST /control/compact` after the deletion.
 
+Compaction never removes three things: an access-label term that only deleted items carried, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
+
 ??? info "What a compaction removes, and when"
     After the compaction, the previous files are removed once no request is reading them, usually within one flush interval, and the log's copy goes when the log next rotates. The cache directory holds no field values; counts and positions the item contributed to are dropped when the cache is next swept, or evicted sooner.
-
-    Compaction never removes three things: an access-label term that only deleted items carried, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
 
 !!! note "Confirming that a compaction ran"
     `POST /control/compact` answers 202 with the request's number once it has asked for a compaction, and the compaction can still be refused, for example for lack of disc space, or fail. Check `/control/status` until `compaction.requests.answered` reaches that number. If `compaction.requests.last_refusal.request` then equals it, a shard was refused and `detail` says why; below it, nothing was refused; above it, a later request's refusal has replaced the record. To confirm the deleted rows are gone, check that `compaction.folds` has risen and `overlay.retirable` has fallen; `compaction.fold_failures` counts compactions that failed or were discarded. Where no compaction could start until the server is restarted, the request is answered 503 with the reason.

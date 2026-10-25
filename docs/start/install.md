@@ -36,7 +36,7 @@ The clients aren't on PyPI or npm yet either, so install them from the same clon
     pip install -e 'clients/py[widget]'
     ```
 
-    On Windows, the Python client installs without Mosaica, and connects to a database running on another machine.
+    On Windows, the Python client installs without the database itself, and connects to a database running on another machine.
 
 === "TypeScript"
 

@@ -39,7 +39,7 @@ The [TypeScript reference](../reference/typescript.md) and the [components refer
 
 ## What the store does
 
-Most of the store's value is its caching, which is tuned to how Mosaica serves a map. It asks for as little as it can and reuses everything an answer allows, so that using the database from a browser stays cheap and simple:
+The store is there to make using the database from a browser cheap and simple, and it does that mostly through caching tuned to how Mosaica serves a map. It asks for as little as it can and reuses everything an answer allows:
 
 - **Samples nest across zoom levels.** A tile's points are always the start of the points its deeper tiles draw. So while new tiles load after a zoom, the store draws the points it already holds from another depth in their place. The map never goes blank, and the stand-in points are ones the finished map will draw too.
 - **It asks only for tiles it does not hold.** Mosaica does no work for a tile a request leaves out, so a pan costs only the tiles newly on screen. Held tiles are kept within a memory budget. When it is full, tiles of other views leave first, then empty tiles, then the deepest, then the least recently used.

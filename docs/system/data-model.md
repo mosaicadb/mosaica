@@ -36,7 +36,7 @@ flowchart LR
     A relational database is built to answer any query, planned when you ask it. Mosaica is built to answer one question quickly over billions of rows: what is in this map tile, for this viewer, under these filters.
 
     - **Each layout is stored in its own order.** A tile is quick to read when its points are stored together. A table has one physical order, and a second order needs a second copy, as a covering index is. Mosaica keeps one such copy per view, ordered by position, and keeps what is true of the item in every view apart from them.
-    - **Drawn columns sit beside the positions.** A rendered field is copied next to each position, so drawing a tile reads one place. Turning `render` on later would rewrite every view, which Mosaica does only in a first load.
+    - **Drawn columns sit beside the positions.** A rendered field is copied next to each position, so drawing a tile reads one place. Turning `render` on later would rewrite every view, so it can only be done by rebuilding.
     - **Annotations are built in.** In SQL, counting the papers a viewer may see in each topic on screen is a join and a grouping on every request. Mosaica stores each artifact's members as a bitmap over the same item numbers as the viewer's visible items, so each count is one bitmap intersection.
     - **Rows are matched to items when they are written.** Mosaica has no query language and joins none of your tables at request time. Each row from a separate file, such as a field's values or a cluster's members, is tied to its item once, when it is inserted, by a unique field or, once the database is running, a `mosaica_id`. That is why a unique field matters.
 
@@ -55,7 +55,7 @@ In the example, each paper is an item, and its data is held in fields, one for e
 
 Then you decide what each field is for. If the map should colour or size points by it, **render** it: its value is sent with every point drawn, so you'd render `archive` to colour the map by archive. A rendered field can be filtered and counted too, but it makes every point larger to send, so render only what the map needs. Keywords and text can't be rendered.
 
-If viewers should filter, count or search by a field without it travelling with the points, **index** it instead. You'd index `year` to filter by a range of years, and `abstract` to search it. An index costs disc space and build time. A field can be both rendered and indexed.
+If viewers should filter, count or search by a field without it travelling with the points, **index** it. You'd index `year` to filter by a range of years, and `abstract` to search it. An index costs disc space and build time. A field can be both rendered and indexed.
 
 A field that is neither is still stored. It's shown when someone opens the item and returned when items are read in bulk, so it suits anything a viewer reads but never filters on, such as the full author list.
 
@@ -119,7 +119,7 @@ A layer is drawn on the views you name, or declared for a view group with its ow
 
 In the example, `archive` takes its values from a vocabulary of arXiv archives: `cs`, `math`, `astro-ph` and so on, each with an optional title such as "Computer Science". Several fields can share one vocabulary.
 
-When you declare a vocabulary, you choose how many values it can hold (up to 255, 65,535 or about 4.3 billion), which is fixed from then on. You also choose whether it's closed, refusing any value it doesn't hold, or open, adding new values as they arrive. And you choose who sees the list: a public vocabulary lists every value to every viewer, while a derived one lists to each viewer only the values carried by items they may see. Use derived when the list itself would reveal something, such as the names of clients.
+When you declare a vocabulary, you choose how many values it can hold (up to 255, 65,535 or about 4.3 billion), which is fixed from then on, and whether it's closed, refusing any value it doesn't hold, or open, adding new values as they arrive. The third choice is who sees the list: a public vocabulary lists every value to every viewer, while a derived one lists to each viewer only the values carried by items they may see. Use derived when the list itself would reveal something, such as the names of clients.
 
 ??? info "Codes and keys"
     Each value is stored as a numeric code, drawn at random unless you pin it in the declaration. A rebuild draws unpinned codes again, so name values by their keys rather than their codes.

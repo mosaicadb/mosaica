@@ -17,7 +17,7 @@ flowchart LR
   db[("Mosaica")]
 ```
 
-You load data over the HTTP API or from either client, and you can declare new fields and views and insert or delete records while the database serves. For a large first load, `mosaica build` loads a set of Parquet files in one pass, which is much faster than sending the same rows in batches.
+You load data over the HTTP API or from either client, and you can declare new fields and views and insert or delete records while the database serves. For a large first load, `mosaica build` loads a set of Parquet files in one pass, which is faster than sending the same rows in batches.
 
 !!! note ""
     Not built yet: starting from an empty database. A database's first load comes from `mosaica build`, or from the Python client's first commit, which runs one. Every load after that can come from anywhere.
