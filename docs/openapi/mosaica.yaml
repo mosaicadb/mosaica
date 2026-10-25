@@ -2867,8 +2867,8 @@ paths:
         `request` is the highest request that refusal answered. Read after the request is
         answered, a `last_refusal.request` below its number means none of its shards was refused;
         equal to it, a shard was refused while answering it, and `detail` says why and what to
-        do; above it, a later request's refusal has replaced the record, which then says nothing
-        about this one. A request answered without a refusal may still have failed: to confirm
+        do; above it, a later request's refusal has replaced the record, and since requests
+        answered together share a refusal, it may or may not concern this one. A request answered without a refusal may still have failed: to confirm
         the deleted rows were removed, check that `compaction.folds` rose and `overlay.retirable`
         fell, and see `compaction.fold_failures` for a compaction that failed or was discarded.
 

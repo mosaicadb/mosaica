@@ -2301,7 +2301,10 @@ async fn a_scheduled_refusal_leaves_the_requests_refusal() {
     config.compaction.after_deletions = Some(1);
     let (server, _faults) = serve_with_faults_and_config(&tmp, config).await;
     let (_, requested) = compact_refused_for_memory(&server).await;
+    assert_eq!(requested["last_refusal"]["had_bytes"], 1, "{requested}");
     let before = server.state.engine.write_executor_stats().fold_refusals;
+    // A different figure, so the scheduled refusal's record differs from the request's.
+    server.state.engine.set_fold_memory_for_test(Some(2));
 
     // One deletion is enough for the schedule to call for a compaction, which is refused too.
     let resp = server
@@ -2328,6 +2331,7 @@ async fn a_scheduled_refusal_leaves_the_requests_refusal() {
         status["compaction"]["last_refusal"]["gate"],
         "insufficient_memory"
     );
+    assert_eq!(status["compaction"]["last_refusal"]["had_bytes"], 2, "{status}");
     assert_eq!(status["compaction"]["requests"], requested, "{status}");
 }
 

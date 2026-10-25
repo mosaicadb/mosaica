@@ -334,7 +334,8 @@ Read after your request is answered:
 - Equal to it: a shard was refused while answering it. `last_refusal` names the shard and the
   reason in `gate`, gives the bytes needed and available for a memory or disc refusal, and says
   what to do in `detail`.
-- Above it: a later request's refusal has replaced the record, and it says nothing about yours.
+- Above it: a later request's refusal has replaced the record. Requests answered together share a
+  refusal, so it may or may not concern yours.
 
 A request answered without a refusal may still have failed. To confirm that the deleted rows are
 gone, check that `folds` rose and `overlay.retirable` fell; `fold_failures` counts the compactions
