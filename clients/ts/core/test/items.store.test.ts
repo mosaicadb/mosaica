@@ -164,9 +164,29 @@ describe('Store.items', () => {
     expect(browsed.at(-1)).toBeNull();
   });
 
-  it('refuses `inView` before the camera is set, and for another view than the current one', async () => {
+  it('waits with `inView` until the camera is set, then reads its box', async () => {
+    const {store, sent, clock} = await storeWith();
+    const read = store.items({fields: [], inView: true});
+    await clock.advance(1_000);
+    expect(sent).toHaveLength(0);
+    store.setView(camera(store.frame(), BOX, 400, 400));
+    await read;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body.filters).toEqual({region: {bbox: BOX}});
+  });
+
+  it('rejects an `inView` read waiting for the camera when the store is disposed, and sends nothing', async () => {
+    const {store, sent, clock} = await storeWith();
+    const read = store.items({fields: [], inView: true});
+    await clock.advance(1);
+    store.dispose();
+    await expect(read).rejects.toMatchObject({name: 'AbortError'});
+    expect(sent).toHaveLength(0);
+  });
+
+  it('refuses `inView` for another view than the current one at once, camera or not', async () => {
     const {store, sent, clock, scheduler} = await storeWith();
-    await expect(store.items({fields: [], inView: true})).rejects.toThrow();
+    await expect(store.items({fields: [], inView: true, view: 'other'})).rejects.toThrow();
     store.setView(camera(store.frame(), BOX, 400, 400));
     await clock.advance(600);
     scheduler.flush();

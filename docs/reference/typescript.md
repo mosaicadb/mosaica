@@ -32,7 +32,9 @@ const first = await read.next();   // read.head.matched counts every match
 const second = await read.next();  // the next 25, read from the cursor
 ```
 
-The filters are those in force when `items` is called. A read already open does not follow a later change of filters, so a page that lists matches reads again after one.
+The filters are those in force when the request goes out. A read already open does not follow a later change of filters, so a page that lists matches reads again after one.
+
+With `inView: true`, `items` waits until there is an area to read. Called before the map has reported its camera and with no region selected, it sends nothing until the first `setView` or selected region, then reads that area, so a page can ask for its list as soon as it loads. Disposing the store while it waits rejects the call with an `AbortError`, as aborting its `signal` does. Naming another `view` than the current one with `inView` is refused at once.
 
 ## When the server is busy
 

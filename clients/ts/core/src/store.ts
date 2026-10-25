@@ -673,15 +673,19 @@ export interface Store {
    * const second = await read.next(); // when the reader asks for more
    * ```
    *
-   * The filters are taken when it is called; a later `setFilters` does not change a read already
-   * open. Waits for `/v1/meta`.
+   * The filters are taken when the request goes out; a later `setFilters` does not change a read
+   * already open. Waits for `/v1/meta`, and with `inView` for the camera: a call made before the map
+   * has called `setView` or a region is selected sends nothing until one of them arrives, then reads
+   * that area. Disposing the store, or aborting `signal`, while it waits rejects it.
    *
    * @param req - The read. `view` defaults to the current view and `filters` to
    *   {@link Store.requestFilters}; see {@link StoreItemsRequest}.
    * @param signal - Aborts the read.
    * @throws {@link MosaicaError} where the server refuses the first request, as
    *   {@link MosaicaClient.items} says, or where the store's read of `/v1/meta` was refused;
-   *   `Error` for `inView` before the camera is set or with another view than the current one.
+   *   `Error` at once for `inView` with another view than the current one; a `DOMException` named
+   *   `AbortError` where the store is disposed before the camera is set, and `signal`'s reason where
+   *   it aborts first.
    */
   items(req: StoreItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>>;
   /**
@@ -2154,6 +2158,7 @@ export function createStore(options: StoreOptions): Store {
   function setView(input: ViewInput): void {
     if (!Number.isFinite(input.zoom)) throw new TypeError(`setView was given zoom ${String(input.zoom)}: ViewInput.zoom is required, the camera's zoom as a finite number`);
     lastView = {input};
+    areaChanged();
     // From here the request's own status transitions answer for the status.
     awaitingSwitchFrame = false;
     const current = views.current;
@@ -2473,18 +2478,50 @@ export function createStore(options: StoreOptions): Store {
     return client.browse(token, {...req, view, filters});
   }
 
+  /** Woken by `setView`, a region selected and `dispose`: an `inView` read waiting for its area. */
+  const areaWaits = new Set<() => void>();
+
+  function areaChanged(): void {
+    const waits = [...areaWaits];
+    areaWaits.clear();
+    for (const wake of waits) wake();
+  }
+
+  /** Settles at the next `setView`, region selected or `dispose`; rejects where `signal` aborts first. */
+  function nextArea(signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const aborted = () => {
+        areaWaits.delete(wake);
+        reject(signal!.reason);
+      };
+      const wake = () => {
+        signal?.removeEventListener('abort', aborted);
+        resolve();
+      };
+      if (signal?.aborted) return reject(signal.reason);
+      signal?.addEventListener('abort', aborted, {once: true});
+      areaWaits.add(wake);
+    });
+  }
+
   async function items(req: StoreItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>> {
     const {inView, filters: _filters, view: _view, ...rest} = req;
-    const read = await readDefaults(req);
-    let filters = read.filters;
-    if (inView) {
-      if (read.view !== read.current) throw new Error(`\`inView\` reads the current view '${read.current}': leave \`view\` out or set it to that.`);
-      const area = countedArea();
-      if (area === null) throw new Error('`inView` reads the area the camera shows: call setView before reading it.');
-      // A caller's own filters do not carry the selected region, so its leaf is joined to them.
-      filters = read.own ? withRegion(filters, area.operand, area.outside) : withArea(filters, area);
+    for (;;) {
+      const read = await readDefaults(req);
+      let filters = read.filters;
+      if (inView) {
+        if (read.view !== read.current) throw new Error(`\`inView\` reads the current view '${read.current}': leave \`view\` out or set it to that.`);
+        const area = countedArea();
+        if (area === null) {
+          await nextArea(signal);
+          if (disposed) throw new DOMException('the store was disposed before the camera was set', 'AbortError');
+          continue;
+        }
+        // A caller's own filters do not carry the selected region, so its leaf is joined to them.
+        filters = read.own ? withRegion(filters, area.operand, area.outside) : withArea(filters, area);
+      }
+      return client.items(read.token, {...rest, view: read.view, ...(filters === null ? {} : {filters})}, signal);
     }
-    return client.items(read.token, {...rest, view: read.view, ...(filters === null ? {} : {filters})}, signal);
   }
 
   function setMembers(clauses: readonly MemberClause[]): void {
@@ -2732,6 +2769,7 @@ export function createStore(options: StoreOptions): Store {
     dropTitles();
     stopTitles();
     inView.dispose();
+    areaChanged();
     if (inViewTimer !== null) clock.cancel(inViewTimer);
     if (probe !== null) clock.cancel(probe);
     if (identityRetry !== null) clock.cancel(identityRetry);
@@ -2795,7 +2833,10 @@ export function createStore(options: StoreOptions): Store {
     needShape: (id) => shapes.need(id),
     clearSelection,
     select(shape) {
-      if (region.select(shape, projections.marks)) requery();
+      if (region.select(shape, projections.marks)) {
+        requery();
+        areaChanged();
+      }
     },
     extentOf,
     dataXY,
