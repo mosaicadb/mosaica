@@ -5716,11 +5716,12 @@ impl Config {
                     fields: group.fields.clone(),
                     point_visibility: group.point_visibility.clone(),
                     select,
-                    visibility: if group.members.is_some() {
-                        group.visibility.clone()
-                    } else {
-                        view.visibility.clone().or_else(|| group.visibility.clone())
-                    },
+                    // **The record's own gate, on the owner and on every group sharing its
+                    // views**, as a view created while the service runs stores it
+                    // (`Manifest::with_roster`): the group's gate is the group descriptor's, and
+                    // the gate is applied with it at authorise, so copying it here would store one
+                    // declaration two ways.
+                    visibility: view.visibility.clone(),
                 });
             }
         }

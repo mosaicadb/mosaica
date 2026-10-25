@@ -687,7 +687,7 @@ fn a_roster_tables_gate_column_may_be_a_large_list_of_large_strings() {
         Field::new("label", DataType::Utf8, false),
         Field::new("starts", DataType::Int64, false),
     ]));
-    // Q2: two labels; Q3: one label holding a conjunction; Q4: null, so the group's gate.
+    // Q2: two labels; Q3: one label holding a conjunction; Q4: null, so no gate of its own.
     let labels = LargeStringArray::from(vec!["finance", "legal", "legal&finance"]);
     let gates = LargeListArray::try_new(
         gate_field,
@@ -749,7 +749,7 @@ fields = { key = "quarter" }
         Some(vec!["finance&legal".to_string()]),
         "an element is one expression, stored as its canonical text"
     );
-    assert_eq!(gate_of(2), None, "a null row takes the group's gate");
+    assert_eq!(gate_of(2), None, "a null row states no gate of its own");
 }
 
 /// **Declared words are stored trimmed** by the rule a running service stores them by: a plain
@@ -838,9 +838,12 @@ fields = { key = "quarter" }
     assert_eq!(view("open").visibility, None);
     assert_eq!(view("open").point_visibility.default.as_deref(), Some("public"));
     assert_eq!(view("quarter:2026-Q2").visibility, labels(&["finance"]));
-    // A roster row of ` public ` and a null row both take the group's gate, trimmed.
-    assert_eq!(view("quarter:2026-Q3").visibility, labels(&["0"]));
-    assert_eq!(view("quarter:2026-Q4").visibility, labels(&["0"]));
+    // A roster row of ` public ` and a null row state no gate of their own; the group's, trimmed,
+    // is the group's, applied beside each view's at authorise.
+    assert_eq!(view("quarter:2026-Q3").visibility, None);
+    assert_eq!(view("quarter:2026-Q4").visibility, None);
+    let quarter = config.view_groups.iter().find(|g| g.name == "quarter").unwrap();
+    assert_eq!(quarter.visibility, labels(&["0"]));
     assert_eq!(
         view("quarter:2026-Q4").point_visibility.default.as_deref(),
         Some("public")

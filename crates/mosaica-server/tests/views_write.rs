@@ -543,6 +543,93 @@ async fn a_created_view_with_no_rows_survives_a_flush_and_is_listed_once() {
     );
 }
 
+/// **A view a build made takes its own record again as a view created while the service runs
+/// does.** Its group is gated and it states no gate of its own, so both paths store none for it
+/// and apply the group's gate beside it: the record as the declaration writes it, sent again, is
+/// the view that holds the key, and the same record with a gate of its own is refused.
+#[tokio::test]
+async fn a_built_view_of_a_gated_group_given_its_declared_record_again_is_that_view() {
+    use arrow::array::{Float64Array, StringArray, UInt64Array};
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    let ids = || 0..20u64;
+    write_parquet(
+        &dir.join("years.parquet"),
+        vec![
+            column("entity_id", false, UInt64Array::from_iter_values(ids())),
+            column("x", false, Float64Array::from_iter_values(ids().map(|e| e as f64))),
+            column("y", false, Float64Array::from_iter_values(ids().map(|e| e as f64))),
+            column(
+                "year",
+                false,
+                StringArray::from_iter_values(ids().map(|e| if e < 10 { "2010" } else { "2011" })),
+            ),
+        ],
+    );
+    write_parquet(
+        &dir.join("roster.parquet"),
+        vec![
+            column("year", false, StringArray::from(vec!["2010", "2011"])),
+            column("label", false, StringArray::from(vec!["ten", "eleven"])),
+        ],
+    );
+    let declaration = dir.join("config.toml");
+    std::fs::write(
+        &declaration,
+        r#"
+[sources]
+years  = "years.parquet"
+roster = "roster.parquet"
+
+[defaults]
+allocation_view = "years:2010"
+
+[[attribute]]
+name   = "id"
+type   = "u64"
+unique = true
+field  = "entity_id"
+source = "years"
+
+[[view_group]]
+name             = "years"
+extent           = { min = 0.0, max = 1000.0 }
+source           = "years"
+fields           = { view = "year" }
+point_visibility = { default = "public" }
+visibility       = "finance"
+metadata         = { label = "text" }
+
+[view_group.views]
+source = "roster"
+fields = { key = "year" }
+"#,
+    )
+    .unwrap();
+    mosaica_build::build(&args_from_declaration(&declaration, &dir.join("bundle")))
+        .expect("the declaration builds");
+    let server = open(dir).await;
+    let put = |record: Value| {
+        server
+            .client
+            .put(server.control_url("/control/views/years/2010"))
+            .bearer_auth(OPERATOR_CREDENTIAL)
+            .json(&record)
+            .send()
+    };
+
+    let resp = put(json!({ "metadata": { "label": "ten" } })).await.unwrap();
+    assert_eq!(resp.status(), 200, "the declared record again");
+    let answer: Value = resp.json().await.unwrap();
+    assert_eq!(answer["view"], "years:2010");
+    assert_eq!(answer["existing"], true);
+    let resp = put(json!({ "metadata": { "label": "ten" }, "visibility": "finance" }))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 409, "a gate of its own is another record");
+    server.shutdown().await;
+}
+
 /// Every arm the create refuses, and the status each takes (`views.md` §3.2). They are told apart
 /// because the caller's remedy differs: a refused record is one to correct, a taken or burnt key
 /// is one to replace, and an unknown group is not a view at all.
