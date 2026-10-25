@@ -1,6 +1,6 @@
 # Size a deployment
 
-How much memory and disc Mosaica needs depends on how many items you have and on what your schema does with their fields. The most reliable estimate comes from building a sample of your own data, so this page explains what uses each resource and then how to measure.
+How much memory and disc Mosaica needs depends on how many items you have and on what your schema does with their fields. The most reliable estimate comes from building a sample of your own data, so this page explains what uses each resource and then how to build that sample.
 
 ## Memory
 
