@@ -77,6 +77,38 @@ impl ViewMetadataValue {
             ViewMetadataValue::TimestampUs(_) => "timestamp_us",
         }
     }
+
+    /// The value as a request body writes it, a timestamp as its microseconds.
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            ViewMetadataValue::Bool(v) => (*v).into(),
+            ViewMetadataValue::Int(v) | ViewMetadataValue::TimestampUs(v) => (*v).into(),
+            ViewMetadataValue::Float(v) => (*v).into(),
+            ViewMetadataValue::Text(v) => v.as_str().into(),
+        }
+    }
+
+    /// A value a request body writes under `name`, read by its JSON shape alone;
+    /// [`ViewMetadataType::typed`] stores it under its declaration.
+    pub fn from_json(name: &str, value: &serde_json::Value) -> Result<Self, String> {
+        match value {
+            serde_json::Value::Bool(v) => Ok(ViewMetadataValue::Bool(*v)),
+            serde_json::Value::String(v) => Ok(ViewMetadataValue::Text(v.clone())),
+            serde_json::Value::Number(n) => n
+                .as_i64()
+                .map(ViewMetadataValue::Int)
+                .or_else(|| n.as_f64().map(ViewMetadataValue::Float))
+                .ok_or_else(|| format!("metadata '{name}' is {n}, a number no metadata type holds")),
+            serde_json::Value::Null => Err(format!(
+                "metadata '{name}' is null; give it a value, since every name a view group \
+                 declares is required"
+            )),
+            _ => Err(format!(
+                "metadata '{name}' is an array or an object; give one string, number or boolean, \
+                 or declare a per-point value as an attribute"
+            )),
+        }
+    }
 }
 
 /// The kind one declared metadata name takes.
@@ -184,8 +216,9 @@ impl ViewMetadataType {
             ViewMetadataType::TimestampUs => "a date (`2026-04-01`), a date-time with an offset \
                  (`2026-04-01T00:00:00Z`), or microseconds since the Unix epoch as an integer"
                 .to_string(),
-            ViewMetadataType::Category => "the key of a value of its vocabulary, as a string"
-                .to_string(),
+            ViewMetadataType::Category => {
+                "the key of a value of its vocabulary, as a string".to_string()
+            }
             integer => {
                 let (min, max) = integer.integer_range().unwrap_or((i64::MIN, i64::MAX));
                 format!("an integer from {min} to {max}")
@@ -432,6 +465,23 @@ mod tests {
         assert!(ViewMetadataType::Text
             .typed("s", ViewMetadataValue::Int(1))
             .is_err());
+    }
+
+    #[test]
+    fn a_stored_value_written_as_json_reads_back_as_itself() {
+        for (ty, value) in [
+            (ViewMetadataType::Bool, ViewMetadataValue::Bool(true)),
+            (ViewMetadataType::I16, ViewMetadataValue::Int(-3)),
+            (ViewMetadataType::Float, ViewMetadataValue::Float(2.0)),
+            (ViewMetadataType::Text, ViewMetadataValue::Text("Q1".into())),
+            (ViewMetadataType::TimestampUs, ViewMetadataValue::TimestampUs(7)),
+        ] {
+            let written = serde_json::to_string(&value.to_json()).unwrap();
+            let read = ViewMetadataValue::from_json("m", &serde_json::from_str(&written).unwrap());
+            assert_eq!(ty.typed("m", read.unwrap()), Ok(value));
+        }
+        assert!(ViewMetadataValue::from_json("m", &serde_json::Value::Null).is_err());
+        assert!(ViewMetadataValue::from_json("m", &serde_json::json!([1])).is_err());
     }
 
     #[test]

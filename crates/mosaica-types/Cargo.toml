@@ -13,6 +13,8 @@ description = "Shared identifier and value types for Mosaica. Internal crate of 
 
 [dependencies]
 serde = { workspace = true, optional = true }
+# A roster metadata value as a request body writes it (`view::ViewMetadataValue::to_json`).
+serde_json = { workspace = true, optional = true }
 # A layer declaration's labels are read by the one label rule.
 mosaica-access = { workspace = true }
 # `IdentityKey::generate`: the operating system's random source, for the key every new bundle gets.
@@ -35,8 +37,7 @@ libc = "0.2"
 # unrelated member's dependency decided. `cargo tree -e normal` does not see a dev edge, so
 # check-layers.sh's rule 2 is unaffected.
 mosaica-types = { path = ".", features = ["serde"] }
-# Test-only: parses reference/vectors/mosaica_id.json against the known-answer vectors
-# (Task 5). The crate itself remains dependency-free of serde_json.
+# Test-only: parses reference/vectors/mosaica_id.json against the known-answer vectors.
 serde_json = { workspace = true }
 # Test-only: the I4 compile-fail rows (conformance §4.1). `cargo build` does not build
 # dev-dependencies, so nothing a release binary carries can reach this.
@@ -49,4 +50,4 @@ trybuild = { workspace = true }
 #
 # It also gates `layer`, which is a whole module rather than a set of derives: a layer declaration
 # exists only to be written down, so a build without serde has no use for the type at all.
-serde = ["dep:serde"]
+serde = ["dep:serde", "dep:serde_json"]

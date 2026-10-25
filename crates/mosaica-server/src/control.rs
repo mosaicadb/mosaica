@@ -1356,36 +1356,6 @@ struct ViewRecord {
     metadata: serde_json::Map<String, serde_json::Value>,
 }
 
-/// One supplied metadata value, typed by its JSON shape; the executor checks the type against
-/// the group's declaration. Integers and floats are kept apart, not coerced.
-fn metadata_value(name: &str, value: &serde_json::Value) -> Result<ViewMetadataValue, ApiError> {
-    match value {
-        serde_json::Value::Bool(v) => Ok(ViewMetadataValue::Bool(*v)),
-        serde_json::Value::String(v) => Ok(ViewMetadataValue::Text(v.clone())),
-        serde_json::Value::Number(n) => {
-            if let Some(v) = n.as_i64() {
-                // An integer may be an `int`, a category code or a `timestamp_us`; the
-                // declaration decides which.
-                Ok(ViewMetadataValue::Int(v))
-            } else if let Some(v) = n.as_f64() {
-                Ok(ViewMetadataValue::Float(v))
-            } else {
-                Err(ApiError::Contract(format!(
-                    "metadata '{name}' is a number this build cannot store"
-                )))
-            }
-        }
-        serde_json::Value::Null => Err(ApiError::Contract(format!(
-            "metadata '{name}' is null; give it a value, since every name a view group declares \
-             is required"
-        ))),
-        _ => Err(ApiError::Contract(format!(
-            "metadata '{name}' is an array or an object; give one string, number or boolean, or \
-             declare a per-point value as an attribute"
-        ))),
-    }
-}
-
 /// `PUT /control/views/{group}/{key}`: creates a view of a group. The executor checks the group
 /// and key, so two racing requests cannot both take one key: 404 for an unknown group, 200 for a
 /// live key holding this record, 409 for one holding another, 422 for a bad record. A dropped key
@@ -1399,7 +1369,10 @@ async fn create_view(
     let record = body.0;
     let mut metadata = std::collections::BTreeMap::new();
     for (name, value) in &record.metadata {
-        metadata.insert(name.clone(), metadata_value(name, value)?);
+        metadata.insert(
+            name.clone(),
+            ViewMetadataValue::from_json(name, value).map_err(ApiError::Contract)?,
+        );
     }
     let visibility = record
         .visibility

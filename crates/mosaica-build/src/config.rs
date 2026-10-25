@@ -6093,15 +6093,7 @@ pub fn group_view_payloads(config: &Config) -> Result<Vec<serde_json::Value>> {
             let metadata: serde_json::Map<String, serde_json::Value> = view
                 .metadata
                 .into_iter()
-                .map(|(name, value)| {
-                    let value = match value {
-                        ViewMetadataValue::Bool(v) => v.into(),
-                        ViewMetadataValue::Int(v) | ViewMetadataValue::TimestampUs(v) => v.into(),
-                        ViewMetadataValue::Float(v) => v.into(),
-                        ViewMetadataValue::Text(v) => v.into(),
-                    };
-                    (name, value)
-                })
+                .map(|(name, value)| (name, value.to_json()))
                 .collect();
             let mut body = serde_json::Map::new();
             insert_some(&mut body, "visibility", view.visibility);
