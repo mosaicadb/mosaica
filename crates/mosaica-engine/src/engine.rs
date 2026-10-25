@@ -1261,10 +1261,11 @@ impl Engine {
         )?;
         let bundle = served_bundle(bundle, &state, &vocabularies);
         // A layer naming a view group is drawn on the views the replayed roster leaves it, and its
-        // shapes given a form on each, as the running service gave them.
+        // shapes hold a form on exactly those, as the running service left them. Every such layer
+        // is redrawn: a publication replayed from the log holds forms for the views of its day.
         let group = mosaica_store::manifest::group_views(&bundle.manifest.groups);
-        for (layer, view, siblings) in state.registry.follow_groups(group) {
-            state.artifacts.draw_shapes_on(&layer, &view, &siblings);
+        for followed in state.registry.follow_groups(group) {
+            state.artifacts.redraw_shapes(&followed.layer, &followed.views, &followed.groups);
         }
         // A dropped view's artifacts are deleted, with their keys free, wherever the log or the
         // deny state does not already hold the deletion.

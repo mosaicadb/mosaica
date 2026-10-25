@@ -494,8 +494,27 @@ async fn a_followed_view_serves_the_layers_artifacts_and_a_dropped_one_leaves_it
     server.shutdown().await;
 }
 
+/// A box artifact of `regions/boxes` keyed `key`, published or sent again: the status and the
+/// body.
+async fn put_box(server: &TestServer, key: &str) -> (u16, String) {
+    let resp = server
+        .client
+        .put(server.control_url("/control/layers/regions%2Fboxes/artifacts?wait=visible"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&json!({
+            "artifacts": [{ "key": key, "members": {}, "bbox": [0.0, 0.0, 1000.0, 1000.0] }]
+        }))
+        .send()
+        .await
+        .unwrap();
+    (resp.status().as_u16(), resp.text().await.unwrap())
+}
+
 /// **A shape layer named on a group draws its shapes on a view created in the group later**, and
-/// counts the points there, before and after a restart: a group's views share its frame.
+/// counts the points there, before and after a restart: a group's views share its frame. The
+/// same shape sent again is the artifact that holds it while the group gains a view and after it
+/// loses one, before and after a restart, whether it was published before the view existed or
+/// while it did.
 #[tokio::test]
 async fn a_shape_layer_named_on_a_group_draws_on_a_view_created_in_it() {
     const LAYER: &str = "regions/boxes";
@@ -519,27 +538,44 @@ async fn a_shape_layer_named_on_a_group_draws_on_a_view_created_in_it() {
     )
     .await;
     assert_eq!(status, 201, "{body}");
-    let resp = server
-        .client
-        .put(server.control_url("/control/layers/regions%2Fboxes/artifacts"))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .json(&json!({
-            "artifacts": [{ "key": "box", "members": {}, "bbox": [0.0, 0.0, 1000.0, 1000.0] }]
-        }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status(), 201, "{}", resp.text().await.unwrap());
+    let (status, body) = put_box(&server, "box").await;
+    assert_eq!(status, 201, "{body}");
 
     create_year(&server, "2012").await;
     place(&server, "into-2012", "years:2012", 1000..1006).await;
     assert_eq!(browse(&server, "years:2012", LAYER).await.get("box"), Some(&6));
+    let (status, body) = put_box(&server, "box").await;
+    assert_eq!(status, 200, "held once the group gains a view: {body}");
+    let (status, body) = put_box(&server, "late").await;
+    assert_eq!(status, 201, "{body}");
     let server = restart(server, &built.dir).await;
     assert_eq!(
         browse(&server, "years:2012", LAYER).await.get("box"),
         Some(&6),
         "after a restart"
     );
+    for key in ["box", "late"] {
+        let (status, body) = put_box(&server, key).await;
+        assert_eq!(status, 200, "{key} held after a restart: {body}");
+    }
+
+    let resp = server
+        .client
+        .delete(server.control_url("/control/views/years/2012?wait=visible"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    for key in ["box", "late"] {
+        let (status, body) = put_box(&server, key).await;
+        assert_eq!(status, 200, "{key} held once the group loses a view: {body}");
+    }
+    let server = restart(server, &built.dir).await;
+    for key in ["box", "late"] {
+        let (status, body) = put_box(&server, key).await;
+        assert_eq!(status, 200, "{key} held after the drop and a restart: {body}");
+    }
     server.shutdown().await;
 }
 

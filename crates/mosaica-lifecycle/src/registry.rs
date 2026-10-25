@@ -1023,6 +1023,16 @@ impl ResolvedLayers {
     }
 }
 
+/// One layer [`LayerRegistry::follow_groups`] drew again: the views it is drawn on now, the
+/// views of each group it names, and whether its views changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Followed {
+    pub layer: String,
+    pub views: Vec<String>,
+    pub groups: Vec<Vec<String>>,
+    pub changed: bool,
+}
+
 /// What [`LayerRegistry::prepare_create`] prepares: the record that registers a new layer, or the
 /// space of the live layer that already holds the declaration.
 #[derive(Debug)]
@@ -1163,31 +1173,27 @@ impl LayerRegistry {
     }
 
     /// Draw each layer that named a view group on the views `group` answers it holds now, from
-    /// the names it was written with. Returns every view a layer is drawn on through a group, as
-    /// `(layer, view, the group's views)`, for its shapes to be given a form there
-    /// ([`crate::membership::ArtifactStore::draw_shapes_on`]).
-    pub fn follow_groups(
-        &mut self,
-        group: impl Fn(&str) -> Option<Vec<String>>,
-    ) -> Vec<(String, String, Vec<String>)> {
-        let mut drawn = Vec::new();
+    /// the names it was written with. Returns each such layer's views and the views of each group
+    /// it names, for its shapes to hold a form on exactly those views
+    /// ([`crate::membership::ArtifactStore::redraw_shapes`]).
+    pub fn follow_groups(&mut self, group: impl Fn(&str) -> Option<Vec<String>>) -> Vec<Followed> {
+        let mut followed = Vec::new();
         for (name, layer) in self.layers.iter_mut() {
             if layer.written_views.is_empty() {
                 continue;
             }
-            layer.declaration.views =
-                mosaica_types::layer::expand_views(&layer.written_views, &group, |_| true)
-                    .expect("every name that is no group is kept as a view");
-            for written in &layer.written_views {
-                let Some(views) = group(written) else {
-                    continue;
-                };
-                for view in &views {
-                    drawn.push((name.clone(), view.clone(), views.clone()));
-                }
-            }
+            let views = mosaica_types::layer::expand_views(&layer.written_views, &group, |_| true)
+                .expect("every name that is no group is kept as a view");
+            let changed = views != layer.declaration.views;
+            layer.declaration.views = views.clone();
+            followed.push(Followed {
+                layer: name.clone(),
+                views,
+                groups: layer.written_views.iter().filter_map(|w| group(w)).collect(),
+                changed,
+            });
         }
-        drawn
+        followed
     }
 
     /// Validates a batch of artifacts against the layer they are offered to, claims ordinals and

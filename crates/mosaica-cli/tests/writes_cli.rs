@@ -831,8 +831,10 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     // Without a credential the request goes bare and a server with users refuses it; a view the
     // service lacks refuses the page.
     let control = served.bound.control.clone();
-    let bare = run(&dir, &["status", "--control", &control], &[], b"");
-    assert!(!bare.status.success() && bare.stdout.is_empty(), "{bare:?}");
+    let row = b"{\"id\": 9000, \"x\": 1.0, \"y\": 1.0}\n";
+    let insert = ["insert", "-", "--format", "ndjson", "--view", "s0", "--control", &control];
+    let bare = refused(run(&dir, &insert, &[], row));
+    assert_eq!(bare["refused_pages"][0]["status"], 401, "{bare}");
     let nowhere = refused(run(
         &dir,
         &[
@@ -846,7 +848,7 @@ fn deletions_and_suppressions_hold_after_a_restart() {
             &control,
         ],
         &[OPERATOR],
-        b"{\"id\": 9000, \"x\": 1.0, \"y\": 1.0}\n",
+        row,
     ));
     assert_eq!(nowhere["refused_pages"][0]["status"], 404, "{nowhere}");
 }

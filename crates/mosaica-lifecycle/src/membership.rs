@@ -1957,27 +1957,26 @@ impl ArtifactStore {
         shapes[idx] = shape.map(Box::new);
     }
 
-    /// Give each shape of `layer` that holds no canonical form for `view` the form one of
-    /// `siblings` holds. `view` is one the layer is drawn on through a view group it names, and
-    /// `siblings` that group's views: they share its frame and projection, which are all a
-    /// canonical form is computed from, so these are the bytes a publication would give `view`.
-    /// A shape that already holds a form for `view` keeps it.
-    pub fn draw_shapes_on(&mut self, layer: &str, view: &str, siblings: &[String]) {
+    /// Keep each shape of `layer` holding a canonical form for exactly `views`, the views the
+    /// layer is drawn on: a form for a view not among them is removed, and a view it lacks takes
+    /// the form a view of the same group holds, from `groups`. A group's views share its frame and
+    /// projection, which are all a canonical form is computed from, so these are the bytes a
+    /// publication over `views` would give. A shape left with no form keeps the ones it has.
+    pub fn redraw_shapes(&mut self, layer: &str, views: &[String], groups: &[Vec<String>]) {
         let Some(levels) = self.shapes.get_mut(layer) else {
             return;
         };
         for slot in levels.values_mut().flatten().flatten() {
-            if slot.for_view(view).is_some() {
-                continue;
-            }
-            let Some(bytes) = siblings.iter().find_map(|sibling| slot.for_view(sibling)) else {
-                continue;
-            };
-            let mut by_view: Vec<(String, Vec<u8>)> = slot
-                .views()
-                .map(|(held, bytes)| (held.to_string(), bytes.to_vec()))
+            let by_view: Vec<(String, Vec<u8>)> = views
+                .iter()
+                .filter_map(|view| {
+                    let bytes = slot.for_view(view).or_else(|| {
+                        let siblings = groups.iter().find(|g| g.contains(view))?;
+                        siblings.iter().find_map(|sibling| slot.for_view(sibling))
+                    })?;
+                    Some((view.clone(), bytes.to_vec()))
+                })
                 .collect();
-            by_view.push((view.to_string(), bytes.to_vec()));
             if let Some(shapes) = ArtifactShapes::new(by_view) {
                 **slot = shapes;
             }

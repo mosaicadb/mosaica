@@ -1533,8 +1533,9 @@ impl Executor {
         // Nothing is appended: the views follow from the roster, and a replay draws them again.
         self.live.with_publication_state(|registry, store| {
             let group = mosaica_store::manifest::group_views(&manifest.groups);
-            for (layer, view, siblings) in registry.follow_groups(group) {
-                store.draw_shapes_on(&layer, &view, &siblings);
+            // Only a layer whose views changed has a shape form to add or remove.
+            for followed in registry.follow_groups(group).into_iter().filter(|f| f.changed) {
+                store.redraw_shapes(&followed.layer, &followed.views, &followed.groups);
             }
         });
         let bundle = generation.bundle.with_views(manifest);
