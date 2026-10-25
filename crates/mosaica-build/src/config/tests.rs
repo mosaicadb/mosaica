@@ -2797,12 +2797,12 @@ fn a_group_compiles_its_roster_its_metadata_and_its_shared_settings() {
     };
     assert_eq!(
         views[0].metadata.get("label"),
-        Some(&MetadataValue::Text("Q2 2026".to_string()))
+        Some(&ViewMetadataValue::Text("Q2 2026".to_string()))
     );
     // 2026-04-01T00:00:00Z, in the one unit a `timestamp_us` may hold.
     assert_eq!(
         views[0].metadata.get("starts"),
-        Some(&MetadataValue::TimestampUs(1_775_001_600_000_000))
+        Some(&ViewMetadataValue::TimestampUs(1_775_001_600_000_000))
     );
     assert!(views[0].source.is_some(), "each view names its own points");
 }

@@ -1412,9 +1412,6 @@ impl ViewMetadata {
     }
 }
 
-/// A metadata value as one roster record carries it, typed against its declaration: the type a
-/// running service stores a record's values in, so a build stores them as it does.
-pub use mosaica_types::view::ViewMetadataValue as MetadataValue;
 
 /// Which views a group has, and therefore where its points come from (`views.md` §3.1).
 ///
@@ -1447,7 +1444,7 @@ pub struct RosterView {
     /// takes; `None` takes the group's.
     pub visibility: Option<Vec<String>>,
     /// This view's metadata, one entry per declared name.
-    pub metadata: BTreeMap<String, MetadataValue>,
+    pub metadata: BTreeMap<String, ViewMetadataValue>,
 }
 
 /// The roster as a table (`views.md` §3.1's form B): one row per view, carrying the canonical
@@ -3684,7 +3681,7 @@ fn compile_point_visibility(
 }
 
 /// The roster's own key set, which no metadata name may take (`views.md` §3.2).
-use mosaica_types::view::ROSTER_KEYS;
+use mosaica_types::view::{ViewMetadataValue, ROSTER_KEYS};
 
 /// The keys a group declares and a view of it may not (`views.md` §3.1).
 const GROUP_LEVEL_KEYS: [&str; 8] = [
@@ -3929,7 +3926,7 @@ fn compile_metadata_value(
     object: &str,
     declared: &ViewMetadata,
     value: &toml::Value,
-) -> Result<MetadataValue> {
+) -> Result<ViewMetadataValue> {
     let name = &declared.name;
     let wrong = |wanted: &str| {
         declaration_error(format!(
@@ -3948,23 +3945,23 @@ fn compile_metadata_value(
         })?;
         // Stored as the key, as a create at a running service stores it; the build resolves it
         // against the vocabulary as a row's category value is (`crate::mint_metadata_keys`).
-        return Ok(MetadataValue::Text(key.to_string()));
+        return Ok(ViewMetadataValue::Text(key.to_string()));
     }
     Ok(match declared.ty {
-        ScalarType::Bool => MetadataValue::Bool(
+        ScalarType::Bool => ViewMetadataValue::Bool(
             value
                 .as_bool()
                 .ok_or_else(|| wrong("write `true` or `false`"))?,
         ),
         ScalarType::F32 | ScalarType::F64 => match value {
-            toml::Value::Float(f) => MetadataValue::Float(*f),
+            toml::Value::Float(f) => ViewMetadataValue::Float(*f),
             // An integer where a float is declared is the value the author wrote rather than a
             // type error: TOML spells `0` as an integer and there is one reading of it here.
-            toml::Value::Integer(i) => MetadataValue::Float(*i as f64),
+            toml::Value::Integer(i) => ViewMetadataValue::Float(*i as f64),
             _ => return Err(wrong("write a number")),
         },
         ScalarType::TimestampUs => match value {
-            toml::Value::Integer(us) => MetadataValue::TimestampUs(*us),
+            toml::Value::Integer(us) => ViewMetadataValue::TimestampUs(*us),
             // A TOML date-time is read as the text it writes, so it takes the forms a JSON
             // string takes at a running service.
             toml::Value::Datetime(when) => timestamp_us(object, name, &when.to_string())?,
@@ -3974,7 +3971,7 @@ fn compile_metadata_value(
                  (`2026-04-01T00:00:00Z`), or the microseconds since the Unix epoch as an integer",
             )),
         },
-        ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => MetadataValue::Text(
+        ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => ViewMetadataValue::Text(
             value
                 .as_str()
                 .ok_or_else(|| wrong("write a string"))?
@@ -3996,15 +3993,15 @@ fn compile_metadata_value(
                     declared.ty.arrow_type_name()
                 )));
             }
-            MetadataValue::Int(held)
+            ViewMetadataValue::Int(held)
         }
     })
 }
 
 /// A timestamp written as text, as [`mosaica_types::written`] reads one.
-fn timestamp_us(object: &str, name: &str, text: &str) -> Result<MetadataValue> {
+fn timestamp_us(object: &str, name: &str, text: &str) -> Result<ViewMetadataValue> {
     mosaica_types::written::timestamp_us(text)
-        .map(MetadataValue::TimestampUs)
+        .map(ViewMetadataValue::TimestampUs)
         .map_err(|e| declaration_error(format!("{object}: `{name}` = '{text}' {e}")))
 }
 
@@ -5490,7 +5487,7 @@ pub struct GroupMembership {
     /// the owner, so a `members` group's views carry none of their own.
     pub members_of: Option<String>,
     /// This view's typed metadata, one entry per name the owning group declared.
-    pub metadata: BTreeMap<String, MetadataValue>,
+    pub metadata: BTreeMap<String, ViewMetadataValue>,
 }
 
 /// How one view's rows are picked out of a shared points file (`views.md` §3.1's form B).
@@ -6165,10 +6162,10 @@ pub fn group_view_payloads(config: &Config) -> Result<Vec<serde_json::Value>> {
                 .into_iter()
                 .map(|(name, value)| {
                     let value = match value {
-                        MetadataValue::Bool(v) => v.into(),
-                        MetadataValue::Int(v) | MetadataValue::TimestampUs(v) => v.into(),
-                        MetadataValue::Float(v) => v.into(),
-                        MetadataValue::Text(v) => v.into(),
+                        ViewMetadataValue::Bool(v) => v.into(),
+                        ViewMetadataValue::Int(v) | ViewMetadataValue::TimestampUs(v) => v.into(),
+                        ViewMetadataValue::Float(v) => v.into(),
+                        ViewMetadataValue::Text(v) => v.into(),
                     };
                     (name, value)
                 })

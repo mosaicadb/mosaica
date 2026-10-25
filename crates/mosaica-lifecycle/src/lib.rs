@@ -49,7 +49,7 @@ pub use membership::{
 pub use overlay::{owner_id_only, Overlay, Overlays, Replay};
 pub use registry::{
     no_pending, EdgeCheck, Everything, GroupViews, LayerRegistry, PreparedGrow, PreparedPut, Reach,
-    RegistryError, ResolvedLayers,
+    Registration, RegistryError, ResolvedLayers,
 };
 pub use roster::{GroupFacts, HeldView, RosterError, ViewRoster};
 pub use wal::{

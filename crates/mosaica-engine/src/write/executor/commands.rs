@@ -283,24 +283,13 @@ impl Executor {
                     Ok(written) => written,
                     Err(detail) => return reply.fail(ExecError::LayerRefused { detail }),
                 };
-                let name = declaration.name.clone();
                 let prepared = self
                     .live
                     .with_registry(|registry| registry.prepare_create(*declaration, written));
                 match prepared {
                     // The same declaration again answers the layer that holds it.
-                    Ok(None) => {
-                        let held = self
-                            .live
-                            .with_registry(|registry| registry.get(&name).map(|layer| layer.space));
-                        match held {
-                            Some(space) => reply.ack((space, true)),
-                            None => reply.fail(ExecError::LayerRefused {
-                                detail: format!("layer '{name}' is not held"),
-                            }),
-                        }
-                    }
-                    Ok(Some(record)) => self.commit_registry(
+                    Ok(mosaica_lifecycle::Registration::Held(space)) => reply.ack((space, true)),
+                    Ok(mosaica_lifecycle::Registration::New(record)) => self.commit_registry(
                         move |_| Ok(record),
                         |record| match record {
                             WalRecord::LayerCreate { space, .. } => (*space, false),

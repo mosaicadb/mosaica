@@ -1023,6 +1023,24 @@ impl ResolvedLayers {
     }
 }
 
+/// What [`LayerRegistry::prepare_create`] prepares: the record that registers a new layer, or the
+/// space of the live layer that already holds the declaration.
+#[derive(Debug)]
+pub enum Registration {
+    New(WalRecord),
+    Held(LayerSpace),
+}
+
+impl Registration {
+    /// The record a new layer is registered by, `None` where the layer is held.
+    pub fn record(self) -> Option<WalRecord> {
+        match self {
+            Registration::New(record) => Some(record),
+            Registration::Held(_) => None,
+        }
+    }
+}
+
 /// What layers exist and what they declared.
 #[derive(Debug, Clone, Default)]
 pub struct LayerRegistry {
@@ -1084,8 +1102,8 @@ impl LayerRegistry {
     }
 
     /// Validates a registration and gives it a space, returning the WAL record that makes it
-    /// durable; `None` where a live layer of the name holds this declaration as written, which
-    /// registers nothing. **It does not apply it** — the caller appends the record, fsyncs, and
+    /// durable; or, where a live layer of the name holds this declaration as written, that
+    /// layer's space, and nothing is registered. **It does not apply it** — the caller appends the record, fsyncs, and
     /// only then calls [`LayerRegistry::apply`]. The record carries the space and the runs, so
     /// replay applies what was decided rather than re-deriving it.
     ///
@@ -1097,12 +1115,12 @@ impl LayerRegistry {
         &self,
         mut declaration: LayerDeclaration,
         written_views: Vec<String>,
-    ) -> Result<Option<WalRecord>, RegistryError> {
+    ) -> Result<Registration, RegistryError> {
         declaration.validate()?;
         if let Some(held) = self.layers.get(&declaration.name) {
             let held_written = RegisteredLayer::as_written(&held.declaration, &held.written_views);
             return if held_written == RegisteredLayer::as_written(&declaration, &written_views) {
-                Ok(None)
+                Ok(Registration::Held(held.space))
             } else {
                 Err(RegistryError::NameTaken(declaration.name))
             };
@@ -1135,7 +1153,7 @@ impl LayerRegistry {
             .map(|run| ReservedRuns::from_runs(vec![run]))
             .collect();
 
-        Ok(Some(WalRecord::LayerCreate {
+        Ok(Registration::New(WalRecord::LayerCreate {
             declaration: Box::new(declaration),
             space,
             runs,
@@ -3246,7 +3264,7 @@ mod tests {
         reg: &mut LayerRegistry,
         d: LayerDeclaration,
     ) -> Result<(), RegistryError> {
-        let record = reg.prepare_create(d, Vec::new()).map(|record| record.expect("a new layer"))?;
+        let record = reg.prepare_create(d, Vec::new()).map(|prepared| prepared.record().expect("a new layer"))?;
         reg.apply(&record);
         Ok(())
     }
@@ -3366,11 +3384,11 @@ mod tests {
         // layer's ids under every bookmark and suppression naming them.
         let mut live = LayerRegistry::new();
         let create = live
-            .prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer"))
+            .prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer"))
             .unwrap();
         let drop_b = {
             let mut r = LayerRegistry::new();
-            let c = r.prepare_create(declaration("clusters/b"), Vec::new()).map(|record| record.expect("a new layer")).unwrap();
+            let c = r.prepare_create(declaration("clusters/b"), Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
             r.apply(&c);
             r.prepare_drop("clusters/b").unwrap()
         };
@@ -3390,7 +3408,7 @@ mod tests {
         let mut live = LayerRegistry::new();
         let mut log = Vec::new();
         for name in ["clusters/a", "clusters/b"] {
-            let record = live.prepare_create(declaration(name), Vec::new()).map(|record| record.expect("a new layer")).unwrap();
+            let record = live.prepare_create(declaration(name), Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
             live.apply(&record);
             log.push(record);
         }
@@ -3400,7 +3418,7 @@ mod tests {
             log.push(drop);
         }
         let again = live
-            .prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer"))
+            .prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer"))
             .unwrap();
         live.apply(&again);
         log.push(again);
@@ -3518,7 +3536,7 @@ mod tests {
             pinned,
             treed,
         ] {
-            let record = reg.prepare_create(d, Vec::new()).map(|record| record.expect("a new layer")).unwrap();
+            let record = reg.prepare_create(d, Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
             reg.apply(&record);
             log.push(record);
         }
@@ -4149,7 +4167,7 @@ mod tests {
         let mut reg = LayerRegistry::new();
         let mut store = ArtifactStore::new();
         let create = reg
-            .prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer"))
+            .prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer"))
             .unwrap();
         reg.apply(&create);
         let publication = reg
@@ -4205,7 +4223,7 @@ mod tests {
     fn an_extension_replayed_from_the_log_is_not_given_again() {
         let mut reg = LayerRegistry::new();
         let store = ArtifactStore::new();
-        let create = reg.prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer")).unwrap();
+        let create = reg.prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
         reg.apply(&create);
         let publication = reg
             .prepare_publish(

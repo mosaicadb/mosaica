@@ -1064,20 +1064,6 @@ pub struct RegisteredLayer {
     pub written_views: Vec<String>,
 }
 
-impl RegisteredLayer {
-    /// The declaration as written: `views` as declared, a group's name where one was named.
-    pub fn as_written(
-        declaration: &LayerDeclaration,
-        written_views: &[String],
-    ) -> LayerDeclaration {
-        let mut declaration = declaration.clone();
-        if !written_views.is_empty() {
-            declaration.views = written_views.to_vec();
-        }
-        declaration
-    }
-}
-
 /// Each of `layers`' spaces, by the layer's name.
 pub fn spaces_by_name(
     layers: &[RegisteredLayer],
@@ -1098,6 +1084,18 @@ pub fn enumerated_names(layers: &[RegisteredLayer]) -> std::collections::BTreeSe
 }
 
 impl RegisteredLayer {
+    /// The declaration as written: `views` as declared, a group's name where one was named.
+    pub fn as_written(
+        declaration: &LayerDeclaration,
+        written_views: &[String],
+    ) -> LayerDeclaration {
+        let mut declaration = declaration.clone();
+        if !written_views.is_empty() {
+            declaration.views = written_views.to_vec();
+        }
+        declaration
+    }
+
     /// The layout recorded for one level. Absent is [`ServingLayout::ArtifactMajor`] — see
     /// [`RegisteredLayer::layouts`].
     pub fn layout_of(&self, level: u32) -> ServingLayout {

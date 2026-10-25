@@ -576,13 +576,13 @@ fields = { key = "quarter" }
     assert_eq!(group.key, "2026-Q3", "the roster's own order is the registry's");
     assert_eq!(
         group.metadata.get("label"),
-        Some(&mosaica_build::config::MetadataValue::Text(
+        Some(&mosaica_types::view::ViewMetadataValue::Text(
             "Q3 2026".to_string()
         ))
     );
     assert_eq!(
         group.metadata.get("starts"),
-        Some(&mosaica_build::config::MetadataValue::TimestampUs(1))
+        Some(&mosaica_types::view::ViewMetadataValue::TimestampUs(1))
     );
     // Every view's points are the group's one file, selected by its key, and the selection
     // carries the whole roster so a stray key can be refused naming it.
@@ -660,7 +660,7 @@ fields = { key = "quarter" }
         let registry = registry.expect("a value that fits is read");
         assert_eq!(
             registry[1].group.as_ref().unwrap().metadata.get("tier"),
-            Some(&mosaica_build::config::MetadataValue::Int(tier))
+            Some(&mosaica_types::view::ViewMetadataValue::Int(tier))
         );
     }
 }

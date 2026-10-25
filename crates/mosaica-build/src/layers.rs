@@ -1711,6 +1711,7 @@ pub(crate) fn publish(
         let record = registry
             .prepare_create(declaration.clone(), written)
             .map_err(|e| BuildError::Invalid(format!("layer {name}: {e}")))?
+            .record()
             .ok_or_else(|| BuildError::Invalid(format!("layer {name} is declared twice")))?;
         registry.apply(&record);
     }

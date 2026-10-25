@@ -1973,7 +1973,7 @@ mod tests {
         let rows = read(7).expect("a rank an i64 holds is read");
         assert!(matches!(
             rows[0].metadata["rank"],
-            crate::config::MetadataValue::Int(7)
+            mosaica_types::view::ViewMetadataValue::Int(7)
         ));
         assert!(read(1 << 63).is_err(), "a rank past i64::MAX is refused");
     }
@@ -2010,7 +2010,7 @@ pub struct RosterRow {
     /// one label from a string column, or the elements of a `list<string>` column, each one
     /// label (`views.md` §6). `None` takes the group's.
     pub visibility: Option<Vec<String>>,
-    pub metadata: std::collections::BTreeMap<String, crate::config::MetadataValue>,
+    pub metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
 }
 
 /// Read the roster table: one row per view, the canonical `key`, `visibility` and one column per
@@ -2029,7 +2029,7 @@ pub fn read_roster_table(
     fields: &Fields,
     metadata: &[crate::config::ViewMetadata],
 ) -> Result<Vec<RosterRow>> {
-    use crate::config::MetadataValue;
+    use mosaica_types::view::ViewMetadataValue;
     use arrow::array::{BooleanArray, LargeStringArray, StringArray};
 
     let file = File::open(path).map_err(|e| BuildError::io(path, e))?;
@@ -2187,7 +2187,7 @@ pub fn read_roster_table(
         };
         // One decode per column per batch, as every other reader here does: the roster is a
         // handful of rows, and the shape is the file's rather than the row's.
-        let mut values: Vec<Vec<MetadataValue>> = Vec::with_capacity(metadata.len());
+        let mut values: Vec<Vec<ViewMetadataValue>> = Vec::with_capacity(metadata.len());
         for (declared, &idx) in metadata.iter().zip(&metadata_idx) {
             let column = batch.column(idx);
             let name = fields.of(&declared.name);
@@ -2200,13 +2200,13 @@ pub fn read_roster_table(
                      missing for the whole of its life"
                 ),
             };
-            let held: Vec<MetadataValue> = if declared.vocabulary.is_some() {
+            let held: Vec<ViewMetadataValue> = if declared.vocabulary.is_some() {
                 // A category's key, carried as written: it is resolved against the vocabulary
                 // where a category column's values are, which is not this parse's decision.
                 strings(path, column, name)?
                     .into_iter()
                     .enumerate()
-                    .map(|(row, value)| value.map(MetadataValue::Text).ok_or_else(|| missing(row)))
+                    .map(|(row, value)| value.map(ViewMetadataValue::Text).ok_or_else(|| missing(row)))
                     .collect::<Result<_>>()?
             } else {
                 match declared.ty {
@@ -2226,7 +2226,7 @@ pub fn read_roster_table(
                         (0..values.len())
                             .map(|row| match values.is_null(row) {
                                 true => Err(missing(row)),
-                                false => Ok(MetadataValue::Bool(values.value(row))),
+                                false => Ok(ViewMetadataValue::Bool(values.value(row))),
                             })
                             .collect::<Result<_>>()?
                     }
@@ -2246,7 +2246,7 @@ pub fn read_roster_table(
                         })?;
                         (0..column.len())
                             .map(|row| match read.value(row) {
-                                Ok(ScalarValue::F64(value)) => Ok(MetadataValue::Float(value)),
+                                Ok(ScalarValue::F64(value)) => Ok(ViewMetadataValue::Float(value)),
                                 Ok(_) => Err(missing(row)),
                                 Err(e) => unreachable!("an f64 read refuses nothing: {e}"),
                             })
@@ -2257,7 +2257,7 @@ pub fn read_roster_table(
                             .into_iter()
                             .enumerate()
                             .map(|(row, value)| {
-                                value.map(MetadataValue::Text).ok_or_else(|| missing(row))
+                                value.map(ViewMetadataValue::Text).ok_or_else(|| missing(row))
                             })
                             .collect::<Result<_>>()?
                     }
@@ -2289,18 +2289,18 @@ pub fn read_roster_table(
                             .map(|row| match read.value(row) {
                                 Ok(ScalarValue::Null) => Err(missing(row)),
                                 Ok(ScalarValue::TimestampUs(value)) => {
-                                    Ok(MetadataValue::TimestampUs(value))
+                                    Ok(ViewMetadataValue::TimestampUs(value))
                                 }
-                                Ok(ScalarValue::U8(value)) => Ok(MetadataValue::Int(value.into())),
-                                Ok(ScalarValue::U16(value)) => Ok(MetadataValue::Int(value.into())),
-                                Ok(ScalarValue::U32(value)) => Ok(MetadataValue::Int(value.into())),
+                                Ok(ScalarValue::U8(value)) => Ok(ViewMetadataValue::Int(value.into())),
+                                Ok(ScalarValue::U16(value)) => Ok(ViewMetadataValue::Int(value.into())),
+                                Ok(ScalarValue::U32(value)) => Ok(ViewMetadataValue::Int(value.into())),
                                 Ok(ScalarValue::U64(value)) => i64::try_from(value)
-                                    .map(MetadataValue::Int)
+                                    .map(ViewMetadataValue::Int)
                                     .map_err(|_| unfit(row, &value)),
-                                Ok(ScalarValue::I8(value)) => Ok(MetadataValue::Int(value.into())),
-                                Ok(ScalarValue::I16(value)) => Ok(MetadataValue::Int(value.into())),
-                                Ok(ScalarValue::I32(value)) => Ok(MetadataValue::Int(value.into())),
-                                Ok(ScalarValue::I64(value)) => Ok(MetadataValue::Int(value)),
+                                Ok(ScalarValue::I8(value)) => Ok(ViewMetadataValue::Int(value.into())),
+                                Ok(ScalarValue::I16(value)) => Ok(ViewMetadataValue::Int(value.into())),
+                                Ok(ScalarValue::I32(value)) => Ok(ViewMetadataValue::Int(value.into())),
+                                Ok(ScalarValue::I64(value)) => Ok(ViewMetadataValue::Int(value)),
                                 Ok(other) => {
                                     unreachable!("read as an integer or a timestamp: {other:?}")
                                 }
