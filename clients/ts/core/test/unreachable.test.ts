@@ -150,6 +150,35 @@ describe('a server that goes away and comes back', () => {
     store.dispose();
   });
 
+  it('a server error with no Mosaica body is published with its status apart from the server’s own refusals, and a refresh recovers', async () => {
+    const {srv, clock, scheduler, store} = await drawing();
+    const fetch = srv.answer;
+    const failing = (answer: () => Response) =>
+      (async (url: string, init?: RequestInit) => (new URL(url).pathname === '/v1/viewport' ? answer() : fetch(url, init))) as typeof globalThis.fetch;
+    // A box not yet drawn, so the store asks the server; with none, the refresh Retry makes.
+    const ask = async (box?: [number, number, number, number]) => {
+      if (box) store.setView(camera({xMin: 0, xMax: 1000, yMin: 0, yMax: 1000}, box, 400, 400));
+      else store.refresh();
+      for (let i = 0; i < 5; i++) {
+        await clock.advance(1_000);
+        scheduler.flush();
+        await settle();
+      }
+      return store.get('status');
+    };
+
+    srv.s.slow = failing(() => new Response(null, {status: 504}));
+    expect(await ask([0, 0, 250, 250])).toMatchObject({status: 'refused', refusal: {code: 'http-error', status: 504}, unreachable: false, expired: false});
+
+    srv.s.slow = failing(() => new Response(JSON.stringify({error: 'fail-closed', detail: 'postings unreadable'}), {status: 500, headers: {'content-type': 'application/json'}}));
+    expect(await ask([250, 250, 500, 500])).toMatchObject({status: 'refused', refusal: {code: 'fail-closed', detail: 'postings unreadable', status: 500}});
+
+    srv.s.slow = null;
+    expect(await ask()).toMatchObject({status: 'shown', refusal: null});
+    expect(srv.authorise).toHaveBeenCalledTimes(1);
+    store.dispose();
+  });
+
   it('a route a proxy cannot reach while others answer waits longer each time, and costs no new session', async () => {
     const {srv, clock, scheduler, store} = await drawing();
     const fetch = srv.answer;

@@ -544,7 +544,7 @@ describe('suggest in the store, with requests held in flight', () => {
       await clock.advance(1_000);
       for (const h of inFlight()) answer(h, {shed: true});
     }
-    expect(store.get('filters').suggestErrors['archive']).toEqual({code: 'backpressure', detail: 'one suggest in flight'});
+    expect(store.get('filters').suggestErrors['archive']).toEqual({code: 'backpressure', detail: 'one suggest in flight', status: 429});
   });
 
   it('does not ask again for a change the request would not carry', async () => {

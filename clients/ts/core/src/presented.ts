@@ -60,18 +60,20 @@ export type Refusal = {
   code: string;
   /** A {@link MosaicaError}'s `detail`, or the other error's message. */
   detail: string;
+  /** A {@link MosaicaError}'s HTTP status, or `null` for any other error. */
+  status: number | null;
 };
 
 /**
- * The {@link Refusal} a thrown error stands for: the `code` and `detail` of a {@link MosaicaError},
- * or `fetch-failed` and the message for any other error, such as one from a request that reached
- * no server.
+ * The {@link Refusal} a thrown error stands for: the `code`, `detail` and `status` of a
+ * {@link MosaicaError}, or `fetch-failed`, the message and `null` for any other error, such as one
+ * from a request that reached no server.
  *
  * @category Projections
  */
 export function refusalOf(error: unknown): Refusal {
-  const e = (error ?? {}) as {code?: string; detail?: string; message?: string};
-  return {code: e.code ?? 'fetch-failed', detail: e.detail ?? e.message ?? String(error)};
+  const e = (error ?? {}) as {code?: string; detail?: string; message?: string; status?: number};
+  return {code: e.code ?? 'fetch-failed', detail: e.detail ?? e.message ?? String(error), status: typeof e.status === 'number' ? e.status : null};
 }
 
 /** The driver's verdict; see `DriverEvents.onFrame`. */

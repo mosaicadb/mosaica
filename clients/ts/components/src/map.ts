@@ -1595,8 +1595,8 @@ export class MosaicaMap extends MosaicaElement {
   override render(): TemplateResult | typeof nothing {
     const status = this.resolvedStore?.get('status') ?? null;
     const state: PanelState = stateOf(status);
-    // Loading and retrying are the status strip's; the map draws the states that could otherwise
-    // read as an empty corpus.
+    // Loading, retrying and unanswered say how the server is doing and are the status strip's; the
+    // map draws the answers that could otherwise read as an empty corpus.
     const refresh = () => this.resolvedStore?.refresh();
     const nothingVisible = seesNothing(this.resolvedStore, state);
     const overlay = nothingVisible

@@ -3,7 +3,7 @@ import type {AggregateSpec, Store, StatusProjection} from '@mosaicajs/client';
 import {HeldAggregate} from './aggregate.js';
 
 /**
- * The eight panel states. Every panel shows its state in one `part="state"` region, with
+ * The nine panel states. Every panel shows its state in one `part="state"` region, with
  * `data-state` set to it, so one rule restyles every panel. Each follows from the store's `status`
  * projection:
  *
@@ -15,14 +15,17 @@ import {HeldAggregate} from './aggregate.js';
  * | shown | `shown` |
  * | empty | `empty` |
  * | refused | `refused` |
+ * | unanswered | `refused` with a `5xx` whose body is not a Mosaica error, such as a gateway's `504` |
  * | expired | the `expired` flag: `expired-token`, a `bad-credential` on a token this store used, or `expiresAt` passed |
  * | stale | `shown` with `stale` |
  *
  * `expired` is a named refusal and wins over `refused`. While the server cannot be reached the state
  * is `retrying` whatever the last answer was, since the store is asking again; what is drawn stays.
+ * `unanswered` is a server error that says nothing about this viewer, so it is not shown as a
+ * refusal; the store does not ask again until Retry.
  * `stale` is `shown` with the picture older than the numbers.
  */
-export type PanelState = 'detached' | 'loading' | 'retrying' | 'shown' | 'empty' | 'refused' | 'expired' | 'stale';
+export type PanelState = 'detached' | 'loading' | 'retrying' | 'shown' | 'empty' | 'refused' | 'unanswered' | 'expired' | 'stale';
 
 export function stateOf(status: StatusProjection | null | undefined): PanelState {
   if (!status) return 'detached';
@@ -37,7 +40,7 @@ export function stateOf(status: StatusProjection | null | undefined): PanelState
     case 'empty':
       return 'empty';
     case 'refused':
-      return 'refused';
+      return status.refusal?.code === 'http-error' && (status.refusal.status ?? 0) >= 500 ? 'unanswered' : 'refused';
     case 'shown':
       return status.stale ? 'stale' : 'shown';
   }
@@ -51,7 +54,7 @@ export function showsContent(state: PanelState): boolean {
 export type StateActions = {
   /** The Refresh button, present when stale. */
   onRefresh?: (() => void) | null;
-  /** The Retry button, present when refused. */
+  /** The Retry button, present when refused or unanswered. */
   onRetry?: (() => void) | null;
   /** The Sign in button, shown on expiry when the host gave the element a renewal. */
   onReauthorise?: (() => void) | null;
@@ -77,6 +80,8 @@ export function stateWord(state: PanelState, status: StatusProjection | null | u
       return 'Nothing in view';
     case 'refused':
       return 'View refused';
+    case 'unanswered':
+      return 'Server did not answer';
     case 'expired':
       return 'Session expired';
     case 'stale':
@@ -109,6 +114,10 @@ export function renderState(
     }
     case 'retrying':
       return html`<span part="state" data-state="retrying"><span class="dot warn"></span>${stateWord(state, status)}</span>`;
+    case 'unanswered':
+      return html`<span part="state" data-state="unanswered"><span class="dot warn"></span>${stateWord(state, status)}${actions.onRetry
+          ? html`<button part="retry" class="btn small" type="button" @click=${actions.onRetry}>Retry</button>`
+          : nothing}</span>`;
     case 'shown':
       return html`<span part="state" data-state="shown"></span>`;
     case 'empty':

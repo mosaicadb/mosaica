@@ -103,7 +103,7 @@ describe('the presented frame', () => {
     h.presenter.schedule({target: [400, 400, 0], zoom: 8}, 400, 300);
     await h.clock.advance(1000);
     expect(h.presenter.currentStatus).toBe('refused');
-    expect(h.refusal()).toEqual({code: 'expired-token', detail: 'gone'});
+    expect(h.refusal()).toEqual({code: 'expired-token', detail: 'gone', status: 403});
     expect(h.presenter.frame).toBeNull();
     expect(h.replica.bandCount).toBe(heldBands);
   });

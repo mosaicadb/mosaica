@@ -100,7 +100,7 @@ describe('the category typeahead', () => {
 
     part.suggest('admin4', 'fr', 'filter');
     await clock.advance(200);
-    expect(state().suggestErrors['admin4']).toEqual({code: 'fail-closed', detail: 'admin4 postings unreadable'});
+    expect(state().suggestErrors['admin4']).toEqual({code: 'fail-closed', detail: 'admin4 postings unreadable', status: 500});
     expect(state().suggestions['admin4']).toBeUndefined();
 
     fail = false;
@@ -183,6 +183,6 @@ describe('the category typeahead', () => {
 
     part.suggest('admin4', 'fr', 'filter');
     await clock.advance(10_000);
-    expect(state().suggestErrors['admin4']).toEqual({code: 'backpressure', detail: 'one suggest in flight'});
+    expect(state().suggestErrors['admin4']).toEqual({code: 'backpressure', detail: 'one suggest in flight', status: 429});
   });
 });

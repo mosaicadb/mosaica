@@ -253,7 +253,11 @@ export type StatusProjection = {
   status: PresentedStatus;
   /** Whether a frame has been shown or has drawn marks since the store was made or last cleared. */
   sessionWarm: boolean;
-  /** The refusal while `status` is `refused`, else `null`. */
+  /**
+   * The refusal while `status` is `refused`, else `null`. A `5xx` whose body names no Mosaica code,
+   * such as a gateway's `504`, has the code `http-error`: the server did not answer, and nothing
+   * about this viewer was refused.
+   */
   refusal: Refusal | null;
   /**
    * Whether a response since the frame on screen was fetched reported that the data has changed,

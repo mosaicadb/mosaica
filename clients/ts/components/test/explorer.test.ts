@@ -76,12 +76,12 @@ describe('<mosaica-explorer> parts', () => {
     await check();
     store.set('region', {shape: {kind: 'box', bbox: [0, 0, 1, 1]}, status: 'shown', refusal: null, visible: {value: 3, exact: true}, matched: {value: 3, exact: true}, served: {shown: 1, total: 3, exact: true}, verdict: {exact: true, depth: null}, held: {ids: BigUint64Array.of(5n), positions: new Float32Array(2), count: 1}});
     await check();
-    store.set('status', status({status: 'refused', refusal: {code: 'unauthorised', detail: ''}}));
+    store.set('status', status({status: 'refused', refusal: {code: 'unauthorised', detail: '', status: 403}}));
     await check();
     store.set('status', status({stale: true}));
     await check();
     for (const s of shadow.querySelectorAll('mosaica-status')) (s as unknown as {reauthorise: () => void}).reauthorise = () => {};
-    store.set('status', status({status: 'refused', refusal: {code: 'expired-token', detail: ''}, expired: true}));
+    store.set('status', status({status: 'refused', refusal: {code: 'expired-token', detail: '', status: 403}, expired: true}));
     await check();
     for (const part of ['item-card-headline', 'artifact-card-headline', 'selection-items', 'status-refusal', 'map-refusal', 'status-refresh', 'status-reauthorise']) expect(seen, part).toContain(part);
   });

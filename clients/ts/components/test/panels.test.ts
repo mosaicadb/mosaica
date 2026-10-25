@@ -83,7 +83,7 @@ describe('<mosaica-item-card>', () => {
     expect(deep(host, '[part="refusal"]')).not.toBeNull();
 
     el.pick = null;
-    el.refusal = {code: 'not-found', detail: 'nope'};
+    el.refusal = {code: 'not-found', detail: 'nope', status: 404};
     await settle(host);
     expect(deep(host, '[part="state"]')?.getAttribute('data-state')).toBe('refused');
     expect(deep(host, '[part="refusal"]')).not.toBeNull();
@@ -225,7 +225,7 @@ describe('<mosaica-filter> on a category', () => {
   });
 
   it('shows a refusal beside the box, with its code, and keeps the box', async () => {
-    const {host} = await mountFilter('archive', filtersOf({filter: {}, highlight: {}}, {suggestErrors: {archive: {code: 'vocabulary-withheld', detail: ''}}}));
+    const {host} = await mountFilter('archive', filtersOf({filter: {}, highlight: {}}, {suggestErrors: {archive: {code: 'vocabulary-withheld', detail: '', status: 403}}}));
     await type(host, 'c');
     expect(deep(host, '[part="entry"]')).not.toBeNull();
     expect(deep(host, '[part="refusal"]')?.getAttribute('data-code')).toBe('vocabulary-withheld');

@@ -194,8 +194,8 @@ export class MosaicaError extends Error {
     readonly status: number,
     /**
      * The body's `error` code: `bad-credential`, `expired-token`, `unknown`, `conflict`,
-     * `contract`, `backpressure`, `fail-closed` or `not-ready`. `unknown` also where the body is not
-     * JSON or has no code.
+     * `contract`, `backpressure`, `fail-closed` or `not-ready`. `http-error` where the body is not
+     * JSON or names no code, such as a proxy's answer; then only `status` says what went wrong.
      */
     readonly code: string,
     /** The body's `detail`, saying what was wrong. The HTTP status text where the body has none. */
@@ -212,7 +212,7 @@ export class MosaicaError extends Error {
 }
 
 async function fail(response: Response): Promise<never> {
-  let code = 'unknown';
+  let code = 'http-error';
   let detail = response.statusText;
   let wait = response.headers.get('retry-after');
   try {

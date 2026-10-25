@@ -11,8 +11,12 @@ export type SelectionShapeDetail = Exclude<SelectionShape, {kind: 'artifact'}> |
  * as a decimal string, since it is a 64-bit integer.
  */
 export type MosaicaEventDetails = {
-  /** The panel state moved from `from` to `to`; `from` is null on the first render. */
-  'mosaica-statechange': {from: PanelState | null; to: PanelState};
+  /**
+   * The panel state moved from `from` to `to`; `from` is null on the first render. `refusal` is
+   * the store's `status.refusal`, whose `code`, `detail` and HTTP `status` say what went wrong
+   * where `to` is `refused`, `unanswered` or `expired`, and is null otherwise.
+   */
+  'mosaica-statechange': {from: PanelState | null; to: PanelState; refusal: Refusal | null};
   /** The session expired; `refusal` is the refusal that ended it, where one did. */
   'mosaica-expired': {refusal: Refusal | null};
   /**

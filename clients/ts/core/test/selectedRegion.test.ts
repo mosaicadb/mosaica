@@ -23,13 +23,13 @@ describe('the selected region', () => {
     part.select({kind: 'box', bbox: [0, 0, 10, 10]}, NO_MARKS);
     expect(published()?.status).toBe('loading');
 
-    part.refuse({code: 'bad-region', detail: 'too many vertices'});
+    part.refuse({code: 'bad-region', detail: 'too many vertices', status: 400});
     expect(published()).toMatchObject({status: 'refused', refusal: {code: 'bad-region'}, visible: null, matched: {value: 0}});
   });
 
   it('has nothing to refuse without a selection', () => {
     const {part, published} = regionPart();
-    part.refuse({code: 'bad-region', detail: 'too many vertices'});
+    part.refuse({code: 'bad-region', detail: 'too many vertices', status: 400});
     expect(published()).toBeNull();
   });
 });

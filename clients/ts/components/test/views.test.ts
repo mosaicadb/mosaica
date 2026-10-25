@@ -392,7 +392,7 @@ describe('<mosaica-explorer>', () => {
     follow('world:2026-Q2');
     store.setFrame(GEO);
     store.set('view', {...store.get('view'), id: 'world:2026-Q2'});
-    store.set('status', status({status: 'refused', refusal: {code: 'no-such-view', detail: 'gone'}}));
+    store.set('status', status({status: 'refused', refusal: {code: 'no-such-view', detail: 'gone', status: 404}}));
     await settle(host);
     expect(looks).toEqual([]);
     // The wait is over: a composition arriving later is not this follow's answer.

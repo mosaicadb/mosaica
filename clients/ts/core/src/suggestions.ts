@@ -230,7 +230,7 @@ export class Suggestions {
         this.set({
           ...this.state,
           suggestions: without(this.state.suggestions, column),
-          suggestErrors: {...this.state.suggestErrors, [column]: {code: 'backpressure', detail: result.detail ?? `shed ${attempt} times`}}
+          suggestErrors: {...this.state.suggestErrors, [column]: {code: 'backpressure', detail: result.detail ?? `shed ${attempt} times`, status: 429}}
         });
         return;
       }

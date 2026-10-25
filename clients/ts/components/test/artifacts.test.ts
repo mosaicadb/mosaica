@@ -142,7 +142,7 @@ describe('<mosaica-artifact-card>', () => {
     const host = await mount('<mosaica-artifact-card></mosaica-artifact-card>');
     const store = fakeStore({meta: META, status: status({})});
     (host.querySelector('mosaica-artifact-card') as unknown as {store: unknown}).store = store;
-    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: {code: 'not-found', detail: 'no'}});
+    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: {code: 'not-found', detail: 'no', status: 404}});
     await settle(host);
     expect(deep(host, '[part="state"]')?.getAttribute('data-state')).toBe('refused');
     expect(deep(host, '[part="refusal"]')).not.toBeNull();
@@ -263,7 +263,7 @@ describe('a refusal on screen', () => {
   };
 
   it('carries the server’s code on the refusal part, in every element that shows one', async () => {
-    const refusal = {code: 'withheld', detail: 'not for you'};
+    const refusal = {code: 'withheld', detail: 'not for you', status: 403};
     const selection = {item: null, itemRefusal: null, artifact: null, artifactRefusal: null};
     expect(await code('<mosaica-item-card></mosaica-item-card>', {selection: {...selection, itemRefusal: refusal}})).toBe('withheld');
     expect(await code('<mosaica-artifact-card></mosaica-artifact-card>', {selection: {...selection, artifactRefusal: refusal}})).toBe('withheld');
