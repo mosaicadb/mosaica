@@ -40,6 +40,7 @@ The [data model](data-model.md) chapter covers views, fields and identifiers in 
 A viewer can pan and zoom, with a count of what's in view and density shading where there are too many points to draw. When they zoom in, the points already drawn stay where they are and more appear around them. On top of that, they can:
 
 - colour points by a category or a cluster, and size them by a number;
+- draw the points over an outline of the world, your own map tiles or an image;
 - filter by ranges of numbers and dates, by category values, and by exact, prefix or substring matches on keywords;
 - search free text by word;
 - draw a box or a freehand shape to select an area. Code can also send a circle, an ellipse or a polygon;

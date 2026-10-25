@@ -107,8 +107,30 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 - **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from a ramp: Viridis by default, Cividis, Magma, Greys or Red-blue. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
 - **Status in plain words**, on the status strip and over the map: Connecting or Updating, Up to date, Nothing in view, View refused with the server's reason under it, Server did not answer and Server busy (each with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
 
+## Basemaps
+
+A geographic view draws an outline of the world under its points unless you say otherwise: land, coastlines and country borders from Natural Earth, which the database serves at `GET /v1/basemaps/world` and the map projects the same way as the points. A view laid out from plain x and y coordinates draws nothing underneath. To choose something else, set `basemap` on `<mosaica-map>` or `<mosaica-explorer>`:
+
+| Value | Draws |
+|---|---|
+| `"world"` | The world outline. It needs a view with a map projection |
+| `"none"` | Nothing |
+| `{tiles, attribution}` | Raster tiles from your own tile server: `tiles` is a URL template with `{z}`, `{x}` and `{y}`, and `attribution` is the credit shown in the map's corner. It needs a view whose frame lines up with web map tiles, as `tile_scheme` in `/v1/meta` says. There is no default tile server |
+| `{image, bounds}` | One image stretched over `bounds`, `[x0, y0, x1, y1]` in the view's own coordinates, or over the whole frame. The image isn't reprojected |
+
+To give each view its own basemap, pass an object keyed by view id. A view it leaves out gets the default.
+
+If the value doesn't fit the view the map opens on, the map says so and draws the points without it. A value that doesn't fit a view the viewer switches to later draws nothing there, with a note in the map's corner saying why. A basemap that fails to load shows a note too, and is tried again after one second, then two, doubling up to a minute. Each time a note appears, changes or goes, the map fires `mosaica-basemapchange`.
+
+??? info "Details for hosts"
+    - An object with a `tiles` or `image` key is one value, and anything else is a mapping, so a view named `tiles` or `image` can't be named in a mapping. A key a form doesn't take is refused.
+    - The note and the tile credit are the map's `note` and `attribution` parts, and the explorer forwards them as `map-note` and `map-attribution`.
+    - A deck.gl host without the components draws a basemap with `basemapLayers(store, view, value, options)` from `@mosaicajs/deck`, and checks a value against a view with `basemapMisfit(view, value)`. The `colours` option is the only way to restyle the world outline.
+    - The map also takes a deck.gl layer you built yourself, drawn in its 512-unit world.
+
 ## Not built yet
 
 - **Animating items between layouts.** A switch between views with different layouts redraws, rather than moving each item to its new position.
 - **Fetching a view before it is chosen.** A view the viewer has not visited is fetched when they switch to it.
+- **A basemap from Python.** The notebook map draws the default basemap, and takes no `basemap` argument yet.
 - **An adapter for tile-based map libraries.** The store asks for an area at a time, and nothing sits between it and a library that asks for one tile at a time.
