@@ -3,6 +3,7 @@ import {composeFilters, type FilterDraft} from '@mosaicajs/client';
 import '../src/status.js';
 import '../src/selection.js';
 import '../src/count.js';
+import '../src/map.js';
 import type {MosaicaStatus} from '../src/status.js';
 import {stateOf} from '../src/states.js';
 import {deep, deepAll, fakeStore, mount, settle, status} from './fake-store.js';
@@ -99,6 +100,33 @@ describe('a server error with no Mosaica body', () => {
     (deep(host, '[part="retry"]') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'refresh')).toHaveLength(1);
   });
+});
+
+describe('<mosaica-map> alone says over the canvas what the strip would', () => {
+  // `words`: the overlay's words, or null for no overlay. `retry`: whether it offers Retry.
+  const cases: [string, Parameters<typeof status>[0], {words: string | null; retry: boolean}][] = [
+    ['loading', {status: 'loading', sessionWarm: true}, {words: null, retry: false}],
+    ['a shed request', {status: 'retrying'}, {words: null, retry: false}],
+    ['shown', {status: 'shown'}, {words: null, retry: false}],
+    ['refused', {status: 'refused', refusal: {code: 'contract', detail: 'no', status: 422}}, {words: 'View refused', retry: true}],
+    ['unanswered', {status: 'refused', refusal: {code: 'http-error', detail: 'Gateway Timeout', status: 504}}, {words: 'Server did not answer', retry: true}],
+    ['unreachable', {status: 'shown', unreachable: true}, {words: 'Server unreachable', retry: false}]
+  ];
+  for (const [name, over, want] of cases) {
+    it(name, async () => {
+      const host = await mount('<mosaica-map></mosaica-map>');
+      const map = host.querySelector('mosaica-map')!;
+      const store = fakeStore({status: status(over), view});
+      (map as unknown as {store: unknown}).store = store;
+      await settle(host);
+      const overlay = map.shadowRoot!.querySelector('[part="overlay"]');
+      expect(overlay?.textContent?.replace('Retry', '').trim() ?? null).toBe(want.words);
+      const retry = (overlay?.querySelector('[part="retry"]') ?? null) as HTMLButtonElement | null;
+      expect(retry !== null).toBe(want.retry);
+      retry?.click();
+      expect(store.calls.filter((c) => c.name === 'refresh')).toHaveLength(want.retry ? 1 : 0);
+    });
+  }
 });
 
 describe('<mosaica-status> renders every state through part="state"', () => {

@@ -104,8 +104,9 @@ let mapsMade = 0;
 
 /**
  * The map: the points, the density wash, the artifacts' outlines and labels, hover, pick and the
- * selection, drawn with deck.gl in an orthographic view. The refused, expired and empty states are
- * drawn over the canvas, so none of them reads as an empty corpus. The toolbar switches between
+ * selection, drawn with deck.gl in an orthographic view. The refused, expired and empty states, and
+ * a server that cannot be reached or did not answer, are drawn over the canvas, so none of them
+ * reads as an empty corpus. The toolbar switches between
  * pan, box select and lasso select, and fits the whole extent; shift-drag in pan mode draws a box.
  * A settled box or lasso becomes the store's selection, a filter every count narrows to; a tag on
  * its top-left corner gives the count matched inside it and a button that clears it.
@@ -149,11 +150,13 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - The
  *   `layers` attribute changed.
  * @csspart canvas - The deck.gl canvas's container.
- * @csspart overlay - The state drawn over the canvas when refused, expired or empty. Where the
+ * @csspart overlay - The state drawn over the canvas when refused, expired or empty, when the
+ *   server cannot be reached, and when it did not answer. Where the
  *   viewer can see no item in the view at all, it says so in place of Nothing in view.
  * @csspart state - The state line inside the overlay, with `data-state`, and `data-visible="none"`
  *   where the viewer can see no item in the view.
- * @csspart retry - The Retry button in the overlay, when the view was refused.
+ * @csspart retry - The Retry button in the overlay, when the view was refused or the server did
+ *   not answer.
  * @csspart refusal - The words "View refused" inside the overlay, with `data-code` set to the
  *   refusal's code.
  * @csspart controls - The toolbar.
@@ -1595,13 +1598,14 @@ export class MosaicaMap extends MosaicaElement {
   override render(): TemplateResult | typeof nothing {
     const status = this.resolvedStore?.get('status') ?? null;
     const state: PanelState = stateOf(status);
-    // Loading, retrying and unanswered say how the server is doing and are the status strip's; the
-    // map draws the answers that could otherwise read as an empty corpus.
+    // The map says over the canvas whatever could otherwise read as an empty corpus: an answer
+    // with nothing to draw, and a server that does not answer. Loading, and a request the server
+    // shed, are the status strip's alone.
     const refresh = () => this.resolvedStore?.refresh();
     const nothingVisible = seesNothing(this.resolvedStore, state);
     const overlay = nothingVisible
       ? html`<div part="overlay"><span part="state" data-state="empty" data-visible="none">${NOTHING_VISIBLE}</span></div>`
-      : state === 'refused' || state === 'expired' || state === 'empty'
+      : state === 'refused' || state === 'unanswered' || state === 'expired' || state === 'empty' || (state === 'retrying' && status?.unreachable)
         ? html`<div part="overlay">${renderState(state, status, {onRefresh: refresh, onRetry: refresh})}</div>`
         : nothing;
     const controls = this.noControls
