@@ -44,13 +44,13 @@ npm start
 ```
 
 ```
-> @mosaicajs/example-getting-started@ start
+> start
 > vite
 
   building the GeoNames bundle, which takes a few seconds
-  Mosaica is serving 150,000 GeoNames places on http://127.0.0.1:37610 (log: /home/you/mosaica/mosaica-demo/getting-started/mosaica.log)
+  Mosaica is serving 150,000 GeoNames places (log: /home/you/mosaica/mosaica-demo/getting-started/mosaica.log)
 
-  VITE v8.2.0  ready in 3196 ms
+  VITE v8.2.0  ready in 2781 ms
 
   ➜  Local:   http://localhost:5310/
   ➜  Network: use --host to expose
@@ -67,12 +67,12 @@ Open <http://localhost:5310/>.
 Every dot is a place: a town, a lake, a mountain, a farm. The panel on the left counts them, and
 each card counts them by one field. Type `San` into the Name box. The search applies as you type.
 The map keeps the 1,310 places with the word San in their name, and every card counts again: Mexico
-has most of them, then Italy, the United States and the Philippines.
+has the most, then Italy, the United States and the Philippines.
 
 Now hover over "Mountain, hill, rock" on the Feature class card and press the funnel button that
-appears beside it, Filter. The two filters apply together and 97 places remain. Most of them are in
-North Korea and South Korea, where san is the Korean word for mountain. "Clear all" at the top of
-the panel removes both filters.
+appears beside it, Filter. The two filters apply together and 97 places remain. The Country card now
+puts North Korea first, with South Korea third, because san is the Korean word for mountain.
+"Clear all" at the top of the panel removes both filters.
 
 If the command stops with `Error: no mosaica binary`, it found no binary to run. Build one with
 `cargo build --release -p mosaica` at the root of the repository, or set `MOSAICA_BIN` to one.
@@ -185,7 +185,7 @@ explorer.addEventListener('mosaica-pick', (event) => {
 ```
 
 Save, and click a place. The line under the map names it, for example
-`Last clicked: Xialucun (settlement, CN)`.
+`Last clicked: Huangjiatan (settlement, CN)`.
 
 The explorer fires `mosaica-pick` twice for each click. The first time, at the click, the event
 carries only the place's `mosaica_id`. The second time it also carries the place's record, once the
