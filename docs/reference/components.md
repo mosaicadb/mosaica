@@ -54,7 +54,7 @@ With none of the three, the element renders its detached state. An element that 
 
 Every event is a `CustomEvent` that bubbles and is composed, so a host listens on the element or on any ancestor, including one outside `<mosaica-explorer>`.
 
-A click on a point fires `mosaica-pick` with its `mosaica_id`. Once the selected item's record arrives, the map fires `mosaica-itemopen` with the id and the record, whether the item was selected by a click or by `Store.pick`. Where the server refuses the record, `mosaica-itemopen` does not fire and the refusal is the store's `selection.itemRefusal`, as an opened artifact's is with `mosaica-artifactopen`. A category value in the record is a key; `Store.titleOf` gives its title, asked for over what the viewer may see, as the item card shows it:
+A click on a point fires `mosaica-pick` with its `mosaica_id`. Once the selected item's record arrives, the map fires `mosaica-itemopen` with the id and the record, whether the item was selected by a click or by `Store.pick`. Where the server refuses the record, `mosaica-itemopen` does not fire and the refusal is the store's `selection.itemRefusal`, as an opened artifact's is with `mosaica-artifactopen`. A category value in the record is a key; `Store.titleOf` gives its title, as the item card shows it. The server answers it as `/v1/categories` would list the value: a value of a `public` vocabulary has its title whether or not the viewer may see an item that carries it, and a value of a `derived` vocabulary only where the viewer may see one. A handler asks for it so:
 
 ```js
 map.addEventListener('mosaica-itemopen', async (e) => {
@@ -62,7 +62,7 @@ map.addEventListener('mosaica-itemopen', async (e) => {
 });
 ```
 
-`<mosaica-item-card>` and `<mosaica-explorer>` take `card-fields`, the fields the compact card shows before "Show all", space-separated and in that order. A name the record has no value for shows nothing.
+`<mosaica-item-card>` and `<mosaica-explorer>` take `card-fields`, the fields the compact card shows before "Show all", separated by spaces or commas and in that order. A name the record has no value for shows nothing.
 
 An element's parts are styled with `::part()`. An element that renders another inside its shadow root forwards the inner element's parts under its name: through `<mosaica-explorer>`, the map's toolbar is `::part(map-controls)` and the item card's title is `::part(item-card-title)`. `PARTS` in `@mosaicajs/components` lists each element's parts, for a host that renders an element in its own shadow root and forwards them.
 

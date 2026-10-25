@@ -143,6 +143,23 @@ describe('<mosaica-item-card>', () => {
     }
   });
 
+  it('asks again for a title the store did not give, as after a refusal, at the next render', async () => {
+    const host = await mount('<mosaica-item-card></mosaica-item-card>');
+    const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+    const store = fakeStore({meta: META, status: status({})});
+    store.setTitles(() => null);
+    el.store = store;
+    store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    const shown = () => deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent;
+    expect(shown()).toBe('cs');
+    store.setTitles(() => 'Computer science');
+    el.requestUpdate();
+    await settle(host);
+    await settle(host);
+    expect(shown()).toBe('Computer science');
+  });
+
   it('shows no answer asked for under a `meta` the store has since replaced', async () => {
     const host = await mount('<mosaica-item-card></mosaica-item-card>');
     const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;

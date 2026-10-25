@@ -25,10 +25,9 @@ import {chrome, tokens} from './tokens.js';
  *
  * `compact` shows less: the headline, cut at three lines, the field `subtitle-field` names under
  * it, cut at two, the fields `card-fields` names (else the first three others), then "Show all N
- * fields" beside Open. Show all
- * lists every field, the views and the group-scoped values, which scroll inside the card past
- * 300 px. A host's buttons in the
- * `actions` slot sit beside the close button.
+ * fields" beside Open. Show all lists every field, the views and the group-scoped values, which
+ * scroll inside the card past 300 px. A host's buttons in the `actions` slot sit beside the close
+ * button.
  *
  * @summary The selected item's fields, with Open and Copy id.
  * @tagname mosaica-item-card
@@ -261,8 +260,14 @@ export class MosaicaItemCard extends MosaicaElement {
       const key = values[column.name];
       if (!column.category || typeof key !== 'string' || titles.held.has(titleKey(column.name, key))) continue;
       titles.held.set(titleKey(column.name, key), null);
+      // A null answer is forgotten, so a refused ask is made again at the next render; the store
+      // answers a value it knows has no title without a request.
       void store.titleOf(column.name, key).then((title) => {
-        if (this.titles !== titles || title === null) return;
+        if (this.titles !== titles) return;
+        if (title === null) {
+          titles.held.delete(titleKey(column.name, key));
+          return;
+        }
         titles.held.set(titleKey(column.name, key), title);
         this.requestUpdate();
       });

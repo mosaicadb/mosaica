@@ -18,29 +18,30 @@ const META = meta({
 });
 
 /** An answer naming each grouping's value with its title, where it has one. */
-function answer(req: AggregateRequest): AggregateResult {
+function answer(req: AggregateRequest, identityKey: string): AggregateResult {
   const tables = req.groupings.map((g, grouping) => {
     const key = (g.by as {values: string[]}).values[0]!;
     const rows = tableFromArrays({group: ['listed'], key: [key], title: [TITLES[key] ?? null], count: BigInt64Array.of(1n)});
     return {grouping, total: 1, referenceTotal: null, groups: 1, sample: null, rows};
   });
-  return {tables, region: null, recomposed: false, identityKey: 'ik', next: null};
+  return {tables, region: null, recomposed: false, identityKey, next: null};
 }
 
-async function storeWith() {
+async function storeWith(opts: {meta?: () => Promise<typeof META>} = {}) {
   const clock = fakeClock();
+  const keys = {identity: 'ik'};
   const pending: {req: AggregateRequest; release: () => void}[] = [];
   const aggregate = vi.fn(
     (_token: string, req: AggregateRequest, signal: AbortSignal) =>
       new Promise<AggregateResult>((resolve, reject) => {
         signal.addEventListener('abort', () => reject(signal.reason));
-        pending.push({req, release: () => resolve(answer(req))});
+        pending.push({req, release: () => resolve(answer(req, keys.identity))});
       })
   );
-  const client = {meta: async () => META, viewport: async () => response(viewportResult()), aggregate, close: () => {}} as unknown as MosaicaClient;
+  const client = {meta: opts.meta ?? (async () => META), viewport: async () => response(viewportResult()), aggregate, close: () => {}} as unknown as MosaicaClient;
   const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler: fakeScheduler(), prefetch: false});
   await clock.advance(1);
-  return {store, pending};
+  return {store, pending, keys};
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -95,5 +96,49 @@ describe('Store.titleOf', () => {
     after[0]!.release();
     expect(await Promise.all(again)).toEqual(['Computer science', 'Mathematics']);
     store.dispose();
+  });
+
+  it('sends one request for two asks for the same value made together', async () => {
+    const {store, pending} = await storeWith();
+    const both = [store.titleOf('archive', 'cs'), store.titleOf('archive', 'cs')];
+    await flush();
+    expect(pending.map((p) => p.req.groupings)).toEqual([[{count: true, by: {field: 'archive', values: ['cs']}}]]);
+    pending[0]!.release();
+    expect(await Promise.all(both)).toEqual(['Computer science', 'Computer science']);
+    store.dispose();
+  });
+
+  it('empties what it holds when an answer under another identity key makes the store forget', async () => {
+    const {store, pending, keys} = await storeWith();
+    const first = store.titleOf('archive', 'cs');
+    await flush();
+    pending[0]!.release();
+    expect(await first).toBe('Computer science');
+    // A renewal under other terms: the next answer carries another key.
+    keys.identity = 'other';
+    const crossing = store.titleOf('archive', 'math');
+    await flush();
+    pending[1]!.release();
+    expect(await crossing).toBeNull();
+    await flush();
+    const again = store.titleOf('archive', 'cs');
+    await flush();
+    expect(pending.slice(2).map((p) => p.req.groupings)).toEqual([[{count: true, by: {field: 'archive', values: ['cs']}}]]);
+    pending[2]!.release();
+    expect(await again).toBe('Computer science');
+    store.dispose();
+  });
+
+  it('resolves null once the store is disposed, asked before or after, and while `/v1/meta` is awaited', async () => {
+    const {store} = await storeWith();
+    const before = store.titleOf('archive', 'cs');
+    store.dispose();
+    expect(await before).toBeNull();
+    expect(await store.titleOf('archive', 'math')).toBeNull();
+
+    const waiting = await storeWith({meta: () => new Promise(() => {})});
+    const unanswered = waiting.store.titleOf('archive', 'cs');
+    waiting.store.dispose();
+    expect(await unanswered).toBeNull();
   });
 });

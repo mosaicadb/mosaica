@@ -788,9 +788,12 @@ export interface Store {
   /**
    * The title the vocabulary gives `key`, a value of the category column `column`. Resolves to
    * `null` where the value has no title, where `column` is not a category column a filter can
-   * name, and where the request was refused. The title is asked for over everything this viewer
-   * may see (`POST /v1/aggregate` with `subject: 'visible'`, naming the value), so a value the
-   * viewer cannot see reads no title. Asks made in one task go as one request, up to
+   * name, where the request was refused, and once the store is disposed. The title is asked for
+   * over everything this viewer may see (`POST /v1/aggregate` with `subject: 'visible'`, naming
+   * the value), and the server gives it as `/v1/categories` would list it: every value of a
+   * `public` vocabulary has its title, whether or not the viewer may see an item that carries it,
+   * and a value of a `derived` vocabulary has its title only where the viewer may see an item that
+   * carries it. Asks made in one task go as one request, up to
    * `meta.selection.maxAggregateGroupings` values each, and are sent and retried as
    * {@link Store.setAggregate}'s are. An answer is held with `meta`, so asking again for a value
    * resolves without a request; it is held only where `meta` is the one it was asked under. When
@@ -1252,12 +1255,17 @@ export function createStore(options: StoreOptions): Store {
     aggregateBody
   );
 
+  /** Settled by `dispose`, so a title asked for while `/v1/meta` is awaited resolves. */
+  let stopTitles: () => void = () => {};
+  const titlesStopped = new Promise<void>((resolve) => (stopTitles = resolve));
+
   async function titleOf(column: string, key: string): Promise<string | null> {
     try {
-      await ready();
+      await Promise.race([ready(), titlesStopped]);
     } catch {
       return null;
     }
+    if (disposed) return null;
     const under = meta;
     if (!under || !under.filterOperands.some((o) => o.column === column && o.family === 'category' && !o.scope)) return null;
     const id = `${column}\u0000${key}`;
@@ -2640,6 +2648,7 @@ export function createStore(options: StoreOptions): Store {
     ranking.dispose();
     titling.dispose();
     dropTitles();
+    stopTitles();
     inView.dispose();
     if (inViewTimer !== null) clock.cancel(inViewTimer);
     if (probe !== null) clock.cancel(probe);

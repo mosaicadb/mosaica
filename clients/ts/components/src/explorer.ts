@@ -139,9 +139,10 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * "Show all N fields". Picking another point replaces it unless Pin was pressed, which keeps it
  * open; Close or Escape closes it and drops the selection, and a click on the map that finds
  * nothing does the same for the card that is not pinned. Tab from the map goes to the card, which
- * is named by its item's title and gives focus back to the map as it closes. A picked cluster's card behaves the same way. While a region is selected
- * its card stands in the map's top-right corner, and where the map holds no position for the
- * selection, as after following an item into another view, the item's card goes there too.
+ * is named by its item's title and gives focus back to the map as it closes. A picked cluster's
+ * card behaves the same way. While a region is selected its card stands in the map's top-right
+ * corner, and where the map holds no position for the selection, as after following an item into
+ * another view, the item's card goes there too.
  *
  * The Layers button opens a popover in four sections. Points: whether the points are drawn; Most
  * points, a slider from `budget-min` to `budget-max` on a log scale that sets the store's budget
