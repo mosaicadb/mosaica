@@ -1,433 +1,109 @@
 # Clients
 
-A client asks Mosaica for a view and displays what comes back. The server decides what a viewer
-may see before any byte leaves it; nothing a client does can widen or narrow that. What a client
-can get wrong is different in kind: showing a sample as though it were the whole set, showing a
-stale view as current, showing a refusal as an empty corpus, showing a masked count as if it were
-a size.
+Mosaica has three clients beside the HTTP API: a Python package, a TypeScript client with web components, and the `mosaica` command. Each reaches the same capabilities, as the [capabilities](../reference/capabilities.md) table lists. This chapter explains what each one does for you, what a browser client holds and when it lets go of it, and the rules for anyone writing a client of their own.
 
-```mermaid
-flowchart LR
-  cred["a credential"] --> session["login or session plane<br/>mints a token"]
-  session -- "token" --> client["client<br/>store"]
-  client -- "token and request" --> viewer["viewer plane<br/>answers from the visible set"]
-  viewer -- "counts, marks, artifacts:<br/>already masked" --> client
-  client --> display["display:<br/>formats a figure, never computes one"]
-```
+Every figure a client shows was computed by the server, from the items the viewer may see, before it arrived. A client cannot widen or narrow what a viewer sees. What it can get wrong is how it presents an answer: a sample shown as the whole set, an old view shown as current, or a refusal shown as an empty map.
 
-*A client asks and displays. Every masked figure it shows was computed before it arrived.*
+## Which client
 
-## Deployment
+- **Python**, the `mosaica` package, makes a database from data frames and files, reads one as pyarrow tables, and draws a map in a Jupyter notebook. `create` and `open` give a `Database` in a directory, which runs its own server. `connect` gives a `Viewer` that reads from a server someone else runs, and `Control` writes to one. The notebook map embeds the TypeScript components, so it behaves as they do.
+- **TypeScript**: `@mosaicajs/client` holds the store, which runs a map for a browser, and `MosaicaClient` and `Control`, which send single requests. `@mosaicajs/components` adds the web components, from a whole explorer down to a single count, `@mosaicajs/deck` a deck.gl layer for a scene of your own, and `@mosaicajs/react` React wrappers.
+- **The `mosaica` command** builds a database from a declaration and its source files, serves it, and reads from a running server with a session token: items, artifacts and aggregates, as Arrow or Parquet.
 
-Of the three planes a deployment exposes, two concern a client. The session plane mints a token
-for any principal and must never be reached from a browser: it is gated by an API key holding
-`authorise-as`, which only the integrator's own server should hold. The viewer plane is what a
-client calls with a token, and it can be reached directly by a browser or a notebook page from an
-origin the deployment has named in advance. A viewer can also log in there with its own password,
-API key or OIDC access token, and receive a token for itself.
+## Connecting from a browser
 
-| Plane | Reached by | Holds | Cross-origin access |
-|---|---|---|---|
-| Session | The integrator's own server | An API key holding `authorise-as` | Never opened to a browser |
-| Viewer | A browser, a notebook page, or a server on the client's behalf | A per-viewer token | An enumerated list of allowed origins, none by default |
+A browser holds a token for one viewer, and calls the viewer address with it. The token comes from one of two places:
 
-Two shapes of mistake pass every functional test and are invisible in a screenshot. The pooled
-service token authorises once with a single broad credential and filters per user inside its own
-proxy afterwards, so every one of its users ends up seeing counts and labels computed for the
-credential rather than for themselves. The claim-minting proxy issues a token per user but mints
-it from whatever claims a caller supplies, so anyone who can call the minting endpoint can claim
-to be any user it names. The authority to grant access belongs at the integrator's own server,
-verified there against an identity provider's claims, never merely asserted by whoever calls the
-minting endpoint.
+- **The viewer logs in** at the viewer address, with a password, an API key or an OIDC access token.
+- **Your own server** asks the session address for a token for a viewer it has already signed in. That address takes an API key that may act as any viewer, so it must never be reached from a browser.
 
-When a session ends, a client returns to the integrator's server for a new token; a notebook
-widget renews before its current one expires rather than waiting for a refusal.
+The viewer address answers browsers only from origins the deployment lists, and from none by default. [Access control](access-control.md#getting-a-token) describes both routes in full.
 
-## What a client holds
+!!! warning "Two integrations that look right and are not"
+    - **One broad token for everyone**, with your server filtering per user afterwards. Every user then sees counts, clusters and labels computed for the broad token, which can reveal what they should not see.
+    - **A token minted from whatever a caller claims**, so anyone who can call your minting endpoint can be any user. Check the user's identity on your server before asking for their token.
 
-A client holds a versioned partial copy of what has been served: a session (the token and the
-identity it names), a replica of the geometry the server has answered for so far, and a presented
-frame, the part of the replica currently on screen. None of this is authoritative. A replica can
-be thrown away and rebuilt from nothing and the picture it produces is the same, only slower to
-arrive.
+## What the store does
 
-The replica is kept current against a content key that changes when the corpus changes in a way
-this viewer can see: new items reaching a request, or an item being denied. A client compares the
-content key on its held geometry against the content key on the latest answer it has received. A
-mismatch means the marks on screen may be older than the corpus. It does not mean they are wrong,
-and nothing already shown is retracted. It does mean a stale view can still draw an item the
-corpus has since denied, which is why the mark and the refresh control are mandatory rather than
-cosmetic.
+The store is the part of the TypeScript client that runs a map. The components and the notebook map are built on it, and a host with its own drawing can use it directly. The host tells it where the camera is, and which filters, layers, colours and view are chosen. The store works out which requests to make, holds what comes back, and publishes what to draw: the points, the counts, the topics, a legend, and the state of the view.
 
-| What changed | What it means for a held view |
+- **It asks only for what is worth asking.** It picks the zoom level whose tiles give about as many points as the point budget, 250,000 by default. It waits for the camera to settle before asking for more, and fetches a margin around the screen once it has.
+- **It keeps what it has fetched**, and asks again only for tiles it does not hold. Topics are fetched by their own request, tile by tile, so they do not blink out as the held points change.
+- **It keeps colours stable.** A topic's colour comes from a slot the server gives it, the same for this viewer at every zoom and filter, from one of four palettes: Okabe-Ito, Tableau 10 (the default), Tableau 20 or Kelly. A category's values take their palette colours in order of the server's count of each over the viewer's items, so they are the same on every load. Colours a user picks are handed to the host in events, and the client keeps none of them. A host that wants them kept stores them and passes them back.
+- **It picks a level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
+- **It draws density from the aggregate route.** Shading follows the filter and the highlight, as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
+- **It counts for the panels.** A component registers the breakdowns it needs, such as a histogram for a field card, and the store sends them as one aggregate request and asks again when the filter changes.
+
+### What the view shows
+
+The store reports the view's state, so a host never shows one kind of answer as another:
+
+| State | Meaning |
 |---|---|
-| A different viewer authorises (a new token for a different viewer) | The host calls `clear()` or makes a new store, which drops the replica, held artifacts, the selection and per-column state and reads meta again. Every `mosaica_id` the client already holds stays valid, because the permutation is keyed per bundle, not per viewer. |
-| An answer carries another identity key | The store detects a new viewer by the identity key, which hashes the exact credential bytes presented at authorisation, the identity of the viewer's visible-set fragment, and the view. An ingest or a suppression does not change it. The store drops everything the server answered, reads meta again and asks again, and keeps the host's own inputs. A renewal that presents different credential bytes, such as a freshly signed token, changes the key, so the store redraws from scratch at that renewal even for the same person. The check runs on answers; the `Store` reference says how long a host that changes viewer without `clear()` shows the previous viewer's data. |
-| A compaction is published | A compaction rotates the fragment identity the identity key hashes, so every store sees a new key on its next answer: it drops what it holds, reads meta again and draws afresh. Every `mosaica_id` stays valid. |
-| The deployment is rebuilt | The new bundle has a new key, so every `mosaica_id` the client holds is meaningless. Read the items again, by a unique field's values or afresh. |
-| The content behind the current identity (an item added, denied, or unsuppressed) | The client's counts and marks may be older than the corpus. Mark the view stale and offer refresh. |
+| `idle` | nothing asked for yet |
+| `loading` | a request is out |
+| `retrying` | the server was busy (`429` or `503`), and the request will be sent again |
+| `shown` | points are on screen. Only this state may show counts |
+| `empty` | the answer holds nothing this viewer may see in view |
+| `refused` | the request failed, so what is here is not known |
 
-Segments merging never reaches a client, because nothing it holds is addressed by row. A
-compaction reaches it only through the identity key, as the table says.
+Two flags sit beside the state:
 
-Marking a view stale is built: the store compares content keys on every answer and flips a flag a
-display reads. Fetching fresh geometry on its own, without a person asking for it, is not: a
-stale view stays on screen, correctly marked, until something asks the store to refresh.
+- **`stale`**: the data has changed since the points on screen were fetched. The store does not fetch again by itself. It marks the view, and a refresh is one action away.
+- **`unreachable`**: a request could not reach the server, or a proxy in front of it answered `502`. The store asks the server again after a second, then twice as long each time, up to 30 seconds, and redraws once it answers. A refusal, a `504` on one route, or a token source that refuses, is not an outage. A `401` on a token that had worked means the session ended, and the store asks the host's `authorise` for a new token once.
 
-## The store
+### When a client lets go of what it holds
 
-The store is the part of a client that decides what to ask for and holds what comes back. It does
-not draw: drawing is a choice a host makes for itself, whether the host is a map, a plain canvas
-or a table. Depth is the zoom level of the tiles it requests. Deciding when to ask, at what
-depth, and what to keep asking for is the same question for every one of them, and getting it
-wrong shows a viewer a wrong or misleading map, not merely a different-looking one.
+| What happened | What the store does |
+|---|---|
+| The data changed under the same viewer | Marks the view `stale` and keeps what is on screen until it is refreshed |
+| The answers carry a different identity key: another viewer, a renewed token, or a compaction | Drops everything the server answered, reads the deployment's description again and redraws. It keeps the host's own choices |
+| The host calls `clear()` | The same, for a host that changes viewer itself |
+| The database was rebuilt | Every `mosaica_id` it holds names nothing. Read the items again by a unique field's values |
 
-The store takes in where the camera is, which filters, layers and colour are active, the point
-budget, which view is current and what is selected. It publishes the marks to draw, the counts to
-show, the display state, and a legend. The point budget is 250,000 marks unless the host gives
-another. The explorer element takes it as `budget`, which leaves the store's own unless the host
-sets it, with `budget-min` and `budget-max`, 1,000 and 2,000,000 by default, for the range its
-Most points slider offers, and passes all three to its map. The slider sets the store's budget
-when it is let go. The notebook widget takes them as `budget`, `budget_min` and `budget_max`, and
-every Python route to a map passes them on.
+A merge of segments never reaches a client. A compaction reaches it only through the identity key, and every `mosaica_id` stays valid across it.
 
-The cluster budget is the most artifacts a `nested` or `dag` layer is cut to, met by drawing
-ancestors in place of their descendants. The store starts with `artifacts.budget`, or the finest
-cut, and `Store.setClusterBudget` changes it, asking again for the treed layers drawn and for every
-aggregate registered with `cut: 'drawn'`. The explorer takes it as `cluster-budget`, 1,000 by
-default, with `cluster-budget-min` and `cluster-budget-max`, 10 and 10,000, for its Most clusters
-slider, which sits beside Most points while a `nested` or `dag` layer is drawn and sets the store's
-cluster budget when it is let go. The notebook widget takes them as `cluster_budget`,
-`cluster_budget_min` and `cluster_budget_max`.
+### Views
 
-Clusters are coloured from a palette: Okabe-Ito with 8 colours, Tableau 10 with 10, which is the
-default, Tableau 20 with 20, or Kelly with 22. The store sends the palette's size as
-`palette_size` with every request for artifacts, and the server answers each cluster with a slot
-below it ([annotations](annotations.md#on-the-map)), the same for this viewer at any zoom, box,
-budget or filter. The store colours a cluster with the palette's colour at its slot, and a cluster
-with no slot with the neutral grey. `Store.setPalette` changes the palette. Slots of one size mean
-nothing under another, so the store asks again with the new size, and each cluster keeps the colour
-of the palette its slot was served under until the new slot arrives.
-`Store.setArtifactColours` gives some clusters a host's own colours, by layer and `mosaica_id`,
-over their slots. The explorer's display menu lists the four palettes with each one's swatches and size, and
-the field card's swatches take the slot each row of its table carries. The notebook widget takes
-the palette as `palette`, and the Python client passes `palette_size` to every route that reads
-clusters and gives back each cluster's `slot`. `mosaica artifacts --palette-size` adds the `slot`
-field at the command line.
+The store keeps what it has fetched for each view it has visited, so a view the viewer returns to is as they left it. All views share one memory budget, and the least recently drawn leave first.
 
-A user chooses single colours in the browser: from a swatch on a field card, which opens a colour
-picker, or in Edit colours (`<mosaica-colour-editor>`), which the explorer's Colour section opens
-while the points are coloured by a category or a layer. Edit colours lists the category's values,
-or the layer's clusters (the level coloured on a levelled layer, and on a `nested` or `dag` layer
-the cut the map draws, whose clusters change as the camera moves), largest first by their counts
-over everything the viewer may see, with no filter and no area, so the rows hold their order
-through a pan or a change of filter. A category value the map has not drawn yet has no palette
-colour, and its swatch is an outline until it has one. It searches with the field card's
-typeahead, over every name in a tree, and sets one colour on several rows, or the palette colour
-back for every value of the field or every cluster of the layer, in one action. A category value's
-colour is written to the colour choices the elements over a store share, and a cluster's to
-`Store.setArtifactColours` under its layer, with the others chosen. Each action fires one event,
-`mosaica-valuecolour` or `mosaica-clustercolour`, naming every value or cluster it changed, and the
-client keeps none of them: a host that wants them kept stores them and sets them back through the
-map's or the explorer's `valueColours` (by column) and `clusterColours` (by layer). The notebook
-widget does so as its `value_colours` and `cluster_colours`.
+- **Within a view group sharing one layout**, such as a year shown quarter by quarter, a switch keeps the camera and the selection, and asks the next view for the same tiles.
+- **Between layouts**, a switch drops the selection and fits the camera to the new view, since a position in one layout means nothing in another.
 
-Told where the camera is, it works out which requests are worth making and issues them. Told a
-filter changed, it recomposes one expression from every active clause and sends it whole. Given a
-response, it decides which already-held geometry still answers for the view and which needs
-replacing, and updates what it publishes.
+## Reading data out
 
-Underneath, the driver tracks whether the view is moving or has come to rest, one outstanding
-request together with its retries, and a settle timer that asks again once the view has been
-still long enough that a further answer would be worth having. A limited look-ahead requests the
-area just outside what is on screen once the view has settled and nothing else is being asked
-for. None of this is visible from outside the store: a host tells it where the camera is and
-reads what it publishes.
+Bulk reads and aggregates do not go through the store. Each client sends the request as the caller wrote it, choosing no fields, order or figures on the caller's behalf, and follows the cursor:
 
-The artifacts of the layers drawn are requested on their own, tile by tile
-([queries](queries.md#annotations-on-the-map)), rather than read off cached point geometry.
-The layer the points are coloured by is named on the point requests, so each point carries its
-artifact's `mosaica_id`. Artifacts are clusters, boundaries, hierarchy nodes and their labels, as
-[annotations](annotations.md) defines them. A cache holds geometry it has
-already fetched and does not ask again for a tile it already holds, and such a tile carries no
-artifacts, so a client reading them off the point path would watch clusters disappear from a view
-that had not moved, for no reason a person could see. Asking on its own avoids that at the cost of
-one extra request once a view has settled.
-
-```mermaid
-flowchart LR
-  gesture["pan, zoom, filter, select"] --> driver["driver<br/>decides what to ask,<br/>when, at what depth"]
-  driver -- "requests" --> srv["mosaica serve"]
-  srv -- "framed responses" --> replica["replica<br/>what has been served,<br/>keyed by content key"]
-  replica --> frame["presented frame<br/>what is on screen now"]
-  frame --> render["renderer<br/>deck.gl layer, or your own"]
-  replica -. "content key differs" .-> stale["frame marked stale,<br/>refresh available"]
-```
-
-*The store decides when to ask and what to hold. Rendering only draws what it is handed; nothing
-refetches on its own.*
-
-## The twelve rules
-
-The server enforces everything about what a viewer may see. It sees one request at a time and
-cannot see a screen, so it cannot enforce how a client presents what it already sent. The rules
-below are what closes that gap: each is something a client must do on its own, and each has a
-specific way of misleading a viewer if it is skipped.
-
-A [viewport response](queries.md#drawing-the-map) carries the marks it drew, each a point with a
-coordinate, an identifier and its artifact in each layer named; a served, a visible and a matched
-count; and a content key. The artifacts of the layers that are on arrive tile by tile from a
-request of their own, with the same keys. The rules below govern what a client does with that
-response once it has it.
-
-```mermaid
-stateDiagram-v2
-  [*] --> idle
-  idle --> loading
-  loading --> shown
-  loading --> empty
-  loading --> refused
-  loading --> retrying
-  retrying --> loading
-  shown --> shown : newer answer arrives, marked stale
-```
-
-*A view holds one of six states, and only `shown` carries a number; `shown` may also be marked
-stale.*
-
-| # | Rule | What goes wrong on screen if it is broken |
+| Client | Bulk read | Aggregate |
 |---|---|---|
-| 1 | Show a state that matches what happened, and let only a shown view carry a number. | A refused request drawn as an empty view looks like a place with no data, when the truth is that nothing was answered at all. |
-| 2 | When a value is a sample of a set, show both how much is shown and how much there is in total, or show neither. | A bare sample count reads as the whole population. A reader takes the number on screen to be everything there is. |
-| 3 | Mark a view as stale once a newer answer exists, and keep refresh one action away. | An unmarked stale view reads as current when the corpus has already moved past it. |
-| 4 | Show a masked count only as what this viewer can see, never as a size or a fraction of one. | "12,040 of 12,040" beside a cluster asserts a total nobody sent. The number looks complete when it is only what one viewer happens to see. |
-| 5 | Treat an absent artifact, and a filter that matches nothing, as an ordinary answer, never as a reason to explain. | Saying "no such value" or "layer not reachable" turns a filter into a way of finding out what is hidden, one guess at a time. |
-| 6 | Ask for artifacts with their own request naming the layers that are on, never by reading them off cached point tiles. | As the cache warms, artifacts blink out of a view that has not changed, because a held tile stopped naming what it contains. |
-| 7 | Drop held geometry, artifacts, and per-column state when the viewer's identity changes; drop held geometry when a filter changes. | Marks or clusters left from a previous login, or from before a filter was applied, stay on screen under a picture they no longer belong to. |
-| 8 | When zooming in, never ask for fewer marks per tile than the previous request did. | Points that were on screen pop out as a viewer zooms in, reading as items vanishing under them. |
-| 9 | Hold an item's identifier as a full sixty-four-bit value, not as a JavaScript `number`, which loses precision above 2⁵³. | A click on a point returns the wrong record, or none at all, for an item plainly on screen. |
-| 10 | A proxy in front of the viewer plane forwards every response header, including the ones it does not recognise. | One viewer's cached view can end up served under another viewer's token, or every request pays for a full response because nothing declares what is already held. |
-| 11 | Treat a credential the server no longer holds and an expired token the same way: the session has ended. | A client that treats an outright rejection as something to retry keeps sending a request that will never succeed. |
-| 12 | Choose which zoom level's tiles to request so the number of marks stays roughly what the screen can show; nothing on the wire states a depth. | Ignoring this either draws a handful of marks across the whole map or asks for far more than a screen can use. |
+| Python | `db.items`, `db.artifacts`, `selection.items`, and the same on a `Viewer`: one pyarrow table, or pages with `batches=True` | `db.aggregate`, `viewer.aggregate`, `selection.aggregate`: one pyarrow table per grouping |
+| TypeScript | `client.items`, `client.artifacts`: Arrow tables, one per page | `client.aggregate`, or `store.setAggregate` for counts that follow the map |
+| CLI | `mosaica items`, `mosaica artifacts`: Arrow IPC or Parquet, written page by page | `mosaica aggregate`, one grouping a run |
 
-Rules 1 to 3 keep a viewer from mistaking one kind of answer for another: a refusal for nothing, a
-sample for a total, an old view for a current one. Rules 4 to 6 keep a masked figure honest about
-what it counts and what it does not explain. The rest are narrower and mechanical: what to forget,
-what identifiers and headers demand, and the one decision the server leaves entirely to the
-client's own judgement.
+A read that stops part of the way gives back the rows it read and the cursor to continue from: `PartialRead` in Python, the cursor after each page in TypeScript, and the cursor named on stderr by the command.
 
-## Views
+## Writing your own client
 
-A deployment can serve more than one view over the same items: a different projection of the
-same corpus, or a group such as a set of quarters, the same items positioned per quarter of a
-year, sharing one layout. A client's store holds one set of session-wide state and, underneath
-it, one replica and one presented frame per view it has visited.
+The server enforces what a viewer may see, but it cannot see a screen. These rules are what a client must do itself. The store follows all of them.
 
-```mermaid
-flowchart TB
-  shared["shared: session, visible set, filters,<br/>colour, layer choice, point budget"]
-  subgraph store["the store"]
-    cur{{"current view"}}
-    A["view A: replica, frame, channel"]
-    B["view B: replica, frame, channel"]
-  end
-  shared --> cur
-  cur -. "points to one" .-> A
-  cur -. "or the other" .-> B
-```
-
-*A switch moves the pointer marking which view's held state is current; both stay in the store.*
-
-A switch does not touch session-wide state or what is already known about a selected item; only
-geometry is per view. A view that is not current has no request in flight, and a view a viewer
-returns to is exactly as warm as their last visit left it. Every view a client has visited shares
-one byte budget; when it is full, whatever was least recently drawn is evicted first.
-
-Within a group whose views share one layout, such as a set of quarters, a switch keeps the
-camera, the depth, and the selection: the same tiles at the same depth are simply asked of the
-next view. Between views that use different layouts, a switch drops the selection and refits the
-camera to the new view's own extent, because a shape or a camera position in one layout means
-nothing in another.
-
-## Reading in bulk
-
-The bulk reads, `POST /v1/items` and `POST /v1/artifacts`, do not pass through the store. Each
-client follows each response's cursor until the read ends, and passes the caller's request through
-as given, choosing no fields and no order on the caller's behalf.
-
-| Client | Call | What it gives back |
+| # | Rule | What goes wrong otherwise |
 |---|---|---|
-| TypeScript | `client.items(token, request)` and `client.artifacts(token, request)` | an async iterator of Arrow tables, one per page, with the cursor after each; a caller who stops, or whose read is cut or refused part-way, resumes from that cursor |
-| Python | `db.items`, `db.artifacts` and `selection.items`, and the same reads on a `Viewer` | one `pyarrow` table of the whole read, or with `batches=True` the pages one at a time; a read that stops part-way raises `PartialRead`, which holds the rows read and the cursor to read on from |
-| CLI | `mosaica items` and `mosaica artifacts` | Arrow IPC or Parquet, to a file or to standard output, written page by page; a read cut short leaves whole pages and names the cursor to read on from |
+| 1 | Show a state that matches what happened, and show a number only in a shown view | A refusal drawn as an empty map looks like a place with no data |
+| 2 | Show a sample's size beside the total it was drawn from, or neither | A count of drawn points reads as everything there is |
+| 3 | Mark a view stale once the data has moved on, and keep refresh one action away | An old view reads as current |
+| 4 | Show a topic's count as what this viewer can see, never as its size | "12,040 of 12,040" asserts a total nobody sent |
+| 5 | Treat a missing topic, and a filter that matches nothing, as ordinary answers | Saying "no such value" lets a viewer probe for what is hidden |
+| 6 | Fetch topics with their own request, never from held point tiles | Topics blink out of a view that has not moved |
+| 7 | Drop what you hold when the viewer changes, and held points when the filter changes | One viewer's points or topics stay on screen for another |
+| 8 | When zooming in, never ask for fewer points per tile than before | Points the viewer was looking at disappear |
+| 9 | Hold a `mosaica_id` as a 64-bit integer, not a JavaScript `number` | A click opens the wrong record, or none |
+| 10 | Have any proxy in front of the viewer address pass every response header through | A cached view can be shown under another viewer's token |
+| 11 | Treat a refused credential and an expired token alike: the session has ended | A client retries a request that can never succeed |
+| 12 | Choose a zoom level that gives about as many points as the screen can show | The map shows a handful of points, or asks for far more than it can draw |
 
-`selection.items` sends the selection's own filters and box as the read's filter, so its rows are
-the items the selection counts.
+## Not built yet
 
-## Counts by group
-
-`POST /v1/aggregate` answers how a set is distributed, one table of counts per grouping.
-
-| Client | Call | What it gives back |
-|---|---|---|
-| TypeScript | `client.aggregate(token, request)` | every response read through the cursor, one Arrow table per grouping with its head's figures, whether a page counted a changed corpus, and the region verdict |
-| TypeScript store | `store.setAggregate(id, {groupings, subject, reference, without, withoutMembersOf, highlighted})` | the `aggregates` projection, each entry answered over the set its `subject` names and asked again when the request that set composes changes; a request the next one supersedes is aborted |
-| Python | `viewer.aggregate(view, groupings, filters, reference)`, `db.aggregate` and `selection.aggregate` | one `pyarrow` table per grouping, the head's figures in its schema metadata |
-| CLI | `mosaica aggregate --view <view> --grouping <json>` | one grouping's table, read through the cursor and written as Arrow IPC or Parquet, its head on stderr |
-
-Every surface sends a grouping as the caller wrote it, its figures, a histogram's `bins`, `range`
-and `sample` and a field's `summary` included, and none adds a default: a table counts only where
-the caller wrote `"count": true`. Each reads a sampled histogram's head as
-it reads the rest: the TypeScript client as the table's `sample`, Python in the `mosaica.head`
-metadata, and the CLI on stderr. A grouping of field figures is a table of one row on every
-surface, with a column `<figure>_<field>` for each, such as `values_year`, `missing_year`,
-`min_year`, `max_year` and `mean_year` for `"summary": ["year"]`, over the whole visible set in the
-view; it is refused beside `by`, `cells`, filters or a reference. The store sends a
-reference only where the component registered one, as a filter expression or as the whole visible
-set. It chooses no grouping. A registration can name one
-column in `without`, as the filter draft keys its controls, and the store then sends its filters
-less that column's control. A category control uses this to list its own values: with its clause
-set, the values it excludes are still counted, and every other clause, the `member_of` clauses and
-the selected region still narrow them. A registration can also name one layer in `withoutMembersOf`,
-and the store then leaves out that layer's `member_of` clauses in the filter position; a cluster
-control uses this to keep counting the clusters its own clauses exclude. A registration with
-`highlighted` has the store join its highlight to the filters, so each count is the viewport's
-highlighted count over the same items. The region is always sent, and nothing is left out unless a
-registration names it. A `429` or `503` is sent again as the map's own requests are, after the same
-backoff or the server's `Retry-After` where that is longer, and a newer change cancels the wait.
-`selection.aggregate` sends the selection's filters and box as the request's `filters`, so every
-grouping's total is the selection's count.
-
-The map draws density from this route. `DensityCounter` in `@mosaicajs/deck` registers one
-grouping of cells with the store, at the depth whose cells come nearest a chosen size on screen at
-the camera's zoom, over the viewport and a margin of a quarter of its width and height on each
-side. The registration is `highlighted`, so the counts are the highlighted items' under a
-highlight and the filtered items' otherwise, over the store's filters and selected region, as the
-map's points are; the store asks again when any of these changes. The counter asks only once the
-camera has rested for 200 ms, draws the last answer at its own world positions until the next
-lands, and asks nothing while the viewport stays inside the area held at the same depth. Each
-request also asks for up to two coarser levels, each one depth coarser and reaching twice as far,
-as the points' ring is fetched coarser further out. Between answers the finest level held whose
-area holds the viewport is drawn, so a zoom out draws to the edges at the cell size the counter
-would ask for there. A move that leaves the finest area drops the registration at once, so a
-filter changed during the move sends nothing for an area no longer shown. A view switch asks again at once, over the area in the new
-view's coordinates.
-
-A depth whose cells over the area could pass `selection.max_aggregate_cells` is not asked for,
-counting one column and one row more than the area spans, since the server quantises the area's
-corners itself; the finest size that fits is drawn instead. A `422` is asked again one depth
-coarser, up to three times. Any other refusal draws nothing until the camera next rests, when the
-counter asks again. A `MosaicaLayer` given a store and neither counts nor a counter keeps a counter
-of its own over its viewport.
-
-Every density mode colours a cell by where its count sits between no items and the largest count
-among the cells counted: in proportion to the count under the linear scale, or to `log(1 + count)`
-under the log scale, which is the default. Counts are skewed on most maps, and under the linear
-scale only the densest few cells stand out. The cells counted cover the viewport and the margin
-around it, so the largest count can be that of a cell just off screen, and it holds while the camera
-pans within the area held. Each hexagon has one cell's area and takes the colour of the densest
-cell under it, so the densest hexagon reaches the top of the scale, as the densest cell does on the
-grid. The contours merge fine cells to coarser ones before drawing, and take the largest of the
-merged counts. The smooth wash blends each cell with
-its neighbours, so an isolated dense cell is drawn lower on the scale than its own count would
-place it. The map's key shows 0, the count at the middle of the scale in whole items and the
-largest count.
-
-There is no command-line command for this route. It is reached over HTTP and through the
-TypeScript and Python clients.
-
-### What a registration counts, and when it is asked again
-
-A registration's `subject` names the set its counts are taken over, and with it when the store
-asks again:
-
-| `subject` | The set | Asked again |
-|---|---|---|
-| `match`, the default | what the store's filters admit, under the selected region | when the filters, the highlight, the `member_of` clauses or the selected region change and the request they compose differs from the one last sent |
-| `view` | the same, within the area the counts in view cover: the camera's box, or the selected region while one is selected | as `match`, at once over the area as it stands; after a pan, only once the camera has rested for 250 ms somewhere new |
-| `visible` | every item this viewer may see in the view; no filters are sent | only at a view switch, at `refresh()`, after a change of viewer and after a change of corpus |
-
-A `view` registration's `reference` is limited to the same area, as the counts in view's own
-reference is, so a lift compares the subject with what is visible in the area.
-
-Every registration is also asked again at a view switch, at `refresh()`, once the store has read
-`/v1/meta` again after forgetting what the server answered, and when a frame the map fetches
-observes a new content key, so an ingest, a deletion or a suppression reaches the counts as it
-reaches the map. Its request is composed once the store has `/v1/meta` for the viewer it asks
-as, so it names only what that meta offers. A change that leaves a
-registration's request as it was sends nothing for it: a category control leaving out its own
-clause is not asked again when only that clause changes, and a `match` registration without
-`highlighted` is not asked again when the highlight does. A `view` registration made while the
-camera moves, or before the store has a camera, shows `loading` and is sent once the camera rests.
-While the next request is out, each entry keeps the answer before it.
-
-The store joins requests asked for together that differ only in their groupings, so the
-registrations answering one rest of the camera go as one request, and those answering one change
-of filter go as another. A request carries one set of filters, so a registration that leaves out
-a clause that is set goes as a request of its own; one leaving out a clause that is not set sends
-the same filters as the rest and joins them. A request holds at most
-`meta.selection.maxAggregateGroupings` groupings, and the registrations past that start the next
-one. A registration whose request is superseded before its answer lands has its share aborted, and
-the joined request is aborted once every share in it has been.
-
-Each entry of the projection holds its status, the last answer and the view it was counted in. A
-histogram asked for with a `sample` carries, in its table's `sample`, whether its counts were
-scaled and how many items were counted, beside the table's `total`, the size of the set. An entry's
-`summaries` holds, for each grouping that lists fields under `summary`, each field's figures read
-from the table, by the field as written: `values` and `missing` as `bigint`s, and `min`, `max` and
-`mean`; for every other grouping it holds `null`. A histogram's default edges are the server's,
-exact and independent of the filters and the region, so a registration over the view and one over everything matched get the same
-edges without sending a range.
-
-A field card registers its counts in view, its counts over everything matched, each leaving out its
-own clause, and its field's figures:
-
-```ts
-const bins = {count: true, by: {field: 'year', bins: 24, sample: 100_000}} as const;
-store.setAggregate('year:subject', {groupings: [bins], subject: 'view', without: 'year', highlighted: true});
-store.setAggregate('year:match', {groupings: [bins], without: 'year'});
-store.setAggregate('year:summary', {groupings: [{summary: ['year']}], subject: 'visible'});
-```
-
-With `highlighted`, the counts in view are the highlighted items' while a highlight is set and the
-matched items' once it is cleared. A change of viewer drops every entry's answer before the store
-asks again, through `clear()` or the identity key, as it drops the rest of what the server
-answered.
-
-A cluster card ranks a `nested` or `dag` layer's clusters at the cut its map draws, registering
-`{by: {layer, top: n, cut: 'drawn'}}`, and a flat or levelled layer's at its level. It names each
-row by the name its table gives, which is the name the layer's browse pages give the same viewer,
-and asks the browse pages only for its path.
-
-## Not built
-
-Switching between two views that use different layouts refits the camera without animating an
-item between its two positions; joining a viewer's held marks across such a switch, so the same
-item can move smoothly from one layout's coordinates to the other's, needs a request the wire does
-not yet carry.
-
-A view that is not currently shown fetches nothing ahead of time. A switch to a view a client has
-not visited fetches it at the moment of the switch, not before, and there is no separate warming
-of a view a viewer has not yet chosen.
-
-There is no way to address the server tile by tile, and no adapter that would let an engine built
-around asking for one tile at a time, such as a slippy-map library, sit on top of the store. Such
-an adapter would gather per-tile asks into the same region-shaped requests the store already
-makes; it is specified and not built.
-
-A notebook widget's token reaches the browser page itself. Keeping it on the notebook server
-behind a proxy, so the page never holds it, is specified and not built.
-
-## Where this is tested and where it lives
-
-The store, its driver, replica, presented frame, filter composition and artifact channel live in
-`@mosaicajs/client`. A drop-in map and its panels live in `@mosaicajs/components` as custom
-elements built on the store; a deck.gl binding lives in `@mosaicajs/deck`; React hooks and element
-wrappers live in `@mosaicajs/react`. The Python package `mosaica` embeds the same components
-inside a notebook widget rather than reimplementing any of this in Python. An acceptance harness
-drives the built components against a running deployment and checks nine claims against rules 1
-to 5 and 7 through what is actually on screen, not through a transcript of what was sent. Rule 6
-is covered by unit tests; rules 8 to 12 are not screen-checkable and are not covered there.
-
-The bulk reads live in `@mosaicajs/client`'s `records` module, in the Python package's viewer
-reader, and in the CLI's `records` module.
+- **Animating items between layouts.** A switch between views with different layouts redraws rather than moving each item to its new position.
+- **Fetching a view before it is chosen.** A view the viewer has not visited is fetched when they switch to it.
+- **An adapter for tile-based map libraries.** The store asks for an area at a time, and nothing sits between it and a library that asks for one tile at a time.
+- **Keeping the notebook map's token off the page.** The widget's token reaches the browser page itself.

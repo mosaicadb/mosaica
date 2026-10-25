@@ -6,7 +6,7 @@ Three things a power user who installs nothing needs, and where each is:
 |---|---|
 | The API | [`mosaica.yaml`](mosaica.yaml), OpenAPI 3.1 for the viewer, session and control planes |
 | The framing, to the byte | [The framing](#the-framing) and [the worked decodes](#the-worked-decodes) below |
-| What the server cannot enforce | [The twelve rules](../system/clients.md#the-twelve-rules) in the clients chapter |
+| What the server cannot enforce | [Writing your own client](../system/clients.md#writing-your-own-client) in the clients chapter |
 
 ## What the description is, and is not
 
