@@ -258,8 +258,8 @@ pub struct GenerationStamp {
 // record pack. A 44 bundle is refused.
 // 46: a partition's `SEGMENTS-<n>.json` stores no shard counter; the next shard opened takes the
 // number after the highest. A 45 bundle is refused.
-// 47: a view of a view group stores its roster record's own gate, on its owner and on every group
-// sharing its views, and not its group's. A 46 bundle is refused.
+// 47: a view of a view group stores its roster record's own gate on the group that owns it, and
+// none on a group sharing its views; neither stores its group's gate. A 46 bundle is refused.
 // Each bump makes a stale local bundle a loud refusal rather than a silent misread — a fail-closed
 // guard, not compatibility.
 pub const BUNDLE_FORMAT: u32 = 47;

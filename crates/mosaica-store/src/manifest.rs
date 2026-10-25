@@ -720,6 +720,19 @@ pub struct GroupViewDescriptor {
     pub metadata: BTreeMap<String, ViewMetadataValue>,
 }
 
+impl GroupViewDescriptor {
+    /// The gate a view of a group stores: its roster record's own on the group that owns its key,
+    /// and none on a group naming `members`, through which the view is reached by that group's
+    /// own gate alone. A build and a running service both store it through this.
+    pub fn stored_gate(owns: bool, record: Option<Vec<String>>) -> Option<Vec<String>> {
+        if owns {
+            record
+        } else {
+            None
+        }
+    }
+}
+
 /// The roster's own types live in `mosaica-types`, because the WAL record that makes a create
 /// durable travels through `mosaica-lifecycle`, which does not depend on this crate
 /// (`mosaica_types::view`). Re-exported here so a manifest reader still names one module.
@@ -1052,12 +1065,14 @@ impl Manifest {
                 if group.views.iter().any(|v| v.key == view.key) {
                     continue;
                 }
+                let owns = group.name == view.group;
+                let visibility = GroupViewDescriptor::stored_gate(owns, view.visibility.clone());
                 group.views.push(GroupViewDescriptor {
                     key: view.key.clone(),
-                    visibility: view.visibility.clone(),
+                    visibility: visibility.clone(),
                     // Metadata belongs to the group that owns the views; a sharing group's copies
                     // carry none, exactly as a build writes them.
-                    metadata: if group.name == view.group {
+                    metadata: if owns {
                         view.metadata.clone()
                     } else {
                         BTreeMap::new()
@@ -1070,10 +1085,9 @@ impl Manifest {
                     manifest.views.push(ViewDescriptor {
                         display_name: id.clone(),
                         id,
-                        // **The record's own gate, on both copies** (`views.md` §6): the roster
-                        // entry above and this descriptor carry one label, which
-                        // `Manifest::validate_groups` holds them to.
-                        visibility: view.visibility.clone(),
+                        // **The gate the roster entry above stores, on both copies**
+                        // (`views.md` §6), which `Manifest::validate_groups` holds them to.
+                        visibility,
                         // **The record's incarnation** (decision 0115), which is what every
                         // consumer with a view id resolves an artifact's stamp against. A key
                         // created again lands here at a higher number than the segments and

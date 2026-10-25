@@ -3366,8 +3366,9 @@ paths:
       description: |
         The view's id is `<group>:<key>`. It starts with no rows, and takes the group's frame and
         projection. A viewer reaches it only where they satisfy the group's `visibility` and the
-        view's own, where one is sent. A session authorised before the view was created does not
-        reach it until it authorises again. Its metadata carries one value per name the group
+        view's own, where one is sent. Through a group that names this one in `members`, the view
+        is reached by that group's `visibility` alone, and the view's own does not apply. A session
+        authorised before the view was created does not reach it until it authorises again. Its metadata carries one value per name the group
         declares, each typed by its JSON form: a boolean, an integer, a number with a fraction, or
         a string. The record cannot be changed after it is created.
 

@@ -20,6 +20,8 @@ An item can carry a list of labels, in which case a viewer who satisfies any one
 
 You can label more than items. A view, a view group, an annotation layer and each artifact can carry a label of its own, and a viewer who doesn't satisfy it is answered as if it didn't exist. Because these labels are checked against the viewer's attributes directly, they can name an attribute that no item carries.
 
+Whether a viewer reaches a view of a group depends on the group they look through and the view's own label in that group. A group that shares another's views with `members` has its own label, and a view reached through it takes that label alone, not the label the view carries in the group that owns it. The items in it keep their own labels, so an item that must stay hidden in every group carries the label itself.
+
 Mosaica stores each label in a canonical form, so `b&(a)` is the same label as `a&b`, and `a|(a&b)` the same as `a`. A label reads the same whether it arrives in the first load or at a running database.
 
 ??? info "The rules for writing a label"

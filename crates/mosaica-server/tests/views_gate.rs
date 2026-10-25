@@ -1540,6 +1540,151 @@ async fn a_sealed_familys_values_need_the_groups_gate_and_not_only_a_reachable_v
         .contains(&"sealed:s2".to_string()));
 }
 
+/// The entities of each key of the shared fixture below: one shared layout's points, labelled by
+/// [`label_of`], in `sealed_map`'s file.
+const SHARED_KEYS: [(&str, std::ops::Range<u64>); 2] = [("s1", 0..9), ("s2", 9..21)];
+
+/// A public owner whose view `s2` is gated on `legal` in it, and a public group sharing its views
+/// with `members`, declared as `mosaica build` reads a declaration. `with_s2` lists `s2` in the
+/// roster; without it the owner holds `s1` alone and `s2` is created while the service runs.
+fn build_shared_declared(dir: &Path, with_s2: bool) {
+    let keyed = |path: &Path, keys: &[(&str, std::ops::Range<u64>)]| {
+        let rows: Vec<(u64, &str)> = keys
+            .iter()
+            .flat_map(|(key, ids)| ids.clone().map(move |e| (e, *key)))
+            .collect();
+        let ids: Vec<u64> = rows.iter().map(|(e, _)| *e).collect();
+        write_points(
+            path,
+            &ids,
+            |e| (e as f64 * 10.0, 500.0),
+            vec![
+                column(
+                    "key",
+                    false,
+                    StringArray::from(rows.iter().map(|(_, k)| *k).collect::<Vec<_>>()),
+                ),
+                column(
+                    "access",
+                    false,
+                    StringArray::from(ids.iter().map(|&e| label_of(e)).collect::<Vec<_>>()),
+                ),
+            ],
+        );
+    };
+    let keys: &[(&str, std::ops::Range<u64>)] = if with_s2 {
+        &SHARED_KEYS
+    } else {
+        &SHARED_KEYS[..1]
+    };
+    keyed(&dir.join("sealed.parquet"), keys);
+    keyed(&dir.join("sealed_map.parquet"), keys);
+    let gates: Vec<Option<&str>> = keys
+        .iter()
+        .map(|(key, _)| (*key == "s2").then_some("legal"))
+        .collect();
+    write_parquet(
+        &dir.join("roster.parquet"),
+        vec![
+            column(
+                "key",
+                false,
+                StringArray::from(keys.iter().map(|(k, _)| *k).collect::<Vec<_>>()),
+            ),
+            column("visibility", true, StringArray::from(gates)),
+        ],
+    );
+    let declaration = dir.join("config.toml");
+    std::fs::write(
+        &declaration,
+        r#"
+[sources]
+sealed     = "sealed.parquet"
+sealed_map = "sealed_map.parquet"
+roster     = "roster.parquet"
+
+[defaults]
+allocation_view = "sealed:s1"
+
+[[view_group]]
+name             = "sealed"
+extent           = { min = 0.0, max = 1000.0 }
+source           = "sealed"
+fields           = { view = "key" }
+point_visibility = { field = "access", default = "public" }
+
+[view_group.views]
+source = "roster"
+
+[[view_group]]
+name             = "sealed_map"
+members          = "sealed"
+extent           = { min = 0.0, max = 1000.0 }
+source           = "sealed_map"
+fields           = { view = "key" }
+point_visibility = { field = "access", default = "public" }
+"#,
+    )
+    .unwrap();
+    build(&args_from_declaration(&declaration, &dir.join("bundle")))
+        .expect("the shared declaration builds");
+}
+
+/// What the shared fixture serves, whichever path made `s2`: a viewer without `legal` reaches
+/// `sealed_map:s2` through the public sharer though not `sealed:s2` in its owner, and is drawn only
+/// the points whose own labels admit them; one holding `legal` reaches both.
+async fn check_shared(served: &Served) {
+    let outsider = token(served, &[]).await;
+    let views = view_ids(&meta(served, &outsider).await);
+    assert!(views.contains("sealed_map:s2"), "{views:?}");
+    assert!(!views.contains("sealed:s2"), "{views:?}");
+    let public = SHARED_KEYS[1]
+        .1
+        .clone()
+        .filter(|&e| label_of(e) == "public")
+        .count();
+    let (status, body) = viewport(served, &outsider, "sealed_map:s2", None).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["points"], public, "the points keep their own labels");
+    let holder = token(served, &["legal"]).await;
+    assert!(view_ids(&meta(served, &holder).await).contains("sealed:s2"));
+}
+
+/// **A view's own gate in its owning group does not follow its key into a group naming
+/// `members`**, on the build's path and on a running service's: access through a view is the
+/// group looked through and the points' own labels.
+#[tokio::test]
+async fn a_view_gated_in_its_owner_is_reached_through_a_public_sharer_on_both_paths() {
+    let built = Served::build(|dir| build_shared_declared(dir, true)).await;
+    check_shared(&built).await;
+
+    let served = Served::build(|dir| build_shared_declared(dir, false)).await;
+    assert_eq!(
+        create_view(&served, "sealed", "s2", json!({ "visibility": "legal" }))
+            .await
+            .status(),
+        201
+    );
+    let rows: Vec<Value> = SHARED_KEYS[1]
+        .1
+        .clone()
+        .map(|e| json!({ "x": e as f64 * 10.0, "y": 500.0, "access": label_of(e) }))
+        .collect();
+    let resp = served
+        .server
+        .client
+        .post(served.server.control_url("/control/ingest?wait=visible"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .header("x-mosaica-batch-id", "shared-s2")
+        .header("x-mosaica-view", "sealed_map:s2")
+        .json(&rows)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "{}", resp.text().await.unwrap());
+    check_shared(&served).await;
+}
+
 /// **A view labelled with a term no point carries** is reached by a principal whose credential
 /// names it and by no other: a view's label is compared with the credential's descriptors, as a
 /// layer's and an artifact's are, not with the terms the dictionary happens to hold.

@@ -111,7 +111,7 @@ Writing both rosters is refused. `[defaults].source` does not reach a group, so 
 | `extent` | string or table | required | As on `[[view]]`: one frame for every view of the group. |
 | `point_visibility` | table | required | As on `[[view]]`, for every view of the group. |
 | `visibility` | string or array of strings | `"public"` | As on `[[view]]`, for every view of the group. A view of the group may narrow it with a `visibility` of its own. |
-| `members` | string | not set | Another group's name: this group's views are that group's, and its own `source` holds their points. The group named may not itself name `members`, and a roster or `metadata` beside `members` is refused. |
+| `members` | string | not set | Another group's name: this group's views are that group's, and its own `source` holds their points. Through this group a view is reached by this group's `visibility` alone; a gate the owning group's roster gives the view does not apply here, and the points keep their own labels. The group named may not itself name `members`, and a roster or `metadata` beside `members` is refused. |
 | `metadata` | table | not set | The values each view carries, served with it on `/v1/meta`: `name = "type"` over the `[[attribute]]` types, or `name = { type = "category", vocabulary = "<name>" }`, whose value is a key taken as an attribute's category value is: a closed vocabulary refuses a key it does not list, and an open one adds it. Every view must carry every name. `key`, `source`, `visibility` and the group's `view` column are refused as names, and so is `metadata` on a group whose views are minted from its `source` with no roster, or one that names `members`. |
 | `view` | array of tables | `[]` | The roster as one block per view: keys under `[[view_group.view]]`. |
 | `views` | table | not set | The roster as a file: keys under `[view_group.views]`. |
@@ -124,7 +124,7 @@ One view of a group, written in the declaration. Beside these keys the block tak
 | --- | --- | --- | --- |
 | `key` | string | required | The view's key: its id is `<group>:<key>`. ASCII letters, digits, `_` and `-`, and no two views of the group may share one. |
 | `source` | string | not set | A name in `[sources]`: the file holding this view's points. A view with none is built with no rows. |
-| `visibility` | string or array of strings | not set | The label, or list of labels of which a viewer must hold one, to reach this view as well as the group. Without it, or with `public` alone, the group's `visibility` is the view's only gate. |
+| `visibility` | string or array of strings | not set | The label, or list of labels of which a viewer must hold one, to reach this view as well as the group, in this group only. Without it, or with `public` alone, the group's `visibility` is the view's only gate. |
 
 ## `[view_group.views]`
 

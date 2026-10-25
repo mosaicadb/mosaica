@@ -55,8 +55,8 @@ struct RosterViewBlock {
     /// Default: not set.
     source: Option<String>,
     /// The label, or list of labels of which a viewer must hold one, to reach this view as well
-    /// as the group. Without it, or with `public` alone, the group's `visibility` is the view's
-    /// only gate.
+    /// as the group, in this group only. Without it, or with `public` alone, the group's
+    /// `visibility` is the view's only gate.
     ///
     /// Type: string or array of strings.
     ///

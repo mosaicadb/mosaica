@@ -397,7 +397,9 @@ struct ViewGroupBlock {
     #[serde(default)]
     visibility: Option<mosaica_types::view::DeclaredGate>,
     /// Another group's name: this group's views are that group's, and its own `source` holds
-    /// their points. The group named may not itself name `members`, and a roster or `metadata`
+    /// their points. Through this group a view is reached by this group's `visibility` alone; a
+    /// gate the owning group's roster gives the view does not apply here, and the points keep
+    /// their own labels. The group named may not itself name `members`, and a roster or `metadata`
     /// beside `members` is refused.
     ///
     /// Default: not set.
@@ -5716,12 +5718,12 @@ impl Config {
                     fields: group.fields.clone(),
                     point_visibility: group.point_visibility.clone(),
                     select,
-                    // **The record's own gate, on the owner and on every group sharing its
-                    // views**, as a view created while the service runs stores it
-                    // (`Manifest::with_roster`): the group's gate is the group descriptor's, and
-                    // the gate is applied with it at authorise, so copying it here would store one
-                    // declaration two ways.
-                    visibility: view.visibility.clone(),
+                    // The group's gate is the group descriptor's, applied beside this one at
+                    // authorise; this is the view's own, stored as a running service stores it.
+                    visibility: mosaica_store::manifest::GroupViewDescriptor::stored_gate(
+                        group.members.is_none(),
+                        view.visibility.clone(),
+                    ),
                 });
             }
         }
