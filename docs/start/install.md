@@ -63,6 +63,9 @@ flowchart LR
 !!! note ""
     Not built yet: starting from an empty database. For now, a database starts with a build that loads at least one view's data.
 
+!!! tip "Working on your own machine"
+    For development and prototyping, start the database in open mode, with `mosaica serve --open` or `open = true` under `[serve]`. It then answers every request without signing in, from any client: the HTTP API, the command line, a web page or Python. It listens only on this machine, needs no operator credential, and refuses to start once you've set up users. [Your first map in a web page](typescript.md) uses it.
+
 ??? info "Where Mosaica looks for the two files"
     Mosaica looks for `mosaica.toml` in the directory you run it from, then in each directory above, unless you name one with `--deployment`. It reads the schema from `schema.toml` in the same directory, unless `[build] schema` or `--config` names another file. A relative path in either file is read from that file's own directory.
 
