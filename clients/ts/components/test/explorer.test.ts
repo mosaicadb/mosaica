@@ -158,6 +158,16 @@ describe('<mosaica-explorer title-field>', () => {
   });
 });
 
+describe('<mosaica-explorer card-fields>', () => {
+  it('reaches the item card, which shows those fields in that order', async () => {
+    const {host, shadow, store} = await explorer('<mosaica-explorer card-fields="author archive"></mosaica-explorer>');
+    store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs', author: 'Ada'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    const card = shadow.querySelector('mosaica-item-card')!;
+    expect([...card.shadowRoot!.querySelectorAll('[part="field"]')].map((f) => f.getAttribute('data-name'))).toEqual(['author', 'archive']);
+  });
+});
+
 describe('<mosaica-explorer> narrow layout', () => {
   it('draws none of the cards over the map, so nothing hidden asks for counts; a sheet asks for its own', async () => {
     const {host, el, shadow, store} = await explorer('<mosaica-explorer layout="overlay" pinned-filters="archive"></mosaica-explorer>');

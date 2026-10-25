@@ -76,6 +76,7 @@ const withStableAuthorise = <C extends React.ForwardRefExoticComponent<any>>(Inn
 /** The handler props for events a map emits, which the explorer also carries. */
 const mapEvents = {
   onPick: ev('mosaica-pick'),
+  onItemOpen: ev('mosaica-itemopen'),
   onMiss: ev('mosaica-miss'),
   onHover: ev('mosaica-hover'),
   onViewChange: ev('mosaica-viewchange'),
@@ -88,7 +89,7 @@ const mapEvents = {
 export const MosaicaStore = withStableAuthorise(wrap('mosaica-store', StoreElement, {}));
 /**
  * `<mosaica-explorer>` as a React component. It has a handler prop for every event, since the
- * elements inside it emit them and each event bubbles out of it: `onPick`, `onMiss`, `onHover`,
+ * elements inside it emit them and each event bubbles out of it: `onPick`, `onItemOpen`, `onMiss`, `onHover`,
  * `onViewChange`, `onSelectChange`, `onArtifactOpen`, `onLayerChange`, `onArtifactFit`,
  * `onColourChange`, `onLevelChange`, `onValueColour`, `onClusterColour`, `onPaletteChange`, `onClusterPaletteChange`,
  * `onDisplayChange`, `onSizeChange`, `onBudgetChange`, `onClusterBudgetChange`, `onFold`,
@@ -119,7 +120,8 @@ export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', Expl
   onViewFollow: ev('mosaica-viewfollow')
 }));
 /**
- * `<mosaica-map>` as a React component. Event props: `onPick` (`mosaica-pick`), `onMiss`
+ * `<mosaica-map>` as a React component. Event props: `onPick` (`mosaica-pick`), `onItemOpen`
+ * (`mosaica-itemopen`), `onMiss`
  * (`mosaica-miss`), `onHover` (`mosaica-hover`), `onViewChange` (`mosaica-viewchange`), `onSelectChange`
  * (`mosaica-selectchange`), `onArtifactOpen` (`mosaica-artifactopen`) and `onLayerChange`
  * (`mosaica-layerchange`).

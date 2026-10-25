@@ -13,6 +13,8 @@ export type FakeStore = Store & {
   setBrowse(key: string, page: BrowsePage): void;
   /** Answer `basemapWorld` with these bytes, reject with this error, or answer when this promise does. */
   setWorld(answer: ArrayBuffer | Error | Promise<ArrayBuffer>): void;
+  /** Answer `titleOf` with what `answer` returns; unset, every value has no title. */
+  setTitles(answer: (column: string, key: string) => string | null | Promise<string | null>): void;
   calls: {name: string; args: unknown[]}[];
 };
 
@@ -82,6 +84,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
   const calls: {name: string; args: unknown[]}[] = [];
   const browsePages = new Map<string, BrowsePage>();
   let worldAnswer: ArrayBuffer | Error | Promise<ArrayBuffer> = new ArrayBuffer(0);
+  let titleAnswer: (column: string, key: string) => string | null | Promise<string | null> = () => null;
   const world = () => {
     if (worldAnswer instanceof Error) throw worldAnswer;
     return worldAnswer;
@@ -147,6 +150,9 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     setWorld(answer: ArrayBuffer | Error | Promise<ArrayBuffer>) {
       worldAnswer = answer;
     },
+    setTitles(answer) {
+      titleAnswer = answer;
+    },
     // The composed request, from the projections a test sets, through the client's own
     // composition: the filter-position expression, the clauses in that position, the region.
     requestFilters: () => {
@@ -160,6 +166,10 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     describe: async (...args: unknown[]) => {
       calls.push({name: 'describe', args});
       return null;
+    },
+    titleOf: async (column: string, key: string) => {
+      calls.push({name: 'titleOf', args: [column, key]});
+      return titleAnswer(column, key);
     },
     openArtifact: async (...args: unknown[]) => {
       calls.push({name: 'openArtifact', args});

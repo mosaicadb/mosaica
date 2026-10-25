@@ -552,8 +552,8 @@ type Listener = () => void;
  * its view; where, after a renewal, an answer arrives on a view that holds no key before any answer
  * under the new token has matched a held key; where the server refuses the renewed token the
  * current view; and at a renewal while it holds `meta` and no key. What it drops: points, frames,
- * counts, artifacts, shapes, item records, legend values, typeahead pages, the picked item and
- * opened artifact, the `member_of` clauses, a region selected from an artifact, the region's
+ * counts, artifacts, shapes, item records, legend values, category titles, typeahead pages, the
+ * picked item and opened artifact, the `member_of` clauses, a region selected from an artifact, the region's
  * counts, and `meta`. What it keeps: a drawn region's shape, the filter controls, the layers, the
  * colouring, the current view and the camera. It then reads `meta` again under the token it holds,
  * drops a kept input that names a view, layer or column the new `meta` does not list, and asks
@@ -786,6 +786,26 @@ export interface Store {
    */
   describe(id: bigint): Promise<Record<string, unknown> | null>;
   /**
+   * The title the vocabulary gives `key`, a value of the category column `column`. Resolves to
+   * `null` where the value has no title, where `column` is not a category column a filter can
+   * name, and where the request was refused. The title is asked for over everything this viewer
+   * may see (`POST /v1/aggregate` with `subject: 'visible'`, naming the value), so a value the
+   * viewer cannot see reads no title. Asks made in one task go as one request, up to
+   * `meta.selection.maxAggregateGroupings` values each, and are sent and retried as
+   * {@link Store.setAggregate}'s are. An answer is held with `meta`, so asking again for a value
+   * resolves without a request; it is held only where `meta` is the one it was asked under. When
+   * the store forgets what the server answered (see {@link Store}) it drops what is held, and an
+   * answer asked for before then resolves to `null`. Waits for `/v1/meta`.
+   *
+   * @example The title of an opened item's archive
+   * ```ts
+   * map.addEventListener('mosaica-itemopen', async (e) => {
+   *   const title = await store.titleOf('archive', String(e.detail.record.fields.archive));
+   * });
+   * ```
+   */
+  titleOf(column: string, key: string): Promise<string | null>;
+  /**
    * Fetch one artifact's detail under the current view (`POST /v1/artifacts/{mosaica_id}`) and
    * publish it as `selection.artifact`, clearing `selection.item`. Its shape is held in
    * `artifacts.shapes` at full detail. A refusal is published as `selection.artifactRefusal` and the
@@ -910,6 +930,20 @@ function listedKeys(table: AggregateTable | undefined): string[] {
   const keys: string[] = [];
   for (let i = 0; rows && group && key && i < rows.numRows; i++) if (group.get(i) === 'listed') keys.push(String(key.get(i)));
   return keys;
+}
+
+/** The title of the listed group `key` in `table`, or `null` where it is not listed or has none. */
+function listedTitle(table: AggregateTable | undefined, key: string): string | null {
+  const rows = table?.rows;
+  const group = rows?.getChild('group');
+  const keys = rows?.getChild('key');
+  const titles = rows?.getChild('title');
+  for (let i = 0; rows && group && keys && titles && i < rows.numRows; i++) {
+    if (group.get(i) !== 'listed' || String(keys.get(i)) !== key) continue;
+    const title = titles.get(i) as unknown;
+    return typeof title === 'string' ? title : null;
+  }
+  return null;
 }
 
 /** The bearer token in a request's headers, or `null`. */
@@ -1187,6 +1221,65 @@ export function createStore(options: StoreOptions): Store {
       const top = Math.min(RANKED_VALUES, meta?.selection.maxAggregateTop ?? RANKED_VALUES);
       ranking.set(column, {groupings: [{count: true, by: {field: column, top}}], subject: 'visible'});
     });
+  }
+
+  /**
+   * The titles of category values {@link Store.titleOf} was answered under the current `meta`, by
+   * column and key; `null` for a value with no title. Emptied when the store forgets.
+   */
+  const titles = new Map<string, string | null>();
+  /** The asks for a title in flight, by column and key, each with the `meta` it was asked under. */
+  const titleAsks = new Map<string, {under: Meta; answer: Promise<string | null>; settle: (title: string | null) => void}>();
+  const titling = new Aggregates(
+    ready,
+    askRegistered,
+    (entries) => {
+      for (const [id, entry] of entries) {
+        const ask = titleAsks.get(id);
+        if (!ask || (entry.status !== 'shown' && entry.status !== 'refused')) continue;
+        titleAsks.delete(id);
+        const kept = entry.status === 'shown' && meta === ask.under;
+        const title = kept ? listedTitle(entry.result?.tables[0], id.slice(id.indexOf('\u0000') + 1)) : null;
+        if (kept) titles.set(id, title);
+        ask.settle(title);
+        queueMicrotask(() => {
+          if (!titleAsks.has(id)) titling.set(id, null);
+        });
+      }
+    },
+    clock,
+    {...RETRY_DEFAULTS, ...options.driver},
+    aggregateBody
+  );
+
+  async function titleOf(column: string, key: string): Promise<string | null> {
+    try {
+      await ready();
+    } catch {
+      return null;
+    }
+    const under = meta;
+    if (!under || !under.filterOperands.some((o) => o.column === column && o.family === 'category' && !o.scope)) return null;
+    const id = `${column}\u0000${key}`;
+    if (titles.has(id)) return titles.get(id)!;
+    const asked = titleAsks.get(id);
+    if (asked) return asked.answer;
+    let settle: (title: string | null) => void = () => {};
+    const answer = new Promise<string | null>((resolve) => (settle = resolve));
+    titleAsks.set(id, {under, answer, settle});
+    titling.set(id, {groupings: [{count: true, by: {field: column, values: [key]}}], subject: 'visible'});
+    return answer;
+  }
+
+  /** Drop the titles held, settle every title asked for and not yet answered with `null`, and stop asking. */
+  function dropTitles(): void {
+    titles.clear();
+    const asks = [...titleAsks];
+    titleAsks.clear();
+    for (const [id, ask] of asks) {
+      ask.settle(null);
+      titling.set(id, null);
+    }
   }
 
   /**
@@ -2450,10 +2543,10 @@ export function createStore(options: StoreOptions): Store {
 
   /**
    * Drop what the server answered: points, frames, counts, artifacts, shapes, records, legend
-   * values, typeahead pages, the picked item and opened artifact, the `member_of` clauses, a region
-   * drawn from an artifact, the region's held marks and counts, and `meta`. The store reads `meta`
-   * again under the token it holds and asks again for the camera, the region's counts with it. What
-   * is kept is listed on {@link Store}.
+   * values, category titles, typeahead pages, the picked item and opened artifact, the `member_of`
+   * clauses, a region drawn from an artifact, the region's held marks and counts, and `meta`. The
+   * store reads `meta` again under the token it holds and asks again for the camera, the region's
+   * counts with it. What is kept is listed on {@link Store}.
    */
   function forgetAnswers(): void {
     clears += 1;
@@ -2496,6 +2589,7 @@ export function createStore(options: StoreOptions): Store {
     legend.clear();
     for (const column of rankingAsks.keys()) ranking.set(column, null);
     rankingAsks.clear();
+    dropTitles();
     meta = null;
     warming = null;
     replaceProjection('meta', null);
@@ -2544,6 +2638,8 @@ export function createStore(options: StoreOptions): Store {
     legend.dispose();
     aggregates.dispose();
     ranking.dispose();
+    titling.dispose();
+    dropTitles();
     inView.dispose();
     if (inViewTimer !== null) clock.cancel(inViewTimer);
     if (probe !== null) clock.cancel(probe);
@@ -2601,6 +2697,7 @@ export function createStore(options: StoreOptions): Store {
     frame: frameOrNull,
     pick,
     describe: (id) => records.describe(id),
+    titleOf,
     openArtifact,
     needShape: (id) => shapes.need(id),
     clearSelection,

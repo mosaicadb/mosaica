@@ -338,6 +338,32 @@ describe('event details', () => {
     expect(JSON.parse(JSON.stringify(details))).toEqual([{id: '9', detail: {layer: 'l', key: null, maskedCount: '9223372036854775808', centroid: null, box: null, shape: null}}]);
   });
 
+  it('a click picks with the id alone, and the record arriving opens the item with it however it was selected; a refusal opens nothing', async () => {
+    const {MosaicaMap} = await import('../src/map.js');
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as InstanceType<typeof MosaicaMap>;
+    const store = fakeStore({status: status({})});
+    map.store = store;
+    await settle(host);
+    const seen: [string, unknown][] = [];
+    host.addEventListener('mosaica-pick', (e) => seen.push(['pick', e.detail]));
+    host.addEventListener('mosaica-itemopen', (e) => {
+      expect(e.bubbles && e.composed).toBe(true);
+      seen.push(['itemopen', e.detail]);
+    });
+    (map as unknown as {onClick(info: unknown): void}).onClick({index: 0, x: 5, y: 5, sourceLayer: {id: 'marks-p0', props: {mosaicaIds: new BigUint64Array([2n ** 63n])}}, coordinate: [5, 5]});
+    const record = {fields: {name: 'Ada'}, labels: [], views: [], scoped: {}};
+    store.set('selection', {item: {id: 2n ** 63n, detail: record}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    // Selected without a click, as by `Store.pick`.
+    store.set('selection', {item: {id: 3n, detail: record}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    store.set('selection', {item: null, itemRefusal: {code: 'unknown', detail: 'no', status: 404}, artifact: null, artifactRefusal: null});
+    expect(seen).toEqual([
+      ['pick', {id: '9223372036854775808'}],
+      ['itemopen', {id: '9223372036854775808', record}],
+      ['itemopen', {id: '3', record}]
+    ]);
+  });
+
   it('carry an artifact selection’s id as a decimal string, so the detail is JSON', async () => {
     const {MosaicaMap} = await import('../src/map.js');
     const host = await mount('<mosaica-map></mosaica-map>');

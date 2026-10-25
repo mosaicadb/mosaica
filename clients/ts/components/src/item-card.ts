@@ -1,8 +1,7 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
-import type {AggregateSpec, DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal} from '@mosaicajs/client';
+import type {DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal, Store} from '@mosaicajs/client';
 import {GRID32} from '@mosaicajs/client';
-import {HeldAggregate, listedGroups} from './aggregate.js';
 import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
@@ -14,12 +13,9 @@ import {chrome, tokens} from './tokens.js';
  * grid, its group-scoped values, then Open and Copy id. Fields are listed by name in
  * declaration order, then any the schema does not declare; a field the record has no value for is
  * left out. A declared field is captioned in words (`published_at` as "Published at"). A category
- * field shows its value's title where the vocabulary has one, else its key. The titles are asked
- * for as a field card asks for its rows' (`Store.setAggregate`, over everything the viewer may
- * see, naming the item's values), at most `selection.maxAggregateGroupings` fields at a time. An
- * answer is kept with the store's `meta`, for every card on that store, and goes when the store
- * replaces `meta`, as it does whenever it forgets what the server answered. A timestamp
- * shows in full, as `14 March 2024, 12:00 UTC`.
+ * field shows its value's title where the vocabulary has one, else its key; the titles are asked
+ * of the store (`Store.titleOf`), and an answer is shown only while the store's `meta` is the one
+ * it was asked under. A timestamp shows in full, as `14 March 2024, 12:00 UTC`.
  * The close button appears only while the card shows something: an item, a refusal or a click's
  * result.
  *
@@ -28,7 +24,8 @@ import {chrome, tokens} from './tokens.js';
  * (`Store.pick`), or the `item` property.
  *
  * `compact` shows less: the headline, cut at three lines, the field `subtitle-field` names under
- * it, cut at two, the first three other fields, then "Show all N fields" beside Open. Show all
+ * it, cut at two, the fields `card-fields` names (else the first three others), then "Show all N
+ * fields" beside Open. Show all
  * lists every field, the views and the group-scoped values, which scroll inside the card past
  * 300 px. A host's buttons in the
  * `actions` slot sit beside the close button.
@@ -215,34 +212,30 @@ export class MosaicaItemCard extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor compact = false;
   /** The field shown under the headline under `compact`. Unset, there is no subtitle. */
   @property({attribute: 'subtitle-field'}) accessor subtitleField = '';
+  /**
+   * The fields shown under `compact` before "Show all", space- or comma-separated, in this order.
+   * Unset, the first three in declaration order. A name the record has no value for, and the
+   * `title-field` and `subtitle-field` fields, show nothing here. Show all, and the card without
+   * `compact`, list these fields first and then the rest.
+   */
+  @property({attribute: 'card-fields'}) accessor cardFields = '';
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;
   private expandedFor: bigint | null = null;
-  /** The titles of the item's category values, asked of the store as the field cards ask for theirs. */
-  private readonly titles = new HeldAggregate('item-titles');
-  /** What `titles` asks for: the shown item's category fields, one grouping each, in this order, and the store's `meta` it was asked under. */
-  private titleAsk: {fields: string[]; spec: AggregateSpec | null; under: Meta | null} = {fields: [], spec: null, under: null};
+  /**
+   * The titles of category values the store answered, by field and key, `null` until answered or
+   * where there is none; with the store and its `meta` they were asked under.
+   */
+  private titles: {store: Store | null; under: Meta | null; held: Map<string, string | null>} = {store: null, under: null, held: new Map()};
 
   /** A category value's title as answered, else from what the store already holds, else its key. */
   private titleOf(field: string, key: string): string {
-    const store = this.resolvedStore;
-    const meta = store?.get('meta');
-    return (meta && TITLES.get(meta)?.get(titleKey(field, key))) ?? keyTitle(store, field, key);
+    return this.titles.held.get(titleKey(field, key)) ?? keyTitle(this.resolvedStore, field, key);
   }
 
   /** A field's value as text: a category value by its title, anything else by its declared type. */
   private text(name: string, value: unknown, column: DeclaredScalar | undefined): string {
     return column?.category && typeof value === 'string' ? this.titleOf(name, value) : present(value, column);
-  }
-
-  protected override updated(changed: PropertyValues<this>): void {
-    super.updated(changed);
-    this.titles.set(this.isConnected ? this.resolvedStore : null, this.isConnected ? this.titleAsk.spec : null);
-  }
-
-  override disconnectedCallback(): void {
-    this.titles.set(null, null);
-    super.disconnectedCallback();
   }
 
   /**
@@ -259,29 +252,21 @@ export class MosaicaItemCard extends MosaicaElement {
     }
     const store = this.resolvedStore;
     const served = store?.get('meta') ?? null;
-    if (!store || !meta || !served) {
-      this.titleAsk = {fields: [], spec: null, under: null};
-      return;
-    }
-    // Keep what the last ask answered under this `meta`, then ask for the fields still without an answer.
-    const held = TITLES.get(served) ?? new Map<string, string | null>();
-    TITLES.set(served, held);
-    const asked = this.titleAsk;
-    const answer = this.titles.entryOf(store, asked.spec)?.result;
-    if (answer && asked.spec && asked.under === served) {
-      asked.fields.forEach((field, i) => {
-        const key = (asked.spec!.groupings[i]!.by as {values: string[]}).values[0]!;
-        held.set(titleKey(field, key), listedGroups(answer.tables[i]).find((g) => g.key === key)?.title ?? null);
+    if (store !== this.titles.store || served !== this.titles.under) this.titles = {store, under: served, held: new Map()};
+    if (!store || !served || !meta || !this.isConnected) return;
+    // Ask for each category value not yet asked for; an answer is kept while `meta` is the one it was asked under.
+    const values = item?.detail.fields ?? {};
+    const titles = this.titles;
+    for (const column of meta.declaredScalars) {
+      const key = values[column.name];
+      if (!column.category || typeof key !== 'string' || titles.held.has(titleKey(column.name, key))) continue;
+      titles.held.set(titleKey(column.name, key), null);
+      void store.titleOf(column.name, key).then((title) => {
+        if (this.titles !== titles || title === null) return;
+        titles.held.set(titleKey(column.name, key), title);
+        this.requestUpdate();
       });
     }
-    const values = item?.detail.fields ?? {};
-    const countable = new Set(meta.filterOperands.filter((o) => o.family === 'category' && !o.scope).map((o) => o.column));
-    const fields = meta.declaredScalars
-      .filter((c) => c.category && countable.has(c.name) && typeof values[c.name] === 'string' && !held.has(titleKey(c.name, values[c.name] as string)))
-      .map((c) => c.name)
-      .slice(0, meta.selection.maxAggregateGroupings);
-    const groupings = fields.map((field) => ({count: true as const, by: {field, values: [values[field] as string]}}));
-    this.titleAsk = {fields, spec: fields.length === 0 ? null : {groupings, subject: 'visible'}, under: served};
   }
 
   private get shown(): {item: {id: bigint; detail: ItemDetail} | null; refusal: Refusal | null; meta: Meta | null} {
@@ -317,7 +302,7 @@ export class MosaicaItemCard extends MosaicaElement {
     const ordered = [...declared.map((c) => c.name).filter((n) => n in fields), ...names.filter((n) => !declared.some((c) => c.name === n))];
     const id = idString(item.id);
     const titleName = this.titleField && fields[this.titleField] !== undefined && fields[this.titleField] !== null ? this.titleField : null;
-    const rest = ordered.filter((n) => n !== titleName);
+    const rest = this.namedFirst(ordered.filter((n) => n !== titleName));
     const copy = () => void navigator.clipboard?.writeText(id);
     if (this.compact) return this.compactBody(item, meta, titleName, rest, id);
     return html`<div class="panel">
@@ -350,7 +335,7 @@ export class MosaicaItemCard extends MosaicaElement {
     const subtitleName = this.subtitleField && this.subtitleField !== titleName && fields[this.subtitleField] !== undefined && fields[this.subtitleField] !== null ? this.subtitleField : null;
     const others = rest.filter((n) => n !== subtitleName);
     const total = others.length + (titleName ? 1 : 0);
-    const shown = this.expanded ? others : others.slice(0, 3);
+    const shown = this.expanded ? others : this.cardFields ? this.named(others) : others.slice(0, 3);
     const headline = titleName
       ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${this.text(titleName, fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
       : html`<div part="headline" class="card-title mono" data-name="mosaica_id">${id}</div>`;
@@ -377,6 +362,18 @@ export class MosaicaItemCard extends MosaicaElement {
         <button part="open" class="btn" type="button" @click=${() => emit(this, 'mosaica-open', {id, fields})}>Open</button>
       </div>
     </div>`;
+  }
+
+  /** The fields of `fields` that `card-fields` names, in its order. */
+  private named(fields: string[]): string[] {
+    const names = this.cardFields.split(/[\s,]+/);
+    return names.filter((n, i) => n && fields.includes(n) && names.indexOf(n) === i);
+  }
+
+  /** `fields` with those `card-fields` names first, in its order. */
+  private namedFirst(fields: string[]): string[] {
+    const named = this.named(fields);
+    return [...named, ...fields.filter((n) => !named.includes(n))];
   }
 
   /**
@@ -444,11 +441,6 @@ export class MosaicaItemCard extends MosaicaElement {
   }
 }
 
-/**
- * The titles of category values the item cards have asked for, by the store's `meta` they were
- * answered under and then by field and key; `null` for a value with no title.
- */
-const TITLES = new WeakMap<Meta, Map<string, string | null>>();
 const titleKey = (field: string, key: string) => `${field}\u0000${key}`;
 
 /** A value as text, by the column's declared type. */

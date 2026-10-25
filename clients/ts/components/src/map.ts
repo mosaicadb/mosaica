@@ -146,8 +146,9 @@ let mapsMade = 0;
  *   moved.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-basemapchange']>} mosaica-basemapchange - The
  *   basemap's refusal or note appeared, changed or went.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-pick']>} mosaica-pick - A point was clicked, and
- *   again with its record once the record arrives.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-pick']>} mosaica-pick - A point was clicked.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-itemopen']>} mosaica-itemopen - The selected
+ *   item's record arrived, however the item was selected.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click found no point
  *   and no artifact.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved onto
@@ -981,12 +982,12 @@ export class MosaicaMap extends MosaicaElement {
     p.encoding = clusterLayer ? `cluster|${clusterLayer}` : encodingSignature(encodingOf(s.get('meta'), legend, colouringOf(s)));
     if (this.measure) this.measureStore(s);
 
-    // Events for what arrived: the picked record, the opened artifact, the region's counts.
+    // Events for what arrived: the selected item's record, the opened artifact, the region's counts.
     const sel = s.get('selection');
     if (sel.item && sel.item !== this.announcedItem) {
       this.announcedItem = sel.item;
       if (this.hover?.id === sel.item.id) this.hover = null;
-      emit(this, 'mosaica-pick', {id: idString(sel.item.id), record: sel.item.detail});
+      emit(this, 'mosaica-itemopen', {id: idString(sel.item.id), record: sel.item.detail});
     }
     if (sel.artifact && sel.artifact !== this.announcedArtifact) {
       this.announcedArtifact = sel.artifact;

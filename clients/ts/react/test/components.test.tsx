@@ -3,7 +3,7 @@ import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {formatCount} from '@mosaicajs/client';
 import {deep, fakeStore, meta, scalar, settle, status} from '../../components/test/fake-store.js';
-import {MosaicaCount, MosaicaExplorer, MosaicaFilter, MosaicaHierarchy, MosaicaItemCard, MosaicaKeyPicker, MosaicaStatus, MosaicaStore, MosaicaViewPicker, type CountElement, type ExplorerElement, type ItemCardElement, type StoreElement, type ViewPickerElement} from '../src/components.js';
+import {MosaicaCount, MosaicaExplorer, MosaicaFilter, MosaicaHierarchy, MosaicaItemCard, MosaicaKeyPicker, MosaicaMap, MosaicaStatus, MosaicaStore, MosaicaViewPicker, type CountElement, type ExplorerElement, type ItemCardElement, type StoreElement, type ViewPickerElement} from '../src/components.js';
 
 /**
  * The wrappers: an object prop lands as a property (never an attribute), an `on*` prop receives
@@ -116,6 +116,25 @@ describe('@mosaicajs/react/components', () => {
     select.value = 'v:pca64';
     select.dispatchEvent(new Event('change'));
     expect(seen).toEqual([{from: 'knn', to: 'pca64', sameFrame: false}]);
+  });
+
+  it('onPick and onItemOpen on the map receive the click’s id and then the record', async () => {
+    const store = fakeStore({status: status({})});
+    const seen: unknown[] = [];
+    await act(async () => root.render(createElement(MosaicaMap, {store, onPick: (e) => seen.push(e.detail), onItemOpen: (e) => seen.push(e.detail)})));
+    await settle(host);
+    const map = host.querySelector('mosaica-map') as unknown as {onClick(info: unknown): void};
+    map.onClick({index: 0, x: 5, y: 5, sourceLayer: {id: 'marks-p0', props: {mosaicaIds: new BigUint64Array([7n])}}, coordinate: [5, 5]});
+    const record = {fields: {name: 'Ada'}, labels: [], views: [], scoped: {}};
+    store.set('selection', {item: {id: 7n, detail: record}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    expect(seen).toEqual([{id: '7'}, {id: '7', record}]);
+  });
+
+  it('cardFields on the explorer reaches its item card', async () => {
+    const ref = createRef<ExplorerElement>();
+    await act(async () => root.render(createElement(MosaicaExplorer, {ref, cardFields: 'author'})));
+    await settle(host);
+    expect(ref.current?.cardFields).toBe('author');
   });
 
   it('titleField on the explorer reaches its map', async () => {

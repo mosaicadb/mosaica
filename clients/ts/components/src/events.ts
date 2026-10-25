@@ -25,11 +25,14 @@ export type MosaicaEventDetails = {
    * `height` the canvas in CSS pixels.
    */
   'mosaica-viewchange': {bbox: [number, number, number, number]; zoom: number; width: number; height: number};
+  /** A point was clicked: `id` is its `mosaica_id`. The record follows in `mosaica-itemopen`. */
+  'mosaica-pick': {id: string};
   /**
-   * A point was picked: `id` is its `mosaica_id`. Fired on the click without `record`, and again
-   * with the item's record once it arrives.
+   * The selected item's record arrived, as `record`, for the item `id`, whether it was selected by
+   * a click or by `Store.pick`. Where the server refuses the record, this does not fire; the
+   * refusal is the store's `selection.itemRefusal`.
    */
-  'mosaica-pick': {id: string; record?: ItemDetail};
+  'mosaica-itemopen': {id: string; record: ItemDetail};
   /** A click on the map found no point and no artifact. */
   'mosaica-miss': Record<string, never>;
   /** The pointer is over the point `id`, at `x`, `y` in canvas pixels. */

@@ -100,22 +100,23 @@ describe('<mosaica-item-card>', () => {
     expect(deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent).toBe('cs');
   });
 
-  it('shows a category value by its title, asked of the store for the item’s values over what the viewer may see', async () => {
+  it('shows a category value by the title the store gives, asking once for each value', async () => {
     const host = await mount('<mosaica-item-card></mosaica-item-card>');
     const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
     const store = fakeStore({meta: META, status: status({})});
+    let answer: (title: string | null) => void = () => {};
+    store.setTitles(() => new Promise((resolve) => (answer = resolve)));
     el.store = store;
     store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs', title: 'A title'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
     await settle(host);
-    const asked = [...registered(store)].find(([id]) => id.startsWith('item-titles'))?.[1];
-    expect(asked).toEqual({groupings: [{count: true, by: {field: 'archive', values: ['cs']}}], subject: 'visible'});
     const shown = () => deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent;
     expect(shown()).toBe('cs');
-    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', title: 'Computer science', count: 3}]}]));
+    answer('Computer science');
     await settle(host);
     expect(shown()).toBe('Computer science');
-    // Answered, the card asks for nothing more.
-    expect([...registered(store).keys()].some((id) => id.startsWith('item-titles'))).toBe(false);
+    el.requestUpdate();
+    await settle(host);
+    expect(store.calls.filter((c) => c.name === 'titleOf').map((c) => c.args)).toEqual([['archive', 'cs']]);
   });
 
   it('drops the titles when the store forgets what the server answered, whether or not the card was attached then', async () => {
@@ -123,58 +124,58 @@ describe('<mosaica-item-card>', () => {
       const host = await mount('<mosaica-item-card></mosaica-item-card>');
       const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
       const store = fakeStore({meta: META, status: status({})});
+      store.setTitles(() => 'Computer science');
       el.store = store;
       store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
-      await settle(host);
-      answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', title: 'Computer science', count: 3}]}]));
       await settle(host);
       const shown = () => deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent;
       expect(shown()).toBe('Computer science');
       if (!attached) el.remove();
-      // The store forgets, as on a renewal under other terms, and answers `meta` again.
-      store.set('aggregates', new Map());
+      // The store forgets, as on a renewal under other terms, and answers `meta` again; under it the value has no title.
+      store.setTitles(() => null);
       store.set('meta', null);
       store.set('meta', {...META});
       if (!attached) host.append(el);
       await settle(host);
       expect(shown()).toBe('cs');
-      expect([...registered(store)].find(([id]) => id.startsWith('item-titles'))?.[1]).toEqual({groupings: [{count: true, by: {field: 'archive', values: ['cs']}}], subject: 'visible'});
+      expect(store.calls.filter((c) => c.name === 'titleOf').length).toBe(2);
       document.body.innerHTML = '';
     }
   });
 
-  it('asks for at most the server’s groupings at a time, and asks again for nothing it was answered', async () => {
-    const category = {category: {vocabulary: 'v', kind: 'declared' as const, visibility: 'public' as const}, render: true, homes: ['rendered' as const]};
-    const names = ['a', 'b', 'c'];
-    const capped = meta({
-      declaredScalars: names.map((n) => scalar(n, 'u16', category)),
-      filterOperands: names.map((n) => ({column: n, family: 'category' as const, operands: ['in' as const]})),
-      selection: {...meta({}).selection, maxAggregateGroupings: 2}
-    });
+  it('shows no answer asked for under a `meta` the store has since replaced', async () => {
     const host = await mount('<mosaica-item-card></mosaica-item-card>');
     const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
-    const store = fakeStore({meta: capped, status: status({})});
+    const store = fakeStore({meta: META, status: status({})});
+    const answers: ((title: string | null) => void)[] = [];
+    store.setTitles(() => new Promise((resolve) => answers.push(resolve)));
     el.store = store;
-    const select = (id: bigint, fields: Record<string, string>) =>
-      store.set('selection', {item: {id, detail: {fields, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
-    const asked = () => [...registered(store)].find(([id]) => id.startsWith('item-titles'))?.[1] as {groupings: {by: {field: string}}[]} | undefined;
-    select(1n, {a: 'x', b: 'y', c: 'z'});
+    store.set('selection', {item: {id: 5n, detail: {fields: {archive: 'cs'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
     await settle(host);
-    expect(asked()?.groupings.map((g) => g.by.field)).toEqual(['a', 'b']);
-    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'x', title: 'Ex', count: 1}]}, {rows: [{key: 'y', title: 'Why', count: 1}]}]));
+    store.set('meta', {...META});
     await settle(host);
-    expect(asked()?.groupings.map((g) => g.by.field)).toEqual(['c']);
-    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'z', title: 'Zed', count: 1}]}]));
+    answers[0]!('Computer science');
     await settle(host);
-    expect(names.map((n) => deep(host, `[part="field"][data-name="${n}"] [part="value"]`)?.textContent)).toEqual(['Ex', 'Why', 'Zed']);
-    expect(asked()).toBeUndefined();
-    // Another item, then the first again: only the value not yet answered is asked for.
-    select(2n, {a: 'x', b: 'w'});
+    expect(deep(host, '[part="field"][data-name="archive"] [part="value"]')?.textContent).toBe('cs');
+  });
+
+  it('under `compact`, shows the fields `card-fields` names in its order, skipping a name the record lacks, with the rest under Show all', async () => {
+    const host = await mount('<mosaica-item-card compact title-field="title" card-fields="note nope submitted_at"></mosaica-item-card>');
+    const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+    el.meta = META;
+    el.item = {id: 9n, detail: {fields: {archive: 'cs', submitted_at: 1_700_000_000_000_000, title: 'T', note: 'n', extra: 'e'}, labels: [], views: [], scoped: {}}};
     await settle(host);
-    expect(asked()?.groupings.map((g) => g.by.field)).toEqual(['b']);
-    select(1n, {a: 'x', b: 'y', c: 'z'});
+    const names = () => deepAll(host, '[part="field"]').map((f) => f.getAttribute('data-name'));
+    expect(names()).toEqual(['note', 'submitted_at']);
+    expect(deep(host, '[part="show-all"]')?.textContent).toBe('Show all 5 fields');
+    (deep(host, '[part="show-all"]') as HTMLButtonElement).click();
     await settle(host);
-    expect(asked()).toBeUndefined();
+    expect(names()).toEqual(['note', 'submitted_at', 'archive', 'extra', 'mosaica_id']);
+    // Unset, the first three in declaration order.
+    el.cardFields = '';
+    (deep(host, '[part="show-all"]') as HTMLButtonElement).click();
+    await settle(host);
+    expect(names()).toEqual(['archive', 'submitted_at', 'note']);
   });
 });
 
