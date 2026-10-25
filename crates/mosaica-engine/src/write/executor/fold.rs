@@ -298,12 +298,14 @@ fn write_next_tenancy_index(
     Ok(next)
 }
 
-/// The derived files that still stand at their level's versions after the fold's retirement has
-/// run ([`DerivedExtent::stands`], with the layers in `enumerated`); every other one is dropped
-/// and named. See [`PendingRetirement`].
+/// The derived files of the fold's manifest that stand at their levels' versions once its
+/// retirement has run ([`DerivedExtent::stands`], with the layers in `enumerated`). The manifest
+/// already left out every file that would not stand at the versions [`PendingRetirement`]
+/// predicted, so a file dropped here is a retirement that moved a level other than predicted: a
+/// fault, and named.
 ///
 /// [`DerivedExtent::stands`]: mosaica_store::manifest::DerivedExtent::stands
-fn held_at_current_version(
+fn standing_after_retirement(
     store: &ArtifactStore,
     enumerated: &std::collections::BTreeSet<String>,
     entries: impl IntoIterator<Item = (ShardId, mosaica_store::manifest::DerivedExtent)>,
@@ -2454,7 +2456,7 @@ impl Executor {
         let enumerated = mosaica_types::layer::enumerated_names(&self.live.registered_layers());
         self.side_manifests.derived_extents = self
             .live
-            .with_artifacts(|store| held_at_current_version(store, &enumerated, written));
+            .with_artifacts(|store| standing_after_retirement(store, &enumerated, written));
         let folded_tiers = segments_manifest
             .shard(shard_id)
             .map(|record| record.deltas.clone())

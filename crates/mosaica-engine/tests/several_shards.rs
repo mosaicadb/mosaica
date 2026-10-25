@@ -2179,10 +2179,16 @@ fn growth_through_another_shards_compaction(
     );
 }
 
-/// A new artifact moves every shard's slice, so shard 1's column is behind its level when shard 0
-/// is compacted alone. The column is adopted and completed rather than composed again, at the
-/// running service and across a restart, and every viewer is served what one shard holding the
-/// same items serves.
+/// Shard 1's column falls behind its level, and is adopted and completed rather than composed
+/// again, at the running service and across each restart, while every viewer is served what one
+/// shard holding the same items serves:
+///
+/// - a new artifact, beyond the column's length, is read whole;
+/// - an item of shard 1's base joining `c-0` before shard 0's compaction writes shard 1's pack
+///   again is read whole, since the pack no longer matches the column;
+/// - a new item joining `c-1`, outside every base, leaves the column lacking nothing for `c-1`;
+/// - after shard 1's own compaction writes its column and pack together, an item of its base
+///   joining `c-2` is read from what joined since the pack alone.
 #[test]
 fn a_column_behind_its_level_is_adopted_through_another_shards_compaction() {
     use mosaica_lifecycle::ShardSets;
@@ -2191,29 +2197,61 @@ fn a_column_behind_its_level_is_adopted_through_another_shards_compaction() {
     let (one_engine, engine) = (one.open_writing(), several.open_writing());
     // Items no artifact holds, so the level's memberships still partition and no compaction
     // moves its layout, which would write every shard's column again.
-    let in_shard = |shard: u32| {
-        *ids_in_shard(&engine, TWO_SHARD_N, shard)
-            .iter()
-            .find(|id| unheld(**id))
-            .unwrap()
+    let unheld_in = |shard: u32| -> Vec<u64> {
+        ids_in_shard(&engine, TWO_SHARD_N, shard)
+            .into_iter()
+            .filter(|id| unheld(*id))
+            .collect()
     };
-    let fresh_members = [in_shard(0), in_shard(1)];
+    let (zero, first) = (unheld_in(0), unheld_in(1));
+    assert!(first.len() >= 3, "shard 1 holds three items no artifact holds");
+    let grow = |engine: &Engine, key: &str, id: u64| {
+        let mut growth = IncomingGrowth::from_entities(key.into(), Vec::new());
+        growth.joining = ShardSets::of_items([item_by_id(engine, id)]);
+        engine
+            .grow_memberships("t".into(), 0, vec![growth])
+            .unwrap();
+        tick(engine);
+    };
+    let fresh_item = key_id("fresh-0");
     for engine in [&one_engine, &engine] {
         let mut fresh = IncomingArtifact::from_entities(Some("c-new".into()), Vec::new());
-        fresh.members =
-            ShardSets::of_items(fresh_members.iter().map(|id| item_by_id(engine, *id)));
+        fresh.members = ShardSets::of_items([zero[0], first[0]].map(|id| item_by_id(engine, id)));
         engine
             .publish_artifacts("t".into(), 0, vec![fresh])
             .unwrap();
         tick(engine);
+        grow(engine, "c-0", first[1]);
+        let joining = mosaica_lifecycle::BatchArtifacts {
+            memberships: vec![mosaica_lifecycle::BatchMembership {
+                layer: "t".to_string(),
+                level: 0,
+                view: None,
+                key: "c-1".to_string(),
+                rows: vec![0],
+            }],
+            edges: Vec::new(),
+        };
+        insert_keyed_joining(engine, "fresh", &[true], joining);
+        publish_buffered(engine);
     }
+    assert_eq!(
+        item_by_id(&engine, fresh_item).shard,
+        shard(1),
+        "the new item is in the open shard"
+    );
     fold(&one_engine);
-    let expected = served_layer(&one_engine);
-    assert!(
-        expected[0]
+    let count = |served: &[Vec<ServedArtifact>], key: &str| {
+        served[0]
             .iter()
-            .any(|a| a.0.as_deref() == Some("c-new") && a.1 == 2),
-        "the new artifact counts its members in both shards: {expected:?}"
+            .find(|a| a.0.as_deref() == Some(key))
+            .map(|a| a.1)
+    };
+    let expected = served_layer(&one_engine);
+    assert_eq!(
+        (count(&expected, "c-new"), count(&expected, "c-0"), count(&expected, "c-1")),
+        (Some(2), Some(9), Some(8)),
+        "each write counts: {expected:?}"
     );
     let composed = engine.columns_composed();
     compact(&engine, Some(ShardId::ZERO));
@@ -2223,7 +2261,6 @@ fn a_column_behind_its_level_is_adopted_through_another_shards_compaction() {
         composed,
         "no column was composed at the compaction or the reads after it"
     );
-
     drop(engine);
     let engine = several.open_writing();
     assert_eq!(served_layer(&engine), expected, "across a restart");
@@ -2233,6 +2270,53 @@ fn a_column_behind_its_level_is_adopted_through_another_shards_compaction() {
         2,
         "the restart adopted each shard's column"
     );
+
+    compact(&engine, Some(shard(1)));
+    for engine in [&one_engine, &engine] {
+        grow(engine, "c-2", first[2]);
+    }
+    let expected = served_layer(&one_engine);
+    assert_eq!(count(&expected, "c-2"), Some(9), "the join counts: {expected:?}");
+    assert_eq!(served_layer(&engine), expected, "after shard 1's compaction and a join");
+    drop(engine);
+    let engine = several.open_writing();
+    assert_eq!(served_layer(&engine), expected, "across a second restart");
+    assert_eq!(
+        (engine.columns_composed(), engine.columns_adopted()),
+        (0, 2),
+        "the second restart adopted each shard's column and composed none"
+    );
+}
+
+/// A column stamped ahead of its level, by its records version or its slice version, is never
+/// adopted: the level is composed again from its members, and every viewer is served what the
+/// unedited bundle serves. Such a stamp is damage, made here by editing the served manifest.
+#[test]
+fn a_column_ahead_of_its_level_is_never_adopted() {
+    use mosaica_store::manifest::DerivedForm;
+    let unedited = layered_fixture(Some(TWO_SHARD_SIZE));
+    let expected = served_layer(&unedited.open_writing());
+    let stamps: [fn(&mut mosaica_store::manifest::DerivedExtent); 2] = [
+        |extent| extent.level_version += 1,
+        |extent| extent.slice_version += 1,
+    ];
+    for (at, stamp) in stamps.into_iter().enumerate() {
+        let several = layered_fixture(Some(TWO_SHARD_SIZE));
+        edit_side_manifest(&several.root, |manifest| {
+            for extent in &mut manifest.shards.records[1].derived_extents {
+                if matches!(extent.form, DerivedForm::RowColumn { .. } | DerivedForm::RowMembers) {
+                    stamp(extent);
+                }
+            }
+        });
+        let engine = several.open_writing();
+        assert_eq!(served_layer(&engine), expected, "stamp {at}");
+        assert_eq!(
+            (engine.columns_adopted(), engine.columns_composed()),
+            (1, 1),
+            "stamp {at}: shard 0's column is adopted and shard 1's composed"
+        );
+    }
 }
 
 /// Dropping a layer at two shards removes every shard's member packs and derived files of its

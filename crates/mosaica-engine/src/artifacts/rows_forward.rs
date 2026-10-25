@@ -173,12 +173,13 @@ impl ArtifactRows {
     /// shard's compactions, so the column's labels are a subset of the records' and these pairs
     /// are the whole difference.
     ///
-    /// An entity has at most one base row per view and a retired entity has none, so a membership
-    /// exactly as large as the column labels it lacks nothing and is passed over. A membership
-    /// mapped from a pack exactly as large as those labels lacks only what has joined it since
+    /// An entity has at most one base row per view and a retired entity has none, so an artifact
+    /// whose members with a base row number exactly the column's labels for it lacks nothing and
+    /// is passed over, whatever has joined it from outside the base. One mapped from a pack whose
+    /// members with a base row number exactly those labels lacks only what has joined it since
     /// ([`Members::joined`]), which is projected alone. Every other artifact is projected whole:
     /// one published since the column, at or beyond its length, and one whose pack another
-    /// shard's compaction wrote again with joins the column does not carry. This holds one
+    /// shard's compaction wrote again after an item of the base joined it. This holds one
     /// artifact's rows and the pairs found, never the level.
     ///
     /// [`Members::joined`]: mosaica_lifecycle::membership::Members::joined
@@ -190,20 +191,22 @@ impl ArtifactRows {
         let Some(column) = self.column.as_deref() else {
             return Vec::new();
         };
+        let in_base = space.base().present_entities();
+        let scratch = &mut ProjectScratch::default();
         let mut added = Vec::new();
         for (ordinal, record) in artifacts {
             let members = &record.members;
             let labelled = column.declared_size(ordinal);
             let rows = if ordinal as usize >= column.len() {
-                members.projected(|part| space.project_base(part))
-            } else if members.cardinality() == labelled {
+                members.projected(|part| space.project_base_with(part, scratch))
+            } else if members.and_cardinality(in_base) == labelled {
                 continue;
             } else {
-                match (members.mapped_cardinality(), members.joined()) {
+                match (members.mapped_and_cardinality(in_base), members.joined()) {
                     (Some(packed), Some(joined)) if packed == labelled => {
-                        space.project_base(joined)
+                        space.project_base_with(joined, scratch)
                     }
-                    _ => members.projected(|part| space.project_base(part)),
+                    _ => members.projected(|part| space.project_base_with(part, scratch)),
                 }
             };
             for row in rows.iter() {

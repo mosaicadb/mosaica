@@ -747,11 +747,12 @@ standing.
 A shard's row-major column and its member file stay through every other shard's compaction while
 they are behind the level's versions and never ahead of them, in memory and in the manifest alike.
 A membership only grows between its own shard's compactions, so such a column labels a subset of
-the members, and the reader completes it. An artifact with as many members as the column labels
-lacks nothing. One whose member pack holds exactly as many lacks only what joined since the pack
-was written. Any other is projected whole: it was published after the column, or another shard's
-compaction wrote its pack again, since a compaction of any shard writes every shard's member packs
-from the slices as they stand.
+the members, and the reader completes it, counting only members with a row in the shard's base.
+An artifact with as many such members as the column labels lacks nothing, whatever joined it from
+outside the base. One whose member pack holds exactly as many lacks only what joined since the
+pack was written. Any other is projected whole: it was published after the column, or an item of
+the base joined it before another shard's compaction wrote its pack again, since a compaction of
+any shard writes every shard's member packs from the slices as they stand.
 
 When a content is dropped, at the compaction of the shard holding a member its generating set
 lost or at a page that empties the set, its rank is withdrawn in the record: the rank's values go

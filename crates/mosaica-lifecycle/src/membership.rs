@@ -994,11 +994,11 @@ impl Members {
         matches!(self.0, MembersInner::Mapped { .. })
     }
 
-    /// How many members the mapped bytes hold, without what [`Self::joined`] holds: the size of
+    /// How many of `other`'s members the mapped bytes hold, without what [`Self::joined`] holds:
     /// the membership its pack was written with. `None` for a membership on the heap.
-    pub fn mapped_cardinality(&self) -> Option<u64> {
+    pub fn mapped_and_cardinality(&self, other: &Bitmap) -> Option<u64> {
         match &self.0 {
-            MembersInner::Mapped { .. } => Some(self.base().cardinality()),
+            MembersInner::Mapped { .. } => Some(self.base().and_cardinality(other)),
             MembersInner::Owned(_) => None,
         }
     }
