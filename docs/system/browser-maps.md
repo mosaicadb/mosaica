@@ -1,24 +1,60 @@
 # Maps in the browser
 
-A Mosaica map in the browser is built in layers, each usable on its own:
+A Mosaica map in the browser is built from four layers. Each one uses the layer below it, and each can be used on its own, so an application takes as much as suits it and replaces the rest.
 
-- **The store**, in `@mosaicajs/client`, decides what to ask the server for, holds what comes back, and publishes what to draw. It draws nothing itself.
-- **The deck.gl layer**, `MosaicaLayer` in `@mosaicajs/deck`, draws a store's points, topics and density, in a deck.gl scene of your own or inside the components.
-- **The components**, in `@mosaicajs/components`, are web components built on both: a whole explorer, a map, and panels such as a filter panel, a field card or a count. `@mosaicajs/react` wraps each one for React.
-- **The Python notebook map** embeds the components, so it behaves as they do.
+```mermaid
+flowchart TB
+  server["Mosaica server"]
+  client["MosaicaClient<br/>sends one request, decodes the answer"]
+  store["Store<br/>decides what to ask, caches the answers,<br/>publishes what to draw"]
+  layer["MosaicaLayer<br/>draws points, topics and density in deck.gl"]
+  components["Components<br/>explorer, map, filter panel, field card, counts"]
+  hosts["Your page, React, or the Python notebook map"]
+  own["Your own renderer or panels"]
+  server <--> client
+  client <--> store
+  store --> layer
+  layer --> components
+  components --> hosts
+  store -. "projections" .-> own
+```
 
-A host with its own drawing can use the store alone. This chapter describes what the store does, and then what the deck layer and the components add. The [TypeScript reference](../reference/typescript.md) and the [components reference](../reference/components.md) list every option.
+*Each layer uses the one below it. Your own drawing or panels can read the store's projections directly.*
 
-## The store
+- **`MosaicaClient`**, in `@mosaicajs/client`, sends one request and decodes its answer, in a web worker where one is available.
+- **The store**, in the same package, decides what to ask for, caches what comes back, and publishes what to draw as projections: the points, the counts, the topics, a legend and the state of the view. It draws nothing itself.
+- **`MosaicaLayer`**, in `@mosaicajs/deck`, draws a store's points, topics and density as a deck.gl layer.
+- **The components**, in `@mosaicajs/components`, are web components built on the store and the layer: a whole explorer, a map, and panels such as a filter panel, a field card or a count. `@mosaicajs/react` wraps each one for React, and the Python notebook map embeds them.
 
-The host tells the store where the camera is, and which view, filters, layers and colouring are chosen. The store does the rest:
+## Building on it
 
-- **It gets tokens from the host.** The host gives it a fixed `token`, or an `authorise` function, which the store calls for a token and again to renew it 30 seconds before it expires.
-- **It asks only for what is worth asking.** It picks the zoom level whose tiles give about as many points as its point budget, 250,000 by default. It waits for the camera to settle before asking for more, and then fetches a margin around the screen.
-- **It keeps what it has fetched**, and asks only for tiles it does not hold. Topics come from a request of their own, tile by tile, so they stay put as the held points change.
-- **It keeps topic colours stable.** The server gives each topic a colour slot, the same for this viewer at every zoom and filter, in one of four palettes: Okabe-Ito, Tableau 10 (the default), Tableau 20 or Kelly.
-- **It ranks category values for colouring** by the server's count of each over the viewer's items, so a value has the same colour on every load. If that count is refused, it ranks the values already drawn.
-- **It counts for panels.** A component registers the breakdowns it needs, such as a histogram for a field card. The store sends registrations with the same filters as one aggregate request, and asks again when the filter, the highlight, the selected region or the view changes, at a refresh, and when the data changes.
+| To | Use | You write |
+|---|---|---|
+| Put a map with its panels on a page | `<mosaica-explorer>`, or `<mosaica-map>` with the panels you choose | a token source, and any styling |
+| Add your own panels beside the map | the components, and the store's projections and `setAggregate` for your panels | the panels |
+| Draw Mosaica's points in your own deck.gl scene | the store and `MosaicaLayer` | the scene and its other layers |
+| Draw with something other than deck.gl | the store, reading its `marks` projection | the drawing, and telling the store where the camera is |
+| Schedule and cache requests yourself | `MosaicaClient` | everything the store does. [Writing your own client](../openapi/README.md#writing-your-own-client) lists what to take care of |
+
+The [TypeScript reference](../reference/typescript.md) and the [components reference](../reference/components.md) list every option.
+
+## What the store does
+
+The store exists to make the database cheap and simple to use from a browser. Its caching follows how Mosaica serves a map, so it asks the server for as little as it can and reuses everything an answer allows:
+
+- **Samples nest across zoom levels.** A tile's points are always the start of the points its deeper tiles draw. So while new tiles load after a zoom, the store draws the points it already holds from another depth in their place. The map never goes blank, and the stand-in points are ones the finished map will draw too.
+- **It asks only for tiles it does not hold.** The server does no work for a tile a request leaves out, so a pan costs only the tiles newly on screen. Held tiles are kept within a memory budget, and the least recently drawn leave first.
+- **It fetches ahead.** Once the camera settles, it asks for a margin around the screen, reaching further in the direction the camera was moving.
+- **It picks the zoom level** whose tiles give about as many points as its point budget, 250,000 by default.
+- **It draws as answers arrive.** Counts come first, then points, decoded off the page's main thread and drawn tile by tile.
+- **It knows when what it holds is out of date.** It compares each answer's content key and identity key with what it holds, marks the view stale when the data has moved on, and drops everything when the viewer changes.
+- **It batches the panels' counts.** A component registers the breakdowns it needs, such as a histogram for a field card. The store sends registrations with the same filters as one aggregate request, and asks again only when the filter, the highlight, the selected region or the view changes, at a refresh, and when the data changes.
+
+It also handles the rest of talking to the server:
+
+- **Tokens.** The host gives it a fixed `token`, or an `authorise` function, which the store calls for a token and again to renew it 30 seconds before it expires.
+- **Topics** come from a request of their own, tile by tile, so they stay put as the held points change.
+- **Stable colours.** The server gives each topic a colour slot, the same for this viewer at every zoom and filter, in one of four palettes: Okabe-Ito, Tableau 10 (the default), Tableau 20 or Kelly. Category values are ranked for colouring by the server's count of each over the viewer's items, so a value has the same colour on every load. If that count is refused, the store ranks the values already drawn.
 
 ### What the view shows
 
