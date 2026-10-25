@@ -36,6 +36,10 @@ mosaica-build = { workspace = true }
 mosaica-config = { workspace = true }
 serde_json = { workspace = true }
 
+[build-dependencies]
+# The link arguments an extension module needs on macOS (`build.rs`).
+pyo3-build-config = "0.29"
+
 [dependencies.pyo3]
 version = "0.29"
 # `abi3-py310` builds against the stable ABI, so one object serves every Python from 3.10 up.

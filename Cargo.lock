@@ -2255,6 +2255,7 @@ dependencies = [
  "mosaica-build",
  "mosaica-config",
  "pyo3",
+ "pyo3-build-config",
  "serde_json",
 ]
 
