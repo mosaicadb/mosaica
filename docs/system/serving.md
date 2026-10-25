@@ -1,6 +1,6 @@
 # Serving
 
-Mosaica answers every viewer from one process, and most of what it does between a request and its answer is about keeping the map quick for everyone at once. It streams answers so a client can start drawing early, keeps busy requests from crowding each other out, and does the expensive work for a set of viewers once rather than on every request. Each answer also tells the client whether what it already holds is still current. For sizing and settings, see the [operating guide](../guides/operating.md).
+Mosaica answers every viewer from one process, and most of what it does between a request and its answer is about keeping the map quick for everyone at once. It streams answers so a client can start drawing early, keeps busy requests from crowding each other out, and does the expensive work for a set of viewers once rather than on every request. Each answer also tells the client whether what it already holds is still current. For sizing and settings, see [Size and tune a deployment](../guides/sizing.md).
 
 ## How an answer arrives
 
@@ -46,7 +46,7 @@ Viewers who hold the same access labels share a **grant**, and Mosaica keeps its
 
 Every later request, from any session with the grant, reuses them, and each request corrects them for whatever has been deleted, suppressed or ingested since they were built. The figures and the visible set's list of items are written to disc and read back after a restart. The visible set's arrangement over the rows is held in memory only, so each grant's first request after a restart builds that again.
 
-So the first request from a new grant is the slow one, and its cost grows with how much of the data the grant may see. You pay it once for each grant, so a few groups of viewers cost a few first requests, while users who each hold attributes of their own cost one each. The [operating guide](../guides/operating.md#annotation-layers-and-new-viewers) explains how to plan for it.
+So the first request from a new grant is the slow one, and its cost grows with how much of the data the grant may see. You pay it once for each grant, so a few groups of viewers cost a few first requests, while users who each hold attributes of their own cost one each. [Size and tune a deployment](../guides/sizing.md#annotation-layers-and-new-viewers) explains how to plan for it.
 
 ??? info "After a flush, a merge or a compaction"
     When new data is flushed or segments are merged, a background pass brings each grant's visible set up to date. Until it reaches a grant, a viewer already shown the view is answered from the previous version after a flush, so new items appear a moment later, and is asked to retry after a merge. A session's first read in the view does the update itself. After a [compaction](write-path.md#background-maintenance), the same pass rebuilds each grant's visible set, and each level's figures are rebuilt for the compacted part of the data the next time they are read.

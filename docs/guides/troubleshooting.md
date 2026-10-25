@@ -65,11 +65,11 @@ A page can call the viewer address only from an origin the server admits. Add th
 
 ### The first request from a new user is slow
 
-The first request from a new set of access attributes works out which items they admit, and its cost grows with how many items that is. Later requests reuse the result. [What the server keeps ready](../system/serving.md#what-the-server-keeps-ready) explains the cost, and [Annotation layers and new viewers](operating.md#annotation-layers-and-new-viewers) how to plan for it.
+The first request from a new set of access attributes works out which items they admit, and its cost grows with how many items that is. Later requests reuse the result. [What the server keeps ready](../system/serving.md#what-the-server-keeps-ready) explains the cost, and [Annotation layers and new viewers](sizing.md#annotation-layers-and-new-viewers) how to plan for it.
 
 ### Requests slow down under load, or when memory is short
 
-Mosaica maps its files rather than loading them, so the parts in use sit in the kernel's page cache. When the memory cap leaves little room beyond the caches, the server reads from disc more often and slows down before it fails. Compare `heap.anon_bytes` and `heap.file_bytes` in `/control/status` with the cap, and raise the cap or lower the cache limits, as [Memory](operating.md#memory) describes.
+Mosaica maps its files rather than loading them, so the parts in use sit in the kernel's page cache. When the memory cap leaves little room beyond the caches, the server reads from disc more often and slows down before it fails. Compare `heap.anon_bytes` and `heap.file_bytes` in `/control/status` with the cap, and raise the cap or lower the cache limits, as [The caches](sizing.md#the-caches) describes.
 
 ### A build runs out of memory
 

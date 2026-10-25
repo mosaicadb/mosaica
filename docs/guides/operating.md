@@ -1,206 +1,43 @@
 # Operate a deployment
 
-This guide covers running Mosaica once it is installed, [under systemd](systemd.md) or [with
-Docker](docker.md). Before anyone else uses the server, decide who may reach each of its three
-addresses and how much memory it gets. After that you'll mostly need the sections on health, the
-write-ahead log and compaction. Putting the viewer address behind TLS has [a page of its
-own](tls.md), and so does [rebuilding the bundle](rebuild.md).
+This guide covers running Mosaica once it is installed, [under systemd](systemd.md) or [with Docker](docker.md). Before anyone else uses the server, decide who may reach each of its three addresses and how much memory it gets. After that, the server mostly looks after itself: you check that it's healthy, back it up, and restart it when you change a setting. Most of what it does on its own is compaction, which has [a page of its own](compaction.md), as do [sizing and tuning](sizing.md), [putting it behind TLS](tls.md) and [rebuilding the bundle](rebuild.md).
 
-The examples use the systemd install, run as the `mosaica` user in `/srv/mosaica`. Under Docker,
-run them from `~/mosaica-docker`, use ports 9161 and 9162 in place of 9151 and 9152, and write
-`http://127.0.0.1:9163` where the examples reach the control socket with
-`--unix-socket /run/mosaica/control.sock http://localhost`.
+The examples use the systemd install, run as the `mosaica` user in `/srv/mosaica`, whose control address is a Unix socket. Under Docker, run them from `~/mosaica-docker`, use ports 9161 and 9162 in place of 9151 and 9152, and write `--control http://127.0.0.1:9163` in place of `--control unix:/run/mosaica/control.sock`. The commands that use the control address read the operator credential from `MOSAICA_CREDENTIAL`:
 
-## What the server keeps on disc
-
-`[bundle]` in `mosaica.toml` names three places.
-
-| Key | What it holds | What makes it grow | If it is lost |
-|---|---|---|---|
-| `path` | The bundle: every item, its position, its attributes, the search indexes and the identity key. The server writes to it as it runs, adding a segment each time it makes newly ingested items visible and rewriting it at each compaction | Ingest, until a compaction reclaims what deletions and merges left behind | The database. Restore it from a backup |
-| `wal` | The write-ahead log, which holds every change since the last flush into the bundle, in files named after this path: `wal-000001.log`, `wal-000001.sync` and so on | Writes, until the bundle holds them and the oldest files are deleted | Every change acknowledged since the last flush |
-| `cache` | Work the server can redo: each distinct grant's set of visible items, each grant's counts for the annotation layers it has read, the name-search suggestions and scratch files | A pair of files for each distinct set of labels a viewer has been granted, and under `figures/` a file for each grant and annotation level read, up to `figures_disk_bytes`. A compaction deletes them | Nothing but time. The server rebuilds what it needs |
-
-Back up the bundle and the log together, with the server stopped. A copy of one without the other
-is a database as it stood at some other moment.
-
-!!! warning
-    Keep the bundle and the log on a local disc. The server locks the bundle's directory so that a
-    second server cannot write to it, and that lock does not work reliably over NFS or SMB. Two
-    servers writing one bundle overwrite each other's changes.
-
-Anyone who can read the bundle can read every item in it, whatever its access label, and the
-identity key too. Access control applies to what the server sends, not to the files.
+```console
+mosaica$ export MOSAICA_CREDENTIAL=$(cat secrets/operator.secret)
+```
 
 ## Addresses and credentials
 
 | Address | Routes | Who should reach it |
 |---|---|---|
-| Viewer | `/v1/*`, `/healthz`, `/readyz` | Browsers, each with its own token, through a TLS proxy. People who log in with a password or an API key do it here, at `/v1/login`. |
+| Viewer | `/v1/*`, `/healthz`, `/readyz` | Browsers, each with its own token, through a TLS proxy. People who log in with a password or an API key do it here, at `/v1/login` |
 | Session | `/session/authorise`, `/session/revoke`, `/healthz`, `/readyz` | Your application's backend, which signs people in and asks Mosaica for their tokens with an API key whose user holds `authorise-as` |
-| Control | `/control/*` | You, and whatever loads data into the corpus |
+| Control | `/control/*` | You, and whatever loads data into the database |
 
-An API key whose user holds `authorise-as` can mint a token for any user in the catalogue,
-and so read whatever any user's attributes admit. The operator credential holds every permission:
-it can mint a token for any set of access labels, read every item, change the catalogue, and
-delete your data or add to it. Keep the session and control addresses off the internet. The viewer
-address serves only what each token allows, and it is the one browsers need. It serves plain
-HTTP and accepts a password over it, so put it behind TLS, as [Put Mosaica behind TLS](tls.md)
-describes.
+Keep the session and control addresses off the internet. An API key whose user holds `authorise-as` can start a session for any user, and so read whatever any user's attributes admit. The operator credential holds every permission: it can start a session that sees everything, change the catalogue, and delete your data or add to it. The viewer address serves only what each token allows, and it's the one browsers need. It serves plain HTTP and accepts passwords, so put it behind TLS, as [Put Mosaica behind TLS](tls.md) describes.
 
-Both installs keep the operator credential in a file called `operator.secret`. Under systemd it is
-in `/srv/mosaica/secrets`, and under Docker in `~/mosaica-docker/secrets`, which Compose mounts into
-the container as `/run/secrets`. The server reads the file once, when it starts, and trims the
-whitespace around it. To change the credential, replace the file and restart the server. The users,
-groups, API keys and grants are kept in the catalogue, the directory `[catalogue] dir` names, and
-change without a restart.
+Both installs keep the operator credential in a file called `operator.secret`: under systemd in `/srv/mosaica/secrets`, and under Docker in `~/mosaica-docker/secrets`, which Compose mounts into the container as `/run/secrets`. The server reads the file once, when it starts, so to change the credential, replace the file and restart. Users, groups, API keys and grants live in the catalogue, the directory `[catalogue] dir` names, and change without a restart. [Users and roles](../system/users-and-roles.md) covers them.
 
-Instead of a file, `operator_credential_env` can name an environment variable, which the server
-trims in the same way. Anything else running as the same user can read a process's environment
-from `/proc`, so a file is the better choice. Whichever you use, the server wants the credential
-even if nothing ever calls the control address, and refuses one that is empty:
+??? info "The credential in an environment variable"
+    Instead of a file, `operator_credential_env` can name an environment variable. Anything else running as the same user can read a process's environment from `/proc`, so a file is the better choice. Either way, the server trims the whitespace around the credential, and refuses to start without one, even if nothing ever calls the control address:
 
-```text
-mosaica serve: refused to start: there is no operator credential; set `operator_credential_file` or `operator_credential_env` under [serve] and put the secret in that file or variable
-```
+    ```text
+    mosaica serve: refused to start: there is no operator credential; set `operator_credential_file` or `operator_credential_env` under [serve] and put the secret in that file or variable
+    ```
 
-A browser's token lasts `token_max_lifetime` seconds, set under `[disclosure]`, and keeps the
-access attributes its user held when it was issued. A change in the catalogue that could change
-them, such as an attribute granted or taken away, a group membership or a disabled user, ends every
-token of the users it affects. Their next request is answered `403 expired-token`, and the client
-asks for a new token.
+A viewer's session lasts at most `token_max_lifetime` seconds, set under `[disclosure]`, and a change in the catalogue that affects a user ends their sessions, so their next request starts a new one. [When a session ends](../system/access-control.md#when-a-session-ends) lists every cause.
 
 ## Memory
 
-The server holds these caches, each with a limit you can set under `[serve]`:
-
-| Key | Default | What it holds |
-|---|---|---|
-| `row_projection_cache_bytes` | 2 GiB | For each grant, view and shard, which rows of the bundle the grant may see, shared by every session with that grant |
-| `fragment_cache_bytes` | 1 GiB | For each distinct set of granted labels, the items it covers. Copies on disc in the cache directory outlive the memory |
-| `masked_count_cache_bytes` | 1 GiB | Visible member counts, centroids and boxes for annotation levels served from a column, one entry per grant and level, whatever the number of shards. Per artifact: 4 B for counts alone, 40 B with a centroid and a box, and for a layer serving a box 4 B more plus 128 B for each artifact with more than sixteen placed rows, 256 B in a bundle of several shards. A level of 1.4 million artifacts is 56 MB a grant counted with geometry, and a layer serving a box keeps at most 185 MB more of reserves in the same entry, 364 MB over several shards, so the default holds the counts of about nineteen such grant-levels, and at least four with their reserves, two over several shards. Deployments where every user holds their own attributes need one entry per user per level. An entry larger than the bound is served and not kept, and an entry that fits only without its reserve is kept without it; `masked_count_cache.not_admitted` on `/control/status` counts both. Empty in a corpus without such a layer |
-| `figures_disk_bytes` | 8 GiB | The same entries, and the labels of denied rows they are corrected with, kept in the cache directory, so a restart reads them back and does not walk each grant's rows again. In a bundle of several shards it also keeps each shard's walk of each grant's items, which a compaction of one shard reads back so as to walk that shard alone: up to 172 B for each artifact a shard holds a member of, for each level version the shard was walked at, until this bound removes the older ones. Size it as the memory bound above times the number of grant-levels a restart should find, plus those walks, plus about 24 B per denied row per level. Past it, the files least recently written or read are removed |
-| `region_cache_bytes` | 256 MiB | Drawn filter regions broken into map tiles, shared between viewers |
-| `occupancy_cache_bytes` | 32 MiB | How many tiles at each zoom hold something a session can see |
-
-`masked_count_cache_bytes` bounds two caches, each to that size: the counts, with the eight most
-extreme rows on each side kept for an annotation layer that serves a box, and the tallies of number
-and timestamp fields, which are under a kilobyte each. Beside them the server keeps what it
-subtracts and adds on each request for deleted and suppressed rows and for recently ingested ones,
-and the labels of denied rows, under fixed limits that come to 1.5 GiB.
-
-The paged reads, `POST /v1/items` and `POST /v1/artifacts`, share one limit. Two may run at once
-(`bulk_admission`), each holding up to seven pages of at most 64 MiB (`max_page_bytes`). The server
-logs what that comes to when it starts, as `bulk_read_memory_bytes=939524096`. With the defaults,
-the limits on the caches and the paged reads add up to about 7.7 GiB.
-
-The bundle itself is not loaded. The server maps its files, so their pages sit in the kernel's page
-cache and count towards the process's memory. When memory is short the kernel drops them, and reads
-them back from disc when a request needs them. Set the cap (`MemoryMax` under systemd, or a memory
-limit on the container) above the caches and paged reads together. Every gigabyte beyond that keeps
-more of the bundle in memory. A cap that is too low makes the server slower before it makes it fail.
-
-`/control/status` shows what the process holds. `anon_bytes` is the caches and the allocator's own
-memory, and `file_bytes` is how much of the bundle is in memory:
-
-```console
-mosaica$ curl -sS --unix-socket /run/mosaica/control.sock \
-  -H "authorization: Bearer $(cat secrets/operator.secret)" \
-  http://localhost/control/status | jq '{posture: .write_executor.posture, heap}'
-{
-  "posture": "running",
-  "heap": {
-    "anon_bytes": 6320128,
-    "file_bytes": 19673088,
-    "last_trim_micros": 0,
-    "last_trim_returned_bytes": 0,
-    "resident_bytes": 25993216,
-    "trim_baseline_bytes": 6139904,
-    "trim_growth_bytes": 268435456,
-    "trims": 0
-  }
-}
-```
-
-`compute_threads` defaults to the number of CPUs the process may use. Lower it to leave some for
-other work on the same machine.
-
-A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build's own
-structures within 24 GiB. Without it the build works out a budget from the memory the machine has
-free, which is too much if the server is running beside it.
-
-## Annotation layers and new viewers
-
-Plan for one cost when viewers first open an annotation layer. A grant is the set of labels a
-viewer holds, and every viewer holding the same set shares one. The cost falls on an annotation
-level served from a column, which holds one entry per row naming its artifacts. Unless the layer
-declares `layout = "rows"`, that is every level of a `flat`, `stacked` or `tiered` layer whose
-memberships are enumerated, every attribute layer's level, and a `nested`, `dag` or shape level of
-at least 1,000 artifacts of which a quarter are spread too widely for the map's index. The
-first time a viewer reads such a level under a grant the server has not seen, the server walks
-every row the last build or compaction wrote that the grant may see, and counts each artifact's
-members, with their positions where the layer serves a centroid or a box. Drawing a layer or
-listing its artifacts reads its levels. Colouring points by a layer reads them when the map then
-reads the artifacts its points are tagged with. Every later request under that grant reads the
-result, corrected for whatever has been deleted, suppressed or ingested since.
-
-The walk takes longer the more of the corpus the grant sees. A request that shows several levels
-for the first time fills them one after another.
-
-A viewer's first request for a layer's colours, with a `palette_size`, also costs one pass over
-the layer: the server works out a colour slot for every cluster the viewer is served, over the
-whole layer, one level at a time: the level asked for and, on a `tiered` layer, the levels above
-it, never a deeper one. Where the layer declares a centroid, as a taxonomy does, the pass
-reads the centroids the map fills when it draws the level, so it adds no walk of its own. A
-viewer whose first view of a `tiered` taxonomy is at genus or species therefore also fills the
-counts and centroids of every coarser level, since each level's slots are worked out from its own
-centroids whichever level is asked first. The fill is kept for each grant, so it is paid once
-per grant. Any route that names a `palette_size`,
-browse and the bulk reads included, fills those same counts and centroids where nothing has yet;
-without a `palette_size` no route fills them for colours.
-
-The slots are then held for that credential, layer and palette size, shared by every session
-holding the credential. After a deletion, a suppression or
-an unsuppression, an edit, a publication, or a change to the layer's registration or edges, the
-viewer's next request that colours the layer pays the pass again before it is answered, and so
-does every change on a layer whose criterion is a fraction or whose content has a generating set.
-After an ingest, a flush or a growth of a membership on any other layer, the next request is
-answered from the slots held and the server works them out again once that response is sent, on
-at most two sessions at once, so the viewer pays nothing for it.
-
-Browse and a bulk read of `/v1/artifacts` with a `palette_size` work out slots for every level
-whose rows they return, and on a `tiered` layer for the levels above each, filling each level's
-counts and centroids as drawing it would. Without `palette_size` they fill nothing for colours.
-
-A deployment whose viewers fall into a few groups pays the walk a few times for each level. A
-deployment in which every user holds labels of their own, such as a label per document, pays it for
-each user and each level they open.
-
-The result is written to the cache directory, and a restart reads it back. A compaction changes
-the identity of the shard it compacts, and each grant walks that shard's items again the next time
-it reads each level, and no other shard's.
-`figures_disk_bytes` decides how many results the directory keeps, and `masked_count_cache_bytes`
-how many stay in memory. `/control/status` counts walks under `masked_count_cache.fills` and
-results read back from disc under `masked_count_cache.loads`.
-
-The artifacts a map draws come from `POST /v1/artifacts/viewport`, which has an admission limit of
-its own, `artifact_admission`, one request per compute thread by default. A request past it, and
-past as many waiting, is answered 429, and `/control/status` counts those under
-`artifacts.shed_total`. `max_artifacts_per_tile`, 1,000 by default, is the most artifacts one
-request may ask for in each tile and level.
+Set a memory cap on the server (`MemoryMax` under systemd, or the container's memory limit) above the limits on its caches, which come to about 7.7 GiB by default. Memory beyond that keeps more of the bundle in memory and makes the server faster. [Size and tune a deployment](sizing.md#memory) explains how to choose the cap and when to change the cache limits.
 
 ## Health and readiness
 
-The viewer and session addresses both answer `/healthz` and `/readyz`, with no credential and no
-body. `/healthz` answers 200 whenever the process is answering at all. `/readyz` is the one to send
-traffic by. It answers 200 while the part of the server that takes writes is running normally, and
-503 when it is not, or when the server has had to open an older state of the bundle because the
-newest one on disc failed its checks. The control address has neither.
+The viewer and session addresses both answer `/healthz` and `/readyz`, with no credential. Send traffic by `/readyz`: it answers 200 while the server is taking writes normally, and 503 when it isn't, or when the server has had to open an older state of the bundle because the newest one on disc failed its checks. `/healthz` answers 200 whenever the process answers at all. The control address has neither.
 
-The [TLS proxy](tls.md) does not pass the probes through. Run your load balancer's or monitor's
-check on the server's machine, or against the session address from inside your network.
-`mosaica health` makes the same check from the command line. It reads `mosaica.toml`, asks the
-viewer address for `/readyz`, and exits 0 on a 200. The Docker image uses it as its health check.
+`mosaica health` makes the same check from the command line. It reads `mosaica.toml`, asks the viewer address for `/readyz`, and exits 0 on a 200. The Docker image uses it as its health check.
 
 ```console
 mosaica$ mosaica health && echo ready
@@ -213,168 +50,58 @@ When nothing is listening it says so and exits 1:
 mosaica health: no server answering at 127.0.0.1:9151: Connection refused (os error 111)
 ```
 
-`/control/status` names the state of the write side in `write_executor.posture`: `not-started`,
-`running`, `wal-poisoned` or `dead`. Only `running` is ready.
+The [TLS proxy](tls.md) doesn't pass the probes through, so run your load balancer's or monitor's check on the server's machine, or against the session address from inside your network.
 
-A disc that hangs on a write, rather than failing it, leaves the posture at `running` and `/readyz`
-at 200 while nothing is written. [Health and readiness](../system/serving.md#health-and-readiness)
-covers what the probe can and cannot see.
+For more than up or down, `mosaica status` prints the server's status report: how far writes have got, queue depths, compaction, memory and the limits on each write. `write_executor.posture` is the state of the write side, one of `not-started`, `running`, `wal-poisoned` or `dead`, and only `running` is ready.
 
-## The write-ahead log
+A disc that hangs on a write, rather than failing it, leaves the posture at `running` and `/readyz` at 200 while nothing is written. [Health and readiness](../system/serving.md#health-and-readiness) covers what the probe can and cannot see.
 
-The server writes every change to the log, and forces it to disc, before it tells the caller the
-change succeeded. A change it has acknowledged therefore survives the server being stopped or
-killed.
+## What the server does on its own
 
-### When a write to the log fails
+New and edited items become visible at each **flush**, every 90 seconds by default, or sooner once 40,000 rows are waiting. Each flush adds a segment to the bundle, and the server merges small segments as they build up.
 
-If appending the record fails, the posture becomes `wal-poisoned` and `/readyz` answers 503 until
-the server restarts.
+Deleted and edited items stay in the bundle, hidden, until a **compaction** removes them. The server compacts on its own, mostly in a four-hour window from midnight UTC. Set `compaction_window_start` under `[ingest]` to the start of your quietest hours, since requests straight after a compaction are slower while the server rebuilds its caches. A compaction needs free disc space of one and a half times the bundle. [Schedule compactions](compaction.md) covers the rest.
 
-If the record was appended but forcing it to disc fails, a deletion or suppression is tried again,
-twice. Ingest is not. When the write still fails, the server throws away what did not reach the
-disc and goes back to `running`, and `/readyz` answers 200 again. The only sign in
-`/control/status` is `write_executor.wal_recoveries` going up by one. The server is not back to
-normal, though. It makes no newly ingested items visible and never trims the log. It starts no
-compaction: a `POST /control/compact` is answered 503 with a detail saying to restart it, and the
-schedule starts none. The log has a line beginning `ALARM` and ending "Restart this node."
+## What the server keeps on disc
 
-Either way, a deletion or suppression whose write failed is still applied in memory, so the item
-stays hidden. The caller is answered 500, with a detail that includes "a change in it may be in
-force, so do not treat this as a no-op". An unsuppress whose write failed is not applied. Nothing on
-disc records the deletions and suppressions that were applied, so a restart forgets them.
+`[bundle]` in `mosaica.toml` names three places:
 
-!!! warning
-    A restart can bring a deleted or suppressed item back into view if the change that hid it was
-    answered 500. After a failed write:
-
-    1. Have whatever sends changes to `/control/changes` send again every change that was answered
-       500. If the log has recovered, this writes them to disc.
-    2. Fix the disc.
-    3. Restart the server.
-    4. Send every change that was answered 500 once more. This catches any that failed again in
-       step 1.
-
-    Restart the server when its process exits, and never because `/readyz` answers 503. The
-    systemd unit and the Compose file in these guides both work that way.
-
-## Compaction
-
-The server adds a segment to the bundle each time it makes newly ingested items visible, and merges
-small segments as they build up. Deleted items stay in the bundle, hidden from every viewer, until a
-compaction rewrites the bundle as one segment per view without them. Compaction also reclaims the
-disc space that merges leave behind.
-
-The server starts one when any of these conditions holds, each set under `[ingest]`:
-
-| Key | Default | Starts a compaction when |
+| Key | What it holds | If it is lost |
 |---|---|---|
-| `compaction_window_start`, `compaction_window_secs`, `compaction_window_min_segments` | `"00:00"`, 14400, 8 | A view has 8 segments or more during the four hours from midnight UTC |
-| `compaction_max_segments` | 64 | A view has 64 segments, at any hour |
-| `compaction_after_deletions` | 500000, the value of `overlay_soft_limit` | 500,000 deleted items and annotations, counted together, are waiting to be removed |
-| `compaction_dead_rows_fraction` | 0.2 | Deleted items waiting to be removed are at least a fifth of all rows |
-| `compaction_dead_bytes_ratio` | 1.0 | Files the bundle no longer uses take at least as much space as the files it does |
+| `path` | The bundle: every item, its position, its fields, the search indexes and the identity key. The server writes to it as it runs | The database. Restore it from a backup |
+| `wal` | The write-ahead log: every change since the last flush, in files named after this path, such as `wal-000001.log` | Every change acknowledged since the last flush |
+| `cache` | Work the server can redo, such as each set of access attributes' visible items and their annotation counts | Nothing but time. The server rebuilds what it needs |
 
-Set `compaction_window_start` to the start of your quietest hours, in UTC as `"HH:MM"`. Requests are
-answered as usual while a compaction runs. When it finishes, though, every session's cached view of
-the map is out of date at once. A background pass rebuilds them, and a session it hasn't reached
-yet pays for its own on its next request.
+Back up the bundle and the log together, with the server stopped. A copy of one without the other is the database as it stood at some other moment. [Disc](sizing.md#disc) explains how much space each takes.
 
-After one compaction starts, none of these conditions starts another until
-`compaction_min_interval_secs` has passed, 86400 seconds by default, and never while one is still
-running. The server keeps that time in memory, so after a restart the first condition that holds
-starts one straight away. A compaction that was refused does not count. Writing `"off"` for
-`compaction_window_start`, `compaction_max_segments`, `compaction_after_deletions`,
-`compaction_dead_rows_fraction` or `compaction_dead_bytes_ratio` turns that condition off and leaves
-the others.
+Keep the bundle and the log on a local disc. The server locks the bundle's directory so that a second server can't write to it, and that lock doesn't work reliably over NFS or SMB, where two servers writing one bundle overwrite each other's changes.
 
-A bundle whose items fill more than one shard (`[shards] size` in the declaration) is compacted one
-shard at a time. Each shard is checked against these conditions on its own counts, and the interval
-applies to each shard on its own.
-
-A compaction needs free space on the bundle's disc of one and a half times the bundle's current
-size, and enough memory for its own estimate, which respects the cap you set. Without either it is
-refused, and `/control/status` records the reason under `compaction.last_refusal`.
-
-To start one yourself, whatever the schedule says:
-
-```console
-mosaica$ curl -sS -X POST --unix-socket /run/mosaica/control.sock \
-  -H "authorization: Bearer $(cat secrets/operator.secret)" \
-  -w '\n%{http_code}\n' http://localhost/control/compact
-{"request":1}
-202
-```
-
-The server picks the request up at its next tick and compacts every shard with something to
-reclaim, one after another. A request made while a compaction is running is held until that
-compaction finishes. The answer carries the request's number, counted from 1 each time the server
-starts. Read the outcome under `compaction.requests` a few seconds later:
-
-```console
-mosaica$ curl -sS --unix-socket /run/mosaica/control.sock \
-  -H "authorization: Bearer $(cat secrets/operator.secret)" \
-  http://localhost/control/status | jq '.compaction | {folds, requests}'
-{
-  "folds": 1,
-  "requests": {
-    "accepted": 1,
-    "answered": 1,
-    "last_refusal": null
-  }
-}
-```
-
-The request is answered once `answered` reaches its number: every shard it asked for has been
-compacted, has failed or been discarded, or has been refused. `last_refusal` holds only the latest
-refusal that answered a request, and its `request` is the highest request that refusal answered.
-Read after your request is answered:
-
-- `last_refusal.request` below your number: none of your request's shards was refused.
-- Equal to it: a shard was refused while answering it. `last_refusal` names the shard and the
-  reason in `gate`, gives the bytes needed and available for a memory or disc refusal, and says
-  what to do in `detail`.
-- Above it: a later request's refusal has replaced the record. Requests answered together share a
-  refusal, so it may or may not concern yours.
-
-A request answered without a refusal may still have failed. To confirm that the deleted rows are
-gone, check that `folds` rose and `overlay.retirable` fell; `fold_failures` counts the compactions
-that failed or were discarded. A compaction the schedule started and the server refused is not
-recorded under `requests`, only under `compaction.last_refusal`. If the write executor stops after
-the 202, the request is never answered, and `write_executor.posture` reads `dead`.
-
-When no compaction could start until the server is restarted, the request is refused straight
-away with `503 not-ready` and nothing is requested. That happens when the write executor is not
-running, when the deletion overlay no longer matches the log, when a compaction was published on
-disc and the server could not switch to it, or when a partition is serving an older manifest than
-the newest on disc. The detail says which, and what to do.
-
-From the command line, `mosaica compact` sends the same request, and `mosaica status` shows its
-progress. The Python and TypeScript clients have `compact` too.
-
-Between compactions, a write can stall the write side in one case. When a growth, a publication, a
-flush or a merge leaves an item with a second artifact in a level the server answers from one label
-per row, and the server holds that level in memory, it rewrites the level's column as a list, and
-its member file with it, on the thread that applies writes. Other writes wait until it finishes.
-A level whose layer declares `layout = "column"`, and whose rows the server holds artifact
-by artifact, is served by artifact instead, with no rewrite. A level the server does not hold is
-composed as a list by the next request that reads it. The next compaction records the level as a
-list and writes both files again.
-
-[Background maintenance](../system/write-path.md#background-maintenance) in Changing data says when compaction runs.
+Anyone who can read the bundle's files can read every item in it, whatever its access label, and the identity key too. Access control applies to what the server sends, not to the files.
 
 ## Stopping and restarting
 
-SIGTERM or SIGINT stops the server at once, without waiting for requests in progress, and it
-writes `mosaica serve: stopped on SIGTERM` as it goes. With `--exit-on-stdin-close`, the server
-also stops, as SIGTERM stops it, when its standard input reaches its end. A process that starts
-the server and holds a pipe to its standard input can then stop it by closing the pipe, and the
-server stops too when that process ends in any way. Standard input that is empty or `/dev/null`
-stops the server as soon as it starts, so leave the flag off under systemd or Docker. A browser partway through a response gets it
-cut short, missing the final frame that marks a response complete.
+SIGTERM or SIGINT stops the server at once, without waiting for requests in progress, and it writes `mosaica serve: stopped on SIGTERM` as it goes. A browser partway through a response gets it cut short.
 
-Sessions are held only in memory. After a restart none of them exists, and each browser has to ask
-your backend for a new token. Changes are a different matter. On starting, the server opens the
-newest state of the bundle on disc that passes its checks and replays the log over it, which brings
-back every change it acknowledged before it stopped. [Durability
-and restarts](../system/write-path.md#durability-and-restarts) has the detail.
+On starting, the server opens the newest state of the bundle on disc that passes its checks and replays the log over it, which brings back every change it acknowledged before it stopped. Sessions are held only in memory, so after a restart each browser asks your backend for a new token. [Durability and restarts](../system/write-path.md#durability-and-restarts) has the detail.
+
+??? info "Stopping when standard input closes"
+    With `--exit-on-stdin-close`, the server also stops, as SIGTERM stops it, when its standard input reaches its end. A process that starts the server and holds a pipe to its standard input can then stop it by closing the pipe, and the server stops too when that process ends in any way. Standard input that is empty or `/dev/null` stops the server as soon as it starts, so leave the flag off under systemd or Docker.
+
+## When a write to the log fails
+
+The server writes every change to its write-ahead log, and forces it to disc, before it tells the caller the change succeeded, so a change it has acknowledged survives the server being stopped or killed. When a write to the log fails, the server tells you in one of two ways:
+
+- If appending the record fails, the posture becomes `wal-poisoned` and `/readyz` answers 503 until the server restarts.
+- If the record was appended but forcing it to disc fails, a deletion or suppression is tried again, twice, and ingest isn't. When the write still fails, the server throws away what didn't reach the disc and goes back to `running`, and `/readyz` answers 200 again. The signs are `write_executor.wal_recoveries` going up by one in `/control/status`, and a line in the log beginning `ALARM` and ending "Restart this node." The server isn't back to normal: it makes no new items visible, never trims the log and starts no compaction.
+
+Either way, a deletion or suppression whose write failed is still applied in memory, so the item stays hidden. The caller is answered 500, with a detail that includes "a change in it may be in force, so do not treat this as a no-op". An unsuppress whose write failed isn't applied. Nothing on disc records the deletions and suppressions that were applied, so a restart forgets them.
+
+!!! warning
+    A restart can bring a deleted or suppressed item back into view if the change that hid it was answered 500. After a failed write:
+
+    1. Have whatever sends deletions and suppressions send again every change that was answered 500. If the log has recovered, this writes them to disc.
+    2. Fix the disc.
+    3. Restart the server.
+    4. Send every change that was answered 500 once more. This catches any that failed again in step 1.
+
+    Restart the server when its process exits, and never because `/readyz` answers 503. The systemd unit and the Compose file in these guides both work that way.
