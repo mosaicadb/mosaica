@@ -809,6 +809,12 @@ export interface Store {
    */
   titleOf(column: string, key: string): Promise<string | null>;
   /**
+   * The title {@link Store.titleOf} was answered for `key` of `column` and the store holds:
+   * `null` where the value has no title, `undefined` where none is held, as before an ask, while
+   * one is in flight, after a refusal and once the store forgets what the server answered.
+   */
+  heldTitle(column: string, key: string): string | null | undefined;
+  /**
    * Fetch one artifact's detail under the current view (`POST /v1/artifacts/{mosaica_id}`) and
    * publish it as `selection.artifact`, clearing `selection.item`. Its shape is held in
    * `artifacts.shapes` at full detail. A refusal is published as `selection.artifactRefusal` and the
@@ -2706,6 +2712,7 @@ export function createStore(options: StoreOptions): Store {
     pick,
     describe: (id) => records.describe(id),
     titleOf,
+    heldTitle: (column, key) => titles.get(`${column}\u0000${key}`),
     openArtifact,
     needShape: (id) => shapes.need(id),
     clearSelection,

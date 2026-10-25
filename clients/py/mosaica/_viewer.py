@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Union
 
-from ._auth import Token, TokenSource, minted
+from ._auth import Token, TokenSource, minted, request_headers
 from ._refusal import Refusal, listed, retry_after
 
 if TYPE_CHECKING:
@@ -1749,10 +1749,7 @@ class Viewer:
                 self.url + path,
                 data=None if body is None else self._encoded(body),
                 method=method,
-                headers={
-                    **({} if token is None else {"authorization": f"Bearer {token.token}"}),
-                    **({} if method == "GET" else {"content-type": "application/json"}),
-                },
+                headers=request_headers(method, None if token is None else token.token),
             )
             try:
                 return urllib.request.urlopen(request, timeout=120)

@@ -72,20 +72,25 @@ describe('Store.titleOf', () => {
     expect(pending.length).toBe(1);
     pending[0]!.release();
     expect(await untitled).toBeNull();
+    expect(store.heldTitle('archive', 'hep')).toBeNull();
     store.dispose();
   });
 
   it('drops what it holds when the store forgets, and an answer asked for before then is not kept', async () => {
     const {store, pending} = await storeWith();
+    expect(store.heldTitle('archive', 'cs')).toBeUndefined();
     const first = store.titleOf('archive', 'cs');
     await flush();
+    expect(store.heldTitle('archive', 'cs')).toBeUndefined();
     pending[0]!.release();
     expect(await first).toBe('Computer science');
+    expect(store.heldTitle('archive', 'cs')).toBe('Computer science');
 
     const late = store.titleOf('archive', 'math');
     await flush();
     store.clear();
     expect(await late).toBeNull();
+    expect(store.heldTitle('archive', 'cs')).toBeUndefined();
     await flush();
 
     // Under the next `meta` both are asked for again.

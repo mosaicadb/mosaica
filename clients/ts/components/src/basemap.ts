@@ -1,7 +1,7 @@
 import type {Layer} from '@deck.gl/core';
 import type {Store} from '@mosaicajs/client';
 import {basemapLayers, basemapMisfit, type BasemapValue, type DensityCamera} from '@mosaicajs/deck';
-import {basemapValueError, frameKey, tileCover, withoutUndefined} from '@mosaicajs/deck/internal';
+import {basemapValueError, frameKey, isSingle, tileCover, withoutUndefined} from '@mosaicajs/deck/internal';
 
 /**
  * What `<mosaica-map>`'s `basemap` takes: one {@link BasemapValue} for every view, a mapping from
@@ -25,11 +25,6 @@ export type BasemapInput = {store: Store | null; choice: BasemapChoice | null; s
 /** A plain object, as a host or the notebook writes a value or a mapping: not a class instance, an array or a Map. */
 function isPlain(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype;
-}
-
-/** Whether `value` is written as one tile or image basemap: a plain object with a `tiles` or an `image` key. */
-function isSingle(value: Readonly<Record<string, unknown>>): boolean {
-  return Object.hasOwn(value, 'tiles') || Object.hasOwn(value, 'image');
 }
 
 /**

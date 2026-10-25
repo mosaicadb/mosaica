@@ -32,6 +32,7 @@ import urllib.request
 import uuid
 from dataclasses import dataclass, field
 
+from ._auth import request_headers
 from ._refusal import listed, retry_after
 from typing import Any, Sequence
 
@@ -125,12 +126,7 @@ class Control:
         headers: dict | None = None,
         replayable: bool = False,
     ) -> Answer:
-        head = {} if self.credential is None else {"authorization": f"Bearer {self.credential}"}
-        head.update(headers or {})
-        if method != "GET" and "content-type" not in head:
-            # An open server refuses a write with no content type, so a route without a body
-            # names JSON.
-            head["content-type"] = JSON
+        head = request_headers(method, self.credential, headers)
         # An empty body goes as none: urllib labels any body it is given as form data.
         request = urllib.request.Request(
             self.base + path, data=body or None, method=method, headers=head

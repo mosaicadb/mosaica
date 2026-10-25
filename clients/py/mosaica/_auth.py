@@ -75,14 +75,21 @@ def minted(source: TokenSource) -> Token:
     return got
 
 
+def request_headers(method: str, bearer: Optional[str], given: Optional[dict] = None) -> dict:
+    """A request's headers: the bearer where there is one, then `given`, then JSON as the content
+    type of a write that names none, since an open server refuses a write with no content type,
+    body or not."""
+    head = {} if bearer is None else {"authorization": f"Bearer {bearer}"}
+    head.update(given or {})
+    if method != "GET" and "content-type" not in head:
+        head["content-type"] = "application/json"
+    return head
+
+
 def _post(url: str, bearer: Optional[str], body: Optional[dict], timeout: float, verb: str):
     """One POST, answering the parsed JSON body, or `None` where there is none."""
-    # Named with no body too: an open server refuses a write with no content type.
-    headers = {"content-type": "application/json"}
-    if bearer is not None:
-        headers["authorization"] = f"Bearer {bearer}"
     data = None if body is None else json.dumps(body).encode()
-    request = urllib.request.Request(url, data=data, method="POST", headers=headers)
+    request = urllib.request.Request(url, data=data, method="POST", headers=request_headers("POST", bearer))
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             text = response.read()

@@ -274,11 +274,7 @@ def write_deployment(directory: Path) -> Path:
         "cors_loopback": True,
     }
     document = {
-        "bundle": {
-            "path": "bundle",
-            "cache": ".mosaica/cache",
-            "wal": ".mosaica/wal.log",
-        },
+        "bundle": {"path": "bundle"},
         "build": {"schema": "schema.toml"},
         "disclosure": {"token_max_lifetime": TOKEN_MAX_LIFETIME},
         "serve": serve,

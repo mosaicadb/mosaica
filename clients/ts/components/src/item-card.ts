@@ -241,15 +241,9 @@ export class MosaicaItemCard extends MosaicaElement {
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;
   private expandedFor: bigint | null = null;
-  /**
-   * The titles of category values the store answered, by field and key, `null` until answered or
-   * where there is none; with the store and its `meta` they were asked under.
-   */
-  private titles: {store: Store | null; under: Meta | null; held: Map<string, string | null>} = {store: null, under: null, held: new Map()};
-
-  /** A category value's title as answered, else from what the store already holds, else its key. */
+  /** A category value's title as the store holds it, else from the legend or a suggestion page, else its key. */
   private titleOf(field: string, key: string): string {
-    return this.titles.held.get(titleKey(field, key)) ?? keyTitle(this.resolvedStore, field, key);
+    return this.resolvedStore?.heldTitle(field, key) ?? keyTitle(this.resolvedStore, field, key);
   }
 
   /** A field's value as text: a category value by its title, anything else by its declared type. */
@@ -270,26 +264,16 @@ export class MosaicaItemCard extends MosaicaElement {
       this.expanded = false;
     }
     const store = this.resolvedStore;
-    const served = store?.get('meta') ?? null;
-    if (store !== this.titles.store || served !== this.titles.under) this.titles = {store, under: served, held: new Map()};
-    if (!store || !served || !meta || !this.isConnected) return;
-    // Ask for each category value not yet asked for; an answer is kept while `meta` is the one it was asked under.
+    if (!store || !store.get('meta') || !meta || !this.isConnected) return;
+    // Ask for each category value the store holds no title for. The store holds an answer only
+    // under the `meta` it was asked under; a refused ask holds nothing, so it is made again at the
+    // next render.
     const values = item?.detail.fields ?? {};
-    const titles = this.titles;
     for (const column of meta.declaredScalars) {
       const key = values[column.name];
-      if (!column.category || typeof key !== 'string' || titles.held.has(titleKey(column.name, key))) continue;
-      titles.held.set(titleKey(column.name, key), null);
-      // A null answer is forgotten, so a refused ask is made again at the next render; the store
-      // answers a value it knows has no title without a request.
+      if (!column.category || typeof key !== 'string' || store.heldTitle(column.name, key) !== undefined) continue;
       void store.titleOf(column.name, key).then((title) => {
-        if (this.titles !== titles) return;
-        if (title === null) {
-          titles.held.delete(titleKey(column.name, key));
-          return;
-        }
-        titles.held.set(titleKey(column.name, key), title);
-        this.requestUpdate();
+        if (title !== null) this.requestUpdate();
       });
     }
   }
@@ -483,8 +467,6 @@ export class MosaicaItemCard extends MosaicaElement {
     </div>`;
   }
 }
-
-const titleKey = (field: string, key: string) => `${field}\u0000${key}`;
 
 /**
  * `template` with each `{name}` replaced by `values[name]`, URL-encoded, and resolved against the

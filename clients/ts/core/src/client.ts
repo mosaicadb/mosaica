@@ -1356,17 +1356,19 @@ function browseRow(r: RawBrowseRow): BrowseRow {
 /** The fields `/v1/meta` must carry, and those each of its blocks and list elements must. */
 const VIEW_FIELDS = ['id', 'display_name', 'quantisation', 'projection', 'world_aspect', 'tile_scheme', 'tile', 'group', 'key', 'metadata'];
 const GROUP_FIELDS = ['name', 'title', 'members_of', 'views'];
-/**
- * A request body as JSON, a `bigint` written as its decimal digits in a string: a filter
- * comparand past 2^53, which a JSON number read as a double would round, is sent that way.
- */
 /** The `authorization` header for `token`, or none where there is no token, as an open server takes. */
 function bearer(token: string | undefined): Record<string, string> {
   return token ? {authorization: `Bearer ${token}`} : {};
 }
 
-function jsonBody(body: unknown): string {
-  return JSON.stringify(body, (_, value) => (typeof value === 'bigint' ? value.toString() : value));
+/**
+ * `value` as JSON, a `bigint` written as its decimal digits in a string: a filter comparand past
+ * 2^53, which a JSON number read as a double would round, is sent that way.
+ *
+ * @internal
+ */
+export function jsonBody(value: unknown): string {
+  return JSON.stringify(value, (_, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
 }
 
 const DECLARED_FIELDS = ['name', 'arrow_type', 'category', 'analyser', 'render', 'index', 'unique', 'homes'];

@@ -9,4 +9,4 @@ export {UNMAPPED, colourOfFraction, colourOfRank, css, encodingSignature, fracti
 export {DENSITY_COLOUR_TITLES, densityStops, drawnCells, maxCount} from './density.js';
 export {drawnSizing, hollowRadius, radiusAt, sizeEncodingOf, sizeFraction, valueAtSize, writeSizes, type SizeEncoding} from './size.js';
 export {hoverAt, type ContourShape} from './contours.js';
-export {basemapValueError, frameKey, tileCover, withoutUndefined} from './basemap.js';
+export {basemapValueError, frameKey, isSingle, tileCover, withoutUndefined} from './basemap.js';

@@ -1,6 +1,6 @@
 import {retryDelayMs, type Clock, type RetryOptions} from './driver.js';
 import {PartialAggregate} from './aggregate.js';
-import {MosaicaError} from './client.js';
+import {MosaicaError, jsonBody} from './client.js';
 import {refusalOf, type Refusal} from './presented.js';
 import {paletteOfSize, type PaletteName} from './palette.js';
 import type {AggregateBy, AggregateCut, AggregateRequest, AggregateResult, AggregateTable, FilterExpr, Grouping} from './types.js';
@@ -170,11 +170,6 @@ export type AggregatesProjection = ReadonlyMap<string, AggregateEntry>;
 /** An aggregate request less its view, which is the store's at the moment it is sent. */
 export type AggregateBody = Omit<AggregateRequest, 'view'>;
 
-/** `body` as JSON, an artifact id as its decimal string. */
-function bodyKey(body: AggregateBody): string {
-  return JSON.stringify(body, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
-}
-
 /** The figures of each field each grouping of `spec` lists under `summary`, as `result` answers them. */
 function summariesOf(spec: AggregateSpec, result: AggregateResult): (ReadonlyMap<string, FieldSummary> | null)[] {
   return spec.groupings.map((grouping, i) => {
@@ -282,7 +277,7 @@ export class Aggregates {
     const asked: string[] = [];
     for (const id of ids) {
       const body = now ? this.compose(this.specs.get(id)!) : null;
-      const key = body === null ? null : bodyKey(body);
+      const key = body === null ? null : jsonBody(body);
       const held = next.get(id);
       if (changed && key !== null && key === this.sent.get(id) && held?.status !== 'refused') continue;
       // Still waiting to be sendable, as it was.
@@ -325,7 +320,7 @@ export class Aggregates {
         this.sent.delete(id);
         return;
       }
-      this.sent.set(id, bodyKey(body));
+      this.sent.set(id, jsonBody(body));
       const {result, view} = await this.ask(spec, body, controller.signal);
       entry = {status: 'shown', result, view, palette: paletteOf(body), refusal: null, summaries: summariesOf(spec, result)};
     } catch (error) {
@@ -457,7 +452,7 @@ export function joinedAggregate(
         {once: true}
       );
       if (groupings.length > maxGroupings()) return alone(token, rest, part);
-      const key = JSON.stringify([token, rest], (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
+      const key = jsonBody([token, rest]);
       const batch = open.get(key);
       if (batch && batch.parts.reduce((n, p) => n + p.groupings.length, 0) + groupings.length <= maxGroupings()) {
         batch.parts.push(part);

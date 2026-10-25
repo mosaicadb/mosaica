@@ -13,7 +13,11 @@ export type FakeStore = Store & {
   setBrowse(key: string, page: BrowsePage): void;
   /** Answer `basemapWorld` with these bytes, reject with this error, or answer when this promise does. */
   setWorld(answer: ArrayBuffer | Error | Promise<ArrayBuffer>): void;
-  /** Answer `titleOf` with what `answer` returns; unset, every value has no title. */
+  /**
+   * Answer `titleOf` with what `answer` returns; unset, every value has no title. A title is held
+   * for `heldTitle` while `meta` is the one it was asked under; a `null` answer stands for a
+   * refusal and is not held.
+   */
   setTitles(answer: (column: string, key: string) => string | null | Promise<string | null>): void;
   calls: {name: string; args: unknown[]}[];
 };
@@ -85,6 +89,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
   const browsePages = new Map<string, BrowsePage>();
   let worldAnswer: ArrayBuffer | Error | Promise<ArrayBuffer> = new ArrayBuffer(0);
   let titleAnswer: (column: string, key: string) => string | null | Promise<string | null> = () => null;
+  const titles = new Map<string, string>();
   const world = () => {
     if (worldAnswer instanceof Error) throw worldAnswer;
     return worldAnswer;
@@ -102,6 +107,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     clusterBudget: null,
     get: (name) => projections[name],
     set(name, value) {
+      if (name === 'meta') titles.clear();
       projections[name] = value;
       perName.get(name)?.forEach((fn) => fn());
       all.forEach((fn) => fn());
@@ -169,8 +175,13 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     },
     titleOf: async (column: string, key: string) => {
       calls.push({name: 'titleOf', args: [column, key]});
-      return titleAnswer(column, key);
+      const under = projections.meta;
+      const title = await titleAnswer(column, key);
+      if (projections.meta !== under) return null;
+      if (title !== null) titles.set(`${column}\u0000${key}`, title);
+      return title;
     },
+    heldTitle: (column: string, key: string) => titles.get(`${column}\u0000${key}`),
     openArtifact: async (...args: unknown[]) => {
       calls.push({name: 'openArtifact', args});
     },

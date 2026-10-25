@@ -127,6 +127,16 @@ export function basemapValueError(value: unknown): string | null {
 }
 
 /**
+ * Whether `value` is written as one tile or image basemap, not a mapping from view id to one: it
+ * holds a `tiles` or an `image` key.
+ *
+ * @internal
+ */
+export function isSingle(value: object): boolean {
+  return FORMS.some(([form]) => Object.hasOwn(value, form));
+}
+
+/**
  * `value` with its undefined-valued keys left out, as JSON leaves them out, where it is an object;
  * anything else unchanged.
  *

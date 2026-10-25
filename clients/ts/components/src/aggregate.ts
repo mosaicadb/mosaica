@@ -1,5 +1,5 @@
 import type {AggregateEntry, AggregateSpec, AggregateSpecGrouping, AggregateTable, Layer, Meta, Store} from '@mosaicajs/client';
-import {topLevelServed} from '@mosaicajs/client/internal';
+import {jsonBody, topLevelServed} from '@mosaicajs/client/internal';
 
 /**
  * One listed group of an aggregate table: its key (a vocabulary key for a field, an artifact's
@@ -110,7 +110,7 @@ let registered = 0;
 
 /** A spec as one string, so two that ask the same are equal; empty for none. */
 function keyOf(spec: AggregateSpec | null): string {
-  return spec === null ? '' : JSON.stringify(spec, (_k, v: unknown) => (typeof v === 'bigint' ? v.toString() : v));
+  return spec === null ? '' : jsonBody(spec);
 }
 
 /**

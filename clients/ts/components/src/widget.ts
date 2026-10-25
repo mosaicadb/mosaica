@@ -13,7 +13,7 @@ import {
   type TokenSupplier
 } from '@mosaicajs/client';
 import type {Sizing} from '@mosaicajs/deck';
-import {hexOf} from '@mosaicajs/deck/internal';
+import {hexOf, isSingle} from '@mosaicajs/deck/internal';
 import {idString} from './base.js';
 import {colouringOf, setSizing, sizingOf} from './colouring.js';
 import type {MosaicaExplorer} from './explorer.js';
@@ -725,8 +725,7 @@ function applyBasemap(explorer: MosaicaExplorer, model: WidgetModel, images: Rea
     if (!held) waiting = true;
     return {...(one as object), image: held?.url ?? ''};
   };
-  // A mapping as the map reads one: an object with neither `tiles` nor `image`.
-  const mapping = typeof value === 'object' && value !== null && !('tiles' in value) && !('image' in value);
+  const mapping = typeof value === 'object' && value !== null && !isSingle(value);
   const given = mapping ? Object.fromEntries(Object.entries(value).map(([view, one]) => [view, local(one)])) : local(value);
   explorer.basemap = (waiting ? 'none' : given) as MosaicaExplorer['basemap'];
 }

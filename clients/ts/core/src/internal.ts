@@ -5,6 +5,7 @@
  */
 export {SessionArtifactTable} from './artifactTable.js';
 export {servedLineage} from './artifactChannel.js';
+export {jsonBody} from './client.js';
 export {attachedTextOf} from './names.js';
 export {topLevelServed} from './layers.js';
 export {bandsOfResult} from './bands.js';

@@ -909,37 +909,23 @@ export class MosaicaMap extends MosaicaElement {
     super.willUpdate(changed);
     const s = this.resolvedStore;
     if (!s) return;
-    if (this.unpushed === s) {
-      this.unpushed = null;
-      this.askPointColumns(s);
-      if (this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
-      if (this.layers) s.setLayers(this.layers);
-      if (changed.has('layers') && this.layers) emit(this, 'mosaica-layerchange', {layers: this.layers});
-      if (this.budget > 0) s.setBudget(this.budget);
+    const all = this.unpushed === s;
+    if (all) this.unpushed = null;
+    const touched = (k: keyof MosaicaMap) => all || changed.has(k);
+    if (touched('tooltipFields') || touched('titleField')) this.askPointColumns(s);
+    if (touched('colourBy') && this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
+    if (touched('layers') && this.layers) s.setLayers(this.layers);
+    if (changed.has('layers') && this.layers) emit(this, 'mosaica-layerchange', {layers: this.layers});
+    if (touched('budget') && this.budget > 0) s.setBudget(this.budget);
+    if (touched('clusterBudget')) {
       if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
-      if (this.palette !== '') s.setPalette(this.palette);
-      this.pushClusterColours(s);
-      this.pushColouring(s);
-      this.pushSizing(s);
-      this.pushSizeBy(s);
-      return;
+      else if (!all && (changed.get('clusterBudget') ?? 0) > 0) s.setClusterBudget(null);
     }
-    if (changed.has('colourBy') && this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
-    this.pushSizing(s, changed);
-    if (changed.has('sizeBy')) this.pushSizeBy(s);
-    if (changed.has('layers') && this.layers) {
-      s.setLayers(this.layers);
-      emit(this, 'mosaica-layerchange', {layers: this.layers});
-    }
-    if (changed.has('budget') && this.budget > 0) s.setBudget(this.budget);
-    if (changed.has('clusterBudget')) {
-      if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
-      else if ((changed.get('clusterBudget') ?? 0) > 0) s.setClusterBudget(null);
-    }
-    if (changed.has('palette') && this.palette !== '') s.setPalette(this.palette);
-    if (changed.has('clusterColours')) this.pushClusterColours(s);
-    if (changed.has('tooltipFields') || changed.has('titleField')) this.askPointColumns(s);
-    this.pushColouring(s, changed);
+    if (touched('palette') && this.palette !== '') s.setPalette(this.palette);
+    if (touched('clusterColours')) this.pushClusterColours(s);
+    this.pushColouring(s, all ? undefined : changed);
+    this.pushSizing(s, all ? undefined : changed);
+    if (touched('sizeBy')) this.pushSizeBy(s);
   }
 
   protected override onStoreChange(): void {
