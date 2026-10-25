@@ -946,7 +946,7 @@ fn build_bundle(
     crate::residency::report_identity_disk(args, available_disk(&args.out))?;
     let mut numbering = crate::ids::number_streaming(args, tmp.path())?;
     let n = numbering.items;
-    crate::config::require_sources(&args.schema, &args.attribute_sources, n)?;
+    crate::config::require_sources(&args.schema, &args.attribute_sources, n > 0)?;
     let refused = std::mem::take(&mut numbering.refused);
     // The frames fitted over the rows the pass kept, which every view reads from here on.
     let fitted;

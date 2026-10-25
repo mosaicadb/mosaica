@@ -289,3 +289,92 @@ async fn an_empty_declaration_builds_a_database_declared_and_filled_through_cont
     assert_eq!(state(&server).await, served);
     server.shutdown().await;
 }
+
+/// A group naming no file and no roster, and a group whose file holds no rows, are built with no
+/// view and served so. A view created under each at the control plane is served with its group's
+/// stated frame, and so are both groups and views after a restart.
+#[tokio::test]
+async fn a_group_built_with_no_view_takes_its_views_through_control() {
+    let tmp = TempDir::new().unwrap();
+    write_parquet(
+        &tmp.path().join("quarters.parquet"),
+        vec![
+            column("x", false, Float64Array::from(Vec::<f64>::new())),
+            column("y", false, Float64Array::from(Vec::<f64>::new())),
+            column("quarter", false, arrow::array::StringArray::from(Vec::<&str>::new())),
+        ],
+    );
+    build_from(
+        tmp.path(),
+        r#"
+[sources]
+quarters = "quarters.parquet"
+
+[[view_group]]
+name             = "regions"
+extent           = { min = 0.0, max = 100.0 }
+point_visibility = { default = "public" }
+
+[[view_group]]
+name             = "quarters"
+source           = "quarters"
+fields           = { view = "quarter" }
+extent           = { min = 0.0, max = 100.0 }
+point_visibility = { default = "public" }
+"#,
+    );
+    let server = open(tmp.path()).await;
+    let groups = |meta: &Value| -> Vec<(String, Vec<String>)> {
+        meta["groups"]
+            .as_array()
+            .unwrap_or_else(|| panic!("/v1/meta lists groups: {meta}"))
+            .iter()
+            .map(|g| {
+                let views = g["views"].as_array().unwrap().iter();
+                (
+                    g["name"].as_str().unwrap().to_string(),
+                    views.map(|v| v.as_str().unwrap().to_string()).collect(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(
+        groups(&meta(&server, &[]).await),
+        [("regions".to_string(), vec![]), ("quarters".to_string(), vec![])]
+    );
+
+    for (group, key) in [("regions", "north"), ("quarters", "q1")] {
+        let path = format!("/control/views/{group}/{key}");
+        let (status, answer) = send(&server, reqwest::Method::PUT, &path, &json!({})).await;
+        assert_eq!(status, 201, "{answer}");
+    }
+    let state = async |server: &TestServer| {
+        let meta = meta(server, &[]).await;
+        let frames: Vec<(String, Value)> = meta["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| (v["id"].as_str().unwrap().to_string(), v["quantisation"].clone()))
+            .collect();
+        (groups(&meta), frames)
+    };
+    let frame = json!({ "x_min": 0.0, "x_max": 100.0, "y_min": 0.0, "y_max": 100.0 });
+    let served = state(&server).await;
+    assert_eq!(
+        served,
+        (
+            vec![
+                ("regions".to_string(), vec!["regions:north".to_string()]),
+                ("quarters".to_string(), vec!["quarters:q1".to_string()]),
+            ],
+            vec![
+                ("regions:north".to_string(), frame.clone()),
+                ("quarters:q1".to_string(), frame),
+            ],
+        )
+    );
+
+    let server = restart(server, tmp.path()).await;
+    assert_eq!(state(&server).await, served);
+    server.shutdown().await;
+}

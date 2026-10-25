@@ -2407,11 +2407,11 @@ impl Config {
     }
 }
 
-/// Refuse a build whose `items` items have no value for an attribute no source reads, as an ingest
-/// row creating an item without a declared column is refused. A unique attribute is the exception:
-/// its values come from every file that carries its column. A build of no items refuses nothing.
-pub fn require_sources(schema: &Schema, sources: &[AttributeSource], items: u64) -> Result<()> {
-    if items == 0 {
+/// Refuse a build that creates items, `creates`, where an attribute no source reads would leave
+/// them without a value, as an ingest row creating an item without a declared column is refused.
+/// A unique attribute is the exception: its values come from every file that carries its column.
+pub fn require_sources(schema: &Schema, sources: &[AttributeSource], creates: bool) -> Result<()> {
+    if !creates {
         return Ok(());
     }
     let mut carried: Vec<usize> = sources
@@ -2427,9 +2427,9 @@ pub fn require_sources(schema: &Schema, sources: &[AttributeSource], items: u64)
         return Ok(());
     }
     Err(declaration_error(format!(
-        "{items} item(s) have no value for {} attribute(s) that name no `source`, where \
-         `[defaults]` declares none: {}. Name a `[sources]` key on each, or write `[defaults]` \
-         with `source = \"<name>\"`",
+        "the items this build creates would have no value for {} attribute(s) that name no \
+         `source`, where `[defaults]` declares none: {}. Name a `[sources]` key on each, or \
+         write `[defaults]` with `source = \"<name>\"`",
         unsourced.len(),
         names(unsourced.iter().copied())
     )))
@@ -3141,11 +3141,8 @@ fn compile_attribute_sources(
         if scopes.contains_key(&block.name) {
             continue;
         }
-        // **An attribute with no source at all is legal to *declare*** (`configuration.md` §2):
-        // a deployment that writes through the service declares its columns and acquires nothing,
-        // and the empty bundle is what carries the schema. A build that has to read the column is
-        // where that becomes a refusal ([`Config::acquire`]), naming the columns with nowhere to
-        // read from.
+        // An attribute with no source is declared and empty: its values arrive through the
+        // service. A build whose views create items refuses it ([`require_sources`]).
         let name = block.source.as_ref().or(defaults.source.as_ref());
         let path = match name {
             Some(name) => Some(sources.path(&object, name)?),
@@ -3202,10 +3199,8 @@ fn compile_views(
             )));
         }
         let object = format!("view '{}'", block.name);
-        // **A view with no `source` takes `[defaults].source`**, and a declaration with neither is
-        // still legal here: a view declared and empty is the normal state for a deployment that
-        // writes through the service (`configuration.md` §2). It becomes a refusal at
-        // [`Config::acquire`], where a build asks for the file.
+        // A view with no `source` takes `[defaults].source`. With neither it is declared and empty,
+        // and a build writes it with no rows.
         let source = match &block.source {
             Some(declared) => Some(sources.path(&object, declared)?),
             None => match &defaults.source {
@@ -5862,37 +5857,34 @@ impl Config {
         Ok(registry)
     }
 
-    /// The views a layer is drawn on, expanded against a [`Config::build_views`] registry: a
-    /// plain view under its own name, and **a group under every view of it** (`views.md` §2,
-    /// §3.5).
-    ///
-    /// Naming a group draws the layer on every view of it, which is what lets a layer follow a
-    /// group that grows rather than being redeclared per quarter. A name matching no group is a
-    /// plain view and is kept as written — the declaration refused an unknown one long before
-    /// this.
-    ///
-    /// ⊘ *Present and future* is the ingest half: a view created later gets the layer's artifacts
-    /// at the fold that writes them (spec §3.5).
-    pub fn expand_layer_views(registry: &[BuildView], declared: &[String]) -> Vec<String> {
+    /// The views a layer is drawn on, expanded against a [`Config::build_views`] registry and the
+    /// declaration's `groups`: a plain view under its own name, and a group under every view it has
+    /// now, which for a group with none yet is no view. A running service expands a layer's `views`
+    /// by the same rule ([`mosaica_types::layer::expand_views`]). A name matching no group is a
+    /// plain view and is kept as written; the declaration refused an unknown one long before this.
+    pub fn expand_layer_views(
+        registry: &[BuildView],
+        groups: &[ViewGroup],
+        declared: &[String],
+    ) -> Vec<String> {
         mosaica_types::layer::expand_views(
             declared,
             |name| {
-                let of_group: Vec<String> = registry
-                    .iter()
-                    .filter(|view| view.group.as_ref().is_some_and(|g| g.group == name))
-                    .map(|view| view.id.clone())
-                    .collect();
-                (!of_group.is_empty()).then_some(of_group)
+                groups.iter().any(|g| g.name == name).then(|| {
+                    registry
+                        .iter()
+                        .filter(|view| view.group.as_ref().is_some_and(|g| g.group == name))
+                        .map(|view| view.id.clone())
+                        .collect()
+                })
             },
             |_| true,
         )
         .expect("every name that is no group is kept as a view")
     }
 
-    /// The group registry the manifest publishes, derived from a [`Config::build_views`]
-    /// registry (`views.md` §3.2).
-    ///
-    /// **The roster's durable home is the manifest**: one place, carried forward for ever.
+    /// The group registry the manifest publishes: every declared group, with the views of it in a
+    /// [`Config::build_views`] registry. A group with no view yet takes the frame it states.
     pub fn group_registry(
         &self,
         registry: &[BuildView],
@@ -5932,19 +5924,14 @@ impl Config {
             };
             groups.push(GroupDescriptor {
                 name: declared.name.clone(),
-                // The **declared** group's title, not the owner's, for the reason its gate is
-                // its own: two groups over one key set are two layouts, and how a layout is
-                // presented is a fact about the layout (`views.md` §3.3).
+                // The declared group's title, not the owner's: two groups over one key set are two
+                // layouts, and how a layout is presented is a fact about the layout.
                 title: declared.title.clone(),
                 members_of: declared.members.clone(),
-                // The declared group's own point default (decision 0133), on the rule its
-                // gate and title follow: two groups over one key set are two declarations.
+                // The declared group's own point default, on the rule its gate and title follow.
                 point_default: declared.point_visibility.default.clone(),
-                // **The frame as resolved, not as declared**: a group's `auto` extent is
-                // fitted over every view of it, so the declaration may say `auto` where the
-                // manifest must say numbers. Every view of a group shares one frame by
-                // construction (`views.md` §3.1), so any of them answers — and this view is
-                // one of them.
+                // The frame as resolved above, not as declared: the declaration may say `auto`
+                // where the manifest must say numbers.
                 quantisation: mosaica_store::manifest::Quantisation {
                     x_min: frame.x_min,
                     x_max: frame.x_max,
@@ -5952,23 +5939,18 @@ impl Config {
                     y_max: frame.y_max,
                 },
                 projection: declared.projection,
-                // **The group's own gate, the outer bound over every view of it**
-                // (`views.md` §6). The *declared* group's, not the owner's: two groups sharing
-                // one key set are two layouts, and which principals may see each layout is a
-                // fact about the layout (`views.md` §3.3).
+                // The group's own gate, the outer bound over every view of it: the declared
+                // group's, not the owner's, as its title is.
                 visibility: declared.visibility.clone(),
-                // A `members` group declares none: keys and metadata belong to the
-                // group that owns the views (`views.md` §3.3), so a create against the owner
-                // is what supplies them and this group's copies carry none.
+                // A `members` group declares none: keys and metadata belong to the group that
+                // owns the views, so a create against the owner supplies them.
                 metadata: if declared.members.is_some() {
                     Vec::new()
                 } else {
                     owner
                         .metadata
                         .iter()
-                        // The mapping is [`ViewMetadata::declared_type`], shared with the
-                        // control-plane emitter so a build and a runtime declaration of one
-                        // block cannot disagree about a name's type (decision 0139).
+                        // [`ViewMetadata::declared_type`], shared with the control-plane emitter.
                         .map(|field| GroupMetadataField {
                             name: field.name.clone(),
                             ty: field.declared_type(),
@@ -6055,6 +6037,10 @@ impl Config {
     pub fn registry(&self) -> Result<Registry> {
         let views = self.build_views()?;
         let anchor = self.anchor_view(&views)?;
+        for layer in &self.layers {
+            let drawn_on = Config::expand_layer_views(&views, &self.view_groups, &layer.views);
+            mosaica_types::layer::check_drawn_on(layer, &drawn_on).map_err(declaration_error)?;
+        }
         Ok(Registry { views, anchor })
     }
 }

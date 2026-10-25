@@ -627,7 +627,7 @@ pub fn check_reports(config: &Config) -> Vec<std::result::Result<ShapeLayerRepor
         // 0111): `mosaica check` sizes what the build will store, and where the frames differ so
         // do the decompositions. A view whose extent is `auto` has no frame until the points are
         // read, so the whole layer is reported unsized rather than half-sized.
-        let drawn_on = Config::expand_layer_views(&registry, &declaration.views);
+        let drawn_on = Config::expand_layer_views(&registry, &config.view_groups, &declaration.views);
         let frames: std::result::Result<Vec<ViewFrame>, String> = drawn_on
             .iter()
             .filter_map(|name| registry.iter().find(|v| &v.id == name))

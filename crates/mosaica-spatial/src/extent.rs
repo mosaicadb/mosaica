@@ -133,7 +133,8 @@ fn spellings(projection: Projection) -> &'static str {
 pub fn auto_without_rows(subject: &str, projection: Projection) -> String {
     format!(
         "{subject}: `extent` is `auto`, which fits the frame to the view's rows, and there are no \
-         rows to fit it to. A view that starts empty needs its frame stated:{}",
+         rows to fit it to. A view that starts empty, or whose rows --limit excluded, needs its \
+         frame stated:{}",
         spellings(projection)
     )
 }

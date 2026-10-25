@@ -2633,18 +2633,6 @@ fn a_build_refuses_an_anchor_the_config_does_not_declare() {
     );
 }
 
-/// A view declaring no source and reaching no `[defaults].source` is declared and empty: it
-/// acquires no file, and a build writes it with no rows.
-#[test]
-fn a_view_with_no_source_acquires_no_file() {
-    let text = ACQUIRED
-        .replace("source           = \"geometry\"\n", "")
-        .replace("[defaults]\nsource = \"corpus\"\n", "");
-    let config = parse_bound(&text, &HashMap::new()).unwrap();
-    let registry = config.build_views().unwrap();
-    assert_eq!(crate::config::acquire_view(&registry[0]).points, None);
-}
-
 /// All three label routes acquire: a field of the view's own source, a separate exploded relation,
 /// and a `default` alone — the corpus with no permission model, where every point takes it.
 #[test]
@@ -2677,25 +2665,6 @@ fn every_label_route_acquires() {
         acquired.access
     );
     assert_eq!(acquired.access.default.as_deref(), Some("ir:analyst"));
-}
-
-/// An attribute with no source at all is declared and empty. A build of no items writes it, and
-/// a build of items refuses them, as an ingest refuses a row creating an item without a declared
-/// column.
-#[test]
-fn an_attribute_with_no_source_is_refused_only_over_items() {
-    let text = ACQUIRED.replace("[defaults]\nsource = \"corpus\"\n", "");
-    let config = parse_bound(&text, &HashMap::new())
-        .expect("a column with no source is a legal declaration");
-    let acquired = config.acquire();
-    assert!(
-        acquired.attribute_sources.is_empty(),
-        "no source named, so no group to read"
-    );
-    crate::config::require_sources(&config.schema, &acquired.attribute_sources, 0)
-        .expect("no item lacks the column");
-    crate::config::require_sources(&config.schema, &acquired.attribute_sources, 3)
-        .expect_err("three items lack the column");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2849,20 +2818,6 @@ fn declaring_both_roster_forms_is_refused() {
     let message = err(&text);
     assert!(message.contains("both roster forms"), "{message}");
     assert!(message.contains("Write one of them"), "{message}");
-}
-
-/// Neither form and no `source`: the group is declared and empty, and its views are created at a
-/// running service. `[defaults].source` does not reach a group.
-#[test]
-fn a_group_with_no_roster_and_no_source_has_no_views() {
-    let text = format!(
-        "{SEVERITY}\n[[view_group]]\nname = \"quarter\"\nextent = {{ min = 0.0, max = 1.0 }}\n\
-         point_visibility = {{ default = \"public\" }}\n"
-    );
-    let dir = tempfile::tempdir().expect("tempdir");
-    let config = parse_at(dir.path(), &text, &HashMap::new()).expect("the declaration parses");
-    assert_eq!(config.view_groups.len(), 1);
-    assert!(config.build_views().unwrap().iter().all(|v| v.group.is_none()));
 }
 
 /// Form B is two files, and the group needs both: the roster lists the views, and the group's own
@@ -3618,13 +3573,6 @@ fn a_minted_key_outside_the_charset_is_refused() {
     assert!(message.contains("'2026 Q2'"), "{message}");
     assert!(message.contains("column 'quarter'"), "{message}");
     assert!(message.contains("ASCII letters"), "{message}");
-}
-
-/// A source with no rows mints no views: the group is declared and empty.
-#[test]
-fn a_group_with_no_roster_and_no_rows_has_no_views() {
-    let registry = minted_registry(&[]).expect("an empty source mints nothing");
-    assert!(registry.iter().all(|v| v.group.is_none()), "{registry:?}");
 }
 
 /// A `members` group whose **owner** declares no roster: the only arrangement where the mint runs

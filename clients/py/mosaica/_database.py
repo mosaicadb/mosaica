@@ -1328,7 +1328,6 @@ class Database:
         if self.built:
             return self._paged(sent=True, strict=strict)
         document = self.write()
-        self._refuse_an_empty_build(document)
         findings = self._preflight(document)
         if findings:
             raise Refusal(
@@ -1397,22 +1396,6 @@ class Database:
         findings: list[C.Finding] = []
         C.keys_into_supplied_content(document, self.inserts, findings)
         return findings
-
-    def _refuse_an_empty_build(self, document: dict) -> None:
-        """A first commit with no rows inserted needs an explicit extent on every view."""
-        inserted = {
-            insert.target for insert in self.inserts if insert.role == "rows" and insert.rows
-        }
-        for block in document.get("view", []) + document.get("view_group", []):
-            if block["name"] in inserted:
-                continue
-            extent = block.get("extent")
-            fitted = extent == "auto" or (isinstance(extent, dict) and extent.get("auto"))
-            if fitted:
-                raise Refusal(
-                    f"commit: view {block['name']!r} has no inserted rows to fit a frame around. "
-                    f"An empty database needs extent= on every view"
-                )
 
     # ------------------------------------------------------------------ the paged commit
 

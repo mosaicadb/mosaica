@@ -791,12 +791,8 @@ pub(crate) fn declared_views(
     }
     // A shape layer over both projected and unprojected views is refused at the declaration
     // rather than at its first artifact.
+    mosaica_types::layer::check_drawn_on(declaration, &declaration.views)?;
     if declaration.membership == mosaica_types::layer::MembershipSource::Spatial {
-        if declaration.views.is_empty() {
-            return Err(format!(
-                "layer '{name}' declares no view to publish a shape into; name one"
-            ));
-        }
         let frames: Vec<crate::shapes::ViewFrame> = declaration
             .views
             .iter()

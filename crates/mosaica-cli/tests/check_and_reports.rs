@@ -479,8 +479,10 @@ point_visibility = { default = "public" }
 
 /// **`mosaica check` accepts what `mosaica build` builds and refuses what it refuses**, through
 /// one rule below both. Declarations naming no file, and an empty one, build with no rows. Several
-/// views reading files need `allocation_view`, and it must name one of them. A file's rows are
-/// the build's alone to judge, so a declaration is chosen here whose answer needs none.
+/// views reading files need `allocation_view`, and it must name one of them. A layer naming a group
+/// with no view yet is drawn on none of it, as at a running service, which a shape layer cannot
+/// be. A file's rows are the build's alone to judge, so each declaration here is one whose answer
+/// needs none.
 #[test]
 fn check_and_build_accept_and_refuse_the_same_declarations() {
     let tmp = tempfile::tempdir().unwrap();
@@ -496,6 +498,13 @@ fn check_and_build_accept_and_refuse_the_same_declarations() {
     let attribute = "[[attribute]]\nname = \"sentiment\"\ntype = \"f32\"\n";
     let group = "[[view_group]]\nname = \"quarters\"\nextent = { min = -25.0, max = 25.0 }\n\
                  point_visibility = { default = \"public\" }\n";
+    let layer = |membership: &str| {
+        format!(
+            "[[layer]]\nname = \"regions\"\nviews = [\"quarters\"]\nmembership = \"{membership}\"\n\
+             hierarchy = {{ kind = \"flat\" }}\nvisibility = \"public\"\n\
+             artifact_visibility = {{ default = \"inherited\" }}\nrequire_member_visibility = \"any\"\n"
+        )
+    };
     let cases: Vec<(&str, String, bool)> = vec![
         ("an empty declaration", String::new(), true),
         (
@@ -533,6 +542,16 @@ fn check_and_build_accept_and_refuse_the_same_declarations() {
             format!("[defaults]\nallocation_view = \"s9\"\n{}", view("s0", "")),
             false,
         ),
+        (
+            "a layer naming only a group with no view",
+            format!("{group}{}", layer("enumerated")),
+            true,
+        ),
+        (
+            "a shape layer naming only a group with no view",
+            format!("{group}{}", layer("spatial")),
+            false,
+        ),
     ];
     for (n, (what, declaration, accepted)) in cases.iter().enumerate() {
         std::fs::write(tmp.path().join("schema.toml"), declaration).unwrap();
@@ -551,6 +570,44 @@ fn check_and_build_accept_and_refuse_the_same_declarations() {
             "build, {what}: {}",
             stderr(&built)
         );
+    }
+}
+
+/// **An attribute naming no file is the build's to refuse, and only where its views create
+/// items**, since those items would have no value for it. A points file's rows say so, which no
+/// check of the declaration can; the same declaration over a points file with no rows builds, and
+/// check accepts both.
+#[test]
+fn an_attribute_naming_no_file_is_refused_by_a_build_that_creates_items() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    write(
+        &tmp.path().join("empty.parquet"),
+        Arc::new(Schema::new(vec![
+            Field::new("x", DataType::Float64, false),
+            Field::new("y", DataType::Float64, false),
+        ])),
+        vec![
+            Arc::new(Float64Array::from(Vec::<f64>::new())),
+            Arc::new(Float64Array::from(Vec::<f64>::new())),
+        ],
+    );
+    for (file, builds) in [("points.parquet", false), ("empty.parquet", true)] {
+        std::fs::write(
+            tmp.path().join("schema.toml"),
+            format!(
+                "[sources]\npoints = \"{file}\"\n\
+                 [[view]]\nname = \"s0\"\nsource = \"points\"\n\
+                 extent = {{ min = -25.0, max = 50.0 }}\npoint_visibility = {{ default = \"public\" }}\n\
+                 [[attribute]]\nname = \"sentiment\"\ntype = \"f32\"\n"
+            ),
+        )
+        .unwrap();
+        let checked = run(tmp.path(), &["check"]);
+        assert!(checked.status.success(), "{file}: {}", stderr(&checked));
+        let out = format!("bundles/{file}");
+        let built = run(tmp.path(), &["build", "--out", &out]);
+        assert_eq!(built.status.success(), builds, "{file}: {}", stderr(&built));
     }
 }
 

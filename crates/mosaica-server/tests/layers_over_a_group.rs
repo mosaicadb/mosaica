@@ -219,7 +219,11 @@ fn build_side(layers: &str, keyed: &dyn Fn(u64) -> bool) -> Built {
         .collect();
     let groups = config.group_registry(&registry, &views).expect("the groups resolve");
     for layer in &mut config.layers {
-        layer.views = mosaica_build::config::Config::expand_layer_views(&registry, &layer.views);
+        layer.views = mosaica_build::config::Config::expand_layer_views(
+            &registry,
+            &config.view_groups,
+            &layer.views,
+        );
     }
     let scoped_layers = config
         .scopes

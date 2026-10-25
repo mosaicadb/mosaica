@@ -1821,6 +1821,20 @@ pub fn expand_views(
     Ok(expanded)
 }
 
+/// Refuse a shape layer drawn on no view, `views` being its views expanded by [`expand_views`]. A
+/// shape is decomposed in each view it is drawn on, so with none it has nowhere to go. A layer
+/// that names only a view group with no view yet is drawn on none.
+pub fn check_drawn_on(declaration: &LayerDeclaration, views: &[String]) -> Result<(), String> {
+    if declaration.membership == MembershipSource::Spatial && views.is_empty() {
+        return Err(format!(
+            "layer '{}' is a shape layer drawn on no view, so a shape has nowhere to be placed. \
+             Name a view, or create a view of the group it names before declaring it",
+            declaration.name
+        ));
+    }
+    Ok(())
+}
+
 /// A name a group-scoped layer's `views` gives outside the scope's key set, and the groups that
 /// hold that key set, for a refusal to name.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -527,28 +527,27 @@ require_member_visibility = "any"
     }
 }
 
-/// `declaration` with every key naming a file taken out: `[sources]`, each `source`, an
-/// attribute's `fields`, the access relation and the layer's members. What is left declares the
-/// same objects, each with no rows.
+/// `declaration` with every key naming a file taken out but the access relation, which the views
+/// name as their labels' source: each `source` and the `[sources]` entries they named, an
+/// attribute's `fields`, and the layer's members. What is left declares the same objects, each
+/// with no rows.
 fn without_files(declaration: &str) -> String {
     let stripped: Vec<&str> = declaration
         .lines()
         .filter(|line| {
             let key = line.trim_start();
-            !(key.starts_with("source ")
-                || key.starts_with("source=")
-                || key.starts_with("fields ")
-                || key == "[sources]"
-                || key == "[layer.members]"
-                || key.ends_with(".parquet\""))
+            let access = key.starts_with("access ") && key.ends_with("\"access.parquet\"");
+            access
+                || !(key.starts_with("source ")
+                    || key.starts_with("source=")
+                    || key.starts_with("fields ")
+                    || key == "[layer.members]"
+                    || key.ends_with(".parquet\""))
         })
         .collect();
     let stripped = stripped.join("\n") + "\n";
-    assert!(!stripped.contains("parquet"), "{stripped}");
-    stripped.replace(
-        "{ source = \"access\", default = \"public\" }",
-        "{ default = \"public\" }",
-    )
+    assert_eq!(stripped.matches(".parquet").count(), 1, "{stripped}");
+    stripped
 }
 
 /// Every build argument the declaration implies.
@@ -961,7 +960,7 @@ async fn build_equals_ingest(seed: u64, thirds: bool) -> Vec<String> {
 
     // Path B: the same declaration built empty, and each file sent in declaration order. Built
     // from each file with no rows at odd seeds, and at even seeds from the declaration with every
-    // key naming a file taken out, so from no file at all.
+    // key naming a file taken out but the access relation's.
     let empty = tmp.path().join("empty");
     corpus.write(&empty, true, size);
     let empty_root = empty.join("bundle");

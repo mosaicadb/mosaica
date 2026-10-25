@@ -46,6 +46,12 @@ pub fn declared_build(
     let limited = crate::ids::Limit::of(&config.schema, limit)?.is_some();
     let acquired = config.acquire();
     let acquired_views: Vec<_> = registry.iter().map(crate::config::acquire_view).collect();
+    crate::require_sources_unread(
+        &config.schema,
+        &acquired.attribute_sources,
+        acquired_views.iter().filter_map(|view| view.points.as_deref()),
+        limit,
+    )?;
 
     // One frame per view, except on a group, where one frame covers every view of it: `auto` is
     // fitted over the union of their sources and a stated extent is surveyed against every one of
@@ -157,7 +163,7 @@ pub fn declared_build(
     // materialises by the rule `mosaica check` sizes shape layers through.
     let mut config = config;
     for layer in &mut config.layers {
-        layer.views = Config::expand_layer_views(&registry, &layer.views);
+        layer.views = Config::expand_layer_views(&registry, &config.view_groups, &layer.views);
     }
     // A scoped layer is a different artifact set per view of one group: its rows say which view
     // each artifact belongs to, under the layer's own `fields.view`, and the group's keys are what
