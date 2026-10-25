@@ -109,7 +109,7 @@ fn the_end_of_stdin_stops_the_server_and_what_it_wrote_survives_a_restart() {
     assert!(close_stdin(server).success());
     assert!(
         dir.join("mosaica.toml").exists(),
-        "only --remove-on-exit removes the deployment"
+        "stopping leaves the deployment in place"
     );
 
     let again = piped(dir, &["--exit-on-stdin-close"]);
