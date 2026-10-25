@@ -1,12 +1,12 @@
 # What Mosaica does
 
-Mosaica is a database for interactive maps of large sets of records, each placed at a point. People pan, zoom, filter and search the map in a browser or a notebook, and every count and sample they see is worked out for the view in front of them. You can add, edit and delete records while the map is in use.
+Mosaica is a database for interactive maps of massive spatial datasets. People pan, zoom, filter and search the map in a browser or a notebook, and the points, counts, clusters, regions and other figures derived from them update as they go.
 
-You'd reach for it when you have too many points for a plotting library, or when the data changes too often to bake into map tiles. It also suits data that different people may see different parts of, because each viewer's map is computed from the records that viewer is allowed to see.
+You'd reach for it when you have too many points for a plotting library, or when the data changes too often to bake into map tiles. It also suits data with complex access requirements, because it applies attribute-based access control to every part of the data: each viewer's map, and every count and cluster on it, is computed only from what that viewer may see.
 
 ## How you work with it
 
-Mosaica runs as a database server. You reach it over its HTTP API, with the `mosaica` command line, or from the Python and TypeScript clients, which are built on the same API. The TypeScript client draws the map in a web page, and the Python client draws it in a notebook and returns counts and records as tables.
+You reach Mosaica over its HTTP API, with the `mosaica` command line, or from the Python and TypeScript clients, which are built on the same API. The TypeScript client draws the map in a web page, and the Python client draws it in a notebook and returns counts and records as tables.
 
 ```mermaid
 flowchart LR
