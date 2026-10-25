@@ -349,8 +349,8 @@ running, when the deletion overlay no longer matches the log, when a compaction 
 disc and the server could not switch to it, or when a partition is serving an older manifest than
 the newest on disc. The detail says which, and what to do.
 
-The CLI has no command for compaction. Send `POST /control/compact` as above, or use `compact` in
-the Python or TypeScript client.
+From the command line, `mosaica compact` sends the same request, and `mosaica status` shows its
+progress. The Python and TypeScript clients have `compact` too.
 
 Between compactions, a write can stall the write side in one case. When a growth, a publication, a
 flush or a merge leaves an item with a second artifact in a level the server answers from one label

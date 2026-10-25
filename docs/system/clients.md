@@ -18,7 +18,7 @@ The TypeScript client is for maps that other people use. For a map that is an ap
 
 ### The command line: operators and scripts
 
-The `mosaica` command builds a database from a declaration and its source files, serves it, declares, inserts, deletes and suppresses on a running server from Parquet, Arrow or NDJSON files, exports items, artifacts and aggregates as Arrow or Parquet, and manages users and their access.
+The `mosaica` command builds a database from a schema and its source files, serves it, declares, inserts, deletes and suppresses on a running server from Parquet, Arrow or NDJSON files, exports items, artifacts and aggregates as Arrow or Parquet, and manages users and their access.
 
 ### The HTTP API: anything else
 

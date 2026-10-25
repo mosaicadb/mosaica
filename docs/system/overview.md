@@ -101,7 +101,8 @@ The [queries](queries.md) and [serving](serving.md) chapters explain these in fu
 | Annotation layers: clusters, hierarchies, regions and hulls | Built |
 | Reading records and annotations in bulk | Built, on all four surfaces. A read pinned to one version of the data is not built yet |
 | Starting from an empty database, and declaring everything to it as it runs | Built |
-| Writing to a running database, and drawing a map, from the command line | Not built yet |
+| Writing to a running database from the command line | Built |
+| Drawing a map from the command line | Not built yet |
 | Python and TypeScript packages | Built. Not yet published to PyPI or npm |
 | A conformance suite that checks a running database's answers against an independent reference implementation | Built |
 | Running across several machines, and replicas | Not built |
