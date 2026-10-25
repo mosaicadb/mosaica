@@ -404,10 +404,11 @@ struct ViewGroupBlock {
     #[serde(default)]
     members: Option<String>,
     /// The values each view carries, served with it on `/v1/meta`: `name = "type"` over the
-    /// `[[attribute]]` types, or `name = { type = "category", vocabulary = "<name>" }`. Every view
-    /// must carry every name. `key`, `source`, `visibility` and the group's `view` column are
-    /// refused as names, and so is `metadata` on a group with no roster or one that names
-    /// `members`.
+    /// `[[attribute]]` types, or `name = { type = "category", vocabulary = "<name>" }`, whose value
+    /// is a key taken as an attribute's category value is: a closed vocabulary refuses a key it
+    /// does not list, and an open one adds it. Every view must carry every name. `key`, `source`,
+    /// `visibility` and the group's `view` column are refused as names, and so is `metadata` on a
+    /// group whose views are minted from its `source` with no roster, or one that names `members`.
     ///
     /// Type: table.
     ///

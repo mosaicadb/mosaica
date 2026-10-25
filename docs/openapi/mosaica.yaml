@@ -7596,7 +7596,7 @@ components:
         metadata:
           type: object
           default: {}
-          description: One value for each name the group declares, and no other. A `category` is its vocabulary's key as a string, taken as a row's category value is: a key a `closed` vocabulary does not list is `422`, and one an `open` vocabulary does not hold is added to it. A `timestamp_us` is microseconds since the Unix epoch, as an integer or a string of digits, or an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string, read as `schema.toml` reads one; a date-time with no offset, or with more than six fractional-second digits, is `422`. An integer is never read as a float, nor a float as an integer.
+          description: One value for each name the group declares, and no other. A `category` is its vocabulary's key as a string, taken as a row's category value is, so a key a `closed` vocabulary does not list is `422`, and one an `open` vocabulary does not hold is added to it. A `timestamp_us` is microseconds since the Unix epoch, as an integer or a string of digits, or an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string, read as `schema.toml` reads one; a date-time with no offset, or with more than six fractional-second digits, is `422`. An integer is never read as a float, nor a float as an integer.
           additionalProperties:
             type: [boolean, number, string]
 
