@@ -1417,7 +1417,6 @@ paths:
             - neither or both of `bbox` and `tiles`, a `bbox` that is not finite or has a maximum below its minimum, or a tile prefix with bits above `zoom`;
             - an `underlay_offset` beyond `selection.max_underlay_offset`, past depth 16, or over the sub-cell budget, which is refused and not clamped;
             - an unknown filter column, or an operator outside its column's family (an unknown value is an empty operand and is not refused);
-            - `none_of: []`;
             - a `layers`, `levels` or `point_rows` value outside its schema;
             - a `point_rows` list naming a column that is not one of the view's render columns.
           content:
@@ -6193,10 +6192,10 @@ components:
       description: |
         A boolean expression over declared columns. A node is a leaf, exactly one column name
         mapped to exactly one operator, or a combinator: `all_of`, `any_of` or `none_of` over
-        sub-expressions. `all_of: []` matches everything; `any_of: []` matches nothing;
-        `none_of: []` is `422`. `none_of` matches every item the viewer may see that none of its
-        branches matches, an item holding no value in a column included, and its branches may name
-        any columns. The deployment bounds nesting, and an expression nested deeper is refused,
+        sub-expressions. `all_of: []` matches everything; `any_of: []` matches nothing. `none_of`
+        matches every item the viewer may see that none of its branches matches, an item holding no
+        value in a column included, and its branches may name any columns; `none_of: []` matches
+        everything. The deployment bounds nesting, and an expression nested deeper is refused,
         not flattened.
 
         Values: a category takes its vocabulary's key (a string) or code (an integer), mixed

@@ -161,8 +161,6 @@ pub enum FilterError {
     /// be evaluated for it. Fail-closed: an empty value set is what a principal who may see none of
     /// them is told.
     MembershipUnavailable(String),
-    /// A `none_of` names no column, as `none_of: []` does.
-    EmptyNegation,
     /// A region leaf reached the entity-space evaluator, which cannot answer it: a region is a
     /// statement about position, and position is row space. Only
     /// [`crate::filter::FilterColumns::evaluate_routed`] takes a tree carrying one.
@@ -215,10 +213,6 @@ impl std::fmt::Display for FilterError {
                 f,
                 "column '{column}' carries no derived membership postings, so its per-viewer value \
                  visibility cannot be derived"
-            ),
-            FilterError::EmptyNegation => write!(
-                f,
-                "a 'none_of' names no column; put the expressions to exclude inside it"
             ),
             FilterError::RegionInEntitySpace => write!(
                 f,
@@ -282,7 +276,6 @@ impl FilterError {
         match self {
             FilterError::UndeclaredColumn(_)
             | FilterError::TooDeep { .. }
-            | FilterError::EmptyNegation
             | FilterError::UniqueOnly { .. }
             | FilterError::UnknownLayer(_) => true,
             FilterError::PostingsUnreadable { .. }

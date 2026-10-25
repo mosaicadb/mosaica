@@ -210,7 +210,7 @@ impl FilterColumns {
     }
 
     /// Refuse every filter that no candidate could make answerable, from the declarations alone:
-    /// its depth and negations, every column it names, and every layer a `member_of` names, which
+    /// its depth, every column it names, and every layer a `member_of` names, which
     /// `reaches_layer` says this principal reaches. [`Self::evaluate_routed`] refuses exactly these
     /// before it reads a row, and the evaluation after it refuses only an artefact that will not
     /// read.

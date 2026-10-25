@@ -12,10 +12,10 @@ pub enum EngineError {
     /// An attribute filter could not be answered because an artefact it needs could not be read.
     /// A refusal, not an empty result, which would hide an uncomputed answer from a real one.
     FilterRefused(String),
-    /// The filter expression itself is malformed: an undeclared column, too deep, or a negation
-    /// that names no column. Separate from [`Self::FilterRefused`] because a column's existence
-    /// and family are published schema, safe to name back unlike a failed read. An unknown value
-    /// is neither of these; it is an empty operand, never an error.
+    /// The filter expression itself is malformed: an undeclared column or too deep. Separate from
+    /// [`Self::FilterRefused`] because a column's existence and family are published schema, safe
+    /// to name back unlike a failed read. An unknown value is neither of these; it is an empty
+    /// operand, never an error.
     FilterMalformed(String),
     /// A change or a membership addressed items by a field that is not unique, or by a value the
     /// field cannot hold. Always the caller's fault, and the detail names only what it sent.

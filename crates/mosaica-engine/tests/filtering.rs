@@ -1993,11 +1993,13 @@ fn a_negation_spanning_two_columns_is_the_conjunction_of_two_negations() {
     assert_eq!(as_vec(&spanning), want);
     assert_eq!(as_vec(&composed), want);
 
-    // An empty negation names no column, and is refused.
-    assert!(matches!(
-        fx.columns.evaluate(&FilterExpr::NoneOf(vec![]), &cand),
-        Err(FilterError::EmptyNegation)
-    ));
+    // An empty negation excludes nothing, and neither does one whose only branch matches nothing.
+    for empty in [
+        FilterExpr::NoneOf(vec![]),
+        FilterExpr::NoneOf(vec![FilterExpr::AnyOf(vec![])]),
+    ] {
+        assert_eq!(fx.columns.evaluate(&empty, &cand).unwrap(), cand);
+    }
 }
 
 /// A negation nests inside the other combinators and counts against the same depth budget.

@@ -649,12 +649,10 @@ def test_none_of_is_the_visible_set_minus_the_matches(
         if expr is one_field:
             assert m_auth - carried <= served, "an item with no department was left out"
 
-    # An empty negation names no column and is refused.
-    resp = catalogue_server.viewport_request(
-        token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters={"none_of": []}
-    )
-    assert resp.status_code == 422, f"{resp.status_code} {resp.text}"
-    assert resp.json()["error"] == "contract"
+    # An empty negation excludes nothing, and neither does one whose only branch matches nothing.
+    for expr in [{"none_of": []}, {"none_of": [{"any_of": []}]}]:
+        raw = catalogue_server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=expr)
+        assert _served_entities(raw, entity_of_fx) == m_auth, expr
 
 
 def test_an_operator_outside_the_columns_family_refuses(catalogue_server, sweep_cases):

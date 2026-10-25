@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use croaring::Bitmap;
@@ -101,8 +100,7 @@ pub enum FilterExpr {
     /// At least one sub-expression must match. Empty matches nothing, the identity for union.
     AnyOf(Vec<FilterExpr>),
     /// Every entity of the candidate that no sub-expression matches, an entity with no value in a
-    /// column included. Refused where no sub-expression names a column
-    /// ([`FilterError::EmptyNegation`]).
+    /// column included. Empty matches the whole candidate.
     NoneOf(Vec<FilterExpr>),
 }
 
@@ -121,33 +119,7 @@ impl FilterExpr {
         }
     }
 
-    /// Every column named anywhere in this expression, in name order.
-    pub fn columns(&self) -> BTreeSet<&str> {
-        let mut out = BTreeSet::new();
-        self.collect_columns(&mut out);
-        out
-    }
-
-    fn collect_columns<'a>(&'a self, out: &mut BTreeSet<&'a str>) {
-        match self {
-            FilterExpr::Leaf { column, .. } => {
-                out.insert(column.as_str());
-            }
-            FilterExpr::Region(_) => {
-                out.insert(REGION_COLUMN);
-            }
-            FilterExpr::MemberOf(_) => {
-                out.insert(MEMBER_OF_COLUMN);
-            }
-            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
-                for kid in kids {
-                    kid.collect_columns(out);
-                }
-            }
-        }
-    }
-
-    /// Checks depth against [`MAX_FILTER_DEPTH`] and that each negation names a column.
+    /// Checks depth against [`MAX_FILTER_DEPTH`].
     pub(in crate::filter) fn check(&self) -> Result<(), FilterError> {
         let depth = self.depth();
         if depth > MAX_FILTER_DEPTH {
@@ -156,17 +128,7 @@ impl FilterExpr {
                 max: MAX_FILTER_DEPTH,
             });
         }
-        self.check_negations()
-    }
-
-    fn check_negations(&self) -> Result<(), FilterError> {
-        match self {
-            FilterExpr::Leaf { .. } | FilterExpr::Region(_) | FilterExpr::MemberOf(_) => Ok(()),
-            FilterExpr::NoneOf(_) if self.columns().is_empty() => Err(FilterError::EmptyNegation),
-            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
-                kids.iter().try_for_each(FilterExpr::check_negations)
-            }
-        }
+        Ok(())
     }
 }
 
