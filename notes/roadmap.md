@@ -437,17 +437,13 @@ outgoing view's data coordinates (`clients/ts/core/src/store.ts`, at the view sw
 needs the selection carried as the set of items it selected, or mapped into the new view. No issue
 exists.
 
-**Declaring a rendered field at a running server.** A field declared with `render = true` is
-refused at the control plane (`crates/mosaica-engine/src/attributes.rs`), because a rendered value
-lives in a row's drawn columns and a column declared live has no rows written for it. It can only
-be declared at a build, which breaks the rule that a build is an ingest into an empty database.
-Left as it is for the first release. No issue exists.
-
-**Category-typed view metadata in a view group declared at a running server.** A view group
-declared at a build can carry metadata of type `category` for each of its views; the same
-declaration sent to `PUT /control/view_groups/{name}` is refused with `422`. This breaks the rule
-that a build is an ingest into an empty database. Left as it is for the first release. No issue
-exists.
+**A per-view field declared at a running server, on every view of its group at once.** A field
+scoped to a view group and declared at a running server reaches each view of the group at that
+view's next flush; until then the view's points frame carries no such column, which readers take
+as no value. A build serves the column, as nulls, on every view from the start. Deferred by Joe:
+the declaration would have to write an empty column for every shard and view and make that
+durable before answering, or the rule that reads a listed view as built in every shard would
+have to tell a live declaration apart (`PartitionData::scoped_base_in`). No issue exists.
 
 **An `exists` operator in filters.** Once `none_of` means everything the viewer may see minus
 the matches, nothing asks directly whether an item holds a value in a field. `{"x": {"exists":

@@ -5633,7 +5633,7 @@ components:
           description: The family's columns carry a per-item value column a filter can be answered from, which is what makes it a filter operand.
         views:
           type: array
-          description: "Every view id whose rows carry this column and that this principal may reach: the owning group's own `<group>:<key>` ids, and the same keys under every group sharing those views. A client under a sharing group's view receives the column under that group's id. Filtered per id, as `views` is. Not the group's whole roster: a view created while the service runs has no column until a rebuild."
+          description: "Every view id whose rows carry this column and that this principal may reach: the owning group's own `<group>:<key>` ids, and the same keys under every group sharing those views. A client under a sharing group's view receives the column under that group's id. Filtered per id, as `views` is. Not always the group's whole roster: a view gains the column at its first flush after the column is declared or the view is created, and until then its points frame carries no such column, which reads as no value."
           items: { type: string }
 
     Selection:

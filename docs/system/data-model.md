@@ -109,7 +109,7 @@ When you declare a vocabulary, you choose how many values it can hold (up to 255
 | | While the database runs |
 |---|---|
 | Items | Insert, edit, delete, suppress and lift a suppression |
-| Fields | Declare a new field, rendered or not. Its type, `render` and `index` are fixed once declared. `unique` can be turned on or off. An item stored before a field is declared holds no value in it, and draws none, until an insert gives it one |
+| Fields | Declare a new field, rendered or not. Its type, `render` and `index` are fixed once declared. `unique` can be turned on or off. An item stored before a field is declared holds no value in it, and draws none, until an insert gives it one. A field with a value per view of a group reaches each view at that view's next flush; until then the view's points carry no such column, which reads as no value |
 | Plain views | Declare a new view. A view cannot be changed or dropped |
 | View groups | Declare a group, and create and drop its views. A group's view cannot be changed: drop it, create it again empty, and insert its points again. Items that were in no other view come back as new items |
 | Annotation layers | Declare a layer, publish artifacts into it, and drop it |
@@ -123,4 +123,5 @@ Anything else about these needs a rebuild.
 ## Not built yet
 
 - **Fields holding a list of values.** A field holds at most one value per item.
+- **A per-view field on every view of its group from the moment it is declared.** Declared while the database runs, it reaches each view at that view's next flush, as above.
 - **Titles of fields and vocabularies.** A declaration may give one, but it is not yet sent to clients. Titles of views, view groups, layers, levels and category values are sent.
