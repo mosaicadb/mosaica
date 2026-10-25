@@ -230,7 +230,6 @@ export class MosaicaItemCard extends MosaicaElement {
     return (meta && TITLES.get(meta)?.get(titleKey(field, key))) ?? keyTitle(store, field, key);
   }
 
-
   /** A field's value as text: a category value by its title, anything else by its declared type. */
   private text(name: string, value: unknown, column: DeclaredScalar | undefined): string {
     return column?.category && typeof value === 'string' ? this.titleOf(name, value) : present(value, column);
