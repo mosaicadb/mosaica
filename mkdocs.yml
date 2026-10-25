@@ -114,6 +114,7 @@ nav:
       - Serving: system/serving.md
       - Changing data: system/write-path.md
       - Clients: system/clients.md
+      - Maps in the browser: system/browser-maps.md
       - Annotations: system/annotations.md
       - Access control: system/access-control.md
       - Security: system/security.md
