@@ -1156,12 +1156,13 @@ fn a_negation_keeps_the_visible_items_no_branch_matches_over_every_shard() {
         .find(|&e| NARROW.contains(&e) && kept(e))
         .expect("an item the narrow viewer sees that the negation keeps");
     for built in [&pair.one, &pair.several] {
-        let entity = item_of_id(&built.engine, suppressed)
-            .unwrap()
-            .expect("a built item");
+        let item = item_by_id(&built.engine, suppressed);
         built
             .engine
-            .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+            .accept_changes(vec![(
+                mosaica_types::Target::Item(item.shard, item.entity),
+                mosaica_lifecycle::wal::ChangeOp::Suppress,
+            )])
             .unwrap();
     }
     for (viewer, credential) in viewers() {
