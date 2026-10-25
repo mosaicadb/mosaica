@@ -1,12 +1,10 @@
 # Views and projections
 
-A view lays your items out on a map. This chapter covers the two kinds of view and the projections a geographic one can use, the frame a view's positions are stored across, how one item takes a place in several views, view groups, and what is drawn under the points. The examples carry on from the [data model](data-model.md)'s collection of research papers.
+A view lays your items out on a map, giving each item a position. You can have as many views as you like over the same items, such as a world map of where each record was made and a layout of what it says, and a viewer can switch between them without losing their filters.
 
 ## Plain and geographic views
 
-The papers' view, `map`, places each paper at a UMAP projection of its abstract's embedding, so papers on similar subjects sit together. A view like this, a **plain view**, takes any x and y and draws them as they are.
-
-If your items have longitude and latitude, use a **geographic view** instead, which draws them with a map projection:
+If your items have longitude and latitude, use a **geographic view**, which draws them with a map projection:
 
 | Projection | Draws the world |
 |---|---|
@@ -15,6 +13,8 @@ If your items have longitude and latitude, use a **geographic view** instead, wh
 | `gall_isographic` | As the same grid drawn √2 times as wide as it is tall, so shapes are true at 45° north and south rather than at the equator |
 
 All three store the same positions, so they differ only in the width-to-height a client draws the world at.
+
+Any other two coordinates go in a **plain view**, which draws its x and y as they are. That suits a 2D projection of embeddings, such as UMAP or t-SNE, where nearby items are similar, as well as a floor plan, a microscope slide or a chart of two measurements.
 
 ## The frame
 
@@ -27,13 +27,13 @@ The [corpus.toml reference](../reference/corpus-toml.md#viewextent) lists every 
 
 ## Several views of the same items
 
-You might lay the same papers out by abstract in one view and by citation graph in another. Each view gives a paper its own position, but everything else about it, its fields, its access label and its `mosaica_id`, is shared, so a viewer who switches views keeps their filters.
+Each view gives an item its own position, but everything else about it, its fields, its access label and its `mosaica_id`, is shared, so a viewer who switches views keeps their filters.
 
-To place a paper in a second view, give it a position there that names it: in a first load from files, a row of the second view's points file carrying the paper's DOI, and later, an insert into that view naming the paper by its DOI or its `mosaica_id`. Without a unique field, a first load can't tell that two rows in two files are one paper, and makes each its own item. An item doesn't have to be in every view; a view holds the items given a position in it.
+To place an item in a second view, give it a position there that names it: in a first load from files, a row of the second view's points file carrying the item's [unique field](data-model.md#naming-an-item), and later, an insert into that view naming the item by that field or its `mosaica_id`. Without a unique field, a first load can't tell that two rows in two files are one item, and makes each its own. An item doesn't have to be in every view; a view holds the items given a position in it.
 
 ## View groups
 
-Sometimes you want many views of the same kind. You might want a separate layout of the papers for each year, so that a viewer can see how one year's papers relate, and add next year's layout when it arrives. A view group gives you that: each view in it has its own key, such as `2024`, is named `by_year:2024`, and holds its own items and positions, while the projection, the frame and the group's access label are shared. Each view may narrow who sees it.
+Sometimes you want many views of the same kind, such as a layout recomputed each year, with next year's added when it arrives. A view group gives you that: each view in it has its own key, such as `2024`, is named after the group and its key, as in `by_year:2024`, and holds its own items and positions, while the projection, the frame and the group's access label are shared. Each view may narrow who sees it.
 
 You can create and drop a group's views while the database runs. A group can also carry facts about each view, such as the date range a year covers, and a field can hold a different value for each view, such as a score recomputed every year.
 
