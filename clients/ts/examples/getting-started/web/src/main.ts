@@ -3,7 +3,7 @@ import './style.css';
 
 const explorer = document.querySelector('mosaica-explorer')!;
 
-// Development only: the dev server's tokens see every place.
+// The explorer calls this for a token when it starts, and again before each one expires.
 explorer.authorise = async () => {
   const answer = await fetch('/dev/token');
   if (!answer.ok) throw new Error(await answer.text());

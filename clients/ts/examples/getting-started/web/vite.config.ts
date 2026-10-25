@@ -12,7 +12,7 @@ export default defineConfig({
   },
   plugins: [
     {
-      // Development only: every token this hands out sees every place.
+      // Development only: a token that sees every place, for anyone who asks.
       name: 'mosaica-dev-token',
       configureServer(server) {
         server.middlewares.use('/dev/token', async (_req, res) => {

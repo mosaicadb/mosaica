@@ -2,7 +2,7 @@
 
 This tutorial is for a developer who wants Mosaica's map inside their own web application, and wants to see it working before reading much else. We'll start a Mosaica server over 150,000 places from GeoNames, a free gazetteer of the world's place names. Then we'll make a new web project with Vite, put the `<mosaica-explorer>` element on its page, and end with the map sitting in an ordinary page layout of our own, with a search box and filters built from the data.
 
-It takes about fifteen minutes. You need the `mosaica` program, Node.js 22.15 or later with npm, and a clone of the Mosaica repository, which holds the sample data:
+Once `mosaica` is installed, it takes about fifteen minutes. You need the `mosaica` program, Node.js 22.15 or later with npm, and a clone of the Mosaica repository, which holds the sample data:
 
 ```bash
 git clone https://github.com/mosaicadb/mosaica ~/mosaica
@@ -75,7 +75,7 @@ mosaica build --config ~/mosaica/examples/data/geonames/schema.toml
 
 ```
 ...
-built /home/you/places/mosaica/bundle (v00000): 150000 items, 245 terms, 150000 pairs, 18100841 bytes on disk, 0 artifact(s) minted, 3 unclustered member row(s), 0 row(s) refused
+built /home/you/places/mosaica/bundle (v00000): 150000 items, 245 terms, 150000 pairs, 18101144 bytes on disk, 0 artifact(s) minted, 3 unclustered member row(s), 0 row(s) refused
   view world: 150000 row(s)
 ```
 
@@ -103,11 +103,11 @@ The line of JSON is the one to wait for. It means all three addresses are open.
 
 ## Make a web project
 
-Open a second terminal. We'll use Vite, a build tool with a development server, and its plain TypeScript template.
+Open a second terminal. We'll use Vite, a build tool with a development server, and its plain TypeScript template. `--no-interactive` stops it asking whether to install and start the template's demo straight away.
 
 ```bash
 cd ~/places
-npm create vite@latest web -- --template vanilla-ts
+npm create vite@latest web -- --template vanilla-ts --no-interactive
 cd web
 npm install @mosaicajs/components
 ```
@@ -120,7 +120,7 @@ rm -r src/counter.ts src/assets public/icons.svg
 
 `@mosaicajs/components` holds Mosaica's elements for the browser. npm also installs what they're built on: Lit, which the elements are written with, and deck.gl, which draws the map.
 
-Before the page can show anything, it needs two things from Mosaica. The first is the data, from the viewer address. The page will ask for it at `/mosaica` on its own origin, and Vite's development server will pass those requests on. The second is a token. Mosaica answers a request only when it carries a token, a string that says which places the person asking may see. A real application gets one for whoever is signed in, from its own server, and the third tutorial shows how. For now the development server will make one that sees every place, by asking the session address with the operator secret.
+Before the page can show anything, it needs two things from Mosaica. The first is the data, from the viewer address. The page will ask for it at `/mosaica` on its own origin, and Vite's development server will pass those requests on. The second is a token. Mosaica answers a request only when it carries a token, a string that says which places the person asking may see. Our development server will make one by asking the session address, with the operator secret.
 
 Create `vite.config.ts` in the `web` directory:
 
@@ -129,6 +129,9 @@ Create `vite.config.ts` in the `web` directory:
 ```
 
 `server.proxy` passes every request under `/mosaica` on to the viewer address, without the `/mosaica` prefix. The plugin adds one route to the development server, `/dev/token`. It posts to the session address's `/session/authorise` with the operator secret, asks for a session that reads every place, and hands back Mosaica's answer: the token and when it expires.
+
+!!! note "Development only"
+    `/dev/token` gives a token that sees every place to anyone who can reach the development server. A real application gets a token for whoever is signed in, from its own server. The third tutorial shows how.
 
 The secret stays in the development server and never reaches the page. The plugin reads it from the `MOSAICA_CREDENTIAL` environment variable, which we'll set when we start Vite. The two addresses can be changed the same way, with `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL`, but the defaults match our `mosaica.toml`.
 
@@ -154,13 +157,13 @@ The secret stays in the development server and never reaches the page. The plugi
 
 `viewer-url` is where the explorer finds Mosaica: the path our proxy passes on.
 
-Replace `src/main.ts` with this:
+Replace the template's script, `web/src/main.ts`, with this:
 
 ```ts
 --8<-- "clients/ts/examples/getting-started/web/src/main.ts"
 ```
 
-The import defines `<mosaica-explorer>` and the other Mosaica elements. `authorise` is how the explorer gets its token. It calls the function when it starts, and again shortly before each token expires. The function returns the token, and its expiry in seconds since 1970. Here it asks our development server's `/dev/token`.
+The import defines `<mosaica-explorer>` and the other Mosaica elements. `authorise` is how the explorer gets its token. The function returns the token, and its expiry in seconds since 1970. Here it asks our development server's `/dev/token`, and Mosaica's answer names the expiry `expires_at`.
 
 The explorer is as tall as the element around it. So that it fills the window, replace `src/style.css` with:
 
@@ -179,13 +182,21 @@ npm run dev
 ```
 
 ```
-  VITE v8.3.5  ready in 214 ms
+> web@0.0.0 dev
+> vite
+
+
+  VITE v8.3.5  ready in 380 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose
 ```
 
-Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm. The strip at the bottom right counts them, and the panel on the left is empty but for an "Add field" button.
+Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm. The strip at the bottom right counts them. The panel on the left has a count at the top and an "Add field" button, and nothing else yet.
+
+If the map says "View refused" instead, the page got no token. Open <http://localhost:5173/dev/token> to see why. `{"error":"bad-credential","detail":"missing or invalid bearer credential"}` means `MOSAICA_CREDENTIAL` wasn't set in the terminal that started Vite: stop Vite with Ctrl-C, run the `export` line and start it again. An answer beginning `Mosaica's session address did not answer` means `mosaica serve` isn't running.
+
+Vite copies the browser's console to the terminal, so you'll see `Lit is in dev mode` there each time the page loads. Lit says that about any page served by a development server, and it goes away in a production build.
 
 The explorer asked Mosaica what the data holds, and the answer lists every field with its kind. The page itself says nothing about the data. Press "Add field" and choose Name. `name` is text that the declaration marks for search, so its card is a search box. Type `San` into it. The search applies as you type. The map keeps the 1,310 places with the word San in their name.
 
@@ -210,7 +221,7 @@ Save the file. Vite reloads the page.
 
 `pinned-filters` names the fields whose cards are in the panel from the start, so nobody has to find them under "Add field". `colour-by` colours the places by a field. A category gets a colour per value, and a number gets a ramp from its lowest value to its highest. Settlements are blue, and most of Asia is blue. In the United States most dots are orange and red, because GeoNames lists many streams, farms and buildings there. Someone using the map can still change the colouring, with the Layers button on the map or the paint button on a field's card.
 
-`title-field` says which field names a place. Hover over one. The label that follows the pointer is the place's name. Without `title-field`, it was a long number such as `#4040127343466120394`, the `mosaica_id` that Mosaica gives each place it serves. Click a place, and the card that opens beside it is headed by the name too.
+`title-field` says which field names a place. Hover over one. The label that follows the pointer is the place's name. Without `title-field` the explorer doesn't know which field that is, and shows a long number such as `#4040127343466120394`, the `mosaica_id` that Mosaica gives each place it serves. Click a place, and the card that opens beside it is headed by the name too.
 
 The [components reference](../reference/components/mosaica-explorer.md) lists the explorer's other attributes, from the most points it draws to how density is shaded.
 
