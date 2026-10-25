@@ -1411,19 +1411,9 @@ impl ViewMetadata {
     }
 }
 
-/// A metadata value as one roster record carries it, typed against its declaration.
-#[derive(Debug, Clone, PartialEq)]
-pub enum MetadataValue {
-    Bool(bool),
-    /// Every integer width.
-    Int(i64),
-    Float(f64),
-    /// A string, and a category's key.
-    Text(String),
-    /// Microseconds since the Unix epoch — the one time unit a `timestamp_us` may hold, so a
-    /// declaration and a reader cannot disagree about it (`ScalarType::TimestampUs`).
-    TimestampUs(i64),
-}
+/// A metadata value as one roster record carries it, typed against its declaration: the type a
+/// running service stores a record's values in, so a build stores them as it does.
+pub use mosaica_types::view::ViewMetadataValue as MetadataValue;
 
 /// Which views a group has, and therefore where its points come from (`views.md` §3.1).
 ///
@@ -5798,9 +5788,7 @@ impl Config {
         registry: &[BuildView],
         resolved: &[crate::ViewArgs],
     ) -> Result<Vec<mosaica_store::manifest::GroupDescriptor>> {
-        use mosaica_store::manifest::{
-            GroupDescriptor, GroupMetadataField, GroupViewDescriptor, ViewMetadataValue,
-        };
+        use mosaica_store::manifest::{GroupDescriptor, GroupMetadataField, GroupViewDescriptor};
         let mut groups: Vec<GroupDescriptor> = Vec::new();
         // Every declared group, whether or not it has a view yet: a view created while the service
         // runs is minted from the group's own settings, and a group with no view has nowhere else
@@ -5883,20 +5871,7 @@ impl Config {
             group.views.push(GroupViewDescriptor {
                 key: membership.key.clone(),
                 visibility: view.visibility.clone(),
-                metadata: membership
-                    .metadata
-                    .iter()
-                    .map(|(name, value)| {
-                        let value = match value {
-                            MetadataValue::Bool(v) => ViewMetadataValue::Bool(*v),
-                            MetadataValue::Int(v) => ViewMetadataValue::Int(*v),
-                            MetadataValue::Float(v) => ViewMetadataValue::Float(*v),
-                            MetadataValue::Text(v) => ViewMetadataValue::Text(v.clone()),
-                            MetadataValue::TimestampUs(v) => ViewMetadataValue::TimestampUs(*v),
-                        };
-                        (name.clone(), value)
-                    })
-                    .collect(),
+                metadata: membership.metadata.clone(),
             });
         }
         Ok(groups)
