@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 
 use mosaica_types::view::{
     check_view_key, CreatedView, DeadIncarnation, GroupMetadataField, ViewIncarnation,
-    ViewMetadataType, ViewMetadataValue, DECLARED_INCARNATION,
+    ViewMetadataValue, DECLARED_INCARNATION,
 };
 
 use crate::wal::WalRecord;
@@ -239,36 +239,13 @@ impl ViewRoster {
         check_view_key(key).map_err(RosterError::Refused)?;
         // The gate arrives as `Engine::create_view` stored it: each label's canonical text, and
         // `None` for `public`.
-        // **A `timestamp_us` arrives as an integer or a string, and the declaration is what says
-        // so.** JSON carries no date type, so a record's `starts` is microseconds since the epoch
-        // as a number, or text read as a build reads it ([`mosaica_types::written`]); typing it
-        // from the wire alone would make every timestamp an `int` or a `text` and refuse every
-        // create. These are the only coercions: an integer is *not* accepted where a float is
-        // declared, because those two are told apart in every other surface too.
-        let mut metadata = metadata;
-        for field in facts.metadata {
-            if field.ty != ViewMetadataType::TimestampUs {
-                continue;
-            }
-            let micros = match metadata.get(&field.name) {
-                Some(ViewMetadataValue::Int(v)) => *v,
-                Some(ViewMetadataValue::Text(text)) => mosaica_types::written::timestamp_us(text)
-                    .map_err(|e| {
-                        RosterError::Refused(format!(
-                            "metadata '{}' is '{text}', which {e}",
-                            field.name
-                        ))
-                    })?,
-                _ => continue,
-            };
-            metadata.insert(field.name.clone(), ViewMetadataValue::TimestampUs(micros));
-        }
         // Every declared name, and no others. A missing one is refused rather than defaulted: the
         // record is immutable, so a value left out is a value that can never be supplied, and a
         // client reading the roster would see a name the group declares and this view does not
         // carry.
+        let mut metadata = metadata;
         for field in facts.metadata {
-            let Some(value) = metadata.get(&field.name) else {
+            let Some(value) = metadata.remove(&field.name) else {
                 return Err(RosterError::Refused(format!(
                     "view group '{}' declares metadata '{}' ({}) and this record carries none. \
                      Every declared name is required: a roster record is immutable, so a value \
@@ -278,15 +255,11 @@ impl ViewRoster {
                     field.ty.name()
                 )));
             };
-            if !field.ty.admits(value) {
-                return Err(RosterError::Refused(format!(
-                    "metadata '{}' is {}, and view group '{}' declares it {}",
-                    field.name,
-                    value.type_name(),
-                    facts.name,
-                    field.ty.name()
-                )));
-            }
+            let value = field
+                .ty
+                .typed(&field.name, value)
+                .map_err(|e| RosterError::Refused(format!("view group '{}': {e}", facts.name)))?;
+            metadata.insert(field.name.clone(), value);
         }
         for name in metadata.keys() {
             if !facts.metadata.iter().any(|f| &f.name == name) {
@@ -384,6 +357,7 @@ impl ViewRoster {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mosaica_types::view::ViewMetadataType;
 
     fn facts<'a>(name: &'a str, metadata: &'a [GroupMetadataField]) -> GroupFacts<'a> {
         GroupFacts {
@@ -648,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn a_timestamp_arrives_as_an_integer_and_a_float_is_still_a_float() {
+    fn a_record_is_stored_as_its_declaration_types_it() {
         let declared = [
             GroupMetadataField {
                 name: "starts".to_string(),
@@ -669,36 +643,26 @@ mod tests {
                 None,
                 [
                     ("starts".to_string(), ViewMetadataValue::Int(1_767_225_600)),
-                    ("weight".to_string(), ViewMetadataValue::Float(0.5)),
+                    ("weight".to_string(), ViewMetadataValue::Int(2)),
                 ]
                 .into_iter()
                 .collect(),
                 None,
             )
-            .expect("an integer is what a JSON timestamp is");
+            .expect("a well-typed record");
         match record {
-            Some(WalRecord::ViewCreate { view }) => assert_eq!(
-                view.metadata.get("starts"),
-                Some(&ViewMetadataValue::TimestampUs(1_767_225_600)),
-                "the declaration is what types it"
-            ),
+            Some(WalRecord::ViewCreate { view }) => {
+                assert_eq!(
+                    view.metadata.get("starts"),
+                    Some(&ViewMetadataValue::TimestampUs(1_767_225_600))
+                );
+                assert_eq!(
+                    view.metadata.get("weight"),
+                    Some(&ViewMetadataValue::Float(2.0))
+                );
+            }
             _ => unreachable!(),
         }
-        // The one coercion, and no other: an integer where a float is declared stays a refusal.
-        assert!(roster
-            .prepare_create(
-                facts("quarter", &declared),
-                "2026-Q6",
-                None,
-                [
-                    ("starts".to_string(), ViewMetadataValue::Int(1)),
-                    ("weight".to_string(), ViewMetadataValue::Int(1)),
-                ]
-                .into_iter()
-                .collect(),
-                None,
-            )
-            .is_err());
     }
 
     /// A gate is recorded as the engine hands it over, each element one label.

@@ -630,6 +630,69 @@ fields = { key = "year" }
     server.shutdown().await;
 }
 
+/// A float metadata value written as an integer is that float, in a declaration and in a create.
+#[tokio::test]
+async fn an_integer_given_for_float_metadata_is_stored_as_a_float_at_a_build_and_a_create() {
+    use arrow::array::{Float64Array, UInt64Array};
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    let ids = || 0..20u64;
+    write_parquet(
+        &dir.join("points.parquet"),
+        vec![
+            column("entity_id", false, UInt64Array::from_iter_values(ids())),
+            column("x", false, Float64Array::from_iter_values(ids().map(|e| e as f64))),
+            column("y", false, Float64Array::from_iter_values(ids().map(|e| e as f64))),
+        ],
+    );
+    let declaration = dir.join("config.toml");
+    std::fs::write(
+        &declaration,
+        r#"
+[sources]
+points = "points.parquet"
+
+[[view]]
+name             = "world"
+source           = "points"
+extent           = { min = 0.0, max = 1000.0 }
+point_visibility = { default = "public" }
+
+[[attribute]]
+name   = "id"
+type   = "u64"
+unique = true
+field  = "entity_id"
+source = "points"
+
+[[view_group]]
+name             = "runs"
+extent           = { min = 0.0, max = 1000.0 }
+point_visibility = { default = "public" }
+metadata         = { weight = "f64" }
+
+[[view_group.view]]
+key    = "built"
+weight = 2
+"#,
+    )
+    .unwrap();
+    mosaica_build::build(&args_from_declaration(&declaration, &dir.join("bundle")))
+        .expect("the declaration builds");
+    let mut served = Served::open(tmp).await;
+    let resp = create(&served, "runs", "created", json!({ "metadata": { "weight": 3 } })).await;
+    assert_eq!(resp.status(), 201);
+    served.reauthorise().await;
+    let document = meta(&served).await;
+    for (id, weight) in [("runs:built", 2.0), ("runs:created", 3.0)] {
+        assert_eq!(
+            roster_of(&document, id).expect("the view is served")["metadata"]["weight"],
+            json!({ "type": "float", "value": weight }),
+        );
+    }
+    served.server.shutdown().await;
+}
+
 /// Every arm the create refuses, and the status each takes (`views.md` §3.2). They are told apart
 /// because the caller's remedy differs: a refused record is one to correct, a taken or burnt key
 /// is one to replace, and an unknown group is not a view at all.

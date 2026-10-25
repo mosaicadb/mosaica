@@ -3681,7 +3681,7 @@ fn compile_point_visibility(
 }
 
 /// The roster's own key set, which no metadata name may take (`views.md` §3.2).
-use mosaica_types::view::{ViewMetadataValue, ROSTER_KEYS};
+use mosaica_types::view::{ViewMetadataType, ViewMetadataValue, ROSTER_KEYS};
 
 /// The keys a group declares and a view of it may not (`views.md` §3.1).
 const GROUP_LEVEL_KEYS: [&str; 8] = [
@@ -3916,93 +3916,26 @@ fn compile_roster_view(
     })
 }
 
-/// One metadata value on one roster record, typed against its declaration.
-///
-/// **Typed at the declaration and not at the reader**, because the roster is served on `/v1/meta`
-/// as typed values (`views.md` §3.2): a `starts` written as a string in one block and as a
-/// date-time in the next is one field with two wire types, and the client reading it has no way to
-/// know which it will get.
+/// One metadata value on one roster record, typed against its declaration as a create at a
+/// running service types it. A TOML date-time is read as the text it writes.
 fn compile_metadata_value(
     object: &str,
     declared: &ViewMetadata,
     value: &toml::Value,
 ) -> Result<ViewMetadataValue> {
-    let name = &declared.name;
-    let wrong = |wanted: &str| {
-        declaration_error(format!(
-            "{object}: `{name}` is {}, and this group declares it '{}' — {wanted}",
-            value.type_str(),
-            declared.ty.arrow_type_name()
-        ))
-    };
-    if let Some(vocabulary) = &declared.vocabulary {
-        let key = value.as_str().ok_or_else(|| {
-            declaration_error(format!(
-                "{object}: `{name}` is {}, and this group declares it a category over vocabulary \
-                 '{vocabulary}' — write the value's key as a string",
-                value.type_str()
-            ))
-        })?;
-        // Stored as the key, as a create at a running service stores it; the build resolves it
-        // against the vocabulary as a row's category value is (`crate::mint_metadata_keys`).
-        return Ok(ViewMetadataValue::Text(key.to_string()));
-    }
-    Ok(match declared.ty {
-        ScalarType::Bool => ViewMetadataValue::Bool(
-            value
-                .as_bool()
-                .ok_or_else(|| wrong("write `true` or `false`"))?,
-        ),
-        ScalarType::F32 | ScalarType::F64 => match value {
-            toml::Value::Float(f) => ViewMetadataValue::Float(*f),
-            // An integer where a float is declared is the value the author wrote rather than a
-            // type error: TOML spells `0` as an integer and there is one reading of it here.
-            toml::Value::Integer(i) => ViewMetadataValue::Float(*i as f64),
-            _ => return Err(wrong("write a number")),
-        },
-        ScalarType::TimestampUs => match value {
-            toml::Value::Integer(us) => ViewMetadataValue::TimestampUs(*us),
-            // A TOML date-time is read as the text it writes, so it takes the forms a JSON
-            // string takes at a running service.
-            toml::Value::Datetime(when) => timestamp_us(object, name, &when.to_string())?,
-            toml::Value::String(text) => timestamp_us(object, name, text)?,
-            _ => return Err(wrong(
-                "write a date (`2026-04-01`), a date-time with an offset \
-                 (`2026-04-01T00:00:00Z`), or the microseconds since the Unix epoch as an integer",
-            )),
-        },
-        ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => ViewMetadataValue::Text(
-            value
-                .as_str()
-                .ok_or_else(|| wrong("write a string"))?
-                .to_string(),
-        ),
-        _ => {
-            let held = value
-                .as_integer()
-                .ok_or_else(|| wrong("write an integer"))?;
-            let (min, max) = declared
-                .declared_type()
-                .integer_range()
-                .unwrap_or((i64::MIN, i64::MAX));
-            if held < min || held > max {
-                return Err(declaration_error(format!(
-                    "{object}: `{name}` is {held}, and this group declares it '{}', which holds \
-                     {min} to {max}. The width is part of the declaration, so the value is refused \
-                     rather than narrowed",
-                    declared.ty.arrow_type_name()
-                )));
-            }
-            ViewMetadataValue::Int(held)
+    let ty = declared.declared_type();
+    let refused = |e: String| declaration_error(format!("{object}: {e}"));
+    let written = match value {
+        toml::Value::Boolean(v) => ViewMetadataValue::Bool(*v),
+        toml::Value::Integer(v) => ViewMetadataValue::Int(*v),
+        toml::Value::Float(v) => ViewMetadataValue::Float(*v),
+        toml::Value::String(v) => ViewMetadataValue::Text(v.clone()),
+        toml::Value::Datetime(when) if ty == ViewMetadataType::TimestampUs => {
+            ViewMetadataValue::Text(when.to_string())
         }
-    })
-}
-
-/// A timestamp written as text, as [`mosaica_types::written`] reads one.
-fn timestamp_us(object: &str, name: &str, text: &str) -> Result<ViewMetadataValue> {
-    mosaica_types::written::timestamp_us(text)
-        .map(ViewMetadataValue::TimestampUs)
-        .map_err(|e| declaration_error(format!("{object}: `{name}` = '{text}' {e}")))
+        _ => return Err(refused(ty.refusal(&declared.name, value.type_str()))),
+    };
+    ty.typed(&declared.name, written).map_err(refused)
 }
 
 /// `[view_group.views]` — form B's roster table (`views.md` §3.1).

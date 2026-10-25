@@ -143,8 +143,62 @@ impl ViewMetadataType {
         Some((stored(min), stored(max)))
     }
 
-    /// Does `value` belong under this declaration? An integer must fit the declared width. An
-    /// integer is not accepted where a float is declared, because the roster is served typed.
+    /// `value`, as a schema or a request body writes it, stored under this declaration. An
+    /// integer where a float is declared is that float. Where a timestamp is declared, an integer
+    /// is microseconds since the Unix epoch and a text is read as [`crate::written`] reads one.
+    /// Every other value is stored as it is written, and must be one this declaration admits.
+    pub fn typed(self, name: &str, value: ViewMetadataValue) -> Result<ViewMetadataValue, String> {
+        let value = match (self, value) {
+            (ViewMetadataType::Float, ViewMetadataValue::Int(v)) => {
+                ViewMetadataValue::Float(v as f64)
+            }
+            (ViewMetadataType::TimestampUs, ViewMetadataValue::Int(v)) => {
+                ViewMetadataValue::TimestampUs(v)
+            }
+            (ViewMetadataType::TimestampUs, ViewMetadataValue::Text(text)) => {
+                crate::written::timestamp_us(&text)
+                    .map(ViewMetadataValue::TimestampUs)
+                    .map_err(|e| format!("metadata '{name}' is '{text}', which {e}"))?
+            }
+            (_, value) => value,
+        };
+        if self.admits(&value) {
+            return Ok(value);
+        }
+        Err(match (&value, self.integer_range()) {
+            (ViewMetadataValue::Int(v), Some((min, max))) => format!(
+                "metadata '{name}' is {v}, and it is declared {}, which holds {min} to {max}; \
+                 write a value in that range, or declare a wider type",
+                self.name()
+            ),
+            _ => self.refusal(name, value.type_name()),
+        })
+    }
+
+    /// The refusal of a value of the kind `found` under this declaration, saying what to write.
+    pub fn refusal(self, name: &str, found: &str) -> String {
+        let write = match self {
+            ViewMetadataType::Bool => "`true` or `false`".to_string(),
+            ViewMetadataType::Float => "a number".to_string(),
+            ViewMetadataType::Text => "a string".to_string(),
+            ViewMetadataType::TimestampUs => "a date (`2026-04-01`), a date-time with an offset \
+                 (`2026-04-01T00:00:00Z`), or microseconds since the Unix epoch as an integer"
+                .to_string(),
+            ViewMetadataType::Category => "the key of a value of its vocabulary, as a string"
+                .to_string(),
+            integer => {
+                let (min, max) = integer.integer_range().unwrap_or((i64::MIN, i64::MAX));
+                format!("an integer from {min} to {max}")
+            }
+        };
+        format!(
+            "metadata '{name}' is {found}, and it is declared {}; write {write}",
+            self.name()
+        )
+    }
+
+    /// Does `value` belong under this declaration as it is stored? An integer must fit the
+    /// declared width.
     pub fn admits(self, value: &ViewMetadataValue) -> bool {
         match (self, value) {
             (ViewMetadataType::Bool, ViewMetadataValue::Bool(_))
@@ -350,6 +404,34 @@ mod tests {
         assert!(ViewMetadataType::I8.admits(&ViewMetadataValue::Int(-128)));
         assert!(!ViewMetadataType::Float.admits(&ViewMetadataValue::Int(1)));
         assert!(!ViewMetadataType::I32.admits(&ViewMetadataValue::Text("1".to_string())));
+    }
+
+    #[test]
+    fn a_written_value_is_stored_as_its_declaration_types_it() {
+        assert_eq!(
+            ViewMetadataType::Float.typed("w", ViewMetadataValue::Int(2)),
+            Ok(ViewMetadataValue::Float(2.0))
+        );
+        assert_eq!(
+            ViewMetadataType::TimestampUs.typed("t", ViewMetadataValue::Int(7)),
+            Ok(ViewMetadataValue::TimestampUs(7))
+        );
+        assert_eq!(
+            ViewMetadataType::TimestampUs.typed("t", ViewMetadataValue::Text("1970-01-02".into())),
+            Ok(ViewMetadataValue::TimestampUs(86_400_000_000))
+        );
+        assert!(ViewMetadataType::TimestampUs
+            .typed("t", ViewMetadataValue::Text("2026-04-01T09:30:00".into()))
+            .is_err());
+        assert!(ViewMetadataType::I32
+            .typed("n", ViewMetadataValue::Float(1.0))
+            .is_err());
+        assert!(ViewMetadataType::U8
+            .typed("n", ViewMetadataValue::Int(256))
+            .is_err());
+        assert!(ViewMetadataType::Text
+            .typed("s", ViewMetadataValue::Int(1))
+            .is_err());
     }
 
     #[test]

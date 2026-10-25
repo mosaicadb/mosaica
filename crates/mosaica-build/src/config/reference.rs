@@ -40,10 +40,11 @@ const TABLE_FORMS: [(&str, &str, &str); 3] = [
 /// each name the group's `metadata` declares, holding a value of the declared type, and every
 /// view carries every name. A `timestamp_us` value is a date, such as `2026-04-01`, which is
 /// midnight UTC; a date-time with an offset, such as `2026-04-01T09:30:00Z`, with at most six
-/// fractional-second digits and a space allowed for the `T`; or microseconds since the Unix epoch, as an integer or a string of
-/// digits. Either date form may also be written as a string. A date-time with no offset is
-/// refused. An integer outside its type's range is refused. A group-level key, such as `extent`
-/// or `projection`, is refused, and so is any other key.
+/// fractional-second digits and a space allowed for the `T`; or microseconds since the Unix
+/// epoch, as an integer or a string of digits. Either date form may also be written as a string.
+/// A date-time with no offset is refused. A float may be written as an integer. An integer
+/// outside its type's range is refused. A group-level key, such as `extent` or `projection`, is
+/// refused, and so is any other key.
 #[allow(dead_code)]
 struct RosterViewBlock {
     /// The view's key: its id is `<group>:<key>`. ASCII letters, digits, `_` and `-`, and no two
