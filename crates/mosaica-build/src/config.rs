@@ -5872,7 +5872,8 @@ pub struct Registry {
 
 /// The declaration, minus its acquisition keys, as the control plane's declaration routes take it
 /// (`configuration.md` §2; `ingest.md` §1.3): one array per runtime block kind, each in
-/// declaration order, and `shards`, the `PUT /control/shards` body, where the declaration writes
+/// declaration order except that a view group sharing another's views comes after the groups that
+/// own theirs, and `shards`, the `PUT /control/shards` body, where the declaration writes
 /// `[shards]`.
 ///
 /// **One implementation of declaration-to-payload** ([decision 0139](../../../docs/decisions/0139-one-implementation-between-build-and-ingest-and-across-a-type-family.md)).
@@ -6139,9 +6140,13 @@ fn view_payloads(config: &Config) -> Vec<serde_json::Value> {
 /// The roster and the group's own points file are acquisition and are gone: a group declared at a
 /// running service starts with an empty roster, and its keys are created one at a time.
 fn view_group_payloads(config: &Config) -> Vec<serde_json::Value> {
-    config
-        .view_groups
-        .iter()
+    // A group sharing another's views comes after every group that owns its own, so the group its
+    // `members` names is declared first. Chains are refused, so one pass orders them.
+    let (owners, sharing): (Vec<_>, Vec<_>) =
+        config.view_groups.iter().partition(|g| g.members.is_none());
+    owners
+        .into_iter()
+        .chain(sharing)
         .map(|group| {
             let mut body = serde_json::Map::new();
             insert_some(&mut body, "title", group.title.clone());
@@ -6584,6 +6589,46 @@ fields = { id = "entity" }
             "the declared names, in the order the group carries them"
         );
         assert!(body.get("members").is_none(), "this group owns its views");
+    }
+
+    /// A group sharing another's views is declared after the group it names, wherever the
+    /// declaration writes it.
+    #[test]
+    fn a_sharing_group_is_emitted_after_its_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[sources]
+shared = "shared.parquet"
+
+[[view_group]]
+name             = "maps"
+members          = "quarters"
+source           = "shared"
+fields           = { view = "quarter" }
+extent           = { min = 0.0, max = 1.0 }
+point_visibility = { default = "public" }
+
+[[view_group]]
+name             = "quarters"
+extent           = { min = 0.0, max = 1.0 }
+point_visibility = { default = "public" }
+
+[[view_group.view]]
+key = "q1"
+"#,
+        )
+        .unwrap();
+        let config = Config::parse(&path, &HashMap::new()).unwrap();
+        let names: Vec<_> = control_payloads(&config)["view_groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|group| group["name"].clone())
+            .collect();
+        assert_eq!(names, ["quarters", "maps"]);
     }
 
     /// **`auto` has nothing to resolve against**, so it is emitted as declared and the route

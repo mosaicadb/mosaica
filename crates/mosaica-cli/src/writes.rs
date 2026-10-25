@@ -6,7 +6,7 @@
 //! do. A verb that reads a file, `insert` and the change verbs, sends each page before reading the
 //! next, then prints one JSON object totalling the answers on stdout and one line on stderr.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -590,8 +590,8 @@ fn declaration_requests(config: &mosaica_build::config::Config) -> Result<Vec<Re
             requests.push(("PATCH", format!("{path}/values"), values_body(page)));
         }
     }
-    for entry in shared_last(&list("view_groups")) {
-        let path = format!("/control/view_groups/{}", segment(&name(entry)));
+    for entry in list("view_groups") {
+        let path = format!("/control/view_groups/{}", segment(&name(&entry)));
         put(&mut requests, path, &entry["body"]);
     }
     for entry in list("views") {
@@ -612,34 +612,6 @@ fn declaration_requests(config: &mosaica_build::config::Config) -> Result<Vec<Re
         put(&mut requests, "/control/layers".into(), &body);
     }
     Ok(requests)
-}
-
-/// View groups in declaration order, except that a group sharing another's views comes after
-/// that group. A cycle keeps the rest in declaration order, and the route answers it.
-fn shared_last(groups: &[Value]) -> Vec<&Value> {
-    let name = |group: &Value| group["name"].as_str().unwrap_or_default().to_owned();
-    let declared: HashSet<String> = groups.iter().map(name).collect();
-    let mut placed: Vec<&Value> = Vec::with_capacity(groups.len());
-    let mut done: HashSet<String> = HashSet::new();
-    let mut pending: Vec<&Value> = groups.iter().collect();
-    while !pending.is_empty() {
-        let before = pending.len();
-        pending.retain(|group| {
-            let ready = match group["body"]["members"].as_str() {
-                Some(shared) => !declared.contains(shared) || done.contains(shared),
-                None => true,
-            };
-            if ready {
-                placed.push(group);
-                done.insert(name(group));
-            }
-            !ready
-        });
-        if pending.len() == before {
-            placed.append(&mut pending);
-        }
-    }
-    placed
 }
 
 fn values_body(rows: &[Value]) -> Vec<u8> {

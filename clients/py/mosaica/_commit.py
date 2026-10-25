@@ -128,9 +128,9 @@ def _scoped_to(block: dict) -> str | None:
 def _placed(rows: Sequence[dict], key_of, needs) -> list[dict]:
     """Declaration order, each row after the rows it names.
 
-    A group goes after the group whose views it shares, a layer after the layers it depends on,
-    and an artifact after the siblings it names as parents: each of the three is a `404` at its
-    route until the row it names is there. A cycle stops at the row that closes it.
+    A layer goes after the layers it depends on, and an artifact after the siblings it names as
+    parents: each is a `404` at its route until the row it names is there. A cycle stops at the
+    row that closes it.
     """
     by_key = {key_of(row): row for row in rows}
     ordered: list[dict] = []
@@ -297,11 +297,7 @@ class Planner:
             self._vocabulary(entry)
         for name in self._held_vocabularies_with_values():
             self._value_pages(name)
-        for entry in _placed(
-            payloads.get("view_groups", []),
-            lambda entry: entry["name"],
-            lambda entry: [entry["body"].get("members")],
-        ):
+        for entry in payloads.get("view_groups", []):
             name = entry["name"]
             if name in self.held_views:
                 continue
