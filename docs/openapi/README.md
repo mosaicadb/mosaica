@@ -285,8 +285,8 @@ the page before it. A response can end part-way through a table. The next respon
 trailer's `next` as `cursor`, opens with that table's head again, with `resumed` true. The rules of
 the items read hold: no trailer means incomplete, and a whole result passes `next` back until it is
 null. A table's rows are the batches between its head and the next head or the trailer, joined
-across responses. A field's `key` and `title` are dictionaries whose values differ from page to
-page.
+across responses. A field's `key` is a dictionary whose values differ from page to page, and so is its `title`.
+A field grouping has a `title` column only when its vocabulary holds a title for some value.
 
 **Python, with `pyarrow`**, reusing `frames` from the items decode:
 
