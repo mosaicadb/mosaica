@@ -1,393 +1,72 @@
 # Serving
 
-By the time an answer to a viewport request leaves the engine, every count and every point in it
-has already been computed from the viewer's own visible items. What is left is how that answer
-reaches a client, and what happens on the server while it is busy or the corpus is changing under
-it.
+One Mosaica server answers every viewer from one process. This chapter covers what happens between a request and its answer: how an answer reaches the client, what the server does when it is busy, what it keeps ready between requests, and how a client can tell whether what it holds is still current. The [operating guide](../guides/operating.md) covers sizing and settings.
 
-## Admission and load
+## How an answer arrives
 
-A request for a viewport or an item needs a slot permit before the engine runs it, apart from
-whatever is happening on the write side. A request for a new session needs none: it builds nothing,
-and the session's first read builds its authorised set under that read's admission. Admission
-checks two things in order. First, an overall limit on how many requests may be outstanding at
-once: a request that arrives once every slot is taken is refused immediately, with no wait. A
-request that clears that stage still needs a compute permit, a share of running capacity, and
-waits up to a configured timeout, `serve.admission_timeout_ms`, for one to open. A request that
-gets no compute permit within that time is refused as well. A bulk read of items or artifacts is
-admitted under a limit of its own, described under [bulk reads](#bulk-reads), and so is a request
-for the artifacts of each tile, described under
-[the artifacts of each tile](#the-artifacts-of-each-tile).
-
-Both refusals answer with the same 429 status, carrying a fixed one-second interval to wait before
-retrying. Two further cases carry the same status and the same interval, for reasons closer to a
-session's own cached state than to the gate:
-
-| What happened | What to do |
-|---|---|
-| Every slot was taken, or no compute permit opened up within the timeout | Wait the interval given, then retry |
-| A concurrent request was already building the row projection of this session's grant, and the wait for it ran out | Wait the interval given, then retry; the build it was waiting on may have finished by then |
-| A background pass was already rebuilding the row projection of this session's grant after a merge, this session has already been served the view, and this request would otherwise pay that rebuild itself | Wait the interval given, then retry |
-
-The last two rows share one status for different reasons. A row projection is kept per grant,
-and every session with the grant reads the same one. In the second row, a matching request, from
-this session or another with its grant, got to the projection first. It is being built now, so a
-later request for it waits for that build, up to `serve.single_flight_wait_ms`, rather than
-starting a second one. It is served that build's result if the build finishes within the wait. In
-the third, no other request is building anything. A merge has moved the grant's cached row
-projection out of date, and a background pass, not a request, is already rebuilding it for every
-resident grant. Rebuilding it again on this request's own thread would cost far more than the
-fixed wait, so a session already served the view is refused instead and asked to come back once
-that pass has caught up. A session's first read in the view is answered at the live generation
-instead: it carries the grant's previous projection across the merge itself, or waits on the
-pass's build of it, and is refused only as in the second row.
-
-A streamed viewport response holds its slot permit for as long as the response is being sent, not
-only for as long as it takes to compute: the response occupies capacity for exactly as long as
-bytes take to reach the client. The compute permit is narrower. It releases as soon as the
-engine's sweep produces the first counts, before any point is gathered, so a slow but healthy
-reader cannot hold compute capacity a waiting request needs.
-
-## What the server keeps warm
-
-A grant's authorised set and its row projection, which [access control
-describes](access-control.md#what-a-request-answers-from), are built once, together, and then kept
-for every session with the grant rather than rebuilt on every request. Rebuilding either from
-nothing is the most expensive step in the path a request takes. A flush, a merge and a
-compaction each change that cached pair, and none of the
-three is applied on the thread answering a request. A background pass folds a flush or a merge
-into every resident grant's cached pair as it reaches each one. Only a session whose grant the pass
-has not yet reached pays the cost inline, as an ordinary cache miss, on its own next request. After
-a compaction fold the cached pair is invalid outright for every grant, and the same background pass
-rebuilds each one in turn.
-
-Each annotation level's figures are kept as well, per grant, in memory and on disc, as [a level's
-figures](#a-levels-figures) describes.
-
-The rows and positions a request reads live in files the server maps into memory rather than loads
-into its own structures. A value a recent request read is more likely to still be in the operating
-system's own page cache the next time. Nothing in the server manages that layer directly.
-
-**Not built yet:** caching a filter's own matching result apart from the viewport that used it. A
-filter's result does not depend on which part of the map is being looked at, but nothing keeps it
-from one request to the next, so panning or zooming with a filter applied repeats that evaluation
-on every request.
-
-## How a response is delivered
-
-A viewport response arrives as a sequence of frames rather than as one block: counts first, then
-points as they are found, then a trailer. A client can start drawing from the counts and the first
-points before the rest of the answer has been computed.
+A map answer is streamed in frames, so a client can start drawing before the server has finished:
 
 | Frame | Carries | How many |
 |---|---|---|
-| counts | visible, matched, served and highlighted counts for each tile that has anything visible; a tile the request named with nothing visible carries no row | exactly one, sent first |
-| density | a count for each of a tile's [finer cells](queries.md#drawing-the-map), where a request asked for them | one, only when asked for |
-| points | a chunk of the matched points from one or more tiles; where the request names layers, each point carries the `mosaica_id` of its artifact in each, or a null | zero or more |
-| trailer | how many points were served in total, marking the response complete | exactly one, sent last |
+| counts | each tile's visible, matched, highlighted and drawn counts | one, first |
+| density | counts for each tile's finer cells, where the request asked for them | one, when asked for |
+| points | the drawn points of one or more tiles, with each point's topic in each layer the request names | any number |
+| trailer | how many points were sent, marking the answer complete | one, last |
 
-A viewport response carries no artifacts. They have a route of their own, below.
+Within a tile, points always come in the same order. An answer that stops early, because the client went away, a time limit passed or the server met a fault, is still correct as far as it goes: each tile's points are the start of that tile's full answer, with nothing skipped or reordered. Only the missing trailer says it is incomplete.
 
-Within one tile, points are sent in ascending identifier order. Across tiles, points are sent in
-the order the request named its tiles, or, where a request named a bounding box instead of a list,
-in the order the server derives from it.
+The annotations of each tile arrive the same way: one frame for each tile, each complete in itself, and a trailer. A request for a `nested` or `dag` layer gets one more frame first, holding the tree's cut across the whole screen.
 
-A response that stops before it is finished, whether because a client disconnects or because the
-server meets a fault partway through, is not discarded. Each tile's delivered points still form a
-prefix of that tile's full answer, in that same order. Nothing is skipped or reordered, only cut
-off. What did arrive was computed against one version of the corpus and can be trusted for what it
-is. Only the trailer's absence marks the response as incomplete.
+### Bulk reads
 
-Two deadlines bound how long a viewport's delivery may take. A send that stalls longer than
-`serve.stream_write_stall_ms` aborts the stream. The whole delivery of a viewport response, from
-the first flush to the trailer, may not outlive `serve.stream_deadline_ms`, however the client is
-reading. A reader that accepts just enough bytes to dodge the stall limit still cannot hold a slot
-forever. A bulk read uses the same two settings differently, as described under
-[bulk reads](#bulk-reads).
+A bulk read arrives in pages, each followed by a page end. A response stops when the read is finished, or at its limits of time or size, and its trailer carries a cursor to continue from. The Python and TypeScript clients and the `mosaica` command follow the cursor for you. A client that stops reading for too long is cut off without a trailer, and continues from the last page end it received.
 
-If a client disconnects before a response finishes, the server notices at points it checks between
-steps of the work still to do, and stops rather than continuing to compute or send.
+## When the server is busy
 
-```mermaid
-flowchart TD
-  A[admission:<br/>slot permit, then compute permit] --> B[sweep:<br/>counts and density computed]
-  B --> C[counts sent;<br/>compute permit released]
-  C --> D[points sent at the<br/>client's pace;<br/>slot permit held]
-  D --> E[trailer sent;<br/>slot permit released]
-  D -.client disconnects.-> X1[stream ends,<br/>no trailer]
-  D -.a deadline passes.-> X2[stream cut off,<br/>no trailer]
-  D -.a fault occurs.-> X3[connection ends,<br/>no trailer]
-```
+Each kind of request has its own limit on how many run at once, so a long export cannot starve the map:
 
-*A streamed request's lifetime. The compute permit releases once counts are sent; the slot permit
-stays held until delivery ends, whichever of the four exits reaches it first.*
+- **Map and item requests** are refused at once when every place is taken, and otherwise wait briefly for computing capacity.
+- **Bulk reads** run two at once by default. One more is refused at once.
+- **Annotations by tile** run one for each compute thread by default, with as many again waiting.
 
-## Bulk reads
+A refused request is answered `429` with a one-second wait. The TypeScript map retries a refused map request, and both clients retry a refused write. A deletion or suppression is never refused for load, as [changing data](write-path.md#deleting-and-suppressing) explains.
 
-The bulk reads, `POST /v1/items` and `POST /v1/artifacts`
-([queries](queries.md#reading-records)), run under an admission limit of their
-own, `serve.bulk_admission`, so a long read takes no slot from the viewport and item routes, and
-those routes take none from it. A read past the limit is refused at once with the 429
-and one-second interval above, and a limit of 0 refuses every bulk read. An admitted read holds its
-permit until its response ends, on a blocking thread of its own: the server allows one such thread
-for each read the limit admits. Bulk reads share the machine's CPU and the process's memory with
-every other request. `/control/status` reports the limit under `bulk`, with the reads in flight and
-how many have been refused.
+A map request keeps its place until its whole answer has been sent, but gives up its share of the server's computing as soon as its counts are worked out. A slow reader therefore holds up no one else's work. When a client goes away, the server stops working on its answer.
 
-| Key | Default | What it bounds |
-|---|---|---|
-| `serve.bulk_admission` | 2 | bulk reads running at once |
-| `serve.max_page_rows` | 100,000 | rows in a page; published in `/v1/meta` as `selection.max_page_rows` |
-| `serve.max_page_bytes` | 64 MiB | a page's Arrow bytes before compression; published as `selection.max_page_bytes`; at most 2 GiB |
-| `serve.bulk_response_bytes` | 256 MiB | the Arrow bytes one response may carry: no page starts that could take the response past it; at least `serve.max_page_bytes` |
-| `serve.bulk_response_ms` | 30,000 | how long one response runs |
+## What the server keeps ready
 
-The server refuses a configuration that sets `serve.max_page_rows` or `serve.max_page_bytes` to 0,
-`serve.max_page_bytes` above 2 GiB, or `serve.bulk_response_bytes` below `serve.max_page_bytes`.
+Viewers who hold the same access labels share a **grant**, and the server keeps the expensive state per grant rather than per viewer or per request:
 
-The server allows seven pages of `serve.max_page_bytes` for each bulk read. Building one page takes a few
-multiples of the page size, and an engine test holds it below eight. Encoded pages on their way to
-the socket take at most two more, one in the body channel and one being written. All bulk reads
-together can hold `serve.bulk_admission` × 7 × `serve.max_page_bytes`, 896 MiB at the defaults. The
-server has no memory cap of its own to hold that against, so it logs the figure at startup as
-`bulk_read_memory_bytes`, for the operator to compare with the cap the process runs under.
+- **The visible set**: which items the grant may see, arranged over the map's stored rows. It is built on the grant's first request.
+- **Each annotation level's figures**: every artifact's count, centre and box over the visible set. They are built the first time the grant reads that level.
 
-Every end the server chooses closes with a trailer that says why and carries the cursor to continue
-from, null once no row remains. A response stops for its time budget only where stopping moves the
-cursor on, so it can overrun by one filter evaluation and one chunk of its scan. The stream
-deadline, `serve.stream_deadline_ms`, is measured from admission for a bulk read, and it cancels
-the engine's work: the page under way is sent short and a trailer marked `deadline` follows. Those
-last frames go at the client's pace, bounded by the stall limit, since a bulk read's body has no
-send deadline of its own. At the defaults the 30-second time budget ends a response well before the
-60-second deadline.
+Every later request, from any session with the grant, reuses them. They are corrected on each request for whatever has been deleted, suppressed or ingested since they were built. Both are also written to disc, so a restart reads them back rather than building them again.
 
-A client that stops reading for `serve.stream_write_stall_ms` is cut off without a trailer. It
-resumes from the last page end it received and discards any records frame that no page end
-follows.
+The first request from a new grant is therefore the slow one. Its cost grows with how much of the corpus the grant may see. A deployment whose viewers fall into a few groups pays it a few times. A deployment where every user has labels of their own pays it once for each user. The [operating guide](../guides/operating.md#annotation-layers-and-new-viewers) explains how to plan for it.
 
-```mermaid
-flowchart TD
-  A[admission:<br/>a bulk-read permit, or 429 at once] --> P[build a page;<br/>send it and its page end]
-  P -- "rows remain, within the pages<br/>asked for and both budgets" --> P
-  P -- "no row remains, a limit is reached,<br/>or the stream deadline passes" --> T[trailer;<br/>permit released]
-  P -. "client stops reading for<br/>stream_write_stall_ms" .-> X1[connection cut, no trailer;<br/>permit released]
-  P -. "client disconnects or a fault occurs" .-> X2[read stops, no trailer;<br/>permit released]
-```
+When new data is flushed or segments are merged, a background pass brings each grant's state up to date. Only a viewer whose grant the pass has not reached yet pays for the update, on their next request. After a [compaction](write-path.md#background-maintenance), the same pass rebuilds each grant's visible set, and each level's figures are rebuilt for the compacted part of the data the next time they are read.
 
-*How a bulk-read response ends. The permit is released on every path.*
-
-## The artifacts of each tile
-
-`POST /v1/artifacts/viewport` answers which artifacts lie in each tile
-([queries](queries.md#annotations-on-the-map)), framed as a viewport response is. A frame for
-the `nested` and `dag` layers the request names comes first, where it holds a row. Then comes
-exactly one frame for each tile, in the order the request named its tiles or the order the server
-derives from a bounding box, and then a trailer giving how many rows and frames were sent. A tile
-with nothing to show still has its frame, of no rows. Each frame is whole, so a client can keep a
-tile's artifacts as soon as its frame arrives. A response without its trailer is incomplete.
-
-The route has its own admission limit, `serve.artifact_admission`, one request for each compute
-thread by default. As many more may wait, each for at most `serve.admission_timeout_ms`. A request
-past both is refused at once with the 429 and one-second interval above, and its detail names the
-artifact-viewport limit. A limit of 0 refuses every such request. The route takes no slot from the
-viewport, item and session routes, and they take none from it. An admitted request computes until
-its last tile, so it holds its permit and a blocking thread until its response ends. It is
-streamed under `serve.stream_write_stall_ms` and `serve.stream_deadline_ms`, as a viewport is, and
-stops between tiles when its client goes away. `/control/status` reports the limit under
-`artifacts`, with the requests in flight and waiting and how many have been refused.
-
-Before its first frame, a request reads the figures of every level it names: each artifact's
-count, centroid and box over the viewer's visible set, described in the next section. After that
-a tile costs the candidates it tests. For a level served from a column, the candidates are the
-artifacts whose coverings overlap the tile's rows, with those labelling a visible row of the tile
-above the base. They are taken in order of count, and each is tested for a member the viewer can
-see in the tile by probing its member bitmap. Once the probes have cost what one scan of the
-tile's visible rows would, the rest of the tile is answered from that scan. A level stored by
-artifact asks the tile index for its candidates and probes each one.
-
-## A level's figures
-
-Every count served beside an artifact of a level served from a column, on any route, is read
-from that level's figures for the request. So are its centroid and box, except on a layer that
-serves a hull, whose rows the server holds artifact by artifact and reads them from. The figures
-are computed from the request's visible set in three parts:
-
-- **F**, the grant's base rows: the rows, below the bundle's base row count, of every item listed
-  under an index key the session satisfies. Every session with the same grant has the same F.
-- **D**, the base rows the request's visible set leaves out of F: the rows of deleted and
-  suppressed items, and of any buffered item whose labels this viewer does not satisfy.
-- **T**, every row of the visible set outside F: rows above the base, and the flushed rows of items
-  whose labels are still buffered, where the viewer satisfies them.
-
-The visible set is F less D, together with T, and the three never overlap, so an artifact's count
-is its count over F, less its count over D, plus its count over T. The same holds for the number
-of its rows with a position and for the sums of their positions, which give the centroid. In a
-bundle whose items are numbered in several point shards,
-F, D and T are each the union of the shards' own. F's figures are held as one sum over every
-shard, so an artifact's count, centroid and box are read once, as in a bundle of one shard, before
-the artifact is tested or served.
-
-```mermaid
-flowchart LR
-  F["F: the grant's base rows<br/>walked once per grant and level,<br/>shared, kept on disc"] --> S
-  D["D: base rows the request leaves out<br/>per deny version"] -->|subtracted| S
-  T["T: rows above the base<br/>per session and generation"] -->|added| S
-  S["each artifact's count,<br/>centroid and box"]
-```
-
-*The three parts of a level's figures. Only F is shared between sessions, and it is never served
-without the other two.*
-
-F's figures are the expensive part: a walk of the grant's base rows that reads each row's label and,
-where the layer serves a centroid or a box, its position. They are filled the first time any route
-reads the level under that grant, on a pool of as many threads as `serve.compute_threads`. A request
-that needs a level while its walk runs waits for that walk, for as long as its client stays
-connected and at most ten minutes, and at most two walks run at once. A walk pauses between chunks
-while a viewport is drawing points, so that the viewport's reads do not queue behind it, for at most
-`serve.masked_count_give_way_ms` from its first pause.
-
-Once filled, F's figures are shared by every session with the same grant: the same set of
-satisfied index keys, or every key for a session that reads every item. They are held in memory
-under `serve.masked_count_cache_bytes`, the least recently used leaving first, at 40 B an
-artifact with a centroid and a box whatever the number of shards. An eviction costs a read from
-the cache directory or a refill and never changes an answer. A growth or a publication between
-compactions adds its rows to them in place. A flush adds none, since its rows are above the base,
-so an ingest window never refills them.
-
-A compaction rotates one shard's identity, which is part of their key. The first read of each level
-after it walks that shard's base rows again and takes the sum again over every shard's walk: each
-other shard's walk is read back from the cache directory at the level version it read, and what a
-growth has added to it since is kept. The same holds for a shard that opens, and for one whose
-column's steps do not lead to the version a request reads. A shard whose walk is not on disc is
-walked again.
-
-They are also written to the cache directory, in files named by a digest of what they describe and
-checked against a SHA-256 when they are read, so a torn or altered file is read as a miss: each
-sum under `figures/sums/`, naming every shard's identity and version it is over, and in a bundle of
-several shards, each shard's walk under `figures/` and then the shard's identity. A restart reads
-the sums back, and walks again only what it cannot read back. The directory is held under
-`serve.figures_disk_bytes`, the files least
-recently written or read removed first, and the directory of a shard identity a compaction has
-replaced is removed.
-
-D's correction is computed at the request's start from the labels and positions of the view's denied
-base rows, which the server holds per view, level and shard and writes beside the shard's walks. It
-is cached per sum and every shard's deny version, a number per view in each shard that moves exactly
-when that shard's denied rows below the base change: at a deny, a lift or a compaction, and never at
-an ingest or a flush. A request that starts after a
-suppression is accepted therefore reads a new correction. The labels are read for every denied base
-row in the view, whatever the grant. Where a request's own D holds a denied row and more than 4,096
-of the view's denied base rows have no label held for the level, that request walks its whole
-visible set instead, and the labels are read in the background for the requests after it.
-[Security](security.md#residual-disclosure) states what that timing can reveal. T's correction is
-held per session and generation.
-
-The box of F less D is F's box unless a row D leaves out lies on one of its edges. For a layer that
-serves a box, each artifact with more than sixteen placed rows keeps its eight most extreme rows on
-each side, whichever shards they are in, and the first of them D does not hold becomes the edge.
-Where D holds all eight on a side, or the artifact has no more than sixteen placed rows, its box is
-worked out from its member bitmap and the visible set in every shard.
-
-The walk is the cost a new grant pays. Its time grows with the number of rows the grant may see.
-
-A grant pays the walk once per level, the first time it reads that level, and keeps the result
-across restarts until a compaction, or until the bound on the cache directory removes it. A
-deployment in which every user holds a grant of their own pays it once per user.
+The data itself is mapped from disc, as the [overview](overview.md#how-it-serves-large-data) describes, so the parts of the map people are looking at stay in memory.
 
 ## What a client may already hold
 
-A response carries two keys and a generation name a client can compare against what it already
-holds.
+Each response carries three values a client can compare with what it holds:
 
-Whether a held answer may still be shown at all depends on the identity key, carried as
-`x-mosaica-identity-key`. It is derived from the session's authorisation data, its visible set
-and the view, and changes when any of them does. The visible set's identity is keyed by the
-bundle, so the identity key also changes when the bundle is rebuilt, which gives every item a new
-`mosaica_id`. It is not the key of the `mosaica_id` permutation.
+- **The identity key**, `x-mosaica-identity-key`, says whether a held answer may still be shown at all. It changes when the viewer's access, their visible set or the view changes, and when the database is rebuilt, which gives every item a new `mosaica_id`.
+- **The content key**, the `ETag`, changes whenever the data has changed in a way that could add something the client does not have.
+- **The generation**, `x-mosaica-pin`, names the version of the data the answer came from. A request that echoes it gets `x-mosaica-stale` in reply, saying whether the data has moved on since.
 
-Whether a held answer may still be declared to the server as something it can skip resending
-depends on the content key, carried as an `ETag`. It changes whenever the corpus has moved in a
-way that could add something a client does not already have. The one form of narrowing a response
-the server acts on today is omission: a client leaves a tile out of what it asks for, and the
-server does no work for that tile at all, not even a count.
-
-**Not built yet:** reading a declaration back. The server mints and returns the content key as an
-`ETag` on every response. A client that wanted to declare what it already holds would echo it as
-`If-Match`. No request carries a declaration today, so nothing reads that header, and every
-response is answered in full. Even a finer declaration would only change what is sent, not what is
-computed. [Selecting which of a tile's matched points are
-served](queries.md#which-points-are-drawn) is the most expensive part of answering a tile, not
-testing whether an item is visible at all. Every tile a request does name pays that cost in full,
-whatever the client already has.
-
-A third value, the generation a response was answered from, travels as a header,
-`x-mosaica-pin`, and a request may echo it back. While the background refresh after a
-[flush](write-path.md#when-new-data-appears) has not reached a session, the header names the previous generation,
-because the session's visible set is still that generation's projection. A response's visible set
-is one generation's in every point shard it reads: the previous generation's projections serve only
-where every shard has one, and a response never combines one shard's previous projection with
-another's current one. Deletions, suppressions and segments are current either way. An echoed pin
-buys one comparison against the generation the response was answered from, reported as a flag on
-the response, `x-mosaica-stale`.
-
-## Serving other map stacks
-
-Most mapping tools outside Mosaica address a map by tile rather than by viewport: they ask for one
-square at a time, identified by its zoom level and its position, and expect each square to answer
-on its own. MapLibre, OpenLayers and QGIS all work this way, and none of them speaks the viewport
-request directly.
-
-**Not built yet:** a route that accepts a tile address. An integrator wiring one of these tools to
-Mosaica today writes an adapter that turns each tile request into its own viewport request, one
-evaluation per tile, rather than the single evaluation a native viewport request would do for the
-same area.
+A client saves work by leaving out the tiles it already holds. The server does nothing for a tile a request does not name.
 
 ## Health and readiness
 
-Two routes answer with no body and no credential required, so a load balancer or an orchestrator
-can probe them directly: `/healthz`, which reports that the process is running and nothing more,
-and `/readyz`, which reports whether the server should currently receive ordinary requests. Both
-answer on the same two listeners a viewer or a session request reaches, not on the administrative
-one, which already requires a credential on every call and gains nothing from an anonymous probe.
+The viewer and session addresses answer `/healthz` and `/readyz`, with no credential. `/healthz` says the process is answering. `/readyz` says whether to send it traffic: it fails when the part of the server that takes writes is not running normally, or when the server has opened an older state of the data because the newest failed its checks.
 
-A node is ready when its write side is running normally and no partition it holds has fallen
-behind its own record of what it should be serving. The write side reports one of four states:
+A server that is not ready still applies deletions and suppressions. Stop sending it ordinary requests, but keep sending it those, and do not restart it because a probe failed: a deletion that was applied but could not be written to the log is lost at a restart, and the item comes back. A disc that hangs on a write, rather than failing it, leaves `/readyz` reporting ready. The [operating guide](../guides/operating.md#health-and-readiness) covers the checks.
 
-| State | What it means | Ready |
-|---|---|---|
-| not started | the write side has not begun | no |
-| running | accepting and applying ingest and denies normally | yes |
-| write-ahead log failed | durability could not be confirmed for new writes, but denies already accepted keep being applied to what the server holds | no |
-| stopped | the write side has stopped entirely | no |
+## Not built yet
 
-An executor stuck inside a disk write that never returns, a stalled mount or a stuck device, keeps
-reporting as running. `/readyz` then answers 200 while every deny that should be applying is
-blocked behind it. The probe cannot see the difference between healthy and stalled.
-
-A node reporting a failed write-ahead log keeps hiding items even though it reports not ready for
-ordinary requests. An operator routing traffic away from a not-ready node must keep sending it
-operations that hide items regardless, because a hidden item cannot wait for a repair. A red probe
-means stop routing ordinary requests to the node, never restart it. Replay does not reinstate a
-deny that was applied but never made durable, so restarting in response to a red probe can bring a
-hidden item back into view.
-
-## What is not built
-
-No replica of any kind exists. What a session has cached and how fresh an answer is are properties
-of the one process holding the corpus.
-
-## Where this is tested and where it lives
-
-The framed response, and the split between computing counts and streaming points, live in
-`mosaica-engine`'s `viewport` module; the frame encoding itself is in `mosaica-wire`. A session's
-kept authorised set and row arrangement, the background pass that keeps them current, and the
-wait-rather-than-refuse behaviour for a request racing a build already in progress live in
-`mosaica-engine`'s `cache` and `refresh` modules and in the `mosaica-cache` crate. Admission, the
-streaming transport and its deadlines, and the health and readiness routes live in
-`mosaica-server`, in its `state`, `stream`, `viewer` and `health` modules. The artifacts of each
-tile are walked in `mosaica-engine`'s `viewport::tiled` module and streamed by `mosaica-server`'s
-`artifact_tiles` module. A level's figures, their cache and the files they are written to live in
-`mosaica-engine`'s `figures` module, and the member bitmaps and coverings in `mosaica-store`'s
-`row_members` module. A bulk read's pages,
-stretches and cursors live in `mosaica-engine`'s `records` module, and its admission and streaming
-in `mosaica-server`'s `records` module.
+- **A route for tile-based map tools.** MapLibre, OpenLayers and QGIS ask for one tile at a time. An adapter can turn each tile into a map request of its own, at the cost of one evaluation per tile instead of one for the whole screen.
+- **Replicas.** A deployment is one server.
+- **Keeping a filter's result between requests.** Panning or zooming with a filter applied evaluates it again on each request.
+- **Telling the server what a client already holds.** A client can leave out whole tiles, but cannot say which points of a tile it has. Every tile it names is answered in full.
