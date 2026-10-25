@@ -23,6 +23,11 @@ the directory's life, and the system releases the lock however the process ends.
 removes every temporary directory beside the one it makes whose lock it can take, its owner
 having gone. Only a directory named `mosaica-*` holding that lock file is a candidate.
 
+A process forked from this one, as multiprocessing's fork start method forks it, would hold the
+pipes and locks open after this process ends. The child's copies are pointed at the null device as
+it starts, and the child forgets this process's servers and directories, so its own exit handler
+leaves them alone.
+
 The child runs in a session of its own (a process group of its own on Windows). A kernel's signal
 to its own process group, and a Jupyter kernel's wait at shutdown for the children in its group to
 end, then do not reach it; the pipe stops it instead.
@@ -134,6 +139,35 @@ def sweep(parent: Path | None) -> None:
         os.close(descriptor)
         if taken:
             shutil.rmtree(directory, ignore_errors=True)
+
+
+def _forget_in_a_forked_child() -> None:
+    """In a process forked from this one: point its copies of the servers' standard input pipes
+    and of the lock files at the null device, so this process's end still closes the pipes and
+    frees the locks, and forget them, so the child's exit handler stops and removes nothing.
+    Only `os` calls, which take no lock another thread may have held at the fork."""
+    null = os.open(os.devnull, os.O_RDWR)
+    try:
+        for child in list(_running.values()):
+            if child.stdin is not None:
+                try:
+                    os.dup2(null, child.stdin.fileno())
+                except (OSError, ValueError):
+                    pass
+        for descriptor in list(_locks.values()):
+            try:
+                os.dup2(null, descriptor)
+            except OSError:
+                pass
+    finally:
+        os.close(null)
+    _running.clear()
+    temporary.clear()
+    _locks.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_in_a_forked_child)
 
 
 class Held:

@@ -307,6 +307,28 @@ def test_a_temporary_database_is_removed_however_its_process_ends(how, tmp_path,
             process.kill()
 
 
+def test_a_forked_child_keeps_neither_the_server_nor_the_directory(tmp_path, monkeypatch):
+    """A child forked after the server started inherits the pipe to its standard input and the
+    directory's lock, and lets both go as it starts."""
+    from conftest import binary
+
+    binary()
+    where = tmp_path / "shm"
+    where.mkdir()
+    process, left = ended("fork", where)
+    try:
+        process.wait(timeout=30)
+        assert left["forked"] and os.kill(left["forked"], 0) is None, "the child is alive"
+        assert stopped(left["pid"]), process.stderr.read()
+        assert swept(where, left, monkeypatch)
+    finally:
+        if left.get("forked"):
+            try:
+                os.kill(left["forked"], signal.SIGKILL)
+            except OSError:
+                pass
+
+
 def test_the_sweep_removes_only_directories_whose_owner_has_gone(tmp_path, monkeypatch):
     import mosaica
     from mosaica import _database, _instance
