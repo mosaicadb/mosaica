@@ -2513,7 +2513,7 @@ export function createStore(options: StoreOptions): Store {
         if (read.view !== read.current) throw new Error(`\`inView\` reads the current view '${read.current}': leave \`view\` out or set it to that.`);
         const area = countedArea();
         if (area === null) {
-          await nextArea(signal);
+          if (!disposed) await nextArea(signal);
           if (disposed) throw new DOMException('the store was disposed before the camera was set', 'AbortError');
           continue;
         }

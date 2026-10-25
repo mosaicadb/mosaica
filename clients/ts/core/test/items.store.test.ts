@@ -184,6 +184,56 @@ describe('Store.items', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('rejects an `inView` read waiting for the camera with the reason its signal aborts with, and sends nothing', async () => {
+    const {store, sent, clock} = await storeWith();
+    const abort = new AbortController();
+    const read = store.items({fields: [], inView: true}, abort.signal);
+    await clock.advance(1);
+    const reason = new Error('the reader left');
+    abort.abort(reason);
+    await expect(read).rejects.toBe(reason);
+    store.setView(camera(store.frame(), BOX, 400, 400));
+    await clock.advance(1);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('reads the selected region where one is selected while an `inView` read waits', async () => {
+    const {store, sent, clock} = await storeWith();
+    const read = store.items({fields: [], inView: true});
+    await clock.advance(1);
+    store.select({kind: 'box', bbox: BOX});
+    await read;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body.filters).toEqual(store.requestFilters());
+    expect(JSON.stringify(sent[0]!.body.filters)).toContain('region');
+  });
+
+  it('sends the token of the viewer the store serves when the camera arrives, after a change of principal', async () => {
+    let principal = 'ann';
+    const {store, sent, clock} = await storeWith({authorise: async () => ({token: `tok-${principal}`, expiresAt: (Date.now() + 3_600_000) / 1000})});
+    const at = camera(store.frame(), BOX, 400, 400);
+    const read = store.items({fields: [], inView: true});
+    await clock.advance(1);
+    principal = 'bob';
+    store.clear();
+    await clock.advance(1);
+    store.setView(at);
+    await read;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.auth).toBe('Bearer tok-bob');
+  });
+
+  it('sends the filters set while an `inView` read waits for the camera', async () => {
+    const {store, sent, clock} = await storeWith();
+    const read = store.items({fields: [], inView: true});
+    await clock.advance(1);
+    store.setFilters(CS);
+    store.setView(camera(store.frame(), BOX, 400, 400));
+    await read;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body.filters).toEqual({all_of: [store.requestFilters(), {region: {bbox: BOX}}]});
+  });
+
   it('refuses `inView` for another view than the current one at once, camera or not', async () => {
     const {store, sent, clock, scheduler} = await storeWith();
     await expect(store.items({fields: [], inView: true, view: 'other'})).rejects.toThrow();
