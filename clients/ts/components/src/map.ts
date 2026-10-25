@@ -124,7 +124,8 @@ let mapsMade = 0;
  * view and a margin round it, with coarser counts reaching further for a zoom out, and the last
  * counts are drawn at their own positions until the next land. Keys, with the map focused: the
  * arrow keys pan, `+` and `-` zoom, and Escape cancels a shape being drawn, else
- * clears the selected region, else drops the picked point or artifact and its ring. A press hides
+ * clears the selected region, else drops the picked point or artifact and its ring. A click on
+ * empty map drops them too; a selected region stays. A press hides
  * the hover tooltip until the pointer is released, and the point whose record is selected, which
  * its item card shows, has no tooltip. The canvas is one tab stop, after the toolbar
  * and before the content of the other corners: it carries `role="application"`, the `tabindex`
@@ -151,7 +152,7 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-itemopen']>} mosaica-itemopen - The selected
  *   item's record arrived, however the item was selected.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click found no point
- *   and no artifact.
+ *   and no artifact. The map has dropped the selection, as {@link MosaicaMap.clearPick} does.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved onto
  *   or over a point.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An
@@ -1338,11 +1339,16 @@ export class MosaicaMap extends MosaicaElement {
     else super.focus(options);
   }
 
-  /** Forget the last pick: the card it opened and the ring drawn round the picked point. */
+  /**
+   * Drop the selection: forget the last pick and the ring drawn round the picked point, and clear
+   * the store's selection, which closes the card it opened. A click on empty map and Escape call
+   * it. A selected region stays.
+   */
   clearPick(): void {
     this.lastPick = null;
     this.pickedAt = null;
     this.pickedId = null;
+    this.resolvedStore?.clearSelection();
     if (this.selectedWorldXY === null) return;
     this.selectedWorldXY = null;
     this.paint();
@@ -1377,8 +1383,8 @@ export class MosaicaMap extends MosaicaElement {
         const world = this.worldAt(info.x, info.y);
         const id = world ? this.artifactAt(world, null) : null;
         if (id === null) {
+          this.clearPick();
           this.lastPick = {kind: 'miss'};
-          this.pickedAt = null;
           emit(this, 'mosaica-miss', {});
           return;
         }
@@ -1662,7 +1668,6 @@ export class MosaicaMap extends MosaicaElement {
           this.select(null);
         } else if (this.pickedAt || this.selectedWorldXY) {
           this.clearPick();
-          this.resolvedStore?.clearSelection();
         }
         break;
       default:

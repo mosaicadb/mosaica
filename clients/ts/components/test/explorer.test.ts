@@ -394,8 +394,9 @@ describe('<mosaica-explorer> the item card beside its point', () => {
 
   it('closes the card that is not pinned and drops the selection on a click that finds nothing; a pinned card stays', async () => {
     const {host, shadow, store, map} = await pinnedAndLive();
-    map.pickedAt = null;
-    map.dispatchEvent(new CustomEvent('mosaica-miss', {detail: {}, bubbles: true, composed: true}));
+    const clicked = map as unknown as {worldAt: unknown; onClick(info: unknown): void};
+    clicked.worldAt = (x: number, y: number) => [x, y];
+    clicked.onClick({index: -1, x: 900, y: 500});
     await settle(host);
     expect(store.calls.filter((c) => c.name === 'clearSelection')).toHaveLength(1);
     store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});

@@ -2131,15 +2131,14 @@ export class MosaicaExplorer extends MosaicaElement {
     };
   }
 
-  /** A click on empty map closes the card that is not pinned and drops the selection; pinned cards stay. */
+  /** A click on empty map: the map has dropped the selection, so the card that is not pinned closes; pinned cards stay. */
   private onMiss(): void {
-    this.dropSelection();
+    this.requestUpdate();
   }
 
-  /** Close the selection's card: forget the map's pick and the ring round its point, and clear the store's selection. */
+  /** Close the selection's card: the map drops its pick and the store's selection. */
   private dropSelection(): void {
     this.map?.clearPick();
-    this.resolvedStore?.clearSelection();
     this.requestUpdate();
   }
 

@@ -45,7 +45,7 @@ describe('an open server', () => {
   it('serves a store built from the viewer address alone', async (ctx) => {
     live(ctx);
     const {fetch, authorised} = watching();
-    const store = createStore({viewerUrl: (served as Served).viewerUrl, prefetch: false, clientOptions: {sessionUrl: '', fetch}});
+    const store = createStore({viewerUrl: (served as Served).viewerUrl, prefetch: false, clientOptions: {fetch}});
     try {
       await until('/v1/meta', () => store.get('meta') !== null || store.get('status').status === 'refused');
       expect(store.get('status').refusal).toBeNull();

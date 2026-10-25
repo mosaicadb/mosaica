@@ -24,7 +24,7 @@ describe('MosaicaClient.suggest', () => {
       seenAuth = new Headers(init?.headers).get('authorization')!;
       return jsonResponse(200, {column: 'primary_category', q: 'mach', values: [], more: false});
     });
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     await client.suggest('tok', 'primary_category', 'mach', {limit: 5, counts: true, view: 'g:k'});
     expect(seenUrl).toBe('http://viewer/v1/categories/primary_category/suggest?q=mach&limit=5&counts=true&view=g%3Ak');
     expect(seenAuth).toBe('Bearer tok');
@@ -36,7 +36,7 @@ describe('MosaicaClient.suggest', () => {
       seenUrl = url;
       return jsonResponse(200, {column: 'a/b', q: '', values: [], more: false});
     });
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     await client.suggest('tok', 'a/b', '');
     expect(seenUrl).toBe('http://viewer/v1/categories/a%2Fb/suggest?q=');
   });
@@ -53,7 +53,7 @@ describe('MosaicaClient.suggest', () => {
         more: true
       })
     );
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     const result = await client.suggest('tok', 'primary_category', 'mach');
     expect(result).toEqual({
       status: 'ok',
@@ -79,7 +79,7 @@ describe('MosaicaClient.suggest', () => {
         {'x-mosaica-region': 'cover; depth=12'}
       );
     });
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     const filters: FilterExpr = {all_of: [{department: {in: ['d01']}}, {region: {bbox: [0, 0, 10, 10]}}]};
     const result = await client.suggest('tok', 'archive', 'a', {counts: true, view: 's0', filters});
     expect(seenUrl).toBe('http://viewer/v1/categories/archive/suggest');
@@ -102,21 +102,21 @@ describe('MosaicaClient.suggest', () => {
       'fetch',
       async () => jsonResponse(429, {error: 'backpressure', detail: 'one suggest in flight', retry_after_s: 2}, {'Retry-After': '2'})
     );
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     const result = await client.suggest('tok', 'primary_category', 'ma');
     expect(result).toEqual({status: 'shed', retryAfterS: 2, detail: 'one suggest in flight'});
   });
 
   it('falls back to the Retry-After header when a 429 body will not parse', async () => {
     vi.stubGlobal('fetch', async () => new Response('not json', {status: 429, headers: {'Retry-After': '3'}}));
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     const result = await client.suggest('tok', 'primary_category', 'ma');
     expect(result).toEqual({status: 'shed', retryAfterS: 3, detail: null});
   });
 
   it('throws MosaicaError for a real refusal, e.g. 500 fail-closed on a derived column', async () => {
     vi.stubGlobal('fetch', async () => jsonResponse(500, {error: 'fail-closed', detail: 'primary_category postings unreadable'}));
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: ''});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer'});
     await expect(client.suggest('tok', 'primary_category', 'ma')).rejects.toThrow(MosaicaError);
   });
 });

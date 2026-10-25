@@ -2,7 +2,7 @@ import {act} from 'react';
 import {StrictMode, createElement, useState, type ReactNode} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import type {Projections, Store, StoreOptions} from '@mosaicajs/client';
+import {MosaicaClient, type Projections, type Store, type StoreOptions} from '@mosaicajs/client';
 import {fakeStore} from '../../components/test/fake-store.js';
 
 /**
@@ -114,6 +114,22 @@ describe('useMosaicaStore', () => {
     expect(built).toHaveLength(2);
     expect(built[0]!.disposed).toBe(1);
     expect(built[1]!.disposed).toBe(0);
+  });
+
+  it('builds from a client with no viewer URL, and a different client is a different store', async () => {
+    const first = new MosaicaClient({viewerUrl: 'http://x'});
+    let setClient = (_: MosaicaClient) => {};
+    function Host() {
+      const [client, set] = useState(first);
+      setClient = set;
+      useMosaicaStore({client, token: 't'});
+      return null;
+    }
+    await render(createElement(Host));
+    expect(built[0]!.options.client).toBe(first);
+    await act(async () => setClient(new MosaicaClient({viewerUrl: 'http://y'})));
+    expect(built).toHaveLength(2);
+    expect(built[0]!.disposed).toBe(1);
   });
 });
 

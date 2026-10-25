@@ -16,6 +16,24 @@ The TypeScript client is four packages in `clients/ts`. Each page below lists wh
 
 Not built yet: the packages are not published to npm. The registry holds an empty placeholder, version 0.0.0, under each of the four names, so `npm install @mosaicajs/client` succeeds and installs no Mosaica code. `npm run build` in `clients/ts` builds each package into its `dist/` directory, and `npm pack` in a package's directory makes a tarball of it. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly version 0.1.0 of the Mosaica packages they import, which exists only in those tarballs, so install the tarballs together in one `npm install`. The client README in `clients/ts` gives the commands and each package's peer dependencies.
 
+## Connecting
+
+`createStore` takes the viewer server's base URL as `viewerUrl`, or a `MosaicaClient` as `client`, whose URL it then uses. `MosaicaClient` takes `viewerUrl` for the viewer routes and `sessionUrl` for the session routes. A page that is handed a token uses only the viewer routes and can leave `sessionUrl` out; `authorise` and `revoke` reject without it.
+
+## Reading the items the map shows
+
+`store.items` reads the items this viewer may see that match what the map shows, through `POST /v1/items`. It sends the store's token, its current view and the filters the map's own requests carry: the filter controls, the `member_of` clauses, inside or outside an artifact, and the selected region. `inView: true` narrows the read to the area the counts in view cover, which is the selected region where one is selected and the camera's box where none is. The caller names the `fields`, the `order` and the rows per page. `filters` and `view` may be given to read something else, and `filters: null` reads every item the viewer may see.
+
+It returns the client's `RecordsRead`. Each `next()` gives one page as an Arrow table, and the read takes from the server only as pages are asked for, so a page can show the first rows and read on when the reader asks:
+
+```ts
+const read = await store.items({fields: ['name', 'country'], pageRows: 25, count: true, inView: true});
+const first = await read.next();   // read.head.matched counts every match
+const second = await read.next();  // the next 25, read from the cursor
+```
+
+The filters are those in force when `items` is called. A read already open does not follow a later change of filters, so a page that lists matches reads again after one.
+
 ## When the server is busy
 
 A Mosaica server too busy to take a request answers `429 backpressure` with a `Retry-After` header, the number of seconds to wait before sending the same request again. What each part of `@mosaicajs/client` does with it:

@@ -26,6 +26,7 @@ export type {
   SelectionProjection,
   SelectionShape,
   StatusProjection,
+  StoreItemsRequest,
   StoreOptions,
   TilesProjection,
   TokenSupplier,

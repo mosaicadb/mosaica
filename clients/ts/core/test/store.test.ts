@@ -2938,7 +2938,7 @@ describe('a store closes only the client it built', () => {
   const points = (store: Store) => store.get('marks').bands.reduce((n, band) => n + band.ids.length, 0);
 
   it('leaves a shared client open when one of its stores is replaced mid-decode, and the other store draws', async () => {
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: '', fetch});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer', fetch});
     const other = await drawing({client});
     const replaced = await drawing({client});
     expect(workers.length).toBeGreaterThan(0);
@@ -2962,7 +2962,7 @@ describe('a store closes only the client it built', () => {
   });
 
   it('closes the client it built, with a decode in flight, and leaves no unhandled rejection', async () => {
-    const {store, clock} = await drawing({clientOptions: {sessionUrl: '', fetch}});
+    const {store, clock} = await drawing({clientOptions: {fetch}});
     expect(workers.length).toBeGreaterThan(0);
     store.dispose();
     await clock.advance(1_000);
@@ -2972,7 +2972,7 @@ describe('a store closes only the client it built', () => {
   });
 
   it('leaves a passed client usable once the store that used it is disposed', async () => {
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: '', fetch});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer', fetch});
     const {store} = await drawing({client});
     const asked = client.viewport('tok', {view: 's0', zoom: 0, k: 100});
     await settle();

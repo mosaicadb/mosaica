@@ -28,14 +28,14 @@ describe('Store.basemapWorld', () => {
     }) as typeof globalThis.fetch;
     const store = (token: string) => {
       s.sessions.add(token);
-      return createStore({viewerUrl: url, token, clientOptions: {sessionUrl: '', fetch}, clock: fakeClock(), prefetch: false});
+      return createStore({viewerUrl: url, token, clientOptions: {fetch}, clock: fakeClock(), prefetch: false});
     };
     const authorise = vi.fn(async () => {
       const token = `t${++s.issued}`;
       s.sessions.add(token);
       return {token, expiresAt: Date.now() / 1000 + 3600};
     });
-    const authorised = () => createStore({viewerUrl: url, authorise, clientOptions: {sessionUrl: '', fetch}, clock: fakeClock(), prefetch: false});
+    const authorised = () => createStore({viewerUrl: url, authorise, clientOptions: {fetch}, clock: fakeClock(), prefetch: false});
     return {s, store, authorised, authorise, world: () => s.asked.filter((a) => a.startsWith('/v1/basemaps/world'))};
   }
 
@@ -87,7 +87,7 @@ describe('Store.basemapWorld', () => {
         srv.s.sessions.add('late');
         return {token: 'late', expiresAt: Date.now() / 1000 + 3600};
       },
-      clientOptions: {sessionUrl: '', fetch: (async () => new Response('{}', {status: 500})) as typeof globalThis.fetch},
+      clientOptions: {fetch: (async () => new Response('{}', {status: 500})) as typeof globalThis.fetch},
       clock: fakeClock(),
       prefetch: false
     });

@@ -239,8 +239,12 @@ export type MosaicaClientOptions = {
    * each request to `/v1/...` on the page's own origin.
    */
   viewerUrl: string;
-  /** The session listener's base URL. Routes under `/session/` are appended to it, after any trailing slash is dropped. */
-  sessionUrl: string;
+  /**
+   * The session listener's base URL. Routes under `/session/` are appended to it, after any
+   * trailing slash is dropped. Only `authorise` and `revoke` use it, and each throws where it is
+   * unset; a page that holds a token already can leave it out.
+   */
+  sessionUrl?: string;
   /**
    * The bearer token `authorise` and `revoke` send; no other method uses it. It is an API key whose
    * principal holds `authorise-as`, or the operator credential, which alone may name a session's
@@ -320,7 +324,14 @@ export class MosaicaClient {
   private readonly opts: MosaicaClientOptions;
 
   constructor(opts: MosaicaClientOptions) {
-    this.opts = {...opts, viewerUrl: opts.viewerUrl.replace(/\/+$/, ''), sessionUrl: opts.sessionUrl.replace(/\/+$/, '')};
+    this.opts = {...opts, viewerUrl: opts.viewerUrl.replace(/\/+$/, ''), sessionUrl: opts.sessionUrl?.replace(/\/+$/, '')};
+  }
+
+  /** The session listener's base URL, or a refusal naming the option where it is unset. */
+  private sessionBase(method: string): string {
+    const url = this.opts.sessionUrl;
+    if (url === undefined) throw new Error(`${method} needs the session listener's base URL: pass \`sessionUrl\` to the MosaicaClient.`);
+    return url;
   }
 
   /**
@@ -402,7 +413,8 @@ export class MosaicaClient {
    * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
    *   accept, `403` where the key's principal does not hold `authorise-as`, the target does not
    *   hold `read`, or a key names `terms`, `404` where `principal` names no enabled principal,
-   *   `422` for an access token it does not accept, `429` under load, with the wait in `retryAfterS`.
+   *   `422` for an access token it does not accept, `429` under load, with the wait in `retryAfterS`;
+   *   `Error` where the client was built without `sessionUrl`.
    */
   async authorise(target: AuthoriseTarget, signal?: AbortSignal): Promise<Session> {
     const credential = this.opts.sessionCredential;
@@ -414,7 +426,7 @@ export class MosaicaClient {
           : 'readAll' in target
             ? {read_all: true}
             : {access_token: target.accessToken};
-    const response = await this.send(`${this.opts.sessionUrl}/session/authorise`, {
+    const response = await this.send(`${this.sessionBase('authorise')}/session/authorise`, {
       method: 'POST',
       headers: {...bearer(credential), 'content-type': 'application/json'},
       body: JSON.stringify(body),
@@ -432,11 +444,11 @@ export class MosaicaClient {
    *
    * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
    *   accept, `403` where the key's principal does not hold `authorise-as`, `422` for a malformed
-   *   request.
+   *   request; `Error` where the client was built without `sessionUrl`.
    */
   async revoke(tokenId: number, signal?: AbortSignal): Promise<void> {
     const credential = this.opts.sessionCredential;
-    const response = await this.send(`${this.opts.sessionUrl}/session/revoke`, {
+    const response = await this.send(`${this.sessionBase('revoke')}/session/revoke`, {
       method: 'POST',
       headers: {...bearer(credential), 'content-type': 'application/json'},
       body: JSON.stringify({token_id: tokenId}),

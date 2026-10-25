@@ -22,7 +22,7 @@ describe('a store with no token', () => {
       }
       return new Response(META, {headers: {'content-type': 'application/json'}});
     }) as typeof globalThis.fetch;
-    const store = createStore({viewerUrl: 'http://open', clientOptions: {sessionUrl: '', fetch}, clock: fakeClock(), prefetch: false});
+    const store = createStore({viewerUrl: 'http://open', clientOptions: {fetch}, clock: fakeClock(), prefetch: false});
     return {store, sent};
   }
 

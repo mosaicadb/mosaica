@@ -68,8 +68,8 @@ describe('a decoder passed to a client', () => {
 
   it('stays open when a client sharing it is closed, and the decodes in flight on it finish', async () => {
     const decoder = workerDecoder()!;
-    const one = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: '', fetch, decoder});
-    const two = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: '', fetch, decoder});
+    const one = new MosaicaClient({viewerUrl: 'http://viewer', fetch, decoder});
+    const two = new MosaicaClient({viewerUrl: 'http://viewer', fetch, decoder});
     const ask = (client: MosaicaClient) => client.viewport('tok', {view: 's0', zoom: 0, k: 100});
     const asked = [ask(one), ask(two)];
     await settle();

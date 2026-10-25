@@ -21,11 +21,12 @@ export type UseMosaicaStoreOptions = Omit<StoreOptions, 'authorise'> & {
 
 /**
  * Creates a store with {@link createStore} for the component's lifetime, and disposes of it on
- * unmount. The store is rebuilt when `viewerUrl`, `token` or `view` changes, or when `authorise` is
- * given or removed. A change to any other option takes effect at the next rebuild.
+ * unmount. The store is rebuilt when `viewerUrl`, `client`, `token` or `view` changes, or when
+ * `authorise` is given or removed. A change to any other option takes effect at the next rebuild.
+ * With a `client`, `viewerUrl` may be left out, as `createStore` allows.
  *
- * The store is built in an effect, so the first render returns `null`. Options with none of
- * `token`, `authorise` or `client` throw from that effect, as `createStore` does.
+ * The store is built in an effect, so the first render returns `null`. Options `createStore`
+ * refuses, such as neither `viewerUrl` nor `client`, throw from that effect.
  */
 export function useMosaicaStore(options: UseMosaicaStoreOptions): Store | null {
   const [store, setStore] = useState<Store | null>(null);
@@ -33,7 +34,7 @@ export function useMosaicaStore(options: UseMosaicaStoreOptions): Store | null {
   useLayoutEffect(() => {
     latest.current = options;
   });
-  const {viewerUrl, token, view} = options;
+  const {viewerUrl, client, token, view} = options;
   const hasAuthorise = options.authorise !== undefined;
   useEffect(() => {
     const opts = latest.current;
@@ -46,7 +47,7 @@ export function useMosaicaStore(options: UseMosaicaStoreOptions): Store | null {
       built.dispose();
       setStore((current) => (current === built ? null : current));
     };
-  }, [viewerUrl, token, view, hasAuthorise]);
+  }, [viewerUrl, client, token, view, hasAuthorise]);
   return store;
 }
 

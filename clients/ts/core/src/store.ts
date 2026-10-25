@@ -22,6 +22,7 @@ import {rectContainsTile} from './rects.js';
 import {Presenter, defaultFrameScheduler, isUnanswered, refusalOf, type FrameScheduler, type Presented, type PresentedStatus, type Refusal} from './presented.js';
 import {insideBox, regionOperand, withRegion} from './region.js';
 import type {RegionOperand} from './types.js';
+import type {RecordsRead} from './records.js';
 import {DEFAULT_CACHE_BYTES, Replica, type ReplicaOptions} from './replica.js';
 import {SelectedRegion, type RegionProjection, type SelectionShape} from './selectedRegion.js';
 import {Suggestions, type SuggestState} from './suggestions.js';
@@ -36,6 +37,8 @@ import type {
   FilterExpr,
   Grouping,
   ItemDetail,
+  ItemsHead,
+  ItemsRequest,
   Meta,
   Quantisation,
   Shape,
@@ -103,9 +106,10 @@ export type ViewInput = {
 export type StoreOptions = {
   /**
    * The viewer server's base URL, joined to each route as {@link MosaicaClientOptions.viewerUrl}
-   * says: an empty string is the page's own origin. Unused where `client` is given.
+   * says: an empty string is the page's own origin. Required unless `client` is given, whose own
+   * URL is used in its place.
    */
-  viewerUrl: string;
+  viewerUrl?: string;
   /**
    * A viewer token used for every request and never renewed. Where `token` and `authorise` are both
    * given, `token` is used and `authorise` is never called.
@@ -185,7 +189,7 @@ export type StoreOptions = {
   client?: MosaicaClient;
   /**
    * Options for the client the store builds, such as `headers`, `fetch` or `decoder`. Ignored where
-   * `client` is given. The store calls no session route, so `sessionUrl` may be `''`.
+   * `client` is given.
    */
   clientOptions?: Omit<MosaicaClientOptions, 'viewerUrl'>;
   /** Measurements the projections do not carry, for a demo's instrument panels. @internal */
@@ -533,6 +537,28 @@ export type ReplicaProjection = {
 type Listener = () => void;
 
 /**
+ * What {@link Store.items} reads: an {@link ItemsRequest} whose `view` and `filters` default to the
+ * store's, with `inView` to read only the area in view.
+ *
+ * @category Store
+ */
+export type StoreItemsRequest = Omit<ItemsRequest, 'view' | 'filters'> & {
+  /** The view to read. Defaults to the current view. */
+  view?: string;
+  /**
+   * Defaults to {@link Store.requestFilters}, so the read returns the items the map counts as
+   * matching. `null` reads every item this viewer may see.
+   */
+  filters?: FilterExpr | null;
+  /**
+   * Read only the area the counts in view cover: the selected region where one is selected, and
+   * the camera's box where none is, as the store's `inView` counts take it. Only for the current
+   * view, once the camera has been set.
+   */
+  inView?: boolean;
+};
+
+/**
  * The headless store {@link createStore} returns. The host tells it where the camera looks, what to
  * filter and which layers to draw. The store fetches, caches and composes frames on its own
  * schedule and publishes what to draw as {@link Projections}. It holds no camera and draws nothing.
@@ -540,6 +566,10 @@ type Listener = () => void;
  *
  * A store serves one viewer. To show the map to another viewer, call {@link Store.clear} or create
  * a new store.
+ *
+ * Besides its projections, the store reads on request through its own token, view and filters:
+ * {@link Store.browse} a layer's hierarchy and {@link Store.items} the matching items. Each reads
+ * only what this viewer may see.
  *
  * Behind that rule the store checks each viewport answer's identity key, as far as answers allow.
  * The server derives the key from the terms the session's principal held when it was minted, the
@@ -630,6 +660,30 @@ export interface Store {
    *   layer, or where the store's read of `/v1/meta` was refused.
    */
   browse(req: Omit<BrowseRequest, 'filters' | 'view'> & {filters?: FilterExpr | null; view?: string}): Promise<BrowsePage>;
+  /**
+   * The items this viewer may see that match the store's filters (`POST /v1/items`), with the
+   * caller's `fields`, `order` and page size. It is {@link MosaicaClient.items} sent with the
+   * store's token, and resolves when the first response's head arrives. Iterate the result for each
+   * page as an Arrow table; the read follows the server's cursor page after page, and stops when
+   * the caller does. To show the first 50 and page on:
+   *
+   * ```ts
+   * const read = await store.items({fields: ['title'], pageRows: 50, count: true, inView: true});
+   * const first = await read.next(); // read.head.matched counts them all
+   * const second = await read.next(); // when the reader asks for more
+   * ```
+   *
+   * The filters are taken when it is called; a later `setFilters` does not change a read already
+   * open. Waits for `/v1/meta`.
+   *
+   * @param req - The read. `view` defaults to the current view and `filters` to
+   *   {@link Store.requestFilters}; see {@link StoreItemsRequest}.
+   * @param signal - Aborts the read.
+   * @throws {@link MosaicaError} where the server refuses the first request, as
+   *   {@link MosaicaClient.items} says, or where the store's read of `/v1/meta` was refused;
+   *   `Error` for `inView` before the camera is set or with another view than the current one.
+   */
+  items(req: StoreItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>>;
   /**
    * The `filters` expression every request carries: the filter-position controls, the `member_of`
    * clauses in that position and the selected region's leaf, joined by `all_of`. `null` where none
@@ -981,6 +1035,7 @@ const NO_STATUS: StatusProjection = {
  * publishes `status` as `refused`, and is tried again by the next call that waits for `/v1/meta`
  * and whenever `authorise` supplies a token.
  *
+ * @throws `Error` where `options` gives neither `viewerUrl` nor `client`.
  * @category Store
  */
 export function createStore(options: StoreOptions): Store {
@@ -994,9 +1049,9 @@ export function createStore(options: StoreOptions): Store {
     } as Clock);
 
   const ownsClient = !options.client;
+  if (ownsClient && options.viewerUrl === undefined) throw new Error('createStore needs `viewerUrl`, or a `client` to send requests through.');
   const client =
-    options.client ??
-    new MosaicaClient({viewerUrl: options.viewerUrl, sessionUrl: '', ...options.clientOptions, fetch: watched(options.clientOptions?.fetch)});
+    options.client ?? new MosaicaClient({viewerUrl: options.viewerUrl!, ...options.clientOptions, fetch: watched(options.clientOptions?.fetch)});
 
   const table = new SessionArtifactTable();
 
@@ -2410,6 +2465,21 @@ export function createStore(options: StoreOptions): Store {
     return client.browse(asked.token, {...req, view: req.view ?? asked.view, filters});
   }
 
+  async function items(req: StoreItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>> {
+    const asked = await viewed();
+    const {inView, filters: given, view: named, ...rest} = req;
+    const view = named ?? asked.view;
+    let filters = 'filters' in req ? (given ?? null) : requestFilters();
+    if (inView) {
+      if (view !== asked.view) throw new Error(`\`inView\` reads the current view '${asked.view}': leave \`view\` out or set it to that.`);
+      const area = countedArea();
+      if (area === null) throw new Error('`inView` reads the area the camera shows: call setView before reading it.');
+      // A caller's own filters do not carry the selected region, so its leaf is joined to them.
+      filters = 'filters' in req ? withRegion(filters, area.operand, area.outside) : withArea(filters, area);
+    }
+    return client.items(asked.token, {...rest, view, ...(filters === null ? {} : {filters})}, signal);
+  }
+
   function setMembers(clauses: readonly MemberClause[]): void {
     const members = [...clauses];
     replaceProjection('filters', {...projections.filters, members});
@@ -2687,6 +2757,7 @@ export function createStore(options: StoreOptions): Store {
     },
     setView,
     browse,
+    items,
     requestFilters,
     setAggregate,
     setFilters,
@@ -2722,7 +2793,7 @@ export function createStore(options: StoreOptions): Store {
     extentOf,
     dataXY,
     async basemapWorld() {
-      const server = options.client ?? serverOf(options.viewerUrl);
+      const server = options.client ?? serverOf(options.viewerUrl!);
       const shared = worldOutlines.get(server);
       if (shared) {
         try {

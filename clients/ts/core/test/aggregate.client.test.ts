@@ -303,7 +303,7 @@ describe('MosaicaClient.aggregate', () => {
   it('stops at an abort of its signal, mid-body', async () => {
     const controller = new AbortController();
     const body = manual(controller.signal);
-    const client = new MosaicaClient({viewerUrl: 'http://viewer', sessionUrl: '', fetch: (async () => body.response) as typeof fetch});
+    const client = new MosaicaClient({viewerUrl: 'http://viewer', fetch: (async () => body.response) as typeof fetch});
     const read = client.aggregate('tok', REQUEST, controller.signal);
     const whole = TWO['']();
     body.push(new Uint8Array(await whole.arrayBuffer()).slice(0, 30));

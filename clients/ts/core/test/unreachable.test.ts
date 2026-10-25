@@ -38,7 +38,7 @@ describe('a server that goes away and comes back', () => {
     const srv = server();
     const clock = fakeClock();
     const scheduler = fakeScheduler();
-    const store = createStore({viewerUrl: 'http://viewer', authorise: srv.authorise, clientOptions: {sessionUrl: '', fetch: srv.fetch}, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}});
+    const store = createStore({viewerUrl: 'http://viewer', authorise: srv.authorise, clientOptions: {fetch: srv.fetch}, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}});
     await clock.advance(1);
     store.setView(camera({xMin: 0, xMax: 1000, yMin: 0, yMax: 1000}, [0, 0, 1000, 1000], 400, 400));
     await clock.advance(600);
@@ -100,7 +100,7 @@ describe('a server that goes away and comes back', () => {
     const srv = server();
     srv.s.up = false;
     const clock = fakeClock();
-    const store = createStore({viewerUrl: 'http://viewer', authorise: srv.authorise, clientOptions: {sessionUrl: '', fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
+    const store = createStore({viewerUrl: 'http://viewer', authorise: srv.authorise, clientOptions: {fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
     await clock.advance(10);
     await settle();
     expect(store.get('status').unreachable).toBe(true);
@@ -120,7 +120,7 @@ describe('a server that goes away and comes back', () => {
       throw new Error('principal "eve" is not known');
     });
     const clock = fakeClock();
-    const store = createStore({viewerUrl: 'http://viewer', authorise, clientOptions: {sessionUrl: '', fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
+    const store = createStore({viewerUrl: 'http://viewer', authorise, clientOptions: {fetch: srv.fetch}, clock, scheduler: fakeScheduler(), prefetch: false});
     for (let i = 0; i < 120; i++) {
       await clock.advance(1_000);
       await settle();

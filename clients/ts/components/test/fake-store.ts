@@ -193,6 +193,10 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
       store.set('artifacts', {...projections.artifacts, overrides: new Map([...colours].filter(([, ids]) => ids.size > 0))});
     },
     select: spy('select'),
+    items: async (...args: unknown[]) => {
+      calls.push({name: 'items', args});
+      throw new Error('the fake store reads no items');
+    },
     extentOf: () => null,
     basemapWorld: async () => {
       calls.push({name: 'basemapWorld', args: []});
