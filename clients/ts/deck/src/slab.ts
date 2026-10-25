@@ -170,8 +170,11 @@ class Partition {
     this.membershipLayer = membershipLayer;
 
     // Three cases per band: already written, a refetch that fits its old slot, or new space needed.
+    // A band of no points needs a slot like any other, so the bands placed are counted apart from
+    // the marks appended.
     let wanted = 0;
     let appending = 0;
+    let placing = 0;
     let stale = 0;
     const rewrite: Band[] = [];
     for (const band of bands) {
@@ -183,6 +186,7 @@ class Partition {
         continue;
       }
       appending += band.ids.length;
+      placing += 1;
       if (slot) stale += slot.length;
     }
     this.frameMarks = wanted;
@@ -200,7 +204,7 @@ class Partition {
       this.flushGpu();
       return this.publish(true, true, true, true, true);
     }
-    if (appending === 0 && rewrite.length === 0 && !recolour && !reordinal && !resize) return this.draw;
+    if (placing === 0 && rewrite.length === 0 && !recolour && !reordinal && !resize) return this.draw;
 
     if (recolour) {
       // Every resident band, since a band outside the frame is still drawn.
@@ -230,7 +234,7 @@ class Partition {
     }
     this.flushGpu();
     const moved = appending > 0 || rewrite.length > 0;
-    return this.publish(moved, moved, true, moved || reordinal, moved || resize);
+    return this.publish(moved, moved, moved || recolour, moved || reordinal, moved || resize);
   }
 
   private rebuild(bands: readonly Band[], encoding: Encoding, colourBy: string | null): void {

@@ -116,6 +116,19 @@ describe('MarkSlab', () => {
     expect(slab.drawn).toBe(200_005);
   });
 
+  it('holds a tile served with no marks that arrives with nothing else new', () => {
+    const slab = new MarkSlab();
+    const a = band(1, 3);
+    const first = slab.sync([a], 2, UNIFORM_ENCODING, null);
+
+    const empty = band(2, 0);
+    const next = slab.sync([a, empty], 2, UNIFORM_ENCODING, null);
+    expect(slab.holds(empty)).toBe(true);
+    // Nothing to draw was added, so nothing is uploaded.
+    expect(next).toBe(first);
+    expect(slab.drawn).toBe(3);
+  });
+
   it('keeps what it draws within the mark budget: past it, marks that left the frame are dropped', () => {
     const slab = new MarkSlab();
     const a = band(1, 150_000);
