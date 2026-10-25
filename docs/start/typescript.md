@@ -62,11 +62,11 @@ Mosaica reads its settings from `mosaica.toml`. This one says:
 --8<-- "clients/ts/examples/getting-started/mosaica/mosaica.toml"
 ```
 
-`[bundle]` names the bundle, Mosaica's own copy of the data, arranged so that any part of the map can be read quickly. `[serve]` gives the address the page will read the map from, port 9141 on this machine.
+`[bundle]` names the bundle, the database's own copy of the data, arranged so that any part of the map can be read quickly. `[serve]` gives the address the page will read the map from, port 9141 on this machine.
 
-`open = true` lets anything on this machine read and change the data without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token, which decides what that person sees. A later tutorial covers tokens.
+`open = true` lets anything on this machine read and change the data without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token, which decides what that person sees. [Call Mosaica from a backend](../guides/backend.md) shows how your server gets one for each user.
 
-Now build the bundle. The repository's sample comes with a declaration, `schema.toml`, which tells Mosaica what each column of the data means. `name` is text to search, for instance, and `feature_class` and `country` are categories. `--config` points the build at it.
+Now create the database and load the sample into it. The repository's sample comes with a schema, `schema.toml`, which tells Mosaica what each column of the data means. `name` is text to search, for instance, and `feature_class` and `country` are categories. `--config` points the build at it.
 
 ```bash
 mosaica build --config ~/mosaica/examples/data/geonames/schema.toml
@@ -167,11 +167,11 @@ npm run dev
   ➜  Network: use --host to expose
 ```
 
-Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm, drawn over the outlines of the countries. The strip at the bottom right counts them. The panel on the left is headed GeoNames, the title the declaration gives this map, and under the counts it has an "Add field" button and nothing else yet.
+Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm, drawn over the outlines of the countries. The strip at the bottom right counts them. The panel on the left is headed GeoNames, the title the schema gives this map, and under the counts it has an "Add field" button and nothing else yet.
 
 Vite copies the browser's console to the terminal, so you'll see `Lit is in dev mode` there each time the page loads. Lit says that about any page served by a development server, and it goes away in a production build.
 
-The explorer asked Mosaica what the data holds, and the answer lists every field with its kind. The page itself says nothing about the data. Press "Add field" and choose Name. `name` is text that the declaration marks for search, so its card is a search box. Type `San` into it. The search applies as you type. The map keeps the 1,310 places with the word San in their name.
+The explorer asked Mosaica what the data holds, and the answer lists every field with its kind. The page itself says nothing about the data. Press "Add field" and choose Name. `name` is text that the schema marks for search, so its card is a search box. Type `San` into it. The search applies as you type. The map keeps the 1,310 places with the word San in their name.
 
 Now add Feature class and Country the same way. They're categories, so their cards list the values with a count for each, and the counts are of the places that match. Mexico has the most places called San, then Italy, the United States and the Philippines.
 
@@ -221,6 +221,10 @@ Save, and the map sits between the header and the column, as wide as the window 
 
 A page of your own with 150,000 places on a map, which you can search, filter and colour. Nearly all of it came from one element. The explorer learnt the fields from Mosaica and built a card for each, and your attributes chose which cards it starts with, how it colours the places and what it says about each one.
 
-The finished project is in the clone, in `clients/ts/examples/getting-started/`: the same two directories, `mosaica` and `web`, with the same files. The [components reference](../reference/components.md) lists every element, attribute and event.
+The finished project is in the clone, in `clients/ts/examples/getting-started/`: the same two directories, `mosaica` and `web`, with the same files.
 
-The next tutorial builds your own interface around the map: a panel that shows the place someone clicks, and controls of your own that filter and colour it.
+## Next
+
+- The [components reference](../reference/components.md) lists every element, attribute and event, including the map and panels you can use without the explorer.
+- [Maps in the browser](../system/browser-maps.md) explains what the elements are built on, for when you want your own panels or your own deck.gl scene.
+- [Call Mosaica from a backend](../guides/backend.md) sets up users and tokens, for a server that more than one person uses.
