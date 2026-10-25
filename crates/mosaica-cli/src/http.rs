@@ -14,12 +14,12 @@ use clap::Args;
 use serde_json::Value;
 
 /// How long the identity verbs wait for an answer.
-const IDENTITY_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const IDENTITY_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long a write waits for an answer: the clients' figure, since a write may wait on the log's
 /// fsync behind a busy executor, and one sent with `?wait=visible` for
 /// `serve.visible_wait_max_secs` beside.
-const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
+pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// The longest wait between attempts after a `429`, in seconds. A longer one asked for is cut to
 /// this.
@@ -90,11 +90,19 @@ pub(crate) fn send_json(
     bearer: Option<&str>,
     body: Option<&Value>,
 ) -> Result<Answer, String> {
+    with_json(body, |body| {
+        send(target, method, path, bearer, &[], body, IDENTITY_TIMEOUT)
+    })
+}
+
+/// `send` given `body` as a JSON request body.
+fn with_json<T>(body: Option<&Value>, send: impl FnOnce(Option<Body>) -> T) -> T {
     let bytes = body.map(Value::to_string);
-    let body = bytes
-        .as_deref()
-        .map(|bytes| ("application/json", bytes.as_bytes()));
-    send(target, method, path, bearer, &[], body, IDENTITY_TIMEOUT)
+    send(
+        bytes
+            .as_deref()
+            .map(|bytes| ("application/json", bytes.as_bytes())),
+    )
 }
 
 /// One request, sent once.
@@ -337,11 +345,7 @@ pub(crate) fn env_bearer(name: &str) -> Option<String> {
 }
 
 pub(crate) fn env_secret(name: &str, what: &str) -> Result<String, String> {
-    std::env::var(name)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .map(|v| v.trim().to_owned())
-        .ok_or_else(|| format!("no {what}: set {name}"))
+    env_bearer(name).ok_or_else(|| format!("no {what}: set {name}"))
 }
 
 /// The first line of stdin, trimmed of its line ending.
@@ -373,24 +377,15 @@ impl Control {
         Plane::writer(&self.control)
     }
 
-    /// One request of an identity verb, with a JSON body or none.
+    /// One request with a JSON body or none, waiting at most `timeout` for each answer.
     pub(crate) fn call(
         &self,
         method: &str,
         path: &str,
         body: Option<Value>,
+        timeout: Duration,
     ) -> Result<Answer, String> {
-        Plane::connect(&self.control, IDENTITY_TIMEOUT)?.call(method, path, body.as_ref())
-    }
-
-    /// One write request, with a JSON body or none.
-    pub(crate) fn write(
-        &self,
-        method: &str,
-        path: &str,
-        body: Option<Value>,
-    ) -> Result<Answer, String> {
-        self.writer()?.call(method, path, body.as_ref())
+        Plane::connect(&self.control, timeout)?.call(method, path, body.as_ref())
     }
 }
 
@@ -422,11 +417,7 @@ impl Plane {
         path: &str,
         body: Option<&Value>,
     ) -> Result<Answer, String> {
-        let bytes = body.map(Value::to_string);
-        let body = bytes
-            .as_deref()
-            .map(|bytes| ("application/json", bytes.as_bytes()));
-        self.send(method, path, &[], body)
+        with_json(body, |body| self.send(method, path, &[], body))
     }
 
     /// One request, sent again with the same headers and bytes after a `429`, once the wait it

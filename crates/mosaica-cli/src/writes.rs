@@ -24,7 +24,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ProjectionMask;
 use serde_json::{json, Map, Value};
 
-use crate::http::{finish, segment, Answer, Control, Plane};
+use crate::http::{finish, segment, Answer, Control, Plane, WRITE_TIMEOUT};
 use crate::records::Output;
 
 /// The counts an ingest answer gives, summed over the pages.
@@ -364,7 +364,7 @@ pub(crate) fn declare(args: DeclareArgs) -> ExitCode {
     };
     let put = |control: &Control, path: &str, body: &BodyArg| {
         body.value()
-            .and_then(|body| control.write("PUT", path, Some(body)))
+            .and_then(|body| control.call("PUT", path, Some(body), WRITE_TIMEOUT))
     };
     let answer = match command {
         DeclareCommand::Attribute { control, body } => put(&control, "/control/attributes", &body),
@@ -392,9 +392,12 @@ pub(crate) fn declare(args: DeclareArgs) -> ExitCode {
             &body,
         ),
         DeclareCommand::Layer { control, body } => put(&control, "/control/layers", &body),
-        DeclareCommand::Shards { control, size } => {
-            control.write("PUT", "/control/shards", Some(json!({ "size": size })))
-        }
+        DeclareCommand::Shards { control, size } => control.call(
+            "PUT",
+            "/control/shards",
+            Some(json!({ "size": size })),
+            WRITE_TIMEOUT,
+        ),
     };
     finish("declare", answer)
 }
@@ -408,7 +411,7 @@ pub(crate) fn artifacts(args: ArtifactArgs, method: &str, verb: &str) -> ExitCod
     let answer = args
         .body
         .value()
-        .and_then(|body| args.control.write(method, &path, Some(body)));
+        .and_then(|body| args.control.call(method, &path, Some(body), WRITE_TIMEOUT));
     finish(verb, answer)
 }
 
@@ -418,20 +421,22 @@ pub(crate) fn drop_command(command: DropCommand) -> ExitCode {
             control,
             name,
             wait,
-        } => control.write(
+        } => control.call(
             "DELETE",
             &format!("/control/layers/{}{}", segment(&name), query(false, wait)),
             None,
+            WRITE_TIMEOUT,
         ),
         DropCommand::View {
             control,
             view,
             wait,
         } => match view.split_once(mosaica_types::view::GROUP_SEPARATOR) {
-            Some(_) => control.write(
+            Some(_) => control.call(
                 "DELETE",
                 &format!("{}{}", view_path(&view), query(false, wait)),
                 None,
+                WRITE_TIMEOUT,
             ),
             None => Err(format!(
                 "`{view}` is not a view of a view group, and only those can be dropped; name one \
@@ -444,15 +449,24 @@ pub(crate) fn drop_command(command: DropCommand) -> ExitCode {
 
 pub(crate) fn flush(args: FlushArgs) -> ExitCode {
     let path = format!("/control/flush{}", query(false, args.wait));
-    finish("flush", args.control.write("POST", &path, None))
+    finish(
+        "flush",
+        args.control.call("POST", &path, None, WRITE_TIMEOUT),
+    )
 }
 
 pub(crate) fn compact(control: Control) -> ExitCode {
-    finish("compact", control.write("POST", "/control/compact", None))
+    finish(
+        "compact",
+        control.call("POST", "/control/compact", None, WRITE_TIMEOUT),
+    )
 }
 
 pub(crate) fn status(control: Control) -> ExitCode {
-    finish("status", control.write("GET", "/control/status", None))
+    finish(
+        "status",
+        control.call("GET", "/control/status", None, WRITE_TIMEOUT),
+    )
 }
 
 /// `?strict=true` and `?wait=visible`, where asked for; the routes' defaults are the reverse.

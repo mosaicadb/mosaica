@@ -13,7 +13,10 @@ use std::process::ExitCode;
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
-use crate::http::{env_bearer, env_secret, finish, segment, send_json, stdin_secret, Control, Target};
+use crate::http::{
+    env_bearer, env_secret, finish, segment, send_json, stdin_secret, Control, Target,
+    IDENTITY_TIMEOUT,
+};
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
@@ -168,13 +171,25 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
                 AuthoriseTarget { read_all: true, .. } => json!({ "read_all": true }),
                 AuthoriseTarget { terms, .. } => json!({ "terms": terms }),
             };
-            send_json(&at, "POST", "/session/authorise", key.as_deref(), Some(&body))
+            send_json(
+                &at,
+                "POST",
+                "/session/authorise",
+                key.as_deref(),
+                Some(&body),
+            )
         })(),
         SessionCommand::Revoke { session, token_id } => (|| {
             let target = Target::parse(&session)?;
             let key = env_bearer("MOSAICA_API_KEY");
             let body = json!({ "token_id": token_id });
-            send_json(&target, "POST", "/session/revoke", key.as_deref(), Some(&body))
+            send_json(
+                &target,
+                "POST",
+                "/session/revoke",
+                key.as_deref(),
+                Some(&body),
+            )
         })(),
         SessionCommand::List {
             control,
@@ -186,7 +201,12 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
                 (None, Some(p)) => format!("?provider={}", segment(&p)),
                 (None, None) => String::new(),
             };
-            control.call("GET", &format!("/control/sessions{query}"), None)
+            control.call(
+                "GET",
+                &format!("/control/sessions{query}"),
+                None,
+                IDENTITY_TIMEOUT,
+            )
         }
         SessionCommand::End { control, which } => {
             let body = match (which.token_id, which.principal, which.provider) {
@@ -194,7 +214,12 @@ pub(crate) fn session(command: SessionCommand) -> ExitCode {
                 (None, Some(p), _) => json!({ "principal": p }),
                 (None, None, p) => json!({ "provider": p }),
             };
-            control.call("POST", "/control/sessions/end", Some(body))
+            control.call(
+                "POST",
+                "/control/sessions/end",
+                Some(body),
+                IDENTITY_TIMEOUT,
+            )
         }
     };
     finish("session", answer)
@@ -264,8 +289,12 @@ pub(crate) enum PrincipalCommand {
 pub(crate) fn principal(command: PrincipalCommand) -> ExitCode {
     let at = |name: &str| format!("/control/principals/{}", segment(name));
     let answer = match command {
-        PrincipalCommand::List { control } => control.call("GET", "/control/principals", None),
-        PrincipalCommand::Show { control, name } => control.call("GET", &at(&name), None),
+        PrincipalCommand::List { control } => {
+            control.call("GET", "/control/principals", None, IDENTITY_TIMEOUT)
+        }
+        PrincipalCommand::Show { control, name } => {
+            control.call("GET", &at(&name), None, IDENTITY_TIMEOUT)
+        }
         PrincipalCommand::Create {
             control,
             name,
@@ -274,24 +303,37 @@ pub(crate) fn principal(command: PrincipalCommand) -> ExitCode {
             "POST",
             "/control/principals",
             Some(json!({ "name": name, "kind": kind })),
+            IDENTITY_TIMEOUT,
         ),
-        PrincipalCommand::Delete { control, name } => control.call("DELETE", &at(&name), None),
-        PrincipalCommand::Disable { control, name } => {
-            control.call("PATCH", &at(&name), Some(json!({ "disabled": true })))
+        PrincipalCommand::Delete { control, name } => {
+            control.call("DELETE", &at(&name), None, IDENTITY_TIMEOUT)
         }
-        PrincipalCommand::Enable { control, name } => {
-            control.call("PATCH", &at(&name), Some(json!({ "disabled": false })))
-        }
+        PrincipalCommand::Disable { control, name } => control.call(
+            "PATCH",
+            &at(&name),
+            Some(json!({ "disabled": true })),
+            IDENTITY_TIMEOUT,
+        ),
+        PrincipalCommand::Enable { control, name } => control.call(
+            "PATCH",
+            &at(&name),
+            Some(json!({ "disabled": false })),
+            IDENTITY_TIMEOUT,
+        ),
         PrincipalCommand::SetPassword { control, name } => stdin_secret("password").and_then(|p| {
             control.call(
                 "PUT",
                 &format!("{}/password", at(&name)),
                 Some(json!({ "password": p })),
+                IDENTITY_TIMEOUT,
             )
         }),
-        PrincipalCommand::ClearPassword { control, name } => {
-            control.call("DELETE", &format!("{}/password", at(&name)), None)
-        }
+        PrincipalCommand::ClearPassword { control, name } => control.call(
+            "DELETE",
+            &format!("{}/password", at(&name)),
+            None,
+            IDENTITY_TIMEOUT,
+        ),
     };
     finish("principal", answer)
 }
@@ -335,6 +377,7 @@ pub(crate) fn key(command: KeyCommand) -> ExitCode {
             "GET",
             &format!("/control/principals/{}/keys", segment(&principal)),
             None,
+            IDENTITY_TIMEOUT,
         ),
         KeyCommand::Create {
             control,
@@ -353,11 +396,15 @@ pub(crate) fn key(command: KeyCommand) -> ExitCode {
                 "POST",
                 &format!("/control/principals/{}/keys", segment(&principal)),
                 Some(body),
+                IDENTITY_TIMEOUT,
             )
         }
-        KeyCommand::Revoke { control, prefix } => {
-            control.call("DELETE", &format!("/control/keys/{}", segment(&prefix)), None)
-        }
+        KeyCommand::Revoke { control, prefix } => control.call(
+            "DELETE",
+            &format!("/control/keys/{}", segment(&prefix)),
+            None,
+            IDENTITY_TIMEOUT,
+        ),
     };
     finish("key", answer)
 }
@@ -414,22 +461,36 @@ pub(crate) fn group(command: GroupCommand) -> ExitCode {
     let at = |name: &str| format!("/control/groups/{}", segment(name));
     let member = |g: &str, p: &str| format!("{}/members/{}", at(g), segment(p));
     let answer = match command {
-        GroupCommand::List { control } => control.call("GET", "/control/groups", None),
-        GroupCommand::Show { control, name } => control.call("GET", &at(&name), None),
-        GroupCommand::Create { control, name } => {
-            control.call("POST", "/control/groups", Some(json!({ "name": name })))
+        GroupCommand::List { control } => {
+            control.call("GET", "/control/groups", None, IDENTITY_TIMEOUT)
         }
-        GroupCommand::Delete { control, name } => control.call("DELETE", &at(&name), None),
+        GroupCommand::Show { control, name } => {
+            control.call("GET", &at(&name), None, IDENTITY_TIMEOUT)
+        }
+        GroupCommand::Create { control, name } => control.call(
+            "POST",
+            "/control/groups",
+            Some(json!({ "name": name })),
+            IDENTITY_TIMEOUT,
+        ),
+        GroupCommand::Delete { control, name } => {
+            control.call("DELETE", &at(&name), None, IDENTITY_TIMEOUT)
+        }
         GroupCommand::AddMember {
             control,
             group,
             principal,
-        } => control.call("PUT", &member(&group, &principal), None),
+        } => control.call("PUT", &member(&group, &principal), None, IDENTITY_TIMEOUT),
         GroupCommand::RemoveMember {
             control,
             group,
             principal,
-        } => control.call("DELETE", &member(&group, &principal), None),
+        } => control.call(
+            "DELETE",
+            &member(&group, &principal),
+            None,
+            IDENTITY_TIMEOUT,
+        ),
     };
     finish("group", answer)
 }
@@ -485,7 +546,11 @@ pub(crate) fn grant(args: GrantArgs, revoke: bool) -> ExitCode {
         "/control/grants"
     };
     let verb = if revoke { "revoke-grant" } else { "grant" };
-    finish(verb, args.control.call("POST", path, Some(body)))
+    finish(
+        verb,
+        args.control
+            .call("POST", path, Some(body), IDENTITY_TIMEOUT),
+    )
 }
 
 #[derive(Subcommand)]
@@ -538,8 +603,12 @@ pub(crate) enum ProviderCommand {
 pub(crate) fn provider(command: ProviderCommand) -> ExitCode {
     let at = |name: &str| format!("/control/providers/{}", segment(name));
     let answer = match command {
-        ProviderCommand::List { control } => control.call("GET", "/control/providers", None),
-        ProviderCommand::Show { control, name } => control.call("GET", &at(&name), None),
+        ProviderCommand::List { control } => {
+            control.call("GET", "/control/providers", None, IDENTITY_TIMEOUT)
+        }
+        ProviderCommand::Show { control, name } => {
+            control.call("GET", &at(&name), None, IDENTITY_TIMEOUT)
+        }
         ProviderCommand::Put {
             control,
             name,
@@ -567,9 +636,12 @@ pub(crate) fn provider(command: ProviderCommand) -> ExitCode {
                     "claim_rules": rules,
                     "role_mappings": mappings,
                 })),
+                IDENTITY_TIMEOUT,
             )
         }
-        ProviderCommand::Delete { control, name } => control.call("DELETE", &at(&name), None),
+        ProviderCommand::Delete { control, name } => {
+            control.call("DELETE", &at(&name), None, IDENTITY_TIMEOUT)
+        }
     };
     finish("provider", answer)
 }
