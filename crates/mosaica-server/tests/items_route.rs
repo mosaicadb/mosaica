@@ -325,6 +325,32 @@ async fn the_page_schema_is_the_named_fields_then_the_position_and_labels() {
     assert_eq!(marked, matched, "and marks the matching ones");
 }
 
+/// **`position` and `labels` each add their own columns**: either alone adds only its own, and
+/// neither adds none.
+#[tokio::test]
+async fn position_and_labels_each_add_only_their_own_columns() {
+    let f = fixture().await;
+    let token = token_for(&f.server, &["1"]).await;
+    let cases = [
+        (json!({ "position": true }), vec!["mosaica:x", "mosaica:y"]),
+        (json!({ "labels": true }), vec!["mosaica:labels"]),
+        (json!({ "position": false, "labels": false }), vec![]),
+        (json!({}), vec![]),
+    ];
+    for (flags, added) in cases {
+        let mut body = json!({ "view": "s0", "fields": ["archive"], "page_rows": 10, "pages": 1 });
+        for (key, value) in flags.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let read = items_ok(&f.server, &token, &body).await;
+        let schema = read.pages[0].0.schema();
+        let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+        let mut expected = vec!["mosaica_id", "archive"];
+        expected.extend(added);
+        assert_eq!(names, expected, "{body}");
+    }
+}
+
 /// **A response that finds no row carries one page of no rows** with the columns asked for,
 /// typed as a page holding rows types them, and a page end and trailer that end the read.
 #[tokio::test]

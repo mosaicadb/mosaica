@@ -215,8 +215,8 @@ the binary scan in case anything ever writes raw bytes to the log, and the decim
 that actually matches how a text logger would leak an id.
 
 **`POST /v1/items` is swept whole.** It returns rows by the thousand, so a read is taken in both
-orders with every declared field, both system fields, two pages a response and the cursor carried
-across responses to the end.
+orders with every declared field, the position and the labels, two pages a response and the
+cursor carried across responses to the end.
 Every frame is swept. A records frame's `mosaica_id` column is swept as the points batch's is, at
 its own 8-byte stride against the unfiltered target set, and its `mosaica:x` and `mosaica:y`
 columns at their own stride against the floor-filtered set, since a position at the extent origin
@@ -328,8 +328,8 @@ UNDERLAY_OFFSET = 2
 # per-element-aligned entity-id scan of `mosaica_id` needs no floor at all (see the same section).
 SAFE_ID_FLOOR = 100_000
 ITEM_SAMPLE_SIZE = 25  # mosaica ids sampled for the /v1/items/{mosaica_id} textual scan
-# `POST /v1/items`: every declared field, the two system fields, and pages small enough that a
-# read spans several responses carried by the cursor.
+# `POST /v1/items`: every declared field, the position and the labels, and pages small enough
+# that a read spans several responses carried by the cursor.
 ITEMS_FIELDS = [
     "serial", "fx_key", "department", "archive", "title", "shelf", "submitter", "abstract", "note",
     "pages",

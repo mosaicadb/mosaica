@@ -1401,17 +1401,19 @@ paths:
 
         **Columns.** `mosaica_id` (`uint64`) first, then the named fields in the order named, then
         the position under `position`, then the labels under `labels`, then `mosaica:matched`
-        (`bool`) under `keep_unmatched`. Every named field is present whether or not an item carries a value. A
-        number or boolean arrives as its declared type, `timestamp_us` as `timestamp[us, UTC]`, a
-        keyword or text field as `utf8`, and a category as `dictionary<int32, utf8>` holding its
-        keys, each frame's dictionary holding only the keys its rows carry. An absent value is
-        null. The position is two `float64` columns, `mosaica:x` and `mosaica:y`: the centre of the
-        step of the view's 32-bit grid the item is stored in, converted back through the view's
-        projection and frame, so degrees on a geographic view, and within half a step of the
-        position the item was given. The labels are `list<utf8>` as `mosaica:labels`: the clauses of the item's labels this principal satisfies, as the item card serves them. A rendered field is read
-        from `view`, where the item card reads the first view the principal can reach, so the two
-        can differ. An item joined into `view` before its own ingest is flushed has null record
-        fields until that flush.
+        (`bool`) under `keep_unmatched`. Every named field is present whether or not an item
+        carries a value. A number or boolean arrives as its declared type, `timestamp_us` as
+        `timestamp[us, UTC]`, a keyword or text field as `utf8`, and a category as
+        `dictionary<int32, utf8>` holding its keys, each frame's dictionary holding only the keys
+        its rows carry. An absent value is null. The position is two `float64` columns,
+        `mosaica:x` and `mosaica:y`: the centre of the step of the view's 32-bit grid the item is
+        stored in, converted back through the view's projection and frame, so degrees on a
+        geographic view, and within half a step of the position the item was given. The labels are
+        `list<utf8>` as `mosaica:labels`: the clauses of the item's labels this principal
+        satisfies, as the item card serves them. A rendered field is read from `view`, where the
+        item card reads the first view the principal can reach, so the two can differ. An item
+        joined into `view` before its own ingest is flushed has null record fields until that
+        flush.
 
         **Group-scoped fields** resolve as a filter leaf on them does: under a view of the field's
         group, or of a group sharing its views, they read that view's column; elsewhere they are
