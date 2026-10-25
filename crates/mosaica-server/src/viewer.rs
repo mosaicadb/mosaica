@@ -1,6 +1,7 @@
 //! The viewer plane: `/v1/meta`, `/v1/categories`, `/v1/viewport`, `/v1/artifacts/viewport`,
 //! `/v1/items`, `/v1/items/{mosaica_id}`, `/v1/artifacts`, `/v1/aggregate` and
-//! `/v1/basemaps/world`, plus `/healthz` and `/readyz`. Bearer auth is a session token minted by the session plane's `/session/authorise`.
+//! `/v1/basemaps/world`, plus `/healthz` and `/readyz`. Bearer auth is a session token minted by
+//! the session plane's `/session/authorise`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

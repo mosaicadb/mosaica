@@ -8,8 +8,8 @@
 mod address;
 mod aggregate;
 mod artifact_tiles;
-mod basemap;
 pub mod auth;
+mod basemap;
 pub mod control;
 pub mod cors;
 mod decode;

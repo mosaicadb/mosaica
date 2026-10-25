@@ -181,11 +181,11 @@ struct Reader<'a> {
 
 impl Reader<'_> {
     fn take<const N: usize>(&mut self) -> [u8; N] {
-        let out = self.bytes[self.at..self.at + N]
-            .try_into()
-            .unwrap_or_else(|_| {
-                panic!("the body ends at byte {} inside a field", self.bytes.len())
-            });
+        let out = *self
+            .bytes
+            .get(self.at..self.at + N)
+            .and_then(|s| s.first_chunk::<N>())
+            .unwrap_or_else(|| panic!("the body ends at byte {} inside a field", self.bytes.len()));
         self.at += N;
         out
     }

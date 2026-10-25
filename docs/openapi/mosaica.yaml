@@ -267,7 +267,7 @@ paths:
         Land, coastlines and country borders from Natural Earth 1:50m, which is in the public
         domain ("Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.").
         The body is compiled into the server, says nothing about the corpus or the node, and is
-        the same for every session.
+        the same for every session. Not subject to compute admission.
 
         **The body is not JSON.** All integers are little-endian, with no padding:
 
