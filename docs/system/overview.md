@@ -33,7 +33,7 @@ Each record is an **item**: a place, a paper, a specimen, a log event. An item c
 
 For each field you decide what it's for. A **rendered** field travels with every point drawn, so the map can colour or size points by it. An **indexed** field can be filtered, searched and counted without travelling with the points. A field can be both, or neither, in which case it's stored and shown when someone opens the item, which costs least.
 
-The [data model](data-model.md) chapter covers views, fields and identifiers in full.
+The [data model](data-model.md) chapter covers fields and identifiers in full, and [views and projections](views.md) covers views.
 
 ## On the map
 

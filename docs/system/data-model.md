@@ -70,29 +70,9 @@ Your data probably has its own identifier too, such as a DOI. If you declare tha
 
 ## Views
 
-The example has a view called `map`, which places each paper at a UMAP projection of its abstract's embedding, so papers on similar subjects sit together. A view like this, a **plain view**, takes any x and y and draws them as they are.
+The example has a view called `map`, which places each paper at a UMAP projection of its abstract's embedding, so papers on similar subjects sit together. A view takes any x and y, or longitude and latitude drawn with a map projection, and one paper can have a position in several views while keeping its fields and access label. A view group holds many views of the same kind, such as one layout per year.
 
-If your items have longitude and latitude, use a **geographic view** instead, which draws them with a map projection. `web_mercator`, the projection web maps use, keeps shapes but enlarges areas towards the poles, and stops at about 85° north and south. `equirectangular` and `gall_isographic` reach the poles but stretch shapes away from the equator. All three store the same positions, and differ only in the width-to-height a client draws the world at.
-
-Each view stores its positions across a **frame**. You can give its range yourself, or write `auto` to fit it to the points of the first load, with a small margin.
-
-!!! note "The frame does not grow"
-    An `auto` frame is fitted once, at the first load. A point outside the frame, inserted later or read in the first load, is drawn on its edge, and the build's report or the insert's answer counts how many were. A point beyond `web_mercator`'s limit near the poles is counted separately, as clipped. A group whose views will arrive later needs a margin or an explicit frame wide enough for them. A view added to a running database has no data to fit, so it needs an explicit frame, given in the view's stored coordinates rather than degrees; `mosaica check --payloads` prints it.
-
-### Several views of the same items
-
-You might lay the same papers out by abstract in one view and by citation graph in another. Each view gives a paper its own position, but everything else about it, its fields, its access label and its `mosaica_id`, is shared, so a viewer who switches views keeps their filters.
-
-To place a paper in a second view, give it a position there that names it: in a first load from files, a row of the second view's points file carrying the paper's DOI, and later, an insert into that view naming the paper by its DOI or its `mosaica_id`. Without a unique field, a first load can't tell that two rows in two files are one paper, and makes each its own item. An item doesn't have to be in every view; a view holds the items given a position in it.
-
-### View groups
-
-Sometimes you want many views of the same kind. In the example, you might want a separate layout for each year, so that a viewer can see how one year's papers relate, and add next year's layout when it arrives. A view group gives you that: each view in it has its own key, such as `2024`, is named `by_year:2024`, and holds its own items and positions, while the projection, the frame and the group's access label are shared. Each view may narrow who sees it.
-
-You can create and drop a group's views while the database runs. A group can also carry facts about each view, such as the date range a year covers, and a field can hold a different value for each view, such as a score recomputed every year.
-
-!!! warning "Dropping a view deletes items that are in no other view"
-    When a view of a group is dropped, any item that has a position in no other view is deleted, as if you had deleted it yourself. The answer to the drop says how many. Items that are also in another view are not affected.
+[Views and projections](views.md) covers the kinds of view, their frames, view groups and what is drawn under the points.
 
 ## Annotation layers
 
@@ -144,6 +124,4 @@ Anything else about these needs a rebuild.
 
 - **Fields holding a list of values.** A field holds at most one value per item.
 - **Declaring a rendered field while the database runs.** Declare it in the first load.
-- **Dropping a plain view.** A view in a view group can be dropped.
-- **Category-typed view facts in a group declared while the database runs.** A group declared in the first load can carry a category fact about each view, such as a region drawn from a vocabulary, but the same group declared later is refused. Declare such a group in the first load.
 - **Titles of fields and vocabularies.** A declaration may give one, but it is not yet sent to clients. Titles of views, view groups, layers, levels and category values are sent.

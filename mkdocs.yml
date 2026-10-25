@@ -118,6 +118,7 @@ nav:
   - How it works:
       - Overview: system/overview.md
       - Data model: system/data-model.md
+      - Views and projections: system/views.md
       - Queries: system/queries.md
       - Serving: system/serving.md
       - Changing data: system/write-path.md
