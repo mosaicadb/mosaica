@@ -86,7 +86,7 @@ impl Shed {
 
 /// The producer's half of a stream, moved onto the blocking thread with the engine call. It
 /// answers the handler once, through [`Self::open`] or [`Self::refuse`], then sends frames. It
-/// holds the request's admission permits and frees them before the client can have its answer:
+/// holds the request's admission permits and frees them before the client has its whole answer:
 /// before a refusal, after the trailer is queued and before the body can end, and on drop before
 /// its sender goes.
 pub(crate) struct Producer<T> {
