@@ -114,14 +114,42 @@ describe('<mosaica-item-card>', () => {
     answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', title: 'Computer science', count: 3}]}]));
     await settle(host);
     expect(shown()).toBe('Computer science');
-    // A value whose vocabulary holds no title keeps its key.
-    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'cs', count: 3}]}]));
-    await settle(host);
-    expect(shown()).toBe('cs');
-    // Closed, the card asks for nothing.
-    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
-    await settle(host);
+    // Answered, the card asks for nothing more.
     expect([...registered(store).keys()].some((id) => id.startsWith('item-titles'))).toBe(false);
+  });
+
+  it('asks for at most the server’s groupings at a time, and asks again for nothing it was answered', async () => {
+    const category = {category: {vocabulary: 'v', kind: 'declared' as const, visibility: 'public' as const}, render: true, homes: ['rendered' as const]};
+    const names = ['a', 'b', 'c'];
+    const capped = meta({
+      declaredScalars: names.map((n) => scalar(n, 'u16', category)),
+      filterOperands: names.map((n) => ({column: n, family: 'category' as const, operands: ['in' as const]})),
+      selection: {...meta({}).selection, maxAggregateGroupings: 2}
+    });
+    const host = await mount('<mosaica-item-card></mosaica-item-card>');
+    const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+    const store = fakeStore({meta: capped, status: status({})});
+    el.store = store;
+    const select = (id: bigint, fields: Record<string, string>) =>
+      store.set('selection', {item: {id, detail: {fields, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    const asked = () => [...registered(store)].find(([id]) => id.startsWith('item-titles'))?.[1] as {groupings: {by: {field: string}}[]} | undefined;
+    select(1n, {a: 'x', b: 'y', c: 'z'});
+    await settle(host);
+    expect(asked()?.groupings.map((g) => g.by.field)).toEqual(['a', 'b']);
+    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'x', title: 'Ex', count: 1}]}, {rows: [{key: 'y', title: 'Why', count: 1}]}]));
+    await settle(host);
+    expect(asked()?.groupings.map((g) => g.by.field)).toEqual(['c']);
+    answerAggregate(store, 'item-titles', aggregateEntry([{rows: [{key: 'z', title: 'Zed', count: 1}]}]));
+    await settle(host);
+    expect(names.map((n) => deep(host, `[part="field"][data-name="${n}"] [part="value"]`)?.textContent)).toEqual(['Ex', 'Why', 'Zed']);
+    expect(asked()).toBeUndefined();
+    // Another item, then the first again: only the value not yet answered is asked for.
+    select(2n, {a: 'x', b: 'w'});
+    await settle(host);
+    expect(asked()?.groupings.map((g) => g.by.field)).toEqual(['b']);
+    select(1n, {a: 'x', b: 'y', c: 'z'});
+    await settle(host);
+    expect(asked()).toBeUndefined();
   });
 });
 

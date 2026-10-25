@@ -186,7 +186,7 @@ describe('the map’s toolbar in a bottom corner', () => {
 });
 
 describe('the filter panel', () => {
-  it('renders a card’s rows from the counts registered, and Tab from its search box reaches the first row, then its Highlight, showing it', async () => {
+  it('renders a card’s rows from the counts registered, and Tab from its search box reaches a row’s Highlight and shows it', async () => {
     const p = await page('<div style="width: 340px"><mosaica-filter-panel pinned="archive"></mosaica-filter-panel></div>');
     const seen = await p.evaluate(async () => {
       const rows = [
@@ -239,16 +239,13 @@ describe('the filter panel', () => {
       return {names};
     });
     expect(seen.names).toEqual(['cs', 'math']);
-    const focused = () =>
-      p.evaluate(() => {
-        let at: Element | null = document.activeElement;
-        while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
-        const verbs = at?.closest('[part~="row"]')?.querySelector('[part="verbs"]');
-        return {part: at?.getAttribute('part') ?? null, row: at?.closest('[part~="row"]')?.getAttribute('data-key') ?? null, shown: verbs ? getComputedStyle(verbs).opacity : null};
-      });
     await p.keyboard.press('Tab');
-    expect(await focused()).toEqual({part: 'row', row: 'cs', shown: '1'});
-    await p.keyboard.press('Tab');
-    expect(await focused()).toEqual({part: 'highlight', row: 'cs', shown: '1'});
+    const focused = await p.evaluate(() => {
+      let at: Element | null = document.activeElement;
+      while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
+      const verbs = at?.closest('[part="verbs"]');
+      return {part: at?.getAttribute('part') ?? null, row: at?.closest('[part~="row"]')?.getAttribute('data-key') ?? null, shown: verbs ? getComputedStyle(verbs).opacity : null};
+    });
+    expect(focused).toEqual({part: 'highlight', row: 'cs', shown: '1'});
   });
 });

@@ -121,7 +121,7 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * field, the values it leaves out are greyed and show only how many items they would add, and the
  * shares are of what the filter keeps. Hovering or focusing a row shows Highlight and Filter, which
  * put the value in or out of the field's clause in that position. On a category card, a click on
- * the row, or Enter or Space on the focused row, does what its Filter button does. Over the rows is the field's
+ * the row does what its Filter button does. Over the rows is the field's
  * search box, the typeahead of `<mosaica-filter>` or `<mosaica-cluster-filter>`, whose choice joins
  * the filter. A levelled layer's card has a Level choice in its heading, the top (coarsest) level
  * by default, which fires `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's
@@ -356,7 +356,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       [part~='row'][data-shown] {
         background: var(--_mosaica-surface-2);
       }
-      [part~='row'][tabindex] {
+      [part~='row'][data-presses] {
         cursor: pointer;
       }
       [part~='row'][data-state='out'] {
@@ -1029,9 +1029,10 @@ export class MosaicaFieldCard extends MosaicaElement {
       const counts = out
         ? html`<span part="count">${r.all === null ? '' : countText(r.all)}</span>`
         : html`<span part="count"><span class="sub">${r.sub === null ? '' : countText(r.sub)}</span>${same || r.all === null ? '' : ` / ${countText(r.all)}`}</span>`;
-      // A category's row filters to its value, as its Filter button does, and shows its buttons.
+      // A press on a category's row filters to its value, as its Filter button does, and shows its
+      // buttons; the keyboard reaches the buttons.
       const filters = kind === 'category';
-      return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key} tabindex=${filters ? '0' : nothing}
+      return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key} ?data-presses=${filters}
         @click=${(e: Event) => {
           if ((e.target as HTMLElement).closest('button')) return;
           if (!filters) {
@@ -1039,11 +1040,6 @@ export class MosaicaFieldCard extends MosaicaElement {
             return;
           }
           this.shownRow = r.key;
-          verb('filter')();
-        }}
-        @keydown=${(e: KeyboardEvent) => {
-          if (!filters || e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
-          e.preventDefault();
           verb('filter')();
         }}>
         <span class="mark">${mark}</span>

@@ -132,6 +132,21 @@ describe('<mosaica-explorer colour-by>', () => {
   });
 });
 
+describe('<mosaica-explorer layers>', () => {
+  it('reports the layers given at its first render, as it writes them to its store', async () => {
+    const store = fakeStore({meta: META, status: status({})});
+    const el = document.createElement('mosaica-explorer') as HTMLElement & {store: unknown};
+    el.setAttribute('layers', 'clusters');
+    el.store = store;
+    const seen: unknown[] = [];
+    document.body.addEventListener('mosaica-layerchange', (e) => seen.push((e as CustomEvent).detail));
+    document.body.append(el);
+    await settle(document.body);
+    expect(store.calls.filter((c) => c.name === 'setLayers').at(-1)?.args).toEqual([['clusters']]);
+    expect(seen).toEqual([{layers: ['clusters']}]);
+  });
+});
+
 describe('<mosaica-explorer title-field>', () => {
   it('reaches the map’s hover and the default item card', async () => {
     const {host, shadow, store} = await explorer('<mosaica-explorer title-field="author"></mosaica-explorer>');

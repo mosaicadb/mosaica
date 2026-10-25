@@ -1,6 +1,6 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
-import type {AggregateSpec, DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal} from '@mosaicajs/client';
+import type {AggregateSpec, DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal, Store} from '@mosaicajs/client';
 import {GRID32} from '@mosaicajs/client';
 import {HeldAggregate, listedGroups} from './aggregate.js';
 import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
@@ -14,9 +14,11 @@ import {chrome, tokens} from './tokens.js';
  * grid, its group-scoped values, then Open and Copy id. Fields are listed by name in
  * declaration order, then any the schema does not declare; a field the record has no value for is
  * left out. A declared field is captioned in words (`published_at` as "Published at"). A category
- * field shows its value's title where the vocabulary has one, else its key; the titles are asked
+ * field shows its value's title where the vocabulary has one, else its key. The titles are asked
  * for as a field card asks for its rows' (`Store.setAggregate`, over everything the viewer may
- * see, naming the item's values). A timestamp shows in full, as `14 March 2024, 12:00 UTC`.
+ * see, naming the item's values), at most `selection.maxAggregateGroupings` fields at a time, and
+ * kept for the store's other cards until the store forgets what the server answered. A timestamp
+ * shows in full, as `14 March 2024, 12:00 UTC`.
  * The close button appears only while the card shows something: an item, a refusal or a click's
  * result.
  *
@@ -220,10 +222,14 @@ export class MosaicaItemCard extends MosaicaElement {
   /** What `titles` asks for: the shown item's category fields, one grouping each, in this order. */
   private titleAsk: {fields: string[]; spec: AggregateSpec | null} = {fields: [], spec: null};
 
-  /** A category value's title from the answer to `titles`, else from what the store already holds, else its key. */
+  /** A category value's title as answered, else from what the store already holds, else its key. */
   private titleOf(field: string, key: string): string {
-    const table = this.titles.entryOf(this.resolvedStore, this.titleAsk.spec)?.result?.tables[this.titleAsk.fields.indexOf(field)];
-    return listedGroups(table).find((g) => g.key === key)?.title ?? keyTitle(this.resolvedStore, field, key);
+    const store = this.resolvedStore;
+    return (store && TITLES.get(store)?.get(titleKey(field, key))) ?? keyTitle(store, field, key);
+  }
+
+  protected override resetServerData(): void {
+    if (this.resolvedStore) TITLES.delete(this.resolvedStore);
   }
 
   /** A field's value as text: a category value by its title, anything else by its declared type. */
@@ -253,9 +259,28 @@ export class MosaicaItemCard extends MosaicaElement {
       this.expandedFor = id;
       this.expanded = false;
     }
+    const store = this.resolvedStore;
+    if (!store || !meta) {
+      this.titleAsk = {fields: [], spec: null};
+      return;
+    }
+    // Keep what the last ask answered, then ask for the fields still without an answer.
+    const held = TITLES.get(store) ?? new Map<string, string | null>();
+    TITLES.set(store, held);
+    const asked = this.titleAsk;
+    const answer = this.titles.entryOf(store, asked.spec)?.result;
+    if (answer && asked.spec) {
+      asked.fields.forEach((field, i) => {
+        const key = (asked.spec!.groupings[i]!.by as {values: string[]}).values[0]!;
+        held.set(titleKey(field, key), listedGroups(answer.tables[i]).find((g) => g.key === key)?.title ?? null);
+      });
+    }
     const values = item?.detail.fields ?? {};
-    const countable = new Set((meta?.filterOperands ?? []).filter((o) => o.family === 'category' && !o.scope).map((o) => o.column));
-    const fields = (meta?.declaredScalars ?? []).filter((c) => c.category && countable.has(c.name) && typeof values[c.name] === 'string').map((c) => c.name);
+    const countable = new Set(meta.filterOperands.filter((o) => o.family === 'category' && !o.scope).map((o) => o.column));
+    const fields = meta.declaredScalars
+      .filter((c) => c.category && countable.has(c.name) && typeof values[c.name] === 'string' && !held.has(titleKey(c.name, values[c.name] as string)))
+      .map((c) => c.name)
+      .slice(0, meta.selection.maxAggregateGroupings);
     const groupings = fields.map((field) => ({count: true as const, by: {field, values: [values[field] as string]}}));
     this.titleAsk = {fields, spec: fields.length === 0 ? null : {groupings, subject: 'visible'}};
   }
@@ -419,6 +444,13 @@ export class MosaicaItemCard extends MosaicaElement {
     </div>`;
   }
 }
+
+/**
+ * The titles of category values the item cards have asked for, by store and then by field and key;
+ * `null` for a value with no title.
+ */
+const TITLES = new WeakMap<Store, Map<string, string | null>>();
+const titleKey = (field: string, key: string) => `${field}\u0000${key}`;
 
 /** A value as text, by the column's declared type. */
 function present(value: unknown, column: DeclaredScalar | undefined): string {

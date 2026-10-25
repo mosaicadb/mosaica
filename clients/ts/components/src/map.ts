@@ -834,7 +834,8 @@ export class MosaicaMap extends MosaicaElement {
 
   /**
    * Write the host's settings to the store before the render: every one to a store adopted since
-   * the last update, else those that changed. The store answers synchronously, so a write here
+   * the last update, else those that changed. `layers` set or changed in this update fires
+   * `mosaica-layerchange` either way. The store answers synchronously, so a write here
    * lands in this update; one written while another element renders, or after this one has,
    * schedules a second update.
    */
@@ -847,6 +848,7 @@ export class MosaicaMap extends MosaicaElement {
       this.askPointColumns(s);
       if (this.colourBy !== '') s.setColourBy(this.colourBy === 'none' ? null : this.colourBy);
       if (this.layers) s.setLayers(this.layers);
+      if (changed.has('layers') && this.layers) emit(this, 'mosaica-layerchange', {layers: this.layers});
       if (this.budget > 0) s.setBudget(this.budget);
       if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
       if (this.palette !== '') s.setPalette(this.palette);
