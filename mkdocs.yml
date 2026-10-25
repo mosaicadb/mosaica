@@ -146,7 +146,7 @@ nav:
       - Capabilities: reference/capabilities.md
       - CLI: reference/cli.md
       - mosaica.toml: reference/mosaica-toml.md
-      - schema.toml: reference/corpus-toml.md
+      - schema.toml: reference/schema-toml.md
       - Python client:
           - reference/python/index.md
           - Connecting and creating: reference/python/connecting.md

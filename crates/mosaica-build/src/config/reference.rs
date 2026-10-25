@@ -1,4 +1,4 @@
-//! `docs/reference/corpus-toml.md`, rendered from the doc comments on the blocks in `config.rs`.
+//! `docs/reference/schema-toml.md`, rendered from the doc comments on the blocks in `config.rs`.
 //!
 //! The page is committed so the documentation site builds without cargo. The first test below
 //! renders it again and fails when the committed copy differs. After changing a key or its doc
@@ -220,7 +220,7 @@ fn render() -> String {
         "<!-- Generated from crates/mosaica-build/src/config.rs. Edit the doc comments there, \
          then run: {REGENERATE} -->\n"
     );
-    out.push_str("# corpus.toml\n\n");
+    out.push_str("# schema.toml\n\n");
     let _ = writeln!(
         out,
         "{}\n",
@@ -259,7 +259,7 @@ fn render() -> String {
 fn corpus_reference_matches_the_source() {
     mosaica_docgen::check_page(
         Path::new(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference/corpus-toml.md"),
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference/schema-toml.md"),
         ),
         &render(),
         "MOSAICA_WRITE_CORPUS_REFERENCE",

@@ -230,7 +230,7 @@ Both rows created a place. Each new item gets a `mosaica_id`, which you use to e
 
 New items appear at the next flush, within 90 seconds, or at once with `--wait`. [Changing data](../system/write-path.md) covers every write. `mosaica declare` adds views, fields and layers the same way, except that a rendered field must be in the schema the database is built from.
 
-Every key this example leaves out is in the [schema.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the database keeps on disc and how to back it up.
+Every key this example leaves out is in the [schema.toml](../reference/schema-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the database keeps on disc and how to back it up.
 
 ## From Python
 

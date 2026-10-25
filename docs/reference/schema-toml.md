@@ -1,8 +1,8 @@
 <!-- Generated from crates/mosaica-build/src/config.rs. Edit the doc comments there, then run: MOSAICA_WRITE_CORPUS_REFERENCE=1 cargo test -p mosaica-build corpus_reference -->
 
-# corpus.toml
+# schema.toml
 
-`corpus.toml` declares a corpus: the files a build reads, the views that place each item on a map, the vocabularies and attributes each item carries, and the annotation layers drawn over the items. `mosaica build` and `mosaica check` read the file that `[build] schema` in `mosaica.toml` names, `schema.toml` by default, or the one `--config` names. `mosaica check --payloads` prints the same declaration as the request bodies that declare it on a running service.
+`schema.toml` declares a corpus: the files a build reads, the views that place each item on a map, the vocabularies and attributes each item carries, and the annotation layers drawn over the items. `mosaica build` and `mosaica check` read the file that `[build] schema` in `mosaica.toml` names, `schema.toml` by default, or the one `--config` names. `mosaica check --payloads` prints the same declaration as the request bodies that declare it on a running service.
 
 Every table refuses a key it does not know. Where a key is refused beside another, or needs another, its description says so.
 

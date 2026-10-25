@@ -2,7 +2,7 @@
 //! its attributes and its layers.
 //!
 //! The doc comments on the blocks under "The file, as written" are the reference page
-//! `docs/reference/corpus-toml.md`, which `config/reference.rs` renders and holds to the parser.
+//! `docs/reference/schema-toml.md`, which `config/reference.rs` renders and holds to the parser.
 //! Every block parses under `deny_unknown_fields`, and every value that is a word rather than a
 //! caller's string is drawn from an enumerated set, so the page names the whole surface: a key
 //! added here without a doc comment fails that test.
@@ -183,10 +183,10 @@ use mosaica_access::{is_inherited, INHERITED};
 // The file, as written
 // ---------------------------------------------------------------------------------------------
 
-// The blocks' doc comments are the reference page `docs/reference/corpus-toml.md`, rendered by
+// The blocks' doc comments are the reference page `docs/reference/schema-toml.md`, rendered by
 // `config/reference.rs`. They are written for someone declaring a corpus.
 
-/// `corpus.toml` declares a corpus: the files a build reads, the views that place each item on a
+/// `schema.toml` declares a corpus: the files a build reads, the views that place each item on a
 /// map, the vocabularies and attributes each item carries, and the annotation layers drawn over
 /// the items. `mosaica build` and `mosaica check` read the file that `[build] schema` in
 /// `mosaica.toml` names, `schema.toml` by default, or the one `--config` names. `mosaica check
