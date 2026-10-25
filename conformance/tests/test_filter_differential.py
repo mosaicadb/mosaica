@@ -25,10 +25,9 @@ What this module covers:
 - **Composition** — `any_of` across columns, mixed key/code operands, and a nested
   `all_of`/`any_of` tree, against brute force; plus two algebraically equal spellings of one
   expression, which must serve identical responses.
-- **Refusals** — an unknown *column* is a `422`; an unknown *value* is not; `none_of` and
-  `match` are `422` because they are unbuilt (decision 0062), and an operator outside the
-  column's family is a `422` because a refusal is a function of the request and the deployment's
-  schema, never of the viewer's data (§10.6).
+- **Refusals** — an unknown *column* is a `422`; an unknown *value* is not; `match` on a keyword
+  column is a `422`, and an operator outside the column's family is a `422` because a refusal is a
+  function of the request and the deployment's schema, never of the viewer's data (§10.6).
 
 What it deliberately does **not** cover, so the next reader is not left inferring it:
 
@@ -588,9 +587,7 @@ def test_an_unknown_column_refuses_and_an_unknown_value_does_not(
 
 def test_the_unbuilt_operators_refuse_by_name(catalogue_server, sweep_cases):
     """Decision 0013: `match` is specified and unbuilt, so naming it is a `422` — never an ignored
-    clause, which would answer a different question while looking like an answer to this one.
-
-    `none_of` was in this list until decision 0066 built it; it is covered positively below."""
+    clause, which would answer a different question while looking like an answer to this one."""
     case = sweep_cases["crossover_below"]
     token = catalogue_server.authorise(list(case.grants))["token"]
 
@@ -626,53 +623,36 @@ def test_an_over_deep_expression_is_a_contract_refusal_not_a_server_fault(
     assert resp.json()["error"] == "contract"
 
 
-def test_none_of_requires_a_value_and_names_one_column(
+def test_none_of_is_the_visible_set_minus_the_matches(
     catalogue_bundle, catalogue_server, catalogue_filter_columns, entity_of_fx, sweep_cases
 ):
-    """**Decision 0066 on the wire**: `none_of` means *carries a value in this column, and none of
-    these matches it* — so an item carrying no value for the column is outside it, where a
-    complement would return it.
+    """`none_of` serves every visible item no branch matches, an item with no value among them.
 
-    Asserted against the oracle's own brute-force evaluation rather than against a hand-written
-    expectation, and against a `department` column the fixture leaves absent for some entities —
-    without absences the two readings agree and this proves nothing. The two refusals the decision
-    introduces are checked here too, since both are things a client can provoke.
+    Against a `department` column the fixture leaves absent for some entities, since without
+    absences a reading that required a value would agree. Branches may name different columns.
     """
     case = sweep_cases["crossover_above"]
     token = catalogue_server.authorise(list(case.grants))["token"]
-    expr = {"none_of": [{"department": {"eq": "alpha"}}]}
-
-    raw = catalogue_server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=expr)
-    served = _served_entities(raw, entity_of_fx)
-
     m_auth = cat.items_of(catalogue_bundle, case.entities)
-    expected = filt.evaluate(expr, catalogue_filter_columns, m_auth)
-    assert served == expected
-
-    # The premise: the column really does have absences among this principal's own entities, and
-    # the negation really did exclude something.
     carried = set(catalogue_filter_columns["department"].values)
-    assert m_auth - carried, "no entity here lacks a department, so the two readings agree"
-    assert (m_auth & carried) - expected, "the negation excluded nothing"
-    assert not (served & (m_auth - carried)), (
-        "an item carrying no department was returned by `none_of` — that is the complement "
-        "reading, and it puts every entity whose value is merely unreachable into the result"
-    )
+    assert m_auth - carried, "no entity here lacks a department, so this proves nothing"
 
-    # An empty negation names no column to require a value in; one spanning two columns gives two
-    # answers to which. Both are `422`, not a silently-chosen reading.
-    for label, filters in [
-        ("empty", {"none_of": []}),
-        (
-            "two columns",
-            {"none_of": [{"department": {"eq": "alpha"}}, {"title": {"prefix": "smith"}}]},
-        ),
+    for expr in [
+        {"none_of": [{"department": {"eq": "alpha"}}]},
+        {"none_of": [{"department": {"eq": "alpha"}}, {"title": {"prefix": "smith"}}]},
     ]:
-        resp = catalogue_server.viewport_request(
-            token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=filters
-        )
-        assert resp.status_code == 422, f"{label}: {resp.status_code} {resp.text}"
-        assert resp.json()["error"] == "contract", label
+        raw = catalogue_server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=expr)
+        served = _served_entities(raw, entity_of_fx)
+        assert served == filt.evaluate(expr, catalogue_filter_columns, m_auth), expr
+        assert m_auth - carried <= served, expr
+        assert served < m_auth, f"the negation excluded nothing: {expr}"
+
+    # An empty negation names no column and is refused.
+    resp = catalogue_server.viewport_request(
+        token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters={"none_of": []}
+    )
+    assert resp.status_code == 422, f"{resp.status_code} {resp.text}"
+    assert resp.json()["error"] == "contract"
 
 
 def test_an_operator_outside_the_columns_family_refuses(catalogue_server, sweep_cases):

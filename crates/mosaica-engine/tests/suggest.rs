@@ -1087,8 +1087,8 @@ fn a_deletion_between_two_requests_moves_the_filtered_count() {
     assert_eq!(count_of_eng(), before - 1);
 }
 
-/// **A negated filter counts the visible items carrying a value in its column that match none of
-/// it**, and an item with no value in that column is not among them.
+/// **A negated filter counts the visible items that match none of it**, an item with no value in
+/// its column among them.
 #[test]
 fn a_negated_filter_counts_what_it_leaves() {
     let fx = fixture();
@@ -1103,8 +1103,7 @@ fn a_negated_filter_counts_what_it_leaves() {
             let expected = visible
                 .iter()
                 .filter(|&&e| {
-                    matches!(archive_of(e), Some(a) if a != "xx")
-                        && department_of(e) == Some(value.key.as_str())
+                    archive_of(e) != Some("xx") && department_of(e) == Some(value.key.as_str())
                 })
                 .count() as u64;
             assert_eq!(value.count, Some(expected), "{}", value.key);

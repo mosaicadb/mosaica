@@ -203,7 +203,7 @@ enum RowScope {
 }
 
 impl RowScope {
-    /// Every row in scope — a negated region's presence half.
+    /// Every row in scope, which a negation subtracts its matches from.
     fn all_rows(&self) -> croaring::Bitmap {
         match self {
             RowScope::WholeView { total_rows } => croaring::Bitmap::from_range(0..*total_rows),
@@ -251,9 +251,8 @@ fn eval_row_expr(
         // the tree to the request's rows.
         RowExpr::MemberOf(rows) => Ok(scope.clamp(rows)),
         RowExpr::NotInRows(kids) => {
-            // Every rowed entity carries a position and may be a member, so the presence half of
-            // this negation is every row in scope. No early exit on an empty difference: these
-            // kids are already resolved, so skipping buys nothing.
+            // Every kid is evaluated, even once the difference is empty: `images` is positional,
+            // so a skipped kid would leave the cursor short of the verdicts after it.
             let mut out = scope.all_rows();
             for kid in kids {
                 out.andnot_inplace(&eval_row_expr(
@@ -284,31 +283,6 @@ fn eval_row_expr(
             }
             Ok(out)
         }
-        RowExpr::NoneOf {
-            column,
-            family,
-            kids,
-        } => {
-            // `present ∖ matched`, presence being whatever this column's family stores it as: a
-            // non-sentinel code for a category, the presence bitmap for every other. An item that
-            // cannot be read is answered as absent, so it under-reports rather than widening.
-            let mut out = scan_rows(segments, domain, column, RowPredicate::present_in(*family))?;
-            for (i, kid) in kids.iter().enumerate() {
-                out.andnot_inplace(&eval_row_expr(
-                    kid, images, next_image, segments, domain, scope,
-                )?);
-                if out.is_empty() {
-                    // The remaining kids are skipped, but `images` is positional, so the cursor
-                    // must still advance past their verdicts. See
-                    // `a_short_circuited_negation_still_consumes_its_skipped_images`.
-                    for skipped in &kids[i + 1..] {
-                        *next_image += skipped.entity_verdicts().len();
-                    }
-                    break;
-                }
-            }
-            Ok(out)
-        }
     }
 }
 
@@ -319,8 +293,6 @@ fn eval_row_expr(
 enum RowPredicate<'a> {
     /// A category's code is non-sentinel and in this set. An empty set matches nothing.
     CodeIn(&'a [u32]),
-    /// A category's code is non-sentinel — the presence half of a negation over one.
-    CodePresent,
     /// A number's value equals one of these. An empty set matches nothing.
     NumberIn(&'a [Scalar]),
     /// A number's value lies between these bounds. Either may be absent, an open side.
@@ -328,28 +300,14 @@ enum RowPredicate<'a> {
         lo: Option<Endpoint>,
         hi: Option<Endpoint>,
     },
-    /// The row carries a value — the presence half of a negation over a bitmap-absence column.
-    ValuePresent,
 }
 
 impl RowPredicate<'_> {
-    /// The presence half of a negation over a column of this family.
-    fn present_in(family: Family) -> RowPredicate<'static> {
-        match family {
-            Family::Category => RowPredicate::CodePresent,
-            Family::Numeric => RowPredicate::ValuePresent,
-            // Neither string family is row-placed; an empty code set is the fail-closed reading.
-            Family::Keyword | Family::Text => RowPredicate::CodeIn(&[]),
-        }
-    }
-
     /// Does this family read absence from the presence bitmap? A category does not.
     fn reads_presence(&self) -> bool {
         match self {
-            RowPredicate::CodeIn(_) | RowPredicate::CodePresent => false,
-            RowPredicate::NumberIn(_) | RowPredicate::Range { .. } | RowPredicate::ValuePresent => {
-                true
-            }
+            RowPredicate::CodeIn(_) => false,
+            RowPredicate::NumberIn(_) | RowPredicate::Range { .. } => true,
         }
     }
 }
@@ -396,8 +354,6 @@ impl LeafValues {
 /// needle the type cannot hold gone, a needle set sorted for a binary search. A predicate that
 /// can match no row of the column has no representation: [`Prepared::of`] answers `None`.
 enum Prepared<'a> {
-    /// Every row of the run: presence alone decides — see [`scan_run`].
-    EveryRow,
     Bool(&'a arrow::array::BooleanArray, IntTest<u8>),
     U8(&'a [u8], IntTest<u8>),
     U16(&'a [u16], IntTest<u16>),
@@ -440,20 +396,10 @@ impl<'a> Prepared<'a> {
     /// match: a range narrowed to nothing, or a needle set the column's type cannot hold.
     fn of(slice: &ScalarSlice<'a>, predicate: &RowPredicate<'_>) -> Option<Prepared<'a>> {
         match predicate {
-            // No value is consulted: this family's absence lives in the bitmap beside the column.
-            RowPredicate::ValuePresent => Some(Prepared::EveryRow),
             RowPredicate::CodeIn(codes) => match slice {
                 ScalarSlice::U8(v) => Some(Prepared::U8(v, code_test(codes)?)),
                 ScalarSlice::U16(v) => Some(Prepared::U16(v, code_test(codes)?)),
                 ScalarSlice::U32(v) => Some(Prepared::U32(v, code_test(codes)?)),
-                _ => None,
-            },
-            // A category carries a value when its code is not the sentinel; codes are unsigned,
-            // so "present" is "at least 1".
-            RowPredicate::CodePresent => match slice {
-                ScalarSlice::U8(v) => Some(Prepared::U8(v, above_zero())),
-                ScalarSlice::U16(v) => Some(Prepared::U16(v, above_zero())),
-                ScalarSlice::U32(v) => Some(Prepared::U32(v, above_zero())),
                 _ => None,
             },
             RowPredicate::NumberIn(needles) => match slice {
@@ -504,14 +450,6 @@ fn code_test<T: Copy + Ord + TryFrom<u32>>(codes: &[u32]) -> Option<IntTest<T>> 
     w.sort_unstable();
     w.dedup();
     set_test(w)
-}
-
-/// A category's non-sentinel codes, as a bound rather than a set.
-fn above_zero<T: TryFrom<u32>>() -> IntTest<T> {
-    IntTest::Range {
-        lo: T::try_from(1).ok(),
-        hi: None,
-    }
 }
 
 /// The needles a numeric `in` names, at the column's width: one the type cannot hold, or a
@@ -608,10 +546,6 @@ fn match_run(
     let span = (run.start - base) as usize..(run.end - base) as usize;
     let first_row = run.start;
     match prepared {
-        Prepared::EveryRow => {
-            rows.add_range(run);
-            return;
-        }
         // Arrow does not store a bool as a flat slice; the run's bits are taken once and read
         // forward, then tested as the integer widths are.
         Prepared::Bool(a, test) => {
@@ -1550,55 +1484,6 @@ mod tests {
         );
     }
 
-    /// A short-circuited `none_of` must still consume its skipped kids' images, or the `Entity`
-    /// after it reads the wrong one — see `eval_row_expr`'s `NoneOf` arm.
-    #[test]
-    fn a_short_circuited_negation_still_consumes_its_skipped_images() {
-        use crate::filter::{Family, FilterOperand, RowExpr};
-
-        let skipped_image = croaring::Bitmap::from_iter(0u32..1_000);
-        let wanted_image = croaring::Bitmap::from_iter([7u32, 11, 13]);
-        let images = vec![skipped_image.clone(), wanted_image.clone()];
-
-        let tree = RowExpr::AnyOf(vec![
-            RowExpr::NoneOf {
-                column: "band".to_string(),
-                family: Family::Category,
-                // Evaluated and empties the difference, so the `Entity` after it is skipped.
-                kids: vec![
-                    RowExpr::Leaf {
-                        column: "band".to_string(),
-                        family: Family::Category,
-                        operand: FilterOperand::Equals(mosaica_types::AttrLocalId::new(1)),
-                    },
-                    RowExpr::Entity(croaring::Bitmap::new()),
-                ],
-            },
-            RowExpr::Entity(croaring::Bitmap::new()),
-        ]);
-        assert_eq!(
-            tree.entity_verdicts().len(),
-            images.len(),
-            "the fixture must hand one image per Entity node, as the caller does"
-        );
-
-        // An empty domain short-circuits the negation on its first kid.
-        let mut next_image = 0usize;
-        let scope = RowScope::Domain(croaring::Bitmap::new());
-        let out = eval_row_expr(&tree, &images, &mut next_image, &[], &[], &scope)
-            .expect("an empty domain scans cleanly");
-
-        assert_eq!(
-            out, wanted_image,
-            "the union answered with the skipped kid's image instead of the second clause's"
-        );
-        assert_eq!(
-            next_image,
-            images.len(),
-            "every image must be consumed, or a later Entity reads the wrong one"
-        );
-    }
-
     /// A view with no `row-entity.u32` declines the per-tile route rather than reading
     /// `entity_of`'s `None` as "no entity", which would drop rows silently.
     #[test]
@@ -1771,11 +1656,6 @@ mod tests {
             ),
             vec![4, 5]
         );
-        // The presence half of a negation reads the bitmap alone.
-        assert_eq!(
-            run(&slice, &RowPredicate::ValuePresent, Some(&present)),
-            vec![0, 2, 4, 5]
-        );
     }
 
     /// A category reads absence from its own code 0 and has no bitmap at all, so the scan asks
@@ -1785,7 +1665,6 @@ mod tests {
         let codes = [1u8, 0, 2, 0, 1, 3];
         let slice = ScalarSlice::U8(&codes);
         assert!(!RowPredicate::CodeIn(&[1]).reads_presence());
-        assert!(!RowPredicate::CodePresent.reads_presence());
 
         assert_eq!(run(&slice, &RowPredicate::CodeIn(&[1]), None), vec![0, 4]);
         assert_eq!(
@@ -1796,10 +1675,6 @@ mod tests {
             run(&slice, &RowPredicate::CodeIn(&[0]), None),
             Vec::<u32>::new(),
             "the absent sentinel names no row, even asked for by code"
-        );
-        assert_eq!(
-            run(&slice, &RowPredicate::CodePresent, None),
-            vec![0, 2, 4, 5]
         );
     }
 

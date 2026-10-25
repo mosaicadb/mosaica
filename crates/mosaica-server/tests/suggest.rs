@@ -811,7 +811,7 @@ async fn a_member_of_filter_counts_the_members_and_withholds_as_absence() {
     );
 }
 
-/// **A negated filter counts the items carrying a value in its column that match none of it.**
+/// **A negated filter counts the items that match none of it.**
 #[tokio::test]
 async fn a_negated_filter_counts_what_it_leaves() {
     let tmp = TempDir::new().unwrap();

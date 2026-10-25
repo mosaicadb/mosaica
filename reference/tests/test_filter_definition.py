@@ -2,9 +2,9 @@
 
 Every other use of this module compares it against the engine, so a rule the two got wrong the
 same way is reported as agreement. These cases assert the four column families, the boolean
-combinators and `none_of`'s presence requirement against answers taken from the design —
-contracts §3.2, decision 0062, decision 0066, filter-surface §5.1 — over columns declared in this
-file. Nothing here opens a bundle, so nothing here needs the Phase 0 corpus.
+combinators and `none_of` against answers taken from the design — contracts §3.2, decision 0062,
+filter-surface §5.1 — over columns declared in this file. Nothing here opens a bundle, so nothing
+here needs the Phase 0 corpus.
 
 The `region` cases use an identity `quantise`, which keeps the polygon arithmetic checkable by
 eye; `fixed32` itself is `oracle.morton`'s and is not under test here.
@@ -246,49 +246,40 @@ def test_a_node_with_more_than_one_key_is_refused():
         filters.matches({"colour": {"eq": "red"}, "name": {"eq": "alpha"}}, COLUMNS, 1)
 
 
-# -- none_of: a negation that requires presence --------------------------------------------------
+# -- none_of: everything in the candidate, minus the matches ----------------------------------------
 
 
-def test_none_of_requires_the_entity_to_carry_a_value():
-    """`none_of` is "carries a value here, and none of these matches it" — decision 0066.
+def test_none_of_keeps_an_entity_with_no_value():
+    """`none_of` is the candidate minus the matches.
 
-    Working: `none_of [colour eq red]` over the fixture. Entities 2 and 3 carry a colour that is
-    not red, so both match. Entity 1 is red and does not. Entity 4 carries **no** colour, and the
-    complement — `not any(...)` — would admit it; decision 0066 does not, because that would
-    admit every entity whose value is merely unreachable and invert the failure arithmetic
-    `filter-index.md` §5 rests on.
+    Working: `none_of [colour eq red]` over the fixture. Entity 1 is red and is excluded; entities
+    2 and 3 carry another colour and entity 4 carries none, and none of them is a match.
 
-    Kills: `none_of` implemented as `not any_of` — the single most plausible defect in this
-    module, and the one with a second statement on the Rust side
-    (`none_of_requires_a_value_rather_than_taking_the_complement`).
+    Kills: a `none_of` that requires a value in the column it negates.
     """
-    assert _matching({"none_of": [{"colour": {"eq": "red"}}]}) == {2, 3}
+    assert _matching({"none_of": [{"colour": {"eq": "red"}}]}) == {2, 3, 4}
     assert _matching({"any_of": [{"colour": {"eq": "red"}}]}) == {1}
 
 
-def test_none_of_names_exactly_one_column():
-    """The presence requirement is per column, so a `none_of` over two is refused (decision 0066).
+def test_none_of_may_name_several_columns():
+    """Branches over different columns are one negation of their disjunction.
 
-    Working: with two columns under one negation there is no single column whose presence could
-    be required, and answering anyway would silently pick one.
+    Working: `colour eq red` is {1} and `name eq alphabet` is {2}, so their `none_of` is {3, 4}.
 
-    Kills: a presence check taken over the first column named, or over any column named.
+    Kills: a `none_of` that negates only its first sub-expression, or refuses a second column.
     """
-    both = {"none_of": [{"colour": {"eq": "red"}}, {"name": {"eq": "alpha"}}]}
-    with pytest.raises(ValueError, match="exactly one column"):
-        filters.matches(both, COLUMNS, 2)
+    both = {"none_of": [{"colour": {"eq": "red"}}, {"name": {"eq": "alphabet"}}]}
+    assert _matching(both) == {3, 4}
 
 
 def test_none_of_over_several_predicates_in_one_column():
-    """Several leaves are allowed while they name one column — the negation of their disjunction.
+    """Several leaves over one column: the negation of their disjunction.
 
-    Working: `none_of [colour eq red, colour eq blue]` leaves green (entity 3) and excludes the
-    valueless entity 4.
-
-    Kills: a `none_of` that negates only its first sub-expression.
+    Working: `none_of [colour eq red, colour eq blue]` leaves green (entity 3) and the valueless
+    entity 4.
     """
     expr = {"none_of": [{"colour": {"eq": "red"}}, {"colour": {"eq": "blue"}}]}
-    assert _matching(expr) == {3}
+    assert _matching(expr) == {3, 4}
 
 
 # -- the region leaf -----------------------------------------------------------------------------
@@ -299,7 +290,7 @@ def test_a_bbox_region_is_inclusive_on_both_corners():
 
     Working: positions are (1, 1), (3, 3) and (9, 9). The box [1, 1, 3, 3] contains the first two
     on its corners and excludes the third. Entity 4 has no row, so it carries no position and
-    matches neither the region nor — see below — its negation.
+    matches no region.
 
     Kills: an exclusive comparison on either corner; a bbox tested against the source coordinate
     rather than the quantised one (identical here by construction, and the reason `quantise` is
@@ -343,17 +334,13 @@ def test_a_region_by_artifact_is_the_membership_the_principal_is_served():
     assert _matching({"region": {"artifact": 78}}) == set()
 
 
-def test_a_region_none_of_is_the_complement_within_the_rowed_entities():
-    """A region is total over rowed entities, so its presence is having a row at all.
+def test_a_region_none_of_is_the_complement_within_the_candidate():
+    """`none_of [region bbox [1,1,3,3]]` answers {3, 4}: outside the box, or holding no position.
 
-    Working: entities 1, 2 and 3 have positions; entity 4 has none. `none_of [region bbox
-    [1,1,3,3]]` therefore answers {3} — outside the box and rowed — and excludes entity 4, which
-    is neither in the region nor in its negation (`filter-index.md` §5, without exception).
-
-    Kills: a presence check that looks for `column.values` on a `RegionColumn` (which has no
-    such attribute) or that treats every candidate entity as present.
+    The served answer is taken over a view's rows, so an entity with no row is never in it; the
+    differential hands the oracle the visible rowed entities as its candidate.
     """
-    assert _matching({"none_of": [{"region": {"bbox": [1, 1, 3, 3]}}]}) == {3}
+    assert _matching({"none_of": [{"region": {"bbox": [1, 1, 3, 3]}}]}) == {3, 4}
 
 
 def test_an_unbuilt_region_spelling_is_refused_rather_than_guessed():

@@ -146,8 +146,6 @@ pub fn parse(
             Ok(match combinator {
                 "all_of" => FilterExpr::AllOf(kids),
                 "any_of" => FilterExpr::AnyOf(kids),
-                // The engine checks `none_of`'s one-column rule over the whole tree, so the rule
-                // also covers expressions built without this parser.
                 _ => FilterExpr::NoneOf(kids),
             })
         }
@@ -949,8 +947,7 @@ mod tests {
         assert!(format!("{err:?}").contains("exactly one key"), "{err:?}");
     }
 
-    /// `none_of` parses like the other combinators. The engine enforces its one-column rule,
-    /// tested in `mosaica-engine/tests/filtering.rs`.
+    /// `none_of` parses like the other combinators.
     #[test]
     fn none_of_parses_as_a_combinator() {
         let expr = parse_str(r#"{"none_of": [{"department": {"eq": "eng"}}]}"#).unwrap();

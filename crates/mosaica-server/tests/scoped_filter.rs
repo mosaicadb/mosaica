@@ -416,12 +416,10 @@ async fn a_pin_naming_nothing_is_the_unknown_view_404() {
     }
 }
 
-/// **Absence is absence, in a predicate and in its negation** (decision 0064): an entity carrying no
-/// Q3 value is in no Q3 answer. `none_of` subtracts from the set of entities *carrying* a value, so
-/// the negation of a predicate covering the whole domain is empty rather than "everyone with no
-/// value" — which is the difference between a filter and a presence test.
+/// **An entity carrying no Q3 value matches no Q3 predicate, and so its negation keeps it**: the
+/// negation of a predicate covering the whole domain is exactly the visible entities with no value.
 #[tokio::test]
-async fn an_entity_with_no_value_matches_no_predicate_of_that_view() {
+async fn an_entity_with_no_value_matches_no_predicate_and_every_negation() {
     let served = Served::build(build_scoped).await;
     let rows = ids(&served, "quarter:2026-Q3", None).await;
     let whole_domain = json!({"sentiment": {"range": {"gte": -1.0, "lte": 2.0}}});
@@ -446,10 +444,8 @@ async fn an_entity_with_no_value_matches_no_predicate_of_that_view() {
         Some(json!({"none_of": [whole_domain]})),
     )
     .await;
-    assert!(
-        negated.is_empty(),
-        "a valueless entity is not resurrected by a negation: {negated:?}"
-    );
+    let valueless: BTreeSet<u64> = rows.difference(&present).copied().collect();
+    assert_eq!(negated, valueless);
 }
 
 /// **I12's direction, over a pin**: a filter may move the frontier up and never down. The same

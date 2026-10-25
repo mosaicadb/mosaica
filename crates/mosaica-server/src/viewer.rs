@@ -231,8 +231,8 @@ async fn meta(
             })
         }).collect::<Vec<_>>(),
         // Filterable columns (`filter::is_filterable`, as the viewport parse uses) with their
-        // family's operators; `none_of` is refused over a `text` column, which this does not say.
-        // A scoped entry must be pinned outside its group's views; unreachable groups are omitted.
+        // family's operators. A scoped entry must be pinned outside its group's views;
+        // unreachable groups are omitted.
         "filter_operands": meta.declared_scalars.iter().filter(|d| mosaica_engine::filter::is_filterable(d)).map(|d| {
             let family = mosaica_engine::filter::Family::of(d);
             serde_json::json!({

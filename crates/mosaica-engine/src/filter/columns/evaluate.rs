@@ -210,10 +210,10 @@ impl FilterColumns {
     }
 
     /// Refuse every filter that no candidate could make answerable, from the declarations alone:
-    /// its depth and negations, every column it names, the presence each `none_of` subtracts
-    /// from, and every layer a `member_of` names, which `reaches_layer` says this principal
-    /// reaches. [`Self::evaluate_routed`] refuses exactly these before it reads a row, and the
-    /// evaluation after it refuses only an artefact that will not read.
+    /// its depth and negations, every column it names, and every layer a `member_of` names, which
+    /// `reaches_layer` says this principal reaches. [`Self::evaluate_routed`] refuses exactly these
+    /// before it reads a row, and the evaluation after it refuses only an artefact that will not
+    /// read.
     pub fn admit(
         &self,
         expr: &FilterExpr,
@@ -247,20 +247,19 @@ impl FilterColumns {
         Ok(space)
     }
 
-    /// One column's routed space, the single transcription of the leaf-routing rule. `operand` is
-    /// the leaf's, or `None` for a negation's presence half: a unique index answers `eq` and `in`
-    /// in entity space, and nothing else.
+    /// One leaf's routed space, the single transcription of the leaf-routing rule: a unique index
+    /// answers `eq` and `in` in entity space, and nothing else.
     fn leaf_space(
         &self,
         column: &str,
-        operand: Option<&FilterOperand>,
+        operand: &FilterOperand,
         prefer_row: bool,
     ) -> Result<Space, FilterError> {
         if column == REGION_COLUMN || column == MEMBER_OF_COLUMN {
             return Ok(Space::Row);
         }
         let placement = self.placement_of(column)?;
-        if operand.is_some_and(|operand| self.unique_keys(column, operand).is_some()) {
+        if self.unique_keys(column, operand).is_some() {
             return Ok(Space::Entity);
         }
         let entity = placement.entity
@@ -286,16 +285,12 @@ impl FilterColumns {
     }
 
     /// Which space `expr` evaluates in. `Entity` means the whole sub-tree can be answered by the
-    /// existing entity-space evaluation. A `none_of` takes its single column's space whole, since
-    /// its presence half and its matched half must be computed in the same space, and one in
-    /// entity space is refused here where its column has no presence to subtract from.
+    /// existing entity-space evaluation.
     fn space_of(&self, expr: &FilterExpr, prefer_row: bool) -> Result<Space, FilterError> {
         match expr {
-            FilterExpr::Leaf { column, operand } => {
-                self.leaf_space(column, Some(operand), prefer_row)
-            }
+            FilterExpr::Leaf { column, operand } => self.leaf_space(column, operand, prefer_row),
             FilterExpr::Region(_) | FilterExpr::MemberOf(_) => Ok(Space::Row),
-            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) => {
+            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
                 let mut all_entity = true;
                 for kid in kids {
                     if self.space_of(kid, prefer_row)? != Space::Entity {
@@ -307,14 +302,6 @@ impl FilterColumns {
                 } else {
                     Space::Mixed
                 })
-            }
-            FilterExpr::NoneOf(kids) => {
-                let column = FilterExpr::negated_column(kids);
-                let space = self.leaf_space(column, None, prefer_row)?;
-                if space == Space::Entity {
-                    self.presence_layers(column)?;
-                }
-                Ok(space)
             }
         }
     }
@@ -349,22 +336,11 @@ impl FilterColumns {
                     .map(|kid| self.route(kid, candidate, prefer_row, resolvers))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            FilterExpr::NoneOf(kids) => {
-                let column = FilterExpr::negated_column(kids).to_string();
-                let routed = kids
-                    .iter()
+            FilterExpr::NoneOf(kids) => Ok(RowExpr::NotInRows(
+                kids.iter()
                     .map(|kid| self.route(kid, candidate, prefer_row, resolvers))
-                    .collect::<Result<Vec<_>, _>>()?;
-                if column == REGION_COLUMN || column == MEMBER_OF_COLUMN {
-                    return Ok(RowExpr::NotInRows(routed));
-                }
-                let family = self.placement_of(&column)?.family;
-                Ok(RowExpr::NoneOf {
-                    column,
-                    family,
-                    kids: routed,
-                })
-            }
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
         }
     }
 
@@ -420,39 +396,6 @@ impl FilterColumns {
         Ok(out)
     }
 
-    /// The entities of `candidate` that carry a value in `column`, the presence half of a
-    /// negation, unioned across the layers exactly as a scan is.
-    ///
-    /// A scan of every layer, never the postings, even for a column whose `eq` is routed: the
-    /// value column answers this in one intersection per layer, where the postings answer only
-    /// for the base, since no flush writes postings.
-    fn present_in(&self, column: &str, candidate: &Bitmap) -> Result<Bitmap, FilterError> {
-        let mut out = Bitmap::new();
-        for layer in self.presence_layers(column)? {
-            out |= layer.values.present_in(candidate);
-        }
-        Ok(out)
-    }
-
-    /// The layers a negation of `column` takes its presence from, refused where there are none:
-    /// a `text` column has no value layers at all, and a running-service column has none until
-    /// its first flush. Answering the empty set would under-report every negation silently.
-    fn presence_layers(&self, column: &str) -> Result<&[super::Layer], FilterError> {
-        let held = self
-            .columns
-            .get(column)
-            .filter(|held| held.filterable)
-            .ok_or_else(|| FilterError::UndeclaredColumn(column.to_string()))?;
-        let layers = held.value_layers();
-        if layers.is_empty() {
-            return Err(FilterError::NegationWithoutPresence {
-                column: column.to_string(),
-                family: held.family.as_str().to_string(),
-            });
-        }
-        Ok(layers)
-    }
-
     fn eval(
         &self,
         expr: &FilterExpr,
@@ -482,11 +425,8 @@ impl FilterColumns {
                 }
                 Ok(out)
             }
-            // `present ∖ matched`: `NoneOf` carries a value and none of these match, never the
-            // complement, so an unreadable value must narrow rather than widen.
             FilterExpr::NoneOf(kids) => {
-                let column = FilterExpr::negated_column(kids);
-                let mut out = self.present_in(column, candidate)?;
+                let mut out = candidate.clone();
                 for kid in kids {
                     // Under `out`, not `candidate`, the same narrowing `AllOf` does.
                     out.andnot_inplace(&self.eval(kid, &out, unique)?);

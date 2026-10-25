@@ -100,15 +100,9 @@ pub enum FilterExpr {
     AllOf(Vec<FilterExpr>),
     /// At least one sub-expression must match. Empty matches nothing, the identity for union.
     AnyOf(Vec<FilterExpr>),
-    /// The entity carries a value in this column and no sub-expression matches it.
-    ///
-    /// Not the complement: `candidate ∖ any_of(kids)` would put every entity carrying no value into
-    /// the result, and an unreachable value would widen the answer instead of narrowing it.
-    /// Requiring presence also stops the leaf proving which values exist, since an entity carrying
-    /// value *v* inside the candidate is itself the witness that makes *v* visible.
-    ///
-    /// Every sub-expression must name one and the same column, refused otherwise
-    /// ([`FilterError::NegationSpansColumns`]).
+    /// Every entity of the candidate that no sub-expression matches, an entity with no value in a
+    /// column included. Refused where no sub-expression names a column
+    /// ([`FilterError::EmptyNegation`]).
     NoneOf(Vec<FilterExpr>),
 }
 
@@ -139,11 +133,9 @@ impl FilterExpr {
             FilterExpr::Leaf { column, .. } => {
                 out.insert(column.as_str());
             }
-            // The reserved word, so two region leaves in one `none_of` are one column.
             FilterExpr::Region(_) => {
                 out.insert(REGION_COLUMN);
             }
-            // The second reserved word, on the same argument.
             FilterExpr::MemberOf(_) => {
                 out.insert(MEMBER_OF_COLUMN);
             }
@@ -155,7 +147,7 @@ impl FilterExpr {
         }
     }
 
-    /// Checks depth against [`MAX_FILTER_DEPTH`] and that each negation names one column.
+    /// Checks depth against [`MAX_FILTER_DEPTH`] and that each negation names a column.
     pub(in crate::filter) fn check(&self) -> Result<(), FilterError> {
         let depth = self.depth();
         if depth > MAX_FILTER_DEPTH {
@@ -167,30 +159,11 @@ impl FilterExpr {
         self.check_negations()
     }
 
-    /// The one column a [`FilterExpr::NoneOf`]'s sub-expressions name, [`FilterExpr::check`] having
-    /// already established there is exactly one.
-    pub(in crate::filter) fn negated_column(kids: &[FilterExpr]) -> &str {
-        kids.iter()
-            .flat_map(|kid| kid.columns())
-            .next()
-            .expect("check_negations admits exactly one column")
-    }
-
-    /// Refuse a [`FilterExpr::NoneOf`] whose sub-expressions do not name exactly one column:
-    /// `all_of: [none_of: [A], none_of: [B]]` says which presence a multi-column reading requires.
-    pub(in crate::filter) fn check_negations(&self) -> Result<(), FilterError> {
+    fn check_negations(&self) -> Result<(), FilterError> {
         match self {
             FilterExpr::Leaf { .. } | FilterExpr::Region(_) | FilterExpr::MemberOf(_) => Ok(()),
-            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) => {
-                kids.iter().try_for_each(FilterExpr::check_negations)
-            }
-            FilterExpr::NoneOf(kids) => {
-                let columns = self.columns();
-                if columns.len() != 1 {
-                    return Err(FilterError::NegationSpansColumns {
-                        columns: columns.into_iter().map(str::to_string).collect(),
-                    });
-                }
+            FilterExpr::NoneOf(_) if self.columns().is_empty() => Err(FilterError::EmptyNegation),
+            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
                 kids.iter().try_for_each(FilterExpr::check_negations)
             }
         }
@@ -227,20 +200,13 @@ pub enum RowExpr {
     AllOf(Vec<RowExpr>),
     /// Union in row space. Empty matches nothing, exactly as [`FilterExpr::AnyOf`] does.
     AnyOf(Vec<RowExpr>),
-    /// `present ∖ matched` in row space, [`FilterExpr::NoneOf`]'s positive predicate over the hot
-    /// column: family carried here too, since presence is the family's own statement of it.
-    NoneOf {
-        column: String,
-        family: Family,
-        kids: Vec<RowExpr>,
-    },
     /// A region leaf, already resolved: its rows over the whole view.
     Region(crate::region::RegionRows),
     /// A `member_of` leaf, already resolved: `membership ∩ M_auth`, which has already met the mask,
     /// unlike a region, so its cardinality is already readable off the artifacts frame.
     MemberOf(Bitmap),
-    /// `none_of` over region or `member_of` leaves: the presence half is the whole view or the
-    /// request's domain, and the answer is the complement of the union within it.
+    /// `none_of`: every row in scope, the whole view or the request's domain, that no kid matches.
+    /// Rows outside the mask are among them, so a caller narrows the answer through the mask.
     NotInRows(Vec<RowExpr>),
 }
 
@@ -256,10 +222,7 @@ impl RowExpr {
         match self {
             RowExpr::Entity(bitmap) => out.push(bitmap),
             RowExpr::Leaf { .. } | RowExpr::Region(_) | RowExpr::MemberOf(_) => {}
-            RowExpr::AllOf(kids)
-            | RowExpr::AnyOf(kids)
-            | RowExpr::NotInRows(kids)
-            | RowExpr::NoneOf { kids, .. } => {
+            RowExpr::AllOf(kids) | RowExpr::AnyOf(kids) | RowExpr::NotInRows(kids) => {
                 for kid in kids {
                     kid.collect_verdicts(out);
                 }
@@ -271,21 +234,21 @@ impl RowExpr {
     pub fn is_whole_view(&self) -> bool {
         match self {
             RowExpr::Entity(_) | RowExpr::Region(_) | RowExpr::MemberOf(_) => true,
-            RowExpr::Leaf { .. } | RowExpr::NoneOf { .. } => false,
+            RowExpr::Leaf { .. } => false,
             RowExpr::AllOf(kids) | RowExpr::AnyOf(kids) | RowExpr::NotInRows(kids) => {
                 kids.iter().all(RowExpr::is_whole_view)
             }
         }
     }
 
-    /// Whether a region leaf is anywhere in the tree; its rows have not yet met the mask.
+    /// Whether a region leaf or a negation is anywhere in the tree; their rows have not yet met
+    /// the mask.
     pub fn has_region(&self) -> bool {
         match self {
             // A `member_of` leaf is not one: its set has already met the mask.
             RowExpr::Region(_) | RowExpr::NotInRows(_) => true,
             RowExpr::Entity(_) | RowExpr::Leaf { .. } | RowExpr::MemberOf(_) => false,
             RowExpr::AllOf(kids) | RowExpr::AnyOf(kids) => kids.iter().any(RowExpr::has_region),
-            RowExpr::NoneOf { kids, .. } => kids.iter().any(RowExpr::has_region),
         }
     }
 
@@ -295,10 +258,7 @@ impl RowExpr {
         match self {
             RowExpr::Region(rows) => Some(rows.verdict),
             RowExpr::Entity(_) | RowExpr::Leaf { .. } | RowExpr::MemberOf(_) => None,
-            RowExpr::AllOf(kids)
-            | RowExpr::AnyOf(kids)
-            | RowExpr::NotInRows(kids)
-            | RowExpr::NoneOf { kids, .. } => kids
+            RowExpr::AllOf(kids) | RowExpr::AnyOf(kids) | RowExpr::NotInRows(kids) => kids
                 .iter()
                 .filter_map(RowExpr::region_verdict)
                 .reduce(|a, b| a.coarser(b)),

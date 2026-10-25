@@ -487,19 +487,9 @@ fn a_minimum_above_the_query_s_token_count_matches_nothing() {
     assert!(got("quick fox", Some(1)) > got("quick fox", Some(2)));
 }
 
-/// **A negation over a text column is refused, not answered empty.**
-///
-/// `none_of` is `present ∖ matched`, and `present` is what makes it a positive predicate. A text
-/// column stores no per-item value to be present — its index is the words its documents use, and
-/// its prose is a blob row — so the presence half had nothing to union and every such request
-/// answered "no items" with a 200: indistinguishable from a corpus where nothing matches, for every
-/// principal, silently.
-///
-/// **Mutations this kills:** removing the `layers.is_empty()` guard in `present_in` (the request
-/// answers empty and succeeds); making the guard return `Ok(candidate.clone())` instead (the
-/// negation widens past what the column knows, which is the direction that discloses).
+/// **A negation over a text column keeps every item of the candidate the match does not.**
 #[test]
-fn a_negation_over_a_text_column_is_refused() {
+fn a_negation_over_a_text_column_is_the_complement_of_its_match() {
     use mosaica_engine::filter::{FilterExpr, FilterOperand};
 
     let dir = build_with(text_schema(true));
@@ -507,43 +497,19 @@ fn a_negation_over_a_text_column_is_refused() {
     let columns = open_columns(&out);
     let source_of = common::entities_of(&out, "id", 0..N);
     let all: croaring::Bitmap = (0..N).map(|e| source_of[&e]).collect();
-
-    let negation = FilterExpr::NoneOf(vec![FilterExpr::Leaf {
+    let quick = FilterExpr::Leaf {
         column: "abstract".to_string(),
         operand: FilterOperand::Match {
             query: "quick".to_string(),
             minimum: None,
         },
-    }]);
-    let err = columns
-        .evaluate(&negation, &all)
-        .expect_err("a negation over a text column must refuse rather than answer");
-    assert!(
-        err.is_callers_fault(),
-        "the caller can fix this by asking a different question, so it is a 422 and not a 500"
-    );
-    let text = err.to_string();
-    assert!(
-        text.contains("abstract") && text.contains("text"),
-        "the refusal must name the column and why: {text}"
-    );
-
-    // The positive form of the same question still answers, so what is refused is the negation and
-    // not the column.
-    assert!(
-        columns
-            .resolve(
-                "abstract",
-                &FilterOperand::Match {
-                    query: "quick".to_string(),
-                    minimum: None,
-                },
-                &all,
-            )
-            .expect("the positive predicate answers")
-            .cardinality()
-            > 0
-    );
+    };
+    let matched = columns.evaluate(&quick, &all).unwrap();
+    let negated = columns
+        .evaluate(&FilterExpr::NoneOf(vec![quick]), &all)
+        .unwrap();
+    assert!(!matched.is_empty() && !negated.is_empty());
+    assert_eq!(negated, all.andnot(&matched));
 }
 
 /// **A phrase is where the words are adjacent and in order — the conjunction only narrows to it.**

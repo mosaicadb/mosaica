@@ -296,8 +296,21 @@ fn it_composes_under_the_three_combinators() {
         let clipped = viewport(
             &fx.engine,
             &credential,
-            Some(FilterExpr::AllOf(vec![member_of(fx.id), half])),
+            Some(FilterExpr::AllOf(vec![member_of(fx.id), half.clone()])),
         );
+        // One negation over both kinds is the visible set minus their union.
+        let union = viewport(
+            &fx.engine,
+            &credential,
+            Some(FilterExpr::AnyOf(vec![member_of(fx.id), half.clone()])),
+        );
+        let neither = viewport(
+            &fx.engine,
+            &credential,
+            Some(FilterExpr::NoneOf(vec![member_of(fx.id), half])),
+        );
+        assert_eq!(matched(&union) + matched(&neither), visible(&union));
+        assert!(matched(&neither) > 0 && matched(&union) > 0);
         assert!(
             matched(&clipped) <= matched(&a).min(matched(&in_half)),
             "a conjunction narrows both sides"

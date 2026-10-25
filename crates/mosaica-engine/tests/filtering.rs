@@ -1762,50 +1762,45 @@ fn any_of_unions_across_columns() {
     assert!(got.andnot(&cand).is_empty());
 }
 
-/// **`none_of` means *carries a value in this column, and none of these matches it*** — not the
-/// complement of the candidate.
-///
-/// The distinction is the whole of why a negation is expressible at all, and it is asserted here
-/// against a column that genuinely has absences: an item with no department must be missing from
-/// `none_of: [eng]`, where a complement would return it.
+/// **`none_of` is everything the viewer may see, minus the matches**: an item with no department
+/// is kept by `none_of: [eng]`, since it is not a match.
 #[test]
-fn none_of_requires_a_value_rather_than_taking_the_complement() {
+fn none_of_keeps_the_visible_items_with_no_value() {
     let fx = fixture();
+    let eng = || {
+        leaf(
+            "department",
+            FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
+        )
+    };
+    for credential in [full_coverage_credential(), subset_credential()] {
+        let (_engine, cand) = candidate_for(&fx, &credential);
+        let got = fx
+            .columns
+            .evaluate(&FilterExpr::NoneOf(vec![eng()]), &cand)
+            .unwrap();
+        let want = cand.andnot(&fx.columns.evaluate(&eng(), &cand).unwrap());
+        assert_eq!(got, want);
+    }
     let (_engine, cand) = candidate_for(&fx, &full_coverage_credential());
-
-    let expr = FilterExpr::NoneOf(vec![leaf(
-        "department",
-        FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
-    )]);
-    let got = fx.columns.evaluate(&expr, &cand).unwrap();
-
+    let got = fx
+        .columns
+        .evaluate(&FilterExpr::NoneOf(vec![eng()]), &cand)
+        .unwrap();
     assert_eq!(
         as_vec(&got),
-        expected(&fx, &[ALL_TERM], |e| department_of(e).is_some()
-            && department_of(e) != Some("eng")),
-        "none_of returned items carrying no department, which is the complement rather than the \
-         negation"
+        expected(&fx, &[ALL_TERM], |e| department_of(e) != Some("eng"))
     );
-    // Non-degenerate in both directions: the corpus has items with no department at all, and the
-    // negation really did exclude something.
+    // Non-degenerate: some items carry no department, and the negation excluded something.
     assert!((0..N).any(|e| department_of(e).is_none()));
     assert!((0..N).any(|e| department_of(e) == Some("eng")));
-    // I12 by shape: a negation is still a subset of the candidate.
-    assert!(got.andnot(&cand).is_empty());
 }
 
-/// **The positivity property, asserted rather than argued** (filter-index §5).
-///
-/// Every "this failure degrades safely under I12" argument in the design holds because each operand
-/// is positive: an entity whose value is unreachable matches nothing, so a lost value under-reports
-/// and under-reporting narrows. A complement-style negation inverts that — the same failures would
-/// *widen*.
-///
-/// The unreachable entity here is a **buffered** one: accepted and acked, in the candidate, and in
-/// no layer until its flush (filter-index §5 rules on exactly this lag). Under a complement it
-/// would match every `none_of`; under the built semantics it matches none.
+/// An entity accepted and not yet flushed is in the candidate and in no layer, so it matches no
+/// leaf and every negation keeps it. It has no row in any view until its flush, so nothing draws
+/// or counts it.
 #[test]
-fn an_entity_whose_value_is_not_yet_reachable_matches_no_negation() {
+fn an_entity_whose_value_is_not_yet_reachable_is_kept_by_a_negation() {
     let fx = fixture();
     let cache = fx._dir.path().join("cache-positivity");
     let wal = fx._dir.path().join("wal-positivity");
@@ -1851,26 +1846,19 @@ fn an_entity_whose_value_is_not_yet_reachable_matches_no_negation() {
             .filter_columns
             .evaluate(&expr, &cand)
             .unwrap();
-        assert!(
-            !got.contains(buffered),
-            "an entity with no reachable value matched a negation — the failure arithmetic has \
-             inverted and every 'degrades safely under I12' argument with it"
-        );
+        assert!(got.contains(buffered), "{expr:?}");
+        assert!(got.andnot(&cand).is_empty(), "a negation left the candidate");
     }
 }
 
-/// **Decision 0062's C11 existence oracle, closed by construction.**
+/// `none_of: [every value I was offered]` returns the visible items carrying no value, and no item
+/// carrying a value the principal was not offered: evaluation is inside the candidate, so an item
+/// there carrying a value is the witness that makes the value visible. A hidden value and a value
+/// that does not exist give the same answer.
 ///
-/// The attack: `none_of: [every value I was offered]` returning a non-empty set would prove there
-/// exist values of a `derived` category the principal was not shown. It cannot, and not because
-/// of an extra intersection — because evaluation happens inside the candidate, so an entity in the
-/// candidate carrying value *v* is itself the witness that makes *v* visible under C11's
-/// derivation. Every value reachable in the result was therefore offered.
-///
-/// Asserted with a **narrow** principal, since a full-coverage one is offered everything and the
-/// oracle has nothing to reveal to it.
+/// Asserted with a **narrow** principal, since a full-coverage one is offered everything.
 #[test]
-fn none_of_every_offered_value_proves_no_unoffered_value_exists() {
+fn none_of_every_offered_value_returns_only_the_visible_items_with_no_value() {
     let fx = fixture();
     let (engine, cand) = candidate_for(&fx, &subset_credential());
     let session = engine.authorise(&subset_credential()).unwrap();
@@ -1914,12 +1902,12 @@ fn none_of_every_offered_value_proves_no_unoffered_value_exists() {
         .evaluate(&expr, &cand)
         .unwrap();
 
-    assert!(
-        got.is_empty(),
-        "none_of over every offered value returned {} entities, which proves to this principal \
-         that values it was not shown exist (C11)",
-        got.cardinality()
+    assert_eq!(
+        as_vec(&got),
+        expected(&fx, &[SUBSET_TERM], |e| department_of(e).is_none()),
+        "none_of over every offered value returned an item carrying a value"
     );
+    assert!(!got.is_empty(), "the fixture leaves some visible items with no department");
     let _ = session;
 }
 
@@ -1971,55 +1959,45 @@ fn a_values_count_is_what_a_filter_on_that_value_returns() {
     }
 }
 
-/// A `none_of` naming two columns is refused, because it would have to pick which column's presence
-/// to require and either choice answers a question the caller did not ask. `all_of` of two
-/// single-column negations is the same set and says which.
+/// A `none_of` may name several columns: it keeps the items no branch matches, the same set as
+/// `all_of` of one negation per branch.
 #[test]
-fn a_negation_spanning_two_columns_is_refused_and_composes_instead() {
+fn a_negation_spanning_two_columns_is_the_conjunction_of_two_negations() {
     let fx = fixture();
     let (_engine, cand) = candidate_for(&fx, &full_coverage_credential());
-
-    let spanning = FilterExpr::NoneOf(vec![
+    let eng = || {
         leaf(
             "department",
             FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
-        ),
-        leaf("title", FilterOperand::TextPrefix("paper-1".into())),
-    ]);
-    let err = fx
-        .columns
-        .evaluate(&spanning, &cand)
-        .expect_err("a negation over two columns is refused");
-    assert!(
-        matches!(&err, FilterError::NegationSpansColumns { columns }
-            if columns == &["department".to_string(), "title".to_string()]),
-        "{err:?}"
-    );
+        )
+    };
+    let paper = || leaf("title", FilterOperand::TextPrefix("paper-1".into()));
 
-    // And the composition it points at is accepted, and is the intersection of the two negations.
-    let composed = FilterExpr::AllOf(vec![
-        FilterExpr::NoneOf(vec![leaf(
-            "department",
-            FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
-        )]),
-        FilterExpr::NoneOf(vec![leaf(
-            "title",
-            FilterOperand::TextPrefix("paper-1".into()),
-        )]),
-    ]);
-    let got = fx.columns.evaluate(&composed, &cand).unwrap();
-    assert_eq!(
-        as_vec(&got),
-        expected(&fx, &[ALL_TERM], |e| department_of(e).is_some()
-            && department_of(e) != Some("eng")
-            && !title_of(e).starts_with("paper-1"))
-    );
-
-    // An empty negation names no column at all, and is refused for the same reason.
-    assert!(fx
+    let spanning = fx
         .columns
-        .evaluate(&FilterExpr::NoneOf(vec![]), &cand)
-        .is_err());
+        .evaluate(&FilterExpr::NoneOf(vec![eng(), paper()]), &cand)
+        .unwrap();
+    let composed = fx
+        .columns
+        .evaluate(
+            &FilterExpr::AllOf(vec![
+                FilterExpr::NoneOf(vec![eng()]),
+                FilterExpr::NoneOf(vec![paper()]),
+            ]),
+            &cand,
+        )
+        .unwrap();
+    let want = expected(&fx, &[ALL_TERM], |e| {
+        department_of(e) != Some("eng") && !title_of(e).starts_with("paper-1")
+    });
+    assert_eq!(as_vec(&spanning), want);
+    assert_eq!(as_vec(&composed), want);
+
+    // An empty negation names no column, and is refused.
+    assert!(matches!(
+        fx.columns.evaluate(&FilterExpr::NoneOf(vec![]), &cand),
+        Err(FilterError::EmptyNegation)
+    ));
 }
 
 /// A negation nests inside the other combinators and counts against the same depth budget.
@@ -2039,8 +2017,7 @@ fn a_negation_nests_and_counts_towards_the_depth_limit() {
     let got = fx.columns.evaluate(&expr, &cand).unwrap();
     assert_eq!(
         as_vec(&got),
-        expected(&fx, &[ALL_TERM], |e| (department_of(e).is_some()
-            && department_of(e) != Some("eng"))
+        expected(&fx, &[ALL_TERM], |e| department_of(e) != Some("eng")
             || title_of(e) == "paper-00")
     );
 }
@@ -4514,6 +4491,87 @@ fn the_row_route_and_the_entity_route_agree_over_the_domain() {
         !row_marks.is_empty() && row_marks.len() < narrow_all.len(),
         "non-degenerate in both directions: the window holds matches, and the filter removed some"
     );
+}
+
+/// **A negation is the visible set minus the matches on either route**, over two columns, one of
+/// which the row route reads from the hot column. The row route's complement holds every row of
+/// the window, a suppressed one and one outside the principal's grant among them, and only the
+/// mask removes them; a suppressed item with no department, which the negation would otherwise
+/// keep, is the check that it does.
+#[test]
+fn a_negation_on_either_route_is_the_visible_set_minus_the_matches() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-route-negation");
+    let wal = fx._dir.path().join("wal-route-negation");
+    let engine = open_engine_publishing(&fx.bundle, &cache, &wal);
+    let session = engine.authorise(&subset_credential()).unwrap();
+    let id_of = |e: u64| {
+        engine
+            .mosaica_id_of(mosaica_types::EntityId::new(fx.entity_of[&e]))
+            .expect("identity is computable")
+            .raw()
+    };
+    let ids = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
+        out.points.mosaica_ids.iter().copied().collect()
+    };
+    let negation = FilterExpr::NoneOf(vec![
+        leaf(
+            "department",
+            FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
+        ),
+        leaf("title", FilterOperand::TextPrefix("paper-1".into())),
+    ]);
+    let kept = |e: u64| department_of(e) != Some("eng") && !title_of(e).starts_with("paper-1");
+
+    // A visible item with no department, which the negation keeps until it is suppressed.
+    let narrow = [0.0, 0.0, 400.0, 400.0];
+    let narrow_all = ids(&engine
+        .viewport(&session, ViewportRequest::new("s0", 8, narrow, 10_000))
+        .expect("the narrow window answers unfiltered"));
+    let suppressed = (0..N)
+        .find(|&e| department_of(e).is_none() && kept(e) && narrow_all.contains(&id_of(e)))
+        .expect("the window holds a visible item with no department");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&suppressed]),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )
+        .expect("a suppression is accepted");
+
+    let visible: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| terms_of(e).contains(&SUBSET_TERM) && e != suppressed)
+        .map(id_of)
+        .collect();
+    let want: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| terms_of(e).contains(&SUBSET_TERM) && e != suppressed && kept(e))
+        .map(id_of)
+        .collect();
+    assert!(!want.is_empty() && want.len() < visible.len());
+
+    let before = engine.filter_row_routes();
+    let narrow_filtered = engine
+        .viewport(
+            &session,
+            ViewportRequest::new("s0", 8, narrow, 10_000).filter(negation.clone()),
+        )
+        .expect("the narrow window answers filtered");
+    assert_eq!(engine.filter_row_routes() - before, 1, "the narrow window takes the row route");
+
+    let before = engine.filter_row_routes();
+    let full = engine
+        .viewport(
+            &session,
+            ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000).filter(negation),
+        )
+        .expect("the full extent answers filtered");
+    assert_eq!(engine.filter_row_routes() - before, 0, "the full extent takes the entity route");
+
+    assert_eq!(ids(&full), want);
+    assert_eq!(full.tiles.iter().map(|t| t.matched).sum::<u64>(), want.len() as u64);
+    let in_window: std::collections::BTreeSet<u64> =
+        want.intersection(&narrow_all).copied().collect();
+    assert_eq!(ids(&narrow_filtered), in_window);
+    assert!(!ids(&narrow_filtered).contains(&id_of(suppressed)));
 }
 
 /// **The two routes agree over a numeric range as well as over a category**, which is what admits

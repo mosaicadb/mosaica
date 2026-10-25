@@ -356,18 +356,21 @@ def test_meta_publishes_text_with_exactly_its_two_operands(catalogue_server, cas
         )
         assert resp.status_code == 422, f"{why} must be refused: {resp.text}"
 
-    # **A negation over a text column is refused, not answered empty** (records §4.4). There is no
-    # per-item value for `none_of`'s presence half to subtract from, and answering the empty set
-    # would be indistinguishable from a corpus where nothing matches.
-    resp = catalogue_server.viewport_request(
-        token,
-        cat.VIEW_ID,
-        ZOOM,
-        cat.FULL_VIEWPORT,
-        filters={"none_of": [{"abstract": {"match": "archive"}}]},
-    )
-    assert resp.status_code == 422, resp.text
-    assert "abstract" in resp.text
+
+def test_a_negation_over_a_text_column_serves_the_visible_items_the_match_does_not(
+    catalogue_server, cases, entity_of_fx
+):
+    """`none_of` over a `match` is the unfiltered served set minus the match's, engine to engine."""
+    token = catalogue_server.authorise(list(cases["full_100pct"].grants))["token"]
+    match = {"abstract": {"match": "archive"}}
+    served = {}
+    for name, expr in [("all", None), ("match", match), ("negated", {"none_of": [match]})]:
+        raw = catalogue_server.viewport(
+            token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=expr
+        )
+        served[name] = _served_entities(raw, entity_of_fx)
+    assert served["match"] and served["negated"]
+    assert served["negated"] == served["all"] - served["match"]
 
 
 # ---------------------------------------------------------------------------------------------

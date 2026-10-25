@@ -161,15 +161,8 @@ pub enum FilterError {
     /// be evaluated for it. Fail-closed: an empty value set is what a principal who may see none of
     /// them is told.
     MembershipUnavailable(String),
-    /// A `none_of` names more or fewer than one column; see [`crate::filter::FilterExpr::NoneOf`].
-    NegationSpansColumns { columns: Vec<String> },
-    /// A `none_of` names a column with no presence set to subtract from, a `text` column, whose
-    /// index is postings over words and whose values are blob rows.
-    ///
-    /// Fail-closed: a negation is `present ∖ matched`, and with no presence the left operand is
-    /// empty, so every such request would answer "no items" with a 200, indistinguishable from a
-    /// corpus where nothing matches. Refusing names the column and the reason instead.
-    NegationWithoutPresence { column: String, family: String },
+    /// A `none_of` names no column, as `none_of: []` does.
+    EmptyNegation,
     /// A region leaf reached the entity-space evaluator, which cannot answer it: a region is a
     /// statement about position, and position is row space. Only
     /// [`crate::filter::FilterColumns::evaluate_routed`] takes a tree carrying one.
@@ -223,25 +216,9 @@ impl std::fmt::Display for FilterError {
                 "column '{column}' carries no derived membership postings, so its per-viewer value \
                  visibility cannot be derived"
             ),
-            FilterError::NegationSpansColumns { columns } => match columns.len() {
-                0 => write!(
-                    f,
-                    "a 'none_of' names no column, so there is nothing for an item to be required \
-                     to carry a value in; name one column inside it"
-                ),
-                _ => write!(
-                    f,
-                    "a 'none_of' names {} columns ({}) and may name only one; write all_of: \
-                     [{{none_of: [...]}}, {{none_of: [...]}}], one 'none_of' per column",
-                    columns.len(),
-                    columns.join(", ")
-                ),
-            },
-            FilterError::NegationWithoutPresence { column, family } => write!(
+            FilterError::EmptyNegation => write!(
                 f,
-                "a 'none_of' names column '{column}', which is a {family} column and holds no \
-                 per-item value to be present or absent; say what is wanted with a positive \
-                 expression instead"
+                "a 'none_of' names no column; put the expressions to exclude inside it"
             ),
             FilterError::RegionInEntitySpace => write!(
                 f,
@@ -305,8 +282,7 @@ impl FilterError {
         match self {
             FilterError::UndeclaredColumn(_)
             | FilterError::TooDeep { .. }
-            | FilterError::NegationSpansColumns { .. }
-            | FilterError::NegationWithoutPresence { .. }
+            | FilterError::EmptyNegation
             | FilterError::UniqueOnly { .. }
             | FilterError::UnknownLayer(_) => true,
             FilterError::PostingsUnreadable { .. }

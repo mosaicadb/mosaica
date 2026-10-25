@@ -3068,25 +3068,19 @@ fn a_row_cut_by_the_ceiling_adds_no_key_to_the_dictionary() {
 fn a_malformed_filter_is_refused_whatever_rows_remain() {
     let fx = Fx::new();
     let fields: Vec<String> = Vec::new();
-    // A negation of a text column behind a conjunct that matches no row, and behind one that
-    // matches some: refused alike, though the first leaves nothing for the negation to narrow.
-    let negated_text = |lo: i64, hi: i64| {
+    // An empty negation behind a conjunct that matches no row, and behind one that matches some:
+    // refused alike, though the first leaves nothing for the negation to narrow.
+    let empty_negation = |lo: i64, hi: i64| {
         FilterExpr::AllOf(vec![
             leaf("when", range(lo, hi)),
-            FilterExpr::NoneOf(vec![leaf(
-                "prose",
-                FilterOperand::Match {
-                    query: "x".into(),
-                    minimum: None,
-                },
-            )]),
+            FilterExpr::NoneOf(Vec::new()),
         ])
     };
     let base = 1_700_000_000_000_000;
     let filters = [
         leaf("nothing", FilterOperand::Equals(AttrLocalId::new(1))),
-        negated_text(base + 7000, base + 7099),
-        negated_text(base, base + 1000),
+        empty_negation(base + 7000, base + 7099),
+        empty_negation(base, base + 1000),
     ];
     for credential in [full_coverage_credential(), zero_credential()] {
         let session = fx.engine.authorise(&credential).unwrap();

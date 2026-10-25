@@ -11,8 +11,8 @@ the way the server does — by raising, never by evaluating a guess. The `region
 (`selection-operand.md`, stage 4 of the shape work) is a shape — a polygon or a box in the view's
 own coordinates — or a published artifact named by its `mosaica_id`, evaluated here as an even-odd
 walk over the entity's **stored** position on the quantised grid with a point on an edge inside
-([`RegionColumn`]), and by artifact through the fixture's own membership; `none_of` over it is the
-complement within the rowed entities, every one of which carries a position.
+([`RegionColumn`]), and by artifact through the fixture's own membership. `none_of` is the
+complement within the candidate: every candidate entity no sub-expression matches.
 
 ## What makes this a second implementation rather than a transcription
 
@@ -182,8 +182,7 @@ class RegionColumn:
     by artifact, each published shape's member set as the fixture computed it.
 
     `positions` maps entity id → `(qx, qy)` on the 32-bit grid; an entity absent here has no
-    row (buffered, or in no view) and matches neither the region nor its negation, which is
-    `filter-index.md` §5's ruling applied without exception. `artifacts` maps a `mosaica_id`
+    row (buffered, or in no view) and matches no region. `artifacts` maps a `mosaica_id`
     (as its decimal string) → the member entities of the artifact **this principal is served**;
     an id absent here is an empty operand — for an unknown id, a suppressed artifact, one
     withheld by criterion, exactly as the server answers. `quantise` is the build's `fixed32`
@@ -223,8 +222,7 @@ class MemberOfColumn:
     criterion — exactly as the server answers, and never a refusal: a `422` there would make the
     leaf an existence oracle over what the criterion withholds.
 
-    `rowed` is every entity that has a row in this view; one absent from it matches neither the
-    leaf nor its negation, on `RegionColumn`'s rule and for the same reason.
+    `rowed` is every entity that has a row in this view; one absent from it matches no leaf.
 
     **An unknown *layer* is not modelled here.** It is a `422` at the wire and the differential
     asserts it against the server directly; a column object that could answer it would be a second
@@ -303,32 +301,6 @@ def _inside_polygon(px: int, py: int, rings, quantise) -> bool:
     return parity
 
 
-def _carries_a_value(column, entity: int) -> bool:
-    """Does `entity` hold any value in this column at all?
-
-    **The predicate `none_of` rests on** (decision 0066). Every column kind records absence the
-    same way here — the entity is simply not in `values` — which mirrors the artefact, where a
-    category spends its reserved code 0 and every other family is left out of the presence bitmap.
-    A region is total over rowed entities — every one carries a position — so its presence is
-    the entity having a row at all (`selection-operand.md` §5).
-    """
-    if isinstance(column, RegionColumn):
-        return entity in column.positions
-    if isinstance(column, MemberOfColumn):
-        return entity in column.rowed
-    return entity in column.values
-
-
-def _columns_named(expr: dict) -> set[str]:
-    """Every column named anywhere under `expr` — what the one-column rule is checked against."""
-    if not isinstance(expr, dict) or len(expr) != 1:
-        raise ValueError(f"a filter node is one key: {expr!r}")
-    (name, body), = expr.items()
-    if name in ("all_of", "any_of", "none_of"):
-        return set().union(*(_columns_named(sub) for sub in body)) if body else set()
-    return {name}
-
-
 def _leaf_matches(column, operator: str, operand, entity: int) -> bool:
     """One leaf against one entity — the smallest unit of the definition."""
     if isinstance(column, CategoryColumn):
@@ -370,22 +342,8 @@ def matches(expr: dict, columns: dict, entity: int) -> bool:
     if name == "any_of":
         return any(matches(sub, columns, entity) for sub in body)
     if name == "none_of":
-        # **Carries a value in this column, and none of these matches it** — decision 0066, and
-        # deliberately not `not any(...)`. The complement would admit every entity whose value is
-        # merely *unreachable*, which inverts the failure arithmetic `filter-index.md` §5 rests on;
-        # requiring presence keeps a negation positive. Written from the decision rather than from
-        # the engine: an oracle that transcribed the implementation would ratify whatever it does.
-        named = _columns_named(expr)
-        if len(named) != 1:
-            raise ValueError(
-                f"a none_of names exactly one column, not {sorted(named)} — it requires the item "
-                "to carry a value in the column it negates (decision 0066)"
-            )
-        (column_name,) = named
-        if column_name not in columns:
-            raise UnknownColumn(column_name)
-        if not _carries_a_value(columns[column_name], entity):
-            return False
+        # Everything the viewer may see, minus the matches: an entity with no value in a column
+        # matches no leaf over it, so a negation keeps it.
         return not any(matches(sub, columns, entity) for sub in body)
     if name not in columns:
         raise UnknownColumn(name)
