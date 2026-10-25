@@ -1044,8 +1044,8 @@ impl ValueColumn {
     /// statistic in the timing, which is the class records §4.3 refuses postings for. A table over
     /// the ordinal domain answers in O(1) per slot and is the same size whatever matched.
     ///
-    /// A layer whose codes are not `u32` is not a keyword layer; the fail-closed reading is that
-    /// nothing matches, as every other ordinal path here reads it.
+    /// A layer whose codes are not `u32` is not a keyword layer, and matches nothing here, as on
+    /// every other ordinal path.
     pub fn scan_ordinal_set(&self, candidate: &Bitmap, set: &CodeSet) -> Bitmap {
         match &self.codes {
             Codes::U32(v) => self.walk_typed(candidate, v, |x| set.contains(*x)),

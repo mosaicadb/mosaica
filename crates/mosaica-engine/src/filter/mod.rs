@@ -38,8 +38,8 @@
 //! since appends an extent covering the entities it added. A column here is the base plus every
 //! live extent, scanned in turn and unioned. The layers are disjoint in entity space, checked
 //! rather than assumed: two layers claiming one entity would make it match both values. A buffered
-//! entity is in the candidate and in no layer until its flush, so it matches no predicate and
-//! under-reports rather than over-reports.
+//! entity is in the candidate and in no layer until its flush, so it matches no leaf and a
+//! negation keeps it; it holds no row in any view until then, so nothing draws or counts it.
 //!
 //! # The row route
 //!

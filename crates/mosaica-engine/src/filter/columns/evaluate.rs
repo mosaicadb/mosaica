@@ -378,10 +378,16 @@ impl FilterColumns {
         let tag = u16::try_from(declared_index).unwrap_or(u16::MAX);
         let mut out = Bitmap::new();
         for entity in survivors.iter() {
-            // A row that will not read is not a match, rather than a refused request. Under a
-            // `none_of` that keeps the item, which is in the candidate and so visible; drill-down
-            // refuses instead, because it is about to serve the row.
-            let Ok(Some(fields)) = self.records.fields_of(entity) else {
+            // A record that will not read refuses the request: skipping it would leave the phrase
+            // short, and widen a `none_of` over it. An item with no record holds no prose.
+            let Some(fields) =
+                self.records
+                    .fields_of(entity)
+                    .map_err(|e| FilterError::RecordUnreadable {
+                        column: name.to_string(),
+                        detail: e.to_string(),
+                    })?
+            else {
                 continue;
             };
             let Some(RecordValue::Utf8(prose)) =

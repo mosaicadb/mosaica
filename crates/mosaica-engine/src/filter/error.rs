@@ -186,6 +186,9 @@ pub enum FilterError {
     /// A unique column's index could not be read. Fail-closed, on
     /// [`FilterError::PostingsUnreadable`]'s argument.
     UniqueUnreadable { column: String, detail: String },
+    /// An item's record could not be read where a `phrase` reads its prose. Fail-closed: a skipped
+    /// item would leave a phrase short, and widen a `none_of` over it.
+    RecordUnreadable { column: String, detail: String },
 }
 
 impl std::fmt::Display for FilterError {
@@ -245,6 +248,10 @@ impl std::fmt::Display for FilterError {
                 f,
                 "the unique index of column '{column}' could not be read ({detail})"
             ),
+            FilterError::RecordUnreadable { column, detail } => write!(
+                f,
+                "a record a phrase over column '{column}' reads could not be read ({detail})"
+            ),
         }
     }
 }
@@ -285,7 +292,8 @@ impl FilterError {
             | FilterError::RegionUnavailable(_)
             | FilterError::MemberOfInEntitySpace
             | FilterError::MemberOfUnavailable(_)
-            | FilterError::UniqueUnreadable { .. } => false,
+            | FilterError::UniqueUnreadable { .. }
+            | FilterError::RecordUnreadable { .. } => false,
         }
     }
 }
