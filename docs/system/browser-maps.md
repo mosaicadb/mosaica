@@ -118,7 +118,7 @@ A geographic view draws an outline of the world under its points unless you say 
 | `{tiles, attribution}` | Raster tiles from your own tile server: `tiles` is a URL template with `{z}`, `{x}` and `{y}`, and `attribution` is the credit shown in the map's corner. It needs a view whose frame lines up with web map tiles, as `tile_scheme` in `/v1/meta` says. There is no default tile server |
 | `{image, bounds}` | One image stretched over `bounds`, `[x0, y0, x1, y1]` in the view's own coordinates, or over the whole frame. The image isn't reprojected |
 
-To give each view its own basemap, pass an object keyed by view id. A view it leaves out gets the default. In a notebook, `db.map`, `Selection.map` and `Viewer.map` take the same values as `basemap=`, and an image there can also be a local file, which Python reads and sends to the page.
+To give each view its own basemap, pass an object keyed by view id. A view it leaves out gets the default. In a notebook, `db.map`, `Selection.map` and `Viewer.map` take a `basemap=` argument with the same values, and an image there can also be a local file, which Python reads and sends to the page.
 
 If the value doesn't fit the view the map opens on, the map says so and draws the points without it. A value that doesn't fit a view the viewer switches to later draws nothing there, with a note in the map's corner saying why. A basemap that fails to load shows a note too, and is tried again after one second, then two, doubling up to a minute. Each time a note appears, changes or goes, the map fires `mosaica-basemapchange`.
 
