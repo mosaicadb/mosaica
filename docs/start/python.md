@@ -62,7 +62,7 @@ Then read the places into pandas. JupyterLab shows the first rows as a table, wh
 4        349     52.05     35.65         Soltān Darreh-ye Bālā    settlement        P.PPL    Iran      Tehran, Iran        <NA>           IR
 ```
 
-Each row is one place: its GeoNames id, its longitude and latitude, its name, the kind of feature it is, its country, the region it is filed under, its population and its country's code. `feature_class` holds one of nine words, such as `settlement`, `water` or `mountain`, or nothing. `division` is the place's first-level division, such as a state or a province, followed by its country, because division names repeat across countries. Most places have no population figure, and pandas shows `<NA>` for them.
+Each row is one place: its GeoNames id, its longitude and latitude, its name, the kind of feature it is, its country, the region it is filed under, its population and its country's code. `feature_class` holds one of nine words, such as `settlement`, `water` or `mountain`, except for 47 places GeoNames gives no class. `division` is the place's first-level division, such as a state or a province, followed by its country, because division names repeat across countries. Most places have no population figure, and pandas shows `<NA>` for them.
 
 `dtype_backend="numpy_nullable"` asks pandas for its types that allow a missing value. Without it, the gaps would turn `population` into a column of floats.
 
@@ -89,11 +89,11 @@ and 3 open vocabularies, public, so every reader may list their values: feature_
 
 `projection="web_mercator"` says the view's coordinates are longitude and latitude, to be drawn with the projection web maps use. Without it, a view takes plain x and y coordinates, such as the output of UMAP or t-SNE, and draws them as they are.
 
-`declare_columns` reads the data frame's column types, not its values, and declares every column. We name `feature_class`, `country` and `division` as categories, because each holds a short list of values repeated across many rows. A category can be counted by group once it is rendered or indexed, and can colour the map once it is rendered. The other string columns are declared as text, `geonameid` and `population` as 64-bit integers, and `lon` and `lat` as 64-bit floats.
+`declare_columns` reads the data frame's column types, not its values, and declares every column. `category` says which string columns are categories: `feature_class`, `country` and `division` each hold a short list of values repeated across many rows, and a category stores each value once, however many places hold it. The other string columns are declared as text, `geonameid` and `population` as 64-bit integers, and `lon` and `lat` as 64-bit floats.
 
-Every declared column is stored, and shown when someone opens a place. A column can also be **rendered**: its value is sent with every point drawn, so the map can colour or size points by it, and it can be filtered and counted. It can be **indexed**: Mosaica builds an index on it, so it can be filtered and counted without being sent with every point. A column that is neither is a detail.
+Every declared column is stored, and shown when someone opens a place. A column can also be **rendered**: its value is sent with every point drawn, so the map can colour or size points by it, and it can be filtered and, if it is a category, counted. Or it can be **indexed**: Mosaica builds an index on it, so it can be filtered, and a category counted, without travelling with the points. A column that is neither rendered nor indexed is a **detail**. `country` is a category and a detail, so it is shown when a place is opened, but the map can't be filtered or counted by it.
 
-Each has a cost. A rendered column makes every point the server sends larger, and it is fixed at the first commit, so render only what the map needs, which here is the feature class for colour. An index takes disc and build time, so index the columns people will filter on. We index `name` to search it, `population` to filter on a range, and `division` to filter and count by it. `feature_class` is indexed as well as rendered. The rest, `country` among them, are details, which cost least.
+Each has a cost. A column can only be made rendered before the first commit, but a rendered column makes every point the server sends larger, so render only what the map needs. Here that is the feature class, for colour; it can then be filtered and counted by as well, without an index. An index takes disc and build time, so index the columns people will filter on. We index `name` to search it, `population` to filter on a range, and `division` to filter and count by it. The rest are details, which cost least.
 
 The report lists every column and what it was declared as. Its second line is about the categories. Each category takes its values from a vocabulary, the list of values it can hold. An open vocabulary grows as new values arrive. Public means anyone who can see the map may see the list.
 
@@ -128,7 +128,7 @@ built 150,000 items from world: 150,000 rows
 
 The first commit builds the database. It places every item on the view's grid and stores neighbouring places next to each other on disc, so that drawing one part of the map reads one stretch of the file. Then it starts a Mosaica server for the database on a free local port. Yours will be a different one.
 
-From now on the notebook talks to that server, the same way a browser or another program would.
+From now on the notebook talks to that server, the same way a browser or another program would. A later commit sends its rows to the running server, which adds them without a rebuild.
 
 ## Draw the map
 
@@ -136,9 +136,9 @@ From now on the notebook talks to that server, the same way a browser or another
 --8<-- "clients/py/examples/01_getting_started.py:map"
 ```
 
-The map appears under the cell, with every place coloured by feature class. Drag to pan and scroll to zoom. A map of more points than it can draw at once shows a sample at a wide zoom, chosen so that dense and sparse areas both show, and more points as you zoom in.
+The map draws every place, coloured by feature class. Drag to pan and scroll to zoom. The map aims to draw up to 250,000 points, so all 150,000 places are drawn even with the whole world in view. With more items than that, the map draws a sample at a wide zoom, chosen so that dense and sparse areas both show, and fills in more as you zoom in.
 
-The panel on the left counts the places in view. Its Feature class card lists the five largest classes, each with two counts: the places in view and all that match. Below them, "N more" opens the card to show up to twenty. Hover over a class and two buttons take the place of its counts. The highlighter picks out that class's places on the map and dims the rest, and the funnel filters the map to that class. Click the coloured square beside a class to change its colour.
+The panel on the left counts the places in view. Its Feature class card lists the five largest classes with a count for each, and "4 more in view" opens the rest. Once you zoom in, each row shows two counts: the places in view, then after a slash the places on the whole map. Hover over a class and two buttons take the place of its counts. The highlighter picks out that class's places on the map and dims the rest, and the funnel filters the map to that class. Click the coloured square beside a class to change its colour.
 
 ## Filter from Python
 
@@ -200,11 +200,11 @@ Text columns are searched by word with `match`.
 
 `aggregate` takes a list of groupings and returns one table for each, which is why we unpack a list of one. A grouping says what to group by and what to work out for each group. Here `by` groups by feature class, `top` is how many values to list, the largest first, and `"count": True` asks for the number of places in each. The answer is an Arrow table, like every table Mosaica returns, and `to_pandas()` turns it into a data frame.
 
-Settlements are the largest class, then water, then buildings. The last row, in the group `none`, counts the 47 places GeoNames gives no class. While the whole world is in view, these are the numbers the map's Feature class card shows.
+Settlements are the largest class, then water, then buildings. The last row, in the group `none`, counts the 47 places GeoNames gives no class. While the whole world is in view, the map's Feature class card shows the same numbers for the nine classes, because it makes the same request over the places in view.
 
 ## Find a misfiled place
 
-East Nusa Tenggara is a chain of islands at the south-eastern end of Indonesia. Filter to it with `eq`, which keeps the places whose value is exactly the one given, then count it and draw it.
+East Nusa Tenggara is a chain of islands at the south-eastern end of Indonesia. Filter to it, count it and draw it. `eq` keeps the places whose value is exactly the one given.
 
 ```{.python notest}
 --8<-- "clients/py/examples/01_getting_started.py:outlier"
