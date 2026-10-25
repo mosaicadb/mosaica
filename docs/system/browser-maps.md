@@ -22,14 +22,14 @@ The host tells the store where the camera is, and which view, filters, layers an
 
 ### What the view shows
 
-The store reports the view's state, so a host never shows one kind of answer as another:
+The store reports the view's state:
 
 | State | Meaning |
 |---|---|
 | `idle` | nothing asked for yet |
 | `loading` | a request is out |
 | `retrying` | the server was busy (`429`) or still starting (`503`), and the request will be sent again |
-| `shown` | points are on screen. Only this state may show counts |
+| `shown` | points are on screen, with their counts |
 | `empty` | the answer holds nothing this viewer may see in view |
 | `refused` | the request failed, so what is here is not known |
 
