@@ -38,6 +38,12 @@ use mosaica_types::view::{
 
 use crate::wal::WalRecord;
 
+/// A live key's record as the served manifest holds it: the view's own gate and its metadata.
+pub struct HeldView<'a> {
+    pub visibility: &'a Option<Vec<String>>,
+    pub metadata: &'a BTreeMap<String, ViewMetadataValue>,
+}
+
 /// Why a create or a drop was refused. Every variant is the caller's own request measured against
 /// state only the executor may read, which is why none of them is checkable in a handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,7 +213,8 @@ impl ViewRoster {
         (self.created.clone(), self.dead.clone())
     }
 
-    /// The record a `PUT /control/views/{group}/{key}` appends, or the refusal.
+    /// The record a `PUT /control/views/{group}/{key}` appends; `None` where the key is live and
+    /// `held`, its record as the served manifest holds it, is this one; or the refusal.
     ///
     /// **Prepares only: nothing here mutates the roster.** The record is applied by
     /// [`Self::apply`] once it is durable, which is the same order the layer registry takes and
@@ -219,7 +226,8 @@ impl ViewRoster {
         key: &str,
         visibility: Option<Vec<String>>,
         metadata: BTreeMap<String, ViewMetadataValue>,
-    ) -> Result<WalRecord, RosterError> {
+        held: Option<HeldView<'_>>,
+    ) -> Result<Option<WalRecord>, RosterError> {
         if let Some(owner) = facts.members_of {
             return Err(RosterError::Refused(format!(
                 "view group '{}' takes its views from group '{owner}' (views §3.3), so a key is \
@@ -229,15 +237,6 @@ impl ViewRoster {
             )));
         }
         check_view_key(key).map_err(RosterError::Refused)?;
-        // **A dropped key is not refused** (decision 0115). What was a `409` on a tombstone is a
-        // `201` at a fresh incarnation: the key is a name the caller chose, and the predecessor's
-        // artifacts are kept out by the incarnation below, not by refusing the name.
-        if self.is_live(facts.name, key) {
-            return Err(RosterError::Exists {
-                group: facts.name.to_string(),
-                key: key.to_string(),
-            });
-        }
         // The gate arrives as `Engine::create_view` stored it: each label's canonical text, and
         // `None` for `public`.
         // **A `timestamp_us` arrives as an integer or a string, and the declaration is what says
@@ -309,7 +308,23 @@ impl ViewRoster {
                 )));
             }
         }
-        Ok(WalRecord::ViewCreate {
+        // **A dropped key is not refused** (decision 0115). What was a `409` on a tombstone is a
+        // `201` at a fresh incarnation: the key is a name the caller chose, and the predecessor's
+        // artifacts are kept out by the incarnation below, not by refusing the name. A live key
+        // is compared as the record arrives once typed, so the same record again is the view that
+        // holds it, and any other is refused, the record being immutable.
+        if self.is_live(facts.name, key) {
+            return match held {
+                Some(held) if *held.visibility == visibility && *held.metadata == metadata => {
+                    Ok(None)
+                }
+                _ => Err(RosterError::Exists {
+                    group: facts.name.to_string(),
+                    key: key.to_string(),
+                }),
+            };
+        }
+        Ok(Some(WalRecord::ViewCreate {
             view: CreatedView {
                 group: facts.name.to_string(),
                 key: key.to_string(),
@@ -319,7 +334,7 @@ impl ViewRoster {
                 visibility,
                 metadata,
             },
-        })
+        }))
     }
 
     /// The record a `DELETE /control/views/{group}/{key}` appends, deleting `deleted`, or the
@@ -379,8 +394,8 @@ mod tests {
     }
 
     fn create(roster: &mut ViewRoster, group: &str, key: &str) -> Result<(), RosterError> {
-        let record = roster.prepare_create(facts(group, &[]), key, None, BTreeMap::new())?;
-        roster.apply(&record);
+        let record = roster.prepare_create(facts(group, &[]), key, None, BTreeMap::new(), None)?;
+        roster.apply(&record.expect("a new key"));
         Ok(())
     }
 
@@ -438,6 +453,35 @@ mod tests {
         assert_eq!(roster.dead_incarnations().len(), 1);
     }
 
+    /// The same record on a live key is the view that holds it, and nothing is appended; another
+    /// record, or none to compare with, is refused.
+    #[test]
+    fn a_live_key_given_its_own_record_again_is_that_view() {
+        let mut roster = ViewRoster::new();
+        create(&mut roster, "quarter", "2026-Q2").unwrap();
+        let (visibility, metadata) = (None, BTreeMap::new());
+        let held = || HeldView {
+            visibility: &visibility,
+            metadata: &metadata,
+        };
+        let again = roster.prepare_create(
+            facts("quarter", &[]),
+            "2026-Q2",
+            None,
+            BTreeMap::new(),
+            Some(held()),
+        );
+        assert_eq!(again, Ok(None));
+        let other = roster.prepare_create(
+            facts("quarter", &[]),
+            "2026-Q2",
+            Some(vec!["secret".to_string()]),
+            BTreeMap::new(),
+            Some(held()),
+        );
+        assert!(matches!(other, Err(RosterError::Exists { .. })));
+    }
+
     /// The seed is complete current state, and the two lists may be read in either order: a
     /// recreate's live record must survive a death recorded *below* it.
     #[test]
@@ -460,10 +504,10 @@ mod tests {
         assert_eq!(roster.incarnation_of("quarter", "2026-Q2"), Some(7));
         // And the next mint is above everything ever seen, dead included.
         let record = roster
-            .prepare_create(facts("quarter", &[]), "2026-Q3", None, BTreeMap::new())
+            .prepare_create(facts("quarter", &[]), "2026-Q3", None, BTreeMap::new(), None)
             .unwrap();
         match record {
-            WalRecord::ViewCreate { view } => assert!(view.incarnation > 7),
+            Some(WalRecord::ViewCreate { view }) => assert!(view.incarnation > 7),
             other => panic!("expected a create, got {other:?}"),
         }
     }
@@ -501,6 +545,7 @@ mod tests {
                 "2026-Q5",
                 None,
                 BTreeMap::new(),
+                None,
             )
             .unwrap_err();
         assert!(matches!(refusal, RosterError::Refused(_)));
@@ -515,7 +560,7 @@ mod tests {
         }];
         let roster = ViewRoster::new();
         assert!(roster
-            .prepare_create(facts("quarter", &declared), "k", None, BTreeMap::new())
+            .prepare_create(facts("quarter", &declared), "k", None, BTreeMap::new(), None)
             .is_err());
         assert!(roster
             .prepare_create(
@@ -525,6 +570,7 @@ mod tests {
                 [("label".to_string(), ViewMetadataValue::Int(3))]
                     .into_iter()
                     .collect(),
+                None,
             )
             .is_err());
         assert!(roster
@@ -538,6 +584,7 @@ mod tests {
                 )]
                 .into_iter()
                 .collect(),
+                None,
             )
             .is_ok());
         // An undeclared name is refused rather than stored.
@@ -555,6 +602,7 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
+                None,
             )
             .is_err());
     }
@@ -593,6 +641,7 @@ mod tests {
                 [("tier".to_string(), ViewMetadataValue::Int(3))]
                     .into_iter()
                     .collect(),
+                None,
             )
             .is_err());
     }
@@ -623,10 +672,11 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
+                None,
             )
             .expect("an integer is what a JSON timestamp is");
         match record {
-            WalRecord::ViewCreate { view } => assert_eq!(
+            Some(WalRecord::ViewCreate { view }) => assert_eq!(
                 view.metadata.get("starts"),
                 Some(&ViewMetadataValue::TimestampUs(1_767_225_600)),
                 "the declaration is what types it"
@@ -645,6 +695,7 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
+                None,
             )
             .is_err());
     }
@@ -660,10 +711,11 @@ mod tests {
                     "k",
                     declared.map(|labels| labels.iter().map(|l| l.to_string()).collect()),
                     BTreeMap::new(),
+                    None,
                 )
                 .expect("a well-formed record");
             match record {
-                WalRecord::ViewCreate { view } => view.visibility,
+                Some(WalRecord::ViewCreate { view }) => view.visibility,
                 other => panic!("expected a create record, got {other:?}"),
             }
         };

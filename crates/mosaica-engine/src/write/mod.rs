@@ -765,14 +765,15 @@ impl WritePath {
         self.submit(|reply| Command::DropLayer { name, reply })
     }
 
-    /// Create a view of a view group while the service runs.
+    /// Create a view of a view group while the service runs. Answers whether the key already held
+    /// this record, in which case nothing was appended.
     pub(crate) fn create_view(
         &self,
         group: String,
         key: String,
         visibility: Option<Vec<String>>,
         metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
-    ) -> Result<(), AcceptError> {
+    ) -> Result<bool, AcceptError> {
         self.submit(|reply| Command::CreateView {
             group,
             key,

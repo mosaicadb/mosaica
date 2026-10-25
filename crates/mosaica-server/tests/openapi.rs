@@ -3083,8 +3083,8 @@ async fn status_flush_and_compact_match_the_description() {
 }
 
 /// The declaration routes: attributes, vocabularies and their value pages, view groups and the
-/// views created in them, plain views and layers. Each answers `201` for a new name and `200` for
-/// the same declaration again, except a group's view, whose key is taken once.
+/// views created in them, plain views and layers. Each answers `201` for a new name, `200` for the
+/// same declaration again, and a refusal for another under the same name.
 #[tokio::test]
 async fn declarations_match_the_description() {
     let doc = description();
@@ -3294,9 +3294,20 @@ async fn declarations_match_the_description() {
         assert_answer(&doc, &put, resp, 201).await["view"],
         "quarter:2026-Q3"
     );
+    // The same record again answers the view that holds the key; another record is refused.
     let resp = send(&put, "/control/views/quarter/2026-Q3", &record)
         .await
         .unwrap();
+    let again = assert_answer(&doc, &put, resp, 200).await;
+    assert_eq!(again["view"], "quarter:2026-Q3");
+    assert_eq!(again["existing"], true);
+    let resp = send(
+        &put,
+        "/control/views/quarter/2026-Q3",
+        &json!({ "metadata": { "year": 2027 } }),
+    )
+    .await
+    .unwrap();
     assert_refusal_to(&doc, Some(&put), resp, 409, "conflict").await;
     let resp = send(&put, "/control/views/no-such-group/2026-Q3", &record)
         .await

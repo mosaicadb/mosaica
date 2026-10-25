@@ -234,7 +234,8 @@ pub(crate) enum Command {
         /// The gate's labels, each one term; `None` is `public`.
         visibility: Option<Vec<String>>,
         metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
-        reply: Reply<()>,
+        /// Whether the key already held this record.
+        reply: Reply<bool>,
     },
     /// Drop a view of a view group, deleting the items it leaves with a row in no view. The
     /// deletions retire at the fold like any other.

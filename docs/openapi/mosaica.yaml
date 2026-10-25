@@ -3371,8 +3371,9 @@ paths:
         declares, each typed by its JSON form: a boolean, an integer, a number with a fraction, or
         a string. The record cannot be changed after it is created.
 
-        A key held by a live view is `409`. A dropped key may be created again, and the new view
-        starts with none of the old one's rows or artifacts.
+        A key a live view holds with this record answers `200` with that view, and creates
+        nothing; with any other record it is `409`. A dropped key may be created again, and the
+        new view starts with none of the old one's rows or artifacts.
       security:
         - controlCredential: []
       parameters:
@@ -3386,6 +3387,12 @@ paths:
             schema:
               $ref: "#/components/schemas/ViewRecord"
       responses:
+        "200":
+          description: A live view holds the key with this record. Nothing was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ViewCreated"
         "201":
           description: The view is created.
           content:
@@ -3405,7 +3412,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "409":
-          description: A live view holds this key.
+          description: A live view holds this key with another record.
           content:
             application/json:
               schema:
@@ -7611,7 +7618,7 @@ components:
     ViewCreated:
       type: object
       additionalProperties: false
-      required: [view, group, key, publication]
+      required: [view, group, key, existing, publication]
       properties:
         view:
           type: string
@@ -7620,6 +7627,9 @@ components:
           type: string
         key:
           type: string
+        existing:
+          type: boolean
+          description: "`true` where a live view already held the key with this record."
         publication:
           type: integer
           minimum: 0

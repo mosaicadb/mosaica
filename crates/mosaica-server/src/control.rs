@@ -1387,8 +1387,9 @@ fn metadata_value(name: &str, value: &serde_json::Value) -> Result<ViewMetadataV
 }
 
 /// `PUT /control/views/{group}/{key}`: creates a view of a group. The executor checks the group
-/// and key, so two racing requests cannot both take one key: 404 for an unknown group, 409 for a
-/// live key, 422 for a bad record. A dropped key is reusable and the new view starts empty.
+/// and key, so two racing requests cannot both take one key: 404 for an unknown group, 200 for a
+/// live key holding this record, 409 for one holding another, 422 for a bad record. A dropped key
+/// is reusable and the new view starts empty.
 async fn create_view(
     State(state): State<Arc<AppState>>,
     axum::extract::Path((group, key)): axum::extract::Path<(String, String)>,
@@ -1404,7 +1405,7 @@ async fn create_view(
         .visibility
         .map(mosaica_types::view::DeclaredGate::into_labels);
     let (group_name, view_key) = (group.clone(), key.clone());
-    state
+    let existing = state
         .write(move |state| {
             state
                 .engine
@@ -1415,8 +1416,9 @@ async fn create_view(
         "view": format!("{group}:{key}"),
         "group": group,
         "key": key,
+        "existing": existing,
     });
-    acknowledge(&state, &wait, StatusCode::CREATED, body).await
+    acknowledge(&state, &wait, declared(existing), body).await
 }
 
 /// `DELETE /control/views/{group}/{key}`: drops a view and frees its key; its data stays on disc,

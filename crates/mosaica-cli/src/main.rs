@@ -344,9 +344,8 @@ enum Command {
     /// attributes, then the layers. A group's views are read as `mosaica build` reads them: its
     /// `[[view_group.view]]` blocks, the rows of its `[view_group.views]` table, or the distinct
     /// values of its points file's view column. A declaration identical to one the service holds
-    /// answers what exists, so running it again after adding a block declares only that block,
-    /// except that a view of a view group whose key is held is refused with `409`. It sends no
-    /// rows. It prints one JSON object on stdout with each
+    /// answers what exists, so running it again after adding a block declares only that block. It
+    /// sends no rows. It prints one JSON object on stdout with each
     /// request, its status and the server's answer, goes on past a refused request, and exits 1
     /// when any was refused.
     ///

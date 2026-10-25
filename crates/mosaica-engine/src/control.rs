@@ -474,7 +474,8 @@ impl Engine {
         })
     }
 
-    /// Create a view of a view group. Almost nothing is validated here; the gate's labels are the
+    /// Create a view of a view group, answering whether the key already held this record, in which
+    /// case nothing was appended. Almost nothing is validated here; the gate's labels are the
     /// exception, checked at [`Engine::check_visibility`].
     pub fn create_view(
         &self,
@@ -482,7 +483,7 @@ impl Engine {
         key: String,
         visibility: Option<Vec<String>>,
         metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
-    ) -> std::result::Result<(), crate::write::AcceptError> {
+    ) -> std::result::Result<bool, crate::write::AcceptError> {
         let visibility = self.check_visibility(visibility.as_deref())?;
         self.write.create_view(group, key, visibility, metadata)
     }

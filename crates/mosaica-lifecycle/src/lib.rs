@@ -51,7 +51,7 @@ pub use registry::{
     no_pending, EdgeCheck, Everything, GroupViews, LayerRegistry, PreparedGrow, PreparedPut, Reach,
     RegistryError, ResolvedLayers,
 };
-pub use roster::{GroupFacts, RosterError, ViewRoster};
+pub use roster::{GroupFacts, HeldView, RosterError, ViewRoster};
 pub use wal::{
     accepted_batches, AcceptedBatch, CarriedBatch, ChangeOp, ExecutorWal, MembershipGrowth,
     OverlaySnapshotEntry, PublishedArtifact, RowOutcome, RowReceipt, Wal, WalEdit, WalError,

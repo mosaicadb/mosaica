@@ -242,7 +242,9 @@ fn writes(engine: &Engine) -> Vec<(&'static str, Result<(), AcceptError>)> {
         ),
         (
             "view",
-            engine.create_view("g".into(), "k".into(), None, Default::default()),
+            engine
+                .create_view("g".into(), "k".into(), None, Default::default())
+                .map(drop),
         ),
         (
             "view drop",

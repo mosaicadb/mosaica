@@ -469,7 +469,7 @@ async fn a_created_view_is_served_ingested_flushed_and_survives_a_restart() {
 /// that lists views from meta actually meets: the view was created for rows that have not arrived,
 /// and a flush of the rows of *other* views must not take it off the list. A view listed at the
 /// acknowledgement and gone one flush later is worse than one never listed — the SDK reads meta to
-/// know what exists, and would create it again and take the 409.
+/// know what exists, and would create it again.
 #[tokio::test]
 async fn a_created_view_with_no_rows_survives_a_flush_and_is_listed_once() {
     let mut served = Served::build(build_fixture_bundle).await;

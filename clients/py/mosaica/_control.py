@@ -275,6 +275,8 @@ class Control:
         """`PUT /control/views/{group}/{key}`: add one view to a view group.
 
         `body` is the view's roster record: its metadata, and its `visibility` where it has one.
+        A key a live view holds with this record answers `200` with that view; with another
+        record it is refused with `409`.
         """
         return self._send(
             "PUT",

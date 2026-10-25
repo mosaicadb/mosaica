@@ -413,8 +413,7 @@ fn a_declaration_and_what_is_written_into_it_are_served_and_survive_a_restart() 
     };
 
     // Declared once, every request is taken, the group's view from its roster among them.
-    // Declared again, every request finds what it declares already there, but for the group's
-    // view, whose key is taken once.
+    // Declared again, every request finds what it declares already there.
     let first = answer(write(&["declare", "--config", "more.toml"], b""));
     assert_eq!(first["refused"], 0, "{first}");
     let requests = |report: &Value| -> Vec<(String, u64)> {
@@ -430,15 +429,11 @@ fn a_declaration_and_what_is_written_into_it_are_served_and_survive_a_restart() 
             })
             .collect()
     };
-    let roster_view = "PUT /control/views/years/2020".to_string();
-    assert!(
-        requests(&first).contains(&(roster_view.clone(), 201)),
-        "{first}"
-    );
-    let again = refused(write(&["declare", "--config", "more.toml"], b""));
+    let roster_view = ("PUT /control/views/years/2020".to_string(), 201);
+    assert!(requests(&first).contains(&roster_view), "{first}");
+    let again = answer(write(&["declare", "--config", "more.toml"], b""));
     for (request, status) in requests(&again) {
-        let expected = if request == roster_view { 409 } else { 200 };
-        assert_eq!(status, expected, "{request}: {again}");
+        assert_eq!(status, 200, "{request}: {again}");
     }
     answer(write(
         &[

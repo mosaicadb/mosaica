@@ -959,8 +959,9 @@ export class Control {
 
   /**
    * `PUT /control/views/{group}/{key}`: creates a view of `group` from its roster record in `body`.
-   * An unknown group is refused with `404` and a key already in use with `409`. A dropped key may
-   * be used again, and the new view starts empty.
+   * An unknown group is refused with `404`. A key a live view holds with this record answers
+   * `200` with that view, and one it holds with another record is refused with `409`. A dropped
+   * key may be used again, and the new view starts empty.
    */
   createView(group: string, key: string, body: object, options: WriteOptions = {}): Promise<Answer> {
     return this.sendJson('PUT', withQuery(`/control/views/${segment(group)}/${segment(key)}`, waiting(options)), body, options);

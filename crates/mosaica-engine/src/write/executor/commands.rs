@@ -820,7 +820,7 @@ impl Executor {
         key: String,
         visibility: Option<Vec<String>>,
         metadata: std::collections::BTreeMap<String, mosaica_types::view::ViewMetadataValue>,
-        reply: Reply<()>,
+        reply: Reply<bool>,
     ) {
         let started = std::time::Instant::now();
         let generation = self.generation.load_full();
@@ -847,11 +847,24 @@ impl Executor {
             members_of: descriptor.members_of.as_deref(),
             metadata: &descriptor.metadata,
         };
+        // The key's record as the served manifest holds it, which a live key is compared with.
+        let held = descriptor
+            .views
+            .iter()
+            .find(|view| view.key == key)
+            .map(|view| mosaica_lifecycle::HeldView {
+                visibility: &view.visibility,
+                metadata: &view.metadata,
+            });
         let prepared = self
             .live
-            .with_roster(|roster| roster.prepare_create(facts, &key, visibility, metadata));
+            .with_roster(|roster| roster.prepare_create(facts, &key, visibility, metadata, held));
         let record = match prepared {
-            Ok(record) => record,
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                reply.ack(true);
+                return;
+            }
             Err(e) => {
                 reply.fail(roster_error(e));
                 return;
@@ -917,7 +930,7 @@ impl Executor {
         // Durable in the log and not yet in a manifest, and a rotation reclaims the log: so the
         // roster reaches `SEGMENTS-<n>.json` on the mechanism a deny already uses.
         self.side_manifests.behind_live = true;
-        reply.ack(());
+        reply.ack(false);
     }
 
     /// `PUT /control/attributes`: declare an attribute column while the service runs.
