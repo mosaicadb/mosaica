@@ -1,25 +1,25 @@
 # Data model
 
-This chapter follows one example through everything a Mosaica database holds: a collection of research papers, laid out by what their abstracts say, with a hierarchy of topics drawn over them. Each paper is an **item** with its own field values. You place the items on maps with **views**, draw structure over them, such as clusters, topics or regions, with **annotation layers**, and give category fields their lists of values with **vocabularies**. Each cluster, topic or region in a layer is called an **artifact**.
+A Mosaica database holds **items**, each with its own field values. You place the items on maps with **views**, draw structure over them, such as clusters, topics or regions, with **annotation layers**, and give category fields their lists of values with **vocabularies**. Each cluster, topic or region in a layer is called an **artifact**. The examples in this chapter use a collection of research papers, with a hierarchy of topics drawn over them.
 
 ```mermaid
 flowchart LR
   subgraph items["Items"]
-    p["a paper<br/>title, year, archive, abstract"]
+    p["an item<br/>its fields"]
   end
   subgraph views["Views"]
-    m["map<br/>a layout of every paper"]
-    y["by_year<br/>one layout per year"]
+    m["a view<br/>a layout of the items"]
+    y["a view group<br/>one layout per key"]
   end
   subgraph layers["Annotation layers"]
-    t["topics<br/>field → subfield → topic"]
+    t["a layer<br/>clusters, topics or regions"]
   end
   p --> m
   p --> y
-  t -. "artifacts over the papers" .-> m
+  t -. "artifacts over the items" .-> m
 ```
 
-*Each paper is one item. Views place it on maps. A layer groups papers into topics drawn over a view.*
+*Views place each item on maps. A layer groups items into artifacts drawn over a view.*
 
 ??? info "How does Mosaica compare to a relational database?"
 
@@ -37,12 +37,12 @@ flowchart LR
 
     - **Each layout is stored in its own order.** A tile is quick to read when its points are stored together. A table has one physical order, and a second order needs a second copy, as a covering index is. Mosaica keeps one such copy per view, ordered by position, and keeps what is true of the item in every view apart from them.
     - **Drawn columns sit beside the positions.** A rendered field is copied next to each position, so drawing a tile reads one place. Turning `render` on later would rewrite every view, so it can only be done by rebuilding.
-    - **Annotations are built in.** In SQL, counting the papers a viewer may see in each topic on screen is a join and a grouping on every request. Mosaica stores each artifact's members as a bitmap over the same item numbers as the viewer's visible items, so each count is one bitmap intersection.
+    - **Annotations are built in.** In SQL, counting the items a viewer may see in each cluster on screen is a join and a grouping on every request. Mosaica stores each artifact's members as a bitmap over the same item numbers as the viewer's visible items, so each count is one bitmap intersection.
     - **Rows are matched to items when they are written.** Mosaica has no query language and joins none of your tables at request time. Each row from a separate file, such as a field's values or a cluster's members, is tied to its item once, when it is inserted, by a unique field or, once the database is running, a `mosaica_id`. That is why a unique field matters.
 
 ## Items and fields
 
-In the example, each paper is an item, and its data is held in fields, one for each column you declare, such as `title`, `year`, `archive` and `abstract`. Each item also carries an access label, which decides which viewers may see it ([access control](access-control.md)). What a viewer can do with a field depends first on its type:
+An item's data is held in fields, one for each column you declare, such as a paper's `title`, `year`, `archive` and `abstract`. Each item also carries an access label, which decides which viewers may see it ([access control](access-control.md)). What a viewer can do with a field depends first on its type:
 
 | Kind | For example | Once indexed, a viewer can filter it by |
 |---|---|---|
@@ -70,13 +70,13 @@ Your data probably has its own identifier too, such as a DOI. If you declare tha
 
 ## Views
 
-The example has a view called `map`, which places each paper at a UMAP projection of its abstract's embedding, so papers on similar subjects sit together. A view takes any x and y, or longitude and latitude drawn with a map projection, and one paper can have a position in several views while keeping its fields and access label. A view group holds many views of the same kind, such as one layout per year.
+A view lays the items out on a map, from longitude and latitude drawn with a map projection, or from any two coordinates, such as a projection of embeddings. An item can have a position in several views while keeping its fields and access label. A view group holds many views of the same kind, such as one layout per year.
 
 [Views and projections](views.md) covers the kinds of view, their frames, view groups and what is drawn under the points.
 
 ## Annotation layers
 
-In the example, the `topics` layer groups papers into fields, subfields and topics, and each field, subfield and topic is an artifact, with the papers in it as its members. An artifact can carry:
+A layer groups items into artifacts, such as the clusters of a clustering run, the topics of a topic model or the countries of a world map, and the items in each are its members. An artifact can carry:
 
 - a **title** or other text you supply, such as "Graph Neural Networks". Text made from the members, such as a generated topic name, can be limited to viewers who may see all of them;
 - a **count** of its members, which Mosaica works out for each viewer from the members that viewer may see;
@@ -87,17 +87,17 @@ You decide how a layer finds each artifact's members:
 
 | Membership | Members are | Example |
 |---|---|---|
-| Listed | the items a table names for each artifact | the output of a clustering run, one row per paper and cluster |
+| Listed | the items a table names for each artifact | the output of a clustering run, one row per item and cluster |
 | By shape | the items whose positions fall inside the artifact's shape | country borders on a world map |
-| By an indexed field | the items carrying each value of a category or an unsigned integer field | one artifact per archive |
+| By an indexed field | the items carrying each value of a category or an unsigned integer field | one artifact per value, such as each paper's archive |
 
-A layer can be flat, a single set of artifacts, or arranged in levels, as the example's fields, subfields and topics are: each topic names one subfield as its parent, and a viewer chooses which level to show and can colour the map by it. If your hierarchy has no levels, a layer can be a tree, where an artifact may name more than one parent. And for independent analyses, such as clusterings at three resolutions, it can be a stack with one per level.
+A layer can be flat, a single set of artifacts, or arranged in levels, such as fields, subfields and topics over papers: each artifact names one in the level above as its parent, and a viewer chooses which level to show and can colour the map by it. If your hierarchy has no levels, a layer can be a tree, where an artifact may name more than one parent. And for independent analyses, such as clusterings at three resolutions, it can be a stack with one per level.
 
-A layer is drawn on the views you name, or declared for a view group with its own artifacts for each view, such as a separate clustering for each year. It also has its own access label, and can gate each artifact further, so a viewer may see the papers but not a layer of internal labels over them. The [annotations](annotations.md) chapter covers all of this in detail.
+A layer is drawn on the views you name, or declared for a view group with its own artifacts for each view, such as a separate clustering for each year. It also has its own access label, and can gate each artifact further, so a viewer may see the items but not a layer of internal labels over them. The [annotations](annotations.md) chapter covers all of this in detail.
 
 ## Vocabularies
 
-In the example, `archive` takes its values from a vocabulary of arXiv archives: `cs`, `math`, `astro-ph` and so on, each with an optional title such as "Computer Science". Several fields can share one vocabulary.
+A vocabulary is the list of values a category field takes, each with a key and an optional title, such as the arXiv archives `cs`, `math` and `astro-ph`, titled "Computer Science" and so on. Several fields can share one vocabulary.
 
 When you declare a vocabulary, you choose how many values it can hold (up to 255, 65,535 or about 4.3 billion), which is fixed from then on, and whether it's closed, refusing any value it doesn't hold, or open, adding new values as they arrive. The third choice is who sees the list: a public vocabulary lists every value to every viewer, while a derived one lists to each viewer only the values carried by items they may see. Use derived when the list itself would reveal something, such as the names of clients.
 

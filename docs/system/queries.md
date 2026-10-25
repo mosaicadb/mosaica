@@ -1,6 +1,6 @@
 # Queries
 
-A client builds everything it shows from a handful of requests: the points of the map, the topics over them, the values for a filter list, an item's card, a table of records, and the figures behind a chart. This chapter explains what each one returns and how filters work across them. The examples use the research papers of the [data model](data-model.md), laid out by abstract, with a layer of topics over them.
+A client builds everything it shows from a handful of requests: the points of the map, the clusters, topics or regions over them, the values for a filter list, an item's card, a table of records, and the figures behind a chart. This chapter explains what each one returns and how filters work across them. The examples use a collection of research papers with a layer of topics over them.
 
 === "HTTP"
 
@@ -60,7 +60,7 @@ A client draws the map tile by tile. It names a view, a zoom level and the area 
 
 - the items the viewer may see there, how many of them match the filter, and how many of those match the [highlight](#highlighting);
 - a sample of the matching points, each with its `mosaica_id`, its position and its rendered fields;
-- each point's topic in every annotation layer the request names, so the client can colour points by topic.
+- each point's artifact in every annotation layer the request names, so the client can colour points by cluster or topic.
 
 The counts arrive before the points, so a client can start drawing before the whole answer is in. Where there are too many points to draw, a client can also ask for counts in finer cells within each tile, to draw as shading.
 
@@ -86,7 +86,7 @@ You write a filter as a JSON expression over the declared fields. A field can be
 | Number, true or false, date | `eq`, `in`, `range` | `{"year": {"range": {"gte": 2020, "lt": 2024}}}` |
 | Text | `match`, `phrase` | `{"abstract": {"match": "graph neural network"}}` |
 
-Keywords are compared exactly, case included, while text is matched by word, ignoring case: `match` finds items containing every word, and `phrase` the words together and in order. A unique field, such as a DOI, can be filtered with `eq` and `in` even when it's neither indexed nor rendered, which is the quick way to find a list of papers. Dates can be written as text, such as `"2020-01-01"`, or in microseconds since 1970.
+Keywords are compared exactly, case included, while text is matched by word, ignoring case: `match` finds items containing every word, and `phrase` the words together and in order. A unique field, such as a DOI, can be filtered with `eq` and `in` even when it's neither indexed nor rendered, which is the quick way to find a list of items. Dates can be written as text, such as `"2020-01-01"`, or in microseconds since 1970.
 
 ??? info "Writing dates"
     1 January 2020 is `"2020-01-01"` or `1577836800000000`. A date alone is midnight UTC, and a date with a time needs an offset, as in `"2020-01-01T09:30:00Z"` or `"2020-01-01 10:30:00+01:00"`; a space may stand for the `T`. A date in a range is its first instant, so a range covering 2020 ends at `"lt": "2021-01-01"`; `"lte": "2020-12-31"` would leave out most of 31 December. A string of digits, such as `"20200101"`, is microseconds.
@@ -114,11 +114,11 @@ Where a filter changes what's drawn, a highlight keeps everything drawn and mark
 
 ## Annotations on the map
 
-The points carry each one's topic, but not the topics themselves, so a client reads those from the annotations request. It returns the artifacts in each tile, with their names and other content, their counts, centres and boxes.
+The points carry each one's artifact, but not the artifacts themselves, so a client reads those from the annotations request. It returns the artifacts in each tile, with their names and other content, their counts, centres and boxes.
 
-On a layer with levels, such as `topics`, each tile returns a limited number of artifacts of each level, largest first by the members the viewer may see, so a small topic in a crowded area appears as the viewer zooms in. An artifact's count, centre and box cover all of its members the viewer may see, wherever they are, so a topic that spans several tiles has the same figures in each and can be drawn once. On a `nested` or `dag` layer, a tree of any depth, the request can instead set a budget for the whole screen: where too many fine topics would show, their parent comes back in their place, and zooming in moves the cut deeper.
+On a layer with levels, each tile returns a limited number of artifacts of each level, largest first by the members the viewer may see, so a small cluster in a crowded area appears as the viewer zooms in. An artifact's count, centre and box cover all of its members the viewer may see, wherever they are, so one that spans several tiles has the same figures in each and can be drawn once. On a `nested` or `dag` layer, a tree of any depth, the request can instead set a budget for the whole screen: where too many fine artifacts would show, their parent comes back in their place, and zooming in moves the cut deeper.
 
-A filter doesn't change which artifacts come back or their counts, so topics don't come and go as the viewer types. Instead, each artifact carries a flag saying whether any of its members in the tile match the filter, and another for the highlight. To count each topic's matching members, ask for a [breakdown by the layer](#charts-and-breakdowns). The [annotations](annotations.md) chapter explains which artifacts a viewer may see at all.
+A filter doesn't change which artifacts come back or their counts, so artifacts don't come and go as the viewer types. Instead, each artifact carries a flag saying whether any of its members in the tile match the filter, and another for the highlight. To count each artifact's matching members, ask for a [breakdown by the layer](#charts-and-breakdowns). The [annotations](annotations.md) chapter explains which artifacts a viewer may see at all.
 
 ## Filter lists and typeahead
 
@@ -146,11 +146,11 @@ For a chart, an aggregate request works out the figures without returning the it
 |---|---|---|
 | The whole set | (one row) | how many papers match the filter |
 | Category values | value | papers per archive, the ten largest |
-| Annotations | topic | papers per topic at one level |
+| Annotations | artifact | papers per topic at one level |
 | Histogram | bin | papers per year |
 | Density grid | cell of the map | a heat map of matching papers |
 
-A grouping by values or topics can also be divided into cells, such as a density grid for each archive, and a breakdown by a `nested` or `dag` layer names the same cut the map uses, so the chart lists the topics on screen.
+A grouping by values or annotations can also be divided into cells, such as a density grid for each value, and a breakdown by a `nested` or `dag` layer names the same cut the map uses, so the chart lists the artifacts on screen.
 
 The counts are over the items that match the filter. To compare, add a second filter, the reference: each row then gains its count in that set and the lift, how much more common the group is among the matches than in the reference. This request breaks the papers since 2020 down by archive, against all papers:
 
@@ -176,9 +176,9 @@ The [HTTP API reference](../reference/http.md) lists every grouping, the columns
 
 ## Not built yet
 
-- **Statistics per group**, such as the mean citations of each archive. Read the items in bulk and compute them.
+- **Statistics per group**, such as the mean of a number field in each category value. Read the items in bulk and compute them.
 - **Other breakdowns**: of keyword fields, of integer fields by value, histograms divided into cells, and counts across views.
 - **Searching every category at once.** Typeahead covers one field at a time.
 - **Reading one result in parallel.** A bulk read is one chain of requests.
-- **Filters that reshape a topic tree.** A filter marks which topics hold matches. It does not change how deep into the tree the map goes.
+- **Filters that reshape a tree.** A filter marks which artifacts hold matches. It does not change how deep into the tree the map goes.
 - **A read pinned to one version of the data.**

@@ -1,8 +1,8 @@
 # Annotations
 
-Annotation layers let you put structure over your items: clusters, a hierarchy of topics, regions such as country borders, and the names that label them. The examples here continue with the research papers of the [data model](data-model.md), with a `topics` layer over them.
+Annotation layers let you put structure over your items: clusters, a hierarchy of topics, regions such as country borders, and the names that label them. The examples use a collection of research papers with a `topics` layer over them.
 
-Each annotation in a layer, such as one topic, is an **artifact**, and its members are the items it covers, such as the papers on that topic. Like an item, an artifact has a `mosaica_id`, which clients use to name it.
+Each annotation in a layer, such as one cluster or one region, is an **artifact**, and its members are the items it covers. Like an item, an artifact has a `mosaica_id`, which clients use to name it.
 
 ## Declaring a layer
 
@@ -16,7 +16,7 @@ When you declare a layer, you decide how its members are found, how its artifact
 | `spatial` | the items whose positions fall inside the artifact's shape: a box, circle, ellipse or polygon | regions such as country borders, or areas someone drew |
 | by a field, `{ attribute = "archive" }` | the items carrying each value of an indexed category, `u8`, `u16` or `u32` field | turning a field such as `archive` into a layer of its own |
 
-An `enumerated` membership is fixed at what its table says: a paper inserted later belongs to a topic only when an insert or a publication names it there. The other two are worked out from each item's own position or value, so a new item belongs to the right region or value from the flush that places it.
+An `enumerated` membership is fixed at what its table says: an item inserted later belongs to an artifact only when an insert or a publication names it there. The other two are worked out from each item's own position or value, so a new item belongs to the right region or value from the flush that places it.
 
 ### How artifacts relate
 
