@@ -209,7 +209,7 @@ END
 ```
 
 ```json
-OUTPUT_TBD
+{"added":0,"clamped":0,"clipped":0,"created":2,"edited":0,"ignored_columns":[],"joined":0,"minted":0,"over_bound":0,"pages":1,"publication":1,"refused":[],"refused_pages":[],"replayed":0,"rows":2,"unchanged":0}
 ```
 
 Both rows created a place. Each new item gets a `mosaica_id`, which you use to edit or delete it later, and `--ids-out` writes them to a file.
