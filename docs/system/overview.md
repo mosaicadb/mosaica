@@ -50,9 +50,6 @@ A viewer can pan and zoom, with a count of what's in view and density shading wh
 
 Every count follows the filters. The [queries](queries.md) chapter covers each kind of filter, and how Mosaica chooses which points to draw.
 
-??? info "One limit on combining filters"
-    A free-text search can't be negated, so "not containing the word *neural*" isn't a filter Mosaica can answer.
-
 ## Annotations
 
 Annotation layers add structure over the points: clusters from any clustering you've run, hierarchies such as field, subfield and topic, regions with a shape such as a country border, and labels attached to other annotations. A node in a hierarchy can have more than one parent.
