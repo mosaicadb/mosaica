@@ -503,3 +503,71 @@ async fn an_open_server_refuses_a_browser_request_from_a_page_on_another_site() 
         .unwrap();
     assert_eq!(viewport.status(), 403);
 }
+
+/// The operator's reach is granted only to a request the open guard admitted, so a router
+/// composed without it, as an embedder might compose one, serves no one on `open` alone. The
+/// three routers the server mounts each carry the guard, which the Host test above shows on
+/// every plane.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_router_mounted_without_the_guard_admits_no_one_on_open_alone() {
+    use axum::extract::{Request, State};
+    use mosaica_server::auth::{Accepts, authenticate};
+    use mosaica_server::state::{AppState, ViewerSession};
+    use std::sync::Arc;
+
+    let tmp = TempDir::new().unwrap();
+    let path = deployment(tmp.path());
+    rewrite(&path, "open = true", false);
+    let state = mosaica_server::prepare(&path).expect("starts").state;
+
+    let unguarded = axum::Router::new()
+        .route(
+            "/read",
+            axum::routing::get(|_: ViewerSession| async { "read" }),
+        )
+        .route(
+            "/write",
+            axum::routing::post(
+                |State(state): State<Arc<AppState>>, request: Request| async move {
+                    let accepts = Accepts {
+                        operator: true,
+                        api_key: true,
+                        access_token: true,
+                    };
+                    authenticate(&state, request.extensions(), None, accepts)
+                        .await
+                        .map(|_| "written")
+                },
+            ),
+        )
+        .with_state(Arc::clone(&state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serving = tokio::spawn(async move { axum::serve(listener, unguarded).await });
+
+    let client = reqwest::Client::new();
+    let read = client
+        .get(format!("http://{addr}/read"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(read.status(), 401);
+    let write = client
+        .post(format!("http://{addr}/write"))
+        .header("content-type", "application/json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(write.status(), 401);
+    serving.abort();
+
+    // The server's own routers, over the same state, serve the same request.
+    let server = serve_state(state, String::new(), None).await;
+    let meta = server
+        .client
+        .get(server.viewer_url("/v1/meta"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(meta.status(), 200);
+}

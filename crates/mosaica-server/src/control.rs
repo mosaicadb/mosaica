@@ -199,6 +199,7 @@ async fn authenticate_control(
     };
     let caller = crate::auth::authenticate(
         &state,
+        request.extensions(),
         crate::state::bearer_token(request.headers()),
         accepts,
     )

@@ -151,13 +151,14 @@ pub fn same_secret(presented: &str, expected: &str) -> bool {
 
 /// Authenticates a bearer credential of a kind `accepts` names. Anything not accepted is
 /// `401 bad-credential`, with one answer whatever the cause. An open server answers the
-/// superuser for every request, whatever it sends.
+/// superuser for every request its guard admitted (`crate::open`), whatever it sends.
 pub async fn authenticate(
     state: &AppState,
+    extensions: &axum::http::Extensions,
     bearer: Option<&str>,
     accepts: Accepts,
 ) -> Result<Caller, ApiError> {
-    if state.open.is_some() {
+    if state.open.is_some() && crate::open::guarded_request(extensions) {
         return Ok(Caller::superuser());
     }
     let token = bearer.map(str::trim).ok_or(ApiError::BadCredential)?;

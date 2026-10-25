@@ -776,8 +776,8 @@ pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
 }
 
 /// The viewer plane's authentication extractor: the bearer token, looked up by
-/// [`AppState::authenticated_session`], or on an open server its one session, whatever was sent
-/// ([`crate::auth::OpenSession`]). Handlers take it first after the state, and axum runs
+/// [`AppState::authenticated_session`], or on an open server its one session, whatever was sent,
+/// for a request its guard admitted ([`crate::auth::OpenSession`]). Handlers take it first after the state, and axum runs
 /// extractors in order, so a bad token is refused before the path, query or body is read.
 pub struct ViewerSession(pub Arc<Session>);
 
@@ -799,8 +799,10 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for ViewerSession {
         state: &Arc<AppState>,
     ) -> Result<Self, ApiError> {
         let session = match &state.open {
-            Some(open) => open.session(state).await?,
-            None => {
+            Some(open) if crate::open::guarded_request(&parts.extensions) => {
+                open.session(state).await?
+            }
+            _ => {
                 let token = bearer_token(&parts.headers).ok_or(ApiError::BadCredential)?;
                 state.authenticated_session(token)?
             }

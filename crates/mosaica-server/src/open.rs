@@ -31,6 +31,16 @@ const SENT_WITHOUT_PREFLIGHT: [&str; 3] = [
     "multipart/form-data",
 ];
 
+/// The mark [`guard`] leaves on a request it admitted. An open server serves a request as the
+/// operator only with it, so a router mounted without the guard serves no one on `open` alone.
+#[derive(Clone, Copy)]
+struct Guarded;
+
+/// Whether [`guard`] admitted the request these are the extensions of.
+pub(crate) fn guarded_request(extensions: &axum::http::Extensions) -> bool {
+    extensions.get::<Guarded>().is_some()
+}
+
 /// Mounts [`guard`] on `router` when `state`'s server is open.
 pub(crate) fn guarded(router: Router, state: &AppState) -> Router {
     if state.open.is_some() {
@@ -40,7 +50,7 @@ pub(crate) fn guarded(router: Router, state: &AppState) -> Router {
     }
 }
 
-async fn guard(request: Request, next: Next) -> Result<Response, ApiError> {
+async fn guard(mut request: Request, next: Next) -> Result<Response, ApiError> {
     if !names_this_machine(&request) {
         return Err(ApiError::Forbidden(
             "this server is open, so it answers only a request whose Host is localhost, \
@@ -63,6 +73,7 @@ async fn guard(request: Request, next: Next) -> Result<Response, ApiError> {
                 .into(),
         ));
     }
+    request.extensions_mut().insert(Guarded);
     Ok(next.run(request).await)
 }
 

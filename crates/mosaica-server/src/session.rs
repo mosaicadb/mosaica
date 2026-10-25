@@ -73,7 +73,8 @@ impl axum::extract::FromRequestParts<Arc<AppState>> for Integrator {
             api_key: true,
             access_token: false,
         };
-        let caller = auth::authenticate(state, bearer_token(&parts.headers), accepts).await?;
+        let caller = auth::authenticate(state, &parts.extensions, bearer_token(&parts.headers), accepts)
+            .await?;
         caller.require(Permission::AuthoriseAs)?;
         Ok(Integrator(caller))
     }
