@@ -680,7 +680,13 @@ weight = 2
     mosaica_build::build(&args_from_declaration(&declaration, &dir.join("bundle")))
         .expect("the declaration builds");
     let mut served = Served::open(tmp).await;
-    let resp = create(&served, "runs", "created", json!({ "metadata": { "weight": 3 } })).await;
+    let resp = create(
+        &served,
+        "runs",
+        "created",
+        json!({ "metadata": { "weight": 3 } }),
+    )
+    .await;
     assert_eq!(resp.status(), 201);
     served.reauthorise().await;
     let document = meta(&served).await;

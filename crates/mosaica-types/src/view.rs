@@ -98,7 +98,9 @@ impl ViewMetadataValue {
                 .as_i64()
                 .map(ViewMetadataValue::Int)
                 .or_else(|| n.as_f64().map(ViewMetadataValue::Float))
-                .ok_or_else(|| format!("metadata '{name}' is {n}, a number no metadata type holds")),
+                .ok_or_else(|| {
+                    format!("metadata '{name}' is {n}, a number no metadata type holds")
+                }),
             serde_json::Value::Null => Err(format!(
                 "metadata '{name}' is null; give it a value, since every name a view group \
                  declares is required"
@@ -474,7 +476,10 @@ mod tests {
             (ViewMetadataType::I16, ViewMetadataValue::Int(-3)),
             (ViewMetadataType::Float, ViewMetadataValue::Float(2.0)),
             (ViewMetadataType::Text, ViewMetadataValue::Text("Q1".into())),
-            (ViewMetadataType::TimestampUs, ViewMetadataValue::TimestampUs(7)),
+            (
+                ViewMetadataType::TimestampUs,
+                ViewMetadataValue::TimestampUs(7),
+            ),
         ] {
             let written = serde_json::to_string(&value.to_json()).unwrap();
             let read = ViewMetadataValue::from_json("m", &serde_json::from_str(&written).unwrap());
