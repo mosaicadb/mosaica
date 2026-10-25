@@ -19,56 +19,6 @@ A browser holds a token for one viewer, and calls the viewer address with it. Th
 
 The viewer address answers browsers only from origins the deployment lists, and from none by default. [Access control](access-control.md#getting-a-token) describes both routes in full.
 
-!!! warning "Two integrations that look right and are not"
-    - **One broad token for everyone**, with your server filtering per user afterwards. Every user then sees counts, clusters and labels computed for the broad token, which can reveal what they should not see.
-    - **A token minted from whatever a caller claims**, so anyone who can call your minting endpoint can be any user. Check the user's identity on your server before asking for their token.
-
-## What the store does
-
-The store is the part of the TypeScript client that runs a map. The components and the notebook map are built on it, and a host with its own drawing can use it directly. The host tells it where the camera is, and which filters, layers, colours and view are chosen. The store works out which requests to make, holds what comes back, and publishes what to draw: the points, the counts, the topics, a legend, and the state of the view.
-
-- **It asks only for what is worth asking.** It picks the zoom level whose tiles give about as many points as the point budget, 250,000 by default. It waits for the camera to settle before asking for more, and fetches a margin around the screen once it has.
-- **It keeps what it has fetched**, and asks again only for tiles it does not hold. Topics are fetched by their own request, tile by tile, so they do not blink out as the held points change.
-- **It keeps colours stable.** A topic's colour comes from a slot the server gives it, the same for this viewer at every zoom and filter, from one of four palettes: Okabe-Ito, Tableau 10 (the default), Tableau 20 or Kelly. A category's values take their palette colours in order of the server's count of each over the viewer's items, so they are the same on every load. Colours a user picks are handed to the host in events, and the client keeps none of them. A host that wants them kept stores them and passes them back.
-- **It picks a level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
-- **It draws density from the aggregate route.** Shading follows the filter and the highlight, as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
-- **It counts for the panels.** A component registers the breakdowns it needs, such as a histogram for a field card, and the store sends them as one aggregate request and asks again when the filter changes.
-
-### What the view shows
-
-The store reports the view's state, so a host never shows one kind of answer as another:
-
-| State | Meaning |
-|---|---|
-| `idle` | nothing asked for yet |
-| `loading` | a request is out |
-| `retrying` | the server was busy (`429` or `503`), and the request will be sent again |
-| `shown` | points are on screen. Only this state may show counts |
-| `empty` | the answer holds nothing this viewer may see in view |
-| `refused` | the request failed, so what is here is not known |
-
-Two flags sit beside the state:
-
-- **`stale`**: the data has changed since the points on screen were fetched. The store does not fetch again by itself. It marks the view, and a refresh is one action away.
-- **`unreachable`**: a request could not reach the server, or a proxy in front of it answered `502`. The store asks the server again after a second, then twice as long each time, up to 30 seconds, and redraws once it answers. A refusal, a `504` on one route, or a token source that refuses, is not an outage. A `401` on a token that had worked means the session ended, and the store asks the host's `authorise` for a new token once.
-
-### When a client lets go of what it holds
-
-| What happened | What the store does |
-|---|---|
-| The data changed under the same viewer | Marks the view `stale` and keeps what is on screen until it is refreshed |
-| The answers carry a different identity key: another viewer, a renewed token, or a compaction | Drops everything the server answered, reads the deployment's description again and redraws. It keeps the host's own choices |
-| The host calls `clear()` | The same, for a host that changes viewer itself |
-| The database was rebuilt | Every `mosaica_id` it holds names nothing. Read the items again by a unique field's values |
-
-A merge of segments never reaches a client. A compaction reaches it only through the identity key, and every `mosaica_id` stays valid across it.
-
-### Views
-
-The store keeps what it has fetched for each view it has visited, so a view the viewer returns to is as they left it. All views share one memory budget, and the least recently drawn leave first.
-
-- **Within a view group sharing one layout**, such as a year shown quarter by quarter, a switch keeps the camera and the selection, and asks the next view for the same tiles.
-- **Between layouts**, a switch drops the selection and fits the camera to the new view, since a position in one layout means nothing in another.
 
 ## Reading data out
 
@@ -103,7 +53,4 @@ The server enforces what a viewer may see, but it cannot see a screen. These rul
 
 ## Not built yet
 
-- **Animating items between layouts.** A switch between views with different layouts redraws rather than moving each item to its new position.
-- **Fetching a view before it is chosen.** A view the viewer has not visited is fetched when they switch to it.
-- **An adapter for tile-based map libraries.** The store asks for an area at a time, and nothing sits between it and a library that asks for one tile at a time.
 - **Keeping the notebook map's token off the page.** The widget's token reaches the browser page itself.
