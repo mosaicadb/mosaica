@@ -1,8 +1,9 @@
-"""The one exception the package raises for a request it or the server will not carry out, and
-how an argument that takes several values reads one."""
+"""The one exception the package raises for a request it or the server will not carry out, how
+long a refusal asks the caller to wait, and how an argument that takes several values reads one."""
 
 from __future__ import annotations
 
+import math
 from typing import Any, Optional
 
 #: The shortest wait a `429` asks for, in seconds, which is also the server's own minimum.
@@ -32,7 +33,7 @@ def retry_after(status: int, headers, body: Any) -> Optional[float]:
         seconds = float(named)
     except (TypeError, ValueError):
         seconds = RETRY_AFTER_MIN_S
-    return seconds if seconds >= RETRY_AFTER_MIN_S else RETRY_AFTER_MIN_S
+    return seconds if math.isfinite(seconds) and seconds > RETRY_AFTER_MIN_S else RETRY_AFTER_MIN_S
 
 
 class Refusal(ValueError):

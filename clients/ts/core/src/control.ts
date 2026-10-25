@@ -7,8 +7,8 @@ const ARROW = 'application/vnd.apache.arrow.stream';
 const JSON_TYPE = 'application/json';
 
 /**
- * The shortest wait between attempts after a `429`, in seconds. A `429` that names no wait, or
- * one shorter than this, waits this long.
+ * The shortest wait a `429` asks for, in seconds, which is also the server's own minimum. A `429`
+ * that names no wait, or one shorter than this, waits this long.
  */
 export const MIN_BACKOFF = 1;
 
@@ -19,10 +19,11 @@ export const MIN_BACKOFF = 1;
 export const MAX_BACKOFF = 30;
 
 /**
- * How many times one call sends its request while the server answers `429`. The last `429` is
- * returned as the answer.
+ * How long one call keeps sending its request again after a `429`, in seconds. While the waits so
+ * far total less than this, a `429` is waited out and the request sent again; after that the last
+ * `429` is returned as the answer.
  */
-export const MAX_ATTEMPTS = 600;
+export const RETRY_BUDGET_S = 300;
 
 /**
  * The `status` of an {@link Answer} to a request that reached no server. It is not an HTTP status.
@@ -720,10 +721,18 @@ function decoded(text: string): Record<string, unknown> {
   }
 }
 
-/** How long a `429` asks the caller to wait, in seconds: the header, else the body's figure, else the floor. */
-function retryAfter(response: Response, body: Record<string, unknown>): number {
-  const seconds = Number(response.headers.get('retry-after') ?? body.retry_after_s);
-  return Number.isFinite(seconds) ? Math.max(MIN_BACKOFF, Math.min(seconds, MAX_BACKOFF)) : MIN_BACKOFF;
+/**
+ * The wait a refusal asks for before the request is sent again, in seconds, or `null` where it is
+ * not a `429` and names no wait. The `Retry-After` header comes first, then the body's
+ * `retry_after_s`, then {@link MIN_BACKOFF}, and the wait is never less than {@link MIN_BACKOFF}.
+ *
+ * @internal
+ */
+export function retryAfterOf(status: number, header: string | null, body: unknown): number | null {
+  const named = header ?? (body !== null && typeof body === 'object' ? (body as {retry_after_s?: unknown}).retry_after_s : undefined) ?? null;
+  if (named === null && status !== 429) return null;
+  const seconds = Number(named);
+  return Number.isFinite(seconds) && seconds > MIN_BACKOFF ? seconds : MIN_BACKOFF;
 }
 
 /** Resolves after `seconds`, or rejects with the signal's reason when it aborts first. */
@@ -749,8 +758,9 @@ function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> 
  * JSON on declarations, publications, changes and the catalogue's verbs, and either on `grow`. A JSON body is serialised once per
  * call, so every attempt of one call sends the same bytes.
  *
- * A `429` is backpressure. The call waits the `Retry-After` it carries, between 1
- * and 30 seconds, and sends the request again, at most 600 times in all. Every other status is returned as an {@link Answer}, neither
+ * A `429` is backpressure. The call waits the `Retry-After` it carries, between 1 and 30 seconds,
+ * and sends the request again while the waits so far total less than five minutes
+ * ({@link RETRY_BUDGET_S}); then the last `429` is returned. Every other status is returned as an {@link Answer}, neither
  * thrown nor retried. A request that reaches no server is returned with status
  * {@link UNANSWERED}. A call whose `signal` aborts rejects with the signal's reason.
  *
@@ -794,6 +804,7 @@ export class Control {
     const started = performance.now();
     const seconds = () => (performance.now() - started) / 1000;
     let attempts = 0;
+    let waited = 0;
     for (;;) {
       attempts += 1;
       let response: Response;
@@ -806,8 +817,10 @@ export class Control {
         return {status: UNANSWERED, ok: false, body: {}, text: `${url} did not answer: ${String(error)}`, attempts, seconds: seconds()};
       }
       const answered = decoded(text);
-      if (response.status === 429 && attempts < MAX_ATTEMPTS) {
-        await pause(retryAfter(response, answered), options.signal);
+      if (response.status === 429 && waited < RETRY_BUDGET_S) {
+        const wait = Math.min(retryAfterOf(429, response.headers.get('retry-after'), answered)!, MAX_BACKOFF);
+        await pause(wait, options.signal);
+        waited += wait;
         continue;
       }
       const ok = response.status >= 200 && response.status < 300;

@@ -1,4 +1,5 @@
 import {Table, tableFromIPC} from 'apache-arrow';
+import {MosaicaError} from './client.js';
 import {FRAME_PAGE_END, FRAME_RECORDS, FRAME_TABLE_HEAD, FRAME_TRAILER} from './frame.js';
 import {Frames, pageEndOf, registerZstd, trailerFrom, type RecordsRequest} from './records.js';
 import {parseRegionVerdict} from './region.js';
@@ -14,7 +15,8 @@ type Reading = Omit<AggregateTable, 'rows'> & {pages: Table[]};
  * from the cursor the one before it ended with, until that cursor is null. A table carried over
  * several responses opens each one with its head again, and its pages are joined in order.
  *
- * A body that ends or is cut without its trailer throws {@link PartialAggregate}, holding the whole
+ * A refusal of the first request throws as `request` threw it. A refusal of a later request, and a
+ * body that ends or is cut without its trailer, throw {@link PartialAggregate}, holding the whole
  * pages read before it and the cursor to resume from. A trailer that counts other pages or rows
  * than the body carried throws `Error`. An abort of `signal` throws its reason.
  */
@@ -30,8 +32,17 @@ export async function readAggregate(
   let region: RegionVerdict | null = null;
   let identityKey = '';
   let recomposed = false;
+  let first = true;
   for (;;) {
-    const response = await request(cursor);
+    let response: Response;
+    try {
+      response = await request(cursor);
+    } catch (error) {
+      if (first || signal?.aborted) throw error;
+      const why = error instanceof Error ? error.message : String(error);
+      throw new PartialAggregate(why, {tables: whole(tables), region, recomposed, identityKey, next: cursor ?? null}, error);
+    }
+    first = false;
     region ??= parseRegionVerdict(response.headers.get('x-mosaica-region'));
     identityKey = response.headers.get('x-mosaica-identity-key') ?? identityKey;
     const frames = new Frames(response.body?.getReader(), signal, 'aggregate');
@@ -87,20 +98,33 @@ export async function readAggregate(
 }
 
 /**
- * An aggregate read whose response ended or was cut before its trailer. {@link result} holds every
- * whole page read before the stop, and its `next` is the cursor to pass as `cursor` to read on
- * without repeating a row; `null` there means read again from the start.
+ * An aggregate read that stopped part of the way: a response that ended or was cut before its
+ * trailer, or a later request refused. {@link result} holds every whole page read before the stop,
+ * and its `next` is the cursor to pass as `cursor` to read on without repeating a row; `null` there
+ * means read again from the start.
  *
  * @category HTTP client
  */
 export class PartialAggregate extends Error {
+  /** The {@link MosaicaError} that refused a later request, or `null` where none did. */
+  readonly refusal: MosaicaError | null;
+  /** The refusal's HTTP status, or `null` where no refusal stopped the read. */
+  readonly status: number | null;
+  /** The refusal's `retryAfterS`: on a `429`, the wait in seconds the server asked for. `null` otherwise. */
+  readonly retryAfterS: number | null;
+
   constructor(
     why: string,
     /** The tables as far as they were read. */
-    readonly result: AggregateResult
+    readonly result: AggregateResult,
+    /** What stopped the read where it was not the body: the error a later request threw. */
+    cause?: unknown
   ) {
-    super(`${why}; the whole pages read before the stop are this error's result, and its next is the cursor to read on from`);
+    super(`${why}; the whole pages read before the stop are this error's result, and its next is the cursor to read on from`, cause === undefined ? undefined : {cause});
     this.name = 'PartialAggregate';
+    this.refusal = cause instanceof MosaicaError ? cause : null;
+    this.status = this.refusal?.status ?? null;
+    this.retryAfterS = this.refusal?.retryAfterS ?? null;
   }
 }
 

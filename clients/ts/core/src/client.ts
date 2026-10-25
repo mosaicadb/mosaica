@@ -9,6 +9,7 @@ import {
   type ArtifactsFramePart,
   type PointsPart
 } from './decode.js';
+import {retryAfterOf} from './control.js';
 import {createDecoder, type Decoder} from './decoder.js';
 import {parseRegionVerdict} from './region.js';
 import {FRAME_ARTIFACTS, FRAME_POINTS, FRAME_SUB_CELLS, FRAME_TILES, FRAME_TRAILER, FrameReader, type Frame} from './frame.js';
@@ -202,8 +203,8 @@ export class MosaicaError extends Error {
     readonly detail: string,
     /**
      * The wait the server asked for before the request is sent again, in seconds: its `Retry-After`
-     * header, else the body's `retry_after_s`; `null` where it named none. Every `429` from a
-     * Mosaica server carries it. To retry, wait this long and call the method again.
+     * header, else the body's `retry_after_s`, else 1, and never less than 1. `null` where the
+     * refusal is not a `429` and names no wait. To retry, wait this long and call the method again.
      */
     readonly retryAfterS: number | null = null
   ) {
@@ -215,17 +216,15 @@ export class MosaicaError extends Error {
 async function fail(response: Response): Promise<never> {
   let code = 'http-error';
   let detail = response.statusText;
-  let wait = response.headers.get('retry-after');
+  let body: {error?: string; detail?: string} | null = null;
   try {
-    const body = (await response.json()) as {error?: string; detail?: string; retry_after_s?: number};
+    body = (await response.json()) as {error?: string; detail?: string};
     code = body.error ?? code;
     detail = body.detail ?? detail;
-    wait ??= body.retry_after_s === undefined ? null : String(body.retry_after_s);
   } catch {
     // A body that is not JSON, such as a proxy's, still gives a MosaicaError.
   }
-  const seconds = wait === null ? NaN : Number(wait);
-  throw new MosaicaError(response.status, code, detail, Number.isFinite(seconds) && seconds >= 0 ? seconds : null);
+  throw new MosaicaError(response.status, code, detail, retryAfterOf(response.status, response.headers.get('retry-after'), body));
 }
 
 /**
@@ -1066,18 +1065,14 @@ export class MosaicaClient {
       });
     }
     if (response.status === 429) {
-      // The body's `retry_after_s` is what the contract requires; the header is the fallback for
-      // a body that does not parse.
-      let retryAfterS = Number(response.headers.get('retry-after') ?? '1');
-      let detail: string | null = null;
+      let body: {detail?: unknown} | null = null;
       try {
-        const body = (await response.json()) as {retry_after_s?: number; detail?: string};
-        if (typeof body.retry_after_s === 'number') retryAfterS = body.retry_after_s;
-        if (typeof body.detail === 'string') detail = body.detail;
+        body = (await response.json()) as {detail?: unknown};
       } catch {
-        // A non-JSON 429 (a proxy's) still yields a retryable outcome from the header alone.
+        // A 429 whose body is not JSON, such as a proxy's, is shed all the same.
       }
-      return {status: 'shed', retryAfterS: Number.isFinite(retryAfterS) ? retryAfterS : 1, detail};
+      const detail = typeof body?.detail === 'string' ? body.detail : null;
+      return {status: 'shed', retryAfterS: retryAfterOf(429, response.headers.get('retry-after'), body)!, detail};
     }
     if (!response.ok) await fail(response);
     const body = (await response.json()) as RawSuggest;
@@ -1294,14 +1289,13 @@ export class MosaicaClient {
    * @param options - `follow`: read the responses after the first. Defaults to `true`. With `false`
    *   the result holds the first response's pages, and {@link AggregateResult.next} is where the
    *   read continues, to be passed back as `cursor`.
-   * @throws {@link MosaicaError} when the server refuses a request: `404` for an unknown view,
-   *   `422` for a request the contract refuses, naming the limit where one is exceeded, and `429`
-   *   under load, with the wait in `retryAfterS`. A refusal of a later response drops the pages
-   *   read before it. With `follow: false` each call reads one response, so a caller that retries
-   *   a `429` from `next` keeps what it has read.
-   * @throws {@link PartialAggregate} for a body cut or ended without its trailer, holding the pages
-   *   read before it and the cursor to read on from; `Error` for a trailer that miscounts the body;
-   *   and the signal's reason once it aborts.
+   * @throws {@link MosaicaError} when the server refuses the first request: `404` for an unknown
+   *   view, `422` for a request the contract refuses, naming the limit where one is exceeded, and
+   *   `429` under load, with the wait in `retryAfterS`.
+   * @throws {@link PartialAggregate} for a later request refused, or a body cut or ended without
+   *   its trailer, holding the pages read before it and the cursor to read on from, and for a
+   *   refusal its `refusal`, `status` and `retryAfterS`; `Error` for a trailer that miscounts the
+   *   body; and the signal's reason once it aborts.
    */
   aggregate(token: string, req: AggregateRequest, signal?: AbortSignal, options: {follow?: boolean} = {}): Promise<AggregateResult> {
     const sent = {...req, groupings: req.groupings.map(wireGrouping)};

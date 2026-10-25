@@ -397,12 +397,13 @@ export function joinedAggregate(
   /** The batch still open to parts, by the request its parts share. */
   const open = new Map<string, Batch>();
 
-  // A send that throws rather than rejecting is that caller's refusal all the same.
-  const sent = (token: string, req: AggregateRequest, signal: AbortSignal): Promise<AggregateResult> => {
+  // A send that throws rather than rejecting is that caller's refusal all the same. A read that a
+  // later request's error stopped is that error, since a part asked again reads every page.
+  const sent = async (token: string, req: AggregateRequest, signal: AbortSignal): Promise<AggregateResult> => {
     try {
-      return send(token, req, signal);
+      return await send(token, req, signal);
     } catch (error) {
-      return Promise.reject(error);
+      throw error instanceof PartialAggregate && error.cause !== undefined ? error.cause : error;
     }
   };
 

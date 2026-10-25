@@ -277,15 +277,27 @@ describe('MosaicaClient.aggregate', () => {
     await expect(clientFor({'': () => chunked(headless)}).client.aggregate('tok', {view: 's0', groupings: [{count: true}]})).rejects.toThrow(Error);
   });
 
-  it('rejects with the refusal, first request or follow-up', async () => {
+  it('rejects a refused first request with the refusal', async () => {
     const refusal = () => new Response(JSON.stringify({error: 'contract', detail: 'more cells than selection.max_aggregate_cells'}), {status: 422});
     const first = clientFor({'': refusal}).client.aggregate('tok', REQUEST);
     await expect(first).rejects.toBeInstanceOf(MosaicaError);
-    await expect(first).rejects.toMatchObject({status: 422, code: 'contract'});
-    const later = clientFor({'': TWO[''], c1: refusal}).client.aggregate('tok', REQUEST);
-    await expect(later).rejects.toMatchObject({status: 422, retryAfterS: null});
+    await expect(first).rejects.toMatchObject({status: 422, code: 'contract', retryAfterS: null});
     const shed = () => new Response(JSON.stringify({error: 'backpressure', detail: 'shed', retry_after_s: 1}), {status: 429, headers: {'retry-after': '2'}});
     await expect(clientFor({'': shed}).client.aggregate('tok', REQUEST)).rejects.toMatchObject({status: 429, retryAfterS: 2});
+  });
+
+  it('throws a refused follow-up as a partial result carrying the refusal, which resumes from its cursor', async () => {
+    const shed = () => new Response(JSON.stringify({error: 'backpressure', detail: 'shed', retry_after_s: 1}), {status: 429, headers: {'retry-after': '3'}});
+    const stopped = await clientFor({'': TWO[''], c1: shed}).client.aggregate('tok', REQUEST).catch((error: unknown) => error);
+    expect(stopped).toBeInstanceOf(PartialAggregate);
+    const partial = stopped as PartialAggregate;
+    expect(partial.refusal).toBeInstanceOf(MosaicaError);
+    expect(partial.refusal).toMatchObject({status: 429, code: 'backpressure'});
+    expect([partial.status, partial.retryAfterS]).toEqual([429, 3]);
+    expect(partial.result.next).toBe('c1');
+    expect(partial.result.tables.map((t) => [t.grouping, t.rows.numRows])).toEqual([[0, 1], [1, 2]]);
+    const rest = await clientFor({c1: TWO.c1 as () => Response}).client.aggregate('tok', {...REQUEST, cursor: partial.result.next!});
+    expect(rest.tables.map((t) => [t.grouping, t.rows.numRows])).toEqual([[1, 2]]);
   });
 
   it('stops at an abort of its signal, mid-body', async () => {

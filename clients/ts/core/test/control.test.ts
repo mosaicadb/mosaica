@@ -1,9 +1,9 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {
   Control,
-  MAX_ATTEMPTS,
   MAX_BACKOFF,
   MIN_BACKOFF,
+  RETRY_BUDGET_S,
   UNANSWERED,
   type Answer,
   type ChangeItem,
@@ -220,24 +220,30 @@ describe('an answer', () => {
     expect((await pending).attempts).toBe(2);
   });
 
-  it('is the last 429 once the attempts are spent', async () => {
+  it('is the last 429 once the waits so far reach the budget', async () => {
     vi.useFakeTimers();
-    const sent = recording({status: 429, headers: {'retry-after': '1'}, body: {error: 'backpressure'}});
+    const sent = recording({status: 429, headers: {'retry-after': '100'}, body: {error: 'backpressure'}});
+    const started = Date.now();
     const pending = control.ingest(rows);
     await vi.runAllTimersAsync();
     const answer = await pending;
-    expect(answer).toMatchObject({status: 429, ok: false, attempts: MAX_ATTEMPTS, body: {error: 'backpressure'}});
-    expect(sent).toHaveLength(MAX_ATTEMPTS);
+    const waits = RETRY_BUDGET_S / MAX_BACKOFF;
+    expect(answer).toMatchObject({status: 429, ok: false, attempts: waits + 1, body: {error: 'backpressure'}});
+    expect(sent).toHaveLength(waits + 1);
+    expect(Date.now() - started).toBe(RETRY_BUDGET_S * 1000);
     expect(new Set(sent.map((s) => s.headers['x-mosaica-batch-id'])).size).toBe(1);
   });
 
-  for (const [asked, waited] of [
-    ['0', MIN_BACKOFF],
-    ['100', MAX_BACKOFF]
+  for (const [name, reply, waited] of [
+    ['a header asking for 0 s', {headers: {'retry-after': '0'}}, MIN_BACKOFF],
+    ['a header asking for 100 s', {headers: {'retry-after': '100'}}, MAX_BACKOFF],
+    ['a header and a body', {headers: {'retry-after': '2'}, body: {retry_after_s: 5}}, 2],
+    ['a body asking for 0.2 s', {body: {retry_after_s: 0.2}}, MIN_BACKOFF],
+    ['no wait named', {}, MIN_BACKOFF]
   ] as const) {
-    it(`after a 429 asking for ${asked} s, waits ${waited} s`, async () => {
+    it(`after a 429 with ${name}, waits ${waited} s`, async () => {
       vi.useFakeTimers();
-      const sent = recording({status: 429, headers: {'retry-after': asked}}, {status: 200, body: {}});
+      const sent = recording({status: 429, ...reply}, {status: 200, body: {}});
       const pending = control.status();
       await vi.advanceTimersByTimeAsync(waited * 1000 - 1);
       expect(sent).toHaveLength(1);
