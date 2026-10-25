@@ -239,10 +239,10 @@ jobs:
           cd /tmp
           /tmp/smoke/bin/python - "$version" "$pep440" <<'PY'
           import subprocess, sys
-          import mosaica, mosaica_native
+          import mosaica
           want, want_python = sys.argv[1], sys.argv[2]
           printed = subprocess.run(
-              [mosaica_native.binary_path(), "--version"], check=True, capture_output=True, text=True
+              ["/tmp/smoke/bin/mosaica", "--version"], check=True, capture_output=True, text=True
           ).stdout.strip()
           print(mosaica.__version__, printed, sep="\n")
           if mosaica.__version__ != want_python or not printed.startswith(f"mosaica {want}"):

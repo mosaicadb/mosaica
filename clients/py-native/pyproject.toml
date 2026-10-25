@@ -27,6 +27,9 @@ requires-python = ">=3.10"
 # Two compiled artifacts and an `__init__.py` that says where they are. Nothing to depend on.
 dependencies = []
 
+[project.scripts]
+mosaica = "mosaica_native:main"
+
 [project.urls]
 Homepage = "https://github.com/mosaicadb/mosaica"
 Documentation = "https://github.com/mosaicadb/mosaica/tree/main/docs"

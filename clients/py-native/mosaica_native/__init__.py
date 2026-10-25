@@ -14,6 +14,7 @@ finds the same module object.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -35,4 +36,10 @@ def binary_path() -> str:
     return str(_binary)
 
 
-__all__ = ["binary_path"]
+def main() -> None:
+    """The `mosaica` command on PATH: this process becomes the executable, with the same arguments."""
+    path = binary_path()
+    os.execv(path, [path, *sys.argv[1:]])
+
+
+__all__ = ["binary_path", "main"]

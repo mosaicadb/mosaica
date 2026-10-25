@@ -16,6 +16,8 @@ Binary archives for Linux and macOS are attached to the GitHub release.
 
 ### Changed
 
+- **Python install.** `pip install mosaica` puts the `mosaica` command on PATH, the executable the
+  mosaica-native wheel carries.
 - **TypeScript client.** A click on an empty part of the map clears the selection and its ring, as
   Escape does. `store.items` reads the items the map shows, with the store's view and filters, and
   `inView` narrows it to the area in view; a `filters` left undefined means the map's filters.
@@ -33,7 +35,8 @@ Binary archives for Linux and macOS are attached to the GitHub release.
 
 ### Fixed
 
-- The release workflow publishes the npm packages; for 0.1.0-rc.1 it failed before publishing any.
+- The release workflow publishes the npm packages and the crates; for 0.1.0-rc.1 both failed
+  before publishing any.
 
 ## [0.1.0-rc.1] - 2026-10-25
 
