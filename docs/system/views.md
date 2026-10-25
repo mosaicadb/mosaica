@@ -21,7 +21,7 @@ Any other two coordinates go in a **plain view**, which draws its x and y as the
 Each view stores its positions across a **frame**. You can give its range yourself, or write `auto` to fit it to the points of the first load, with a small margin.
 
 !!! note "The frame does not grow"
-    An `auto` frame is fitted once, at the first load. A point outside the frame, inserted later or read in the first load, is drawn on its edge, and the build's report or the insert's answer counts how many were. A point beyond `web_mercator`'s limit near the poles is counted separately, as clipped. A group whose views will arrive later needs a margin or an explicit frame wide enough for them. A view added to a running database has no data to fit, so it needs an explicit frame, given in the view's stored coordinates rather than degrees; `mosaica check --payloads` prints it.
+    An `auto` frame is fitted once, at the first load. A point outside the frame, inserted later or read in the first load, is drawn on its edge, and the build's report or the insert's answer counts how many were. A point beyond `web_mercator`'s limit near the poles is counted separately, as clipped. A group whose views will arrive later needs a margin or an explicit frame wide enough for them. A view declared with no data to fit, in an empty database or added to a running one, needs its frame stated, in the same forms a schema takes; `auto` is refused there.
 
 The [schema.toml reference](../reference/corpus-toml.md#viewextent) lists every way of writing a frame, and the [Python reference](../reference/python/index.md) covers `declare_view`.
 

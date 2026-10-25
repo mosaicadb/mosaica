@@ -17,10 +17,7 @@ flowchart LR
   db[("Mosaica")]
 ```
 
-You load data over the HTTP API or from either client, and you can declare new fields and views and insert or delete records while the database serves. For a large first load, `mosaica build` loads a set of Parquet files in one pass, which is faster than sending the same rows in batches.
-
-!!! note ""
-    Not built yet: starting from an empty database. A database's first load comes from `mosaica build`, or from the Python client's first commit, which runs one. Every load after that can come from anywhere.
+You load data over the HTTP API or from either client, and you can declare new fields and views and insert or delete records while the database serves. A database can start empty, or, for a large first load, `mosaica build` creates it from a set of Parquet files in one pass, which is faster than sending the same rows in batches.
 
 !!! tip "Prototyping in Python"
     For analysis on your own machine, you don't need to set up a database yourself. The Python client can run a private one for your notebook, with the same reads and map as a shared one.
@@ -104,7 +101,7 @@ The [queries](queries.md) and [serving](serving.md) chapters explain these in fu
 | Annotation layers: clusters, hierarchies, regions and hulls | Built |
 | Reading records and annotations in bulk | Built, on all four surfaces. A read pinned to one version of the data is not built yet |
 | Declaring a rendered field while the database runs | Not built yet. Declare it in the first load |
-| Starting from an empty database | Not built yet. A database starts with a first load of at least one view's data |
+| Starting from an empty database, and declaring everything to it as it runs | Built. A rendered field is declared in the schema it starts from |
 | Writing to a running database, and drawing a map, from the command line | Not built yet |
 | Python and TypeScript packages | Built. Not yet published to PyPI or npm |
 | A conformance suite that checks a running database's answers against an independent reference implementation | Built |

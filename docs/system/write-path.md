@@ -1,6 +1,6 @@
 # Changing data
 
-You change a Mosaica database while it serves: you insert and edit items, delete or suppress them, and declare new fields, views and layers, all without stopping the map. A database's first load comes from `mosaica build`, or from the Python client's first commit, which runs one, and is the fast way to load a large set of files at once. Every change after that goes to the running database.
+You change a Mosaica database while it serves: you insert and edit items, delete or suppress them, and declare new fields, views and layers, all without stopping the map. A database can start empty and take everything this way. For a large first load, `mosaica build` loads a set of files in one pass, which is faster, and the Python client's first commit runs one for you. Every change after that goes to the running database.
 
 Writes go to the control address, set by `[serve] control`. It is separate from the address viewers use, so you can keep it private or put it on a Unix socket. The tables below name each write's route, call or command on each surface.
 

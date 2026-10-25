@@ -58,10 +58,7 @@ flowchart LR
   db --- viewer["viewer address<br/>reads"]
 ```
 
-`mosaica build` creates the database and loads your files into it in one pass, which is the fastest way to load a lot of data at once, and `mosaica serve` starts it. From then on it takes every change: you can declare new fields, views and layers, and insert or delete items, through its control address. It reads `mosaica.toml` when it starts, so restart it after you change a setting.
-
-!!! note ""
-    Not built yet: starting from an empty database. For now, a database starts with a build that loads at least one view's data.
+`mosaica build` creates the database from the schema. If `[sources]` names files, the build loads them in the same pass, which is the fastest way to load a lot of data at once. Without them, you get an empty database, ready to take its data through the control address. `mosaica serve` starts it, and from then on it takes every change: you can declare new fields, views and layers, and insert or delete items. It reads `mosaica.toml` when it starts, so restart it after you change a setting.
 
 !!! tip "Working on your own machine"
     For development and prototyping, start the database in open mode, with `mosaica serve --open` or `open = true` under `[serve]`. It then answers every request without signing in, from any client: the HTTP API, the command line, a web page or Python. It listens only on this machine, needs no operator credential, and refuses to start once you've set up users. [Your first map in a web page](typescript.md) uses it.
@@ -164,6 +161,55 @@ mosaica serve
 ```
 
 You now have a running database with 150,000 places in it. To see them on a map, follow the tutorial's [Open the map](first-map.md#open-the-map) step, using `~/places` where it says `~/ireland`.
+
+### Start from an empty database
+
+If your data arrives through your own code rather than as files, start with an empty database instead. Stop the server, and in a new directory save a `schema.toml` with no `[sources]`. A view with no data to fit needs its frame stated, as this one is:
+
+```toml
+[[view]]
+name             = "world"
+projection       = "web_mercator"
+extent           = { lon = [-180.0, 180.0], lat = [-85.0511287798066, 85.0511287798066] }
+point_visibility = { default = "public" }
+
+[[attribute]]
+name  = "name"
+type  = "text"
+index = true
+
+[[attribute]]
+name   = "population"
+type   = "i64"
+render = true
+```
+
+Copy `mosaica.toml` and `operator.secret` beside it, then build and serve as before. The build writes an empty database:
+
+```bash
+mosaica build 2>&1 | tail -n 2
+mosaica serve
+```
+
+```
+OUTPUT-PENDING
+```
+
+In another shell, send it some places. The control address takes rows as JSON, one object per item, keyed by field name, with the position in `lon` and `lat`:
+
+```bash
+curl -sS http://127.0.0.1:9143/control/ingest \
+  -H "authorization: Bearer $(cat operator.secret)" \
+  -H 'content-type: application/json' \
+  -d '[{"lon": -6.26, "lat": 53.35, "name": "Dublin", "population": 1173179},
+       {"lon": -8.47, "lat": 51.90, "name": "Cork", "population": 190384}]'
+```
+
+```json
+OUTPUT-PENDING
+```
+
+New items appear at the next flush, within 90 seconds. [Changing data](../system/write-path.md) covers every write, and how to wait until one is visible. You can declare more views, fields and layers the same way, except that a rendered field must be in the schema the database is built from.
 
 Every key this example leaves out is in the [schema.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the database keeps on disc and how to back it up.
 
