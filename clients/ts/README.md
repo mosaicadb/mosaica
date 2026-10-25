@@ -116,7 +116,7 @@ The viewer's Vite server listens on 5173, or on `VITE_PORT` where that is set, a
 
 ## The examples
 
-[`getting-started`](examples/getting-started/README.md) is the code of the first tutorial, [Your first map in a web page](../../docs/start/typescript.md). It needs no demo: `npm start` in its directory builds the GeoNames sample in `examples/data/geonames/`, starts `mosaica serve` over it on ports the system chooses, and serves the page on port 5310. `npm run test:live` there serves it the same way and checks in headless Chromium that the page draws.
+[`getting-started`](examples/getting-started/README.md) is the finished project of the first tutorial, [Your first map in a web page](../../docs/start/typescript.md): a `mosaica.toml` for the GeoNames sample in `examples/data/geonames/`, and a Vite project that uses the built packages as an outside project would. Its README says how to run it. `npm run test:live` in its `web/` directory serves it over a temporary build of the sample and checks in headless Chromium that the page draws.
 
 Every example is a workspace that `npm run typecheck` checks. The other four expect the demo's `2m4` scale, started with `./run_demo.sh --scale 2m4`: its viewer listener on `127.0.0.1:37585` and its session listener on `127.0.0.1:49303`. The plain-HTML app server takes an API key holding `authorise-as` in `MOSAICA_API_KEY`; `run_demo.sh` writes one to `mosaica-demo/presets/2m4.key`. The users in `examples/plain-html/users.json` read as the principals `run_demo.sh` creates for that bundle's presets. `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL` point the examples at another deployment, whose principals `users.json` then has to name.
 

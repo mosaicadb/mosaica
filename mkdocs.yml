@@ -115,6 +115,7 @@ nav:
       - Install and configure: start/install.md
       - Your first map from files: start/first-map.md
       - Your first map in Python: start/python.md
+      - Your first map in a web page: start/typescript.md
   - How it works:
       - Overview: system/overview.md
       - Data model: system/data-model.md

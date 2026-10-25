@@ -1,0 +1,100 @@
+import {spawn, type ChildProcess} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
+import {existsSync} from 'node:fs';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {delimiter, join, resolve} from 'node:path';
+import {createInterface} from 'node:readline';
+import {chromium, type Browser} from 'playwright';
+import {createServer, type ViteDevServer} from 'vite';
+import {afterAll, beforeAll, expect, it} from 'vitest';
+
+/**
+ * The tutorial's finished page, served by its own Vite config, over a Mosaica server built from the
+ * example's `mosaica.toml` into a temporary directory, in headless Chromium. The server listens on
+ * ports the system chooses, and the page finds it through `MOSAICA_VIEWER_URL` and
+ * `MOSAICA_SESSION_URL`. Skipped, with the reason, where there is no `mosaica` binary.
+ */
+const web = resolve(import.meta.dirname, '..');
+const example = resolve(web, '..');
+const repo = resolve(example, '../../../..');
+const schema = join(repo, 'examples/data/geonames/schema.toml');
+
+/** The `mosaica` binary: `MOSAICA_BIN`, else this checkout's release build, else one on `PATH`. */
+function findMosaica(): string | null {
+  if (process.env.MOSAICA_BIN) return process.env.MOSAICA_BIN;
+  const candidates = [join(repo, 'target/release/mosaica'), ...(process.env.PATH ?? '').split(delimiter).map((dir) => join(dir, 'mosaica'))];
+  return candidates.find((path) => existsSync(path)) ?? null;
+}
+
+function run(binary: string, args: string[], cwd: string): Promise<void> {
+  return new Promise((done, fail) =>
+    spawn(binary, args, {cwd, stdio: 'ignore'})
+      .on('error', fail)
+      .on('exit', (code) => (code === 0 ? done() : fail(new Error(`mosaica ${args[0]} exited ${code}`))))
+  );
+}
+
+const binary = findMosaica();
+let dir = '';
+let server: ChildProcess | null = null;
+let vite: ViteDevServer | null = null;
+let browser: Browser | null = null;
+
+beforeAll(async () => {
+  if (!binary) return console.log('no mosaica binary: set MOSAICA_BIN, put mosaica on PATH, or run cargo build --release -p mosaica');
+  dir = await mkdtemp(join(tmpdir(), 'mosaica-getting-started-'));
+  const toml = (await readFile(join(example, 'mosaica/mosaica.toml'), 'utf8')).replace(/127\.0\.0\.1:914\d/g, '127.0.0.1:0');
+  await writeFile(join(dir, 'mosaica.toml'), toml);
+  const credential = randomBytes(16).toString('hex');
+  await writeFile(join(dir, 'operator.secret'), credential, {mode: 0o600});
+  await run(binary, ['build', '--config', schema], dir);
+
+  server = spawn(binary, ['serve', '--exit-on-stdin-close'], {cwd: dir, stdio: ['pipe', 'pipe', 'ignore']});
+  const {viewer, session} = await new Promise<{viewer: string; session: string}>((ready, fail) => {
+    server!.on('error', fail).on('exit', () => fail(new Error('mosaica serve stopped while starting')));
+    createInterface({input: server!.stdout!}).once('line', (line) => ready(JSON.parse(line)));
+  });
+
+  process.env.MOSAICA_VIEWER_URL = `http://${viewer}`;
+  process.env.MOSAICA_SESSION_URL = `http://${session}`;
+  process.env.MOSAICA_CREDENTIAL = credential;
+  vite = await createServer({root: web, configFile: join(web, 'vite.config.ts'), logLevel: 'silent', server: {port: 0}});
+  await vite.listen();
+  browser = await chromium.launch();
+});
+
+afterAll(async () => {
+  await browser?.close();
+  await vite?.close();
+  server?.stdin?.end();
+  if (dir) await rm(dir, {recursive: true, force: true});
+});
+
+it.skipIf(!binary)('draws every place in the explorer, which fills its part of the page', async () => {
+  const page = await browser!.newPage({viewport: {width: 1440, height: 900}});
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(vite!.resolvedUrls!.local[0]!);
+  // The map's probe is internal; it is read here to see that marks reached the canvas.
+  const drawn = await page.waitForFunction(
+    () => {
+      const map = (document.querySelector('mosaica-explorer') as unknown as {map: {probe: {marks: number; view: {status: string; visible: number}}} | null}).map;
+      const probe = map?.probe;
+      return probe && probe.view.status === 'shown' && probe.marks > 0 ? {marks: probe.marks, visible: probe.view.visible} : null;
+    },
+    undefined,
+    {timeout: 120_000, polling: 250}
+  );
+  const {marks, visible} = (await drawn.jsonValue())!;
+  expect(visible).toBe(150_000);
+  expect(marks).toBeGreaterThan(100_000);
+
+  const box = await page.locator('mosaica-explorer').boundingBox();
+  const header = await page.locator('body > header').boundingBox();
+  const aside = await page.locator('main > aside').boundingBox();
+  expect(box!.y).toBeCloseTo(header!.y + header!.height, 0);
+  expect(box!.y + box!.height).toBeCloseTo(900, 0);
+  expect(box!.x + box!.width).toBeCloseTo(aside!.x, 0);
+  expect(errors).toEqual([]);
+});

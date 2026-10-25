@@ -1,0 +1,24 @@
+{
+  "name": "@mosaicajs/example-getting-started",
+  "license": "Apache-2.0",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The first TypeScript tutorial's page: <mosaica-explorer> over 150,000 GeoNames places, in a page layout of its own.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc",
+    "test:live": "vitest run test/page.live.test.ts"
+  },
+  "dependencies": {
+    "@mosaicajs/components": "^0.1.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.0",
+    "vite": "^8.2.0",
+    "vitest": "^3.2.0"
+  }
+}

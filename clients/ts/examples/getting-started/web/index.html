@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Places of the world</title>
+  </head>
+  <body>
+    <header>
+      <h1>Places of the world</h1>
+    </header>
+    <main>
+      <mosaica-explorer
+        viewer-url="/mosaica"
+        pinned-filters="name feature_class country"
+        colour-by="feature_class"
+        title-field="name"
+      ></mosaica-explorer>
+      <aside>
+        <h2>About the data</h2>
+        <p>150,000 places from <a href="https://www.geonames.org/">GeoNames</a>: every town of 15,000 people or more, and a sample of everything else, from mountains and lakes to farms and bus stops.</p>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
