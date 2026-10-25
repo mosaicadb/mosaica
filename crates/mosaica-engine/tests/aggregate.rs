@@ -1160,7 +1160,7 @@ fn a_live_corpus_is_counted_as_the_map_shows_it() {
     check(&fx, "after the flush");
 
     let before = fx.engine.write_executor_stats();
-    fx.engine.request_fold();
+    fx.engine.request_fold().unwrap();
     wait_for("the fold", || {
         fx.engine.write_executor_stats().folds > before.folds
     });

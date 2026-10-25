@@ -1256,7 +1256,7 @@ fn a_join_while_a_fold_is_in_flight_survives_the_fold_and_a_restart() {
 
     let folds = engine.write_executor_stats().folds;
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until("the fold holds", std::time::Duration::from_secs(60), || {
         engine.fold_is_holding_for_test()
     });

@@ -563,7 +563,7 @@ fn through_merge_and_fold(tmp: &Path, root: &Path, engine: Engine, check: impl F
 fn fold_while<T>(engine: &Engine, during: impl FnOnce() -> T) -> T {
     let folds = engine.write_executor_stats().folds;
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until("the fold holds", Duration::from_secs(60), || {
         engine.fold_is_holding_for_test()
     });
@@ -816,7 +816,7 @@ fn a_fold_discarded_after_logging_the_unsuppression_hides_nothing_less() {
 
     let failures = engine.write_executor_stats().fold_failures;
     faults.arm_pause(PauseSite::BeforeCurrentFlip, PauseAction::Stall);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     faults.await_arrivals(PauseSite::BeforeCurrentFlip, 1, Duration::from_secs(60));
     // A directory where the flip writes its temporary file fails the flip.
     let blocker = root.join("CURRENT.tmp");

@@ -1725,7 +1725,7 @@ impl Run {
             Op::Fold => {
                 let engine = self.engine();
                 let before = engine.write_executor_stats();
-                engine.request_fold();
+                engine.request_fold().unwrap();
                 wait_until("the fold publishes", Duration::from_secs(60), || {
                     let now = engine.write_executor_stats();
                     assert_eq!(
@@ -1746,7 +1746,7 @@ impl Run {
                 let engine = self.engine();
                 let before = engine.write_executor_stats();
                 engine.set_fold_paused_for_test(true);
-                engine.request_fold();
+                engine.request_fold().unwrap();
                 wait_until("the fold holds", Duration::from_secs(60), || {
                     engine.fold_is_holding_for_test()
                 });

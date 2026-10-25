@@ -9,6 +9,7 @@ control-plane verbs that undo a declaration or end a deletion. The bulk reads ar
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -221,7 +222,14 @@ def test_status_is_read_from_the_database(db):
 def test_compact_is_accepted(db):
     """A deletion leaves the overlay at the fold, and this is how one is asked for."""
     assert db.remove({"paper": ["p0"]}).ok
-    assert db.compact() == {}
+    request = db.compact()["request"]
+    assert request >= 1
+    deadline = time.monotonic() + 60
+    while (requests := db.status()["compaction"]["requests"])["answered"] < request:
+        assert time.monotonic() < deadline, requests
+        time.sleep(0.05)
+    refusal = requests["last_refusal"]
+    assert refusal is None or refusal["request"] < request, refusal
 
 
 def test_a_layer_is_dropped_and_none_of_its_annotations_is_served(db):

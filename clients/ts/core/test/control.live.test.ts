@@ -304,10 +304,17 @@ describe('Control against a live server', () => {
 
   it('asks for a fold, which runs, and the deleted row stays gone after it', async (ctx) => {
     live(ctx);
-    const folds = async () => ((await control.status()).body.compaction as {folds: number}).folds;
-    const before = await folds();
-    expect((await control.compact()).status).toBe(202);
-    await vi.waitFor(async () => expect(await folds()).toBeGreaterThan(before), {timeout: 30_000, interval: 50});
+    type Compaction = {folds: number; requests: {answered: number; last_refusal: {request: number} | null}};
+    const compaction = async () => (await control.status()).body.compaction as Compaction;
+    const before = (await compaction()).folds;
+    const asked = await control.compact();
+    expect(asked.status).toBe(202);
+    const request = asked.body.request as number;
+    expect(request).toBeGreaterThan(0);
+    await vi.waitFor(async () => expect((await compaction()).requests.answered).toBeGreaterThanOrEqual(request), {timeout: 30_000, interval: 50});
+    const after = await compaction();
+    expect(after.requests.last_refusal?.request ?? 0).toBeLessThan(request);
+    expect(after.folds).toBeGreaterThan(before);
     expect((await seen()).visible).toBe(3n);
     expect((await byKey()).has('row-0')).toBe(false);
   });

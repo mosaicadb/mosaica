@@ -77,18 +77,22 @@ pub(crate) enum NoFold {
     InsufficientMemory { need: u64, available: u64 },
     /// Both figures in bytes.
     InsufficientDisc { need: u64, free: u64 },
+    /// `CURRENT` names a prefix this process is not serving. Never planned: the executor answers
+    /// a request with it while the condition stands.
+    PrefixDiverged,
 }
 
 impl NoFold {
     /// In [`NoFold::index`] order. Fixed literals, because they reach `/control/status` and must
     /// never carry text derived from the corpus.
-    pub(crate) const GATES: [&'static str; 6] = [
+    pub(crate) const GATES: [&'static str; 7] = [
         "wal_poisoned",
         "overlay_diverged",
         "stepped_down",
         "nothing_to_fold",
         "insufficient_memory",
         "insufficient_disc",
+        "prefix_diverged",
     ];
 
     pub(crate) fn index(self) -> usize {
@@ -99,6 +103,42 @@ impl NoFold {
             NoFold::NothingToFold => 3,
             NoFold::InsufficientMemory { .. } => 4,
             NoFold::InsufficientDisc { .. } => 5,
+            NoFold::PrefixDiverged => 6,
+        }
+    }
+
+    /// What the gate means and what to do about it, in a sentence. Fixed literals, for the reason
+    /// [`NoFold::GATES`] gives.
+    pub(crate) fn detail(self) -> &'static str {
+        match self {
+            NoFold::WalPoisoned => {
+                "the write-ahead log refused a write, so nothing is compacted while it is \
+                 poisoned; ask again once `write_executor.posture` reads `running`, or restart the \
+                 node if it stays poisoned"
+            }
+            NoFold::OverlayDiverged => {
+                "the deletion overlay no longer matches the write-ahead log, so this node compacts \
+                 nothing until it is restarted; restart it"
+            }
+            NoFold::SteppedDown => {
+                "a partition is serving an older manifest than the newest on disc, so this node \
+                 compacts nothing; repair or restore the newest manifest's files and restart it"
+            }
+            NoFold::NothingToFold => {
+                "the shard holds no segment to compact, so there is nothing to do"
+            }
+            NoFold::InsufficientMemory { .. } => {
+                "the compaction needs more memory than the host has available (`need_bytes` \
+                 against `had_bytes`); free memory on the host and ask again"
+            }
+            NoFold::InsufficientDisc { .. } => {
+                "the compaction needs free disc space of one and a half times the shard's files \
+                 (`need_bytes` against `had_bytes`); free disc space and ask again"
+            }
+            NoFold::PrefixDiverged => {
+                "a compaction was published on disc but this node could not switch to it, so it \
+                 compacts nothing until it is restarted; restart it"
+            }
         }
     }
 
@@ -108,7 +148,8 @@ impl NoFold {
             NoFold::WalPoisoned
             | NoFold::OverlayDiverged
             | NoFold::SteppedDown
-            | NoFold::NothingToFold => (None, None),
+            | NoFold::NothingToFold
+            | NoFold::PrefixDiverged => (None, None),
             NoFold::InsufficientMemory { need, available } => (Some(need), Some(available)),
             NoFold::InsufficientDisc { need, free } => (Some(need), Some(free)),
         };
@@ -487,6 +528,7 @@ mod tests {
                 available: 4,
             },
             NoFold::InsufficientDisc { need: 71, free: 12 },
+            NoFold::PrefixDiverged,
         ];
         assert_eq!(arms.len(), NoFold::GATES.len(), "one counter per gate");
         for (expected, arm) in arms.iter().enumerate() {

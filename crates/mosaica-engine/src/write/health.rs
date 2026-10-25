@@ -160,6 +160,15 @@ pub struct ExecutorHealth {
     pub(crate) fold_refusals: [AtomicU64; crate::compact::NoFold::GATES.len()],
     /// The last refusal, with the two byte figures of an `insufficient_disc` one.
     pub(crate) last_fold_refusal: Mutex<Option<FoldRefusal>>,
+    /// Compaction requests numbered since the executor started. Raised under
+    /// [`Self::compaction_request`]'s lock.
+    pub(crate) compaction_requests_accepted: AtomicU64,
+    /// The highest request number every shard of which has published, been discarded or been
+    /// refused.
+    pub(crate) compaction_requests_answered: AtomicU64,
+    /// The last refusal that answered a request, which a scheduled or closing refusal does not
+    /// replace.
+    pub(crate) last_request_refusal: Mutex<Option<RequestRefusal>>,
     /// The WAL as the last sample found it. Sampled on the executor thread at a tick, at most once a
     /// period, so a status poll costs the node nothing.
     pub(crate) wal_gauge: Mutex<WalGauge>,
@@ -362,14 +371,21 @@ impl StageMark {
 pub(crate) struct CompactionRequest {
     pub(crate) every: bool,
     pub(crate) shards: std::collections::BTreeSet<ShardId>,
+    /// The number of the last request merged into this one.
+    pub(crate) request: u64,
 }
 
 impl ExecutorHealth {
     /// Raise a request for `shard`'s compaction, or every shard's with something to reclaim,
-    /// beside any request not yet taken.
-    pub(crate) fn request_compaction(&self, shard: Option<ShardId>) {
+    /// beside any request not yet taken, and answer its number.
+    pub(crate) fn request_compaction(&self, shard: Option<ShardId>) -> u64 {
         let mut held = lock_recover(&self.compaction_request);
+        let number = self
+            .compaction_requests_accepted
+            .fetch_add(1, Ordering::SeqCst)
+            + 1;
         let request = held.get_or_insert_with(CompactionRequest::default);
+        request.request = number;
         match shard {
             Some(shard) => {
                 request.shards.insert(shard);
@@ -378,6 +394,7 @@ impl ExecutorHealth {
         }
         drop(held);
         self.fold_requested.store(true, Ordering::SeqCst);
+        number
     }
 
     /// The request no tick has taken yet, taken.
@@ -401,6 +418,44 @@ pub struct FoldRefusal {
     pub had_bytes: Option<u64>,
     /// When the refusal happened, as a unix second.
     pub at_unix: u64,
+}
+
+/// Why a compaction request is refused as it is made: the executor is not running, or this node
+/// is in a state that holds until it is restarted, so no tick could start a compaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompactionRefused {
+    NotRunning,
+    OverlayDiverged,
+    PrefixDiverged,
+    SteppedDown,
+}
+
+impl std::fmt::Display for CompactionRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::compact::NoFold;
+        f.write_str(match self {
+            CompactionRefused::NotRunning => {
+                "the write executor is not running, so nothing is compacted; restart the node"
+            }
+            CompactionRefused::OverlayDiverged => NoFold::OverlayDiverged.detail(),
+            CompactionRefused::PrefixDiverged => NoFold::PrefixDiverged.detail(),
+            CompactionRefused::SteppedDown => NoFold::SteppedDown.detail(),
+        })
+    }
+}
+
+impl std::error::Error for CompactionRefused {}
+
+/// A refusal that answered a `POST /control/compact`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestRefusal {
+    /// The highest request number it answered: requests made before a tick takes them are merged.
+    pub request: u64,
+    /// The shard refused, or `None` where the request was refused before it named any.
+    pub shard: Option<ShardId>,
+    pub refusal: FoldRefusal,
+    /// What the gate means and what to do, from a fixed list.
+    pub detail: &'static str,
 }
 
 /// The write-ahead log's size and its rotation bound, sampled at the executor's tick.
@@ -485,6 +540,11 @@ pub struct ExecutorStats {
     /// Refused folds by gate, indexed as [`FOLD_GATES`] names them.
     pub fold_refusals_by_gate: [u64; FOLD_GATES.len()],
     pub last_fold_refusal: Option<FoldRefusal>,
+    /// Compaction requests numbered, and the highest of them answered; see
+    /// [`ExecutorHealth::compaction_requests_answered`].
+    pub compaction_requests_accepted: u64,
+    pub compaction_requests_answered: u64,
+    pub last_request_refusal: Option<RequestRefusal>,
     /// The WAL as the last sample found it — see [`WalGauge`].
     pub wal: WalGauge,
     pub last_fold_attr_read: u64,
@@ -623,6 +683,9 @@ impl ExecutorHealth {
             compaction_request: Mutex::new(None),
             fold_refusals: std::array::from_fn(|_| AtomicU64::new(0)),
             last_fold_refusal: Mutex::new(None),
+            compaction_requests_accepted: AtomicU64::new(0),
+            compaction_requests_answered: AtomicU64::new(0),
+            last_request_refusal: Mutex::new(None),
             wal_gauge: Mutex::new(WalGauge::default()),
             fold_ended_unix: AtomicU64::new(0),
             last_compactions: Mutex::new(BTreeMap::new()),
@@ -877,6 +940,9 @@ impl ExecutorHealth {
             fold_refusals_by_gate,
             fold_refusals: fold_refusals_by_gate.iter().sum(),
             last_fold_refusal: *lock_recover(&self.last_fold_refusal),
+            compaction_requests_accepted: self.compaction_requests_accepted.load(Ordering::SeqCst),
+            compaction_requests_answered: self.compaction_requests_answered.load(Ordering::SeqCst),
+            last_request_refusal: *lock_recover(&self.last_request_refusal),
             wal: *lock_recover(&self.wal_gauge),
             last_fold_attr_read: self.last_fold_attr_read.load(Ordering::Relaxed),
             last_fold_attr_written: self.last_fold_attr_written.load(Ordering::Relaxed),
@@ -949,15 +1015,29 @@ impl ExecutorHealth {
         lock_recover(&self.last_compactions).clone()
     }
 
-    /// Record a fold the planner would not plan. Executor thread only, once per refusal.
-    pub(in crate::write) fn record_fold_refusal(&self, reason: crate::compact::NoFold) {
+    /// Record a fold the planner would not plan, and the request it answered: its number and the
+    /// shard refused. Executor thread only, once per refusal.
+    pub(in crate::write) fn record_fold_refusal(
+        &self,
+        reason: crate::compact::NoFold,
+        answering: Option<(u64, Option<ShardId>)>,
+    ) {
         let (gate, need_bytes, had_bytes) = reason.gauge();
-        *lock_recover(&self.last_fold_refusal) = Some(FoldRefusal {
+        let refusal = FoldRefusal {
             gate,
             need_bytes,
             had_bytes,
             at_unix: unix_now().unwrap_or(0),
-        });
+        };
+        *lock_recover(&self.last_fold_refusal) = Some(refusal);
+        if let Some((request, shard)) = answering {
+            *lock_recover(&self.last_request_refusal) = Some(RequestRefusal {
+                request,
+                shard,
+                refusal,
+                detail: reason.detail(),
+            });
+        }
         self.fold_refusals[reason.index()].fetch_add(1, Ordering::Relaxed);
     }
 

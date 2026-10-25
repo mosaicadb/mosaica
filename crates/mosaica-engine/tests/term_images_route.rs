@@ -753,7 +753,7 @@ fn the_background_refresh_builds_by_a_chosen_route_and_equals_the_walk() {
     let before_refreshes = engine.refreshes();
     let before_routes = engine.projection_builds_by_route();
     let before_fold = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let now = engine.write_executor_stats();
@@ -1004,7 +1004,7 @@ fn every_route_agrees_after_a_fold_executes_a_delete() {
         .expect("the delete is accepted");
 
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let now = engine.write_executor_stats();
@@ -1096,7 +1096,7 @@ fn a_view_created_while_running_gains_images_at_its_first_fold() {
     });
 
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let now = engine.write_executor_stats();

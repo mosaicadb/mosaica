@@ -956,7 +956,7 @@ fn a_session_from_before_a_fold_counts_none_of_the_entity_the_fold_retired() {
         .accept_change(doomed, mosaica_lifecycle::wal::ChangeOp::Delete)
         .expect("a delete is accepted");
     let before = fx.engine.write_executor_stats();
-    fx.engine.request_fold();
+    fx.engine.request_fold().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let now = fx.engine.write_executor_stats();

@@ -1856,10 +1856,15 @@ class Database:
     def compact(self) -> dict:
         """Ask the server to remove the rows of deleted items from disk now.
 
-        It returns `{}` once the server has accepted the request, before the work is done. The
-        server compacts every shard with something to reclaim, one after another. A request made
-        while a compaction runs is held until that compaction lands. The `compaction` block of
-        `status()` and each shard's record in `shards.records` show what happened.
+        It returns `{"request": n}` once the server has accepted the request, before the work is
+        done. The server compacts every shard with something to reclaim, one after another. A
+        request made while a compaction runs is held until that compaction lands.
+
+        A compaction can still be refused when its turn comes, for example for want of disc. In
+        `status()`, `compaction.requests.answered` reaches `n` once the request is answered; where
+        `compaction.requests.last_refusal.request` is at least `n`, a shard of it was refused, and
+        `detail` says why and what to do. Where no compaction could start before the server is
+        restarted, this raises `Refusal` with that detail and nothing is requested.
         """
         self._refuse_before_the_first_commit("compact")
         return _accepted(self.control.compact(), "compact")

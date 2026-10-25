@@ -444,7 +444,7 @@ fn a_deleted_parent_leaves_its_child_a_root() {
 
     // And across the fold that executes it, where the root's ordinal becomes a hole for good.
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     for _ in 0..2_000 {
         let now = engine.write_executor_stats();
         assert_eq!(

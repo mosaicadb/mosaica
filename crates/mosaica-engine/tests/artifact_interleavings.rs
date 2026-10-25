@@ -517,7 +517,7 @@ fn a_growth_that_lands_after_the_folds_pack_pins_the_log_again() {
 
         let late = fx.members(310..320);
         faults.arm_pause(PauseSite::BeforeCurrentFlip, PauseAction::Stall);
-        engine.request_fold();
+        engine.request_fold().unwrap();
         faults.await_arrivals(PauseSite::BeforeCurrentFlip, 1, WAIT);
 
         // Queued behind a fold that has written its whole tree and named none of it. The growth is

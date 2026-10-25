@@ -2849,23 +2849,40 @@ paths:
       operationId: compact
       summary: Ask for a compaction of every shard with something to reclaim.
       description: |
-        Sets a flag the write executor reads at its next tick, and answers `202` with no body. A
-        compaction rewrites one shard with its deleted rows removed, and runs for minutes to hours
-        on a large corpus. The executor compacts every shard with something to reclaim, one after
-        another. Where no shard has anything to reclaim, the shard the schedule ranks first is
-        compacted. At most one compaction is in flight. A request that arrives while one runs is
-        held until it lands. `compaction.fold_requested` on `/control/status` stays true until the
-        last shard the request names publishes. The same block counts a compaction refused for
-        want of memory or disc. The query string is not read.
+        Sets a flag the write executor reads at its next tick, and answers `202` with the
+        request's number. A compaction rewrites one shard with its deleted rows removed, and runs
+        for minutes to hours on a large corpus. The executor compacts every shard with something to
+        reclaim, one after another. Where no shard has anything to reclaim, the shard the schedule
+        ranks first is compacted. At most one compaction is in flight. A request that arrives while
+        one runs is held until it lands.
+
+        A compaction can still be refused when its turn comes: for want of memory or disc, while
+        the write-ahead log is poisoned, or where the shard holds nothing to compact.
+        `compaction.requests` on `/control/status` reports it. The request is answered once
+        `requests.answered` reaches its number. If `requests.last_refusal.request` is at least
+        that number, a shard of it was refused, and `detail` says why and what to do.
+
+        Where no compaction could start before the node is restarted, the request is refused at
+        once with `503` and nothing is requested. The query string is not read.
       security:
         - controlCredential: []
       responses:
         "202":
-          description: The compaction is requested. No body.
+          description: The compaction is requested.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompactionAck"
         "401":
           $ref: "#/components/responses/ControlBadCredential"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          description: "`503 not-ready`: nothing was requested. Either the write executor is not running, or this node is in a state that lasts until it is restarted: its deletion overlay no longer matches its log, a compaction was published on disc that it could not switch to, or a partition is serving an older manifest than the newest on disc. The detail says which, and what to do."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /control/attributes:
     put:
@@ -6905,6 +6922,17 @@ components:
           type: boolean
           description: "Present only with `wait=visible`: `true` where the cycle ran before the answer, `false` where `serve.visible_wait_max_secs` passed first."
 
+    CompactionAck:
+      type: object
+      additionalProperties: false
+      required: [request]
+      description: A compaction request, numbered so `/control/status`'s `compaction.requests` can say when it is answered and whether it was refused.
+      properties:
+        request:
+          type: integer
+          minimum: 1
+          description: This request's number. Numbers rise by one per request, from 1 each time the server starts.
+
     IngestRecords:
       type: array
       description: A JSON ingest batch, one object per row.
@@ -8860,7 +8888,7 @@ components:
       type: object
       additionalProperties: false
       description: Compaction folds. Alarm on `fold_failures`, and on `fold_refusals` rising while `folds` does not.
-      required: [live_rows, folds, fold_failures, fold_requested, fold_refusals, fold_refusals_by_gate, last_refusal, last_attr_bytes_read, last_attr_bytes_written, passes]
+      required: [live_rows, folds, fold_failures, fold_requested, fold_refusals, fold_refusals_by_gate, last_refusal, requests, last_attr_bytes_read, last_attr_bytes_written, passes]
       properties:
         live_rows:
           type: integer
@@ -8884,12 +8912,16 @@ components:
         fold_refusals_by_gate:
           type: object
           additionalProperties: false
-          required: [insufficient_disc, insufficient_memory, nothing_to_fold, overlay_diverged, stepped_down, wal_poisoned]
+          required: [insufficient_disc, insufficient_memory, nothing_to_fold, overlay_diverged, prefix_diverged, stepped_down, wal_poisoned]
           properties:
             insufficient_disc: { type: integer, minimum: 0 }
             insufficient_memory: { type: integer, minimum: 0 }
             nothing_to_fold: { type: integer, minimum: 0 }
             overlay_diverged: { type: integer, minimum: 0 }
+            prefix_diverged:
+              type: integer
+              minimum: 0
+              description: Requests refused because a compaction was published on disc and this node could not switch to it.
             stepped_down: { type: integer, minimum: 0 }
             wal_poisoned: { type: integer, minimum: 0 }
         last_refusal:
@@ -8915,6 +8947,54 @@ components:
                   type: integer
                   minimum: 0
                   description: When, in seconds since the Unix epoch.
+        requests:
+          type: object
+          additionalProperties: false
+          description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried. A scheduled compaction's refusal is not among them."
+          required: [accepted, answered, last_refusal]
+          properties:
+            accepted:
+              type: integer
+              minimum: 0
+              description: The number the latest request was given.
+            answered:
+              type: integer
+              minimum: 0
+              description: The highest request number every shard of which has published, been discarded or been refused.
+            last_refusal:
+              description: The latest refusal that answered a request, or `null` where there has been none.
+              oneOf:
+                - type: "null"
+                - type: object
+                  additionalProperties: false
+                  required: [request, shard, gate, detail, need_bytes, had_bytes, at_unix]
+                  properties:
+                    request:
+                      type: integer
+                      minimum: 1
+                      description: The highest request number it answered. Requests made before a tick takes them are answered together.
+                    shard:
+                      type: [integer, "null"]
+                      minimum: 0
+                      description: The shard refused, or `null` where the request was refused before any shard was chosen.
+                    gate:
+                      type: string
+                      description: One of `fold_refusals_by_gate`'s names.
+                    detail:
+                      type: string
+                      description: What the gate means and what to do about it, in a sentence.
+                    need_bytes:
+                      type: [integer, "null"]
+                      minimum: 0
+                      description: For a memory or disc refusal, what the compaction needs; `null` otherwise.
+                    had_bytes:
+                      type: [integer, "null"]
+                      minimum: 0
+                      description: For a memory or disc refusal, what the host had; `null` otherwise.
+                    at_unix:
+                      type: integer
+                      minimum: 0
+                      description: When, in seconds since the Unix epoch.
         last_attr_bytes_read: { type: integer, minimum: 0 }
         last_attr_bytes_written: { type: integer, minimum: 0 }
         passes:

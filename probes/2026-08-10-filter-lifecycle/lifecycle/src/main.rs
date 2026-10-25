@@ -1127,7 +1127,7 @@ fn main() {
         })
     };
     let t = Instant::now();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until("the fold to publish", 7200, || {
         let s = engine.write_executor_stats();
         assert_eq!(

@@ -2584,7 +2584,7 @@ fn a_refused_fold_is_counted_and_named_while_neither_fold_counter_moves() {
         ExecutorPosture::WalPoisoned
     );
 
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = std::time::Instant::now() + WAIT;
     let stats = loop {
         let now = engine.write_executor_stats();

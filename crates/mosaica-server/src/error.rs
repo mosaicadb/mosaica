@@ -43,6 +43,9 @@ pub enum ApiError {
     /// because the command may be in force. The detail is fixed and there is no `Retry-After`: the
     /// executor's posture is shown only on `/control/status`.
     NotReady,
+    /// 503 `not-ready` with a detail: this node cannot do what an authenticated control caller
+    /// asked until an operator acts, and the detail says what is wrong and what to do.
+    Unavailable(String),
 }
 
 /// Which bound shed a request. Every cause answers `backpressure`; they differ in the `detail`
@@ -165,6 +168,9 @@ impl ApiError {
                 "this node is not accepting writes; nothing in this request was applied"
                     .to_string(),
             ),
+            ApiError::Unavailable(detail) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "not-ready", detail.clone())
+            }
         }
     }
 
@@ -182,7 +188,8 @@ impl ApiError {
             | ApiError::FailClosed(_)
             // None on the 503: a number that varied with the executor's posture would disclose it
             // to an unauthenticated caller.
-            | ApiError::NotReady => None,
+            | ApiError::NotReady
+            | ApiError::Unavailable(_) => None,
         }
     }
 }

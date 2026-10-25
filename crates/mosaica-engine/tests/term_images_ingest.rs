@@ -282,7 +282,7 @@ fn ingest_corpus(engine: &Engine) {
 /// Fold, and return when the fold has published.
 fn fold(engine: &Engine) {
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = Instant::now() + Duration::from_secs(180);
     loop {
         let now = engine.write_executor_stats();

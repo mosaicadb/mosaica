@@ -1230,7 +1230,7 @@ fn a_fold_whose_report_cannot_be_written_is_discarded_and_retires_nothing() {
     std::fs::write(fx.root.join("reports"), b"not a directory").unwrap();
 
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let now = engine.write_executor_stats();

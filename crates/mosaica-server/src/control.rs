@@ -935,13 +935,21 @@ async fn flush(
     Ok((StatusCode::ACCEPTED, Json(body)))
 }
 
-/// `POST /control/compact`: sets a flag the executor reads at its next tick, and answers 202. At
-/// most one compaction is in flight. A request that arrives while one runs is held until it lands,
-/// and `/control/status`'s `compaction.fold_requested` stays true until the last shard the request
-/// names publishes.
-async fn compact(State(state): State<Arc<AppState>>) -> StatusCode {
-    state.engine.request_fold();
-    StatusCode::ACCEPTED
+/// `POST /control/compact`: sets a flag the executor reads at its next tick, and answers 202 with
+/// the request's number. At most one compaction is in flight. A request that arrives while one
+/// runs is held until it lands. `/control/status`'s `compaction.requests` says when the request is
+/// answered and whether it was refused. A 503 where no tick could compact before a restart.
+async fn compact(
+    State(state): State<Arc<AppState>>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    match state.engine.request_fold() {
+        Ok(request) => Ok((
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({ "request": request })),
+        )),
+        Err(mosaica_engine::CompactionRefused::NotRunning) => Err(ApiError::NotReady),
+        Err(refused) => Err(ApiError::Unavailable(refused.to_string())),
+    }
 }
 
 /// `PUT /control/layers`: registers one annotation layer. Synchronous: the answer follows the
@@ -3129,6 +3137,20 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
                 "had_bytes": r.had_bytes,
                 "at_unix": r.at_unix,
             })),
+            // `POST /control/compact`'s requests, by the number each answer carried.
+            "requests": {
+                "accepted": executor.compaction_requests_accepted,
+                "answered": executor.compaction_requests_answered,
+                "last_refusal": executor.last_request_refusal.map(|r| serde_json::json!({
+                    "request": r.request,
+                    "shard": r.shard.map(|s| s.raw()),
+                    "gate": r.refusal.gate,
+                    "detail": r.detail,
+                    "need_bytes": r.refusal.need_bytes,
+                    "had_bytes": r.refusal.had_bytes,
+                    "at_unix": r.refusal.at_unix,
+                })),
+            },
             "last_attr_bytes_read": executor.last_fold_attr_read,
             "last_attr_bytes_written": executor.last_fold_attr_written,
             "passes": state.engine.last_fold_passes()

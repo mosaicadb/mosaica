@@ -1018,10 +1018,15 @@ export class Control {
 
   /**
    * `POST /control/compact`: asks for a compaction, which removes deleted rows, and is answered
-   * `202` before it runs. The server compacts every shard with something to reclaim, one after
-   * another. A request made while a compaction runs is held until that compaction lands. The
-   * `compaction` object of `status()` and each shard's record in `shards.records` show what
-   * happened.
+   * `202` before it runs, with the request's number in `body.request`. The server compacts every
+   * shard with something to reclaim, one after another. A request made while a compaction runs is
+   * held until that compaction lands.
+   *
+   * A compaction can still be refused when its turn comes, for example for want of disc. In
+   * `status()`, `compaction.requests.answered` reaches the request's number once it is answered;
+   * where `compaction.requests.last_refusal.request` is at least that number, a shard of it was
+   * refused, and `detail` says why and what to do. Where no compaction could start before the
+   * server is restarted, the answer is `503` with that detail and nothing is requested.
    */
   compact(options: CallOptions = {}): Promise<Answer> {
     return this.send('POST', '/control/compact', options, '');

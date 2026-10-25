@@ -236,8 +236,8 @@ twice. Ingest is not. When the write still fails, the server throws away what di
 disc and goes back to `running`, and `/readyz` answers 200 again. The only sign in
 `/control/status` is `write_executor.wal_recoveries` going up by one. The server is not back to
 normal, though. It makes no newly ingested items visible and never trims the log. It starts no
-compaction, not even one you ask for, and records nothing about that under `compaction`. The log
-has a line beginning `ALARM` and ending "Restart this node."
+compaction: a `POST /control/compact` is answered 503 with a detail saying to restart it, and the
+schedule starts none. The log has a line beginning `ALARM` and ending "Restart this node."
 
 Either way, a deletion or suppression whose write failed is still applied in memory, so the item
 stays hidden. The caller is answered 500, with a detail that includes "a change in it may be in
@@ -301,24 +301,45 @@ To start one yourself, whatever the schedule says:
 ```console
 mosaica$ curl -sS -X POST --unix-socket /run/mosaica/control.sock \
   -H "authorization: Bearer $(cat secrets/operator.secret)" \
-  -w '%{http_code}\n' http://localhost/control/compact
+  -w '\n%{http_code}\n' http://localhost/control/compact
+{"request":1}
 202
 ```
 
 The server picks the request up at its next tick and compacts every shard with something to
 reclaim, one after another. A request made while a compaction is running is held until that
-compaction finishes. Read the outcome a few seconds later:
+compaction finishes. The answer carries the request's number, counted from 1 each time the server
+starts. Read the outcome under `compaction.requests` a few seconds later:
 
 ```console
 mosaica$ curl -sS --unix-socket /run/mosaica/control.sock \
   -H "authorization: Bearer $(cat secrets/operator.secret)" \
-  http://localhost/control/status | jq '.compaction | {folds, fold_refusals, last_refusal}'
+  http://localhost/control/status | jq '.compaction | {folds, requests}'
 {
   "folds": 1,
-  "fold_refusals": 0,
-  "last_refusal": null
+  "requests": {
+    "accepted": 1,
+    "answered": 1,
+    "last_refusal": null
+  }
 }
 ```
+
+The request is answered once `answered` reaches its number: every shard it asked for has been
+compacted, or has failed or been refused. If `last_refusal.request` is at least its number, a shard
+of it was refused. `last_refusal` then names the shard and the reason in `gate`, gives the bytes
+needed and available for a memory or disc refusal, and says what to do in `detail`. A compaction
+the schedule started and the server refused is not recorded there, only under
+`compaction.last_refusal`.
+
+When no compaction could start until the server is restarted, the request is refused straight
+away with `503 not-ready` and nothing is requested. That happens when the write executor is not
+running, when the deletion overlay no longer matches the log, when a compaction was published on
+disc and the server could not switch to it, or when a partition is serving an older manifest than
+the newest on disc. The detail says which, and what to do.
+
+The CLI has no command for compaction. Send `POST /control/compact` as above, or use `compact` in
+the Python or TypeScript client.
 
 Between compactions, a write can stall the write side in one case. When a growth, a publication, a
 flush or a merge leaves an item with a second artifact in a level the server answers from one label

@@ -1,5 +1,7 @@
 //! The control-plane calls: resolving, writing, declaring and publishing.
 
+use std::sync::atomic::Ordering;
+
 use mosaica_lifecycle::wal::ChangeOp;
 use mosaica_store::StoreError;
 use mosaica_types::{EntityId, ItemAt, LayerSpace, MosaicaId, ShardId, Target, TermId};
@@ -8,6 +10,7 @@ use crate::edited::{NamedTarget, Stamp};
 use crate::engine::Engine;
 use crate::resolver::{MemberNames, MemberSet, Names, Refused, Resolver, ScopeMasks, WriteScope};
 use crate::write::joined::flushed_terms_of;
+use crate::write::{CompactionRefused, ExecutorPosture};
 use crate::Generation;
 
 impl Engine {
@@ -182,14 +185,35 @@ impl Engine {
     /// minutes to hours of IO still to come. At most one compaction is in flight. A request that
     /// arrives while one runs is held until it lands, and `fold_requested` stays true until the
     /// last shard the request names publishes.
-    pub fn request_fold(&self) {
-        self.request_compaction(None);
+    pub fn request_fold(&self) -> Result<u64, CompactionRefused> {
+        self.request_compaction(None)
     }
 
-    /// [`Engine::request_fold`], for `shard` alone where it names one.
-    pub fn request_compaction(&self, shard: Option<ShardId>) {
-        self.write.health().request_compaction(shard);
+    /// [`Engine::request_fold`], for `shard` alone where it names one. Answers the request's
+    /// number, which `/control/status` reports once the request is answered. Refused, and nothing
+    /// requested, where the executor is not running or this node is in a state no tick would
+    /// compact in before a restart. The executor checks each of these again at its tick, so a
+    /// state reached after this answer refuses the request there.
+    pub fn request_compaction(&self, shard: Option<ShardId>) -> Result<u64, CompactionRefused> {
+        let health = self.write.health();
+        if matches!(
+            health.posture(),
+            ExecutorPosture::NotStarted | ExecutorPosture::Dead
+        ) {
+            return Err(CompactionRefused::NotRunning);
+        }
+        if health.overlay_diverged.load(Ordering::SeqCst) {
+            return Err(CompactionRefused::OverlayDiverged);
+        }
+        if health.prefix_diverged.load(Ordering::SeqCst) {
+            return Err(CompactionRefused::PrefixDiverged);
+        }
+        if self.any_partition_stepped_down() {
+            return Err(CompactionRefused::SteppedDown);
+        }
+        let request = health.request_compaction(shard);
         self.write.wake();
+        Ok(request)
     }
 
     /// [`Engine::accept_changes`] for one change to the item `entity` of a bundle of one shard.

@@ -1257,7 +1257,7 @@ fn a_declaration_and_a_fold_wait_for_each_other() {
     // A fold in flight, then a declaration.
     engine.set_fold_paused_for_test(true);
     let folds = engine.write_executor_stats().folds;
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until("the fold never held", Duration::from_secs(60), || {
         engine.fold_is_holding_for_test()
     });
@@ -1272,7 +1272,7 @@ fn a_declaration_and_a_fold_wait_for_each_other() {
     // A declaration building, then a fold.
     let held = held_declaration(&engine, "gid");
     let folds = engine.write_executor_stats().folds;
-    engine.request_fold();
+    engine.request_fold().unwrap();
     engine.set_unique_round_paused_for_test(false);
     held.join().unwrap().expect("the declaration is built before the fold");
     wait_until("the fold never published", Duration::from_secs(60), || {
@@ -1774,7 +1774,7 @@ fn a_request_made_while_a_declaration_builds_compacts_only_what_has_something_to
 
     let held = held_declaration(&engine, "doi");
     let before = engine.write_executor_stats();
-    engine.request_compaction(None);
+    engine.request_compaction(None).unwrap();
     tick(&engine);
     engine.set_unique_round_paused_for_test(false);
     assert!(held.join().unwrap().is_ok());

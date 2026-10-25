@@ -3062,14 +3062,8 @@ async fn status_flush_and_compact_match_the_description() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status().as_u16(), 202);
-    assert!(described_responses(&doc, Some(&post), "/control/compact")
-        .get("202")
-        .is_some());
-    assert!(
-        resp.bytes().await.unwrap().is_empty(),
-        "a compact's 202 has no body"
-    );
+    let compact = assert_answer(&doc, &post, resp, 202).await;
+    assert_eq!(compact["request"], 1);
 
     // After a flush has published, the status still matches.
     let resp = control(&f.server, &get, "/control/status")

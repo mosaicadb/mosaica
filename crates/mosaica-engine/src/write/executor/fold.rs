@@ -493,6 +493,8 @@ pub(in crate::write) struct Compactions {
     /// The shards a request named and no compaction has been dispatched for, in order. `Some`
     /// until the request is answered: [`ExecutorHealth::fold_requested`] stays raised.
     requested: Option<std::collections::VecDeque<ShardId>>,
+    /// The number of the last request taken into `requested`.
+    requested_through: u64,
     /// The shards sealed since their last compaction, each due one closing compaction, with the
     /// WAL position of the last record the append that sealed it wrote.
     closing: std::collections::BTreeMap<ShardId, u64>,
@@ -1181,6 +1183,9 @@ impl Executor {
             self.compactions.requested = None;
         }
         if self.compactions.requested.is_none() {
+            self.health
+                .compaction_requests_answered
+                .fetch_max(self.compactions.requested_through, Ordering::SeqCst);
             // Under the lock a request is raised under, so a request raised now is not lowered.
             let held = lock_recover(&self.health.compaction_request);
             if held.is_none() {
@@ -1243,6 +1248,28 @@ impl Executor {
         }
     }
 
+    /// Answer the request held or being worked through with a refusal, while this node may not
+    /// publish.
+    fn refuse_request_unpublishable(&mut self) {
+        if let Some(request) = self.health.take_compaction_request() {
+            self.compactions.requested_through = request.request;
+        } else if self.compactions.requested.is_none() {
+            return;
+        }
+        let reason = match self.health.overlay_diverged.load(Ordering::SeqCst) {
+            true => crate::compact::NoFold::OverlayDiverged,
+            false => crate::compact::NoFold::PrefixDiverged,
+        };
+        self.health
+            .record_fold_refusal(reason, Some((self.compactions.requested_through, None)));
+        self.compactions.requested = None;
+        self.request_answered();
+        tracing::warn!(
+            gate = ?reason,
+            "a compaction was requested and refused: this node publishes nothing until restarted"
+        );
+    }
+
     /// Plan a compaction and start it on its own thread, if one is requested, due or called for
     /// by a seal and nothing blocks it. Not on the shared rayon pool: a compaction's input is a
     /// shard of the corpus, and occupying request-serving workers for its duration would let
@@ -1253,8 +1280,10 @@ impl Executor {
     /// for a later tick (see [`Executor::fold_outstanding`]).
     pub(super) fn dispatch_fold(&mut self, generation: &Arc<Generation>) {
         // A compaction this node could not publish is hours of IO spent to produce an orphan. The
-        // planner's own gates cover the recoverable postures; this one covers the two that latch.
+        // planner's own gates cover the recoverable postures; this one covers the two that latch,
+        // and answers a request with a refusal, since neither clears before a restart.
         if !self.may_publish() {
+            self.refuse_request_unpublishable();
             return;
         }
         // At most one compaction is in flight, and a completed one not yet drained is one pass
@@ -1277,6 +1306,7 @@ impl Executor {
         }
         // A request is resolved to its shards at this tick, against the gauges as they stand.
         if let Some(request) = self.health.take_compaction_request() {
+            self.compactions.requested_through = request.request;
             let shards = self.requested_shards(generation, request);
             match &mut self.compactions.requested {
                 Some(left) => {
@@ -1316,9 +1346,13 @@ impl Executor {
         ) {
             Ok(plan) => plan,
             Err(reason) => {
+                // Recorded before the request is answered, so a caller that reads it answered
+                // finds the refusal.
+                let answering = matches!(from, Dispatching::Requested)
+                    .then_some((self.compactions.requested_through, Some(shard_id)));
+                self.health.record_fold_refusal(reason, answering);
                 self.compaction_taken(shard_id, from);
                 self.request_answered();
-                self.health.record_fold_refusal(reason);
                 tracing::warn!(
                     gate = ?reason,
                     shard = %shard_id,

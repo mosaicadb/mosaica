@@ -562,7 +562,7 @@ fn a_pending_deletion_keeps_its_terms_across_a_coalesce() {
     // The fold is what retires it — and pass 4c runs over the *merged* shape, one extent where it
     // used to find `WIDTH`.
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let now = engine.write_executor_stats();
@@ -730,7 +730,7 @@ fn a_folds_carried_tiers_and_runs_are_coalesced_and_every_answer_holds_through_a
     // Hold the fold after its passes, and publish WIDTH flushes while it waits.
     engine.set_fold_paused_for_test(true);
     let before_fold = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until("the fold to reach its hold", WAIT, || {
         engine.fold_is_holding_for_test()
     });

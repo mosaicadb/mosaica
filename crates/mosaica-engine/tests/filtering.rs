@@ -3354,7 +3354,7 @@ fn an_extent_published_during_the_folds_flight_is_carried_forward_and_composed()
 
     let before = engine.write_executor_stats();
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while !engine.fold_is_holding_for_test() {
         assert!(

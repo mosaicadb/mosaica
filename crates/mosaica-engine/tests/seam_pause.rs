@@ -116,7 +116,7 @@ fn the_current_flip_site_parks_the_fold_with_the_old_prefix_still_committed() {
         .expect("a delete is accepted");
 
     faults.arm_pause(PauseSite::BeforeCurrentFlip, PauseAction::Stall);
-    engine.request_fold();
+    engine.request_fold().unwrap();
 
     // Arrives: the five passes ran on the fold's thread and the executor reached the flip.
     faults.await_arrivals(PauseSite::BeforeCurrentFlip, 1, WAIT);
@@ -169,7 +169,7 @@ fn the_fold_status_covers_the_publication() {
         .expect("a delete is accepted");
 
     faults.arm_pause(PauseSite::BeforeCurrentFlip, PauseAction::Stall);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     faults.await_arrivals(PauseSite::BeforeCurrentFlip, 1, WAIT);
     let held = Duration::from_millis(1_200);
     std::thread::sleep(held);

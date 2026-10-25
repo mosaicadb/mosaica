@@ -1832,7 +1832,7 @@ fn p1_one_scale(base: u64) {
 
     let before = engine.write_executor_stats();
     let t_fold = Instant::now();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until("the fold's passes to finish", WAIT, || {
         engine.fold_is_holding_for_test()
     });
@@ -2221,7 +2221,7 @@ fn p4_one_arm(advice: bool) {
     // ---- the fold, with the viewport sweeping through it -------------------------------------
     let before = engine.write_executor_stats();
     let started = Instant::now();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let mut contended: Vec<Vec<(u8, Duration, usize)>> = Vec::new();
     loop {
         let now = engine.write_executor_stats();

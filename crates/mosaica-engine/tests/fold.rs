@@ -163,7 +163,7 @@ fn engine_over_fixture_with_sparse_term(tmp: &Path, root: &Path, config: EngineC
 /// publication increments.
 fn fold(engine: &Engine) {
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for_fold_publication(engine, &before);
 }
 
@@ -561,7 +561,7 @@ fn a_merge_is_suspended_while_a_completed_fold_is_unpublished() {
     // the moment the old gate stopped suspending merge.
     engine.set_fold_publication_paused_for_test(true);
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for("the fold's passes to finish", || {
         engine.fold_is_holding_for_test()
     });
@@ -636,7 +636,7 @@ fn a_fold_is_suspended_while_a_completed_merge_is_unpublished() {
         engine.merge_publication_is_held_for_test()
     });
 
-    engine.request_fold();
+    engine.request_fold().unwrap();
     for _ in 0..10 {
         tick(&engine);
         let now = engine.write_executor_stats();
@@ -671,14 +671,14 @@ fn a_request_made_while_a_compaction_runs_is_answered_by_a_later_one() {
     let before = engine.write_executor_stats();
 
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for("the first compaction's passes to finish", || {
         engine.fold_is_holding_for_test()
     });
     engine
         .accept_change(entity_of_source(&root, "v00000", 4), ChangeOp::Delete)
         .unwrap();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     for _ in 0..5 {
         tick(&engine);
         let now = engine.write_executor_stats();
@@ -733,7 +733,7 @@ fn an_engine_dropped_during_a_compaction_abandons_it() {
     let served = visible(&engine, &session);
 
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for("the compaction's passes to finish", || {
         engine.fold_is_holding_for_test()
     });
@@ -1259,7 +1259,7 @@ fn unnamed_files(root: &Path, prefix: &str, live: &[&str]) -> usize {
 fn fold_with_a_flush_in_flight(engine: &Engine) -> (EntityId, u64, u64) {
     engine.set_fold_paused_for_test(true);
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
 
     // Wait until the fold's passes are done and it is holding: from here everything published is
     // post-snapshot and must be carried forward rather than folded.
@@ -1366,7 +1366,7 @@ fn a_delete_accepted_after_the_snapshot_survives_the_fold() {
     // `D₀`, so this one is not in it and the fold's passes never saw it.
     engine.set_fold_paused_for_test(true);
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for("the fold to reach its hold", || {
         engine.fold_is_holding_for_test()
     });
@@ -1486,7 +1486,7 @@ fn a_deletion_a_carried_forward_segment_still_names_does_not_retire() {
     // there to make the overlap wide enough to observe deterministically.
     engine.set_fold_paused_for_test(true);
     let before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for("the fold and the flush to overlap", || {
         engine.fold_is_holding_for_test() && engine.write_executor_stats().flushes > before.flushes
     });
@@ -2698,7 +2698,7 @@ fn dropping_the_engine_returns_while_a_fold_is_held_in_flight() {
     let engine = engine_over_fixture(tmp.path(), &root, config_uncapped());
 
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_for("the fold to reach its hold", || {
         engine.fold_is_holding_for_test()
     });
@@ -2808,7 +2808,7 @@ fn a_fold_lands_while_the_feed_runs(join: bool) {
         let mut landed = false;
         for _ in 0..ATTEMPTS {
             let asked = engine.write_executor_stats();
-            engine.request_fold();
+            engine.request_fold().unwrap();
             // A refusal at the plan answers a request as a discard does.
             wait_for("the fold to publish or be discarded", || {
                 let now = engine.write_executor_stats();

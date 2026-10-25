@@ -891,7 +891,7 @@ fn a_declaration_during_a_fold_survives_the_publication_at_the_same_tail_positio
 
     engine.set_fold_paused_for_test(true);
     let stats_before = engine.write_executor_stats();
-    engine.request_fold();
+    engine.request_fold().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while !engine.fold_is_holding_for_test() {
         assert!(

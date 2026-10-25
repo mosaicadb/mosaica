@@ -237,7 +237,7 @@ fn a_request_compacts_every_shard_with_something_to_reclaim() {
         .unwrap();
     let before = engine.write_executor_stats().folds;
     engine.set_fold_paused_for_test(true);
-    engine.request_fold();
+    engine.request_fold().unwrap();
     wait_until(
         "the first compaction holds",
         Duration::from_secs(60),
@@ -334,7 +334,7 @@ fn memory_between_one_shards_estimate_and_the_corpus_still_compacts() {
     let need = |engine: &Engine, shard_id: Option<ShardId>| {
         engine.set_fold_memory_for_test(Some(1));
         let refusals = engine.write_executor_stats().fold_refusals;
-        engine.request_compaction(shard_id);
+        engine.request_compaction(shard_id).unwrap();
         wait_until("the refusal", Duration::from_secs(60), || {
             engine.write_executor_stats().fold_refusals > refusals
         });

@@ -499,7 +499,7 @@ fn the_leaf_answers_from_the_column_where_the_form_holds_no_rows() {
     );
 
     let before = fx.engine.write_executor_stats();
-    fx.engine.request_fold();
+    fx.engine.request_fold().unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let now = fx.engine.write_executor_stats();

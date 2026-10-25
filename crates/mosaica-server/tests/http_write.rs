@@ -1190,6 +1190,26 @@ async fn readyz_status(server: &TestServer, url: String) -> u16 {
 #[tokio::test]
 async fn a_stepped_down_partition_is_not_ready() {
     let tmp = TempDir::new().unwrap();
+    let server =
+        spawn_server_from_engine(stepped_down_engine(&tmp), 200, generous_test_gate()).await;
+    for url in [server.viewer_url("/readyz"), server.session_url("/readyz")] {
+        assert_eq!(
+            readyz_status(&server, url.clone()).await,
+            503,
+            "a stepped-down node must not report ready on {url}: re-flushing from the served \
+             watermark would lose the acked rows above it"
+        );
+    }
+
+    // Liveness is a different question: the process is up and serving the older manifest.
+    assert_eq!(
+        readyz_status(&server, server.viewer_url("/healthz")).await,
+        200
+    );
+}
+
+/// The standard fixture opened stepped down, its executor not started.
+fn stepped_down_engine(tmp: &TempDir) -> Engine {
     let bundle_root = build_fixture(tmp.path(), N_ITEMS);
 
     // Publish the build's publication again at 1 naming a file that does not exist, so the walk
@@ -1219,22 +1239,7 @@ async fn a_stepped_down_partition_is_not_ready() {
         engine.any_partition_stepped_down(),
         "the fixture must actually step down, or this test asserts nothing"
     );
-
-    let server = spawn_server_from_engine(engine, 200, generous_test_gate()).await;
-    for url in [server.viewer_url("/readyz"), server.session_url("/readyz")] {
-        assert_eq!(
-            readyz_status(&server, url.clone()).await,
-            503,
-            "a stepped-down node must not report ready on {url}: re-flushing from the served \
-             watermark would lose the acked rows above it"
-        );
-    }
-
-    // Liveness is a different question: the process is up and serving the older manifest.
-    assert_eq!(
-        readyz_status(&server, server.viewer_url("/healthz")).await,
-        200
-    );
+    engine
 }
 
 /// **The readiness wiring**: `/readyz` reports the write executor's posture, on every listener.
@@ -2017,9 +2022,10 @@ async fn control_compact_is_accepted_and_deferred() {
         .await
         .unwrap();
     assert_eq!(response.status().as_u16(), 202);
+    let first: serde_json::Value = response.json().await.unwrap();
 
     // Idempotent for `control_flush_is_accepted_and_deferred`'s reason: the request is a flag, so
-    // two before one tick are satisfied by that tick together.
+    // two before one tick are satisfied by that tick together. Each is numbered.
     let again = server
         .client
         .post(server.control_url("/control/compact"))
@@ -2028,6 +2034,11 @@ async fn control_compact_is_accepted_and_deferred() {
         .await
         .unwrap();
     assert_eq!(again.status().as_u16(), 202);
+    let again: serde_json::Value = again.json().await.unwrap();
+    assert_eq!(
+        again["request"].as_u64(),
+        first["request"].as_u64().map(|n| n + 1)
+    );
 
     let unauthenticated = server
         .client
@@ -2067,6 +2078,97 @@ async fn control_compact_is_accepted_and_deferred() {
         status["shards"]["records"][0]["last_compaction"]["rss_bytes"].is_u64(),
         "the one shard compacted: {status}"
     );
+}
+
+/// Ask for a compaction under a memory figure no compaction fits, and answer the request's number
+/// and `compaction.requests` once the request is answered.
+async fn compact_refused_for_memory(server: &TestServer) -> (u64, serde_json::Value) {
+    server.state.engine.set_fold_memory_for_test(Some(1));
+    let resp = server
+        .client
+        .post(server.control_url("/control/compact"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 202);
+    let request = resp.json::<serde_json::Value>().await.unwrap()["request"]
+        .as_u64()
+        .expect("a 202 carries the request's number");
+    wait_for_executor(server, "the request answered", |now| {
+        now.compaction_requests_answered >= request
+    })
+    .await;
+    let status = control_status(server).await;
+    assert_eq!(status["compaction"]["fold_requested"], false, "{status}");
+    (request, status["compaction"]["requests"].clone())
+}
+
+/// A compaction refused when its turn comes is reported against the request that asked for it,
+/// and a restart remembers neither: the numbering starts again and the gate is checked anew.
+#[tokio::test]
+async fn a_compaction_refused_at_its_turn_is_reported_against_its_request() {
+    let tmp = TempDir::new().unwrap();
+    let server = serve(&tmp).await;
+    let (request, requests) = compact_refused_for_memory(&server).await;
+    assert_eq!(request, 1);
+    assert_eq!(requests["accepted"], 1, "{requests}");
+    let refusal = &requests["last_refusal"];
+    assert_eq!(refusal["request"], 1, "{requests}");
+    assert_eq!(refusal["gate"], "insufficient_memory");
+    assert!(refusal["shard"].is_u64());
+    assert!(refusal["detail"].as_str().is_some_and(|d| !d.is_empty()));
+    assert_eq!(refusal["had_bytes"], 1);
+    assert!(refusal["need_bytes"].as_u64().unwrap() > 1);
+
+    let server = restart(server, &tmp).await;
+    let requests = control_status(&server).await["compaction"]["requests"].clone();
+    assert_eq!(
+        requests,
+        serde_json::json!({ "accepted": 0, "answered": 0, "last_refusal": null })
+    );
+    let (request, requests) = compact_refused_for_memory(&server).await;
+    assert_eq!(request, 1);
+    assert_eq!(requests["last_refusal"]["request"], 1);
+    assert_eq!(requests["last_refusal"]["gate"], "insufficient_memory");
+}
+
+/// Where no tick could compact before a restart, the request is refused at once and nothing is
+/// requested: a stepped-down partition, or no write executor.
+#[tokio::test]
+async fn a_compaction_no_tick_could_start_is_refused_at_once() {
+    let refused = async |server: &TestServer| {
+        let resp = server
+            .client
+            .post(server.control_url("/control/compact"))
+            .bearer_auth(OPERATOR_CREDENTIAL)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 503);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["error"], "not-ready");
+        assert!(body["detail"].as_str().is_some_and(|d| !d.is_empty()));
+        let stats = server.state.engine.write_executor_stats();
+        assert!(!stats.fold_requested);
+        assert_eq!(stats.compaction_requests_accepted, 0);
+    };
+
+    let tmp = TempDir::new().unwrap();
+    let server =
+        spawn_server_from_engine(stepped_down_engine(&tmp), 200, generous_test_gate()).await;
+    refused(&server).await;
+
+    let tmp = TempDir::new().unwrap();
+    let bundle_root = build_fixture(tmp.path(), N_ITEMS);
+    let engine = Engine::open(
+        &bundle_root,
+        &tmp.path().join("cache"),
+        &tmp.path().join("wal.log"),
+        default_engine_config(),
+    )
+    .unwrap();
+    refused(&mount_server(engine, 200, generous_test_gate()).await).await;
 }
 
 /// **The stage barriers of `/control/status` move when their stages run** (contracts §3.4's
@@ -3802,6 +3904,10 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
         "/compaction/fold_refusals_by_gate/overlay_diverged",
         "integer",
     ),
+    (
+        "/compaction/fold_refusals_by_gate/prefix_diverged",
+        "integer",
+    ),
     ("/compaction/fold_refusals_by_gate/stepped_down", "integer"),
     ("/compaction/fold_refusals_by_gate/wal_poisoned", "integer"),
     ("/compaction/fold_requested", "bool"),
@@ -3814,6 +3920,23 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/compaction/last_refusal/had_bytes", "integer|null"),
     ("/compaction/last_refusal/need_bytes", "integer|null"),
     ("/compaction/live_rows", "integer"),
+    ("/compaction/requests", "object"),
+    ("/compaction/requests/accepted", "integer"),
+    ("/compaction/requests/answered", "integer"),
+    ("/compaction/requests/last_refusal", "null|object"),
+    ("/compaction/requests/last_refusal/at_unix", "integer"),
+    ("/compaction/requests/last_refusal/detail", "string"),
+    ("/compaction/requests/last_refusal/gate", "string"),
+    (
+        "/compaction/requests/last_refusal/had_bytes",
+        "integer|null",
+    ),
+    (
+        "/compaction/requests/last_refusal/need_bytes",
+        "integer|null",
+    ),
+    ("/compaction/requests/last_refusal/request", "integer"),
+    ("/compaction/requests/last_refusal/shard", "integer|null"),
     ("/compaction/passes", "array"),
     ("/compaction/passes/*", "object"),
     ("/compaction/passes/*/anon_bytes", "integer"),
@@ -4199,12 +4322,10 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/write_executor/work_submitted", "integer"),
 ];
 
-/// Types in [`STATUS_SHAPE`] that no read in the test shows: a fold is refused with byte figures
-/// only when the host is short of memory or disc.
-const STATUS_TYPES_UNREACHED: &[(&str, &str)] = &[
-    ("/compaction/last_refusal/had_bytes", "integer"),
-    ("/compaction/last_refusal/need_bytes", "integer"),
-];
+/// Types in [`STATUS_SHAPE`] that no read in the test shows: a request names no shard only when
+/// it is refused because this node may not publish, which no request reaches through the route.
+const STATUS_TYPES_UNREACHED: &[(&str, &str)] =
+    &[("/compaction/requests/last_refusal/shard", "null")];
 
 type Shape = std::collections::BTreeMap<String, std::collections::BTreeSet<&'static str>>;
 
@@ -4331,6 +4452,10 @@ async fn control_status_serves_its_pinned_shape() {
     reads.push(pinned_and_derived);
 
     flush_and_fold(&server, None).await;
+    // A memory figure no compaction fits refuses one with its byte figures.
+    let (request, _) = compact_refused_for_memory(&server).await;
+    reads.push(control_status(&server).await);
+    server.state.engine.set_fold_memory_for_test(None);
     // A torn append poisons the log for good, so the next fold is refused.
     faults.fail_next_appends(1);
     let resp = server
@@ -4350,7 +4475,10 @@ async fn control_status_serves_its_pinned_shape() {
         .await
         .unwrap();
     assert_eq!(resp.status().as_u16(), 202);
-    wait_for_executor(&server, "the fold refused", |now| now.fold_refusals > 0).await;
+    wait_for_executor(&server, "the fold refused", |now| {
+        now.compaction_requests_answered > request
+    })
+    .await;
     reads.push(control_status(&server).await);
 
     let pinned: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> = STATUS_SHAPE

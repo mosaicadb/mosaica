@@ -63,7 +63,7 @@ pub fn fold(engine: &Engine) {
 /// included.
 pub fn compact(engine: &Engine, shard: Option<mosaica_types::ShardId>) -> u64 {
     let before = engine.write_executor_stats();
-    engine.request_compaction(shard);
+    engine.request_compaction(shard).unwrap();
     let mut published = 0;
     wait_until(
         "the compaction's publication",
