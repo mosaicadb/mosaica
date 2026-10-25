@@ -1,5 +1,6 @@
 import {html, nothing, type TemplateResult} from 'lit';
 import type {AggregateSpec, Store, StatusProjection} from '@mosaicajs/client';
+import {isUnanswered} from '@mosaicajs/client/internal';
 import {HeldAggregate} from './aggregate.js';
 
 /**
@@ -40,7 +41,7 @@ export function stateOf(status: StatusProjection | null | undefined): PanelState
     case 'empty':
       return 'empty';
     case 'refused':
-      return status.refusal?.code === 'http-error' && (status.refusal.status ?? 0) >= 500 ? 'unanswered' : 'refused';
+      return isUnanswered(status.refusal) ? 'unanswered' : 'refused';
     case 'shown':
       return status.stale ? 'stale' : 'shown';
   }

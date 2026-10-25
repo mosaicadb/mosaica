@@ -19,7 +19,7 @@ import {attachedTextOf} from './names.js';
 import {DEFAULT_PALETTE, PALETTES, paletteSize, type ChosenColours, type PaletteName, type Rgba} from './palette.js';
 import {worldBbox} from './prefetch.js';
 import {rectContainsTile} from './rects.js';
-import {Presenter, defaultFrameScheduler, refusalOf, type FrameScheduler, type Presented, type PresentedStatus, type Refusal} from './presented.js';
+import {Presenter, defaultFrameScheduler, isUnanswered, refusalOf, type FrameScheduler, type Presented, type PresentedStatus, type Refusal} from './presented.js';
 import {insideBox, regionOperand, withRegion} from './region.js';
 import type {RegionOperand} from './types.js';
 import {DEFAULT_CACHE_BYTES, Replica, type ReplicaOptions} from './replica.js';
@@ -416,7 +416,7 @@ export type ArtifactsProjection = {
    */
   status: ArtifactChannelState['status'];
   /** The refusal while `status` is `refused`, else `null`. */
-  refusal: {code: string; detail: string} | null;
+  refusal: Refusal | null;
   /** A number that increases each time `served` is replaced. */
   version: number;
   /** How many artifact payloads the session holds: the served set and those kept from earlier answers. */
@@ -1445,8 +1445,9 @@ export function createStore(options: StoreOptions): Store {
    * Asks for the current view's identity key under a token a renewal brought: counts only, one tile
    * at depth 0, with no filter, highlight or layer, so nothing set for the previous viewer can have
    * it refused. The server refusing the view the previous token reached shows another viewer, and
-   * the store forgets as {@link admit} does. A shed request, an expired token or a failed fetch
-   * leaves the next answer to {@link admit}.
+   * the store forgets as {@link admit} does. A shed request, an expired token, a server error that
+   * refused nothing, such as a gateway's `504`, or a failed fetch leaves the next answer to
+   * {@link admit}.
    */
   async function askIdentity(): Promise<void> {
     const current = views.current;
@@ -1460,7 +1461,8 @@ export function createStore(options: StoreOptions): Store {
       if (!disposed && views.current === current) admit(view, response.identityKey, tok);
     } catch (error) {
       if (disposed || tok === null || unconfirmed !== tok || !(error instanceof MosaicaError)) return;
-      if (error.status === 429 || error.status === 503 || tokens.isExpiry(refusalOf(error))) return;
+      const refusal = refusalOf(error);
+      if (error.status === 429 || error.status === 503 || isUnanswered(refusal) || tokens.isExpiry(refusal)) return;
       forgetAnswers();
     }
   }

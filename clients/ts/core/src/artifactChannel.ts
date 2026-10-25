@@ -7,7 +7,7 @@ import {worldBbox, type Viewport} from './prefetch.js';
 import type {ViewState} from './driver.js';
 import type {AggregateCut, Artifact, FilterExpr, Layer, MapProjection, Quantisation, ViewportArtifactsFrame} from './types.js';
 import {SessionArtifactTable, type ArtifactRef} from './artifactTable.js';
-import {refusalOf} from './presented.js';
+import {refusalOf, type Refusal} from './presented.js';
 
 /**
  * The annotation channel: which artifacts the current view is served, and each one's masked count.
@@ -42,7 +42,7 @@ export type ArtifactChannelState = {
   /** The artifacts of the view's tiles, each once. */
   artifacts: Artifact[];
   status: 'idle' | 'loading' | 'shown' | 'refused';
-  refusal: {code: string; detail: string} | null;
+  refusal: Refusal | null;
   /** Incremented whenever `artifacts` is replaced. */
   version: number;
   /** How many distinct artifacts the held tiles carry. For instrumentation. */
@@ -720,7 +720,7 @@ export class ArtifactChannel {
         ...this.state,
         artifacts: [],
         status: 'refused',
-        refusal: {code: 'per-tile', detail: "no number of artifacts per tile was given: set createStore's artifacts.perTile, at most meta.selection.maxArtifactsPerTile"},
+        refusal: {code: 'per-tile', detail: "no number of artifacts per tile was given: set createStore's artifacts.perTile, at most meta.selection.maxArtifactsPerTile", status: null},
         version: this.state.version + 1
       };
       this.emit();

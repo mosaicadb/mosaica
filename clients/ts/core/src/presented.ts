@@ -60,20 +60,31 @@ export type Refusal = {
   code: string;
   /** A {@link MosaicaError}'s `detail`, or the other error's message. */
   detail: string;
-  /** A {@link MosaicaError}'s HTTP status, or `null` for any other error. */
+  /**
+   * The HTTP status: a {@link MosaicaError}'s, or that of any other error carrying a numeric
+   * `status`; `null` where the error carries none.
+   */
   status: number | null;
 };
 
 /**
  * The {@link Refusal} a thrown error stands for: the `code`, `detail` and `status` of a
- * {@link MosaicaError}, or `fetch-failed`, the message and `null` for any other error, such as one
- * from a request that reached no server.
+ * {@link MosaicaError}, or `fetch-failed` and the message for any other error, such as one from a
+ * request that reached no server, with its numeric `status` where it carries one.
  *
  * @category Projections
  */
 export function refusalOf(error: unknown): Refusal {
   const e = (error ?? {}) as {code?: string; detail?: string; message?: string; status?: number};
   return {code: e.code ?? 'fetch-failed', detail: e.detail ?? e.message ?? String(error), status: typeof e.status === 'number' ? e.status : null};
+}
+
+/**
+ * Whether a refusal is a server error that refused nothing: a `5xx` whose body names no Mosaica
+ * code, such as a gateway's `504`. It says nothing about what this viewer may see.
+ */
+export function isUnanswered(refusal: Refusal | null | undefined): boolean {
+  return refusal?.code === 'http-error' && (refusal.status ?? 0) >= 500;
 }
 
 /** The driver's verdict; see `DriverEvents.onFrame`. */

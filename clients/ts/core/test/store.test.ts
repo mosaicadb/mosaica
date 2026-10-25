@@ -1968,19 +1968,20 @@ describe('a store serves one viewer', () => {
   /**
    * Viewer A behind `t1` and viewer B behind `t2`, each with its own meta, whose identity keys name
    * the viewer and the view. `hold` leaves a request unanswered; `refuse` refuses it as the server
-   * refuses a filter on a column the viewer cannot reach.
+   * refuses a filter on a column the viewer cannot reach, or with `error` where that is given.
    */
   function perViewer(opts: {
     metaOf: (token: string) => Meta;
     hold?: (token: string, req: FakeRequest) => boolean;
     refuse?: (token: string, req: FakeRequest) => boolean;
+    error?: Error;
     authorise?: () => Promise<{token: string; expiresAt: number}>;
   }) {
     const clock = fakeClock();
     const scheduler = fakeScheduler();
     const whose = (token: string): Who => (token === 't1' || token === 't-a' ? 'a' : 'b');
     const viewport = vi.fn(async (token: string, req: FakeRequest) => {
-      if (opts.refuse?.(token, req)) throw new MosaicaError(422, 'bad-filter', 'this principal cannot filter on that column');
+      if (opts.refuse?.(token, req)) throw opts.error ?? new MosaicaError(422, 'bad-filter', 'this principal cannot filter on that column');
       if (opts.hold?.(token, req)) return new Promise<never>(() => {});
       const who = whose(token);
       return {...answerOf(who, req), identityKey: `${who}:${req.view}`};
@@ -2038,6 +2039,37 @@ describe('a store serves one viewer', () => {
     expect(store.get('meta')).toBe(metas.b);
     expect(store.get('view').id).toBe('s1');
     expect(whoShows(store, metas)).toEqual(new Set(['b']));
+  });
+
+  it('keeps what is drawn when a gateway answers the renewed token’s identity check with a 504', async () => {
+    const tokens = ['t1', 't-a'];
+    let checks = 0;
+    const {store, clock, scheduler} = perViewer({
+      metaOf: () => SHAPED,
+      authorise: async () => ({token: tokens.shift() ?? 't-a', expiresAt: (Date.now() + 60_000) / 1000}),
+      refuse: (token, req) => {
+        const check = token === 't-a' && req.k === 0;
+        if (check) checks += 1;
+        return check;
+      },
+      error: new MosaicaError(504, 'http-error', 'Gateway Timeout')
+    });
+    store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 400, 400));
+    await settled(clock, scheduler);
+    const drawn = store.get('marks').bands.length;
+    expect(drawn).toBeGreaterThan(0);
+    const blanks: number[] = [];
+    store.subscribe(() => {
+      if (store.get('marks').bands.length === 0) blanks.push(clock.now());
+    });
+
+    await clock.advance(30_000);
+    await settled(clock, scheduler);
+
+    expect(checks).toBeGreaterThan(0);
+    expect(blanks).toEqual([]);
+    expect(store.get('marks').bands.length).toBe(drawn);
+    expect(store.get('marks').bands.every((band) => band.identityKey === 'a:s0')).toBe(true);
   });
 
   it('forgets on a streamed part under a new key for a view it has left, and holds none of it for the return', async () => {

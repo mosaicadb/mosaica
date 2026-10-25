@@ -287,6 +287,36 @@ describe('<mosaica-status> renders every state through part="state"', () => {
 });
 
 describe('<mosaica-selection> — a panel renders the states the same way', () => {
+  it('names a server that did not answer or cannot be reached as the strip does, and a refusal as a refusal', async () => {
+    const host = await mount('<mosaica-selection></mosaica-selection><mosaica-status></mosaica-status>');
+    const store = fakeStore({status: status({}), view});
+    for (const el of host.querySelectorAll('mosaica-selection, mosaica-status')) (el as unknown as {store: unknown}).store = store;
+    const held = {ids: BigUint64Array.from([1n]), positions: new Float32Array(2), count: 1};
+    const shape = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
+    const region = (over: object) => ({shape, status: 'loading' as const, refusal: null, visible: null, matched: {value: 0, exact: false}, served: {shown: 1, total: 0, exact: false}, verdict: null, held, ...over});
+    const said = (tag: string) => deep(host.querySelector(tag)!.shadowRoot!, '[part="state"]')?.textContent?.replace('Retry', '').trim();
+
+    const gateway = {code: 'http-error', detail: 'Gateway Timeout', status: 504};
+    store.set('status', status({status: 'refused', refusal: gateway}));
+    store.set('region', region({status: 'refused', refusal: gateway}));
+    await settle(host);
+    expect(said('mosaica-selection')).toBe('Server did not answer');
+    expect(said('mosaica-selection')).toBe(said('mosaica-status'));
+    expect(deep(host.querySelector('mosaica-selection')!.shadowRoot!, '[part="refusal"]')).toBeNull();
+
+    store.set('status', status({status: 'loading', unreachable: true}));
+    store.set('region', region({}));
+    await settle(host);
+    expect(said('mosaica-selection')).toBe('Server unreachable');
+    expect(said('mosaica-selection')).toBe(said('mosaica-status'));
+
+    const closed = {code: 'fail-closed', detail: 'postings unreadable', status: 500};
+    store.set('status', status({status: 'refused', refusal: closed}));
+    store.set('region', region({status: 'refused', refusal: closed}));
+    await settle(host);
+    expect(said('mosaica-selection')).toBe('Selection refused');
+  });
+
   it('is detached with no region, counting while loading, refused as a refusal, and inexact when the answer is a cover', async () => {
     const host = await mount('<mosaica-selection></mosaica-selection>');
     const store = fakeStore({status: status({}), view});

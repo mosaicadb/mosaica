@@ -1,9 +1,11 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
 import {type RegionProjection} from '@mosaicajs/client';
+import {isUnanswered} from '@mosaicajs/client/internal';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
+import {renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -14,6 +16,10 @@ import './count.js';
  * the server answered for a cover of it; before those land, *Visible inside* appears only while no
  * other filter narrows the view. Clicking a listed mark picks it. *Outside* flips the selection to its
  * complement, and *Clear* drops it.
+ *
+ * While its counts are not shown and the server cannot be reached or did not answer, the state line
+ * says so in the status strip's words, Server unreachable or Server did not answer, in place of
+ * Counting or Selection refused.
  *
  * A selection is a filter: the map and every count narrow to it once it settles. Not built yet:
  * *Export* and *Save as artifact*, which need server routes; their buttons are disabled with the
@@ -91,7 +97,8 @@ export class MosaicaSelection extends MosaicaElement {
     const r = this.shown;
     const heading = (shape: string = '') => html`<h2 part="title">Selection<span class="summary">${shape}</span></h2>`;
     if (!r) return html`<div class="panel">${heading()}<span part="state" data-state="detached"></span></div>`;
-    const stale = this.resolvedStore?.get('status').stale ?? false;
+    const status = this.resolvedStore?.get('status') ?? null;
+    const stale = status?.stale ?? false;
     const state = r.status === 'shown' ? (stale ? 'stale' : 'shown') : r.status;
     const kv = (label: string, count: unknown) => html`<div class="k">${label}</div><div class="v">${count}</div>`;
     const counts =
@@ -102,8 +109,14 @@ export class MosaicaSelection extends MosaicaElement {
             ${r.visible ? kv(r.shape.outside ? 'Visible outside' : 'Visible inside', html`<mosaica-count part="count-visible" .masked=${r.visible} .stale=${stale}></mosaica-count>`) : nothing}
           </div>`
         : nothing;
+    // A server that cannot be reached or did not answer is named as the status strip names it,
+    // since nothing about the selection was refused.
+    const unreachable = stateOf(status) === 'retrying' && status?.unreachable === true;
+    const unanswered = (r.status === 'refused' && isUnanswered(r.refusal)) || stateOf(status) === 'unanswered';
     const stateRegion =
-      r.status === 'loading'
+      r.status !== 'shown' && (unreachable || unanswered)
+        ? renderState(unreachable ? 'retrying' : 'unanswered', status)
+        : r.status === 'loading'
         ? html`<span part="state" data-state="loading"><span class="dot quiet"></span>Counting<span class="skel" aria-hidden="true"></span></span>`
         : r.status === 'refused'
           ? html`<span part="state" data-state="refused"><span class="dot refuse"></span><span part="refusal" data-code=${r.refusal?.code ?? nothing}>Selection refused</span></span>`
