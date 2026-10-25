@@ -193,7 +193,8 @@ def _(mo):
     `topics` clusters with their names. The two are independent, so a map can colour by one
     layer and draw another, or colour by a layer and draw nothing over it.
     `artifacts_per_tile` is how many clusters of each level the map shows in each tile of the
-    map, the largest first; without it the map draws no cluster.
+    map, the largest first; without it the map shows 50, or the server's maximum where that is
+    smaller.
     Hover over a point to see its title, and zoom in to see more points.
     """)
     return

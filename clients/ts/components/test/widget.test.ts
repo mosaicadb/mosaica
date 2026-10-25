@@ -1,7 +1,7 @@
 import {describe, expect, it, onTestFinished} from 'vitest';
 import {composeFilters, type FilterExpr, type FilterOperandSet, type Store, type ViewInput} from '@mosaicajs/client';
 import {mortonOfTile} from '@mosaicajs/client/internal';
-import {draftOf, initialize, render, stateOf, type KernelMessage, type WidgetModel} from '../src/widget.js';
+import {draftOf, initialize, render, stateOf, type KernelMessage, type StoreFactory, type WidgetModel} from '../src/widget.js';
 import {aggregateEntry, answerAggregate, fakeStore, settle, status, type FakeStore} from './fake-store.js';
 
 /**
@@ -65,9 +65,11 @@ function setUp(initial: Record<string, unknown> = {}) {
   const model = fakeModel({...base, ...initial});
   let supplier: (() => Promise<{token: string; expiresAt: number}>) | null = null;
   const stores: FakeStore[] = [];
+  const built: Parameters<StoreFactory>[0][] = [];
   const dispose = initialize({
     model,
     storeFactory: (opts) => {
+      built.push(opts);
       supplier = opts.authorise;
       const store = fakeStore();
       stores.push(store);
@@ -77,7 +79,7 @@ function setUp(initial: Record<string, unknown> = {}) {
   const el = document.createElement('div');
   document.body.append(el);
   const unmount = render({model, el});
-  return {model, store: stores[0]!, stores, el, unmount, supplier: () => supplier!, dispose};
+  return {model, store: stores[0]!, stores, built, el, unmount, supplier: () => supplier!, dispose};
 }
 
 describe('the token protocol', () => {
@@ -181,6 +183,11 @@ describe('the token protocol', () => {
     // The kernel setting the old budget back reaches the explorer.
     model.set('budget', 40_000);
     expect(explorer.budget).toBe(40_000);
+  });
+
+  it('builds the store with the artifacts per tile the kernel sets, and none where it sets none, so the store’s own applies', () => {
+    expect(setUp({artifacts_per_tile: null}).built[0]).not.toHaveProperty('artifacts');
+    expect(setUp({artifacts_per_tile: 7}).built[0]!.artifacts).toEqual({perTile: 7});
   });
 
   it('two views of one model: a store each, one supplier, and one ready', async () => {

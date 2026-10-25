@@ -275,10 +275,11 @@ class Map(anywidget.AnyWidget):
     - `artifacts_per_tile`: the most annotations each level of a layer shows in one tile of the
       map, largest first, at most the server's `max_artifacts_per_tile`. `None`, the default,
       asks for 50, or the server's `max_artifacts_per_tile` where that is smaller. The map asks
-      for annotations by tile at map zoom + 2, the map's own zoom rounded down, a tile of 128 to 256 pixels, and at most 558 tiles in one request, the most a 3840 by 2160
-      screen touches, or the server's `max_tiles_per_request` where that is fewer; a larger
-      screen is asked for at zoom + 1, then coarser, until its tiles fit. So the tiles in view
-      times `artifacts_per_tile` bounds the annotations one level draws.
+      for annotations by tile at map zoom + 2, the map's own zoom rounded down, a tile of 128 to
+      256 pixels, and at most 558 tiles in one request, the most a 3840 by 2160 screen touches,
+      or the server's `max_tiles_per_request` where that is fewer; a larger screen is asked for
+      at zoom + 1, then coarser, until its tiles fit. So the tiles in view times
+      `artifacts_per_tile` bounds the annotations one level draws.
     - `budget`: how many points the map aims to draw on screen. `0`, the default, leaves the
       map's own, 250,000.
     - `budget_min`, `budget_max`: the ends of the Most points slider in the map's Layers
