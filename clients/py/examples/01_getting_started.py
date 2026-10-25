@@ -361,9 +361,8 @@ def _(mo):
     every table Mosaica returns, and `to_pandas()` turns it into a data frame.
 
     Settlements are the largest class, then water, then buildings. The last row, in the group
-    `none`, counts the 47 places GeoNames gives no class. The `title` column holds a display
-    name for each value where one was declared, and we declared none. These are the numbers the
-    map's Feature class card showed, because the card makes the same request.
+    `none`, counts the 47 places GeoNames gives no class. These are the numbers the map's Feature
+    class card showed, because the card makes the same request.
 
     ## Find a misfiled place
 
