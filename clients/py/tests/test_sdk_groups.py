@@ -337,11 +337,32 @@ def test_a_view_created_with_no_rows_is_listed_on_meta_and_is_not_created_twice(
     assert db.check().plan == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a group with metadata declared after the first commit writes no roster into the "
-    "declaration, which `check --payloads` refuses, whatever the metadata's type",
-)
+def test_a_group_with_text_metadata_declared_after_the_first_commit_creates_its_views(grouped):
+    """A group declared at a later commit has no points file and no roster in the declaration,
+    which reads it as declared and empty; its views are created from the roster inserted for it,
+    each with its metadata, and a commit after that plans nothing more for them."""
+    db = grouped
+    db.declare_view_group("eras", extent=EXTENT, metadata={"label": "text"})
+    db.insert(
+        "eras",
+        roster=pa.table({"key": ["early", "late"], "label": ["Early", "Late"]}),
+        key="key",
+        label="label",
+    )
+    report = db.commit()
+    assert report.ok, report.refusals
+    served = {
+        view["id"]: view["metadata"]["label"]
+        for view in db.meta()["views"]
+        if view["id"].startswith("eras:")
+    }
+    assert served == {
+        "eras:early": {"type": "text", "value": "Early"},
+        "eras:late": {"type": "text", "value": "Late"},
+    }
+    assert db.check().plan == []
+
+
 def test_a_group_with_category_metadata_and_its_new_vocabulary_commit_together(grouped):
     """A later commit declaring a vocabulary and a group whose metadata names it sends the
     vocabulary first, since the group route refuses a category over a vocabulary it does not hold.
