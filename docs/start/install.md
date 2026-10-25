@@ -1,55 +1,52 @@
 # Install and configure
 
-## What to install
+## Install
 
-| To | Install |
-|---|---|
-| Build a database from files, serve it, and manage its users | The `mosaica` binary |
-| Run it as a service | The `mosaica` binary under systemd, or the Docker image |
-| Explore data in a notebook, or script a database from Python | The Python package, `mosaica`, which brings the binary with it on Linux and macOS |
-| Put a map in a web page or app | The `@mosaicajs` packages, and a server to read from |
+!!! note "Not published yet"
+    Release binaries, the Docker image and the packages on PyPI and npm come with the first release. Until then, install from a clone of the repository:
 
-!!! note ""
-    Not published yet: release binaries, the Docker image, the Python package on PyPI and the `@mosaicajs` packages on npm. Until they are, install each from a clone of the repository, as below. The npm registry holds an empty placeholder under each `@mosaicajs` name, so `npm install @mosaicajs/client` reports no error and installs no code.
+    ```bash
+    git clone https://github.com/mosaicadb/mosaica ~/mosaica
+    ```
 
-**The binary.** Build it with cargo. You need Rust, installed with rustup, and a C compiler and its build tools (`build-essential` on Debian and Ubuntu), because Mosaica links C libraries such as CRoaring, zstd and SQLite.
+=== "Server"
 
-```bash
-git clone https://github.com/mosaicadb/mosaica ~/mosaica
-cd ~/mosaica
-cargo install --locked --path crates/mosaica-cli
-mosaica --version
-```
+    The `mosaica` binary builds a database and serves it. It needs Rust and a C compiler (`build-essential` on Debian and Ubuntu).
 
-[Your first map from files](first-map.md) starts here, and shows what each step prints.
+    ```bash
+    cd ~/mosaica
+    cargo install --locked --path crates/mosaica-cli
+    ```
 
-**The Docker image.** Build it from the `Dockerfile` at the root of the clone. [Run Mosaica with Docker](../guides/docker.md) covers building it and running it with Compose.
+    To run it as a service, see [systemd](../guides/systemd.md) or [Docker](../guides/docker.md).
 
-**The Python package.** It needs Python 3.10 or later. Install the companion package that carries the binary first, then the client, from the clone. Both build from source: the first compiles Mosaica, so it needs what the binary needs, and the second bundles the map's browser code, so it needs Node.js 22.15 or later. The [Python client's README](https://github.com/mosaicadb/mosaica/blob/main/clients/py/README.md) gives the details.
+=== "Python"
 
-```bash
-cd ~/mosaica
-pip install -e clients/py-native
-pip install -e 'clients/py[widget]'
-```
+    The Python package runs a database in your notebook or connects to a server. It brings the binary with it, and needs Python 3.10 or later, Rust, a C compiler and Node.js 22.15 or later.
 
-**The TypeScript packages.** Build and pack them from `clients/ts`, then install the packed files in your own project, as the [TypeScript client's README](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/README.md#using-the-packages-in-another-project) describes. They need Node.js 22.15 or later.
+    ```bash
+    cd ~/mosaica
+    pip install -e clients/py-native
+    pip install -e 'clients/py[widget]'
+    ```
 
-## Platforms
+=== "TypeScript"
 
-Release builds of Mosaica, and the Python package that carries them, are made for Linux on x86_64 and aarch64, with glibc 2.28 or later or musl 1.2 or later, and for macOS 11 or later on Apple silicon and 10.12 or later on Intel. The tests run on Linux x86_64, and the Linux x86_64 and Apple silicon builds are started once each to check they run.
+    The `@mosaicajs` packages put a map in a web page or app. Pack them from `clients/ts` and install the packed files, as the [TypeScript client's README](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/README.md#using-the-packages-in-another-project) describes. They need Node.js 22.15 or later.
 
-Mosaica doesn't run on Windows yet. The Python client installs there, and connects to a Mosaica server on another machine.
+    `npm install @mosaicajs/client` currently installs an empty placeholder without an error.
 
-## The schema and the server's settings
+Mosaica runs on Linux and macOS. It doesn't run on Windows yet, though the Python client installs there and connects to a server on another machine.
 
-Two files configure Mosaica.
+??? info "Platform details"
+    Release builds are made for Linux on x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on Apple silicon, and macOS 10.12 or later on Intel. The tests run on Linux x86_64.
 
-`corpus.toml` is the database's schema. It declares the views that place items on a map, the fields each item carries and whether each is rendered or indexed, the vocabularies behind category fields, the annotation layers, and who may see what. A running server takes the same declarations at its control address, so the schema can grow while the database serves, and the [data model](../system/data-model.md#what-can-change-while-it-runs) lists what can change. The schema also has a `[sources]` table, naming the Parquet files a first load reads.
+## Configure
 
-`mosaica.toml` holds the server's settings: where the database and the server's working files live, which schema to start from, the three addresses, the operator credential, how long a viewer's session lasts, and the limits on requests and writes. The server reads it when it starts, so a change takes effect at the next restart.
+Two files configure a database:
 
-## Putting data in
+- **`corpus.toml` is the schema.** It declares the views, the fields and whether each is rendered or indexed, the vocabularies, the annotation layers, and who may see what. Its `[sources]` table names the files for the first load. A running server accepts the same declarations, so the schema can grow while it serves.
+- **`mosaica.toml` holds the server's settings**: where its files live, which schema to start from, its three addresses, the operator credential, and its limits. The server reads it at start.
 
 ```mermaid
 flowchart LR
@@ -58,34 +55,30 @@ flowchart LR
   build -->|first load| db[("database")]
   settings["mosaica.toml<br/>server settings"] --> serve["mosaica serve"]
   db <--> serve
+  serve --- control["control address<br/>declarations, inserts, deletions"]
   serve --- viewer["viewer address<br/>reads"]
-  serve --- session["session address<br/>sessions for your users"]
-  serve --- control["control address<br/>declarations, inserts, deletions, users"]
 ```
 
-*A build makes the database and its first load in one pass. Every change after that goes through the server.*
-
-`mosaica build` creates the database from the schema and the files `[sources]` names. It is the quick way to load a lot of data at once: it sorts every item into map order and writes each index in one go, where the server takes rows in batches and merges them in as it runs. Once the server is up, everything else goes to it. New declarations, inserts, deletions and suppressions arrive at the control address, from the Python and TypeScript clients, the command line or the HTTP API, and the server applies them to the same database.
+`mosaica build` creates the database and loads the first data in one pass, which is the quick way to load a lot at once. After that, every change goes through the server's control address, from the clients, the command line or the HTTP API.
 
 !!! note ""
-    Not built yet: creating an empty database and filling it entirely through the server. A database starts with a build, which needs at least one view with data.
+    Not built yet: an empty database. A database starts with a build of at least one view's data.
 
-Where Mosaica finds the two files:
+??? info "Where Mosaica looks for the two files"
+    - `mosaica.toml`: the current directory, or the nearest one above it. `--deployment` names another. Its relative paths are read from its own directory.
+    - The schema: the file `[build] schema` names, or `schema.toml`. `--config` names another. Paths in `[sources]` are read from the schema's directory.
 
-- **`mosaica.toml`** is read from the directory a command runs in, or the nearest directory above it that has one. `--deployment` names another. A relative path in it is read from its own directory.
-- **The schema** is the file `[build] schema` names, `schema.toml` if it names none, and `--config` names another. A path in `[sources]` is read from the schema's own directory, and an absolute one is refused.
+    The examples in the repository and the Python client name the schema `schema.toml`. `mosaica check --payloads` prints a schema as the requests that declare it at a running server.
 
-The schema's file can have any name, since `mosaica.toml` names it. These pages call it `corpus.toml`, and the examples in the repository and the Python client call it `schema.toml`. `mosaica check --payloads` prints a schema as the requests that would declare it at a running server.
+## Try it
 
-## A small deployment
-
-The repository carries 150,000 GeoNames places in `examples/data/geonames`. Here is the least you need to put them on a map, with a name to search by and a population to colour by. Make a directory beside the clone.
+The repository has 150,000 GeoNames places in `examples/data/geonames`. Make a directory beside the clone:
 
 ```bash
 mkdir ~/places && cd ~/places
 ```
 
-Save this as `corpus.toml`.
+Save this as `corpus.toml`:
 
 ```toml
 [sources]
@@ -94,28 +87,30 @@ points = "../mosaica/examples/data/geonames/points.parquet"
 [defaults]
 source = "points"
 
+# A world map, from the file's lon and lat columns. Every place is public.
 [[view]]
 name             = "world"
 projection       = "web_mercator"
 extent           = { lon = [-180.0, 180.0], lat = [-85.0511287798066, 85.0511287798066] }
 point_visibility = { default = "public" }
 
+# Searchable names.
 [[attribute]]
 name  = "name"
 type  = "text"
 index = true
 
+# Sent with every point, to colour by.
 [[attribute]]
 name   = "population"
 type   = "i64"
 render = true
 ```
 
-`[sources]` names the file for the first load, and `[defaults]` makes it the source of everything below. The view places each row on a Web Mercator world map from its `lon` and `lat` columns, and gives every place the access label `public`, which every viewer holds. `index = true` makes the names searchable, and `render = true` sends each place's population with every point drawn. The [tutorial](first-map.md#describe-the-data) explains each of these choices, and the [corpus.toml reference](../reference/corpus-toml.md) lists every key.
-
-Save this as `mosaica.toml`. `mosaica serve` refuses to start without each of these keys, apart from `[build]`, which the build reads and the server does not. It is there because the schema is not called `schema.toml`. The operator credential can come from an environment variable instead of a file, with `operator_credential_env`.
+Save this as `mosaica.toml`:
 
 ```toml
+# The database, the server's cache and its write-ahead log.
 [bundle]
 path  = "bundle"
 cache = "cache"
@@ -124,6 +119,7 @@ wal   = "wal.log"
 [build]
 schema = "corpus.toml"
 
+# A viewer's session lasts at most an hour.
 [disclosure]
 token_max_lifetime = 3600
 
@@ -133,19 +129,12 @@ session                  = "127.0.0.1:9142"
 control                  = "127.0.0.1:9143"
 operator_credential_file = "operator.secret"
 
+# Users, keys and grants.
 [catalogue]
 dir = "catalogue"
 ```
 
-- `[bundle]` names the database's directory, which Mosaica calls the bundle, a cache of work the server can redo, and the write-ahead log, where every write is recorded before it is applied.
-- `[build] schema` names the schema.
-- `token_max_lifetime` is the longest a viewer's session lasts, in seconds.
-- `[serve]` gives the three addresses, and a file holding the operator credential, which holds every permission.
-- `[catalogue] dir` is where the server keeps its users, their passwords and keys, and what each may see and do. [Users and roles](../system/users-and-roles.md) explains them.
-
-The [mosaica.toml reference](../reference/mosaica-toml.md) lists every other key, with its default.
-
-Check the schema against the file, build, make the operator credential and serve.
+Check, build and serve:
 
 ```bash
 mosaica check 2>&1 | tail -n 1
@@ -154,8 +143,6 @@ mosaica check 2>&1 | tail -n 1
 ```
 check OK: 2 source(s), 1 view(s), 0 view group(s) over 0 declared view(s), 0 vocabulary(ies), 2 attribute(s), 0 layer(s), 0 warning(s)
 ```
-
-It counts two sources because the view and the attributes each read the file.
 
 ```bash
 mosaica build 2>&1 | tail -n 2
@@ -176,41 +163,17 @@ mosaica serve
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-In a second terminal, look at what the build and the server made beside your two files.
+The server is running. To open the map in a browser, follow [Open the map](first-map.md#open-the-map) in the tutorial, with `~/places` in place of `~/ireland`.
 
-```bash
-cd ~/places
-ls
-```
-
-```
-bundle
-cache
-catalogue
-corpus.toml
-mosaica.toml
-operator.secret
-wal-000001.log
-wal-000001.sync
-```
-
-| Path | Holds | Made by |
-|---|---|---|
-| `bundle` | The database: every item, its positions, its fields, the indexes and the key that scrambles `mosaica_id`s | `mosaica build`, then added to by the server as writes are flushed and compacted |
-| `wal-*.log`, `wal-*.sync` | Every change accepted since the last flush | The server |
-| `cache` | Work the server can redo, such as each grant's set of visible items | The server |
-| `catalogue` | The users, groups, keys, passwords and grants. It lives outside the bundle, so it survives a rebuild | The server, when it first starts |
-
-[Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) says what makes each grow and what to back up. To see the map in a browser, follow [Open the map](first-map.md#open-the-map) in the tutorial, writing `~/places` where it writes `~/ireland`. It makes the principals the example page signs in with.
+The [corpus.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references list every key. [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) covers what the server keeps on disc.
 
 ## From Python
 
-The Python client writes both files for you. `mosaica.create("~/maps/places")` makes a database in that directory. The client writes the schema, `schema.toml`, from what you declare and insert, and a `mosaica.toml` of its own, which keeps the cache, the write-ahead log, the catalogue and the operator credential under `.mosaica/` and the tables you insert under `sources/`. The first commit builds the database and starts a server on that directory, listening on free ports on this machine only. Call `write()` to see the two files before then.
+The Python client writes both files for you. `mosaica.create("~/maps/places")` makes a database in that directory, and its first commit builds the database and starts a server. `mosaica serve --deployment ~/maps/places/mosaica.toml` serves it again later, without Python.
 
-Since the directory holds everything, `mosaica serve --deployment ~/maps/places/mosaica.toml` serves the same database without Python, on new free ports each time, which it prints when it starts. `mosaica.create()` with no path puts the database in a temporary directory and deletes it when the database is closed or Python exits. `save(path)` copies it somewhere lasting. The [Python reference](../reference/python/connecting.md) covers `create()`, `open()` and `save()`.
+`mosaica.create()` with no path makes a temporary database, deleted when Python exits. The [Python reference](../reference/python/connecting.md) covers `create()`, `open()` and `save()`.
 
 ## Next
 
-- [Your first map from files](first-map.md) builds a map of Ireland step by step, from download to a filtered map in the browser.
-- [Run Mosaica under systemd](../guides/systemd.md) and [Run Mosaica with Docker](../guides/docker.md) run a deployment as a service.
+- [Your first map from files](first-map.md) builds a map of Ireland step by step.
 - [Users and roles](../system/users-and-roles.md) covers who can sign in, and what each may see and do.
