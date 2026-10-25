@@ -1,0 +1,8 @@
+[bundle]
+path = "bundle"
+
+[serve]
+viewer  = "127.0.0.1:9241"
+session = "127.0.0.1:9242"
+control = "127.0.0.1:9243"
+open    = true

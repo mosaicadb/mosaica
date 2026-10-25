@@ -18,7 +18,8 @@
     "examples/react-explorer",
     "examples/canvas-store",
     "examples/deck-host",
-    "examples/getting-started/web"
+    "examples/getting-started/web",
+    "examples/own-ui/web"
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",

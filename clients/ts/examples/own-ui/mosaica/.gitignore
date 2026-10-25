@@ -1,0 +1,4 @@
+# Everything mosaica build and mosaica serve write here.
+*
+!.gitignore
+!mosaica.toml

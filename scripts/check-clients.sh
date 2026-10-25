@@ -2,9 +2,9 @@
 # The TypeScript half of the gate: typecheck every package and the operator scripts, build the four
 # library packages and import each from `dist/` in Node, run the unit suites, run core's live test
 # against a real `mosaica serve`, then the components' browser suite in headless Chromium, which
-# also decodes through the built worker and renders the built elements, and last the
-# getting-started example's page, served by Vite over an open Mosaica server and drawn in headless
-# Chromium.
+# also decodes through the built worker and renders the built elements, and last the two
+# tutorial examples' pages, getting-started and own-ui, each served by Vite over an open Mosaica
+# server and drawn in headless Chromium.
 #
 # It starts by checking that every copy of the release version (the pyprojects, the npm manifests
 # and lockfile, the crates' pins) matches `[workspace.package] version` in Cargo.toml.
@@ -56,5 +56,8 @@ npm --prefix clients/ts/components run test:browser --silent
 
 echo "check-clients: serving the getting-started example and drawing its page"
 npm --prefix clients/ts/examples/getting-started/web run test:live --silent
+
+echo "check-clients: serving the own-ui example and driving its page"
+npm --prefix clients/ts/examples/own-ui/web run test:live --silent
 
 echo "check-clients: ok"

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>arXiv papers</title>
+  </head>
+  <body>
+    <header>
+      <h1>arXiv papers</h1>
+    </header>
+    <main>
+      <div id="controls">
+        <label>
+          Archive
+          <select id="archive">
+            <option value="">All archives</option>
+          </select>
+        </label>
+        <label>
+          Title
+          <input id="title" type="search" placeholder="Words in the title" />
+        </label>
+        <fieldset>
+          <legend>Submitted</legend>
+          <label>From <input id="from" type="date" /></label>
+          <label>To <input id="to" type="date" /></label>
+        </fieldset>
+        <label class="toggle">
+          <input id="topics" type="checkbox" />
+          Show topic names
+        </label>
+        <p id="topic" hidden>
+          Topic: <strong></strong>
+          <button type="button">Clear</button>
+        </p>
+      </div>
+      <mosaica-store>
+        <mosaica-map></mosaica-map>
+      </mosaica-store>
+      <aside>
+        <section id="paper" hidden>
+          <h2></h2>
+          <p class="archive"></p>
+          <p><a target="_blank">Open on arXiv</a></p>
+        </section>
+        <p id="count"></p>
+        <ol id="results"></ol>
+      </aside>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

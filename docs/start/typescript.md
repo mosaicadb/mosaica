@@ -135,7 +135,7 @@ rm -r src/counter.ts src/assets public/icons.svg
 
 `viewer-url` is Mosaica's viewer address. Without it the explorer would look for Mosaica on the page's own address, which here is Vite's.
 
-Replace the template's script, `web/src/main.ts`, with these two lines:
+Replace the template's script, `~/places/web/src/main.ts`, with these two lines:
 
 ```ts
 --8<-- "clients/ts/examples/getting-started/web/src/main.ts"
@@ -228,6 +228,7 @@ The finished project is in the clone, in `clients/ts/examples/getting-started/`:
 
 ## Next
 
+- [Your own interface around the map](typescript-own-ui.md) leaves the explorer behind: a bare map, with the page's own controls, results list and panels driving it through the store.
 - The [components reference](../reference/components.md) lists every element, attribute and event, including the map and panels you can use without the explorer.
 - [Maps in the browser](../system/browser-maps.md) explains what the elements are built on, for when you want your own panels or your own deck.gl scene.
 - [Call Mosaica from a backend](../guides/backend.md) sets up users and tokens, for a server that more than one person uses.
