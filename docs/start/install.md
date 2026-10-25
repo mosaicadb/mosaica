@@ -144,7 +144,7 @@ mosaica build 2>&1 | tail -n 2
 ```
 
 ```
-built /home/you/places/bundle (v00000): 150000 items, 1 terms, 150000 pairs, 11676070 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
+built /home/you/places/bundle (v00000): 150000 items, 1 terms, 150000 pairs, 11684262 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
   view world: 150000 row(s)
 ```
 
@@ -164,7 +164,7 @@ You now have a running database with 150,000 places in it. To see them on a map,
 
 ### Start from an empty database
 
-If your data arrives through your own code rather than as files, start with an empty database instead. Stop the server, and in a new directory save a `schema.toml` with no `[sources]`. A view with no data to fit needs its frame stated, as this one is:
+If your data arrives through your own code rather than as files, start with an empty database instead. Stop the server, make a directory `~/empty` beside `~/places`, and save in it a `schema.toml` with no `[sources]`. A view with no data to fit needs its frame stated, as this one is:
 
 ```toml
 [[view]]
@@ -192,22 +192,28 @@ mosaica serve
 ```
 
 ```
-OUTPUT-PENDING
+built /home/you/empty/bundle (v00000): 0 items, 1 terms, 0 pairs, 12120 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
+  view world: 0 row(s)
+...
+{"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-In another shell, send it some places. The control address takes rows as JSON, one object per item, keyed by field name, with the position in `lon` and `lat`:
+In another shell, send it some places. The control address takes rows as JSON, one object per item, keyed by field name, with the position in `lon` and `lat`. Each batch carries an id you choose, so that sending it again after a dropped connection doesn't add the places twice:
 
 ```bash
 curl -sS http://127.0.0.1:9143/control/ingest \
   -H "authorization: Bearer $(cat operator.secret)" \
   -H 'content-type: application/json' \
+  -H 'x-mosaica-batch-id: first-places' \
   -d '[{"lon": -6.26, "lat": 53.35, "name": "Dublin", "population": 1173179},
        {"lon": -8.47, "lat": 51.90, "name": "Cork", "population": 190384}]'
 ```
 
 ```json
-OUTPUT-PENDING
+{"rows":2,"created":2,"edited":0,"added":0,"unchanged":0,"over_bound":0,"over_bound_rows":[],"clipped":0,"clamped":0,"mosaica_ids":["742306383632468899","3847721634983229458"],"refused":[],"minted":0,"joined":0,"publication":2}
 ```
+
+Both rows created a place, and each has a `mosaica_id`.
 
 New items appear at the next flush, within 90 seconds. [Changing data](../system/write-path.md) covers every write, and how to wait until one is visible. You can declare more views, fields and layers the same way, except that a rendered field must be in the schema the database is built from.
 
