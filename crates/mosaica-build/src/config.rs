@@ -5671,39 +5671,10 @@ impl Config {
             })
             .collect();
         for group in &self.view_groups {
-            let owner = match &group.members {
-                None => group,
-                Some(name) => self
-                    .view_groups
-                    .iter()
-                    .find(|g| &g.name == name)
-                    .ok_or_else(|| {
-                        declaration_error(format!(
-                            "view group '{}': `members = \"{name}\"` names no `[[view_group]]` \
-                             block",
-                            group.name
-                        ))
-                    })?,
-            };
-            // **The roster's rows are views**, whichever form declared them: inline blocks, or
-            // the rows of `[view_group.views].source` read here — before pass two, because the
-            // registry is what pass two iterates and a key the table carries is a coordinate
-            // system this build materialises (`views.md` §3.1, §7).
-            let roster: Vec<RosterView> = match &owner.roster {
-                Roster::Inline(views) => views.clone(),
-                Roster::Table(table) => read_roster(owner, table)?,
-                // A group declaring no roster has its keys minted from the distinct values of
-                // its own discriminator, read here for the reason the table is: the registry is
-                // what pass two iterates, and a minted key is a coordinate system this build
-                // materialises (`views.md` §3.1, §7).
-                Roster::Discriminator => match owner.source {
-                    Some(_) => mint_roster(owner, &mut scanned)?,
-                    // A group that names no points file and no roster is declared and empty:
-                    // there is no discriminator column to mint keys from, so it has no views
-                    // until a running service creates them.
-                    None => Vec::new(),
-                },
-            };
+            // **The roster's rows are views**, read here — before pass two, because the registry
+            // is what pass two iterates and a key the roster carries is a coordinate system this
+            // build materialises (`views.md` §3.1, §7).
+            let roster = self.roster(group, &mut scanned)?;
             let discriminator_field = group.fields.of("view").to_string();
             // Sorted once per group, not once per view: it is the same roster each of its views
             // checks a stray key against.
@@ -5754,6 +5725,41 @@ impl Config {
             }
         }
         Ok(registry)
+    }
+
+    /// The views `group` has, whichever form declared them: its inline blocks, the rows of its
+    /// `[view_group.views]` table, or the distinct values of its discriminator. A group sharing
+    /// another's views has that group's. `scanned` keeps what each points file has said about its
+    /// discriminator, so a source is scanned once however many groups mint from it.
+    fn roster(
+        &self,
+        group: &ViewGroup,
+        scanned: &mut HashMap<(PathBuf, String), BTreeSet<String>>,
+    ) -> Result<Vec<RosterView>> {
+        let owner = match &group.members {
+            None => group,
+            Some(name) => self
+                .view_groups
+                .iter()
+                .find(|g| &g.name == name)
+                .ok_or_else(|| {
+                    declaration_error(format!(
+                        "view group '{}': `members = \"{name}\"` names no `[[view_group]]` block",
+                        group.name
+                    ))
+                })?,
+        };
+        Ok(match &owner.roster {
+            Roster::Inline(views) => views.clone(),
+            Roster::Table(table) => read_roster(owner, table)?,
+            Roster::Discriminator => match owner.source {
+                Some(_) => mint_roster(owner, scanned)?,
+                // A group that names no points file and no roster is declared and empty: there
+                // is no discriminator column to mint keys from, so it has no views until a running
+                // service creates them.
+                None => Vec::new(),
+            },
+        })
     }
 
     /// The views a layer is drawn on, expanded against a [`Config::build_views`] registry and the
@@ -6161,6 +6167,44 @@ pub fn vocabulary_value_rows(vocabulary: &Vocabulary) -> Vec<serde_json::Value> 
             serde_json::Value::Object(row)
         })
         .collect()
+}
+
+/// The views of each view group that owns its views, as `PUT /control/views/{group}/{key}` takes
+/// them: `{ "group", "key", "body" }`, the body the view's record, its `metadata` and its own
+/// `visibility`. A group sharing another's views has none of its own to create.
+///
+/// The roster is read as a build reads it ([`Config::roster`]), so this reads the roster's table
+/// or, for a group declaring no roster, the distinct values of its points file's discriminator.
+/// That is why it is not part of [`control_payloads`], which reads no rows.
+pub fn group_view_payloads(config: &Config) -> Result<Vec<serde_json::Value>> {
+    let mut scanned = HashMap::new();
+    let mut out = Vec::new();
+    for group in config.view_groups.iter().filter(|g| g.members.is_none()) {
+        for view in config.roster(group, &mut scanned)? {
+            let metadata: serde_json::Map<String, serde_json::Value> = view
+                .metadata
+                .into_iter()
+                .map(|(name, value)| {
+                    let value = match value {
+                        MetadataValue::Bool(v) => v.into(),
+                        MetadataValue::Int(v) | MetadataValue::TimestampUs(v) => v.into(),
+                        MetadataValue::Float(v) => v.into(),
+                        MetadataValue::Text(v) => v.into(),
+                    };
+                    (name, value)
+                })
+                .collect();
+            let mut body = serde_json::Map::new();
+            insert_some(&mut body, "visibility", view.visibility);
+            body.insert("metadata".to_string(), metadata.into());
+            out.push(serde_json::json!({
+                "group": group.name,
+                "key": view.key,
+                "body": serde_json::Value::Object(body),
+            }));
+        }
+    }
+    Ok(out)
 }
 
 /// One `PUT /control/views/{name}` body per plain `[[view]]` block, in declaration order.

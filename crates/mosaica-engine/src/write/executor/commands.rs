@@ -280,10 +280,17 @@ impl Executor {
                 if let Err(detail) = crate::control::declared_views(&meta, &mut declaration) {
                     return reply.fail(ExecError::LayerRefused { detail });
                 }
+                // The same declaration again answers the layer that holds it, and appends nothing.
+                let held = self
+                    .live
+                    .with_registry(|registry| registry.holding(&declaration));
+                if let Some(space) = held {
+                    return reply.ack((space, true));
+                }
                 self.commit_registry(
                     |registry| registry.prepare_create(*declaration),
                     |record| match record {
-                        WalRecord::LayerCreate { space, .. } => *space,
+                        WalRecord::LayerCreate { space, .. } => (*space, false),
                         _ => unreachable!("prepare_create returns a LayerCreate"),
                     },
                     reply,

@@ -23,7 +23,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long one `429` may hold a request, in seconds. The server's own figure is clamped to this.
 const MAX_BACKOFF: f64 = 30.0;
 
-/// How many times a request is sent before its `429` is the answer.
+/// How many times a request is sent while it is answered `429`, or, carrying a batch id, while it
+/// is not answered.
 const MAX_ATTEMPTS: u32 = 600;
 
 /// Where a request goes: `http://host:port`, or `unix:<path>` for a control plane on a Unix
@@ -368,9 +369,33 @@ impl Plane {
         headers: &[(&str, &str)],
         body: Option<Body>,
     ) -> Result<Answer, String> {
+        self.exchange(method, path, headers, body, false)
+    }
+
+    /// One request carrying a batch id, sent as [`Plane::send`] sends one, and sent again on the
+    /// same terms when no answer comes: the server answers a body it already accepted under the
+    /// id as a replay.
+    pub(crate) fn send_batch(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<Body>,
+    ) -> Result<Answer, String> {
+        self.exchange(method, path, headers, body, true)
+    }
+
+    fn exchange(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<Body>,
+        replayable: bool,
+    ) -> Result<Answer, String> {
         let mut attempts = 1;
         loop {
-            let answer = send(
+            let sent = send(
                 &self.target,
                 method,
                 path,
@@ -378,18 +403,23 @@ impl Plane {
                 headers,
                 body,
                 self.timeout,
-            )?;
-            if answer.status != 429 || attempts >= MAX_ATTEMPTS {
-                return Ok(answer);
+            );
+            let again = match &sent {
+                Ok(answer) => answer.status == 429,
+                Err(_) => replayable,
+            };
+            if !again || attempts >= MAX_ATTEMPTS {
+                return sent;
             }
             attempts += 1;
-            let wait = answer
-                .retry_after
-                .as_deref()
-                .and_then(|s| s.parse::<f64>().ok())
-                .or_else(|| answer.json()["retry_after_s"].as_f64())
-                .unwrap_or(1.0)
-                .clamp(0.0, MAX_BACKOFF);
+            let named = sent.as_ref().ok().and_then(|answer| {
+                answer
+                    .retry_after
+                    .as_deref()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| answer.json()["retry_after_s"].as_f64())
+            });
+            let wait = named.unwrap_or(1.0).clamp(0.0, MAX_BACKOFF);
             std::thread::sleep(Duration::from_secs_f64(wait));
         }
     }

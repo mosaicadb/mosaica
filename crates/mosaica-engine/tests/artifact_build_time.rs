@@ -380,7 +380,7 @@ fn a_later_online_registration_does_not_reissue_the_builds_ids() {
     let built: Vec<mosaica_types::Target> =
         before.iter().map(|a| artifact_target(&engine, a.0)).collect();
 
-    let id = engine
+    let (id, _) = engine
         .register_layer(mosaica_types::layer::LayerDeclaration {
             scope: Default::default(),
             name: "clusters/online".into(),

@@ -295,6 +295,22 @@ describe('an answer', () => {
     expect(answer).toMatchObject({status: UNANSWERED, ok: false, attempts: 1});
   });
 
+  it('sends an ingest that reached no server again, the same bytes under the same batch id', async () => {
+    vi.useFakeTimers();
+    const sent: {batch: string | null; body: unknown}[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sent.push({batch: new Headers(init.headers).get('x-mosaica-batch-id'), body: init.body});
+      if (sent.length === 1) throw new TypeError('fetch failed');
+      return {status: 200, headers: new Headers(), text: async () => '{"created": 1}'} as unknown as Response;
+    });
+    const pending = control.ingest(new Uint8Array([1, 2, 3]));
+    await vi.advanceTimersByTimeAsync(1_000);
+    const answer = await pending;
+    expect(answer).toMatchObject({status: 200, ok: true, attempts: 2});
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+  });
+
   it('keeps a non-object JSON body under `value`, and a non-JSON body only as text', async () => {
     recording({status: 200, body: [1, 2]});
     expect((await control.status()).body).toEqual({value: [1, 2]});

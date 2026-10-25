@@ -340,10 +340,13 @@ enum Command {
     /// names, or else the one `mosaica.toml` names, found as `mosaica check` finds it. It sends
     /// the bodies `mosaica check --payloads` prints, in the order the routes need: the shard
     /// size, the vocabularies, each followed by the values its `source` names, the view groups,
-    /// each after any group whose views it shares, the views, the attributes, then the layers. A
-    /// declaration identical to one the service holds answers what exists, so running it again
-    /// after adding a block declares only that block. It sends no rows and creates no view of a view group, which
-    /// `mosaica declare view <group>:<key>` does. It prints one JSON object on stdout with each
+    /// each after any group whose views it shares, the views, each group's own views, the
+    /// attributes, then the layers. A group's views are read as `mosaica build` reads them: its
+    /// `[[view_group.view]]` blocks, the rows of its `[view_group.views]` table, or the distinct
+    /// values of its points file's view column. A declaration identical to one the service holds
+    /// answers what exists, so running it again after adding a block declares only that block,
+    /// except that a view of a view group whose key is held is refused with `409`. It sends no
+    /// rows. It prints one JSON object on stdout with each
     /// request, its status and the server's answer, goes on past a refused request, and exits 1
     /// when any was refused.
     ///
@@ -366,7 +369,8 @@ enum Command {
     ///
     /// Each page is sent before the next is read, under a fresh batch id. A page the server
     /// answers with `429` is sent again, the same bytes under the same id, once the wait it names
-    /// has passed. Inserting a file again inserts its rows again, except that a row naming its
+    /// has passed, and so is a page no answer came for, a second later, which the server answers
+    /// as a replay where the first arrived; either is sent at most 600 times. Inserting a file again inserts its rows again, except that a row naming its
     /// item by a unique attribute is then answered as unchanged.
     ///
     /// It prints one JSON object on stdout totalling the answers: `pages` and `rows` sent;
@@ -375,8 +379,8 @@ enum Command {
     /// each refused row by its position in the file, from 0, and its reason; `refused_pages`, each
     /// refused request by its first row, with its status and the server's answer; and
     /// `publication`, from which the rows are visible. A line on stderr says the same. It exits
-    /// 1 when a request was refused or went unanswered, and an unanswered request stops the
-    /// insert there, with `stopped` saying where. Rows refused inside an accepted request do not
+    /// 1 when a request was refused or went unanswered, and a page still unanswered after 600
+    /// attempts stops the insert there, with `stopped` saying where. Rows refused inside an accepted request do not
     /// change the exit status. Needs `write`, and the credential is read from
     /// `MOSAICA_CREDENTIAL`.
     ///

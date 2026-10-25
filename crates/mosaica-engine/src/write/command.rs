@@ -222,7 +222,8 @@ pub(crate) enum Command {
     /// turns into the `mosaica_id` a caller later suppresses the layer by.
     RegisterLayer {
         declaration: Box<mosaica_types::layer::LayerDeclaration>,
-        reply: Reply<mosaica_types::LayerSpace>,
+        /// The layer's space, and whether a layer of that name already held this declaration.
+        reply: Reply<(mosaica_types::LayerSpace, bool)>,
     },
     /// Drop an annotation layer. Its name may be registered again, as a new layer.
     DropLayer { name: String, reply: Reply<()> },

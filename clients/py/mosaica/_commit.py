@@ -45,7 +45,7 @@ from typing import Any, Sequence
 
 import pyarrow as pa
 
-from ._control import Answer, Control, arrow_body, batch_id
+from ._control import UNANSWERED, Answer, Control, arrow_body, batch_id
 from . import _declaration as _D
 from ._declaration import rows_of
 from ._inserts import SHAPE_COLUMNS, SHAPE_FIELDS, SHAPE_RECORD_FIELD, axes
@@ -351,10 +351,8 @@ class Planner:
             )
         for payload in payloads.get("layers", []):
             name = payload["name"]
-            if name in self.held_layers:
-                continue
-            # A layer new to the server takes the label column its artifacts inserts named. One the
-            # server holds is sent the labels as they are, and the route answers for its fields.
+            # A layer takes the label column its artifacts inserts named. One the server holds is
+            # sent as declared, and the route answers an identical declaration with that layer.
             for insert in self._for("layer", "artifacts", name):
                 if insert.columns.get("access"):
                     _D.carry_labels(name, payload, insert.columns["access"])
@@ -1288,7 +1286,8 @@ def _records(table: pa.Table, insert) -> list[dict]:
 
 
 def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -> list[Page]:
-    """Send the plan, in order, then flush once and wait for the publication that flush arms.
+    """Send the plan, in order, then flush once and wait for the publication that flush arms. A
+    page no server answers stops the plan there.
 
     Every page goes unwaited and the flush is the commit's whole wait, whatever the pages did: a
     commit that reported a refusal on one page should not also leave its accepted ones sitting for
@@ -1300,6 +1299,10 @@ def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -
     for page in pages:
         answer = _send(control, page, strict)
         _fold(report, page, answer)
+        if answer.status == UNANSWERED:
+            # Sent again until the budget a `429` has ran out: the server is not answering, and
+            # the pages after this one would go the same way.
+            break
         if answer.ok and page.kind != "flush":
             accepted.append(page)
     if accepted:

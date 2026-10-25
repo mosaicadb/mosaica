@@ -709,7 +709,7 @@ fn a_suppression_racing_a_join_hides_the_artifact_and_keeps_the_join() {
 fn a_layers_suppression_covers_a_publication_that_landed_beside_it() {
     let fx = fixture();
     let (engine, faults) = fx.open_with_faults();
-    let layer_id = engine
+    let (layer_id, _) = engine
         .register_layer(declaration(LAYER, ValueSet::Open))
         .unwrap();
     let layer_target = artifact_target(&engine, layer_id);

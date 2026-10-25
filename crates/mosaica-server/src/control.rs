@@ -958,7 +958,8 @@ async fn compact(
 /// `PUT /control/layers`: registers one annotation layer. Synchronous: the answer follows the
 /// fsynced append and carries the layer's `mosaica_id`, its only address for a later suppression.
 /// A failure means the layer does not exist, unlike a suppression, which is applied even when its
-/// append fails. A declaration that breaks the deployment's rules is a 422 saying why.
+/// append fails. A declaration that breaks the deployment's rules is a 422 saying why. 201 when
+/// new, 200 when a layer of that name holds this declaration, 422 when it holds another.
 async fn register_layer(
     State(state): State<Arc<AppState>>,
     ApiQuery(wait): ApiQuery<WaitQuery>,
@@ -967,11 +968,15 @@ async fn register_layer(
     let declaration = body.0;
     let name = declaration.name.clone();
     // The shared blocking pool, not the deny lane: a declaration is not a deny.
-    let id = state
+    let (id, existing) = state
         .write(move |state| state.engine.register_layer(declaration))
         .await?;
-    let body = serde_json::json!({ "name": name, "mosaica_id": id.raw().to_string() });
-    acknowledge(&state, &wait, StatusCode::CREATED, body).await
+    let body = serde_json::json!({
+        "name": name,
+        "mosaica_id": id.raw().to_string(),
+        "existing": existing,
+    });
+    acknowledge(&state, &wait, declared(existing), body).await
 }
 
 /// `DELETE /control/layers/{name}`: drops a layer and tombstones its name for ever, since

@@ -38,7 +38,7 @@ fn artifact(key: &str, members: Vec<EntityId>) -> IncomingArtifact {
 fn a_published_batch_takes_one_entity_per_artifact_and_none_of_them_is_the_layers() {
     let fx = fixture();
     let engine = fx.open();
-    let layer_id = engine.register_layer(declaration("clusters/a")).unwrap();
+    let (layer_id, _) = engine.register_layer(declaration("clusters/a")).unwrap();
 
     let ids = engine
         .publish_artifacts(
@@ -145,7 +145,7 @@ fn a_second_batch_continues_the_numbering_rather_than_restarting_it() {
 fn an_artifacts_or_a_layers_identifier_names_no_item() {
     let fx = fixture();
     let engine = fx.open();
-    let layer_id = engine.register_layer(declaration("clusters/a")).unwrap();
+    let (layer_id, _) = engine.register_layer(declaration("clusters/a")).unwrap();
     let ids = engine
         .publish_artifacts(
             "clusters/a".into(),

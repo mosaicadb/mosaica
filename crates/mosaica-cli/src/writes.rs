@@ -482,7 +482,7 @@ fn view_path(view: &str) -> String {
 
 /// Every block of a corpus declaration, as the bodies `mosaica check --payloads` prints, in the
 /// order the routes need: a vocabulary before the group or the attribute naming it, a group before
-/// the group sharing its views, a view before the layer drawn on it.
+/// the group sharing its views and before its own views, a view before the layer drawn on it.
 fn declare_all(
     control: Option<String>,
     deployment: Option<PathBuf>,
@@ -598,6 +598,15 @@ fn declaration_requests(config: &mosaica_build::config::Config) -> Result<Vec<Re
         let path = format!("/control/views/{}", segment(&name(&entry)));
         put(&mut requests, path, &entry["body"]);
     }
+    for entry in mosaica_build::config::group_view_payloads(config).map_err(|e| e.to_string())? {
+        let view = format!(
+            "{}{}{}",
+            entry["group"].as_str().unwrap_or_default(),
+            mosaica_types::view::GROUP_SEPARATOR,
+            entry["key"].as_str().unwrap_or_default()
+        );
+        put(&mut requests, view_path(&view), &entry["body"]);
+    }
     for body in list("attributes") {
         put(&mut requests, "/control/attributes".into(), &body);
     }
@@ -691,13 +700,15 @@ fn insert_rows(plane: &Plane, args: &InsertArgs) -> Result<Report, String> {
         for piece in halved(page.len(), limits.bytes, |o, n| page.encode(o, n)) {
             let (offset, count, body) = piece?;
             let start = first + offset;
-            // A fresh id per request, reused only when the same bytes go again after a `429`.
+            // A fresh id per request, reused only when the same bytes go again, after a `429` or
+            // when no answer came.
             let batch = format!("{stem}-{start}-{:032x}", rand::random::<u128>());
             let mut headers = vec![("x-mosaica-batch-id", batch.as_str())];
             if let Some(view) = &args.view {
                 headers.push(("x-mosaica-view", view.as_str()));
             }
-            let answer = plane.send("POST", &path, &headers, Some((page.content_type(), &body)));
+            let answer =
+                plane.send_batch("POST", &path, &headers, Some((page.content_type(), &body)));
             let accepted = report.page(start, count, INGEST_COUNTS, answer, None);
             if let Some(ids) = ids.as_mut() {
                 ids.write(start, count, accepted.as_ref())?;

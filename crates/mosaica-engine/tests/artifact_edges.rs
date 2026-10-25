@@ -239,7 +239,7 @@ fn suppressing_the_cluster_layer_stops_its_labels_serving() {
     let fx = fixture();
     let engine = fx.open();
     // Registration answers with the layer's own identifier — where a layer suppression lands.
-    let cluster_layer = engine.register_layer(clusters(None)).unwrap();
+    let (cluster_layer, _) = engine.register_layer(clusters(None)).unwrap();
     engine.register_layer(labels()).unwrap();
     publish_a_cluster_and_its_label(&engine, &fx);
 

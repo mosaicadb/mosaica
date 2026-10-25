@@ -3501,8 +3501,10 @@ paths:
         answer follows the write-ahead log's fsync and carries the layer's `mosaica_id`, the address
         `POST /control/changes` suppresses it by.
 
-        A name already registered is `422`, including a second request with the same declaration.
-        A dropped layer's name may be registered again. A refusal means the layer does not exist.
+        A name already registered with this declaration answers `200` with that layer, and
+        registers nothing; with any other declaration it is `422`. `views` naming a group compares
+        as the views the group holds now. A dropped layer's name may be registered again. A
+        refusal means the layer does not exist.
       security:
         - controlCredential: []
       parameters:
@@ -3514,6 +3516,12 @@ paths:
             schema:
               $ref: "#/components/schemas/LayerDeclaration"
       responses:
+        "200":
+          description: A layer of this name already holds this declaration. Nothing was registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LayerRegistered"
         "201":
           description: The layer is registered, with no artifacts.
           content:
@@ -3539,7 +3547,7 @@ paths:
         "422":
           description: |
             - An unknown field
-            - A name that is empty, `all` or registered
+            - A name that is empty or `all`, or registered with another declaration
             - A view that is neither a view nor a view group
             - A view outside the group a group-scoped layer names
             - A `depends_on` layer that is not registered, or the layer itself
@@ -7813,10 +7821,13 @@ components:
     LayerRegistered:
       type: object
       additionalProperties: false
-      required: [name, mosaica_id, publication]
+      required: [name, mosaica_id, existing, publication]
       properties:
         name:
           type: string
+        existing:
+          type: boolean
+          description: "`true` where a layer of this name already held this declaration."
         mosaica_id:
           type: string
           pattern: "^[0-9]+$"

@@ -20,9 +20,9 @@ use common::{deployment_with_control, mosaica, Bound, Ports, Server, OPERATOR_CR
 
 const OPERATOR: (&str, &str) = ("MOSAICA_CREDENTIAL", OPERATOR_CREDENTIAL);
 
-/// A declaration of a plain view, a view group, a closed vocabulary whose values are read from a
-/// file, a category attribute drawing on it, and a layer over the view, for a service whose bundle
-/// holds none of them.
+/// A declaration of a plain view, a view group whose roster is a file, a closed vocabulary whose
+/// values are read from a file, a category attribute drawing on it, and a layer over the view, for
+/// a service whose bundle holds none of them.
 const MORE: &str = r#"
 [sources]
 points = "points.parquet"
@@ -306,10 +306,9 @@ fn check_written(served: &Served, ids_file: &Path) {
     let token = token(served);
     let meta = meta(served, &token);
     let views = named(&meta, "views", "id");
-    assert!(
-        views.contains("plane") && views.contains("years:2020"),
-        "{meta}"
-    );
+    for view in ["plane", "years:2020", "years:2021"] {
+        assert!(views.contains(view), "{view}: {meta}");
+    }
     assert!(
         named(&meta, "declared_scalars", "name").contains("mood"),
         "{meta}"
@@ -397,31 +396,57 @@ fn a_declaration_and_what_is_written_into_it_are_served_and_survive_a_restart() 
             ("title", Arc::new(StringArray::from(vec!["Calm", "Glad"]))),
         ],
     );
+    write_parquet(
+        &dir.join("roster.parquet"),
+        vec![
+            (
+                "year",
+                Arc::new(StringArray::from(vec!["2020"])) as ArrayRef,
+            ),
+            ("label", Arc::new(StringArray::from(vec!["twenty"]))),
+        ],
+    );
     let write = |args: &[&str], stdin: &[u8]| {
         let mut all = args.to_vec();
         all.extend(["--control", control.as_str()]);
         run(&dir, &all, &[OPERATOR], stdin)
     };
 
-    // Declared once, every request is taken; declared again, every request finds what it
-    // declares already there.
+    // Declared once, every request is taken, the group's view from its roster among them.
+    // Declared again, every request finds what it declares already there, but for the group's
+    // view, whose key is taken once.
     let first = answer(write(&["declare", "--config", "more.toml"], b""));
     assert_eq!(first["refused"], 0, "{first}");
-    let again = answer(write(&["declare", "--config", "more.toml"], b""));
-    let statuses: Vec<&Value> = again["requests"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|request| &request["status"])
-        .collect();
-    assert!(statuses.iter().all(|status| **status == 200), "{again}");
+    let requests = |report: &Value| -> Vec<(String, u64)> {
+        report["requests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                (
+                    r["request"].as_str().unwrap().to_owned(),
+                    r["status"].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let roster_view = "PUT /control/views/years/2020".to_string();
+    assert!(
+        requests(&first).contains(&(roster_view.clone(), 201)),
+        "{first}"
+    );
+    let again = refused(write(&["declare", "--config", "more.toml"], b""));
+    for (request, status) in requests(&again) {
+        let expected = if request == roster_view { 409 } else { 200 };
+        assert_eq!(status, expected, "{request}: {again}");
+    }
     answer(write(
         &[
             "declare",
             "view",
-            "years:2020",
+            "years:2021",
             "--body",
-            r#"{"metadata": {"label": "twenty"}}"#,
+            r#"{"metadata": {"label": "twenty-one"}}"#,
         ],
         b"",
     ));
@@ -533,6 +558,7 @@ fn a_declaration_and_what_is_written_into_it_are_served_and_survive_a_restart() 
             "{meta}"
         );
         assert!(named(&meta, "views", "id").contains("plane"), "{meta}");
+        assert!(named(&meta, "views", "id").contains("years:2021"), "{meta}");
     };
     gone(&served);
     let served = restart(served);

@@ -747,12 +747,13 @@ impl WritePath {
     ///
     /// Returns the layer's space, whose own entity the caller turns into a `mosaica_id`, the only
     /// address by which the layer can later be suppressed, since an entity id never crosses the
-    /// boundary. A failure means the layer does not exist, the opposite of a deny's posture: see
-    /// `Executor::commit_registry`.
+    /// boundary, and whether a layer of that name already held this declaration, in which case
+    /// nothing was appended. A failure means the layer does not exist, the opposite of a deny's
+    /// posture: see `Executor::commit_registry`.
     pub(crate) fn register_layer(
         &self,
         declaration: mosaica_types::layer::LayerDeclaration,
-    ) -> Result<LayerSpace, AcceptError> {
+    ) -> Result<(LayerSpace, bool), AcceptError> {
         self.submit(|reply| Command::RegisterLayer {
             declaration: Box::new(declaration),
             reply,

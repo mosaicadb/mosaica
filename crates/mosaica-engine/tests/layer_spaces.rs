@@ -16,7 +16,7 @@ use mosaica_types::{EntityId, LayerSpace, MosaicaId, ShardId, Target};
 /// Register `name` and publish one artifact `c0` into it: the layer's identifier and the
 /// artifact's.
 fn register_and_publish(fx: &Fixture, engine: &Engine, name: &str) -> (MosaicaId, MosaicaId) {
-    let layer = engine.register_layer(flat_declaration(name)).unwrap();
+    let (layer, _) = engine.register_layer(flat_declaration(name)).unwrap();
     let ids = engine
         .publish_artifacts(
             name.into(),
@@ -188,7 +188,7 @@ fn a_dropped_layers_space_is_not_given_again_after_a_rotation_and_a_restart() {
     assert_eq!(creates, 0, "the log no longer holds the registrations");
 
     let engine = fx.open();
-    let id = engine.register_layer(flat_declaration("clusters/a")).unwrap();
+    let (id, _) = engine.register_layer(flat_declaration("clusters/a")).unwrap();
     assert_eq!(space_of(id).raw(), 2);
     tick_until(&engine, "the counter's publication", WAIT, || {
         side_manifest(&fx.root).partition.next_layer_space == 3
@@ -406,7 +406,7 @@ fn a_dropped_layer_is_neither_served_nor_stored() {
     let members = fx.members(0..120);
     let (dropped, layer_a, kept) = {
         let engine = fx.open();
-        let layer_a = engine.register_layer(flat_declaration("clusters/a")).unwrap();
+        let (layer_a, _) = engine.register_layer(flat_declaration("clusters/a")).unwrap();
         let mut ids = engine
             .publish_artifacts(
                 "clusters/a".into(),
@@ -479,7 +479,7 @@ fn a_dropped_layer_is_neither_served_nor_stored() {
     let engine = fx.open();
     served(&engine, &dropped, kept.1);
 
-    let again_layer = engine.register_layer(flat_declaration("clusters/a")).unwrap();
+    let (again_layer, _) = engine.register_layer(flat_declaration("clusters/a")).unwrap();
     let again_artifact = engine
         .publish_artifacts(
             "clusters/a".into(),

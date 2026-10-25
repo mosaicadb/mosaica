@@ -336,13 +336,18 @@ impl Engine {
     }
 
     /// Register an annotation layer, returning its `mosaica_id`, the only address it can later
-    /// be suppressed by — entity ids never cross the boundary.
+    /// be suppressed by — entity ids never cross the boundary — and whether a layer of that name
+    /// already held exactly this declaration, in which case nothing was appended and the id is
+    /// that layer's.
     pub fn register_layer(
         &self,
         declaration: mosaica_types::layer::LayerDeclaration,
-    ) -> std::result::Result<MosaicaId, crate::write::AcceptError> {
-        let space = self.write.register_layer(declaration)?;
-        self.issued_id(space, mosaica_types::layer::LAYER_ENTITY)
+    ) -> std::result::Result<(MosaicaId, bool), crate::write::AcceptError> {
+        let (space, existing) = self.write.register_layer(declaration)?;
+        Ok((
+            self.issued_id(space, mosaica_types::layer::LAYER_ENTITY)?,
+            existing,
+        ))
     }
 
     /// The `mosaica_id` of an entity of `space` a layer write just allocated, or the write's

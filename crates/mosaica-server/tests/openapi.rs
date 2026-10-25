@@ -3083,8 +3083,8 @@ async fn status_flush_and_compact_match_the_description() {
 }
 
 /// The declaration routes: attributes, vocabularies and their value pages, view groups and the
-/// views created in them, and plain views. Each answers `201` for a new name and `200` for the
-/// same declaration again, except a group's view, whose key is taken once.
+/// views created in them, plain views and layers. Each answers `201` for a new name and `200` for
+/// the same declaration again, except a group's view, whose key is taken once.
 #[tokio::test]
 async fn declarations_match_the_description() {
     let doc = description();
@@ -3398,9 +3398,20 @@ async fn layers_and_artifacts_match_the_description() {
         .unwrap();
     let registered = assert_answer(&doc, &put, resp, 201).await;
     assert_eq!(registered["name"], NAME);
-    // A name is registered once, whatever the declaration.
+    assert_eq!(registered["existing"], false);
+    // The same declaration again answers the layer that holds it; another is refused.
     let resp = control(&f.server, &put, "/control/layers")
         .json(&declaration)
+        .send()
+        .await
+        .unwrap();
+    let again = assert_answer(&doc, &put, resp, 200).await;
+    assert_eq!(again["existing"], true);
+    assert_eq!(again["mosaica_id"], registered["mosaica_id"]);
+    let mut other = declaration.clone();
+    other["title"] = json!("Another");
+    let resp = control(&f.server, &put, "/control/layers")
+        .json(&other)
         .send()
         .await
         .unwrap();

@@ -1083,6 +1083,16 @@ impl LayerRegistry {
         mosaica_types::layer::next_block(&layer.runs).max(given)
     }
 
+    /// The space of the live layer `declaration` names, where that layer holds exactly this
+    /// declaration, validated as [`LayerRegistry::prepare_create`] validates it. A layer of that
+    /// name holding another is refused there.
+    pub fn holding(&self, declaration: &LayerDeclaration) -> Option<LayerSpace> {
+        let held = self.layers.get(&declaration.name)?;
+        let mut declared = declaration.clone();
+        declared.validate().ok()?;
+        (held.declaration == declared).then_some(held.space)
+    }
+
     /// Validates a registration and gives it a space, returning the WAL record that makes it
     /// durable. **It does not apply it** — the caller appends the record, fsyncs, and only then
     /// calls [`LayerRegistry::apply`]. The record carries the space and the runs, so replay applies

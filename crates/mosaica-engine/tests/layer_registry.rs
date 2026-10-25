@@ -96,7 +96,7 @@ fn suppressing_a_layers_entity_removes_it_at_the_ack() {
     let fx = fixture();
     let engine = fx.open();
 
-    let id = engine
+    let (id, _) = engine
         .register_layer(declaration("clusters/a", None))
         .expect("registers");
     assert_eq!(reachable(&engine, &full_coverage_credential()).len(), 1);
@@ -123,10 +123,10 @@ fn a_registration_and_its_suppression_survive_a_restart_through_the_wal() {
     let fx = fixture();
     let (id, gated) = {
         let engine = fx.open();
-        let id = engine
+        let (id, _) = engine
             .register_layer(declaration("clusters/a", None))
             .unwrap();
-        let gated = engine
+        let (gated, _) = engine
             .register_layer(declaration("clusters/gated", Some("1")))
             .unwrap();
         let target = artifact_target(&engine, id);
@@ -155,7 +155,7 @@ fn a_registration_and_its_suppression_survive_a_restart_through_the_wal() {
         reachable(&engine, &full_coverage_credential()),
         vec!["clusters/a".to_string()]
     );
-    let next = engine
+    let (next, _) = engine
         .register_layer(declaration("clusters/b", None))
         .unwrap();
     assert!(next != id && next != gated);
@@ -172,7 +172,7 @@ fn registering_a_layer_takes_no_point_id_and_its_space_is_not_given_again() {
         let layers: Vec<Target> = ["a", "b", "c"]
             .iter()
             .map(|name| {
-                let id = engine
+                let (id, _) = engine
                     .register_layer(declaration(&format!("clusters/{name}"), None))
                     .unwrap();
                 artifact_target(&engine, id)
@@ -188,7 +188,7 @@ fn registering_a_layer_takes_no_point_id_and_its_space_is_not_given_again() {
 
     let engine = fx.open();
     assert_eq!(engine.allocator_high_water(), high);
-    let id = engine
+    let (id, _) = engine
         .register_layer(declaration("clusters/d", None))
         .unwrap();
     let fourth = artifact_target(&engine, id);
@@ -217,7 +217,7 @@ fn an_incoherent_declaration_is_refused_with_nothing_spent() {
     assert!(refused.to_string().contains("edges"), "{refused}");
 
     assert!(reachable(&engine, &full_coverage_credential()).is_empty());
-    let id = engine
+    let (id, _) = engine
         .register_layer(declaration("clusters/good", None))
         .unwrap();
     assert_eq!(
