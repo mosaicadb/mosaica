@@ -1055,6 +1055,27 @@ pub struct RegisteredLayer {
     /// — see [`RegisteredLayer::layout_of`] — which is the fail-safe direction: the worst outcome
     /// is a row-major column nothing adopts, and the level is served the way it always was.
     pub layouts: Vec<ServingLayout>,
+    /// The names the layer's `views` was declared with, where one names a view group
+    /// ([`written_views`]); empty where every name is a view. A group stands for every view it
+    /// holds, now and later: `declaration.views` holds them, and is drawn again from these names
+    /// when a view of the group is created or dropped. A declaration of the layer is compared with
+    /// it as written.
+    #[serde(default)]
+    pub written_views: Vec<String>,
+}
+
+impl RegisteredLayer {
+    /// The declaration as written: `views` as declared, a group's name where one was named.
+    pub fn as_written(
+        declaration: &LayerDeclaration,
+        written_views: &[String],
+    ) -> LayerDeclaration {
+        let mut declaration = declaration.clone();
+        if !written_views.is_empty() {
+            declaration.views = written_views.to_vec();
+        }
+        declaration
+    }
 }
 
 /// Each of `layers`' spaces, by the layer's name.
@@ -1833,6 +1854,42 @@ pub fn check_drawn_on(declaration: &LayerDeclaration, views: &[String]) -> Resul
         ));
     }
     Ok(())
+}
+
+/// [`expand_views`] over every view id there is, a name standing for a group where an id is
+/// `<name>:<key>`, and any other name kept as a view.
+pub fn expand_views_over(declared: &[String], ids: &[&str]) -> Vec<String> {
+    expand_views(declared, |name| group_of_ids(name, ids), |_| true)
+        .expect("every name that is no group is kept as a view")
+}
+
+/// The ids among `ids` of the views of the group `name`, `None` where it holds none.
+fn group_of_ids(name: &str, ids: &[&str]) -> Option<Vec<String>> {
+    let views: Vec<String> = ids
+        .iter()
+        .filter(|id| {
+            id.split_once(crate::view::GROUP_SEPARATOR)
+                .is_some_and(|(group, _)| group == name)
+        })
+        .map(|id| id.to_string())
+        .collect();
+    (!views.is_empty()).then_some(views)
+}
+
+/// The names a layer's `views` was declared with, kept where one names a view group, which stands
+/// for every view the group holds, now and later; empty where every name is a view. `is_group`
+/// answers whether a name is a group.
+pub fn written_views(declared: &[String], is_group: impl Fn(&str) -> bool) -> Vec<String> {
+    if declared.iter().any(|name| is_group(name)) {
+        declared.to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
+/// [`written_views`] over every view id there is, as [`expand_views_over`] reads them.
+pub fn written_views_over(declared: &[String], ids: &[&str]) -> Vec<String> {
+    written_views(declared, |name| group_of_ids(name, ids).is_some())
 }
 
 /// A name a group-scoped layer's `views` gives outside the scope's key set, and the groups that

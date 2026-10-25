@@ -736,24 +736,37 @@ fn store_refusal(e: StoreError) -> crate::write::AcceptError {
     })
 }
 
+/// The views of the view group `name` in `manifest`, by id in roster order, `None` where it names
+/// no group: what a layer naming the group is drawn on.
+pub(crate) fn group_views(
+    manifest: &mosaica_store::manifest::Manifest,
+) -> impl Fn(&str) -> Option<Vec<String>> + '_ {
+    move |name| {
+        manifest.groups.iter().find(|g| g.name == name).map(|g| {
+            g.views
+                .iter()
+                .map(|v| format!("{}{}{}", g.name, mosaica_store::GROUP_SEPARATOR, v.key))
+                .collect()
+        })
+    }
+}
+
 /// A layer declaration's views as `meta` holds them, as a build takes them: a view group named
 /// stands for every view the group holds now ([`mosaica_types::layer::expand_views`]), a layer
 /// scoped to a group names only views holding its keys, and a shape layer's views share one
-/// space. The refusal says what to name instead.
+/// space. Returns the names as written where one names a group
+/// ([`mosaica_types::layer::written_views`]). The refusal says what to name instead.
 pub(crate) fn declared_views(
     meta: &crate::viewport::EngineMeta,
+    manifest: &mosaica_store::manifest::Manifest,
     declaration: &mut mosaica_types::layer::LayerDeclaration,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<Vec<String>, String> {
     let name = declaration.name.clone();
     let declared_views = std::mem::take(&mut declaration.views);
+    let group = group_views(manifest);
     declaration.views = mosaica_types::layer::expand_views(
         &declared_views,
-        |view| {
-            meta.groups
-                .iter()
-                .find(|g| g.name == view)
-                .map(|g| g.views.clone())
-        },
+        &group,
         |view| meta.resolve_view(view).is_some(),
     )
     .map_err(|view| {
@@ -820,5 +833,5 @@ pub(crate) fn declared_views(
         crate::shapes::check_shape_span(&frames, crate::shapes::ShapeSpace::Wgs84)
             .map_err(|e| format!("layer '{name}': {e}"))?;
     }
-    Ok(())
+    Ok(mosaica_types::layer::written_views(&declared_views, |view| group(view).is_some()))
 }

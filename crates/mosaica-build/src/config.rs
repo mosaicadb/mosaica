@@ -667,7 +667,8 @@ struct LayerBlock {
     /// Default: not set.
     #[serde(default)]
     title: Option<String>,
-    /// The views the layer is drawn on. A view group's name draws it on every view of the group.
+    /// The views the layer is drawn on. A view group's name draws it on every view of the group,
+    /// and on each view created in the group later.
     /// A name no `[[view]]` or `[[view_group]]` declares, and a name given twice, are refused.
     ///
     /// Required.

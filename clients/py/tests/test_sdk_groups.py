@@ -396,6 +396,19 @@ def test_a_group_with_category_metadata_and_its_new_vocabulary_commit_together(g
     }
 
 
+def test_a_later_commit_sends_a_held_group_layer_and_is_answered_with_it(grouped):
+    """A commit carrying a new declaration sends every layer the database holds, and the server
+    answers a layer drawn on the group with the layer it holds, though the group has gained a
+    view since the layer was registered."""
+    db = grouped
+    db.insert("slices", roster=roster(["c"]), key="key", label="label", starts="starts")
+    assert db.commit().ok
+    db.declare_attribute("score", type="f64")
+    report = db.commit()
+    assert report.ok, report.refusals
+    assert any(line.startswith("declare layer 'clusters'") for line in report.plan), report.plan
+
+
 def test_a_plain_view_declared_after_the_first_commit_is_created_and_served(grouped):
     """`PUT /control/views/{name}` from the emitter's own body (§6.2 step 1). The frame is the
     view's own: there are no rows at a running service to fit one against, so `extent=` is

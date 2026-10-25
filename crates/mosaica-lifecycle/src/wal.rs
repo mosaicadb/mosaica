@@ -306,6 +306,9 @@ pub enum WalRecord {
         /// The registry version this registration was given. Replay raises the counter to it
         /// rather than adding one, so a record the manifest already counts is not counted twice.
         version: u64,
+        /// The names the declaration's `views` was written with, where one names a view group
+        /// (`RegisteredLayer::written_views`).
+        written_views: Vec<String>,
     },
     /// A view of a group **created while the service runs** (`views.md` §3.2), carrying the whole
     /// roster record: the key, the ordinal it was given, its gate and its typed metadata.
@@ -2713,6 +2716,7 @@ mod tests {
                 }]),
             ],
             version: 1,
+            written_views: vec!["geographic".into()],
         };
         let dropped = WalRecord::LayerDrop {
             name: "clusters/old".into(),

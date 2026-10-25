@@ -242,10 +242,7 @@ fn args(dir: &Path, budget: Option<u64>) -> crate::BuildArgs {
         })
         .collect();
     let groups = config.group_registry(&registry, &views).expect("the groups resolve");
-    let mut layers = config.layers.clone();
-    for layer in &mut layers {
-        layer.views = Config::expand_layer_views(&registry, &config.view_groups, &layer.views);
-    }
+    let layers = config.layers.clone();
     crate::BuildArgs {
         views,
         anchor,

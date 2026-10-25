@@ -1260,6 +1260,10 @@ impl Engine {
             &readers.prefix_dir,
         )?;
         let bundle = served_bundle(bundle, &state, &vocabularies);
+        // A layer naming a view group is drawn on the views the replayed roster leaves it.
+        state
+            .registry
+            .follow_groups(crate::control::group_views(&bundle.manifest));
         // A dropped view's artifacts are deleted, with their keys free, wherever the log or the
         // deny state does not already hold the deletion.
         let dead =

@@ -277,24 +277,39 @@ impl Executor {
                 // Named as the generation the declaration applies in holds its views.
                 let generation = self.generation.load_full();
                 let meta = crate::viewport::meta_of(&generation);
-                if let Err(detail) = crate::control::declared_views(&meta, &mut declaration) {
-                    return reply.fail(ExecError::LayerRefused { detail });
-                }
-                // The same declaration again answers the layer that holds it, and appends nothing.
-                let held = self
+                let manifest = &generation.bundle.manifest;
+                let written = match crate::control::declared_views(&meta, manifest, &mut declaration)
+                {
+                    Ok(written) => written,
+                    Err(detail) => return reply.fail(ExecError::LayerRefused { detail }),
+                };
+                let name = declaration.name.clone();
+                let prepared = self
                     .live
-                    .with_registry(|registry| registry.holding(&declaration));
-                if let Some(space) = held {
-                    return reply.ack((space, true));
+                    .with_registry(|registry| registry.prepare_create(*declaration, written));
+                match prepared {
+                    // The same declaration again answers the layer that holds it.
+                    Ok(None) => {
+                        let held = self
+                            .live
+                            .with_registry(|registry| registry.get(&name).map(|layer| layer.space));
+                        match held {
+                            Some(space) => reply.ack((space, true)),
+                            None => reply.fail(ExecError::LayerRefused {
+                                detail: format!("layer '{name}' is not held"),
+                            }),
+                        }
+                    }
+                    Ok(Some(record)) => self.commit_registry(
+                        move |_| Ok(record),
+                        |record| match record {
+                            WalRecord::LayerCreate { space, .. } => (*space, false),
+                            _ => unreachable!("prepare_create returns a LayerCreate"),
+                        },
+                        reply,
+                    ),
+                    Err(e) => reply.fail(refusal_of(e)),
                 }
-                self.commit_registry(
-                    |registry| registry.prepare_create(*declaration),
-                    |record| match record {
-                        WalRecord::LayerCreate { space, .. } => (*space, false),
-                        _ => unreachable!("prepare_create returns a LayerCreate"),
-                    },
-                    reply,
-                )
             }
             Command::DropLayer { name, reply } => {
                 self.commit_registry(|registry| registry.prepare_drop(&name), |_| (), reply)
@@ -927,10 +942,25 @@ impl Executor {
         };
         self.live.with_roster(|roster| roster.apply(&record));
         self.publish_roster(&generation, started, &[]);
+        self.follow_groups();
         // Durable in the log and not yet in a manifest, and a rotation reclaims the log: so the
         // roster reaches `SEGMENTS-<n>.json` on the mechanism a deny already uses.
         self.side_manifests.behind_live = true;
         reply.ack(false);
+    }
+
+    /// Draw each layer that named a view group on the views the group holds in the generation
+    /// just published, after a view of a group was created or dropped. Nothing is appended: the
+    /// views follow from the roster, which the log already holds, and a replay draws them again.
+    fn follow_groups(&mut self) {
+        let generation = self.generation.load_full();
+        let group = crate::control::group_views(&generation.bundle.manifest);
+        if self
+            .live
+            .with_registry(|registry| registry.follow_groups(&group))
+        {
+            self.side_manifests.behind_live = true;
+        }
     }
 
     /// `PUT /control/attributes`: declare an attribute column while the service runs.
@@ -1481,6 +1511,7 @@ impl Executor {
         }
         self.live.with_roster(|roster| roster.apply(&record));
         self.publish_roster(&generation, started, &ids);
+        self.follow_groups();
         if !targets.is_empty() {
             self.apply_changes(
                 targets

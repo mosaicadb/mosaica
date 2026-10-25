@@ -153,12 +153,6 @@ pub fn declared_build(
             source: scoped.source.clone(),
         })
         .collect();
-    // A layer naming a group is drawn on every view of it, expanded against the views this build
-    // materialises by the rule `mosaica check` sizes shape layers through.
-    let mut config = config;
-    for layer in &mut config.layers {
-        layer.views = Config::expand_layer_views(&registry, &config.view_groups, &layer.views);
-    }
     // A scoped layer is a different artifact set per view of one group: its rows say which view
     // each artifact belongs to, under the layer's own `fields.view`, and the group's keys are what
     // a stray value is refused against.

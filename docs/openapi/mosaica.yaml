@@ -457,7 +457,7 @@ paths:
                   value:
                     {
                       "api_version": 1,
-                      "bundle_format": 47,
+                      "bundle_format": 48,
                       "declared_scalars": [
                         {
                           "analyser": null,
@@ -3505,14 +3505,13 @@ paths:
       summary: Register an annotation layer.
       description: |
         The body is a corpus declaration's `[[layer]]` block in JSON. `views` may name a view
-        group, which stands for every view the group holds when the layer is registered. The
-        answer follows the write-ahead log's fsync and carries the layer's `mosaica_id`, the address
-        `POST /control/changes` suppresses it by.
+        group, which stands for every view the group holds, and for each view created in it later.
+        The answer follows the write-ahead log's fsync and carries the layer's `mosaica_id`, the
+        address `POST /control/changes` suppresses it by.
 
-        A name already registered with this declaration answers `200` with that layer, and
-        registers nothing; with any other declaration it is `422`. `views` naming a group compares
-        as the views the group holds now. A dropped layer's name may be registered again. A
-        refusal means the layer does not exist.
+        A name already registered with this declaration, as written, answers `200` with that layer,
+        and registers nothing; with any other declaration it is `422`. A dropped layer's name may
+        be registered again. A refusal means the layer does not exist.
       security:
         - controlCredential: []
       parameters:

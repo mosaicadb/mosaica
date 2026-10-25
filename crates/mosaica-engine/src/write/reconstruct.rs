@@ -878,6 +878,7 @@ mod tests {
                 }])],
                 version: 1,
                 layouts: Vec::new(),
+                written_views: Vec::new(),
             }],
             1,
             1,

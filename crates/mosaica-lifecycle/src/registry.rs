@@ -1083,27 +1083,29 @@ impl LayerRegistry {
         mosaica_types::layer::next_block(&layer.runs).max(given)
     }
 
-    /// The space of the live layer `declaration` names, where that layer holds exactly this
-    /// declaration, validated as [`LayerRegistry::prepare_create`] validates it. A layer of that
-    /// name holding another is refused there.
-    pub fn holding(&self, declaration: &LayerDeclaration) -> Option<LayerSpace> {
-        let held = self.layers.get(&declaration.name)?;
-        let mut declared = declaration.clone();
-        declared.validate().ok()?;
-        (held.declaration == declared).then_some(held.space)
-    }
-
     /// Validates a registration and gives it a space, returning the WAL record that makes it
-    /// durable. **It does not apply it** — the caller appends the record, fsyncs, and only then
-    /// calls [`LayerRegistry::apply`]. The record carries the space and the runs, so replay applies
-    /// what was decided rather than re-deriving it.
+    /// durable; `None` where a live layer of the name holds this declaration as written, which
+    /// registers nothing. **It does not apply it** — the caller appends the record, fsyncs, and
+    /// only then calls [`LayerRegistry::apply`]. The record carries the space and the runs, so
+    /// replay applies what was decided rather than re-deriving it.
+    ///
+    /// `declaration.views` is drawn on the views that exist, and `written_views` holds the names
+    /// it was written with where one names a view group ([`RegisteredLayer::written_views`]). A
+    /// held layer is compared as written, so one naming a group is the same declaration however
+    /// many views the group has gained since.
     pub fn prepare_create(
         &self,
         mut declaration: LayerDeclaration,
-    ) -> Result<WalRecord, RegistryError> {
+        written_views: Vec<String>,
+    ) -> Result<Option<WalRecord>, RegistryError> {
         declaration.validate()?;
-        if self.layers.contains_key(&declaration.name) {
-            return Err(RegistryError::NameTaken(declaration.name));
+        if let Some(held) = self.layers.get(&declaration.name) {
+            let held_written = RegisteredLayer::as_written(&held.declaration, &held.written_views);
+            return if held_written == RegisteredLayer::as_written(&declaration, &written_views) {
+                Ok(None)
+            } else {
+                Err(RegistryError::NameTaken(declaration.name))
+            };
         }
         let space =
             LayerSpace::new(self.next_layer_space).map_err(|_| RegistryError::SpacesExhausted)?;
@@ -1133,12 +1135,31 @@ impl LayerRegistry {
             .map(|run| ReservedRuns::from_runs(vec![run]))
             .collect();
 
-        Ok(WalRecord::LayerCreate {
+        Ok(Some(WalRecord::LayerCreate {
             declaration: Box::new(declaration),
             space,
             runs,
             version: self.version + 1,
-        })
+            written_views,
+        }))
+    }
+
+    /// Draw each layer that named a view group on the views `group` answers it holds now, from
+    /// the names it was written with. Whether any layer's views changed.
+    pub fn follow_groups(&mut self, group: impl Fn(&str) -> Option<Vec<String>>) -> bool {
+        let mut changed = false;
+        for layer in self.layers.values_mut() {
+            if layer.written_views.is_empty() {
+                continue;
+            }
+            let views = mosaica_types::layer::expand_views(&layer.written_views, &group, |_| true)
+                .expect("every name that is no group is kept as a view");
+            if views != layer.declaration.views {
+                layer.declaration.views = views;
+                changed = true;
+            }
+        }
+        changed
     }
 
     /// Validates a batch of artifacts against the layer they are offered to, claims ordinals and
@@ -3023,6 +3044,7 @@ impl LayerRegistry {
                 space,
                 runs,
                 version,
+                written_views,
             } => {
                 // The record's own version, so a replay over a seed that already counts it moves
                 // nothing.
@@ -3051,6 +3073,7 @@ impl LayerRegistry {
                         space: *space,
                         runs: runs.clone(),
                         version,
+                        written_views: written_views.clone(),
                     },
                 );
             }
@@ -3223,7 +3246,7 @@ mod tests {
         reg: &mut LayerRegistry,
         d: LayerDeclaration,
     ) -> Result<(), RegistryError> {
-        let record = reg.prepare_create(d)?;
+        let record = reg.prepare_create(d, Vec::new()).map(|record| record.expect("a new layer"))?;
         reg.apply(&record);
         Ok(())
     }
@@ -3343,11 +3366,11 @@ mod tests {
         // layer's ids under every bookmark and suppression naming them.
         let mut live = LayerRegistry::new();
         let create = live
-            .prepare_create(declaration("clusters/a"))
+            .prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer"))
             .unwrap();
         let drop_b = {
             let mut r = LayerRegistry::new();
-            let c = r.prepare_create(declaration("clusters/b")).unwrap();
+            let c = r.prepare_create(declaration("clusters/b"), Vec::new()).map(|record| record.expect("a new layer")).unwrap();
             r.apply(&c);
             r.prepare_drop("clusters/b").unwrap()
         };
@@ -3367,7 +3390,7 @@ mod tests {
         let mut live = LayerRegistry::new();
         let mut log = Vec::new();
         for name in ["clusters/a", "clusters/b"] {
-            let record = live.prepare_create(declaration(name)).unwrap();
+            let record = live.prepare_create(declaration(name), Vec::new()).map(|record| record.expect("a new layer")).unwrap();
             live.apply(&record);
             log.push(record);
         }
@@ -3377,7 +3400,7 @@ mod tests {
             log.push(drop);
         }
         let again = live
-            .prepare_create(declaration("clusters/a"))
+            .prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer"))
             .unwrap();
         live.apply(&again);
         log.push(again);
@@ -3495,7 +3518,7 @@ mod tests {
             pinned,
             treed,
         ] {
-            let record = reg.prepare_create(d).unwrap();
+            let record = reg.prepare_create(d, Vec::new()).map(|record| record.expect("a new layer")).unwrap();
             reg.apply(&record);
             log.push(record);
         }
@@ -4126,7 +4149,7 @@ mod tests {
         let mut reg = LayerRegistry::new();
         let mut store = ArtifactStore::new();
         let create = reg
-            .prepare_create(declaration("clusters/a"))
+            .prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer"))
             .unwrap();
         reg.apply(&create);
         let publication = reg
@@ -4182,7 +4205,7 @@ mod tests {
     fn an_extension_replayed_from_the_log_is_not_given_again() {
         let mut reg = LayerRegistry::new();
         let store = ArtifactStore::new();
-        let create = reg.prepare_create(declaration("clusters/a")).unwrap();
+        let create = reg.prepare_create(declaration("clusters/a"), Vec::new()).map(|record| record.expect("a new layer")).unwrap();
         reg.apply(&create);
         let publication = reg
             .prepare_publish(

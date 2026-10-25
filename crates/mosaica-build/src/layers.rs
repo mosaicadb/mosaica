@@ -190,7 +190,11 @@ enum ResolvedMembers {
 
 /// What the build reads: declarations, and the artifacts to publish into them.
 pub struct LayerPlan {
+    /// The declarations, each drawn on the views of this build that it names.
     declarations: Vec<LayerDeclaration>,
+    /// By layer, the names its `views` was written with, where one names a view group
+    /// (`RegisteredLayer::written_views`).
+    written_views: BTreeMap<String, Vec<String>>,
     /// Per shape layer, what its geometry is (`polygon-membership.md` §6.5) — printed by the
     /// build beside the layer, and completed by the artifact pass with the resolution's cost.
     pub shape_reports: Vec<ShapeLayerReport>,
@@ -629,9 +633,29 @@ pub(crate) fn read(
     scratch: &Path,
     memory_budget: u64,
 ) -> Result<LayerPlan> {
+    // **A layer naming a view group is drawn on every view of it this build writes**, and keeps
+    // the names it was written with, so that a view the group gains later is drawn on too.
+    let ids: Vec<&str> = frames.iter().map(|frame| frame.view.as_str()).collect();
+    let written_views = declarations
+        .iter()
+        .map(|d| {
+            let written = mosaica_types::layer::written_views_over(&d.views, &ids);
+            (d.name.clone(), written)
+        })
+        .filter(|(_, written)| !written.is_empty())
+        .collect();
+    let drawn: Vec<LayerDeclaration> = declarations
+        .iter()
+        .map(|d| LayerDeclaration {
+            views: mosaica_types::layer::expand_views_over(&d.views, &ids),
+            ..d.clone()
+        })
+        .collect();
+    let declarations = &drawn[..];
     let mut plan = LayerPlan {
         bodies: Vec::new(),
         addresses: Vec::new(),
+        written_views,
         declarations: declarations.to_vec(),
         shape_reports: Vec::new(),
         artifacts: BTreeMap::new(),
@@ -1679,9 +1703,11 @@ pub(crate) fn publish(
                 views.join(", ")
             )));
         }
+        let written = plan.written_views.get(&name).cloned().unwrap_or_default();
         let record = registry
-            .prepare_create(declaration.clone())
-            .map_err(|e| BuildError::Invalid(format!("layer {name}: {e}")))?;
+            .prepare_create(declaration.clone(), written)
+            .map_err(|e| BuildError::Invalid(format!("layer {name}: {e}")))?
+            .ok_or_else(|| BuildError::Invalid(format!("layer {name} is declared twice")))?;
         registry.apply(&record);
     }
     let spaces = mosaica_types::layer::spaces_by_name(&registry.snapshot());

@@ -111,10 +111,7 @@ pub fn args_from_declaration(path: &Path, out: &Path, extent: Bounds) -> BuildAr
             source: scoped.source.clone(),
         })
         .collect();
-    let mut layers = config.layers.clone();
-    for layer in &mut layers {
-        layer.views = Config::expand_layer_views(&registry, &config.view_groups, &layer.views);
-    }
+    let layers = config.layers.clone();
     let groups = config.group_registry(&registry, &views).expect("the groups resolve");
     BuildArgs {
         views,

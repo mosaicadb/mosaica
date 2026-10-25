@@ -200,7 +200,7 @@ fn build_side(layers: &str, keyed: &dyn Fn(u64) -> bool) -> Built {
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path().to_path_buf();
     write_sources(&dir, keyed);
-    let mut config = parse(&dir, layers).expect("the declaration parses");
+    let config = parse(&dir, layers).expect("the declaration parses");
     let registry = config.build_views().expect("the roster enumerates");
     let anchor = config.anchor_view(&registry).expect("the anchor is declared");
     let views: Vec<ViewArgs> = registry
@@ -218,13 +218,6 @@ fn build_side(layers: &str, keyed: &dyn Fn(u64) -> bool) -> Built {
         })
         .collect();
     let groups = config.group_registry(&registry, &views).expect("the groups resolve");
-    for layer in &mut config.layers {
-        layer.views = mosaica_build::config::Config::expand_layer_views(
-            &registry,
-            &config.view_groups,
-            &layer.views,
-        );
-    }
     let scoped_layers = config
         .scopes
         .layers
@@ -353,6 +346,45 @@ fn every_view() -> Vec<String> {
     views.extend(YEARS.iter().map(|y| format!("years:{y}")));
     views.sort();
     views
+}
+
+/// **A layer naming a group is drawn on a view created in the group later**, whichever path
+/// registered the layer, and still after a restart; the same declaration sent again, as written,
+/// answers the layer that holds it.
+#[tokio::test]
+async fn a_layer_naming_a_group_follows_a_view_created_in_it_at_both_paths() {
+    const LAYER: &str = "clusters/topics";
+    let declared = || layer_json(LAYER, &["papers", "years"], None);
+    let by_build = build_side(&layer_toml(LAYER, &["papers", "years"], "", "clusters"), &|_| true);
+    let by_control = build_side("", &|_| true);
+    let mut expected = every_view();
+    expected.push("years:2012".to_string());
+    expected.sort();
+    for built in [&by_build, &by_control] {
+        let server = open(&built.dir).await;
+        if std::ptr::eq(built, &by_control) {
+            let (status, body) = put_layer(&server, declared()).await;
+            assert_eq!(status, 201, "{body}");
+        }
+        let resp = server
+            .client
+            .put(server.control_url("/control/views/years/2012"))
+            .bearer_auth(OPERATOR_CREDENTIAL)
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 201);
+        assert_eq!(drawn_on(&server, LAYER).await, expected);
+        let (status, body) = put_layer(&server, declared()).await;
+        assert_eq!(status, 200, "the same declaration again: {body}");
+
+        let server = restart(server, &built.dir).await;
+        assert_eq!(drawn_on(&server, LAYER).await, expected, "after a restart");
+        let (status, body) = put_layer(&server, declared()).await;
+        assert_eq!(status, 200, "the same declaration after a restart: {body}");
+        server.shutdown().await;
+    }
 }
 
 /// **A layer naming a group is drawn on every view of it, at both paths.**
