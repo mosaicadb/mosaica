@@ -311,6 +311,21 @@ describe('an answer', () => {
     expect(sent[1]).toEqual(sent[0]);
   });
 
+  it('answers an ingest no server answered twice with status 0, sent once more and no more', async () => {
+    vi.useFakeTimers();
+    const sent: {batch: string | null; body: unknown}[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sent.push({batch: new Headers(init.headers).get('x-mosaica-batch-id'), body: init.body});
+      throw new TypeError('fetch failed');
+    });
+    const pending = control.ingest(new Uint8Array([1, 2, 3]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    const answer = await pending;
+    expect(answer).toMatchObject({status: UNANSWERED, ok: false, attempts: 2});
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+  });
+
   it('keeps a non-object JSON body under `value`, and a non-JSON body only as text', async () => {
     recording({status: 200, body: [1, 2]});
     expect((await control.status()).body).toEqual({value: [1, 2]});

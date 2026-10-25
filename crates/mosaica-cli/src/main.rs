@@ -369,8 +369,8 @@ enum Command {
     ///
     /// Each page is sent before the next is read, under a fresh batch id. A page the server
     /// answers with `429` is sent again, the same bytes under the same id, once the wait it names
-    /// has passed, and so is a page no answer came for, a second later, which the server answers
-    /// as a replay where the first arrived; either is sent at most 600 times. Inserting a file again inserts its rows again, except that a row naming its
+    /// has passed, at most 600 times. A page no answer came for is sent once more, a second later,
+    /// which the server answers as a replay where the first arrived. Inserting a file again inserts its rows again, except that a row naming its
     /// item by a unique attribute is then answered as unchanged.
     ///
     /// It prints one JSON object on stdout totalling the answers: `pages` and `rows` sent;
@@ -379,8 +379,8 @@ enum Command {
     /// each refused row by its position in the file, from 0, and its reason; `refused_pages`, each
     /// refused request by its first row, with its status and the server's answer; and
     /// `publication`, from which the rows are visible. A line on stderr says the same. It exits
-    /// 1 when a request was refused or went unanswered, and a page still unanswered after 600
-    /// attempts stops the insert there, with `stopped` saying where. Rows refused inside an accepted request do not
+    /// 1 when a request was refused or went unanswered, and a page unanswered twice stops the
+    /// insert there, with `stopped` saying where. Rows refused inside an accepted request do not
     /// change the exit status. Needs `write`, and the credential is read from
     /// `MOSAICA_CREDENTIAL`.
     ///

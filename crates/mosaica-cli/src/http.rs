@@ -23,8 +23,7 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long one `429` may hold a request, in seconds. The server's own figure is clamped to this.
 const MAX_BACKOFF: f64 = 30.0;
 
-/// How many times a request is sent while it is answered `429`, or, carrying a batch id, while it
-/// is not answered.
+/// How many times a request is sent while it is answered `429`.
 const MAX_ATTEMPTS: u32 = 600;
 
 /// Where a request goes: `http://host:port`, or `unix:<path>` for a control plane on a Unix
@@ -372,9 +371,9 @@ impl Plane {
         self.exchange(method, path, headers, body, false)
     }
 
-    /// One request carrying a batch id, sent as [`Plane::send`] sends one, and sent again on the
-    /// same terms when no answer comes: the server answers a body it already accepted under the
-    /// id as a replay.
+    /// One request carrying a batch id, sent as [`Plane::send`] sends one, and sent once more, the
+    /// same bytes under the same id, when no answer comes: the server answers a body it already
+    /// accepted under the id as a replay. A second time without an answer is the answer.
     pub(crate) fn send_batch(
         &self,
         method: &str,
@@ -394,6 +393,7 @@ impl Plane {
         replayable: bool,
     ) -> Result<Answer, String> {
         let mut attempts = 1;
+        let mut resent = false;
         loop {
             let sent = send(
                 &self.target,
@@ -405,12 +405,13 @@ impl Plane {
                 self.timeout,
             );
             let again = match &sent {
-                Ok(answer) => answer.status == 429,
-                Err(_) => replayable,
+                Ok(answer) => answer.status == 429 && attempts < MAX_ATTEMPTS,
+                Err(_) => replayable && !resent,
             };
-            if !again || attempts >= MAX_ATTEMPTS {
+            if !again {
                 return sent;
             }
+            resent |= sent.is_err();
             attempts += 1;
             let named = sent.as_ref().ok().and_then(|answer| {
                 answer

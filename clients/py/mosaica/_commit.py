@@ -1300,8 +1300,8 @@ def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -
         answer = _send(control, page, strict)
         _fold(report, page, answer)
         if answer.status == UNANSWERED:
-            # Sent again until the budget a `429` has ran out: the server is not answering, and
-            # the pages after this one would go the same way.
+            # Unanswered twice: the server is not answering, and the pages after this one would
+            # go the same way.
             break
         if answer.ok and page.kind != "flush":
             accepted.append(page)
