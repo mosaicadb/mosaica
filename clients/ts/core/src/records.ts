@@ -20,7 +20,9 @@ export type RecordsRequest = (cursor?: string) => Promise<Response>;
  * is never yielded. A response that found no row yields one table of no rows, which carries the
  * read's columns. A body that ends or is cut without its trailer throws after its last whole page,
  * and so does a follow-up request the server refuses. {@link cursor} is then where the read
- * resumes without repeating a row.
+ * resumes without repeating a row. A follow-up the server sheds throws a {@link MosaicaError} with
+ * status `429` and the wait in `retryAfterS`. To read on, wait that long and call `items` or
+ * `artifacts` again with the same request, `cursor` set to {@link cursor} and `count` left out.
  *
  * The bodies are read only as the caller iterates. Iterating to the end, breaking out of the loop,
  * calling `return()` or aborting the request's signal each release the connection and send no

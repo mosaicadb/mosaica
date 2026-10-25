@@ -1318,6 +1318,10 @@ class Database:
         before anything was sent, a build that failed, or every request refused. A commit in which
         some requests succeeded returns its report, with the refusals listed.
 
+        A request the server answers `429`, being busy, is sent again unchanged after its
+        `Retry-After`, waiting at most 30 seconds each time, up to 600 attempts. One still refused
+        then is listed as refused.
+
             db.commit()
         """
         if self.built:

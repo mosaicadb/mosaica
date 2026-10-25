@@ -15,3 +15,13 @@ The TypeScript client is four packages in `clients/ts`. Each page below lists wh
 `@mosaicajs/client/internal` and `@mosaicajs/deck/internal` hold what the other packages use beyond these entries. They are not a public API and are not listed here.
 
 Not built yet: the packages are not published to npm. The registry holds an empty placeholder, version 0.0.0, under each of the four names, so `npm install @mosaicajs/client` succeeds and installs no Mosaica code. `npm run build` in `clients/ts` builds each package into its `dist/` directory, and `npm pack` in a package's directory makes a tarball of it. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly version 0.1.0 of the Mosaica packages they import, which exists only in those tarballs, so install the tarballs together in one `npm install`. The client README in `clients/ts` gives the commands and each package's peer dependencies.
+
+## When the server is busy
+
+A Mosaica server too busy to take a request answers `429 backpressure` with a `Retry-After` header, the number of seconds to wait before sending the same request again. What each part of `@mosaicajs/client` does with it:
+
+| Part | On a `429` |
+|---|---|
+| `MosaicaClient` | Sends nothing again. The method rejects with a `MosaicaError` whose `status` is `429`, `code` is `backpressure` and `retryAfterS` is the wait in seconds; `suggest` returns `{status: 'shed', retryAfterS, detail}` instead. To retry, wait `retryAfterS` seconds and call the method again with the same arguments. The [`MosaicaClient`](typescript/client.md) entry has an example. A bulk read refused part-way reads on from its `cursor`. |
+| `Control` | Waits the `Retry-After`, at least 1 s and at most 30 s, and sends the request again, up to 600 attempts in all. The last `429` is returned as the call's `Answer`, whose `attempts` counts the requests sent. |
+| The store from `createStore` | Sends a map request or an aggregate again up to twice, after 1 s doubled each attempt or the `Retry-After` where that is longer, and at most 8 s; `driver.maxRetries` and `driver.retryBackoffMaxMs` in its options change both. The view's `status`, or the aggregate's, is `retrying` meanwhile, then `refused` with the `429` as its `refusal`. A typeahead ask is sent again up to five times; after that, one typed in a search box lands in `filters.suggestErrors` as `backpressure`. An item's record is asked for once, and a `429` lands in `selection.itemRefusal`. |

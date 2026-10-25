@@ -53,3 +53,7 @@ With none, the element renders its detached state. An element that has built its
 Every event is a `CustomEvent` that bubbles and is composed, so a host listens on the element or on any ancestor, including one outside `<mosaica-explorer>`.
 
 An element's parts are styled with `::part()`. An element that renders another inside its shadow root forwards the inner element's parts under its name: through `<mosaica-explorer>`, the map's toolbar is `::part(map-controls)` and the item card's title is `::part(item-card-title)`. `PARTS` in `@mosaicajs/components` lists each element's parts, for a host that renders an element in its own shadow root and forwards them.
+
+## When the server is busy
+
+The elements reach the server through their store, which sends a map request or an aggregate the server sheds with `429` again up to twice, as [When the server is busy](typescript.md#when-the-server-is-busy) in the TypeScript reference sets out. Meanwhile the status strip reads Reconnecting and the map keeps what it drew. A map request the server still sheds shows View refused on the status strip and over the map, with `data-code="backpressure"` on the refusal part and a Retry button that asks again. An item record the server sheds shows Item unavailable on the item card.

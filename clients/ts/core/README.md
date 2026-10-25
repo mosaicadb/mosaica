@@ -21,6 +21,8 @@ store.subscribe('marks', (marks) => draw(marks));
 store.setView({bbox: [-180, -90, 180, 90], zoom: 0, width: 1024, height: 512});
 ```
 
+A server too busy to take a request answers `429` with `Retry-After`. The store and `Control` wait and send the request again themselves. `MosaicaClient` does not: its method rejects with a `MosaicaError` whose `retryAfterS` is the wait in seconds, and the caller waits that long and calls the method again.
+
 To draw with deck.gl, use [`@mosaicajs/deck`](https://www.npmjs.com/package/@mosaicajs/deck). For ready-made elements, use [`@mosaicajs/components`](https://www.npmjs.com/package/@mosaicajs/components).
 
 Documentation: [TypeScript client reference](https://github.com/mosaicadb/mosaica/blob/main/docs/reference/typescript.md). Licence: Apache-2.0.

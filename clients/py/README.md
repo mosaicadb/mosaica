@@ -290,11 +290,12 @@ under — says so, and the report lists it under `replayed` and counts it in its
 counting rows it did not land. That is what a retry inside one commit gets.
 
 A page carries a fresh random batch id, made once when the request is built, and a retry of that
-request carries it again: a `429` is backpressure and is retried after its `Retry-After` with the
-same id and identical bytes. Nothing is kept beyond the commit, and no id is derived from what a
-page contains, so the same frame inserted and committed five times is five loads: on the second,
-rows carrying a unique value name the items the first created and change nothing, and points rows
-carrying none are loaded again. A request that reached no server is a refusal of that page;
+request carries it again. A server too busy to take a page answers `429` with `Retry-After`, and
+the page is sent again after that many seconds, at most 30, with the same id and identical bytes,
+up to 600 attempts in all. A page still refused then is listed as refused in the report. Nothing
+is kept beyond the commit, and no id is derived from what a page contains, so the same frame
+inserted and committed five times is five loads: on the second, rows carrying a unique value name
+the items the first created and change nothing, and points rows carrying none are loaded again. A request that reached no server is a refusal of that page;
 whether it landed is the database's to say.
 
 The pre-flight runs before a byte is sent and it sends nothing while a finding stands: `check()`
@@ -369,6 +370,11 @@ items it may see, so two readers can get different answers from the same databas
 `db` reads with the operator's own token, which holds `read-all` and sees every item that is not
 deleted or suppressed. `db.viewer(terms)` is a reader holding exactly the terms named. A term no row
 carries is accepted and reaches nothing, and an empty list is refused.
+
+A read is sent once. A server too busy to take it answers `429`, and the read raises `Refusal` with
+`status` 429; call it again after a wait. The `Refusal` does not carry the server's
+`Retry-After`. A later request of `items`, `artifacts` or `aggregate` that is refused raises
+`PartialRead`, described below, whose `cursor` is where to read on.
 
 `map(view=None, layers=None, colour_by=None, filters=None, height=480)` is the notebook widget
 described below, pointed at this database's server with a token made for the reader. Give it
@@ -604,7 +610,8 @@ db.drop_view("slices", "a")                    # remove one view of a view group
 `drop_provider`) and sessions (`list_sessions`, `end_sessions`). A change answers how many live
 sessions it ended. A database you read alone needs none of it. `mosaica.Control(url,
 credential)` is the same client for a database somebody else runs, with the operator credential,
-an API key or an OIDC access token.
+an API key or an OIDC access token. A request on it that the server answers `429` is sent again as
+a commit's page is, and the call returns the last answer after 600 attempts.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call

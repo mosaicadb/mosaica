@@ -202,7 +202,8 @@ export class MosaicaError extends Error {
     readonly detail: string,
     /**
      * The wait the server asked for before the request is sent again, in seconds: its `Retry-After`
-     * header, else the body's `retry_after_s`; `null` where it named none.
+     * header, else the body's `retry_after_s`; `null` where it named none. Every `429` from a
+     * Mosaica server carries it. To retry, wait this long and call the method again.
      */
     readonly retryAfterS: number | null = null
   ) {
@@ -277,6 +278,30 @@ export type MosaicaClientOptions = {
  * and `403 expired-token` both mean the session has ended. Every count a viewer route returns is
  * over the items the token's session may see.
  *
+ * No method sends a request again by itself. A server too busy to take a request answers
+ * `429 backpressure`, and the method rejects with a {@link MosaicaError} whose `retryAfterS` is
+ * how many seconds the server asked the caller to wait; {@link MosaicaClient.suggest} returns the
+ * same as `{status: 'shed', retryAfterS}`. To retry, wait that long and call the method again with
+ * the same arguments. Here five attempts are made before the refusal is passed on:
+ *
+ * ```ts
+ * async function retrying<T>(call: () => Promise<T>, attempts = 5): Promise<T> {
+ *   for (let attempt = 1; ; attempt++) {
+ *     try {
+ *       return await call();
+ *     } catch (error) {
+ *       if (!(error instanceof MosaicaError) || error.status !== 429 || attempt === attempts) throw error;
+ *       await new Promise((resolve) => setTimeout(resolve, (error.retryAfterS ?? 1) * 1000));
+ *     }
+ *   }
+ * }
+ *
+ * const read = await retrying(() => client.items(token, {view: 'papers', fields: ['title', 'year']}));
+ * ```
+ *
+ * `Control` and the store that {@link createStore} makes send a shed request again themselves, as
+ * each one's own documentation says.
+ *
  * @category HTTP client
  */
 export class MosaicaClient {
@@ -318,7 +343,8 @@ export class MosaicaClient {
    * @returns The session: `token` for the viewer methods and `logout`, and `expiresAt` in seconds
    *   since the Unix epoch.
    * @throws {@link MosaicaError} when the server refuses: `401` for every credential it does not
-   *   accept, `403` where the principal does not hold `read`, `429` under load.
+   *   accept, `403` where the principal does not hold `read`, `429` under load, with the wait in
+   *   `retryAfterS`.
    */
   async login(credential: LoginCredential, signal?: AbortSignal): Promise<Login> {
     const body =
@@ -368,7 +394,7 @@ export class MosaicaClient {
    * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
    *   accept, `403` where the key's principal does not hold `authorise-as`, the target does not
    *   hold `read`, or a key names `terms`, `404` where `principal` names no enabled principal,
-   *   `422` for an access token it does not accept, `429` under load.
+   *   `422` for an access token it does not accept, `429` under load, with the wait in `retryAfterS`.
    */
   async authorise(target: AuthoriseTarget, signal?: AbortSignal): Promise<Session> {
     const credential = this.requireSessionCredential('authorise');
@@ -574,7 +600,7 @@ export class MosaicaClient {
    * @returns The decoded result, the server's timings, the response's keys (`identityKey`,
    *   `contentKey`, `pin`, `stale`, `region`) and the body's size in `bytes`.
    * @throws {@link MosaicaError} when the server refuses: `404` for an unknown view, `422` for a
-   *   malformed request, `429` under load.
+   *   malformed request, `429` under load, with the wait in `retryAfterS`.
    * @throws `Error` when the body is malformed or ends before its trailer. Parts already passed to
    *   `onPart` hold whole tiles and stay correct.
    */
@@ -813,7 +839,8 @@ export class MosaicaClient {
    * @returns Every frame, the response's keys (`identityKey`, `contentKey`, `pin`, `stale`,
    *   `region`), the server's timings and the body's size in `bytes`.
    * @throws {@link MosaicaError} when the server refuses: `404` for an unknown view, `422` for a
-   *   malformed request or a `perTile` over `selection.maxArtifactsPerTile`, `429` under load.
+   *   malformed request or a `perTile` over `selection.maxArtifactsPerTile`, `429` under
+   *   load, with the wait in `retryAfterS`.
    * @throws `Error` when the body is malformed or ends before its trailer.
    */
   async viewportArtifacts(
@@ -1200,7 +1227,7 @@ export class MosaicaClient {
    *
    * @throws {@link MosaicaError} when the server refuses the first request: `404` for an unknown
    *   view, `422` for a request {@link ItemsRequest} says is refused or a malformed filter, and
-   *   `429` past the bulk-read admission limit.
+   *   `429` past the bulk-read admission limit, with the wait in `retryAfterS`.
    */
   items(token: string, req: ItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>> {
     return this.bulkRead('items', token, req, signal, (raw) => {
@@ -1216,7 +1243,7 @@ export class MosaicaClient {
    *
    * @throws {@link MosaicaError} when the server refuses the first request: `404` for an unknown
    *   view, `422` for a request {@link ArtifactsRequest} says is refused or a malformed filter, and
-   *   `429` past the bulk-read admission limit.
+   *   `429` past the bulk-read admission limit, with the wait in `retryAfterS`.
    */
   artifacts(token: string, req: ArtifactsRequest, signal?: AbortSignal): Promise<RecordsRead<ArtifactsHead>> {
     return this.bulkRead('artifacts', token, req, signal, (raw) => {
@@ -1261,7 +1288,9 @@ export class MosaicaClient {
    *   read continues, to be passed back as `cursor`.
    * @throws {@link MosaicaError} when the server refuses a request: `404` for an unknown view,
    *   `422` for a request the contract refuses, naming the limit where one is exceeded, and `429`
-   *   under load.
+   *   under load, with the wait in `retryAfterS`. A refusal of a later response drops the pages
+   *   read before it. With `follow: false` each call reads one response, so a caller that retries
+   *   a `429` from `next` keeps what it has read.
    * @throws {@link PartialAggregate} for a body cut or ended without its trailer, holding the pages
    *   read before it and the cursor to read on from; `Error` for a trailer that miscounts the body;
    *   and the signal's reason once it aborts.
