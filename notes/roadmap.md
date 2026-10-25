@@ -420,6 +420,12 @@ the provider's login page and collects the token afterwards, so the embedding ap
 The components and the Python client would run the authorization code flow with PKCE and hand the
 token to `/v1/login`. No issue or design exists.
 
+**Maps that wrap at the date line.** Parked by Joe until after the first release. A map opens
+framed on every match, and the map does not wrap, so anything that crosses ±180 opens at the
+world's full width: the United States with the Aleutians, Russia with Chukotka, Fiji, New Zealand
+with the Chatham Islands. A wrapping map would draw points on both sides of ±180 and let the
+camera, and the opening frame, sit across it. No design exists.
+
 **Drawing a circle or an ellipse on the map.** High priority. The HTTP API takes circle, ellipse
 and polygon regions, but the map component offers only a box and a freehand lasso
 (`clients/ts/components/src/map.ts`, `clients/ts/core/src/selectedRegion.ts`), so a viewer cannot
