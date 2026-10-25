@@ -548,20 +548,27 @@ type Listener = () => void;
  * The store forgets what the server answered where an answer's key differs from the one held for
  * its view; where, after a renewal, an answer arrives on a view that holds no key before any answer
  * under the new token has matched a held key; where the server refuses the renewed token the
- * current view, other than by shedding load or for an expired token; and at a renewal while it
- * holds `meta` and no key. What it drops: points, frames, counts, artifacts, shapes, item records,
- * legend values, typeahead pages, the picked item and opened artifact, the `member_of` clauses, a
- * region selected from an artifact, the region's counts, and `meta`. What it keeps: a drawn
- * region's shape, the filter controls, the layers, the colouring, the current view and the camera.
- * It then reads `meta` again under the token it holds, drops a kept input that names a view, layer
- * or column the new `meta` does not list, and asks again. A token renewal whose key matches keeps
- * what is drawn.
+ * current view; and at a renewal while it holds `meta` and no key. What it drops: points, frames,
+ * counts, artifacts, shapes, item records, legend values, typeahead pages, the picked item and
+ * opened artifact, the `member_of` clauses, a region selected from an artifact, the region's
+ * counts, and `meta`. What it keeps: a drawn region's shape, the filter controls, the layers, the
+ * colouring, the current view and the camera. It then reads `meta` again under the token it holds,
+ * drops a kept input that names a view, layer or column the new `meta` does not list, and asks
+ * again. A token renewal whose key matches keeps what is drawn.
+ *
+ * Some refusals of the renewed token say nothing about whose it is, and the store does not forget
+ * on them: an expired token, a shed request (`429`), a server still starting (`503`), a `5xx`
+ * whose body names no Mosaica code, such as a gateway's `504`, and a fetch that reached no server.
+ * For all but the expired token it asks for the key again after 1 s, then twice as long each time
+ * up to 30 s, or after the server's `Retry-After` where that is longer, until an answer confirms
+ * the key or shows another viewer.
  *
  * The check runs on answers. The store calls `authorise` only when the token it holds is due for
  * renewal, and then asks for the current view's key at once. So without {@link Store.clear}, the
- * previous viewer's data stays published until that renewal and the answer or refusal to that ask;
- * where the ask is shed, fails or finds the token expired, until the next answer under the new
- * token.
+ * previous viewer's data stays published until that renewal and the answer or refusal to that ask.
+ * Where the ask is shed or fails, it stays until an answer under the new token, which the store
+ * goes on asking for; where the ask finds the token expired, until an answer under a token a later
+ * renewal brings.
  *
  * @category Store
  */
@@ -1057,6 +1064,8 @@ export function createStore(options: StoreOptions): Store {
   const identities = new Map<string, string>();
   /** A token a renewal brought, until an answer under it matches a key in {@link identities}. */
   let unconfirmed: string | null = null;
+  /** The next {@link askIdentity} after one that failed for a reason that may pass. */
+  let identityRetry: unknown = null;
 
   const colours = new ArtifactColours(table, options.palette ?? DEFAULT_PALETTE, (map, palette, overrides) =>
     replaceProjection('artifacts', {...projections.artifacts, colours: map, palette, overrides})
@@ -1445,11 +1454,16 @@ export function createStore(options: StoreOptions): Store {
    * Asks for the current view's identity key under a token a renewal brought: counts only, one tile
    * at depth 0, with no filter, highlight or layer, so nothing set for the previous viewer can have
    * it refused. The server refusing the view the previous token reached shows another viewer, and
-   * the store forgets as {@link admit} does. A shed request, an expired token, a server error that
-   * refused nothing, such as a gateway's `504`, or a failed fetch leaves the next answer to
-   * {@link admit}.
+   * the store forgets as {@link admit} does. An expired token leaves the next answer to
+   * {@link admit}. A shed request (`429`), a server still starting (`503`), a server error that
+   * refused nothing, such as a gateway's `504`, and a failed fetch ask again while the token is
+   * unconfirmed, after 1 s, then twice as long each time up to 30 s, or the server's
+   * `Retry-After` where that is longer: one ask at a time, until an answer confirms the key or
+   * the store forgets.
    */
-  async function askIdentity(): Promise<void> {
+  async function askIdentity(attempt = 0): Promise<void> {
+    if (identityRetry !== null) clock.cancel(identityRetry);
+    identityRetry = null;
     const current = views.current;
     const q = frameOrNull();
     if (!current || !q) return;
@@ -1460,10 +1474,19 @@ export function createStore(options: StoreOptions): Store {
       const response = await client.viewport(tok, {view, zoom: 0, bbox: rectToRequestBbox({x0: 0, y0: 0, x1: 0, y1: 0}, 0, q), k: 0, layers: []});
       if (!disposed && views.current === current) admit(view, response.identityKey, tok);
     } catch (error) {
-      if (disposed || tok === null || unconfirmed !== tok || !(error instanceof MosaicaError)) return;
+      if (disposed || tok === null || unconfirmed !== tok) return;
       const refusal = refusalOf(error);
-      if (error.status === 429 || error.status === 503 || isUnanswered(refusal) || tokens.isExpiry(refusal)) return;
-      forgetAnswers();
+      if (tokens.isExpiry(refusal)) return;
+      const named = error instanceof MosaicaError ? error : null;
+      if (named && named.status !== 429 && named.status !== 503 && !isUnanswered(refusal)) {
+        forgetAnswers();
+        return;
+      }
+      const wait = Math.min(Math.max(PROBE_FIRST_MS * 2 ** attempt, (named?.retryAfterS ?? 0) * 1000), PROBE_MAX_MS);
+      identityRetry = clock.after(wait, () => {
+        identityRetry = null;
+        if (!disposed && unconfirmed === tok) void askIdentity(attempt + 1);
+      });
     }
   }
 
@@ -2412,6 +2435,8 @@ export function createStore(options: StoreOptions): Store {
   function forgetAnswers(): void {
     clears += 1;
     unconfirmed = null;
+    if (identityRetry !== null) clock.cancel(identityRetry);
+    identityRetry = null;
     suggestions.reset();
     for (const held of views.all()) {
       held.presenter.cancel();
@@ -2488,6 +2513,7 @@ export function createStore(options: StoreOptions): Store {
     inView.dispose();
     if (inViewTimer !== null) clock.cancel(inViewTimer);
     if (probe !== null) clock.cancel(probe);
+    if (identityRetry !== null) clock.cancel(identityRetry);
     for (const held of views.all()) {
       held.presenter.cancel();
       held.channel.cancel();

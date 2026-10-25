@@ -2072,6 +2072,76 @@ describe('a store serves one viewer', () => {
     expect(store.get('marks').bands.every((band) => band.identityKey === 'a:s0')).toBe(true);
   });
 
+  /**
+   * Viewer A behind `t1`, renewed to viewer B's `t2` while a gateway in front of the server answers
+   * every request under `t2` with a bodiless `504` until `up()`. `checks` counts the identity
+   * checks the store sends under `t2`.
+   */
+  function renewalBehindAGateway() {
+    const metas = {a: meta({...SHAPED}), b: meta({...SHAPED})};
+    const gateway = {down: true, checks: 0};
+    const tokens = ['t1', 't2'];
+    const harness = perViewer({
+      metaOf: (token) => (token === 't1' ? metas.a : metas.b),
+      authorise: async () => ({token: tokens.shift() ?? 't2', expiresAt: (Date.now() + (tokens.length === 0 ? 3_600_000 : 60_000)) / 1000}),
+      refuse: (token, req) => {
+        if (token !== 't2') return false;
+        // The identity check names no filters, where a request for counts names them as null.
+        if (req.k === 0 && !('filters' in req)) gateway.checks += 1;
+        return gateway.down;
+      },
+      error: new MosaicaError(504, 'http-error', 'Gateway Timeout')
+    });
+    return {...harness, metas, gateway};
+  }
+
+  it('asks again whose a renewed token is while a gateway answers 504, and forgets viewer A once it answers, with no camera move', async () => {
+    const {store, clock, scheduler, metas, gateway} = renewalBehindAGateway();
+    store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 400, 400));
+    await settled(clock, scheduler);
+    expect(whoShows(store, metas)).toEqual(new Set(['a']));
+
+    await clock.advance(30_000);
+    await settled(clock, scheduler);
+    // The gateway's 504 says nothing about whose `t2` is, so A's answers stay until one does.
+    expect(whoShows(store, metas)).toEqual(new Set(['a']));
+    for (let i = 0; i < 25; i++) await clock.advance(1_000);
+    const sent = gateway.checks;
+    // Asked again after 1 s, 2 s, 4 s, 8 s and 16 s: one at a time, and not in a loop.
+    expect(sent).toBeGreaterThanOrEqual(4);
+    expect(sent).toBeLessThanOrEqual(7);
+
+    gateway.down = false;
+    for (let i = 0; i < 31; i++) {
+      await clock.advance(1_000);
+      scheduler.flush();
+    }
+    await settled(clock, scheduler);
+    expect(whoShows(store, metas).has('a')).toBe(false);
+    expect(store.get('meta')).toBe(metas.b);
+    // Once an answer has shown whose `t2` is, nothing more is asked about it.
+    const after = gateway.checks;
+    for (let i = 0; i < 60; i++) await clock.advance(1_000);
+    expect(gateway.checks).toBe(after);
+    store.dispose();
+  });
+
+  it('stops asking whose a renewed token is on dispose and on clear', async () => {
+    for (const end of ['dispose', 'clear'] as const) {
+      const {store, clock, scheduler, gateway} = renewalBehindAGateway();
+      store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 400, 400));
+      await settled(clock, scheduler);
+      await clock.advance(30_000);
+      await settled(clock, scheduler);
+      expect(gateway.checks, end).toBeGreaterThan(0);
+      store[end]();
+      const sent = gateway.checks;
+      for (let i = 0; i < 120; i++) await clock.advance(1_000);
+      expect(gateway.checks, end).toBe(sent);
+      store.dispose();
+    }
+  });
+
   it('forgets on a streamed part under a new key for a view it has left, and holds none of it for the return', async () => {
     const metas = {a: meta({...TWO_VIEWS}), b: meta({...TWO_VIEWS})};
     // Whose answers the server gives, and whose meta, from here on.
