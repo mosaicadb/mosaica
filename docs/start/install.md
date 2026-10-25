@@ -175,4 +175,5 @@ The Python client writes both files for you. `mosaica.create("~/maps/places")` m
 ## Next
 
 - [Your first map from files](first-map.md) builds a map of Ireland step by step.
+- [Your first map in Python](python.md) does the same from a data frame.
 - [Users and roles](../system/users-and-roles.md) covers who can sign in, and what each may see and do.
