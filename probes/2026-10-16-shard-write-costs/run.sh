@@ -4,7 +4,7 @@
 # and peak memory, then the churn. A shard count N runs at a `[shards] size` of the corpus's items
 # over N, rounded up, written into the base build's declaration and declared on every served copy.
 #
-#   cargo build --release -p mosaica-cli
+#   cargo build --release -p mosaica
 #   (cd <ladder>/<corpus> && mosaica check && mosaica build)
 #   LADDER=<ladder> OUT=<dir> ITEMS=<the corpus's items> bash run.sh cycle|churn|all
 #

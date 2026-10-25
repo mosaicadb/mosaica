@@ -141,13 +141,11 @@ Modelled: an id whose holder turns over every 100 days, 1% daily churn, reaches 
 1,100 years, and at 10% daily churn in about 110.
 
 Ids issued from the pool land among other signatures' runs in the term index rather than in a run of
-their own, as edit-freed ids do today. Measured for edits on GeoNames (13.5 million items, rounds of
-6,748 moved items): the compacted base term index was 82,866 bytes after the two rounds on new ids
-and 82,674 to 82,930 bytes after the rounds on freed ones. The cost of deletions and inserts at a higher churn
-was measured at the first stage's gate (§8.4) on GeoNames at one shard, deleting and inserting half
-the corpus ten times. The high water stopped rising after the second round. The term index's
-postings grew from 9 KB as built to 7 to 13 MB, and a grant's union from 3 to 13 ms to 10 to 22 ms.
-Viewport latency did not change (`probes/2026-10-10-churn-reuse/`).
+their own, as edit-freed ids do today. The cost of deletions and inserts at a high churn was
+measured at the first stage's gate (§8.4) on GeoNames at one shard, deleting and inserting half the
+corpus ten times. The high water stopped rising after the second round. The term index's postings
+grew from 9 KB as built to 7 to 13 MB, and a grant's union from 3 to 13 ms to 10 to 22 ms. Viewport
+latency did not change (`probes/2026-10-10-churn-reuse/`).
 
 ### 1.5 What a client sees
 
@@ -334,7 +332,7 @@ stays sealed. `/control/status` gives each shard's state (§4.9). A build whose 
 items than the size writes several shards (§5).
 
 The default is 2³² − 2²⁸, 4,026,531,840. A sealed shard keeps the 2²⁸ ids above it for edits of its
-own items (§4.3). The default is chosen again from measurement (§8.5).
+own items (§4.3). §8.5 gives the measurements the default stands on.
 
 The field widths of the identity are fixed. A test reaches the tenancy cap by seeding a pool at
 tenancy 4,095.
@@ -592,7 +590,11 @@ times as long at N = 8, 32 and 100, and eight leaves per session took 1.09 times
 4×10⁸ entities on a 12-core host and rose from 2.7 to 5.2 ns at 25% coverage on a 4-core one, so
 whether a shard of 2³² entities projects in proportion to its size is measured on the deployment's
 hardware. The cost model for a dense session at 10¹¹ items, 25 GB a view and 140 s of CPU at first
-touch, was made before term images existed. It is re-measured (§8.2).
+touch, was made before term images existed. On GeoNames (§8.2) a grant's first request, on a
+server that had not seen the grant, gave its first counts after 25 to 46 ms at one shard, 147 to
+178 ms at 32 shards and 578 to 610 ms at 128, 4 to 5 ms a shard whatever the grant sees. The next
+session for the same grant shares the projections, and its first counts took 0.66 to 1.05 times one
+shard's at 32 and 128 shards (`probes/2026-10-25-shard-reads-geonames/`).
 
 ## 4. The write path
 
@@ -605,9 +607,8 @@ allocates, seals, flushes and compacts on its own.
 The allocation target for new items is chosen at each commit window.
 
 1. The point shard with the largest pool, where that pool holds at least `REUSE_MIN_FREE` ids.
-   `REUSE_MIN_FREE` is a fraction of `shards.size`, chosen at stage 7 from the churn measurement
-   (§8.4). Until then it is max(1, `shards.size` >> 10): one id in 1,024 of the size, and at least
-   one.
+   `REUSE_MIN_FREE` is max(1, `shards.size` >> 10): one id in 1,024 of the size, and at least one.
+   It stands until the churn at several shards is measured (§8.4, §8.5).
 2. Otherwise the open shard: its pool, then its high water.
 3. When the open shard's high water reaches `shards.size`, it seals. When a window still has rows
    to place and no pool meets the threshold, the next shard opens. A batch whose new items would
@@ -955,10 +956,19 @@ one segment, θ's occupied tiles also come from a sketch (§3.4). The serve batt
 since it chooses its cells from exact counts. A request with nothing to combine should show a
 ratio near 1 at every N. Where one does not, the extra work is removed before anything is added.
 
+GeoNames ran at all five counts with the binary of main at e54c2c6a6
+(`probes/2026-10-25-shard-reads-geonames/`). The interactive bench ran at every count, each
+replaying all 498 of the reference's requests. The serve battery ran at 1 to 32 shards. Its
+eviction did not drop the server's pages at 2 and 8 shards, and did so for under half the samples
+at 32, so no cold viewport is measured at several shards. Neither tool sends the aggregate's bins,
+sampled bins or field summary, or a bulk read, so those were not measured. Tree of Life was built
+at 1, 4 and 16 shards and not read. GBIF was not built at several shards.
+
 ### 8.3 The write side
 
-At the same sizes, and not measured yet: build time and peak memory, ingest rate, flush time, the
-time and peak memory of one shard's compaction against the whole corpus's, restart replay, and
+Build time and peak memory were measured on GeoNames at all five counts, and Tree of Life's peak
+memory at 1, 4 and 16 shards (§9). At the same sizes, and not measured yet: ingest rate, flush time,
+the time and peak memory of one shard's compaction against the whole corpus's, restart replay, and
 `verify`. The compaction figures decide whether a compaction needs splitting into tiers or running
 several at once. Today's evidence for its cost is one MedCPT compaction of 330 s over 36 million
 items, of which 48.1% was artifact structures (`probes/2026-09-04-epoch-shard-fold-decomposition/`),
@@ -977,12 +987,24 @@ settled the order pool ids are issued in (§4.1) until larger corpora are measur
 
 ### 8.5 What the measurements decide
 
-- `shards.size`: the default stays near the ceiling unless a smaller shard measures cheaper per
-  request, per compaction or per restart. The read path favours fewer shards: every operation on
-  the mask pays a fixed cost per part (§3.2).
-- `REUSE_MIN_FREE`, as a fraction of `shards.size` (§4.1).
-- Compaction tiers and concurrent compactions.
-- The key filter's bits per value.
+Each of the four defaults stays. `REUSE_MIN_FREE` and the compaction rule have no measurement
+against them yet.
+
+- `shards.size` stays at 2³² − 2²⁸. On GeoNames no request measured cheaper at more shards. An item
+  card, a unique `eq` lookup, a hot viewport and a text search cost 0.85 to 1.12 times one shard's
+  up to 32 shards, and an item card and a unique lookup 1.08 to 1.45 times at 128. What grows with
+  N is a cost per shard: a grant's first request, 4 to 5 ms a shard (§3.7); a grant's first
+  figures, one walk of each shard per level; the time to `/readyz`, 4.0 s at one shard and 22.6 s at
+  128, with anonymous memory from 0.92 to 7.47 GiB; and the build, 68 s at one shard and 233 s at
+  128. Each favours fewer, larger shards (`probes/2026-10-25-shard-reads-geonames/`).
+- The key filter stays at 10 bits a key and 7 hashes. It passes 0.966% to 0.971% of absent keys at
+  every run size, against 0.957% modelled. Between 8 and 12 bits a lookup's cost moves by 1 to 2 µs
+  a run, under the one read the run holding the key costs (`probes/2026-10-22-key-filter-bits/`).
+- `REUSE_MIN_FREE` stays at max(1, `shards.size` >> 10) (§4.1), for want of a measurement against
+  it. Owed: the churn of §8.4 at several shards.
+- Compaction stays one shard at a time, in one tier (§4.6), for want of a measurement against it.
+  Owed: one large compaction measured with its peak memory, beside one shard's compaction of the
+  same corpus built at several shards (§8.3).
 
 ## 9. Evidence
 
@@ -1008,7 +1030,15 @@ settled the order pool ids are issued in (§4.1) until larger corpora are measur
 | selection batched per shard, where a request's tiles abut: 0.57 to 0.97 of selection per part for a viewer of 0.1% or 1% at depths 8 to 10; at depth 11 and deeper the count of 300,000 parts, 5.7 to 11.4 ms at N = 100, sets what N costs | measured, synthetic, one thread, 4 cores | `probes/2026-10-10-batched-selection/` |
 | reused numbers, GeoNames at one shard, half the corpus deleted and inserted ten times: the high water stops rising after round 2; the term index's postings grow from 9 KB to 7 to 13 MB, and a grant's union from 3 to 13 ms to 10 to 22 ms; viewport latency unchanged | measured, one run, 4 cores | `probes/2026-10-10-churn-reuse/` |
 | other orders of issuing pool ids under the churn, on GeoNames' term sizes scaled to 1,000,000 items with a fresh random half deleted each round: postings 215 to 343 times the fresh build's lowest first, 209 to 251 a term's own ids first, 330 to 411 the longest free runs first, 181 to 207 high-water ids first, whose high water reaches six times the live count in ten rounds | simulated | `probes/2026-10-10-churn-reuse/policies.py` |
-| the tile index on today's levels; every route at N on a built bundle; churn on Tree of Life, on larger corpora and at several shards; the key filter; compaction per shard | not measured | §8 |
+| GeoNames at 2 to 32 shards: an item card, a unique `eq` lookup, a hot viewport and a text search at 0.85 to 1.12 times one shard's; at 128 shards an item card and a unique lookup at 1.08 to 1.45 times | measured, one run, 12 cores | `probes/2026-10-25-shard-reads-geonames/` |
+| GeoNames: a grant's first counts after 25 to 46 ms at one shard, 147 to 178 ms at 32 and 578 to 610 ms at 128, whatever the grant sees; the same grant's next session 0.66 to 1.05 times one shard's | measured, one sample each, 12 cores | `probes/2026-10-25-shard-reads-geonames/` |
+| GeoNames: a grant's first figures walk each shard once per level, 20 walks at one shard and 2,560 at 128 | measured, the server's counter | `probes/2026-10-25-shard-reads-geonames/` |
+| GeoNames: `/readyz` after 4.0 s at one shard and 22.6 s at 128; anonymous memory at `/readyz` 0.92 GiB and 7.47 GiB | measured, 12 cores | `probes/2026-10-25-shard-reads-geonames/` |
+| GeoNames' build: 68 s at one shard and 233 s at 128; peak resident 2.48 to 2.61 GiB at every count; the bundle 2.001 GB at one shard and 2.132 GB at 128 | measured, the builds' load not recorded | `probes/2026-10-25-shard-reads-geonames/` |
+| Tree of Life's build at 1, 4 and 16 shards: peak resident 14.3, 19.9 and 22.3 GiB, bundles 50.9, 51.4 and 52.1 GB | measured, binary of e73d47ad6; the times were taken at load averages up to 156 and are not compared | `probes/2026-10-25-shard-reads-geonames/` |
+| a viewport's tiles sorted once per request, and a shard's empty runs passed over in one search: the tile-range stage about 2 ms at every count to 128 on GeoNames, against 3 ms at one shard and 280 ms at 128 sorting per segment of each shard | measured | `probes/2026-10-25-shard-reads-geonames/` |
+| the key filter at 10 bits and 7 hashes: 0.966% to 0.971% of absent keys pass, against 0.957% modelled; a cold open of a 2²⁶ run 35 ms, a batch of 10,000 absent keys over a cold filter 27 ms | measured, one thread | `probes/2026-10-22-key-filter-bits/` |
+| the tile index on today's levels; Tree of Life and GBIF read at several shards; a cold viewport at several shards; the aggregate's bins and field summary and a bulk read at several shards; churn on Tree of Life, on larger corpora and at several shards; compaction per shard; ingest, flush, restart replay and `verify` at several shards | not measured | §8 |
 
 ## 10. Stages
 
@@ -1044,13 +1074,13 @@ bumps `WAL_VERSION`.
 | 4 | `ShardedMask`; every route combined as §3.4 says, θ's occupied tiles merged; a shard's identity derived from the bundle's and the shard's number; caches and response keys over every shard (§3.6); projections shared by grant and refreshed per (grant, view, shard), and the threat model's fourth shared cache; the stored-order cursor carries the shard; status's corpus-wide figures summed across shards; a build writes several shards past `shards.size`, a containment expression carries the size of the set it was composed over so no shard's slice answers alone, and verification reads every shard; every write to a bundle of several shards is refused with `409`, its write executor runs no thread, and it is refused at open beside a log that holds records; format bump | the conformance suite's tests that write nothing, marked as such, in both modes, and the two modes fixture; §8.1's tile-index run on MedCPT and PaperSeek; §8.2 |
 | 5 | per-shard allocation, pool and target, with `REUSE_MIN_FREE` at max(1, `shards.size` >> 10); stage 2's size refusals removed: an insert past the size opens the next shard, and a lower size seals the open one; open and seal logged; edits in their shard, never refused for the size; denies resolved per shard (§4.4); flush per (view, shard), oldest WAL position first, and merge per shard; compaction per shard on a per-shard schedule, a request compacting every shard with something to reclaim, and bases tracked per shard, with empty bases for an opened shard; the log and the status naming the compaction's shard; a key filter on every unique run; layer publication per shard, with a records version per level and a slice version per (shard, level); an artifact's key free at its deletion, and its record held until every shard that lists it has compacted; the partition file as the commit point, naming each shard and space file by number and digest; `writes_nothing` deleted; WAL and format bumps | the whole conformance suite in both modes, and the two modes fixture with its write script; sealed shard, allocation, unique, build-equals-ingest, restart, stale identifier, commit point, runtime column and artifact delete fixtures; §8.3 and §8.4 at several shards |
 | 6 | a record per shard in `/control/status` (§4.9); the side-manifest's shard counter removed; format bump | the records over one shard and several, through a deletion and a compaction of one shard |
-| 7 | §8.5 | the defaults written into the declaration's reference |
+| 7 | §8.5's four defaults kept: `shards.size` and the key filter on measurement, `REUSE_MIN_FREE` and one compaction at a time in one tier for want of one; a viewport's tiles sorted once per request; a level's figures one sum per grant over every shard; the key filter read in order at open, and a batch asking for the filter pages it lacks; a compaction of one shard keeping another shard's column only where it pairs with that shard's rewritten members, and a column behind its level completed per artifact; the interactive bench's replay | §8.2 on GeoNames at 1 to 128 shards and the key filter's probe; the declaration's reference unchanged. Owed: one large compaction (§8.3) and the churn at several shards (§8.4) |
 
 ## 11. What this does not settle
 
 - Spreading shards across machines. The choice between shards by insertion order and shards by
   Morton range is made when a corpus needs more than one machine.
 - More than one open shard, for example one per data source.
-- The thresholds and widths §8.5 lists.
+- `REUSE_MIN_FREE`, and compaction tiers and concurrency, until the measurements §8.5 names are made.
 - A per-session memory budget below a materialised mask.
 - What a re-layout costs beyond one publication.
