@@ -1,5 +1,4 @@
 import {spawn, type ChildProcess} from 'node:child_process';
-import {randomBytes} from 'node:crypto';
 import {existsSync} from 'node:fs';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -10,15 +9,16 @@ import {createServer, type ViteDevServer} from 'vite';
 import {afterAll, beforeAll, expect, it} from 'vitest';
 
 /**
- * The tutorial's finished page, served by its own Vite config, over a Mosaica server built from the
- * example's `mosaica.toml` into a temporary directory, in headless Chromium. The server listens on
- * ports the system chooses, and the page finds it through `MOSAICA_VIEWER_URL` and
- * `MOSAICA_SESSION_URL`. Skipped, with the reason, where there is no `mosaica` binary.
+ * The tutorial's finished page in headless Chromium, served by Vite, over an open Mosaica server
+ * built from the example's `mosaica.toml` into a temporary directory. The server listens on ports
+ * the system chooses, and the browser's requests to the page's `viewer-url`, port 9141, are sent
+ * there instead. Skipped, with the reason, where there is no `mosaica` binary.
  */
 const web = resolve(import.meta.dirname, '..');
 const example = resolve(web, '..');
 const repo = resolve(example, '../../../..');
 const schema = join(repo, 'examples/data/geonames/schema.toml');
+const pageViewer = 'http://localhost:9141';
 
 /** The `mosaica` binary: `MOSAICA_BIN`, else this checkout's release build, else one on `PATH`. */
 function findMosaica(): string | null {
@@ -27,16 +27,9 @@ function findMosaica(): string | null {
   return candidates.find((path) => existsSync(path)) ?? null;
 }
 
-function run(binary: string, args: string[], cwd: string): Promise<void> {
-  return new Promise((done, fail) =>
-    spawn(binary, args, {cwd, stdio: 'ignore'})
-      .on('error', fail)
-      .on('exit', (code) => (code === 0 ? done() : fail(new Error(`mosaica ${args[0]} exited ${code}`))))
-  );
-}
-
 const binary = findMosaica();
 let dir = '';
+let viewer = '';
 let server: ChildProcess | null = null;
 let vite: ViteDevServer | null = null;
 let browser: Browser | null = null;
@@ -46,20 +39,20 @@ beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), 'mosaica-getting-started-'));
   const toml = (await readFile(join(example, 'mosaica/mosaica.toml'), 'utf8')).replace(/127\.0\.0\.1:914\d/g, '127.0.0.1:0');
   await writeFile(join(dir, 'mosaica.toml'), toml);
-  const credential = randomBytes(16).toString('hex');
-  await writeFile(join(dir, 'operator.secret'), credential, {mode: 0o600});
-  await run(binary, ['build', '--config', schema], dir);
+  await new Promise<void>((done, fail) =>
+    spawn(binary, ['build', '--config', schema], {cwd: dir, stdio: 'ignore'})
+      .on('error', fail)
+      .on('exit', (code) => (code === 0 ? done() : fail(new Error(`mosaica build exited ${code}`))))
+  );
 
   server = spawn(binary, ['serve', '--exit-on-stdin-close'], {cwd: dir, stdio: ['pipe', 'pipe', 'ignore']});
-  const {viewer, session} = await new Promise<{viewer: string; session: string}>((ready, fail) => {
+  const listening = await new Promise<{viewer: string}>((ready, fail) => {
     server!.on('error', fail).on('exit', () => fail(new Error('mosaica serve stopped while starting')));
     createInterface({input: server!.stdout!}).once('line', (line) => ready(JSON.parse(line)));
   });
+  viewer = `http://${listening.viewer}`;
 
-  process.env.MOSAICA_VIEWER_URL = `http://${viewer}`;
-  process.env.MOSAICA_SESSION_URL = `http://${session}`;
-  process.env.MOSAICA_CREDENTIAL = credential;
-  vite = await createServer({root: web, configFile: join(web, 'vite.config.ts'), logLevel: 'silent', server: {port: 0}});
+  vite = await createServer({root: web, logLevel: 'silent', server: {port: 0}});
   await vite.listen();
   browser = await chromium.launch();
 });
@@ -71,8 +64,12 @@ afterAll(async () => {
   if (dir) await rm(dir, {recursive: true, force: true});
 });
 
-it.skipIf(!binary)('draws every place in the explorer, which fills its part of the page', async () => {
+it.skipIf(!binary)('draws every place with no token, in an explorer that fills its part of the page', async () => {
   const page = await browser!.newPage({viewport: {width: 1440, height: 900}});
+  await page.route(`${pageViewer}/**`, async (route) => {
+    const url = viewer + route.request().url().slice(pageViewer.length);
+    await route.fulfill({response: await route.fetch({url})});
+  });
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(vite!.resolvedUrls!.local[0]!);

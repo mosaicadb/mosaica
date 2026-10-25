@@ -2,7 +2,7 @@
 
 This tutorial is for a developer who wants Mosaica's map inside their own web application, and wants to see it working before reading much else. We'll start a Mosaica server over 150,000 places from GeoNames, a free gazetteer of the world's place names. Then we'll make a new web project with Vite, put the `<mosaica-explorer>` element on its page, and end with the map sitting in an ordinary page layout of our own, with a search box and filters built from the data.
 
-Once `mosaica` is installed, it takes about fifteen minutes. You need the `mosaica` program, Node.js 22.15 or later with npm, and a clone of the Mosaica repository, which holds the sample data:
+Once `mosaica` is installed, it takes about ten minutes. You need Node.js 22.15 or later with npm, and a clone of the Mosaica repository, which holds the sample data:
 
 ```bash
 git clone https://github.com/mosaicadb/mosaica ~/mosaica
@@ -13,9 +13,9 @@ The finished project is in the clone too, in `clients/ts/examples/getting-starte
 Here is what we'll do.
 
 1. Start Mosaica over the sample data.
-2. Make a web project, and connect its development server to Mosaica.
+2. Make a web project and install Mosaica's elements.
 3. Put the explorer on the page, and search and filter the places.
-4. Choose which filters show, how the places are coloured and what they're called.
+4. Choose which filters show, how the places are coloured and what their cards say.
 5. Fit the explorer into a page with a header and a side column.
 
 We'll keep everything in one directory, `~/places`, with Mosaica's files in `~/places/mosaica` and the web project in `~/places/web`.
@@ -50,24 +50,25 @@ We'll keep everything in one directory, `~/places`, with Mosaica's files in `~/p
 
 Mosaica is a database built to send millions of points to a browser. Like most databases, it runs as a server, and your web page talks to it over HTTP.
 
-Make a directory for the server's files.
+Make a directory for the server's files, and copy the example's settings into it:
 
 ```bash
 mkdir -p ~/places/mosaica
 cd ~/places/mosaica
+cp ~/mosaica/clients/ts/examples/getting-started/mosaica/mosaica.toml .
 ```
 
-Mosaica reads its settings from a file called `mosaica.toml`. Save this in the new directory:
+Mosaica reads its settings from `mosaica.toml`. This one says:
 
 ```toml
 --8<-- "clients/ts/examples/getting-started/mosaica/mosaica.toml"
 ```
 
-`[bundle]` names three things the server keeps on disc. `path` is the bundle, Mosaica's own copy of the data, arranged so that any part of the map can be read quickly. `cache` holds work the server can reuse, and `wal` is its write-ahead log, which records changes to the data. `token_max_lifetime` is how long, in seconds, a browser's permission to read the map lasts before it has to ask again.
+`[bundle]` names what the server keeps on disc. `path` is the bundle, Mosaica's own copy of the data, arranged so that any part of the map can be read quickly. `[serve]` gives the addresses the server listens on. The page will read the map from the first, the viewer address, on port 9141.
 
-`[serve]` gives the three addresses the server listens on. The viewer address, 9141, serves the map. The session address, 9142, hands out that permission to read. The control address, 9143, takes changes to the data and to who may see what, and this tutorial doesn't use it. The operator credential is the server's master secret, kept in a file called `operator.secret`. `[catalogue]` is where Mosaica keeps its users and what each may see. We won't add any users here.
+`open = true` lets anything on this machine read the map without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token that says what they may see, and the third tutorial sets that up.
 
-Now build the bundle. The repository's sample comes with a declaration, `schema.toml`, which tells Mosaica what each column of the data means: `name` is text to search, `feature_class` and `country` are categories, and so on. `--config` points the build at it.
+Now build the bundle. The repository's sample comes with a declaration, `schema.toml`, which tells Mosaica what each column of the data means. `name` is text to search, for instance, and `feature_class` and `country` are categories. `--config` points the build at it.
 
 ```bash
 mosaica build --config ~/mosaica/examples/data/geonames/schema.toml
@@ -81,13 +82,6 @@ built /home/you/places/mosaica/bundle (v00000): 150000 items, 245 terms, 150000 
 
 It takes a second or two. The build reads the sample's Parquet files, works out where each place sits on a world map, and writes the result to `bundle`. From now on the server reads only the bundle. `150000 items` is one per place.
 
-The server needs its secret before it starts. Make a random one that only you can read.
-
-```bash
-openssl rand -hex 16 > operator.secret
-chmod 600 operator.secret
-```
-
 Start the server. It runs until you stop it, so give it a terminal of its own.
 
 ```bash
@@ -99,7 +93,7 @@ mosaica serve
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-The line of JSON is the one to wait for. It means all three addresses are open.
+The line of JSON is the one to wait for. It means the server is ready.
 
 ## Make a web project
 
@@ -112,28 +106,13 @@ cd web
 npm install @mosaicajs/components
 ```
 
+`@mosaicajs/components` holds Mosaica's elements for the browser. npm also installs what they're built on: Lit, which the elements are written with, and deck.gl, which draws the map.
+
 The template comes with a demo page and a counter that we won't need. Remove them:
 
 ```bash
 rm -r src/counter.ts src/assets public/icons.svg
 ```
-
-`@mosaicajs/components` holds Mosaica's elements for the browser. npm also installs what they're built on: Lit, which the elements are written with, and deck.gl, which draws the map.
-
-Before the page can show anything, it needs two things from Mosaica. The first is the data, from the viewer address. The page will ask for it at `/mosaica` on its own origin, and Vite's development server will pass those requests on. The second is a token. Mosaica answers a request only when it carries a token, a string that says which places the person asking may see. Our development server will make one by asking the session address, with the operator secret.
-
-Create `vite.config.ts` in the `web` directory:
-
-```ts
---8<-- "clients/ts/examples/getting-started/web/vite.config.ts"
-```
-
-`server.proxy` passes every request under `/mosaica` on to the viewer address, without the `/mosaica` prefix. The plugin adds one route to the development server, `/dev/token`. It posts to the session address's `/session/authorise` with the operator secret, asks for a session that reads every place, and hands back Mosaica's answer: the token and when it expires.
-
-!!! note "Development only"
-    `/dev/token` gives a token that sees every place to anyone who can reach the development server. A real application gets a token for whoever is signed in, from its own server. The third tutorial shows how.
-
-The secret stays in the development server and never reaches the page. The plugin reads it from the `MOSAICA_CREDENTIAL` environment variable, which we'll set when we start Vite. The two addresses can be changed the same way, with `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL`, but the defaults match our `mosaica.toml`.
 
 ## Put the explorer on the page
 
@@ -149,23 +128,21 @@ The secret stays in the development server and never reaches the page. The plugi
     <title>Places of the world</title>
   </head>
   <body>
-    <mosaica-explorer viewer-url="/mosaica"></mosaica-explorer>
+    <mosaica-explorer viewer-url="http://localhost:9141"></mosaica-explorer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
 ```
 
-`viewer-url` is where the explorer finds Mosaica: the path our proxy passes on.
+`viewer-url` is Mosaica's viewer address. Without it the explorer would look for Mosaica on the page's own address, which here is Vite's.
 
-Replace the template's script, `web/src/main.ts`, with this:
+Replace the template's script, `web/src/main.ts`, with these two lines:
 
 ```ts
 --8<-- "clients/ts/examples/getting-started/web/src/main.ts"
 ```
 
-The import defines `<mosaica-explorer>` and the other Mosaica elements. `authorise` is how the explorer gets its token. The function returns the token, and its expiry in seconds since 1970. Here it asks our development server's `/dev/token`, and Mosaica's answer names the expiry `expires_at`.
-
-The explorer is as tall as the element around it. So that it fills the window, replace `src/style.css` with:
+The first defines `<mosaica-explorer>` and the other Mosaica elements. The second keeps the template's stylesheet. The explorer is as tall as the element around it, so make the page fill the window by replacing `src/style.css` with:
 
 ```css
 html, body {
@@ -174,10 +151,9 @@ html, body {
 }
 ```
 
-Start the development server, with the operator secret in `MOSAICA_CREDENTIAL`:
+Start the development server:
 
 ```bash
-export MOSAICA_CREDENTIAL=$(cat ~/places/mosaica/operator.secret)
 npm run dev
 ```
 
@@ -194,26 +170,25 @@ npm run dev
 
 Open <http://localhost:5173/>. Every dot is a place: a town, a lake, a mountain, a farm. The strip at the bottom right counts them. The panel on the left has a count at the top and an "Add field" button, and nothing else yet.
 
-If the map says "View refused" instead, the page got no token. Open <http://localhost:5173/dev/token> to see why. `{"error":"bad-credential","detail":"missing or invalid bearer credential"}` means `MOSAICA_CREDENTIAL` wasn't set in the terminal that started Vite: stop Vite with Ctrl-C, run the `export` line and start it again. An answer beginning `Mosaica's session address did not answer` means `mosaica serve` isn't running.
-
 Vite copies the browser's console to the terminal, so you'll see `Lit is in dev mode` there each time the page loads. Lit says that about any page served by a development server, and it goes away in a production build.
 
 The explorer asked Mosaica what the data holds, and the answer lists every field with its kind. The page itself says nothing about the data. Press "Add field" and choose Name. `name` is text that the declaration marks for search, so its card is a search box. Type `San` into it. The search applies as you type. The map keeps the 1,310 places with the word San in their name.
 
 Now add Feature class and Country the same way. They're categories, so their cards list the values with a count for each, and the counts are of the places that match. Mexico has the most places called San, then Italy, the United States and the Philippines.
 
-Hover over "Mountain, hill, rock" on the Feature class card and press the funnel button that appears in place of its count. The two filters apply together and 97 places remain. The Country card now puts North Korea first, with South Korea third, because san is the Korean word for mountain. "Clear all" at the top of the panel removes both filters.
+Click "Mountain, hill, rock" on the Feature class card. The two filters apply together and 97 places remain. The Country card now puts North Korea first, with South Korea third, because san is the Korean word for mountain. "Clear all" at the top of the panel removes both filters.
 
 ## Shape the explorer
 
-The explorer's attributes set how it opens. Add three to the element in `index.html`:
+The explorer's attributes set how it opens. Add four to the element in `index.html`:
 
 ```html
 <mosaica-explorer
-  viewer-url="/mosaica"
+  viewer-url="http://localhost:9141"
   pinned-filters="name feature_class country"
   colour-by="feature_class"
   title-field="name"
+  card-fields="feature_class country population"
 ></mosaica-explorer>
 ```
 
@@ -221,7 +196,7 @@ Save the file. Vite reloads the page.
 
 `pinned-filters` names the fields whose cards are in the panel from the start, so nobody has to find them under "Add field". `colour-by` colours the places by a field. A category gets a colour per value, and a number gets a ramp from its lowest value to its highest. Settlements are blue, and most of Asia is blue. In the United States most dots are orange and red, because GeoNames lists many streams, farms and buildings there. Someone using the map can still change the colouring, with the Layers button on the map or the paint button on a field's card.
 
-`title-field` says which field names a place. Hover over one. The label that follows the pointer is the place's name. Without `title-field` the explorer doesn't know which field that is, and shows a long number such as `#4040127343466120394`, the `mosaica_id` that Mosaica gives each place it serves. Click a place, and the card that opens beside it is headed by the name too.
+`title-field` says which field names a place. Hover over one. The label that follows the pointer is the place's name. Without `title-field` the explorer doesn't know which field that is, and shows a long number such as `#4040127343466120394`, the `mosaica_id` that Mosaica gives each place it serves. Click a place, and the card that opens beside it is headed by the name too. `card-fields` chooses what the card lists under the name, here the place's kind, its country and its population.
 
 The [components reference](../reference/components/mosaica-explorer.md) lists the explorer's other attributes, from the most points it draws to how density is shaded.
 
@@ -245,7 +220,7 @@ Save, and the map sits between the header and the column, as wide as the window 
 
 ## What you built
 
-A page of your own with 150,000 places on a map, which you can search, filter and colour. Most of it came from one element. The explorer learnt the fields from Mosaica and built a card for each, and your attributes chose which cards it starts with, how it colours the places and what it calls them. The page reaches Mosaica through a proxy in its development server, which also gives it a token that sees everything.
+A page of your own with 150,000 places on a map, which you can search, filter and colour. Nearly all of it came from one element. The explorer learnt the fields from Mosaica and built a card for each, and your attributes chose which cards it starts with, how it colours the places and what it says about each one.
 
 `clients/ts/examples/getting-started/` in the repository holds the same two directories, `mosaica` and `web`, with the same files. The [components reference](../reference/components.md) lists every element, attribute and event.
 

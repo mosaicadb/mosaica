@@ -7,8 +7,6 @@ To run it, start Mosaica in `mosaica/` with a `mosaica` binary on your `PATH`:
 ```bash
 cd mosaica
 mosaica build --config ../../../../../examples/data/geonames/schema.toml
-openssl rand -hex 16 > operator.secret
-chmod 600 operator.secret
 mosaica serve
 ```
 
@@ -16,10 +14,9 @@ Then, in a second terminal, start the page and open <http://localhost:5173/>:
 
 ```bash
 cd web
-export MOSAICA_CREDENTIAL=$(cat ../mosaica/operator.secret)
 npm run dev
 ```
 
 The tutorial explains each step. `mosaica/.gitignore` keeps what the build and the server write out of git.
 
-`npm run test:live` in `web/` builds the sample into a temporary directory, serves it on ports the system chooses, and checks in headless Chromium that the page draws every place and that the explorer fills its part of the layout. It needs `npm run build` in `clients/ts` and a `mosaica` binary in `MOSAICA_BIN`, this checkout's `target/release`, or on `PATH`.
+`npm run test:live` in `web/` builds the sample into a temporary directory, serves it in open mode on ports the system chooses, sends the page's requests for port 9141 there, and checks in headless Chromium that the page draws every place and that the explorer fills its part of the layout. It needs `npm run build` in `clients/ts` and a `mosaica` binary in `MOSAICA_BIN`, this checkout's `target/release`, or on `PATH`.
