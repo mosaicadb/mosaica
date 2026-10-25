@@ -334,7 +334,11 @@ list and writes both files again.
 ## Stopping and restarting
 
 SIGTERM or SIGINT stops the server at once, without waiting for requests in progress, and it
-writes `mosaica serve: stopped on SIGTERM` as it goes. A browser partway through a response gets it
+writes `mosaica serve: stopped on SIGTERM` as it goes. With `--exit-on-stdin-close`, the server
+also stops, as SIGTERM stops it, when its standard input reaches its end. A process that starts
+the server and holds a pipe to its standard input can then stop it by closing the pipe, and the
+server stops too when that process ends in any way. Standard input that is empty or `/dev/null`
+stops the server as soon as it starts, so leave the flag off under systemd or Docker. A browser partway through a response gets it
 cut short, missing the final frame that marks a response complete.
 
 Sessions are held only in memory. After a restart none of them exists, and each browser has to ask

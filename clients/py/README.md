@@ -252,8 +252,10 @@ db.commit()                                    # the report
 ```
 
 `check()` returns the plan and the pre-flight and sends nothing; `commit()` runs the same plan and
-returns the report: rows accepted per view, artifacts minted, memberships joined, parts already
-present, refusals by row and part, and how long the wait for its publication took.
+returns the report: rows accepted per view, items edited, artifacts minted, memberships joined,
+rows that left their item as it was, parts filled on annotations already held, declarations and
+vocabulary keys already present, refusals by row and part, and how long the wait for its
+publication took.
 
 A row names items by its `mosaica_id` column and its columns of attributes declared unique. A row
 of points naming none creates an item. A row naming two items, or an item or a unique value an
@@ -314,8 +316,8 @@ strict=False)` take a list of `mosaica_id`s, or a table (a pandas or polars data
 table, or a dict of columns) whose columns are `mosaica_id` and unique attributes, each row naming
 one item. A unique attribute is read from the column an insert reads it from. A column that is
 neither is not sent, and the report names it in `ignored_columns`; a table with no other column is
-refused before anything is sent, as is a bare string, a list of dicts, or a dict whose columns
-differ in length. A row naming no item, or two, is refused and listed in the report's `refused` by
+refused before anything is sent, as is a list of dicts, or a dict whose columns differ in length.
+A bare string or number is one item's `mosaica_id`. A row naming no item, or two, is refused and listed in the report's `refused` by
 its position, and the other rows are applied; a `None` in a list, or a row whose cells are all
 null, names no item; with `strict=True` the whole request is refused instead. A call whose every
 request the server refused raises `Refusal`, with the report as its `report`; a strict call naming
@@ -341,9 +343,12 @@ has to set up principals to read their own data. `commit()` starts `mosaica serv
 process on loopback at port 0 and reads the three bound addresses from the JSON line the child
 prints once all three planes are listening; `db.viewer_url`, `db.session_url` and
 `db.operator_credential` are what a token is minted against.
-The child is killed by its pid at `close()` and at interpreter exit. A database `create()` made
-with no path is removed at both, after its child has stopped; a directory the user named, through
-`create(path)`, `open(path)` or `save(path)`, is never removed.
+The child is killed by its pid at `close()` and at interpreter exit, and is started with
+`--exit-on-stdin-close`, so it also stops when the Python process ends in any other way. A
+database `create()` made with no path is removed at both, after its child has stopped. Its
+directory holds a lock file the process keeps locked while it lives, and `create()` removes every
+other temporary database directory whose lock it can take, its owner having gone. A directory the
+user named, through `create(path)`, `open(path)` or `save(path)`, is never removed.
 
 The deployment file the SDK writes sets `serve.cors_loopback`, which admits a page served from a
 loopback address on the viewer plane. A notebook page's origin is the front end's, unknown at start
