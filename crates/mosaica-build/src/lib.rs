@@ -1237,28 +1237,6 @@ pub fn describe_refused(refused: &[RefusedRows]) -> Vec<String> {
     ids::describe_refused(refused)
 }
 
-/// [`config::require_sources`] before any row is read. A view's rows create items, and a points
-/// file's footer says whether it has any. Under `limit` the identity pass may keep none, and the
-/// build answers once it has.
-pub(crate) fn require_sources_unread<'a>(
-    schema: &config::Schema,
-    sources: &[config::AttributeSource],
-    points: impl IntoIterator<Item = &'a Path>,
-    limit: Option<u64>,
-) -> Result<()> {
-    if limit.is_some() {
-        return Ok(());
-    }
-    let mut creates = false;
-    for path in points {
-        if row_groups::FileGroups::open(path)?.rows() > 0 {
-            creates = true;
-            break;
-        }
-    }
-    config::require_sources(schema, sources, creates)
-}
-
 /// Argument and destination checks shared by both build implementations.
 fn validate_args(args: &BuildArgs) -> Result<()> {
     if args.anchor >= args.views.len().max(1) {
@@ -1297,12 +1275,20 @@ fn validate_args(args: &BuildArgs) -> Result<()> {
                 .into(),
         ));
     }
-    require_sources_unread(
-        &args.schema,
-        &args.attribute_sources,
-        args.views.iter().filter_map(|view| view.points.as_deref()),
-        args.limit,
-    )?;
+    // [`config::require_sources`] before any row is read: a view's rows create items, and a
+    // points file's footer says whether it has any. A shared file of a group's views is counted
+    // whole, which is the rows its views select, since a row naming no view's key is refused.
+    // Under `--limit` the identity pass may keep none, and the build answers once it has.
+    if args.limit.is_none() {
+        let mut creates = false;
+        for points in args.views.iter().filter_map(|view| view.points.as_deref()) {
+            if row_groups::FileGroups::open(points)?.rows() > 0 {
+                creates = true;
+                break;
+            }
+        }
+        config::require_sources(&args.schema, &args.attribute_sources, creates)?;
+    }
     // The declaration's rules, for the callers that build these arguments directly.
     if let Some(size) = args.shard_size {
         mosaica_types::check_shard_size(size)

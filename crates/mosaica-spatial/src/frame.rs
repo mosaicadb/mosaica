@@ -1,8 +1,9 @@
-//! Legal frames: the aligned squares a projected view may be quantised against, and the outward
-//! snap that reaches one from a stated box.
+//! Aligned frames: the squares a projected view's box in degrees snaps to, and the outward snap
+//! that reaches one.
 //!
-//! A frame is either the projection's whole world or a 2^k-aligned sub-square, the square one
-//! tile covers at some integer zoom offset. Under [`crate::projection::Projection::WebMercator`]
+//! An aligned frame is either the projection's whole world or a 2^k-aligned sub-square, the square
+//! one tile covers at some integer zoom offset. A frame given in frame coordinates is used as
+//! written and need not be one of these; such a view has no basemap tile scheme. Under [`crate::projection::Projection::WebMercator`]
 //! a square here is an XYZ tile; under an equirectangular view it is aligned to a tiling no
 //! server publishes, so the type names an offset rather than a tile.
 //!

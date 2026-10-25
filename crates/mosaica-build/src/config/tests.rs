@@ -996,7 +996,9 @@ fn a_check_answers_a_projected_views_frame_from_the_declaration_alone() {
     assert_eq!(report.frames.len(), 1);
     assert_eq!(report.frames[0].view, "s0");
     assert_eq!(report.frames[0].projection.name(), "equirectangular");
-    let (asked, snap) = report.frames[0].snapped.expect("a stated box snaps");
+    let crate::check::PreviewFrame::Snapped(asked, snap) = report.frames[0].frame else {
+        panic!("a stated box snaps: {:?}", report.frames[0]);
+    };
     assert_eq!(asked.lon_min, -180.0);
     // `x [0, 0.25], y [0, 0.25]`, whose maxima are the z2 boundary and so belong to the next tile.
     assert_eq!(
@@ -1012,8 +1014,23 @@ fn a_check_answers_a_projected_views_frame_from_the_declaration_alone() {
     let report = crate::check::check(&fitted);
     assert_eq!(report.frames.len(), 1);
     assert!(
-        report.frames[0].snapped.is_none(),
+        matches!(report.frames[0].frame, crate::check::PreviewFrame::Fitted),
         "under `auto` the frame is a function of the data and a check cannot answer it"
+    );
+
+    // A box in frame coordinates is the frame as written.
+    let written = parse_str(&projected(
+        "projection = \"web_mercator\"\nextent = { x = [0.5, 0.75], y = [0.25, 0.5] }",
+    ))
+    .expect("the declaration parses");
+    let report = crate::check::check(&written);
+    assert!(
+        matches!(
+            report.frames[0].frame,
+            crate::check::PreviewFrame::Stated(b) if (b.x_min, b.x_max, b.y_min, b.y_max) == (0.5, 0.75, 0.25, 0.5)
+        ),
+        "{:?}",
+        report.frames[0]
     );
 
     // An unprojected view has no projected frame to preview, and does not appear.

@@ -102,32 +102,71 @@ pub struct SourceChecked {
     pub path: Option<String>,
 }
 
-/// A projected view's frame, answered from the declaration alone (`projections.md` §4.2, §8).
+/// A projected view's frame, answered from the declaration alone.
 ///
 /// **The one thing about a frame a check *can* settle.** A stated longitude/latitude box projects
-/// and snaps with no data at all, so the square a corpus will be quantised against — and the
-/// resolution the snap costs — are readable in seconds rather than after a build. Under `auto` the
-/// frame is a function of the data, and this says so instead of guessing.
+/// and snaps with no data at all, so the square a corpus will be quantised against, and the
+/// resolution the snap costs, are readable in seconds rather than after a build. A box stated in
+/// frame coordinates is the frame as written. Under `auto` the frame is a function of the data,
+/// and this says so instead of guessing.
 #[derive(Debug, Clone)]
 pub struct FramePreview {
     pub view: String,
     pub projection: mosaica_spatial::Projection,
-    /// The box declared, and the square it snaps to. `None` under `auto`.
-    pub snapped: Option<(crate::config::LonLatBox, mosaica_spatial::frame::Snap)>,
+    pub frame: PreviewFrame,
+}
+
+/// What a check can say of a projected view's frame.
+#[derive(Debug, Clone)]
+pub enum PreviewFrame {
+    /// `auto`: fitted to the data at the build.
+    Fitted,
+    /// A box in degrees, and the square it snaps to.
+    Snapped(crate::config::LonLatBox, mosaica_spatial::frame::Snap),
+    /// A box in the coordinates the projection produces, used as written.
+    Stated(mosaica_spatial::Bounds),
+}
+
+impl FramePreview {
+    /// The preview of the view or group `view`'s declared `extent` under `projection`.
+    fn of(view: &str, projection: mosaica_spatial::Projection, extent: &Extent) -> FramePreview {
+        FramePreview {
+            view: view.to_string(),
+            projection,
+            frame: match extent {
+                Extent::LonLat(asked) => PreviewFrame::Snapped(
+                    *asked,
+                    crate::config::snap_lon_lat(projection, asked),
+                ),
+                Extent::Fixed(bounds) => PreviewFrame::Stated(*bounds),
+                Extent::Auto { .. } | Extent::AutoLonLat => PreviewFrame::Fitted,
+            },
+        }
+    }
 }
 
 /// One line for the view, and one for the snap where there is one.
 impl std::fmt::Display for FramePreview {
     fn fmt(&self, f_: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.snapped {
-            None => write!(
+        match &self.frame {
+            PreviewFrame::Fitted => write!(
                 f_,
                 "  {:<20} {}, `extent = \"auto\"` — the frame is fitted to the data, so it is not \
                  known until the build reads the points",
                 self.view,
                 self.projection.name()
             ),
-            Some((asked, snap)) => {
+            PreviewFrame::Stated(frame) => write!(
+                f_,
+                "  {:<20} {}, the frame as written: x [{}, {}], y [{}, {}]",
+                self.view,
+                self.projection.name(),
+                frame.x_min,
+                frame.x_max,
+                frame.y_min,
+                frame.y_max
+            ),
+            PreviewFrame::Snapped(asked, snap) => {
                 // y runs south, so the square's minimum y is its maximum latitude.
                 let square = snap.square.bounds();
                 let (lon_min, lat_max) = self.projection.inverse(square.x_min, square.y_min);
@@ -538,16 +577,9 @@ fn check_view(config: &Config, view: &crate::config::View, report: &mut CheckRep
     // **The frame, before the file** — a projected view's square is a function of its declaration
     // alone, so it is answered here whether or not the source opens.
     if view.projection != mosaica_spatial::Projection::None {
-        report.frames.push(FramePreview {
-            view: view.name.clone(),
-            projection: view.projection,
-            snapped: match &view.extent {
-                Extent::LonLat(asked) => {
-                    Some((*asked, crate::config::snap_lon_lat(view.projection, asked)))
-                }
-                _ => None,
-            },
-        });
+        report
+            .frames
+            .push(FramePreview::of(&view.name, view.projection, &view.extent));
     }
     let Some(path) = &view.source else {
         report.sources.push(SourceChecked {
@@ -599,16 +631,9 @@ fn check_view(config: &Config, view: &crate::config::View, report: &mut CheckRep
 fn check_view_group(config: &Config, group: &ViewGroup, report: &mut CheckReport) {
     let object = Object::new("view group", &group.name);
     if group.projection != mosaica_spatial::Projection::None {
-        report.frames.push(FramePreview {
-            view: group.name.clone(),
-            projection: group.projection,
-            snapped: match &group.extent {
-                Extent::LonLat(asked) => {
-                    Some((*asked, crate::config::snap_lon_lat(group.projection, asked)))
-                }
-                _ => None,
-            },
-        });
+        report
+            .frames
+            .push(FramePreview::of(&group.name, group.projection, &group.extent));
     }
     // The columns a scoped attribute reads out of this group's points files, where it declares no
     // source of its own — Appendix A's `sentiment`, read from each quarter's own file.

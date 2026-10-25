@@ -46,12 +46,6 @@ pub fn declared_build(
     let limited = crate::ids::Limit::of(&config.schema, limit)?.is_some();
     let acquired = config.acquire();
     let acquired_views: Vec<_> = registry.iter().map(crate::config::acquire_view).collect();
-    crate::require_sources_unread(
-        &config.schema,
-        &acquired.attribute_sources,
-        acquired_views.iter().filter_map(|view| view.points.as_deref()),
-        limit,
-    )?;
 
     // One frame per view, except on a group, where one frame covers every view of it: `auto` is
     // fitted over the union of their sources and a stated extent is surveyed against every one of

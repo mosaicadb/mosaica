@@ -94,11 +94,12 @@
 //! own: [`frame_view`] reads the view's points source to fit the box, which is legitimate precisely
 //! because the alternative is an operator guessing a frame their data has already decided.
 //!
-//! **The view's `projection` decides which spellings its `extent` and its `fields` take**
-//! (`projections.md` §2). Under the default, `none`, both are what they have always been. Under a
-//! projection the coordinate columns are `lon`/`lat` and the frame is a box in degrees, snapped
-//! outward to the enclosing aligned square — the two sets do not overlap, and each refusal names
-//! the set the view's own projection admits.
+//! **The view's `projection` decides which spellings its `extent` and its `fields` take.** Under
+//! the default, `none`, both are what they have always been. Under a projection the coordinate
+//! columns are `lon`/`lat`, and the frame is a box in degrees, snapped outward to the enclosing
+//! aligned square, or a box in the coordinates the projection produces, used as written. A frame
+//! given that way need not be aligned, and an unaligned one has no basemap tile scheme. Each
+//! refusal names the spellings the view's own projection admits.
 //!
 //! **A `fields` map says *where*, never *whether*.** The object's own keys assert that a field
 //! exists — `hierarchy` that there are parent edges, `depends_on` that there are attachment edges,
