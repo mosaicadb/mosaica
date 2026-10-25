@@ -1190,7 +1190,7 @@ def test_a_label_set_declared_after_the_first_commit_is_declared_and_served(serv
     )
 
     plan = db.check()
-    assert plan.plan[0] == "declare layer 'topics' (flat)", plan
+    assert "declare layer 'topics' (flat)" in plan.plan, plan
     report = db.commit()
     assert report.ok, report
     assert report.artifacts_minted == 1

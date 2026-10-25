@@ -3274,7 +3274,9 @@ mod tests {
         reg: &mut LayerRegistry,
         d: LayerDeclaration,
     ) -> Result<(), RegistryError> {
-        let record = reg.prepare_create(d, Vec::new()).map(|prepared| prepared.record().expect("a new layer"))?;
+        let record = reg
+            .prepare_create(d, Vec::new())
+            .map(|prepared| prepared.record().expect("a new layer"))?;
         reg.apply(&record);
         Ok(())
     }
@@ -3394,11 +3396,15 @@ mod tests {
         // layer's ids under every bookmark and suppression naming them.
         let mut live = LayerRegistry::new();
         let create = live
-            .prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer"))
+            .prepare_create(declaration("clusters/a"), Vec::new())
+            .map(|prepared| prepared.record().expect("a new layer"))
             .unwrap();
         let drop_b = {
             let mut r = LayerRegistry::new();
-            let c = r.prepare_create(declaration("clusters/b"), Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
+            let c = r
+                .prepare_create(declaration("clusters/b"), Vec::new())
+                .map(|prepared| prepared.record().expect("a new layer"))
+                .unwrap();
             r.apply(&c);
             r.prepare_drop("clusters/b").unwrap()
         };
@@ -3418,7 +3424,10 @@ mod tests {
         let mut live = LayerRegistry::new();
         let mut log = Vec::new();
         for name in ["clusters/a", "clusters/b"] {
-            let record = live.prepare_create(declaration(name), Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
+            let record = live
+                .prepare_create(declaration(name), Vec::new())
+                .map(|prepared| prepared.record().expect("a new layer"))
+                .unwrap();
             live.apply(&record);
             log.push(record);
         }
@@ -3428,7 +3437,8 @@ mod tests {
             log.push(drop);
         }
         let again = live
-            .prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer"))
+            .prepare_create(declaration("clusters/a"), Vec::new())
+            .map(|prepared| prepared.record().expect("a new layer"))
             .unwrap();
         live.apply(&again);
         log.push(again);
@@ -3478,7 +3488,13 @@ mod tests {
         let next_layer_space = reg.next_layer_space();
         let version = reg.version();
 
-        assert!(register(&mut reg, declaration("clusters/a")).is_err());
+        // The same declaration again is the layer that holds it; a different one under its name is
+        // refused.
+        assert!(matches!(
+            reg.prepare_create(declaration("clusters/a"), Vec::new()),
+            Ok(Registration::Held(_))
+        ));
+        assert!(register(&mut reg, gated("clusters/a", "team")).is_err());
         let mut bad = declaration("clusters/c");
         bad.hierarchy.kind = HierarchyKind::Stacked;
         assert!(register(&mut reg, bad).is_err());
@@ -3546,7 +3562,10 @@ mod tests {
             pinned,
             treed,
         ] {
-            let record = reg.prepare_create(d, Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
+            let record = reg
+                .prepare_create(d, Vec::new())
+                .map(|prepared| prepared.record().expect("a new layer"))
+                .unwrap();
             reg.apply(&record);
             log.push(record);
         }
@@ -4177,7 +4196,8 @@ mod tests {
         let mut reg = LayerRegistry::new();
         let mut store = ArtifactStore::new();
         let create = reg
-            .prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer"))
+            .prepare_create(declaration("clusters/a"), Vec::new())
+            .map(|prepared| prepared.record().expect("a new layer"))
             .unwrap();
         reg.apply(&create);
         let publication = reg
@@ -4233,7 +4253,10 @@ mod tests {
     fn an_extension_replayed_from_the_log_is_not_given_again() {
         let mut reg = LayerRegistry::new();
         let store = ArtifactStore::new();
-        let create = reg.prepare_create(declaration("clusters/a"), Vec::new()).map(|prepared| prepared.record().expect("a new layer")).unwrap();
+        let create = reg
+            .prepare_create(declaration("clusters/a"), Vec::new())
+            .map(|prepared| prepared.record().expect("a new layer"))
+            .unwrap();
         reg.apply(&create);
         let publication = reg
             .prepare_publish(
