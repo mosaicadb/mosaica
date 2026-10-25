@@ -32,6 +32,7 @@ We'll keep everything in one directory, `~/places`, with Mosaica's files in `~/p
     cd ~/mosaica/clients/ts
     npm ci
     npm run build
+    rm -rf ~/mosaica-packs
     mkdir -p ~/mosaica-packs
     npm pack -w @mosaicajs/client -w @mosaicajs/deck -w @mosaicajs/components --pack-destination ~/mosaica-packs
     ```

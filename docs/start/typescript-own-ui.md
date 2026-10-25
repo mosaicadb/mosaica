@@ -1,6 +1,6 @@
 # Your own interface around the map
 
-The [first TypeScript tutorial](typescript.md) put the whole explorer on a page in one element. This one is for the developer who wants the map inside an interface of their own: their own search box and menus, their own list of results, their own panel for whatever the reader clicks. We'll keep Mosaica's map and build everything around it in plain TypeScript, with no framework.
+The [first TypeScript tutorial](typescript.md) put the whole explorer on a page in one element. This one is for the developer who wants the map inside an interface they design themselves, with menus and a search box of their choosing, a results list, and a panel that shows whatever the reader clicks. We'll keep Mosaica's map and build everything around it in plain TypeScript, with no framework.
 
 The data this time is 50,000 papers from arXiv, the preprint server, laid out so that papers on similar subjects sit near each other. By the end you'll have a page with a menu of arXiv's archives filled from the server, a title search, a date range, a live count and the titles of the matching papers in view, a panel that opens the paper you click, and the map coloured by topic with each topic named. Clicking a topic's name narrows everything to it. Along the way you'll meet the store, the object that every Mosaica element reads from, and learn how a page of your own talks to it.
 
@@ -62,11 +62,17 @@ mosaica serve
 
 ## A map in a layout of your own
 
-The explorer from the first tutorial is made of smaller elements, and you can use them on their own. `<mosaica-map>` is the map canvas. The explorer adds a filter panel of field cards, an item card for the point you click, a layer picker and a few more, and each of them reads the same object: the store.
+The explorer from the first tutorial is made of smaller elements, and you can use them on their own. `<mosaica-map>` is the map canvas. The explorer adds a filter panel of field cards, an item card for the point you click, a layer picker and a few more. Each of them reads from one shared object, which Mosaica calls the store.
 
 The store is the part of Mosaica's client that has no pixels. It asks the server for what the camera can see, holds the filters, the layers and the colouring, and publishes the results as projections. A projection is a named piece of state, such as `view` for the counts or `selection` for the clicked item, and the store replaces it whole each time it changes. The elements draw the projections. Your own code can read them too, and can tell the store what to do. `<mosaica-store>` is an element that hands one store to every Mosaica element inside it.
 
 Make the web project as before, and install the elements and the client they are built on. `@mosaicajs/client` holds the store.
+
+While the packages are unpublished, install the three tarballs from the first tutorial in place of the `npm install @mosaicajs/components @mosaicajs/client` line below:
+
+```bash
+npm install ~/mosaica-packs/mosaicajs-*.tgz
+```
 
 ```bash
 cd ~/papers
@@ -74,12 +80,6 @@ npm create vite@latest web -- --template vanilla-ts --no-interactive
 cd web
 npm install @mosaicajs/components @mosaicajs/client
 rm -r src/counter.ts src/assets public/icons.svg
-```
-
-While the packages are unpublished, install the three tarballs in place of the `npm install` line, as the first tutorial did:
-
-```bash
-npm install ~/mosaica-packs/mosaicajs-*.tgz
 ```
 
 Here is the whole page. Replace `index.html` with it:
@@ -133,7 +133,7 @@ npm run dev -- --port 5273
   ➜  Network: use --host to expose
 ```
 
-Open <http://localhost:5273/>. Each dot is a paper, and a tight clump is a group of papers on one narrow subject. The map's own toolbar is at its top left: pan, select a box, draw a lasso, and fit the map to what matches. The menus beside it do nothing yet.
+Open <http://localhost:5273/>. Each dot is a paper, and a tight clump is a group of papers on one narrow subject. The map's own toolbar is at its top left: pan, select a box, draw a lasso, and fit the map to what matches. The controls in the left column do nothing yet.
 
 ## Drive the filters from the page
 
@@ -171,7 +171,7 @@ We want two things on the right: how many papers match, and the titles of the fi
 
 The count is already in the store. Its `view` projection has an `inView` part, which holds counts over the camera's box: `visible`, how many papers the viewer can see there, and `matched`, how many of those the filters let through. The store asks for them once the camera has been still for a quarter of a second.
 
-The titles are not, because a map only needs the points, so we ask for them. `store.items` reads the records of the papers that match the store's filters, page by page, with the same token and view the map uses. Create `results.ts`:
+The titles are not. A map needs only the points, so the store never fetches titles, and we ask for them ourselves. `store.items` reads the records of the papers that match the store's filters, page by page, with the same token and view the map uses. Create `results.ts`:
 
 ```ts
 --8<-- "clients/ts/examples/own-ui/web/src/results.ts"
@@ -235,7 +235,7 @@ Create `topics.ts`:
 
 `map.colourBy` colours the dots. Given `cluster:` and a layer, it gives each cluster a colour and each paper its cluster's. The checkbox sets `map.layers`, the layers the map draws. Asking for the names draws the clusters they name as well. These are the same properties as the `colour-by` and `layers` attributes, set from code here because the checkbox changes them.
 
-Clicking a topic's name opens the cluster it names, and the map fires `mosaica-artifactopen` once its details arrive. The event's `id` is the artifact's `mosaica_id` as a decimal string, since it doesn't fit in a JavaScript number, and `detail.layer` is its layer. The name comes from the store's `artifacts` projection, whose `attached` map holds each cluster's name by its id.
+Clicking a topic's name, or anywhere inside its outline, opens the cluster, and the map fires `mosaica-artifactopen` once its details arrive. The event's `id` is the artifact's `mosaica_id` as a decimal string, since it doesn't fit in a JavaScript number, and `detail.layer` is its layer. The name comes from the store's `artifacts` projection, whose `attached` map holds each cluster's name by its id.
 
 `store.setMembers` filters to an artifact's members, the papers in the cluster. It takes a list of clauses, each naming an artifact by layer and id, with `outside: false` to keep the members and `verb: 'filter'` to narrow the map to them. The other verb, `highlight`, would keep every paper and light the members. Member clauses join the filters, so the topic combines with the archive, title and dates. Clear passes an empty list.
 
@@ -245,11 +245,13 @@ Add the import and the call to `main.ts`, which is now complete:
 --8<-- "clients/ts/examples/own-ui/web/src/main.ts"
 ```
 
-The page reloads with every paper coloured. Tick "Show topic names", and names appear over the clusters: Nanodevices, AI Systems, Computational Biology. Click "Nanodevices". The map keeps only that cluster, the left column shows the topic, and the count reads "1,242 of the 50,000 papers in view match". The list fills with its papers: graphene photodetectors, silicon waveguides, plasmonic sensors and optical modulators. Type `graphene` in the title box to search within the topic, and 71 papers remain. Empty the box and press Clear to bring every paper back.
+The page reloads with every paper coloured. Tick "Show topic names", and names such as Nanodevices and AI Systems appear over the clusters. Click "Nanodevices", or a spot inside its outline. The map keeps only that cluster, the left column shows the topic, and the count reads "1,242 of the 50,000 papers in view match". The list fills with its papers: graphene photodetectors, silicon waveguides, plasmonic sensors and optical modulators. Type `graphene` in the title box to search within the topic, and 71 papers remain. Empty the box and press Clear to bring every paper back.
 
 ## What you built
 
-A page whose interface is entirely its own, around Mosaica's map. Its menu is filled from the server, and its filters reach the map and every count through one call to the store. Its list reads records over what is on screen, and its panels react to the map's events. You have used the three ways a page works with Mosaica: setting the store's state (`setFilters`, `setMembers`, the map's `colourBy` and `layers`), reading its projections (`view`, `aggregates`, `artifacts`), and listening to the map's events (`mosaica-viewchange`, `mosaica-itemopen`, `mosaica-artifactopen`).
+You built a page with an interface of its own around Mosaica's map. Its menu is filled from the server, and its filters reach the map and every count through one call to the store. Its list reads the records on screen, and its panels react to what the reader clicks.
+
+Along the way you used four ways for a page to work with Mosaica. You changed what is shown with the store's `setFilters` and `setMembers` and the map's `colourBy` and `layers` properties. You read the store's projections `view`, `aggregates` and `artifacts`. You asked the server for more on request, with `store.items` and `store.titleOf`. And you listened to the map's events `mosaica-viewchange`, `mosaica-itemopen`, `mosaica-miss` and `mosaica-artifactopen`.
 
 The finished project is in the clone, in `clients/ts/examples/own-ui/`, with the same files in `mosaica` and `web`.
 
