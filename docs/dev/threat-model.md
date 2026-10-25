@@ -75,7 +75,7 @@ machine that can reach a loopback address therefore reads and changes everything
 refuses to start unless every address it listens on is loopback, and refuses to start beside
 anything that gives it users: a principal or an OIDC provider in its catalogue, an OIDC provider
 in its configuration, `cors_origins` or `dev_cors_origins`. While open it creates no principal and
-no provider. Two guards keep a web page on another site out. Every plane refuses a request whose
+no provider. Three guards keep a web page on another site out. Every plane refuses a request whose
 `Host`, or absolute-form request line, names anything but `localhost` or a loopback address, or
 that carries no host or two. A site that rebinds its own name to 127.0.0.1 therefore gets nothing,
 since the browser sends that name. Every plane refuses a request by any method but `GET`, `HEAD`,

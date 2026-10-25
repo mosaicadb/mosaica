@@ -41,7 +41,9 @@ export abstract class MosaicaElement extends LitElement {
    * read it, to build their own store where no `store` property or context supplies one. Each route
    * is appended to it after any trailing slash is dropped, so a full URL such as
    * `https://maps.example.org` and a path on the page's own server such as `/mosaica` both work.
-   * Unset, requests go to `/v1/...` on the page's own origin. Changing it builds a new store.
+   * Unset, requests go to `/v1/...` on the page's own origin. Changing it builds a new store. With
+   * no `token`, a store built before `authorise` is set asks once with no token, and is replaced
+   * when `authorise` arrives.
    */
   @property({attribute: 'viewer-url'}) accessor viewerUrl = '';
   /**

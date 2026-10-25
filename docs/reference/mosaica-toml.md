@@ -32,7 +32,7 @@ How long a viewer's token lasts. `mosaica build` reads none of it, and `mosaica 
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `token_max_lifetime` | integer | required | The longest a session lasts, in seconds. A session ends sooner when the API key it was authorised with expires, or when the OIDC access token it was authorised with does. A token past its session's end is refused with 403. With `0`, a session has ended when it is issued. An open server (`[serve] open`) serves every request through one session, minted again when it ends, and takes `3600` where the table is left out. |
+| `token_max_lifetime` | integer | required | The longest a session lasts, in seconds. A session ends sooner when the API key it was authorised with expires, or when the OIDC access token it was authorised with does. A token past its session's end is refused with 403. With `0`, a session has ended when it is issued. An open server (`[serve] open`) serves every request through one session, minted again when it ends: it refuses a value below `60`, and takes `3600` where the table is left out. |
 
 ## `[serve]`
 

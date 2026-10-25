@@ -158,7 +158,8 @@ struct RawDisclosure {
     /// authorised with expires, or when the OIDC access token it was authorised with does. A
     /// token past its session's end is refused with 403. With `0`, a session has ended when it
     /// is issued. An open server (`[serve] open`) serves every request through one session,
-    /// minted again when it ends, and takes `3600` where the table is left out.
+    /// minted again when it ends: it refuses a value below `60`, and takes `3600` where the table
+    /// is left out.
     ///
     /// Required.
     token_max_lifetime: Option<u64>,
@@ -1302,17 +1303,6 @@ impl Config {
     /// planes need takes a default: the session and control planes listen on the viewer's address
     /// one and two ports up, or on free ports where the viewer's port is 0.
     fn open_locally(&mut self) -> Result<()> {
-        for (key, set) in [
-            ("serve.cors_origins", !self.cors_origins.is_empty()),
-            ("serve.dev_cors_origins", !self.dev_cors_origins.is_empty()),
-            ("catalogue.providers", !self.oidc_providers.is_empty()),
-        ] {
-            if set {
-                return Err(ConfigError::OpenBeside {
-                    what: format!("`{key}`"),
-                });
-            }
-        }
         if let Some(viewer) = self.viewer_addr {
             let above = |n: u16| {
                 let port = match viewer.port() {
@@ -1329,6 +1319,33 @@ impl Config {
             .get_or_insert_with(|| PathBuf::from(DEFAULT_OPEN_CATALOGUE_DIR));
         self.token_max_lifetime
             .get_or_insert(DEFAULT_OPEN_TOKEN_MAX_LIFETIME_SECS);
+        self.check_open()?;
+        self.open = true;
+        Ok(())
+    }
+
+    /// What an open server cannot run beside: an address off loopback, a setting for a server
+    /// with users, or a session so short that the one session every request is served through
+    /// would be minted again for each. `open_locally` applies it, and `mosaica_server` again at
+    /// start, so a `Config` whose `open` was set directly is held to it too.
+    pub fn check_open(&self) -> Result<()> {
+        for (key, set) in [
+            ("serve.cors_origins", !self.cors_origins.is_empty()),
+            ("serve.dev_cors_origins", !self.dev_cors_origins.is_empty()),
+            ("catalogue.providers", !self.oidc_providers.is_empty()),
+        ] {
+            if set {
+                return Err(ConfigError::OpenBeside {
+                    what: format!("`{key}`"),
+                });
+            }
+        }
+        if let Some(secs) = self
+            .token_max_lifetime
+            .filter(|secs| *secs < OPEN_MIN_TOKEN_MAX_LIFETIME_SECS)
+        {
+            return Err(ConfigError::OpenLifetimeTooShort { secs });
+        }
         let control = match &self.control_listen {
             Some(ControlListen::Tcp(addr)) => Some(*addr),
             Some(ControlListen::Unix(_)) | None => None,
@@ -1342,7 +1359,6 @@ impl Config {
                 return Err(ConfigError::OpenNotLoopback { key, addr });
             }
         }
-        self.open = true;
         Ok(())
     }
 }
@@ -2224,5 +2240,25 @@ max_artifacts_per_tile = 20"))
         let closed = parse(minimal).unwrap();
         assert!(closed.session_addr.is_none() && closed.catalogue_dir.is_none());
         assert!(closed.token_max_lifetime_secs().is_err());
+    }
+
+    /// An open server's one session must last long enough to serve many requests.
+    #[test]
+    fn open_refuses_a_session_shorter_than_a_minute() {
+        let toml = |secs: u64| {
+            valid_toml("open = true").replace(
+                "token_max_lifetime = 3600",
+                &format!("token_max_lifetime = {secs}"),
+            )
+        };
+        for secs in [0, 1, OPEN_MIN_TOKEN_MAX_LIFETIME_SECS - 1] {
+            assert!(
+                matches!(parse(&toml(secs)), Err(ConfigError::OpenLifetimeTooShort { .. })),
+                "{secs}"
+            );
+        }
+        assert!(parse(&toml(OPEN_MIN_TOKEN_MAX_LIFETIME_SECS)).is_ok());
+        let closed = valid_toml("").replace("token_max_lifetime = 3600", "token_max_lifetime = 0");
+        assert!(parse(&closed).is_ok());
     }
 }

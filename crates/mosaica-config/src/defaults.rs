@@ -176,3 +176,6 @@ pub const DEFAULT_OPEN_CATALOGUE_DIR: &str = ".mosaica/catalogue";
 /// `[disclosure] token_max_lifetime` on an open server whose file names none: the life of its one
 /// session, which is minted again when it ends.
 pub const DEFAULT_OPEN_TOKEN_MAX_LIFETIME_SECS: u64 = 3_600;
+/// The shortest `[disclosure] token_max_lifetime` an open server takes: its one session is minted
+/// again at most once in this many seconds.
+pub const OPEN_MIN_TOKEN_MAX_LIFETIME_SECS: u64 = 60;

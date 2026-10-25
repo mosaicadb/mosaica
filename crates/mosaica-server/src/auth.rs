@@ -313,10 +313,11 @@ impl OpenSession {
         {
             return Ok(session);
         }
+        // Served as minted, so a request is never refused for a session that ended while it was
+        // made; `check_open` keeps the lifetime long enough that one serves many requests.
         let minted = mint(state, every_item(&state.catalogue), None).await?;
-        let session = state.authenticated_session(&minted.token)?;
         *held = Some(minted.token);
-        Ok(session)
+        Ok(minted.session)
     }
 }
 
@@ -335,6 +336,8 @@ pub fn named(catalogue: &Catalogue, principal: &str) -> Result<Caller, ApiError>
 
 /// A minted session, as the session plane and the login route answer it.
 pub struct Minted {
+    /// The session itself, registered under `token`.
+    pub session: Arc<mosaica_engine::Session>,
     pub token: String,
     pub token_id: u64,
     pub expires_at: u64,
@@ -422,13 +425,15 @@ pub async fn mint(
         .flatten()
         .min()
         .expect("the engine's deadline is always present");
+        let session = Arc::new(session);
         let minted = Minted {
+            session: Arc::clone(&session),
             token: session.token().to_owned(),
             token_id: session.token_id(),
             expires_at,
         };
         let entry = SessionEntry {
-            session: Arc::new(session),
+            session,
             principal: target.principal.clone(),
             api_key: minter
                 .as_ref()

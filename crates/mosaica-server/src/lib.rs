@@ -67,6 +67,9 @@ pub fn prepare_config(config: Config) -> Result<Prepared, BoxError> {
     } else {
         Some(config.operator_credential.resolve("operator")?)
     };
+    if config.open {
+        config.check_open()?;
+    }
     let catalogue = open_catalogue(&config)?;
     if config.open {
         for (what, held) in [

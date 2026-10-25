@@ -571,3 +571,57 @@ async fn a_router_mounted_without_the_guard_admits_no_one_on_open_alone() {
         .unwrap();
     assert_eq!(meta.status(), 200);
 }
+
+/// An embedder that sets `open` on a loaded `Config` meets the same refusals as the file and the
+/// command line, since the server checks them again at start.
+#[test]
+fn a_config_opened_directly_is_refused_where_the_file_would_be() {
+    let tmp = TempDir::new().unwrap();
+    let path = deployment(tmp.path());
+    let text = std::fs::read_to_string(&path).unwrap();
+    for (edit, refused) in [
+        (text.replacen("127.0.0.1:0", "0.0.0.0:0", 1), "a viewer off loopback"),
+        (
+            text.replace(
+                "[catalogue]",
+                "cors_origins = [\"https://app.example\"]\n        [catalogue]",
+            ),
+            "cors_origins",
+        ),
+        (
+            text.replace("token_max_lifetime = 3600", "token_max_lifetime = 0"),
+            "a session of no length",
+        ),
+    ] {
+        std::fs::write(&path, edit).unwrap();
+        let mut config = mosaica_config::load(&path).expect("loads unopened");
+        config.open = true;
+        let Err(e) = mosaica_server::prepare_config(config) else {
+            panic!("{refused} must refuse to start open");
+        };
+        assert!(e.downcast_ref::<ConfigError>().is_some(), "{refused}: {e}");
+    }
+}
+
+/// The open server's one session is minted once and served again until it ends, so requests
+/// leave no session behind each.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_open_server_serves_every_request_through_one_session() {
+    let tmp = TempDir::new().unwrap();
+    let path = deployment(tmp.path());
+    rewrite(&path, "open = true", false);
+    let server = serve(&path).await;
+    for _ in 0..3 {
+        reads(&server, None).await;
+    }
+    let status: Value = server
+        .client
+        .get(server.control_url("/control/status"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(status["sessions"]["retained"], 1, "{}", status["sessions"]);
+}

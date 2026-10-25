@@ -27,6 +27,10 @@ pub enum ConfigError {
     OpenBeside {
         what: String,
     },
+    /// `[serve] open` with a session that would be minted again for nearly every request.
+    OpenLifetimeTooShort {
+        secs: u64,
+    },
     /// `[serve] open` with a listen address another machine could reach.
     OpenNotLoopback {
         key: &'static str,
@@ -142,6 +146,14 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "`open` serves every request as the operator, so it cannot run beside {what}, \
                  which is for a server with users; remove {what}, or serve without `open`"
+            ),
+            ConfigError::OpenLifetimeTooShort { secs } => write!(
+                f,
+                "disclosure.token_max_lifetime = {secs} is below {}, and an open server serves \
+                 every request through one session of that life; write at least {}, or leave \
+                 `[disclosure]` out",
+                crate::defaults::OPEN_MIN_TOKEN_MAX_LIFETIME_SECS,
+                crate::defaults::OPEN_MIN_TOKEN_MAX_LIFETIME_SECS
             ),
             ConfigError::OpenNotLoopback { key, addr } => write!(
                 f,
