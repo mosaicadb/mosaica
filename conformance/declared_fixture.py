@@ -562,13 +562,23 @@ def _observe_one(
 
 
 def _code_maps(server, token: str, meta: dict) -> dict[str, dict[int, str]]:
-    """`column -> {code: key}` for every rendered category, from this deployment's own list."""
+    """`column -> {code: key}` for every rendered category, from this deployment's own list. A
+    group-scoped family's list is read through each view it is served under, pinned by key."""
     out: dict[str, dict[int, str]] = {}
+
+    def read(name: str, column: str) -> None:
+        pages = record_one(server, token, Categories(column)).payload["pages"]
+        out.setdefault(name, {}).update(
+            {v["code"]: v["key"] for page in pages for v in page["values"]}
+        )
+
     for d in meta.get("declared_scalars", []):
-        if d.get("category") is None or not d.get("render"):
-            continue
-        pages = record_one(server, token, Categories(d["name"])).payload["pages"]
-        out[d["name"]] = {v["code"]: v["key"] for page in pages for v in page["values"]}
+        if d.get("category") is not None and d.get("render"):
+            read(d["name"], d["name"])
+    for d in meta.get("scoped_scalars", []):
+        if d.get("category") is not None and d.get("render"):
+            for view in d.get("views", []):
+                read(d["name"], f'{d["name"]}@{view.split(":", 1)[1]}')
     return out
 
 

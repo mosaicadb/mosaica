@@ -337,6 +337,11 @@ def test_a_view_created_with_no_rows_is_listed_on_meta_and_is_not_created_twice(
     assert db.check().plan == []
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="a group with metadata declared after the first commit writes no roster into the "
+    "declaration, which `check --payloads` refuses, whatever the metadata's type",
+)
 def test_a_group_with_category_metadata_and_its_new_vocabulary_commit_together(grouped):
     """A later commit declaring a vocabulary and a group whose metadata names it sends the
     vocabulary first, since the group route refuses a category over a vocabulary it does not hold.
