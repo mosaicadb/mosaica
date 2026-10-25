@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use arrow::array::{
     ArrayRef, FixedSizeListArray, Float64Array, Int64Array, ListArray, ListBuilder, StringArray,
-    StringBuilder, StructArray, UInt32Array, UInt64Array,
+    StringBuilder, StructArray, TimestampMillisecondArray, UInt32Array, UInt64Array,
 };
 use arrow::buffer::OffsetBuffer;
-use arrow::datatypes::{DataType, Field, Fields, Schema};
+use arrow::datatypes::{DataType, Field, Fields, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 
@@ -676,6 +676,32 @@ fn a_null_member_names_no_item_rather_than_item_zero() {
         vec![("layer 'clusters/a' members", "names_no_item", 1)]
     );
     assert_bundles_identical(&without_out, &out, "a null member");
+}
+
+/// A member named by a timestamp in milliseconds is refused: a unique column is read in
+/// microseconds only.
+#[test]
+fn a_member_named_by_a_timestamp_in_milliseconds_is_refused() {
+    let inputs = inputs();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("key", DataType::Utf8, false),
+        Field::new(
+            "entity",
+            DataType::Timestamp(TimeUnit::Millisecond, None),
+            false,
+        ),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["c-0000"])) as ArrayRef,
+            Arc::new(TimestampMillisecondArray::from(vec![7])),
+        ],
+    )
+    .unwrap();
+    write(&inputs.at("clusters_members.parquet"), schema, batch);
+    let out = inputs.dir.join("bundle");
+    assert!(run(&inputs, &out).is_err());
 }
 
 /// **Publication follows the declaration order, not the alphabet.** An attachment resolves against

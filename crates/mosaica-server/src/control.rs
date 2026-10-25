@@ -1451,8 +1451,11 @@ fn artifact_json<T: serde::de::DeserializeOwned>(body: &[u8], noun: &str) -> Res
 /// `members: list<struct<…>>` or `large_list<struct<…>>`, each struct a member named by its
 /// `mosaica_id` and unique field columns, with `view` and `access` optional and `level` in the
 /// schema metadata. Decoded into the JSON form's body and member tables, so the handler has one
-/// path.
-fn grow_body_from_arrow(body: &[u8]) -> Result<(GrowBody, Vec<MemberList>), ApiError> {
+/// path. `declared` are the bundle's scalars, which decide how a refusal of a column reads.
+fn grow_body_from_arrow(
+    body: &[u8],
+    declared: &[mosaica_engine::DeclaredScalar],
+) -> Result<(GrowBody, Vec<MemberList>), ApiError> {
     use arrow::array::{LargeListArray, ListArray, StringArray, StructArray};
     use arrow::datatypes::DataType;
 
@@ -1568,7 +1571,10 @@ fn grow_body_from_arrow(body: &[u8]) -> Result<(GrowBody, Vec<MemberList>), ApiE
                     field.name()
                 )));
             }
-            columns.push((field.name().clone(), MemberColumn::of(field, column)));
+            columns.push((
+                field.name().clone(),
+                MemberColumn::of(field, column, declared),
+            ));
         }
         for (row, range) in ranges.into_iter().enumerate() {
             if keys.is_null(row) {
@@ -1642,30 +1648,31 @@ fn grow_body_from_arrow(body: &[u8]) -> Result<(GrowBody, Vec<MemberList>), ApiE
     ))
 }
 
-/// One column of an Arrow member struct: text, an integer of any width, a timestamp in
-/// microseconds, or a column of another type, which names nothing and is refused only where it
-/// would name items.
+/// One column of an Arrow member struct: text, the integers
+/// [`mosaica_engine::scalar_column::integer_cells`] reads, or a column of another type, which
+/// names nothing and is refused only where it would name items.
 enum MemberColumn {
     Text(arrow::array::StringArray),
     LargeText(arrow::array::LargeStringArray),
-    /// A signed integer, or a timestamp as its microseconds since the epoch.
-    Signed(arrow::array::Int64Array),
-    Unsigned(arrow::array::UInt64Array),
+    Integers(Vec<Option<i128>>),
     /// Unsigned integers read as their decimal text: a `mosaica_id` column, which a read sends as
     /// uint64.
-    Decimal(arrow::array::UInt64Array),
+    Decimal(Vec<Option<i128>>),
     /// A column of any other type, and how a refusal shows its values.
     Other(arrow::array::ArrayRef, String),
 }
 
 impl MemberColumn {
-    fn of(field: &arrow::datatypes::Field, column: &arrow::array::ArrayRef) -> Self {
-        use arrow::array::{Int64Array, LargeStringArray, StringArray, UInt64Array};
-        use arrow::datatypes::{DataType, TimeUnit};
-        let widened = |to: &DataType| {
-            arrow::compute::cast(column, to)
-                .expect("an integer or a timestamp casts to a 64-bit integer")
-        };
+    /// `column`, named by `field`, read against the bundle's `declared` scalars, which decide how a
+    /// refusal of its values reads.
+    fn of(
+        field: &arrow::datatypes::Field,
+        column: &arrow::array::ArrayRef,
+        declared: &[mosaica_engine::DeclaredScalar],
+    ) -> Self {
+        use arrow::array::{LargeStringArray, StringArray};
+        use arrow::datatypes::DataType;
+        use mosaica_engine::scalar_column::{integer_cells, unit_hint};
         match field.data_type() {
             DataType::Utf8 => MemberColumn::Text(
                 column
@@ -1681,35 +1688,21 @@ impl MemberColumn {
                     .expect("large utf8")
                     .clone(),
             ),
-            DataType::Int8
-            | DataType::Int16
-            | DataType::Int32
-            | DataType::Int64
-            | DataType::Timestamp(TimeUnit::Microsecond, _) => MemberColumn::Signed(
-                widened(&DataType::Int64)
-                    .as_any()
-                    .downcast_ref::<Int64Array>()
-                    .expect("int64")
-                    .clone(),
-            ),
-            DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 => {
-                let column = widened(&DataType::UInt64)
-                    .as_any()
-                    .downcast_ref::<UInt64Array>()
-                    .expect("uint64")
-                    .clone();
-                match field.name() == "mosaica_id" {
-                    true => MemberColumn::Decimal(column),
-                    false => MemberColumn::Unsigned(column),
+            found => match integer_cells(column.as_ref()) {
+                Some(cells) if field.name() == "mosaica_id" && found.is_unsigned_integer() => {
+                    MemberColumn::Decimal(cells)
                 }
-            }
-            other => MemberColumn::Other(
-                column.clone(),
-                format!(
-                    "a {other} value{}",
-                    mosaica_engine::scalar_column::unit_hint(other)
-                ),
-            ),
+                Some(cells) => MemberColumn::Integers(cells),
+                None => {
+                    let hint = declared
+                        .iter()
+                        .find(|d| d.name == *field.name())
+                        .map_or("", |d| {
+                            unit_hint(d.arrow_type, d.vocabulary.is_some(), found)
+                        });
+                    MemberColumn::Other(column.clone(), format!("a {found} value{hint}"))
+                }
+            },
         }
     }
 
@@ -1723,15 +1716,8 @@ impl MemberColumn {
             MemberColumn::LargeText(c) => {
                 (!c.is_null(at)).then(|| AddressValue::Text(c.value(at).to_string()))
             }
-            MemberColumn::Signed(c) => {
-                (!c.is_null(at)).then(|| AddressValue::Integer(i128::from(c.value(at))))
-            }
-            MemberColumn::Unsigned(c) => {
-                (!c.is_null(at)).then(|| AddressValue::Integer(i128::from(c.value(at))))
-            }
-            MemberColumn::Decimal(c) => {
-                (!c.is_null(at)).then(|| AddressValue::Text(c.value(at).to_string()))
-            }
+            MemberColumn::Integers(c) => c[at].map(AddressValue::Integer),
+            MemberColumn::Decimal(c) => c[at].map(|id| AddressValue::Text(id.to_string())),
             MemberColumn::Other(c, shown) => {
                 (!c.is_null(at)).then(|| AddressValue::Other(shown.clone()))
             }
@@ -2652,6 +2638,7 @@ async fn grow_memberships(
     let strict = query.strict;
     let (grown, keys, shape_reports, refused, ignored) = state
         .blocking(move |state| {
+            let scope = caller.write_scope(&state.engine);
             let (
                 GrowBody {
                     level,
@@ -2678,7 +2665,9 @@ async fn grow_memberships(
                     }
                     (body, lists)
                 }
-                BodyEncoding::Arrow => grow_body_from_arrow(&body)?,
+                BodyEncoding::Arrow => {
+                    grow_body_from_arrow(&body, &state.engine.meta_as(&scope).declared_scalars)?
+                }
             };
             let accesses: Vec<Vec<Vec<u8>>> = artifacts
                 .iter_mut()
@@ -2703,7 +2692,6 @@ async fn grow_memberships(
 
             // Shapes go through the publication's reader, so a filled shape is stored byte for
             // byte as a publication would store it.
-            let scope = caller.write_scope(&state.engine);
             let declaration = state
                 .engine
                 .reached_layer(&name, &scope)

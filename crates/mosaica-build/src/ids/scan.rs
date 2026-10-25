@@ -5,9 +5,9 @@ use std::ops::ControlFlow;
 use std::path::Path;
 
 use arrow::array::{Array, ArrayRef};
-use arrow::datatypes::{DataType, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use mosaica_spatial::tiler::ScalarType;
+use mosaica_store::scalar_column::{integer_cells, unit_hint};
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 
 use super::{CarriedField, LimitRead, MOSAICA_ID_COLUMN};
@@ -302,10 +302,11 @@ pub(crate) fn keys_of(
             .map(|row| text.at(row).map(UniqueKey::keyword))
             .collect());
     }
-    let integers = integers_of(column.as_ref()).ok_or_else(|| {
+    let integers = integer_cells(column.as_ref()).ok_or_else(|| {
         refuse(format!(
-            "holds {:?}; write it as an integer column",
-            column.data_type()
+            "holds {:?}; write it as an integer column{}",
+            column.data_type(),
+            unit_hint(field.ty, false, column.data_type())
         ))
     })?;
     integers
@@ -322,34 +323,6 @@ pub(crate) fn keys_of(
         .collect()
 }
 
-/// An integer or timestamp column's values, a null staying null; `None` for any other column.
-fn integers_of(column: &dyn Array) -> Option<Vec<Option<i128>>> {
-    use arrow::array::{
-        Int16Array, Int32Array, Int64Array, Int8Array, TimestampMicrosecondArray, UInt16Array,
-        UInt32Array, UInt64Array, UInt8Array,
-    };
-    let any = column.as_any();
-    macro_rules! read {
-        ($ty:ty) => {
-            if let Some(values) = any.downcast_ref::<$ty>() {
-                return Some(values.iter().map(|v| v.map(i128::from)).collect());
-            }
-        };
-    }
-    read!(UInt8Array);
-    read!(UInt16Array);
-    read!(UInt32Array);
-    read!(UInt64Array);
-    read!(Int8Array);
-    read!(Int16Array);
-    read!(Int32Array);
-    read!(Int64Array);
-    if matches!(column.data_type(), DataType::Timestamp(TimeUnit::Microsecond, _)) {
-        read!(TimestampMicrosecondArray);
-    }
-    None
-}
-
 /// One cell as a report writes it: an integer in decimal, a string as itself.
 pub(crate) fn value_text(column: &dyn Array, row: usize) -> Option<String> {
     if column.is_null(row) {
@@ -358,6 +331,6 @@ pub(crate) fn value_text(column: &dyn Array, row: usize) -> Option<String> {
     if let Some(text) = crate::utf8::Utf8Column::new(column) {
         return text.at(row).map(str::to_string);
     }
-    let integers = integers_of(&column.slice(row, 1))?;
+    let integers = integer_cells(&column.slice(row, 1))?;
     integers.first().copied().flatten().map(|v| v.to_string())
 }

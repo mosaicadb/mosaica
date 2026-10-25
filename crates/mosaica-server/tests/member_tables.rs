@@ -501,36 +501,53 @@ async fn an_arrow_member_column_is_checked_only_where_it_names_items() {
 const STAMPED_ITEMS: u64 = 40;
 const STAMPED_LAYER: &str = "clusters/stamped";
 /// Three artifacts, by key, and the items each holds.
-const STAMPED: [(&str, &[u64]); 3] = [("one", &[0]), ("two", &[1, 2]), ("three", &[3, 4, 5])];
+const STAMPED: [(&str, &[u64]); 3] = [("one", &[0]), ("two", &[19, 20]), ("three", &[21, 30, 39])];
 
-/// Item `e`'s `seen`, in microseconds since the epoch: 2020-01-01T00:00:00Z plus `e` hours.
+/// Item `e`'s `seen`, in microseconds since the epoch: `e` hours after 1969-12-31T04:00:00Z, so
+/// items below 20 hold a time before 1970.
 fn seen_of(e: u64) -> i64 {
-    1_577_836_800_000_000 + e as i64 * 3_600_000_000
+    (e as i64 - 20) * 3_600_000_000
 }
 
-fn microseconds(values: Vec<i64>) -> ArrayRef {
+/// Writes microsecond `seen` values, null where `None`, as one Arrow timestamp type.
+type Stamps = fn(Vec<Option<i64>>) -> ArrayRef;
+
+/// `values` as `timestamp[us, UTC]`.
+fn microseconds(values: Vec<Option<i64>>) -> ArrayRef {
     Arc::new(TimestampMicrosecondArray::from(values).with_timezone("UTC"))
 }
 
-fn milliseconds(values: Vec<i64>) -> ArrayRef {
-    let values = values.into_iter().map(|us| us / 1_000).collect::<Vec<_>>();
+/// `values` as `timestamp[us]` with no time zone.
+fn microseconds_without_zone(values: Vec<Option<i64>>) -> ArrayRef {
+    Arc::new(TimestampMicrosecondArray::from(values))
+}
+
+/// `values` as `timestamp[ms, UTC]`.
+fn milliseconds(values: Vec<Option<i64>>) -> ArrayRef {
+    let values = values
+        .into_iter()
+        .map(|us| us.map(|us| us / 1_000))
+        .collect::<Vec<_>>();
     Arc::new(TimestampMillisecondArray::from(values).with_timezone("UTC"))
 }
 
 /// One list per artifact of [`STAMPED`], of structs naming each member by its `seen`, as `seen`
-/// writes the values.
-fn stamped_lists(seen: fn(Vec<i64>) -> ArrayRef) -> ListArray {
-    let values = STAMPED
+/// writes the values. The last list ends with a member whose `seen` is null, which names no item.
+fn stamped_lists(seen: Stamps) -> ListArray {
+    let mut values: Vec<Option<i64>> = STAMPED
         .iter()
-        .flat_map(|(_, items)| items.iter().map(|&e| seen_of(e)))
+        .flat_map(|(_, items)| items.iter().map(|&e| Some(seen_of(e))))
         .collect();
+    values.push(None);
+    let mut lengths: Vec<usize> = STAMPED.iter().map(|(_, items)| items.len()).collect();
+    *lengths.last_mut().unwrap() += 1;
     let column = seen(values);
     let fields = Fields::from(vec![Field::new("seen", column.data_type().clone(), true)]);
     let elements = StructArray::new(fields.clone(), vec![column], None);
     let item = Arc::new(Field::new("item", DataType::Struct(fields), true));
     ListArray::new(
         item,
-        OffsetBuffer::from_lengths(STAMPED.iter().map(|(_, items)| items.len())),
+        OffsetBuffer::from_lengths(lengths),
         Arc::new(elements),
         None,
     )
@@ -545,12 +562,12 @@ fn stamped_keys() -> StringArray {
 /// by its `seen`, as `members` writes the values.
 fn build_stamped(
     dir: &std::path::Path,
-    members: Option<fn(Vec<i64>) -> ArrayRef>,
+    members: Option<Stamps>,
 ) -> Result<mosaica_build::BuildReport, mosaica_build::BuildError> {
     let points = dir.join("points.parquet");
     let pairs = dir.join("pairs.parquet");
     let ids: Vec<u64> = (0..STAMPED_ITEMS).collect();
-    let seen = microseconds(ids.iter().map(|&e| seen_of(e)).collect());
+    let seen = microseconds(ids.iter().map(|&e| Some(seen_of(e))).collect());
     write_points(
         &points,
         &ids,
@@ -642,7 +659,7 @@ async fn serve_stamped(dir: &std::path::Path) -> TestServer {
 }
 
 /// A growth of [`STAMPED`]'s members, each named by its `seen` as `seen` writes the values.
-fn stamped_growth(seen: fn(Vec<i64>) -> ArrayRef) -> Vec<u8> {
+fn stamped_growth(seen: Stamps) -> Vec<u8> {
     let members = stamped_lists(seen);
     let schema = Arc::new(Schema::new(vec![
         Field::new("key", DataType::Utf8, false),
@@ -717,8 +734,9 @@ async fn stamped_state(server: &TestServer) -> std::collections::BTreeMap<String
 }
 
 /// **An Arrow growth names members by a unique timestamp field as `timestamp[us]`**, as a build's
-/// members file does: the members a service joins this way are those the build joins from the
-/// same column, and a restart keeps them.
+/// members file does: the members a service joins this way, with or without a time zone and
+/// before 1970 or after, are those the build joins from the same column; a null member is left
+/// out at both; and a restart keeps them.
 #[tokio::test]
 async fn an_arrow_growth_names_members_by_a_unique_timestamp_as_a_build_does() {
     let expected: std::collections::BTreeMap<String, (u64, Vec<i64>)> = STAMPED
@@ -729,7 +747,13 @@ async fn an_arrow_growth_names_members_by_a_unique_timestamp_as_a_build_does() {
         })
         .collect();
     let built = TempDir::new().unwrap();
-    build_stamped(built.path(), Some(microseconds)).expect("the stamped layer builds");
+    let report = build_stamped(built.path(), Some(microseconds)).expect("the stamped layer builds");
+    let refused: Vec<(&str, u64)> = report
+        .refused
+        .iter()
+        .map(|entry| (entry.reason.as_str(), entry.rows))
+        .collect();
+    assert_eq!(refused, [("names_no_item", 1)], "the null member");
     let built = open(&built).await;
     assert_eq!(
         stamped_state(&built).await,
@@ -737,19 +761,25 @@ async fn an_arrow_growth_names_members_by_a_unique_timestamp_as_a_build_does() {
         "the build joins every member"
     );
 
-    let tmp = TempDir::new().unwrap();
-    let server = serve_stamped(tmp.path()).await;
-    let (status, body) = patch_arrow(&server, STAMPED_LAYER, stamped_growth(microseconds)).await;
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(body["refused"], json!([]), "{body}");
-    assert_eq!(stamped_state(&server).await, expected);
+    for seen in [microseconds, microseconds_without_zone] {
+        let tmp = TempDir::new().unwrap();
+        let server = serve_stamped(tmp.path()).await;
+        let (status, body) = patch_arrow(&server, STAMPED_LAYER, stamped_growth(seen)).await;
+        assert_eq!(status, 200, "{body}");
+        assert_eq!(
+            body["refused"],
+            json!([{ "artifact": 2, "list": "members", "row": 3, "reason": "names_no_item" }]),
+            "the null member: {body}"
+        );
+        assert_eq!(stamped_state(&server).await, expected);
 
-    let server = restart(server, &tmp).await;
-    assert_eq!(
-        stamped_state(&server).await,
-        expected,
-        "a restart keeps the members"
-    );
+        let server = restart(server, &tmp).await;
+        assert_eq!(
+            stamped_state(&server).await,
+            expected,
+            "a restart keeps the members"
+        );
+    }
 }
 
 /// A timestamp in another unit than microseconds names no member, at a service or a build, and

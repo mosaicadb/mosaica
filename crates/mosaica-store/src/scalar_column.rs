@@ -70,15 +70,47 @@ pub fn carries(ty: ScalarType, category: bool, found: &DataType) -> bool {
 }
 
 /// The clause a refusal of a column of Arrow type `found` ends with where the column is a
-/// timestamp in a unit other than microseconds, which [`carries`] never reads; empty for any other
-/// type.
-pub fn unit_hint(found: &DataType) -> &'static str {
+/// timestamp in a unit other than microseconds and a microsecond timestamp would carry the
+/// declaration (`ty`, a category's where `category` is set); empty otherwise.
+pub fn unit_hint(ty: ScalarType, category: bool, found: &DataType) -> &'static str {
+    let microseconds = DataType::Timestamp(TimeUnit::Microsecond, None);
     match found {
-        DataType::Timestamp(unit, _) if *unit != TimeUnit::Microsecond => {
+        DataType::Timestamp(unit, _)
+            if *unit != TimeUnit::Microsecond && carries(ty, category, &microseconds) =>
+        {
             " (a timestamp is read only in microseconds, so cast it to timestamp[us])"
         }
         _ => "",
     }
+}
+
+/// An integer column of any width, or a timestamp in microseconds, as its values, a null staying
+/// null; `None` for any other column. These are the columns that name a unique integer or
+/// timestamp field's values, at a build's members file and a growth's member table alike.
+pub fn integer_cells(column: &dyn Array) -> Option<Vec<Option<i128>>> {
+    let any = column.as_any();
+    macro_rules! read {
+        ($ty:ty) => {
+            if let Some(values) = any.downcast_ref::<$ty>() {
+                return Some(values.iter().map(|v| v.map(i128::from)).collect());
+            }
+        };
+    }
+    read!(UInt8Array);
+    read!(UInt16Array);
+    read!(UInt32Array);
+    read!(UInt64Array);
+    read!(Int8Array);
+    read!(Int16Array);
+    read!(Int32Array);
+    read!(Int64Array);
+    if matches!(
+        column.data_type(),
+        DataType::Timestamp(TimeUnit::Microsecond, _)
+    ) {
+        read!(TimestampMicrosecondArray);
+    }
+    None
 }
 
 /// A category column's value keys, or `None` where [`carries`] says it cannot hold them.
@@ -315,6 +347,59 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_unit_hint_is_given_only_where_a_microsecond_timestamp_would_carry_the_declaration() {
+        let milliseconds = DataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into()));
+        for ty in DECLARED {
+            let hinted = !unit_hint(ty, false, &milliseconds).is_empty();
+            assert_eq!(
+                hinted,
+                ty == ScalarType::TimestampUs || ty.integer_range().is_some(),
+                "{ty:?}"
+            );
+            let microseconds = DataType::Timestamp(TimeUnit::Microsecond, None);
+            assert!(unit_hint(ty, false, &microseconds).is_empty(), "{ty:?}");
+            assert!(unit_hint(ty, false, &DataType::Utf8).is_empty(), "{ty:?}");
+        }
+        assert!(
+            unit_hint(ScalarType::U8, true, &milliseconds).is_empty(),
+            "a category"
+        );
+    }
+
+    #[test]
+    fn integer_cells_reads_what_carries_lets_name_an_integer() {
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(BooleanArray::from(vec![true])),
+            Arc::new(UInt8Array::from(vec![Some(1u8), None])),
+            Arc::new(UInt64Array::from(vec![u64::MAX])),
+            Arc::new(Int8Array::from(vec![-1i8])),
+            Arc::new(Int64Array::from(vec![i64::MIN])),
+            Arc::new(Float64Array::from(vec![1.0f64])),
+            Arc::new(StringArray::from(vec!["1"])),
+            Arc::new(TimestampMicrosecondArray::from(vec![-1i64]).with_timezone("UTC")),
+            Arc::new(TimestampMicrosecondArray::from(vec![-1i64])),
+            Arc::new(TimestampMillisecondArray::from(vec![1i64])),
+        ];
+        for column in &columns {
+            assert_eq!(
+                integer_cells(column.as_ref()).is_some(),
+                carries(ScalarType::I64, false, column.data_type()),
+                "{:?}",
+                column.data_type()
+            );
+        }
+        assert_eq!(
+            integer_cells(columns[1].as_ref()),
+            Some(vec![Some(1), None])
+        );
+        assert_eq!(
+            integer_cells(columns[2].as_ref()),
+            Some(vec![Some(i128::from(u64::MAX))])
+        );
+        assert_eq!(integer_cells(columns[7].as_ref()), Some(vec![Some(-1)]));
     }
 
     #[test]

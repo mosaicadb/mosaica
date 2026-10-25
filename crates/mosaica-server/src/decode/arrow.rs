@@ -210,7 +210,7 @@ fn check_columns<'b>(
                 d.name,
                 col.data_type(),
                 d.wire_type().arrow_type_name(),
-                scalar_column::unit_hint(col.data_type())
+                scalar_column::unit_hint(d.arrow_type, d.vocabulary.is_some(), col.data_type())
             )));
         }
     }
@@ -226,7 +226,7 @@ fn check_columns<'b>(
                 f.name,
                 col.data_type(),
                 scoped_wire_type(f).arrow_type_name(),
-                scalar_column::unit_hint(col.data_type())
+                scalar_column::unit_hint(f.arrow_type, f.vocabulary.is_some(), col.data_type())
             )));
         }
     }

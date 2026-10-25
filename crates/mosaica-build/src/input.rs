@@ -30,7 +30,7 @@ use std::path::Path;
 
 
 use arrow::array::{Array, UInt32Array, UInt64Array};
-use arrow::datatypes::{DataType, TimeUnit};
+use arrow::datatypes::DataType;
 use mosaica_store::access_column::AccessBatch;
 use mosaica_store::coordinates::{place, read_coordinates, ColumnError};
 use arrow::record_batch::RecordBatch;
@@ -1714,13 +1714,11 @@ impl BatchColumn {
                     attribute.name,
                     attribute.ty.arrow_type_name(),
                     column.data_type(),
-                    match column.data_type() {
-                        DataType::Timestamp(unit, _) if *unit != TimeUnit::Microsecond => {
-                            " (a timestamp is read only in microseconds, so cast it to \
-                             timestamp[us])"
-                        }
-                        _ => "",
-                    }
+                    mosaica_store::scalar_column::unit_hint(
+                        attribute.ty,
+                        attribute.vocabulary.is_some(),
+                        column.data_type()
+                    )
                 ),
             })
     }
@@ -1908,6 +1906,15 @@ mod tests {
             false,
             &DataType::Timestamp(TimeUnit::Millisecond, None)
         ));
+        let milliseconds: ArrayRef =
+            Arc::new(arrow::array::TimestampMillisecondArray::from(vec![1i64]));
+        assert!(BatchColumn::decode_values(
+            path,
+            &milliseconds,
+            &attribute(ScalarType::TimestampUs, None),
+            &mut HashMap::new()
+        )
+        .is_err());
     }
 
     /// A roster integer is held as an `i64`, so a `uint64` past `i64::MAX` is refused rather
