@@ -1,6 +1,6 @@
 # Clients
 
-Mosaica has three clients beside the HTTP API: a Python package, a TypeScript client with web components, and the `mosaica` command. The Python and TypeScript clients reach every core capability. The command builds, serves and reads a database and manages its users, but cannot write to a running server or draw a map. The [capabilities](../reference/capabilities.md) table names the call for each capability on each surface.
+Mosaica has three clients beside the HTTP API: a Python package, a TypeScript client with web components, and the `mosaica` command. The Python and TypeScript clients reach every core capability. The command builds, serves and reads a database and manages its users, but cannot write data or declarations to a running server, or draw a map. The [capabilities](../reference/capabilities.md) table names the call for each capability on each surface.
 
 ## Which client
 

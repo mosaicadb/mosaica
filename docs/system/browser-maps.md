@@ -43,12 +43,12 @@ The [TypeScript reference](../reference/typescript.md) and the [components refer
 The store exists to make the database cheap and simple to use from a browser. Its caching follows how Mosaica serves a map, so it asks the server for as little as it can and reuses everything an answer allows:
 
 - **Samples nest across zoom levels.** A tile's points are always the start of the points its deeper tiles draw. So while new tiles load after a zoom, the store draws the points it already holds from another depth in their place. The map never goes blank, and the stand-in points are ones the finished map will draw too.
-- **It asks only for tiles it does not hold.** The server does no work for a tile a request leaves out, so a pan costs only the tiles newly on screen. Held tiles are kept within a memory budget, and the least recently drawn leave first.
+- **It asks only for tiles it does not hold.** The server does no work for a tile a request leaves out, so a pan costs only the tiles newly on screen. Held tiles are kept within a memory budget. When it is full, tiles of other views leave first, then empty tiles, then the deepest, then the least recently used.
 - **It fetches ahead.** Once the camera settles, it asks for a margin around the screen, reaching further in the direction the camera was moving.
 - **It picks the zoom level** whose tiles give about as many points as its point budget, 250,000 by default.
 - **It draws as answers arrive.** Counts come first, then points, decoded off the page's main thread and drawn tile by tile.
 - **It knows when what it holds is out of date.** It compares each answer's content key and identity key with what it holds, marks the view stale when the data has moved on, and drops everything when the viewer changes.
-- **It batches the panels' counts.** A component registers the breakdowns it needs, such as a histogram for a field card. The store sends registrations with the same filters as one aggregate request, and asks again only when the filter, the highlight, the selected region or the view changes, at a refresh, and when the data changes.
+- **It batches the panels' counts.** A component registers the breakdowns it needs, such as a histogram for a field card. The store sends registrations asked for together that differ only in their groupings as one aggregate request, and asks again only when the filter, the highlight, the selected region or the view changes, at a refresh, and when the data changes.
 
 It also handles the rest of talking to the server:
 
@@ -73,9 +73,9 @@ A refusal carries the server's error code and the HTTP status. An error with no 
 
 Flags sit beside the state:
 
-- **`stale`**: the data has changed since the points on screen were fetched. The store does not fetch again by itself: it marks the view, and a refresh is one action away.
+- **`stale`**: the data has changed since the points on screen were fetched. The store keeps the points on screen and marks the view, and a refresh is one action away. It fetches the topics and the panels' counts again at once.
 - **`unreachable`**: a request could not reach the server, or a proxy in front of it answered `502`. The store asks the server again after a second, then twice as long each time, up to 30 seconds, and redraws once it answers. A refused request, or an `authorise` that fails, is not an outage.
-- **`expired`**: the session has ended, and a new token is needed. A `401` on a token that had worked ends the session, and the store calls `authorise` once for a new one.
+- **`expired`**: the session has ended, and a new token is needed. On a `401` for a token that had worked, the store calls `authorise` once for a new one. When the server answers `403 expired-token`, because it ended the session, the store shows `expired` and leaves renewal to the host.
 
 A store given a `MosaicaClient` of its own does not watch that client's requests, so `unreachable` stays false and a `401` does not call `authorise`.
 
@@ -83,12 +83,12 @@ A store given a `MosaicaClient` of its own does not watch that client's requests
 
 | What happened | What the store does |
 |---|---|
-| The data changed under the same viewer | Marks the view `stale`, and keeps what is on screen until it is refreshed |
+| The data changed under the same viewer | Marks the view `stale` and keeps the points on screen until it is refreshed. Fetches topics and counts again |
 | An answer carries a different identity key: another viewer, a renewed token whose viewer now holds different access, or a compaction | Drops what the server answered, reads the deployment's description again, and redraws |
-| The host calls `clear()` | The same, for a host that changes viewer itself |
+| The host calls `clear()` | The same, and also drops a drawn region and the token, then asks `authorise` again. For a host that changes viewer itself |
 | The database was rebuilt | Every `mosaica_id` it holds names nothing. Read the items again by a unique field's values |
 
-When it drops what the server answered, the store keeps the host's own choices: a drawn region, the filter controls, the layers, the colouring, the view and the camera. It drops what came from the server, including a topic picked as a filter or a region taken from a topic's shape.
+When the identity key changes, the store keeps the host's own choices: a drawn region, the filter controls, the layers, the colouring, the view and the camera. It drops what came from the server, including a topic picked as a filter or a region taken from a topic's shape.
 
 After a token renewal, the store asks whose the new token is. If the answer does not come, because the server is busy, starting or unreachable, it asks again with a growing wait until an answer confirms the viewer or shows another. Until then the previous viewer's data stays on screen, so a host that changes viewer calls `clear()` rather than relying on renewal.
 
@@ -96,7 +96,7 @@ A merge of segments never reaches a client. A compaction reaches it only through
 
 ### Views
 
-The store keeps what it has fetched for each view the viewer has visited, so a view they return to is as they left it. All views share one memory budget, and the least recently drawn leave first.
+The store keeps what it has fetched for each view the viewer has visited, so a view they return to is as they left it. All views share one memory budget, and another view's tiles leave before the current view's.
 
 - **Within a view group sharing one layout**, such as a year shown quarter by quarter, a switch keeps the camera and the selection, and asks the next view for the same tiles.
 - **Between layouts**, a switch drops the selection and the camera, since a position in one layout means nothing in another. The host sets a camera for the new view. The components fit it to the view's extent.
@@ -105,7 +105,7 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 
 - **The level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
 - **Density shading**, counted with the aggregate route, so it follows the filter and the highlight as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
-- **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from Viridis by default, Cividis or Magma. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
+- **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from a ramp: Viridis by default, Cividis, Magma, Greys or Red-blue. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
 - **Status in plain words**, on the status strip and over the map: Connecting or Updating, Up to date, Nothing in view, View refused, Server did not answer (with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
 
 ## Not built yet
