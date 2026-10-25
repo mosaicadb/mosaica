@@ -9,7 +9,7 @@ points        = "points.parquet"
 feature_class = "vocab-feature-class.parquet"
 feature_code  = "vocab-feature-code.parquet"
 country       = "vocab-country.parquet"
-admin1        = "vocab-admin1.parquet"
+division      = "vocab-division.parquet"
 members_admin = "members-admin.parquet"
 admin         = "artifacts-admin.parquet"
 
@@ -20,13 +20,15 @@ source = "points"
 # Mercator's whole domain, so the frame is the world square and the build does the projection.
 #
 # GeoNames has no rights field, so each feature's access term is its country code, standing in for
-# a compartment: a principal is a set of countries. A feature with no country is `public`.
+# a compartment: a principal is a set of countries. A feature with no country is `public`. The term
+# is the code, in `country_code`, because a country's name is not a term: a label is an expression,
+# and "Bosnia and Herzegovina" reads as three terms.
 [[view]]
 name             = "world"
 title            = "GeoNames"
 projection       = "web_mercator"
 extent           = { lon = [-180.0, 180.0], lat = [-85.0511287798066, 85.0511287798066] }
-point_visibility = { field = "country", default = "public" }
+point_visibility = { field = "country_code", default = "public" }
 
 # Feature classes and codes are GeoNames' published lists, so their names disclose nothing about
 # this data. A country or a division is contained in one compartment, so its name is served only
@@ -55,13 +57,15 @@ value_set  = "closed"
 visibility = "derived"
 source     = "country"
 
+# A first-level division's name followed by its country's, since division names repeat across
+# countries: "East Nusa Tenggara, Indonesia".
 [[vocabulary]]
-name       = "admin1"
+name       = "division"
 title      = "First-level administrative division"
 width      = "u16"
 value_set  = "closed"
 visibility = "derived"
-source     = "admin1"
+source     = "division"
 
 # The GeoNames id. Every file names a feature by it: the points as `geonameid`, the members as
 # `entity`.
@@ -101,10 +105,10 @@ render     = true
 index      = true
 
 [[attribute]]
-name       = "admin1"
+name       = "division"
 title      = "First-level division"
 type       = "category"
-vocabulary = "admin1"
+vocabulary = "division"
 index      = true
 
 # Null where GeoNames gives no population.

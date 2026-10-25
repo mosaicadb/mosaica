@@ -6,15 +6,19 @@
 
 | file | rows | contents |
 |---|---|---|
-| `points.parquet` | 150,000 | `geonameid`, `lon`, `lat`, `name`, `feature_class`, `feature_code`, `country`, `admin1`, `population` |
+| `points.parquet` | 150,000 | `geonameid`, `lon`, `lat`, `name`, `feature_class`, `feature_code`, `country`, `division`, `population`, `country_code` |
 | `vocab-feature-class.parquet` | 9 | the feature classes, each a short word with GeoNames' description as its title |
 | `vocab-feature-code.parquet` | 475 | GeoNames' feature codes, keyed `class.code`, with their names |
-| `vocab-country.parquet` | 244 | ISO country codes and country names |
-| `vocab-admin1.parquet` | 3,460 | first-level divisions, keyed `country.code`, with their names |
-| `members-admin.parquet` | 150,000 | each feature's country and first-level division |
+| `vocab-country.parquet` | 244 | the country names |
+| `vocab-division.parquet` | 3,216 | the first-level divisions, each named with its country |
+| `members-admin.parquet` | 150,000 | each feature's country and first-level division, by their codes |
 | `artifacts-admin.parquet` | 3,705 | the name of each country and division |
 
-Coordinates are WGS84 degrees as GeoNames gives them. A population of 0 in GeoNames is null here. The feature classes are shown as words rather than GeoNames' letters:
+Coordinates are WGS84 degrees as GeoNames gives them. A population of 0 in GeoNames is null here.
+
+`country` is the country's name, and `division` is the first-level division's name followed by its country's, such as `East Nusa Tenggara, Indonesia`, since division names repeat across countries. `division` is null for 2,503 features: 337 that GeoNames files under no division, and 2,166 filed under a division code its code table does not name, such as a country's `00` for no division. `country_code` is the ISO code, which `schema.toml` uses as each feature's access term.
+
+The feature classes are shown as words rather than GeoNames' letters:
 
 | letter | word | GeoNames' description |
 |---|---|---|
@@ -40,7 +44,7 @@ Two features lie south of 85.0511° S, the limit of Web Mercator; the build plac
 
 ## Licence and attribution
 
-GeoNames data is licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/). The licensed material is the GeoNames export at <https://download.geonames.org/export/dump/>. This dataset is a modified extract of it: a subset of the features and columns, with the feature classes renamed, populations of 0 made null, and administrative codes prefixed by their country code.
+GeoNames data is licensed under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/). The licensed material is the GeoNames export at <https://download.geonames.org/export/dump/>. This dataset is a modified extract of it: a subset of the features and columns, with the feature classes renamed, populations of 0 made null, countries and first-level divisions given by name, and administrative codes prefixed by their country code.
 
 Attribution: GeoNames, [www.geonames.org](https://www.geonames.org/).
 

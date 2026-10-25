@@ -332,7 +332,7 @@ corpus_dir_of() {
   esac
 }
 # The column holding each item's access terms, from which the candidate principals are measured.
-access_of() { case "$1" in places) echo country ;; *) echo categories ;; esac; }
+access_of() { case "$1" in places) echo country_code ;; *) echo categories ;; esac; }
 # The declaration each scale is built from. The notebook writes its own beside its files, with
 # every source path relative to it (configuration.md §3); the demo scales share one generator.
 schema_of()  { case "$1" in notebook*|arxiv|places) echo "$(corpus_dir_of "$1")/schema.toml" ;; *) echo "$DATA/demo/config-$1.toml" ;; esac; }

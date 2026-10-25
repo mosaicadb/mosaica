@@ -21,8 +21,8 @@
     "artifacts-admin.parquet": 3705,
     "members-admin.parquet": 150000,
     "points.parquet": 150000,
-    "vocab-admin1.parquet": 3460,
     "vocab-country.parquet": 244,
+    "vocab-division.parquet": 3216,
     "vocab-feature-class.parquet": 9,
     "vocab-feature-code.parquet": 475
   }

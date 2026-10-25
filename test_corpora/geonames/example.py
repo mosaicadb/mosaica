@@ -13,10 +13,17 @@ script reads nothing but the ladder's directory.
 
 The declaration follows the ladder rung's: lon and lat as GeoNames publishes them, a
 `web_mercator` view over Web Mercator's whole domain, each feature visible to a principal holding
-its country, and an administrative layer of two tiers, country over first-level division, each
-named. A feature class is a short word rather than GeoNames' letter, so a legend reads without a
-key; the vocabulary's title is GeoNames' own description. A population of 0 is GeoNames saying it
+its country's code, and an administrative layer of two tiers, country over first-level division,
+each named. A feature class is a short word rather than GeoNames' letter, so a legend reads without
+a key; the vocabulary's title is GeoNames' own description. A population of 0 is GeoNames saying it
 has none, and is null here.
+
+The points carry names, not codes, so a filter or a card reads "Indonesia" rather than `ID`.
+`country` is the country's name and `division` the first-level division's, followed by its
+country's name, since division names repeat across countries. (`region` is a reserved word in a
+filter.) A division GeoNames' code table does not name is null. `country_code` stays, because an access label
+is an expression of terms and a country's name is not a term. The layer's member keys are the
+codes, with the names as the annotations' contents.
 
 Each feature is named by its GeoNames id, and the member file names it the same way.
 
@@ -90,7 +97,7 @@ def main() -> None:
         SELECT r.geonameid, r.longitude AS lon, r.latitude AS lat, r.name,
                w.word AS feature_class,
                r.feature_class || '.' || r.feature_code AS feature_code,
-               r.country_code AS country,
+               r.country_code,
                -- Country-qualified, as GeoNames' own admin1 table is keyed: a bare code merges
                -- regions of different countries.
                CASE WHEN r.admin1_code IS NOT NULL
@@ -106,11 +113,23 @@ def main() -> None:
     print(f"{kept:,} features: {populous:,} populated places of {args.min_population:,} or more, "
           f"{kept - populous:,} drawn from the other {len(others):,} with seed {args.seed}")
 
+    # A country code the code table lacks is its own name, as in the ladder. A division code it
+    # lacks, such as a country's `00` for "no division", names nothing, so `division` is null there
+    # and the code is kept only in the layer.
+    con.execute(
+        f"""CREATE TABLE names AS
+            SELECT p.geonameid, coalesce(c.title, p.country_code) AS country,
+                   nullif(a.title, a.key)
+                       || coalesce(', ' || coalesce(c.title, p.country_code), '') AS division
+            FROM places p
+            LEFT JOIN '{src / "vocab-country.parquet"}' c ON c.key = p.country_code
+            LEFT JOIN '{src / "vocab-admin1.parquet"}' a ON a.key = p.admin1"""
+    )
     con.execute(
         f"""COPY (
-            SELECT geonameid, lon, lat, name, feature_class, feature_code, country, admin1,
-                   population
-            FROM places ORDER BY geonameid
+            SELECT geonameid, lon, lat, name, feature_class, feature_code, country, division,
+                   population, country_code
+            FROM places JOIN names USING (geonameid) ORDER BY geonameid
         ) TO '{out / "points.parquet"}' (FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 19)"""
     )
 
@@ -123,36 +142,48 @@ def main() -> None:
             FROM words WHERE word IN (SELECT feature_class FROM places)
         ) TO '{out / "vocab-feature-class.parquet"}' (FORMAT parquet, COMPRESSION zstd)"""
     )
-    for name, column in [("feature-code", "feature_code"), ("country", "country"),
-                         ("admin1", "admin1")]:
+    con.execute(
+        f"""COPY (
+            SELECT key, row_number() OVER (ORDER BY key)::UINTEGER AS code,
+                   coalesce(v.title, key) AS title
+            FROM (SELECT DISTINCT feature_code AS key FROM places WHERE feature_code IS NOT NULL)
+            LEFT JOIN '{src / "vocab-feature-code.parquet"}' v USING (key)
+            ORDER BY key
+        ) TO '{out / "vocab-feature-code.parquet"}' (FORMAT parquet, COMPRESSION zstd)"""
+    )
+    # A country and a division are their names, so a value is its own title.
+    for name, column in [("country", "country"), ("division", "division")]:
         con.execute(
             f"""COPY (
-                SELECT key, row_number() OVER (ORDER BY key)::UINTEGER AS code,
-                       coalesce(v.title, key) AS title
-                FROM (SELECT DISTINCT {column} AS key FROM places WHERE {column} IS NOT NULL)
-                LEFT JOIN '{src / f"vocab-{name}.parquet"}' v USING (key)
+                SELECT key, row_number() OVER (ORDER BY key)::UINTEGER AS code
+                FROM (SELECT DISTINCT {column} AS key FROM names WHERE {column} IS NOT NULL)
                 ORDER BY key
             ) TO '{out / f"vocab-{name}.parquet"}' (FORMAT parquet, COMPRESSION zstd)"""
         )
 
     # The administrative layer: one member row per feature, its country and its first-level
-    # division as the two tiers, and one artifact per region carrying its name. A feature with a
-    # division and no country sits under a `-` country, which is a real key naming that set.
+    # division as the two tiers, keyed by their codes, and one artifact per region carrying its
+    # name. A feature with a division and no country sits under a `-` country, which is a real key
+    # naming that set.
     con.execute(
         f"""COPY (
             SELECT geonameid AS entity,
-                   [CASE WHEN country IS NOT NULL OR admin1 IS NOT NULL
-                         THEN coalesce(country, '{NOT_RECORDED}') END, admin1] AS key
+                   [CASE WHEN country_code IS NOT NULL OR admin1 IS NOT NULL
+                         THEN coalesce(country_code, '{NOT_RECORDED}') END, admin1] AS key
             FROM places ORDER BY geonameid
         ) TO '{out / "members-admin.parquet"}' (FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 19)"""
     )
     con.execute(
         f"""COPY (
             SELECT level::UINTEGER AS level, key, [[title]] AS contents FROM (
-                SELECT 0 AS level, key, title FROM '{out / "vocab-country.parquet"}'
+                SELECT DISTINCT 0 AS level, country_code AS key, country AS title
+                    FROM places JOIN names USING (geonameid) WHERE country_code IS NOT NULL
                 UNION ALL SELECT 0, '{NOT_RECORDED}', 'No country recorded'
-                    WHERE EXISTS (SELECT 1 FROM places WHERE country IS NULL AND admin1 IS NOT NULL)
-                UNION ALL SELECT 1, key, title FROM '{out / "vocab-admin1.parquet"}'
+                    WHERE EXISTS (SELECT 1 FROM places
+                                  WHERE country_code IS NULL AND admin1 IS NOT NULL)
+                UNION ALL SELECT DISTINCT 1, admin1, coalesce(a.title, admin1)
+                    FROM places LEFT JOIN '{src / "vocab-admin1.parquet"}' a ON a.key = admin1
+                    WHERE admin1 IS NOT NULL
             ) ORDER BY level, key
         ) TO '{out / "artifacts-admin.parquet"}' (FORMAT parquet, COMPRESSION zstd)"""
     )
