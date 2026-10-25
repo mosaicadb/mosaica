@@ -4,7 +4,7 @@
 #
 #     marimo export ipynb clients/py/examples/01_getting_started.py -o clients/py/examples/01_getting_started.ipynb
 #
-# The docs site includes the code between each pair of `--8<--` markers.
+# Each pair of `--8<--` markers names a section for the docs site to include.
 
 import marimo
 
@@ -134,8 +134,8 @@ def _():
 def _(mo):
     mo.md(r"""
     `create()` with no argument makes the database in a temporary directory, which is deleted
-    when the notebook's kernel stops. Pass a path, as in `mosaica.create("places-db")`, to keep
-    it.
+    when Python exits, or by the next `create()` if the process ended without cleaning up. Pass a
+    path, as in `mosaica.create("places-db")`, to keep it.
 
     ## Declare what it holds
 
@@ -180,7 +180,7 @@ def _(mo):
     and counted.
 
     Each has a cost. A rendered column makes every point the server sends larger, so render
-    only what the map needs, which here is the feature class for colour. An index takes disk
+    only what the map needs, which here is the feature class for colour. An index takes disc
     and build time, so index the columns people will filter on. We index `name` to search it,
     `population` to filter on a range, and `feature_class` and `division` to filter and count by
     them. The rest are details, which cost least.
@@ -231,7 +231,7 @@ def _(db):
 def _(mo):
     mo.md(r"""
     The first commit builds the database. It places every item on the view's grid and stores
-    neighbouring places next to each other on disk, so that drawing one part of the map reads
+    neighbouring places next to each other on disc, so that drawing one part of the map reads
     one stretch of the file. Then it starts a Mosaica server for the database on a free local
     port.
 
@@ -343,7 +343,9 @@ def _(mo):
 @app.cell
 def _(db):
     # --8<-- [start:counts]
-    (by_class,) = db.aggregate("world", [{"by": {"field": "feature_class", "top": 9}, "count": True}])
+    (by_class,) = db.aggregate(
+        "world", [{"by": {"field": "feature_class", "top": 9}, "count": True}]
+    )
     by_class.to_pandas()
     # --8<-- [end:counts]
     return

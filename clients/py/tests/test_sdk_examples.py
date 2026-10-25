@@ -337,6 +337,8 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
         san = sum("san" in words for words in tokens(places["name"].to_pylist()))
         in_region = pc.equal(places["division"], "East Nusa Tenggara, Indonesia")
         assert counts == [big, san, pc.sum(in_region).as_py()]
+        # The figures the prose quotes.
+        assert counts == [613, 1310, 314]
         assert namespace["db"].view("world").count() == places.num_rows
 
         # Every class and the places with none, largest first, as pyarrow counts them.
@@ -345,6 +347,7 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
         want = {entry["values"]: entry["counts"] for entry in classes}
         assert {(None if pd.isna(key) else key): n for key, n in by_class.items()} == want
         assert list(by_class) == sorted(by_class, reverse=True)
+        assert want[None] == 47
 
         # The westernmost place filed under the region, which the outlier step finds.
         region = places.filter(in_region)
@@ -355,6 +358,7 @@ def test_getting_started_shows_the_counts_its_data_holds(stub_marimo, stub_bundl
             west["name"][0].as_py(),
             west["lon"][0].as_py(),
         )
+        assert found["name"] == "Rokot"
 
         # The three maps: everything, then each of the two selections.
         assert [widget.filters for _, widget in maps] == [

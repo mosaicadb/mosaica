@@ -21,9 +21,9 @@ has none, and is null here.
 The points carry names, not codes, so a filter or a card reads "Indonesia" rather than `ID`.
 `country` is the country's name and `division` the first-level division's, followed by its
 country's name, since division names repeat across countries. (`region` is a reserved word in a
-filter.) A division GeoNames' code table does not name is null. `country_code` stays, because an access label
-is an expression of terms and a country's name is not a term. The layer's member keys are the
-codes, with the names as the annotations' contents.
+filter.) A division GeoNames' code table does not name is null. `country_code` stays, because an
+access label is an expression of terms and a country's name is not a term. The layer's member
+keys are the codes, with the names as the annotations' contents.
 
 Each feature is named by its GeoNames id, and the member file names it the same way.
 

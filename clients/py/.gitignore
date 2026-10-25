@@ -8,3 +8,5 @@ build/
 *.egg-info/
 .venv/
 .pytest_cache/
+# marimo's session cache, written beside a notebook it opens.
+__marimo__/
