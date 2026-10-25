@@ -11,7 +11,8 @@ use crate::Error;
 pub enum Permission {
     /// Authorising a session for itself, and every viewer request made with that session.
     Read,
-    /// Insert, delete, suppress, annotate and declare, masked by the principal's own terms.
+    /// Insert, delete, suppress and annotate, masked by the principal's own terms, and flush and
+    /// compaction.
     Write,
     /// Authorising a session for another principal.
     AuthoriseAs,
@@ -20,7 +21,8 @@ pub enum Permission {
     /// With `read`, a session whose authorised set is the whole corpus and which satisfies every
     /// label gate.
     ReadAll,
-    /// With `write`, writes against the whole corpus, and flush and compaction.
+    /// With `write`, writes against the whole corpus, and every declaration and drop: attributes,
+    /// vocabularies, layers, views, view groups and shards.
     WriteAll,
 }
 
