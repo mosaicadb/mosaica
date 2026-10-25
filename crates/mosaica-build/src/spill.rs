@@ -53,31 +53,36 @@ use crate::error::{BuildError, Result};
 ///
 /// A filesystem that does not implement it (`EOPNOTSUPP`, `ENOSYS`, or `EINVAL` from one that
 /// refuses the request) falls back to `set_len` and the sparse behaviour above — worse than the
-/// allocation, better than refusing to build there at all.
+/// allocation, better than refusing to build there at all. A platform without `posix_fallocate`,
+/// macOS, always takes that fallback.
 fn reserve(file: &File, path: &Path, from: u64, to: u64) -> Result<()> {
-    use std::os::unix::io::AsRawFd;
     if to <= from {
         return Ok(());
     }
-    // SAFETY: `fd` is this call's own open file and `posix_fallocate` touches nothing else. It
-    // returns an errno rather than setting one, so there is no `errno` read to race.
-    let code = unsafe {
-        libc::posix_fallocate(
-            file.as_raw_fd(),
-            from as libc::off_t,
-            (to - from) as libc::off_t,
-        )
-    };
-    match code {
-        0 => Ok(()),
-        libc::EOPNOTSUPP | libc::ENOSYS | libc::EINVAL => {
-            file.set_len(to).map_err(|e| BuildError::io(path, e))
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: `fd` is this call's own open file and `posix_fallocate` touches nothing else. It
+        // returns an errno rather than setting one, so there is no `errno` read to race.
+        let code = unsafe {
+            libc::posix_fallocate(
+                file.as_raw_fd(),
+                from as libc::off_t,
+                (to - from) as libc::off_t,
+            )
+        };
+        match code {
+            0 => return Ok(()),
+            libc::EOPNOTSUPP | libc::ENOSYS | libc::EINVAL => {}
+            errno => {
+                return Err(BuildError::io(
+                    path,
+                    std::io::Error::from_raw_os_error(errno),
+                ))
+            }
         }
-        errno => Err(BuildError::io(
-            path,
-            std::io::Error::from_raw_os_error(errno),
-        )),
     }
+    file.set_len(to).map_err(|e| BuildError::io(path, e))
 }
 
 /// An entity-indexed scratch array of a plain-old-data element, backed by a file under
@@ -429,7 +434,7 @@ impl MappedArena {
             .file
             .try_clone()
             .map_err(|e| BuildError::io(&self.path, e))?;
-        advise(&file, lo, hi - lo, libc::POSIX_FADV_SEQUENTIAL);
+        advise(&file, lo, hi - lo, Hint::Sequential);
         Ok(ArenaWindow {
             file,
             path: self.path.clone(),
@@ -503,10 +508,23 @@ impl MappedArena {
     }
 }
 
+/// The `posix_fadvise` advice this module gives.
+#[derive(Clone, Copy)]
+enum Hint {
+    Sequential,
+    DontNeed,
+}
+
 /// `posix_fadvise`, best effort: every call this module makes is a hint, and a filesystem that
-/// declines one leaves the walk correct and slower.
-fn advise(file: &File, offset: u64, len: u64, advice: libc::c_int) {
+/// declines one leaves the walk correct and slower. A platform without `posix_fadvise`, macOS,
+/// gives no advice.
+#[cfg(target_os = "linux")]
+fn advise(file: &File, offset: u64, len: u64, hint: Hint) {
     use std::os::unix::io::AsRawFd;
+    let advice = match hint {
+        Hint::Sequential => libc::POSIX_FADV_SEQUENTIAL,
+        Hint::DontNeed => libc::POSIX_FADV_DONTNEED,
+    };
     // SAFETY: the descriptor is the caller's own open file and `posix_fadvise` changes nothing
     // but the kernel's readahead and page-cache bookkeeping for it.
     unsafe {
@@ -518,6 +536,9 @@ fn advise(file: &File, offset: u64, len: u64, advice: libc::c_int) {
         );
     }
 }
+
+#[cfg(not(target_os = "linux"))]
+fn advise(_file: &File, _offset: u64, _len: u64, _hint: Hint) {}
 
 /// One contiguous byte range of a [`MappedArena`], read **front to back through the descriptor**
 /// rather than through the mapping.
@@ -601,7 +622,7 @@ impl ArenaWindow {
         let reached = self.offset();
         if reached - self.released >= ARENA_WINDOW_BUF as u64 {
             let len = reached - self.released;
-            advise(&self.file, self.released, len, libc::POSIX_FADV_DONTNEED);
+            advise(&self.file, self.released, len, Hint::DontNeed);
             self.released = reached;
         }
     }
@@ -615,7 +636,7 @@ impl Drop for ArenaWindow {
                 &self.file,
                 self.released,
                 reached - self.released,
-                libc::POSIX_FADV_DONTNEED,
+                Hint::DontNeed,
             );
         }
     }
