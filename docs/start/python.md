@@ -4,7 +4,7 @@ The Python tutorial is available as a Jupyter or marimo notebook in the reposito
 
 ## Run it
 
-You need Python 3.10 or later and a clone of the repository, which holds the notebook and the data. The first two installs build from source, so they also need Rust, a C compiler and Node.js 22.15 or later. [Install and configure](install.md) has the details.
+You need Python 3.10 or later and a clone of the repository, which holds the notebook and the data. The client builds from source, so you also need Rust, a C compiler and Node.js 22.15 or later. [Install and configure](install.md) has the details.
 
 === "Jupyter"
 
