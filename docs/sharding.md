@@ -1021,7 +1021,7 @@ settled the order pool ids are issued in (§4.1) until larger corpora are measur
 | Figure | Class | Source |
 |---|---|---|
 | GBIF: 3,495,729,729 items at a high water of 3,495,729,729 | measured | `probes/2026-10-05-serving-layers-bench/` |
-| one level's figures fill on GBIF, 0.24 s to 12.5 s by coverage and level | measured | [serving](system/serving.md#a-levels-figures), `probes/2026-10-06-first-open-fills/` |
+| one level's figures fill on GBIF, 0.24 s to 12.5 s by coverage and level | measured | [serving](system/serving.md#what-the-server-keeps-ready), `probes/2026-10-06-first-open-fills/` |
 | edit-freed ids stop the high water rising after two rounds on GeoNames | measured | `probes/2026-10-10-churn-reuse/` |
 | counting a 256-tile request at depth 12, 50% coverage: 0.49 ms at N = 1, 4.5 ms at N = 8 | measured, synthetic, one thread, before term images | `probes/2026-09-04-epoch-shard-treemap-mask/` |
 | counting a 3,000-tile contiguous request at depth 10, 10% coverage: 8.0 ms today and 0.38 ms with `count_ranges` at N = 1; 875 ms and 8.5 ms at N = 100 | measured, synthetic, one thread, 4 cores | `probes/2026-10-09-shard-read-costs/` |
