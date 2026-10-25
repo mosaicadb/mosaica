@@ -696,7 +696,9 @@ fn a_negation_over_a_field_declared_while_running_answers_as_one_declared_at_the
     ];
     let mut ingested = Vec::new();
     for engine in &engines {
-        let entity = item_of_id(engine, suppressed).unwrap().expect("a built item");
+        let entity = item_of_id(engine, suppressed)
+            .unwrap()
+            .expect("a built item");
         engine
             .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
             .unwrap();
@@ -717,7 +719,12 @@ fn a_negation_over_a_field_declared_while_running_answers_as_one_declared_at_the
     let built_items = |engine: &Engine| -> Vec<u64> {
         let mut ids: Vec<u64> = (0..N_ITEMS)
             .filter(|&s| subset_sees(s) && s != suppressed)
-            .map(|s| id(engine, item_of_id(engine, s).unwrap().expect("a built item")))
+            .map(|s| {
+                id(
+                    engine,
+                    item_of_id(engine, s).unwrap().expect("a built item"),
+                )
+            })
             .collect();
         ids.sort_unstable();
         ids

@@ -546,7 +546,9 @@ fn a_negated_highlight_lights_only_visible_items() {
         config_uncapped(),
     )
     .expect("the bundle opens");
-    engine.start_write_executor(8).expect("the executor starts once");
+    engine
+        .start_write_executor(8)
+        .expect("the executor starts once");
     // `archive` is drawn and `topic` indexed only, so the tree mixes both spaces.
     let negation = FilterExpr::NoneOf(vec![
         category_is(&fx, "archive", "xx"),
@@ -557,13 +559,18 @@ fn a_negated_highlight_lights_only_visible_items() {
         .find(|&e| subset_sees(e) && kept(e))
         .expect("a visible item the negation keeps");
     assert!((0..N).any(|e| !subset_sees(e) && kept(e)));
-    let entity = item_of_id(&engine, suppressed).unwrap().expect("a built item");
+    let entity = item_of_id(&engine, suppressed)
+        .unwrap()
+        .expect("a built item");
     engine
         .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
         .unwrap();
     let id_of = |e: u64| {
         let entity = item_of_id(&engine, e).unwrap().expect("a built item");
-        engine.mosaica_id_of(entity).expect("identity is computable").raw()
+        engine
+            .mosaica_id_of(entity)
+            .expect("identity is computable")
+            .raw()
     };
     let want: std::collections::BTreeSet<u64> = (0..N)
         .filter(|&e| subset_sees(e) && e != suppressed && kept(e))
@@ -578,7 +585,11 @@ fn a_negated_highlight_lights_only_visible_items() {
         Ask::new().highlight(negation),
     );
     assert_eq!(highlighted_total(&lit), want.len() as u64);
-    let bits = lit.points.highlighted.as_ref().expect("a highlight carries the column");
+    let bits = lit
+        .points
+        .highlighted
+        .as_ref()
+        .expect("a highlight carries the column");
     let lit_ids: std::collections::BTreeSet<u64> = lit
         .points
         .mosaica_ids

@@ -1144,6 +1144,55 @@ fn member_of_and_a_published_region_gate_a_split_artifact_over_every_shard() {
     }
 }
 
+/// A negation over two fields keeps, over every shard, each item a viewer sees that no branch
+/// matches, and neither a suppressed item it would keep nor one outside the viewer's grant; the
+/// viewport under it, with a negated highlight, is one shard's.
+#[test]
+fn a_negation_keeps_the_visible_items_no_branch_matches_over_every_shard() {
+    let pair = Pair::new();
+    let negation = || FilterExpr::NoneOf(vec![scored(), alpha()]);
+    let kept = |e: u64| !(10..=30).contains(&score(e)) && cat(e) != "alpha";
+    let suppressed = (0..N)
+        .find(|&e| NARROW.contains(&e) && kept(e))
+        .expect("an item the narrow viewer sees that the negation keeps");
+    for built in [&pair.one, &pair.several] {
+        let entity = item_of_id(&built.engine, suppressed)
+            .unwrap()
+            .expect("a built item");
+        built
+            .engine
+            .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+            .unwrap();
+    }
+    for (viewer, credential) in viewers() {
+        let sees = |e: u64| match viewer {
+            "full" => true,
+            "subset" => e.is_multiple_of(3),
+            _ => NARROW.contains(&e),
+        };
+        let want: BTreeSet<u64> = (0..N)
+            .filter(|&e| sees(e) && e != suppressed && kept(e))
+            .collect();
+        assert!(!want.is_empty(), "{viewer}");
+        for built in [&pair.one, &pair.several] {
+            let session = built.engine.authorise(&credential).unwrap();
+            let read = Items::new(RecordsOrder::Stored).filter(negation());
+            let got: BTreeSet<u64> = read_items(&built.engine, &session, &read)
+                .rows_with_ids
+                .into_iter()
+                .map(|(_, id)| id)
+                .collect();
+            assert_eq!(got, want, "{viewer}");
+        }
+    }
+    pair.same("the viewport under a negation", |built, session| {
+        let request = ViewportRequest::new("s0", 2, WHOLE_MAP, N as usize)
+            .filter(negation())
+            .highlight(FilterExpr::NoneOf(vec![alpha()]));
+        viewport(built, session, request)
+    });
+}
+
 /// Bulk artifacts and browse count a filter's matches in each artifact over every shard, `split`'s
 /// among them, before ordering and keeping.
 #[test]

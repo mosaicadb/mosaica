@@ -934,13 +934,18 @@ fn a_negation_counts_only_the_visible_items_it_keeps() {
             .any(|i| !i.subset && kept(i) && i.shade.as_deref() == Some("hidden")),
         "an item outside the grant the negation would keep carries `hidden`"
     );
-    let entity = item_of_id(engine, suppressed).unwrap().expect("a built item");
+    let entity = item_of_id(engine, suppressed)
+        .unwrap()
+        .expect("a built item");
     engine.accept_change(entity, ChangeOp::Suppress).unwrap();
 
     let keep = |i: &Item| kept(i) && i.source != suppressed;
     let items: Vec<&Item> = fx.visible(false, &keep).collect();
     let listed = ["x", "y", "z", "hidden"];
-    let listable = |key: &str| fx.visible(false, &|_| true).any(|i| i.shade.as_deref() == Some(key));
+    let listable = |key: &str| {
+        fx.visible(false, &|_| true)
+            .any(|i| i.shade.as_deref() == Some(key))
+    };
     let groupings = [field("shade", named(&listed)), size()];
     let mut req = request(&groupings);
     req.filter = Some(negation.clone());
@@ -950,7 +955,10 @@ fn a_negation_counts_only_the_visible_items_it_keeps() {
         simplified(&tables[&0].1),
         expected_values(&items, None, "shade", &listed, &listable)
     );
-    assert_eq!(viewport_matched(engine, &session, Some(negation)), items.len() as u64);
+    assert_eq!(
+        viewport_matched(engine, &session, Some(negation)),
+        items.len() as u64
+    );
 }
 
 /// **A suppression applies from the next request**, and **between two pages of one table from the

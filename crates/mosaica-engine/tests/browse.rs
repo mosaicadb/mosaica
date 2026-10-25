@@ -870,7 +870,9 @@ fn a_negations_count_per_row_is_the_visible_members_it_keeps() {
         .find(|&e| subset_sees(e) && kept(e))
         .expect("a visible member of alpha the negation keeps");
     assert!((0..300).any(|e| !subset_sees(e) && kept(e)));
-    let entity = item_of_id(&fx.engine, suppressed).unwrap().expect("a built item");
+    let entity = item_of_id(&fx.engine, suppressed)
+        .unwrap()
+        .expect("a built item");
     fx.engine
         .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
         .unwrap();
@@ -885,7 +887,11 @@ fn a_negations_count_per_row_is_the_visible_members_it_keeps() {
     assert_eq!(filtered.artifacts.len(), ROOTS.len());
     for row in &filtered.artifacts {
         let key = row.key.clone().unwrap_or_default();
-        let base = ROOTS.iter().find(|(k, _)| *k == key).expect("a planted root").1;
+        let base = ROOTS
+            .iter()
+            .find(|(k, _)| *k == key)
+            .expect("a planted root")
+            .1;
         let want = (base..base + 300)
             .filter(|&e| subset_sees(e) && e != suppressed && kept(e))
             .count() as u64;

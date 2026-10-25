@@ -1847,7 +1847,10 @@ fn an_entity_whose_value_is_not_yet_reachable_is_kept_by_a_negation() {
             .evaluate(&expr, &cand)
             .unwrap();
         assert!(got.contains(buffered), "{expr:?}");
-        assert!(got.andnot(&cand).is_empty(), "a negation left the candidate");
+        assert!(
+            got.andnot(&cand).is_empty(),
+            "a negation left the candidate"
+        );
     }
 }
 
@@ -1907,7 +1910,10 @@ fn none_of_every_offered_value_returns_only_the_visible_items_with_no_value() {
         expected(&fx, &[SUBSET_TERM], |e| department_of(e).is_none()),
         "none_of over every offered value returned an item carrying a value"
     );
-    assert!(!got.is_empty(), "the fixture leaves some visible items with no department");
+    assert!(
+        !got.is_empty(),
+        "the fixture leaves some visible items with no department"
+    );
     let _ = session;
 }
 
@@ -4516,22 +4522,27 @@ fn a_negation_on_either_route_is_the_visible_set_minus_the_matches() {
     let ids = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
         out.points.mosaica_ids.iter().copied().collect()
     };
-    let negation = FilterExpr::NoneOf(vec![
+    let eng = || {
         leaf(
             "department",
             FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
-        ),
-        leaf("title", FilterOperand::TextPrefix("paper-1".into())),
-    ]);
-    let kept = |e: u64| department_of(e) != Some("eng") && !title_of(e).starts_with("paper-1");
+        )
+    };
+    let prefix = |p: &str| leaf("title", FilterOperand::TextPrefix(p.into()));
+    let starts = |e: u64, p: &str| title_of(e).starts_with(p);
 
-    // A visible item with no department, which the negation keeps until it is suppressed.
+    // A visible item with no department, which both negations below keep until it is suppressed.
     let narrow = [0.0, 0.0, 400.0, 400.0];
     let narrow_all = ids(&engine
         .viewport(&session, ViewportRequest::new("s0", 8, narrow, 10_000))
         .expect("the narrow window answers unfiltered"));
     let suppressed = (0..N)
-        .find(|&e| department_of(e).is_none() && kept(e) && narrow_all.contains(&id_of(e)))
+        .find(|&e| {
+            department_of(e).is_none()
+                && !starts(e, "paper-1")
+                && !starts(e, "paper-2")
+                && narrow_all.contains(&id_of(e))
+        })
         .expect("the window holds a visible item with no department");
     engine
         .accept_change(
@@ -4540,40 +4551,74 @@ fn a_negation_on_either_route_is_the_visible_set_minus_the_matches() {
         )
         .expect("a suppression is accepted");
 
-    let visible: std::collections::BTreeSet<u64> = (0..N)
+    // The second places a negation between two leaves the row route answers in entity space, so
+    // each must be matched against its own result.
+    let neither: fn(u64) -> bool =
+        |e| department_of(e) != Some("eng") && !title_of(e).starts_with("paper-1");
+    let around: fn(u64) -> bool = |e| {
+        let starts = |p: &str| title_of(e).starts_with(p);
+        starts("paper-1")
+            || (!starts("paper-2") && department_of(e) != Some("eng"))
+            || starts("paper-33")
+    };
+    let cases = [
+        (FilterExpr::NoneOf(vec![eng(), prefix("paper-1")]), neither),
+        (
+            FilterExpr::AnyOf(vec![
+                prefix("paper-1"),
+                FilterExpr::NoneOf(vec![prefix("paper-2"), eng()]),
+                prefix("paper-33"),
+            ]),
+            around,
+        ),
+    ];
+    let visible = (0..N)
         .filter(|&e| terms_of(e).contains(&SUBSET_TERM) && e != suppressed)
-        .map(id_of)
-        .collect();
-    let want: std::collections::BTreeSet<u64> = (0..N)
-        .filter(|&e| terms_of(e).contains(&SUBSET_TERM) && e != suppressed && kept(e))
-        .map(id_of)
-        .collect();
-    assert!(!want.is_empty() && want.len() < visible.len());
+        .count();
+    for (expr, kept) in &cases {
+        let want: std::collections::BTreeSet<u64> = (0..N)
+            .filter(|&e| terms_of(e).contains(&SUBSET_TERM) && e != suppressed && kept(e))
+            .map(id_of)
+            .collect();
+        assert!(!want.is_empty() && want.len() < visible, "{expr:?}");
 
-    let before = engine.filter_row_routes();
-    let narrow_filtered = engine
-        .viewport(
-            &session,
-            ViewportRequest::new("s0", 8, narrow, 10_000).filter(negation.clone()),
-        )
-        .expect("the narrow window answers filtered");
-    assert_eq!(engine.filter_row_routes() - before, 1, "the narrow window takes the row route");
+        let before = engine.filter_row_routes();
+        let narrow_filtered = engine
+            .viewport(
+                &session,
+                ViewportRequest::new("s0", 8, narrow, 10_000).filter(expr.clone()),
+            )
+            .expect("the narrow window answers filtered");
+        assert_eq!(
+            engine.filter_row_routes() - before,
+            1,
+            "the narrow window takes the row route: {expr:?}"
+        );
 
-    let before = engine.filter_row_routes();
-    let full = engine
-        .viewport(
-            &session,
-            ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000).filter(negation),
-        )
-        .expect("the full extent answers filtered");
-    assert_eq!(engine.filter_row_routes() - before, 0, "the full extent takes the entity route");
+        let before = engine.filter_row_routes();
+        let full = engine
+            .viewport(
+                &session,
+                ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000).filter(expr.clone()),
+            )
+            .expect("the full extent answers filtered");
+        assert_eq!(
+            engine.filter_row_routes() - before,
+            0,
+            "the full extent takes the entity route: {expr:?}"
+        );
 
-    assert_eq!(ids(&full), want);
-    assert_eq!(full.tiles.iter().map(|t| t.matched).sum::<u64>(), want.len() as u64);
-    let in_window: std::collections::BTreeSet<u64> =
-        want.intersection(&narrow_all).copied().collect();
-    assert_eq!(ids(&narrow_filtered), in_window);
-    assert!(!ids(&narrow_filtered).contains(&id_of(suppressed)));
+        assert_eq!(ids(&full), want, "{expr:?}");
+        assert_eq!(
+            full.tiles.iter().map(|t| t.matched).sum::<u64>(),
+            want.len() as u64,
+            "{expr:?}"
+        );
+        let in_window: std::collections::BTreeSet<u64> =
+            want.intersection(&narrow_all).copied().collect();
+        assert_eq!(ids(&narrow_filtered), in_window, "{expr:?}");
+        assert!(!ids(&narrow_filtered).contains(&id_of(suppressed)));
+    }
 }
 
 /// **The two routes agree over a numeric range as well as over a category**, which is what admits

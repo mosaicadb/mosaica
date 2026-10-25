@@ -3130,9 +3130,8 @@ fn a_malformed_filter_is_refused_whatever_rows_remain() {
     // An undeclared column behind a conjunct that matches no row, and behind one that matches
     // some: refused alike, though the first leaves nothing for the second leaf to narrow.
     let undeclared = || leaf("nothing", FilterOperand::Equals(AttrLocalId::new(1)));
-    let behind = |lo: i64, hi: i64| {
-        FilterExpr::AllOf(vec![leaf("when", range(lo, hi)), undeclared()])
-    };
+    let behind =
+        |lo: i64, hi: i64| FilterExpr::AllOf(vec![leaf("when", range(lo, hi)), undeclared()]);
     let base = 1_700_000_000_000_000;
     let filters = [
         undeclared(),
