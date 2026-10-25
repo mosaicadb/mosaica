@@ -180,7 +180,8 @@ impl ViewMetadataType {
     /// `value`, as a schema or a request body writes it, stored under this declaration. An
     /// integer where a float is declared is that float. Where a timestamp is declared, an integer
     /// is microseconds since the Unix epoch and a text is read as [`crate::written`] reads one.
-    /// Every other value is stored as it is written, and must be one this declaration admits.
+    /// A float must be finite. Every other value is stored as it is written, and must be one this
+    /// declaration admits.
     pub fn typed(self, name: &str, value: ViewMetadataValue) -> Result<ViewMetadataValue, String> {
         let value = match (self, value) {
             (ViewMetadataType::Float, ViewMetadataValue::Int(v)) => {
@@ -193,6 +194,12 @@ impl ViewMetadataType {
                 crate::written::timestamp_us(&text)
                     .map(ViewMetadataValue::TimestampUs)
                     .map_err(|e| format!("metadata '{name}' is '{text}', which {e}"))?
+            }
+            (ViewMetadataType::Float, ViewMetadataValue::Float(v)) if !v.is_finite() => {
+                return Err(format!(
+                    "metadata '{name}' is {v}, which a request body cannot carry; write a finite \
+                     number"
+                ));
             }
             (_, value) => value,
         };
@@ -467,24 +474,35 @@ mod tests {
         assert!(ViewMetadataType::Text
             .typed("s", ViewMetadataValue::Int(1))
             .is_err());
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(ViewMetadataType::Float
+                .typed("w", ViewMetadataValue::Float(v))
+                .is_err());
+        }
     }
 
     #[test]
     fn a_stored_value_written_as_json_reads_back_as_itself() {
-        for (ty, value) in [
-            (ViewMetadataType::Bool, ViewMetadataValue::Bool(true)),
-            (ViewMetadataType::I16, ViewMetadataValue::Int(-3)),
-            (ViewMetadataType::Float, ViewMetadataValue::Float(2.0)),
-            (ViewMetadataType::Text, ViewMetadataValue::Text("Q1".into())),
-            (
-                ViewMetadataType::TimestampUs,
-                ViewMetadataValue::TimestampUs(7),
-            ),
-        ] {
+        let read_back = |value: &ViewMetadataValue| {
             let written = serde_json::to_string(&value.to_json()).unwrap();
-            let read = ViewMetadataValue::from_json("m", &serde_json::from_str(&written).unwrap());
-            assert_eq!(ty.typed("m", read.unwrap()), Ok(value));
+            ViewMetadataValue::from_json("m", &serde_json::from_str(&written).unwrap()).unwrap()
+        };
+        for value in [
+            ViewMetadataValue::Bool(true),
+            ViewMetadataValue::Int(-3),
+            ViewMetadataValue::Float(2.0),
+            ViewMetadataValue::Text("Q1".into()),
+        ] {
+            assert_eq!(read_back(&value), value);
         }
+        // JSON has no timestamp, so one reads back as its microseconds and its declaration types
+        // it.
+        let timestamp = ViewMetadataValue::TimestampUs(7);
+        assert_eq!(read_back(&timestamp), ViewMetadataValue::Int(7));
+        assert_eq!(
+            ViewMetadataType::TimestampUs.typed("m", read_back(&timestamp)),
+            Ok(timestamp)
+        );
         assert!(ViewMetadataValue::from_json("m", &serde_json::Value::Null).is_err());
         assert!(ViewMetadataValue::from_json("m", &serde_json::json!([1])).is_err());
     }
