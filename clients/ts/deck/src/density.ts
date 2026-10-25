@@ -7,8 +7,9 @@ import {RAMPS, rampAt, type Rgb} from './colour.js';
  * Every mode reads counts, not marks. The counts are the aggregate route's cell grouping
  * (`POST /v1/aggregate` with `cells`), exact and taken inside the viewer's visible set under the
  * map's filters; the marks are a per-tile-capped sample and their density on screen says nothing
- * about the corpus. The hexagons, grid and contours aggregate one point per cell at its centre,
- * weighted by its count. {@link DensityCounter} keeps the counts for a camera.
+ * about the corpus. The grid draws each cell, the hexagons take each cell's count into the
+ * hexagons over it ({@link hexagons}), and the contours aggregate one point per cell at its
+ * centre, weighted by its count. {@link DensityCounter} keeps the counts for a camera.
  *
  * The smooth wash is one texture under the marks, with one bin per cell.
  *
@@ -69,7 +70,7 @@ export function densityCountAt(position: number, max: number, scale: DensityScal
 }
 
 /** The largest count among `cells`, 0 where there are none. */
-export function maxCount(cells: readonly DensityCell[]): number {
+export function maxCount(cells: readonly {count: number}[]): number {
   let max = 0;
   for (const c of cells) if (c.count > max) max = c.count;
   return max;
@@ -222,8 +223,8 @@ function evenBits(v: number): number {
 
 /**
  * `counts` merged to coarser cells, a depth at a time, until at most `budget` cells remain: each
- * coarser cell counts the items of the finer cells it holds. The hexagons and contours aggregate
- * on the CPU in time proportional to the cells, so their input is held to a budget.
+ * coarser cell counts the items of the finer cells it holds. deck aggregates the contours on the
+ * CPU in time proportional to the cells, so their input is held to a budget.
  */
 export function coarsened(counts: DensityCounts, budget: number): DensityCounts {
   let {depth, cells} = counts;
@@ -245,27 +246,120 @@ export function coarsened(counts: DensityCounts, budget: number): DensityCounts 
 }
 
 /**
- * The most cells the hexagons and the contours aggregate. deck aggregates them in the render, so
- * finer counts are merged to a coarser depth first ({@link coarsened}). The figures hold one answer
- * under 50 ms of main thread at 1920 × 1080 in headless Chromium's software GL; the contours'
- * cost per cell is the higher.
+ * The most cells the contours aggregate. deck aggregates them in the render, so finer counts are
+ * merged to a coarser depth first ({@link coarsened}). The figure holds one answer under 50 ms of
+ * main thread at 1920 × 1080 in headless Chromium's software GL.
  */
-export const AGGREGATED_CELLS = {hex: 10_000, contours: 2_000} as const;
+export const CONTOUR_CELLS = 2_000;
 
 /** The merged cells each counts object has been drawn from, so a repaint hands deck the same data. */
-const merged = new WeakMap<DensityCounts, Partial<Record<'hex' | 'contours', DensityCounts>>>();
+const merged = new WeakMap<DensityCounts, DensityCounts>();
 
 /**
- * The cells `mode` draws from `counts`: merged to {@link AGGREGATED_CELLS} for the hexagons and
- * contours, and as given for the other modes. Their largest count is the top of the scale.
+ * The cells `mode` draws from `counts`: merged to {@link CONTOUR_CELLS} for the contours, and as
+ * given for the other modes. Their largest count is the top of the scale.
  */
 export function drawnCells(counts: DensityCounts, mode: DensityMode): DensityCounts {
-  if (mode !== 'hex' && mode !== 'contours') return counts;
+  if (mode !== 'contours') return counts;
   let held = merged.get(counts);
-  if (!held) merged.set(counts, (held = {}));
-  return (held[mode] ??= coarsened(counts, AGGREGATED_CELLS[mode]));
+  if (!held) merged.set(counts, (held = coarsened(counts, CONTOUR_CELLS)));
+  return held;
 }
 
+/**
+ * The hexagons over a set of counts: `length` of them, each one's centre in world units at
+ * `positions[2i]` and `positions[2i + 1]` and the count of the densest cell it takes at `counts[i]`,
+ * with their radius, centre to corner, in world units.
+ */
+export type DensityHexagons = {radius: number; length: number; positions: Float64Array; counts: Float64Array};
+
+/** A hexagon's radius, centre to corner, over its cells' width: a hexagon has one cell's area. */
+const HEX_RADIUS = Math.sqrt(2 / (3 * Math.sqrt(3)));
+/** A pointy-topped hexagon's corners over its radius, as {@link hexagons} bins them. */
+export const HEX_VERTICES: [number, number][] = Array.from({length: 6}, (_, i) => [Math.sin((i * Math.PI) / 3), -Math.cos((i * Math.PI) / 3)]);
+/** A pointy-topped lattice's column and row spacing, over the radius. */
+const HEX_DX = Math.sqrt(3);
+const HEX_DY = 1.5;
+
+const heldHexagons = new WeakMap<DensityCounts, DensityHexagons>();
+
+/**
+ * The hexagons over `counts`, each with one cell's area, on a pointy-topped lattice fixed to the
+ * world's origin so a hexagon keeps its place between answers. A hexagon takes the count of the
+ * densest cell with a quarter's centre in it. A cell's quarter centres are closer together than a
+ * hexagon is wide, so no hexagon among cells with counts is left empty, and a hexagon reads one
+ * cell's count, as the grid does, so the top of the scale is the grid's. Time is linear in the
+ * cells and in the area they span, and the result is kept per counts object.
+ */
+export function hexagons(counts: DensityCounts): DensityHexagons {
+  const held = heldHexagons.get(counts);
+  if (held) return held;
+  const span = WORLD_SIZE / 2 ** counts.depth;
+  const radius = span * HEX_RADIUS;
+  const {cells} = counts;
+  let made: DensityHexagons = {radius, length: 0, positions: new Float64Array(0), counts: new Float64Array(0)};
+  if (cells.length > 0) {
+    // The hexagons the cells' extent can reach, one past each side, as a dense array of counts.
+    const {x0, y0, x1, y1} = extentOf(cells);
+    const unit = span / radius;
+    const j0 = Math.floor((y0 * unit) / HEX_DY) - 1;
+    const i0 = Math.floor((x0 * unit) / HEX_DX) - 1;
+    const rows = Math.ceil(((y1 + 1) * unit) / HEX_DY) + 2 - j0;
+    const columns = Math.ceil(((x1 + 1) * unit) / HEX_DX) + 2 - i0;
+    const best = new Float64Array(rows * columns);
+    let length = 0;
+    for (const c of cells) {
+      for (let q = 0; q < 4; q++) {
+        const at = hexAt((c.x + 0.25 + 0.5 * (q & 1)) * unit, (c.y + 0.25 + 0.5 * (q >> 1)) * unit);
+        const k = (hexRow - j0) * columns + (at - i0);
+        if (c.count > best[k]!) {
+          if (best[k] === 0) length++;
+          best[k] = c.count;
+        }
+      }
+    }
+    made = {radius, length, positions: new Float64Array(2 * length), counts: new Float64Array(length)};
+    for (let k = 0, n = 0; n < length; k++) {
+      if (best[k] === 0) continue;
+      const j = Math.floor(k / columns) + j0;
+      const i = (k % columns) + i0;
+      made.positions[2 * n] = (i + (j & 1) / 2) * HEX_DX * radius;
+      made.positions[2 * n + 1] = j * HEX_DY * radius;
+      made.counts[n++] = best[k]!;
+    }
+  }
+  heldHexagons.set(counts, made);
+  return made;
+}
+
+/** The row of the hexagon {@link hexAt} last found. */
+let hexRow = 0;
+
+/**
+ * The column of the pointy-topped hexagon holding `(x, y)`, in units of the radius; its row is
+ * left in {@link hexRow}, so the binning loop allocates nothing.
+ */
+function hexAt(x: number, y: number): number {
+  const py = y / HEX_DY;
+  let j = Math.round(py);
+  const px = x / HEX_DX - (j & 1) / 2;
+  let i = Math.round(px);
+  const dy1 = py - j;
+  // Near a row's slanted edges the hexagon is the nearer of this row's and the next row's centres.
+  if (Math.abs(dy1) * 3 > 1) {
+    const dx1 = px - i;
+    const i2 = i + (px < i ? -1 : 1) / 2;
+    const j2 = j + (py < j ? -1 : 1);
+    const dx2 = px - i2;
+    const dy2 = py - j2;
+    if (dx1 * dx1 + dy1 * dy1 > dx2 * dx2 + dy2 * dy2) {
+      i = i2 + (j & 1 ? 1 : -1) / 2;
+      j = j2;
+    }
+  }
+  hexRow = j;
+  return i;
+}
 /** The positions on the scale contour lines are drawn at. */
 const CONTOUR_POSITIONS = [0.2, 0.4, 0.6, 0.8];
 

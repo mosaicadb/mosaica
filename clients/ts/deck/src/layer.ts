@@ -1,5 +1,5 @@
 import {CompositeLayer, type BinaryAttribute as DeckBinaryAttribute, type CompositeLayerProps, type Layer, type LayersList, type UpdateParameters} from '@deck.gl/core';
-import {BitmapLayer, IconLayer, LineLayer, PolygonLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
+import {BitmapLayer, ColumnLayer, IconLayer, LineLayer, PolygonLayer, ScatterplotLayer, TextLayer} from '@deck.gl/layers';
 import {
   CLUSTER_PREFIX,
   NO_ORDINAL,
@@ -23,7 +23,7 @@ import {materialiseStandIn, type StandInBuffers} from './assemble.js';
 import {BACKING_HEIGHT_EM, backingAspect, backingAtlas, backingIcon} from './backing.js';
 import {DEFAULT_COLOURING, buildColourAttribute, encodingSignature, rgbOfHex, type Colouring, type Encoding, type Rgb} from './colour.js';
 import {shapeBbox, smoothRing, type ContourShape, type Part} from './contours.js';
-import {DEFAULT_DENSITY_SCALE, binDensity, contourThresholds, densityPaint, densityPosition, densitySteps, densityStops, drawnCells, filterDensity, gridImage, maxCount, type DensityCell, type DensityColours, type DensityCounts, type DensityMode, type DensityScale} from './density.js';
+import {DEFAULT_DENSITY_SCALE, binDensity, contourThresholds, densityPaint, densityPosition, densitySteps, densityStops, drawnCells, filterDensity, gridImage, hexagons, maxCount, HEX_VERTICES, type DensityCell, type DensityColours, type DensityHexagons, type DensityCounts, type DensityMode, type DensityScale} from './density.js';
 import {DEFAULT_DENSITY_CELL_PX, DensityCounter} from './density-counter.js';
 import {LABEL_LINE_HEIGHT, labelLine, labelSize, placeLabels, type LabelCandidate, type PlacedLabel} from './labels.js';
 import {importAggregation} from './aggregation-loader.js';
@@ -402,19 +402,24 @@ type WashState = {
 const sameWash = (a: WashKey | null, b: WashKey) => a !== null && a.counts === b.counts && a.kind === b.kind && a.scheme === b.scheme && a.colours === b.colours && a.scale === b.scale;
 /** The colours a hexagon or grid cell takes, sparse to dense, in equal steps of the scale. */
 const DENSITY_STEPS = 8;
-/** The hexagons' colour domain: positions on the density scale. One array, so deck sees no change between paints. */
-const UNIT_DOMAIN: [number, number] = [0, 1];
+/** The hexagons as deck's binary data, one object per set of hexagons so deck keeps its attributes between paints. */
+const heldHexData = new WeakMap<DensityHexagons, {length: number; attributes: {getPosition: {value: Float64Array; size: 2}}}>();
+function hexData(hex: DensityHexagons) {
+  let data = heldHexData.get(hex);
+  if (!data) heldHexData.set(hex, (data = {length: hex.length, attributes: {getPosition: {value: hex.positions, size: 2}}}));
+  return data;
+}
 /** The share of a hexagon drawn, so neighbouring hexagons show a hairline gap. */
 const DENSITY_COVERAGE = 0.94;
 
-/** The aggregation layers the hexagons and contours need, once they have loaded. */
+/** The aggregation layer the contours need, once it has loaded. */
 type Aggregation = Awaited<ReturnType<typeof importAggregation>>;
 let aggregation: Aggregation | null = null;
 let aggregationLoading: Promise<Aggregation> | null = null;
 
 /**
- * Load `@deck.gl/aggregation-layers`, once. The hexagons and contours are drawn from it, and it is
- * loaded the first time either is asked for, so a host that never draws them does not load it.
+ * Load `@deck.gl/aggregation-layers`, once. The contours are drawn from it, and it is loaded the
+ * first time they are asked for, so a host that never draws them does not load it.
  *
  * @internal
  */
@@ -837,13 +842,11 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     ownCounter: DensityCounter | null;
     /** The store the layer's own counter is over. */
     ownCounted: Store | null;
-    /** The hexagons' colour value, kept while the scale and its top count stand, since deck re-aggregates on a new one. */
-    hexColour: {scale: DensityScale; max: number; value: (cells: DensityCell[]) => number} | null;
   };
 
   /** @internal */
   override initializeState(): void {
-    this.state = {tick: 0, unsubscribe: null, subscribed: null, zoomBucket: NaN, ownSlab: null, ownLut: null, wash: {built: null, pending: null, timer: null}, ownCounter: null, ownCounted: null, hexColour: null};
+    this.state = {tick: 0, unsubscribe: null, subscribed: null, zoomBucket: NaN, ownSlab: null, ownLut: null, wash: {built: null, pending: null, timer: null}, ownCounter: null, ownCounted: null};
     this.follow(this.props.store ?? null);
   }
 
@@ -1304,11 +1307,12 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
    *
    * Every mode places counts on `densityScale` up to the largest count among the cells it draws
    * ({@link drawnCells}). The grid is one image, a square per cell in the colour of its count's
-   * position. The hexagons colour each bin by the position of the densest cell whose centre falls
-   * in it, so the densest bin reaches the top of the scale and a bin that happens to hold two cell
-   * centres does not read as twice as dense. The contours are drawn at the counts {@link contourThresholds} picks, in the label ink.
-   * The hexagons and contours come from `@deck.gl/aggregation-layers`, loaded the first time one
-   * is asked for ({@link loadAggregationLayers}); nothing of theirs is drawn until it has loaded.
+   * position. The hexagons, each one cell's area, take the colour of the densest cell they cover
+   * ({@link hexagons}), so the densest hexagon reaches the top of the scale and one over two cells
+   * does not read as twice as dense. The contours are drawn at the counts {@link contourThresholds}
+   * picks, in the label ink. The contours come from `@deck.gl/aggregation-layers`, loaded the first
+   * time they are asked for ({@link loadAggregationLayers}); nothing of theirs is drawn until it
+   * has loaded.
    */
   private densityLayers(timings: {densityMs: number}): Layer[] {
     const started = performance.now();
@@ -1319,14 +1323,31 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const scale = this.props.densityScale ?? DEFAULT_DENSITY_SCALE;
     const counts = mode === 'none' ? null : this.densityCounts();
     const layers: Layer[] = [this.washLayer(mode === 'smooth' || mode === 'grid' ? counts : null, mode === 'grid' ? 'grid' : 'smooth', colours, strength, scale)];
-    if ((mode === 'hex' || mode === 'contours') && counts) {
+    const common = {opacity: strength, pickable: false, parameters: {depthCompare: 'always' as const}};
+    if (mode === 'hex' && counts) {
+      const hex = hexagons(counts);
+      let max = 0;
+      for (const c of hex.counts) if (c > max) max = c;
+      const steps = densitySteps(densityStops(colours, scheme), DENSITY_STEPS);
+      layers.push(
+        new ColumnLayer(this.getSubLayerProps({id: 'density-hex'}), {
+          ...common,
+          data: hexData(hex),
+          getFillColor: (_: unknown, {index}: {index: number}) => steps[Math.min(DENSITY_STEPS - 1, Math.floor(densityPosition(hex.counts[index]!, max, scale) * DENSITY_STEPS))]!,
+          updateTriggers: {getFillColor: `${scale}|${max}|${colours}|${scheme}`},
+          vertices: HEX_VERTICES,
+          diskResolution: 6,
+          radius: hex.radius,
+          coverage: DENSITY_COVERAGE,
+          extruded: false,
+          stroked: false
+        } as never)
+      );
+    } else if (mode === 'contours' && counts) {
       const aggregated = drawnCells(counts, mode);
-      const span = WORLD_SIZE / 2 ** aggregated.depth;
-      const stops = densityStops(colours, scheme);
-      const common = {opacity: strength, pickable: false, parameters: {depthCompare: 'always' as const}};
       if (!aggregation) {
         void loadAggregationLayers().then(() => this.redrawLater());
-      } else if (mode === 'contours') {
+      } else {
         const thresholds = contourThresholds(aggregated.cells, scale);
         const ink = INK[scheme];
         layers.push(
@@ -1335,7 +1356,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
             data: aggregated.cells,
             getPosition: (d: DensityCell) => d.position,
             gpuAggregation: false,
-            cellSize: span,
+            cellSize: WORLD_SIZE / 2 ** aggregated.depth,
             getWeight: (d: DensityCell) => d.count,
             aggregation: 'SUM',
             contours: thresholds.map((threshold, i) => ({
@@ -1343,30 +1364,6 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
               color: [ink[0], ink[1], ink[2], Math.round(90 + (140 * (i + 1)) / thresholds.length)] as [number, number, number, number],
               strokeWidth: i === thresholds.length - 1 ? 1.5 : 1
             }))
-          } as never)
-        );
-      } else {
-        const max = maxCount(aggregated.cells);
-        let held = this.state.hexColour;
-        if (!held || held.scale !== scale || held.max !== max) {
-          held = {scale, max, value: (cells) => densityPosition(maxCount(cells), max, scale)};
-          this.state.hexColour = held;
-        }
-        layers.push(
-          new aggregation.HexagonLayer(this.getSubLayerProps({id: 'density-hex'}), {
-            ...common,
-            data: aggregated.cells,
-            getPosition: (d: DensityCell) => d.position,
-            gpuAggregation: false,
-            getColorValue: held.value,
-            // deck takes a new accessor but recomputes the bins' values only on a changed trigger.
-            updateTriggers: {getColorValue: `${scale}|${max}`},
-            colorScaleType: 'quantize',
-            colorDomain: UNIT_DOMAIN,
-            colorRange: densitySteps(stops, DENSITY_STEPS).map((c) => [...c] as [number, number, number]),
-            coverage: DENSITY_COVERAGE,
-            extruded: false,
-            radius: span
           } as never)
         );
       }

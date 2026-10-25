@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {WORLD_SIZE} from '@mosaicajs/client';
 import {DEFAULT_DENSITY_SCALE, densityCountAt, densityPosition} from '../src/index.js';
-import {binDensity, contourThresholds, densityPaint, densitySteps, densityStops, drawnCells, filterDensity, gridImage, maxCount, type DensityCell, type DensityCounts} from '../src/density.js';
+import {binDensity, contourThresholds, densityPaint, densitySteps, densityStops, drawnCells, filterDensity, gridImage, hexagons, maxCount, type DensityCell, type DensityCounts} from '../src/density.js';
 import {rampAt} from '../src/colour.js';
 
 /**
@@ -127,13 +127,54 @@ describe('the modes on one scale', () => {
     expect(contourThresholds(counts(0, 0).cells, 'linear')).toEqual([]);
   });
 
-  it('takes the top of the hexagons’ and contours’ scale from the merged cells they draw', () => {
+  it('takes the top of the contours’ scale from the merged cells they draw, and the hexagons’ from the cells', () => {
     // Four neighbouring cells of 1 merge to one of 4 once the budget is a single cell.
     const many: DensityCounts = {depth: 14, cells: [0, 1].flatMap((x) => [0, 1].map((y) => ({x, y, position: [0, 0] as [number, number], count: 1})))};
     const fine = {...many, cells: many.cells.slice()};
     for (let i = 0; i < 10_001; i++) fine.cells.push({x: 2 * (i % 2000) + 4, y: 2 * Math.floor(i / 2000), position: [0, 0], count: 1});
     expect(maxCount(drawnCells(fine, 'grid').cells)).toBe(1);
-    expect(maxCount(drawnCells(fine, 'hex').cells)).toBeGreaterThan(1);
-    expect(drawnCells(fine, 'hex')).toBe(drawnCells(fine, 'hex'));
+    expect(maxCount(drawnCells(fine, 'contours').cells)).toBeGreaterThan(1);
+    expect(drawnCells(fine, 'contours')).toBe(drawnCells(fine, 'contours'));
+    expect(Math.max(...hexagons(fine).counts)).toBe(1);
+  });
+});
+
+describe('hexagons', () => {
+  const SPAN = WORLD_SIZE / 2 ** 5;
+  const at = (x: number, y: number, count: number): DensityCell => ({x, y, position: [(x + 0.5) * SPAN, (y + 0.5) * SPAN], count});
+  const centres = (h: ReturnType<typeof hexagons>) => Array.from({length: h.length}, (_, i) => ({position: [h.positions[2 * i]!, h.positions[2 * i + 1]!] as [number, number], count: h.counts[i]!}));
+
+  it('takes the densest cell under each hexagon, not the sum of the cells it covers', () => {
+    const h = hexagons({depth: 5, cells: [at(4, 4, 80_000), at(8, 4, 300), at(9, 4, 100)]});
+    expect(new Set(h.counts)).toEqual(new Set([80_000, 300, 100]));
+  });
+
+  it('leaves no hexagon empty among cells with counts', () => {
+    const block: DensityCell[] = [];
+    for (let x = 0; x < 30; x++) for (let y = 0; y < 30; y++) block.push(at(x, y, 1));
+    const h = hexagons({depth: 5, cells: block});
+    const inHexagon = ([px, py]: [number, number], [cx, cy]: [number, number]) => {
+      const dx = Math.abs(px - cx);
+      const dy = Math.abs(py - cy);
+      return dx <= (Math.sqrt(3) / 2) * h.radius && dy <= h.radius - dx / Math.sqrt(3);
+    };
+    const drawn = centres(h);
+    // Every point inside the block, a cell in from its edges, lies in a hexagon drawn.
+    for (let i = 0; i <= 100; i++) {
+      for (let j = 0; j <= 100; j++) {
+        const p: [number, number] = [(1 + (28 * i) / 100) * SPAN, (1 + (28 * j) / 100) * SPAN];
+        expect(drawn.some((hex) => inHexagon(p, hex.position))).toBe(true);
+      }
+    }
+  });
+
+  it('keeps each hexagon in place whatever else the counts hold', () => {
+    const alone = centres(hexagons({depth: 5, cells: [at(4, 4, 10)]}));
+    const among = centres(hexagons({depth: 5, cells: [at(4, 4, 10), at(20, 20, 5)]})).filter((hex) => hex.count === 10);
+    expect(among).toEqual(alone);
+  });
+
+  it('is empty without cells', () => {
+    expect(hexagons({depth: 5, cells: []}).length).toBe(0);
   });
 });

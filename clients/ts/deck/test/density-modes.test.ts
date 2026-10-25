@@ -3,7 +3,7 @@ import {LayerManager, type Layer} from '@deck.gl/core';
 import {WORLD_SIZE, type ArtifactsProjection, type MarksProjection} from '@mosaicajs/client';
 import {SessionArtifactTable, mortonOfTile, servedLineage} from '@mosaicajs/client/internal';
 import {band} from '../../core/test/support.js';
-import {contourThresholds, densityPosition, densityStops, type DensityCell, type DensityCounts, type DensityMode} from '../src/density.js';
+import {contourThresholds, densityPosition, densitySteps, densityStops, type DensityCell, type DensityCounts} from '../src/density.js';
 import {MosaicaLayer, loadAggregationLayers, type MosaicaLayerInternalProps} from '../src/layer.js';
 import {fakeDevice} from './fake-device.js';
 
@@ -100,10 +100,18 @@ function host() {
       const weight = props.getWeight ?? ((d: Cell) => d.count);
       return props.data.map((d) => ({position: props.getPosition(d), weight: weight(d)}));
     },
-    /** The hexagons' colour value for a bin holding `cells`, and the domain it is scaled over. */
-    hexColour: (cells: Cell[]): {value: number; domain: unknown; type: unknown} => {
-      const props = sublayer('density-hex')!.props as unknown as {getColorValue: (cells: Cell[]) => number; colorDomain: unknown; colorScaleType: unknown};
-      return {value: props.getColorValue(cells), domain: props.colorDomain, type: props.colorScaleType};
+    /** The hexagons drawn: each one's centre and colour, and their radius, centre to corner. */
+    hexagons: (): {radius: number; hexes: {position: [number, number]; colour: number[]}[]} => {
+      const props = sublayer('density-hex')!.props as unknown as {
+        data: {length: number; attributes: {getPosition: {value: ArrayLike<number>}}};
+        radius: number;
+        getFillColor: (d: unknown, info: {index: number}) => number[];
+      };
+      const at = props.data.attributes.getPosition.value;
+      return {
+        radius: props.radius,
+        hexes: Array.from({length: props.data.length}, (_, index) => ({position: [at[2 * index]!, at[2 * index + 1]!] as [number, number], colour: [...props.getFillColor(null, {index})]}))
+      };
     }
   };
 }
@@ -125,14 +133,11 @@ describe('density modes', () => {
     vi.unstubAllGlobals();
   });
 
-  it.each<[DensityMode, string]>([
-    ['hex', 'density-hex'],
-    ['contours', 'density-contours']
-  ])('%s aggregates one point per cell, weighted by its count, whatever the sample holds', (density, id) => {
+  it('contours aggregate one point per cell, weighted by its count, whatever the sample holds', () => {
     const h = host();
-    h.draw({density});
+    h.draw({density: 'contours'});
     expect(h.errors).toEqual([]);
-    expect(h.aggregated(id)).toEqual([
+    expect(h.aggregated('density-contours')).toEqual([
       {position: centre(4, 4), weight: 80_000},
       {position: centre(8, 4), weight: 300}
     ]);
@@ -152,24 +157,30 @@ describe('density modes', () => {
     expect(lum(dense)).toBeLessThan(lum(sparse));
   });
 
-  it('feeds the hexagons and contours at most their budget of cells, merged to a coarser depth, every item kept', () => {
+  it('feeds the contours at most their budget of cells, merged to a coarser depth, every item kept', () => {
     const h = host();
     const many: DensityCell[] = [];
     for (let x = 0; x < 160; x++) for (let y = 0; y < 100; y++) many.push(cell(x, y, 1));
     const fine = {depth: 10, cells: many.map((c) => ({...c, position: [(c.x + 0.5) * (WORLD_SIZE / 1024), (c.y + 0.5) * (WORLD_SIZE / 1024)] as [number, number]}))};
-    for (const [density, id] of [['hex', 'density-hex'], ['contours', 'density-contours']] as const) {
-      h.draw({density, densityCounts: fine});
-      const fed = h.aggregated(id)!;
-      expect(fed.length).toBeLessThan(many.length);
-      expect(fed.length).toBeLessThanOrEqual(density === 'hex' ? 10_000 : 2_000);
-      expect(fed.reduce((n, c) => n + c.weight, 0)).toBe(many.length);
-    }
+    h.draw({density: 'contours', densityCounts: fine});
+    const fed = h.aggregated('density-contours')!;
+    expect(fed.length).toBeLessThan(many.length);
+    expect(fed.length).toBeLessThanOrEqual(2_000);
+    expect(fed.reduce((n, c) => n + c.weight, 0)).toBe(many.length);
   });
 
-  it('bins hexagons one cell wide at the counts’ depth, whatever the marks’ depth', () => {
+  it('draws hexagons of one cell’s area at the counts’ depth, however many cells there are', () => {
     const h = host();
     h.draw({density: 'hex'});
-    expect(h.props<{radius: number}>('density-hex').radius).toBe(SPAN);
+    expect(h.errors).toEqual([]);
+    const area = (r: number) => ((3 * Math.sqrt(3)) / 2) * r * r;
+    expect(area(h.hexagons().radius)).toBeCloseTo(SPAN * SPAN);
+    // 300,000 cells at depth 12 are not merged: the hexagons stay one depth-12 cell in area.
+    const span = WORLD_SIZE / 4096;
+    const many: DensityCell[] = [];
+    for (let x = 0; x < 600; x++) for (let y = 0; y < 500; y++) many.push({x, y, position: [(x + 0.5) * span, (y + 0.5) * span], count: 1});
+    h.draw({density: 'hex', densityCounts: {depth: 12, cells: many}});
+    expect(area(h.hexagons().radius)).toBeCloseTo(span * span);
   });
 
   it('draws the counts it is given and nothing without them', () => {
@@ -197,28 +208,36 @@ describe('density modes', () => {
     expect(h.props<{contours: {threshold: number}[]}>('density-contours').contours.map((c) => c.threshold)).toEqual(contourThresholds(counts.cells, 'log'));
   });
 
-  it.each(['linear', 'log'] as const)('colours a hexagon by the %s position of its densest cell, up to the largest count drawn', (densityScale) => {
+  it.each(['linear', 'log'] as const)('colours each hexagon by the %s position of its count, the densest at the top, whatever the sample holds', (densityScale) => {
     const h = host();
-    h.draw({density: 'hex', densityScale});
-    const hex = h.hexColour([cell(4, 4, 80_000)]);
-    expect(hex.domain).toEqual([0, 1]);
-    expect(hex.type).toBe('quantize');
-    expect(hex.value).toBe(1);
-    expect(h.hexColour([cell(8, 4, 300)]).value).toBe(densityPosition(300, 80_000, densityScale));
-    // Two cells in one bin read as the denser, not their sum.
-    expect(h.hexColour([cell(8, 4, 300), cell(9, 4, 100)]).value).toBe(densityPosition(300, 80_000, densityScale));
+    h.draw({density: 'hex', densityScale, densityColours: 'viridis', scheme: 'dark'});
+    const steps = densitySteps(densityStops('viridis', 'dark'), 8);
+    const colourOf = (count: number) => [...steps[Math.min(7, Math.floor(densityPosition(count, 80_000, densityScale) * 8))]!];
+    const near = (x: number, y: number) => {
+      const [cx, cy] = centre(x, y);
+      return h.hexagons().hexes.filter((hex) => Math.hypot(hex.position[0] - cx, hex.position[1] - cy) < SPAN);
+    };
+    expect(near(4, 4).length).toBeGreaterThan(0);
+    for (const hex of near(4, 4)) expect(hex.colour).toEqual(colourOf(80_000));
+    for (const hex of near(8, 4)) expect(hex.colour).toEqual(colourOf(300));
+    expect(colourOf(80_000)).toEqual([...steps[7]!]);
   });
 
-  it('aggregates the hexagons’ colour values again when only the scale changes, the densest bin at the top', () => {
+  it('colours the hexagons again when only the scale changes, and keeps their data across repaints', () => {
     const h = host();
-    const binValues = () => {
-      const aggregator = (h.sublayer('density-hex')!.state as unknown as {aggregator: {getResult(channel: number): {value: ArrayLike<number>} | null}}).aggregator;
-      return Array.from(aggregator.getResult(0)!.value).sort((a, b) => a - b);
+    const data = () => h.props<{data: unknown}>('density-hex').data;
+    const sparse = () => {
+      const [cx, cy] = centre(8, 4);
+      return h.hexagons().hexes.find((hex) => Math.hypot(hex.position[0] - cx, hex.position[1] - cy) < SPAN)!.colour;
     };
-    h.draw({density: 'hex', densityScale: 'linear'});
-    expect(binValues()).toEqual([Math.fround(densityPosition(300, 80_000, 'linear')), 1]);
-    h.draw({density: 'hex', densityScale: 'log'});
-    expect(binValues()).toEqual([Math.fround(densityPosition(300, 80_000, 'log')), 1]);
+    h.draw({density: 'hex', densityScale: 'linear', densityColours: 'viridis'});
+    const linear = sparse();
+    const first = data();
+    h.draw({density: 'hex', densityScale: 'linear', densityColours: 'viridis'});
+    expect(data()).toBe(first);
+    h.draw({density: 'hex', densityScale: 'log', densityColours: 'viridis'});
+    expect(sparse()).not.toEqual(linear);
+    expect(h.props<{updateTriggers: {getFillColor: string}}>('density-hex').updateTriggers.getFillColor).toContain('log');
   });
 
   it('washes a cell more strongly when only the scale changes from linear to log', () => {
@@ -237,17 +256,6 @@ describe('density modes', () => {
     h.draw({density: 'smooth', densityScale: 'log'});
     expect(alphaAt(centre(8, 4))).toBeGreaterThan(linear);
     expect(alphaAt(centre(4, 4))).toBe(denseLinear);
-  });
-
-  it('keeps the hexagons’ colour value across repaints until the scale changes', () => {
-    const h = host();
-    h.draw({density: 'hex', densityScale: 'log'});
-    const colourValue = () => h.props<{getColorValue: unknown}>('density-hex').getColorValue;
-    const first = colourValue();
-    h.draw({density: 'hex', densityScale: 'log'});
-    expect(colourValue()).toBe(first);
-    h.draw({density: 'hex', densityScale: 'linear'});
-    expect(colourValue()).not.toBe(first);
   });
 
   it('colours the grid by each cell’s position on the scale asked for', () => {

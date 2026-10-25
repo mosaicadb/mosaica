@@ -114,7 +114,8 @@ let mapsMade = 0;
  * The map owns the camera and tells the store where it is looking on every move. It starts on the
  * whole extent, fitted as the Fit button fits it, unless the camera was moved before `meta`. Density is asked
  * for once the camera has rested for 200 ms, as counts by cell over the view and a margin round
- * it, and the last counts are drawn at their own positions until the next land. Keys, with the
+ * it, with coarser counts reaching further for a zoom out, and the last counts are drawn at their
+ * own positions until the next land. Keys, with the
  * map focused: the arrow keys pan, `+` and `-` zoom, and Escape cancels a shape being drawn, else
  * clears the selected region, else drops the picked point or artifact and its ring. A press hides
  * the hover tooltip until the pointer is released. The canvas is one tab stop, after the toolbar
@@ -465,8 +466,8 @@ export class MosaicaMap extends MosaicaElement {
    * which spreads counts that span several orders of magnitude. Log is the default because counts
    * are skewed on most maps, and under linear only the densest few cells stand out from the rest.
    * The largest count is that of the densest cell in the area counted, which is the view and a
-   * margin around it; the hexagons and contours take it among the cells they merge to, and a
-   * hexagon is coloured by the densest cell inside it. Any other value is taken as `log`.
+   * margin around it; the contours take it among the cells they merge to, and a hexagon is
+   * coloured by the densest cell under it. Any other value is taken as `log`.
    */
   @property({attribute: 'density-scale'}) accessor densityScale: DensityScale = DEFAULT_DENSITY_SCALE;
   /**

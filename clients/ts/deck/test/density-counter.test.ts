@@ -18,7 +18,10 @@ const WIDTH = 1000;
 const HEIGHT = 800;
 const camera = (target: [number, number], zoom: number): DensityCamera => ({target, zoom, width: WIDTH, height: HEIGHT});
 
-/** A store whose `aggregate` answers each request with one cell at the asked depth, unless told to refuse. */
+/**
+ * A store whose `aggregate` answers each grouping with one cell at its depth, of 9 items in the
+ * first grouping and one more in each after, unless told to refuse.
+ */
 async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: MosaicaClient['viewport'] = async () => response(viewportResult())) {
   const asked: AggregateRequest[] = [];
   const refusals: Error[] = [];
@@ -26,9 +29,15 @@ async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: 
     asked.push(req);
     const refusal = refusals.shift();
     if (refusal) throw refusal;
-    const depth = req.groupings[0]!.cells!.depth;
     return {
-      tables: [{grouping: 0, total: 9, referenceTotal: null, groups: null, sample: null, rows: tableFromArrays({cell: BigUint64Array.from([mortonOfTile(1, 1, depth)]), count: BigUint64Array.from([9n])})}],
+      tables: req.groupings.map((g, i) => ({
+        grouping: i,
+        total: 9 + i,
+        referenceTotal: null,
+        groups: null,
+        sample: null,
+        rows: tableFromArrays({cell: BigUint64Array.from([mortonOfTile(1, 1, g.cells!.depth)]), count: BigUint64Array.from([BigInt(9 + i)])})
+      })),
       region: null,
       recomposed: false,
       identityKey: 'ik',
@@ -59,9 +68,9 @@ async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: 
   return {store, counter, asked, refusals, settle, depths, changes, clock, scheduler};
 }
 
-/** The cells at a request's depth in its area in view s0, counted as the server counts them. */
-function serverCells(req: AggregateRequest): number {
-  const {depth, area} = req.groupings[0]!.cells!;
+/** The cells at a grouping's depth in its area in view s0, counted as the server counts them. */
+function serverCells(grouping: AggregateRequest['groupings'][number]): number {
+  const {depth, area} = grouping.cells!;
   const side = 2 ** depth;
   const index = (v: number) => Math.min(side - 1, Math.max(0, Math.floor((v / 512) * side)));
   return (index(area![2]) - index(area![0]) + 1) * (index(area![3]) - index(area![1]) + 1);
@@ -113,7 +122,7 @@ describe('DensityCounter', () => {
     expect(asked).toHaveLength(0);
     await settle();
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.groupings).toEqual([{count: true, cells: {depth: cellDepth(1 + 119 / 40, 12), area: expect.any(Array) as unknown}}]);
+    expect(asked[0]!.groupings[0]).toEqual({count: true, cells: {depth: cellDepth(1 + 119 / 40, 12), area: expect.any(Array) as unknown}});
     await settle();
     expect(asked).toHaveLength(1);
   });
@@ -214,6 +223,53 @@ describe('DensityCounter', () => {
     expect(asked).toHaveLength(3);
   });
 
+  it('asks with each answer for two coarser levels, each a depth coarser and twice as far', async () => {
+    const {counter, asked, settle} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 4));
+    await settle();
+    const cells = asked[0]!.groupings.map((g) => g.cells!);
+    const depth = cellDepth(4, 12);
+    expect(cells.map((c) => c.depth)).toEqual([depth, depth - 1, depth - 2]);
+    const width = (i: number) => cells[i]!.area![2] - cells[i]!.area![0];
+    // At zoom 4 the viewport is 62.5 world units wide, so none of the three areas meets the world's edge.
+    expect(width(0)).toBeCloseTo(1.5 * 62.5);
+    expect(width(1)).toBeCloseTo(2 * width(0));
+    expect(width(2)).toBeCloseTo(4 * width(0));
+  });
+
+  it('asks for no coarser level past the one that holds the world', async () => {
+    const {counter, asked, settle} = await setUp();
+    counter.set(ON);
+    // At zoom 0.5 the viewport is about 707 world units wide: the finest area is already the world.
+    counter.look(camera([256, 256], 0.5));
+    await settle();
+    expect(asked[0]!.groupings).toHaveLength(1);
+  });
+
+  it('draws the coarser levels on a zoom out before the next answer, the finest that holds the viewport', async () => {
+    const {counter, settle, changes} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 4));
+    await settle();
+    const depth = cellDepth(4, 12);
+    expect(counter.counts()!.depth).toBe(depth);
+    // Zoomed out by half: the viewport passes the finest area and fits the first ring's.
+    const seen = changes.n;
+    counter.look(camera([256, 256], 3));
+    expect(counter.counts()!.depth).toBe(depth - 1);
+    expect(counter.counts()!.cells.map((c) => c.count)).toEqual([10]);
+    expect(changes.n).toBeGreaterThan(seen);
+    counter.look(camera([256, 256], 2));
+    expect(counter.counts()!.depth).toBe(depth - 2);
+    // Past every level held, the widest is drawn.
+    counter.look(camera([256, 256], 1));
+    expect(counter.counts()!.depth).toBe(depth - 2);
+    // Back in, the finest is drawn again.
+    counter.look(camera([256, 256], 4));
+    expect(counter.counts()!.depth).toBe(depth);
+  });
+
   it('sends nothing for the old area when the filters change during a move that leaves it', async () => {
     const {store, counter, asked, settle} = await setUp();
     counter.set(ON);
@@ -262,7 +318,7 @@ describe('DensityCounter', () => {
     for (const [x, y, zoom] of [[0, 0, 2], [511, 511, 3], [123.4, 300.9, 4.6], [256, 256, -1]] as const) {
       counter.look(camera([x, y], zoom));
       await settle();
-      expect(serverCells(asked.at(-1)!)).toBeLessThanOrEqual(limit);
+      for (const grouping of asked.at(-1)!.groupings) expect(serverCells(grouping)).toBeLessThanOrEqual(limit);
     }
   });
 

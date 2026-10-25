@@ -305,9 +305,12 @@ side. The registration is `highlighted`, so the counts are the highlighted items
 highlight and the filtered items' otherwise, over the store's filters and selected region, as the
 map's points are; the store asks again when any of these changes. The counter asks only once the
 camera has rested for 200 ms, draws the last answer at its own world positions until the next
-lands, and asks nothing while the viewport stays inside the area held at the same depth. A move
-that leaves the area drops the registration at once, so a filter changed during the move sends
-nothing for an area no longer shown. A view switch asks again at once, over the area in the new
+lands, and asks nothing while the viewport stays inside the area held at the same depth. Each
+request also asks for up to two coarser levels, each one depth coarser and reaching twice as far,
+as the points' ring is fetched coarser further out. Between answers the finest level held whose
+area holds the viewport is drawn, so a zoom out draws to the edges at the cell size the counter
+would ask for there. A move that leaves the finest area drops the registration at once, so a
+filter changed during the move sends nothing for an area no longer shown. A view switch asks again at once, over the area in the new
 view's coordinates.
 
 A depth whose cells over the area could pass `selection.max_aggregate_cells` is not asked for,
@@ -322,9 +325,10 @@ among the cells counted: in proportion to the count under the linear scale, or t
 under the log scale, which is the default. Counts are skewed on most maps, and under the linear
 scale only the densest few cells stand out. The cells counted cover the viewport and the margin
 around it, so the largest count can be that of a cell just off screen, and it holds while the camera
-pans within the area held. The hexagons and contours merge fine cells to coarser ones before
-drawing, and take the largest of the merged counts. A hexagon takes the colour of the densest cell
-in it, so the densest hexagon reaches the top of the scale. The smooth wash blends each cell with
+pans within the area held. Each hexagon has one cell's area and takes the colour of the densest
+cell under it, so the densest hexagon reaches the top of the scale, as the densest cell does on the
+grid. The contours merge fine cells to coarser ones before drawing, and take the largest of the
+merged counts. The smooth wash blends each cell with
 its neighbours, so an isolated dense cell is drawn lower on the scale than its own count would
 place it. The map's key shows 0, the count at the middle of the scale in whole items and the
 largest count.
