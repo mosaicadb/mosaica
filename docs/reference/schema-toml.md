@@ -2,7 +2,7 @@
 
 # schema.toml
 
-`schema.toml` declares a corpus: the files a build reads, the views that place each item on a map, the vocabularies and attributes each item carries, and the annotation layers drawn over the items. `mosaica build` and `mosaica check` read the file that `[build] schema` in `mosaica.toml` names, `schema.toml` by default, or the one `--config` names. `mosaica check --payloads` prints the same declaration as the request bodies that declare it on a running service.
+`schema.toml` is the database's schema: its views, fields, vocabularies, layers and access rules. `mosaica build` and `mosaica check` read the file that `[build] schema` in `mosaica.toml` names, `schema.toml` by default, or the one `--config` names. `mosaica check --payloads` prints the same declaration as the request bodies that declare it on a running service.
 
 Every table refuses a key it does not know. Where a key is refused beside another, or needs another, its description says so.
 
@@ -118,7 +118,7 @@ Writing both rosters is refused. `[defaults].source` does not reach a group, so 
 
 ## `[[view_group.view]]`
 
-One view of a group, written in the declaration. Beside these keys the block takes one for each name the group's `metadata` declares, holding a value of the declared type, and every view carries every name. A `timestamp_us` value is a date, such as `2026-04-01`, which is midnight UTC; a date-time with an offset, such as `2026-04-01T09:30:00Z`, with at most six fractional-second digits and a space allowed for the `T`; or microseconds since the Unix epoch, as an integer or a string of digits. Either date form may also be written as a string. A date-time with no offset is refused. An integer outside its type's range is refused. A group-level key, such as `extent` or `projection`, is refused, and so is any other key.
+One view of a group, written in the declaration. Beside these keys the block takes one for each name the group's `metadata` declares, holding a value of the declared type, and every view carries every name. A `timestamp_us` value is a date, such as `2026-04-01`, which is midnight UTC; a date-time with an offset, such as `2026-04-01T09:30:00Z`, with at most six fractional-second digits and a space allowed for the `T`; or microseconds since the Unix epoch, as an integer or a string of digits. Either date form may also be written as a string. A date-time with no offset is refused. A float may be written as an integer. An integer outside its type's range is refused. A group-level key, such as `extent` or `projection`, is refused, and so is any other key.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
