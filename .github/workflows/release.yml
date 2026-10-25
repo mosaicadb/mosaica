@@ -219,7 +219,7 @@ jobs:
               echo "@mosaicajs/$name@$VERSION is already published"
               continue
             fi
-            npm publish "dist-npm/mosaicajs-$name-$VERSION.tgz" --provenance --access public --tag "$DIST_TAG"
+            npm publish "./dist-npm/mosaicajs-$name-$VERSION.tgz" --provenance --access public --tag "$DIST_TAG"
           done
 
   # Trusted publishing: crates.io exchanges this job's OIDC token for a publish token that lasts
