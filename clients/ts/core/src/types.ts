@@ -262,10 +262,10 @@ export type FilterOperandSet = {
  *
  * Each node has exactly one key: a column name mapped to a {@link FilterOperator}, `region`,
  * `member_of`, or one of the combinators `all_of`, `any_of` and `none_of`. `all_of: []` matches
- * every item and `any_of: []` matches none. The server refuses with a `422` a node with two keys,
- * an unknown column, an operator outside the column's family, `none_of: []`, and a `none_of` whose
- * branches name a `text` column or two different columns. Nesting deeper than the deployment
- * allows is refused.
+ * every item and `any_of: []` matches none. `none_of` matches every item this principal may see
+ * that none of its branches matches, an item holding no value in a column included. The server
+ * refuses with a `422` a node with two keys, an unknown column, an operator outside the column's
+ * family, and `none_of: []`. Nesting deeper than the deployment allows is refused.
  *
  * A value that does not exist and a value this principal cannot see both match nothing, with the
  * same status, body and counts. Present both as "no matches".

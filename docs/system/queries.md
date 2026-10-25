@@ -107,8 +107,8 @@ Two filters work on the map rather than on a field. `region` keeps the items ins
 
 A drawn shape is tested exactly, against each item's stored position. Mosaica counts the map cells wholly inside the shape without reading them and tests only the items near its edge, so a large shape costs little more than a small one.
 
-!!! note "`none_of` leaves out items with no value"
-    `{"none_of": [{"archive": {"eq": "cs"}}]}` keeps the papers whose archive is something other than `cs`. Papers with no archive are left out too. The expressions inside one `none_of` must all name the same field, and a text field cannot be negated.
+!!! note "`none_of` keeps items with no value"
+    `{"none_of": [{"archive": {"eq": "cs"}}]}` keeps every paper the viewer may see whose archive is not `cs`, including papers with no archive. The expressions inside one `none_of` may name different fields, and may be free-text searches.
 
 Search results are not ranked. A relevance score is usually computed from how common each word is across the whole collection, and a viewer's results would then depend on documents that viewer cannot see.
 

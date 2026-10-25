@@ -26,7 +26,7 @@ A viewer on the map can:
 - filter by ranges of numbers and dates, by category values, and by exact, prefix or substring matches on keywords;
 - search free text by word;
 - draw a box or a freehand shape to select an area. Code can also send a circle, an ellipse or a polygon;
-- combine any of these filters with and, or and not, except that a free-text search cannot be negated;
+- combine any of these filters with and, or and not;
 - highlight the items that match a test, without hiding the rest;
 - open an item to see all of its fields;
 - switch between views and keep the same filters.
