@@ -88,7 +88,7 @@ Here is the whole page. Replace `index.html` with it:
 --8<-- "clients/ts/examples/own-ui/web/index.html"
 ```
 
-The left column holds our controls, the right one a panel for a paper, a count and a list, and between them a `<mosaica-map>` inside a `<mosaica-store>`. The map has no attributes at all. None of the controls do anything yet: the rest of the tutorial wires them up one at a time.
+The left column holds our controls, the right one a panel for a paper, a count and a list, and between them a `<mosaica-map>` inside a `<mosaica-store>`. The map has one attribute, `title-field="title"`, so hovering over a paper shows its title rather than its id. None of the controls do anything yet: the rest of the tutorial wires them up one at a time.
 
 Vite keeps the page's scripts and stylesheet in `src`. Replace `style.css` there with a three-column grid:
 
