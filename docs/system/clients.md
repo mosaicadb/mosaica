@@ -29,18 +29,6 @@ Each client sends the request as the caller wrote it, choosing no fields, order 
 
 A read that stops part of the way gives back what it read and the cursor to continue from: `PartialRead` for a bulk read in Python; in TypeScript, the cursor after each page of a bulk read, and `PartialAggregate` for an aggregate; and the cursor named on stderr by the command.
 
-## Writing your own client
-
-The TypeScript store handles these, and a client built on the HTTP API alone has to handle them itself:
-
-- **A `mosaica_id` is a 64-bit integer.** A JavaScript `number` is exact only up to 2^53, so read and send ids as `bigint`s or as strings of digits.
-- **Keep `k` steady or raise it as the viewer zooms in.** The sample nests across zoom levels only while each tile may draw as many points as before. Lowering `k` drops points the viewer was already looking at.
-- **Choose the zoom level yourself.** Nothing in a request or an answer states the right depth. `/v1/meta` publishes the sampling settings under `selection`, from which a client can work out how many points a level's tiles will draw, and pick the level that fills the screen.
-- **Drawn points are a sample.** A tile's `served` count is how many points it drew. Its `visible` and `matched` counts are the totals.
-- **Topics come from their own request.** Each point carries its topic's `mosaica_id` in each layer named. The topics' names, counts and positions come from [annotations by tile](queries.md#annotations-on-the-map).
-- **Held tiles answer for one filter and one identity key.** Drop them when either changes. A change of content key means the data has moved on, and the held tiles are older than it.
-- **A proxy in front of the viewer address must pass Mosaica's response headers through:** `x-mosaica-identity-key`, `x-mosaica-pin` and the `ETag`. Without them, a client cannot tell when to drop what it holds.
-
 ## Not built yet
 
 - **Keeping the notebook map's token off the page.** The widget's token reaches the browser page itself.
