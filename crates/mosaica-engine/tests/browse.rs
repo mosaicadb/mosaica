@@ -842,6 +842,57 @@ fn a_filter_adds_a_count_per_row_and_moves_nothing_else() {
     }
 }
 
+/// **A negation's count per row is the row's visible members it keeps**, and leaves out a
+/// suppressed member it would keep and a member outside the viewer's grant.
+#[test]
+fn a_negations_count_per_row_is_the_visible_members_it_keeps() {
+    let fx = fixture(None);
+    // `score` is drawn only, so the negation is answered by the whole-view scan; `archive` is
+    // indexed and answered in entity space beside it.
+    let negation = FilterExpr::NoneOf(vec![
+        FilterExpr::Leaf {
+            column: "score".into(),
+            operand: FilterOperand::Range {
+                lo: None,
+                hi: Some(Endpoint {
+                    value: Scalar::Int(0),
+                    inclusive: false,
+                }),
+            },
+        },
+        FilterExpr::Leaf {
+            column: "archive".into(),
+            operand: FilterOperand::Equals(mosaica_types::AttrLocalId::new(fx.codes["xx"])),
+        },
+    ]);
+    let kept = |e: u64| score_of(e) >= 0 && archive_of(e) != "xx";
+    let suppressed = (0..300)
+        .find(|&e| subset_sees(e) && kept(e))
+        .expect("a visible member of alpha the negation keeps");
+    assert!((0..300).any(|e| !subset_sees(e) && kept(e)));
+    let entity = item_of_id(&fx.engine, suppressed).unwrap().expect("a built item");
+    fx.engine
+        .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+        .unwrap();
+
+    let filtered = browse(
+        &fx.engine,
+        &subset_credential(),
+        BrowseForm::Roots,
+        Some(negation),
+        100,
+    );
+    assert_eq!(filtered.artifacts.len(), ROOTS.len());
+    for row in &filtered.artifacts {
+        let key = row.key.clone().unwrap_or_default();
+        let base = ROOTS.iter().find(|(k, _)| *k == key).expect("a planted root").1;
+        let want = (base..base + 300)
+            .filter(|&e| subset_sees(e) && e != suppressed && kept(e))
+            .count() as u64;
+        assert_eq!(row.matched_count, Some(want), "{key}");
+    }
+}
+
 /// **The refusals name deployment schema; an artifact is never one of them.**
 #[test]
 fn the_refusals_are_about_schema_and_an_artifact_is_an_empty_page() {

@@ -6220,7 +6220,8 @@ components:
 
         `region` is a leaf of its own, not a column, and the name is reserved at the build. It is
         a set of rows over the whole view, composes with every other leaf, and can be negated with
-        `none_of`. It is cached per generation across principals. `x-mosaica-region` says how exact its answer is.
+        `none_of`. It is cached per generation across principals. `x-mosaica-region` says how exact
+        its answer is.
 
         `member_of` is another leaf of its own, also reserved at the build: `{"layer",
         "artifact"}`, the artifact's members this principal can see, as a set of rows over the

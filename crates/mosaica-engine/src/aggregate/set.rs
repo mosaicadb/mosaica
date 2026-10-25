@@ -325,18 +325,19 @@ fn routed(
             let region = tree.region_verdict();
             let total = side.data.row_space.total_rows();
             let whole_view = 0..u32::try_from(total).unwrap_or(u32::MAX);
+            let leaf = open
+                .served
+                .leaf(&open.mask, place)
+                .expect("a side the page reads");
             let matched = engine.evaluate_row_route(
                 &tree,
                 side,
+                leaf,
                 std::slice::from_ref(&whole_view),
                 total,
                 false,
             )?;
-            let rows = open
-                .served
-                .leaf(&open.mask, place)
-                .expect("a side the page reads")
-                .visible_rows(matched.rows());
+            let rows = leaf.visible_rows(matched.rows());
             let size = rows.cardinality();
             (Part::of(Held::Rows(rows), size), region)
         }

@@ -532,6 +532,65 @@ fn the_point_bit_is_present_only_with_a_highlight_and_agrees_with_the_counts() {
     }
 }
 
+/// **A negated highlight lights only the visible items it keeps**: neither its count nor its bit
+/// reaches a suppressed item it would keep or one outside the viewer's grant, on the per-tile walk
+/// a highlight always takes.
+#[test]
+fn a_negated_highlight_lights_only_visible_items() {
+    let fx = fixture();
+    let bundle = fx._dir.path().join("bundle");
+    let mut engine = Engine::open(
+        &bundle,
+        &fx._dir.path().join("cache-negation"),
+        &fx._dir.path().join("wal-negation.log"),
+        config_uncapped(),
+    )
+    .expect("the bundle opens");
+    engine.start_write_executor(8).expect("the executor starts once");
+    // `archive` is drawn and `topic` indexed only, so the tree mixes both spaces.
+    let negation = FilterExpr::NoneOf(vec![
+        category_is(&fx, "archive", "xx"),
+        category_is(&fx, "topic", "yy"),
+    ]);
+    let kept = |e: u64| archive_of(e) == "zz";
+    let suppressed = (0..N)
+        .find(|&e| subset_sees(e) && kept(e))
+        .expect("a visible item the negation keeps");
+    assert!((0..N).any(|e| !subset_sees(e) && kept(e)));
+    let entity = item_of_id(&engine, suppressed).unwrap().expect("a built item");
+    engine
+        .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+        .unwrap();
+    let id_of = |e: u64| {
+        let entity = item_of_id(&engine, e).unwrap().expect("a built item");
+        engine.mosaica_id_of(entity).expect("identity is computable").raw()
+    };
+    let want: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| subset_sees(e) && e != suppressed && kept(e))
+        .map(id_of)
+        .collect();
+
+    let lit = viewport(
+        &engine,
+        &subset_credential(),
+        2,
+        WHOLE_MAP,
+        Ask::new().highlight(negation),
+    );
+    assert_eq!(highlighted_total(&lit), want.len() as u64);
+    let bits = lit.points.highlighted.as_ref().expect("a highlight carries the column");
+    let lit_ids: std::collections::BTreeSet<u64> = lit
+        .points
+        .mosaica_ids
+        .iter()
+        .zip(bits)
+        .filter(|(_, &bit)| bit)
+        .map(|(&id, _)| id)
+        .collect();
+    assert!(!lit_ids.is_empty() && lit_ids.is_subset(&want));
+    assert!(!lit_ids.contains(&id_of(suppressed)));
+}
+
 /// **`point_rows = "highlight"` is a column projection: the same rows, the same split, fewer
 /// columns.**
 ///

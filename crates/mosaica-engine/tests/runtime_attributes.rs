@@ -96,42 +96,59 @@ fn score_of(entity: u64) -> f32 {
     (entity % 97) as f32 * 0.5
 }
 
-fn write_points(path: &Path, n: u64) {
-    let schema = Arc::new(ArrowSchema::new(vec![
+/// The points, with an all-null `late` column where `late` is set, for a build that declares it.
+fn write_points(path: &Path, n: u64, late: bool) {
+    let mut fields = vec![
         Field::new("entity_id", DataType::UInt64, false),
         Field::new("x", DataType::Float64, false),
         Field::new("y", DataType::Float64, false),
         Field::new("band", DataType::Utf8, false),
         Field::new("score", DataType::Float32, false),
-    ]));
+    ];
+    if late {
+        fields.push(Field::new("late", DataType::Float32, true));
+    }
+    let schema = Arc::new(ArrowSchema::new(fields));
     let ids: Vec<u64> = (0..n).collect();
     let xs: Vec<f64> = ids.iter().map(|e| ((e * 37) % 1000) as f64).collect();
     let ys: Vec<f64> = ids.iter().map(|e| ((e * 53) % 1000) as f64).collect();
     let bands: Vec<&str> = ids.iter().map(|e| band_of(*e)).collect();
     let scores: Vec<f32> = ids.iter().map(|e| score_of(*e)).collect();
-    let batch = RecordBatch::try_new(
-        schema.clone(),
-        vec![
-            Arc::new(UInt64Array::from(ids)),
-            Arc::new(Float64Array::from(xs)),
-            Arc::new(Float64Array::from(ys)),
-            Arc::new(StringArray::from(bands)),
-            Arc::new(Float32Array::from(scores)),
-        ],
-    )
-    .unwrap();
+    let mut columns: Vec<arrow::array::ArrayRef> = vec![
+        Arc::new(UInt64Array::from(ids.clone())),
+        Arc::new(Float64Array::from(xs)),
+        Arc::new(Float64Array::from(ys)),
+        Arc::new(StringArray::from(bands)),
+        Arc::new(Float32Array::from(scores)),
+    ];
+    if late {
+        columns.push(Arc::new(Float32Array::from(vec![None::<f32>; ids.len()])));
+    }
+    let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
     let mut w = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
     w.write(&batch).unwrap();
     w.close().unwrap();
 }
 
 fn build_fixture_with_schema(root: &Path, tmp: &Path, shard_size: Option<u64>) {
+    build_fixture_declaring(root, tmp, shard_size, false)
+}
+
+/// [`build_fixture_with_schema`], declaring an indexed `f32` named `late` after the build's
+/// columns where `late` is set, which no built item carries: the column a running service
+/// declares in [`AttributeRequest`] form below, declared at the build instead.
+fn build_fixture_declaring(root: &Path, tmp: &Path, shard_size: Option<u64>, late: bool) {
     let points = tmp.join("points.parquet");
     let pairs = tmp.join("pairs.parquet");
-    write_points(&points, N_ITEMS);
+    write_points(&points, N_ITEMS, late);
     write_pairs_n(&pairs, N_ITEMS);
     let schema_path = tmp.join("schema.toml");
-    std::fs::write(&schema_path, SCHEMA_TOML).unwrap();
+    let toml = if late {
+        format!("{SCHEMA_TOML}\n[[attribute]]\nname  = \"late\"\ntype  = \"f32\"\nindex = true\n")
+    } else {
+        SCHEMA_TOML.to_string()
+    };
+    std::fs::write(&schema_path, toml).unwrap();
     let schema = mosaica_build::config::Config::parse(&schema_path, &Default::default())
         .expect("the fixture schema parses")
         .schema;
@@ -641,6 +658,85 @@ fn a_declaration_mid_ingest_pads_earlier_rows_and_neither_panics_nor_fails_the_f
         vec![id(carrying[0])],
         "a filter over the column matches the row that carried it and no padded row"
     );
+}
+
+/// **A negation over a field declared at a running service answers as one over the same field
+/// declared at the build**, before the first flush of a row carrying it and after, for a viewer
+/// who sees a subset: a suppressed item and an item outside the grant are in neither answer.
+#[test]
+fn a_negation_over_a_field_declared_while_running_answers_as_one_declared_at_the_build() {
+    let live = fixture();
+    let built = {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("bundle");
+        build_fixture_declaring(&root, tmp.path(), None, true);
+        Fixture { tmp, root }
+    };
+    let engines = [engine_over(&live), engine_over(&built)];
+    engines[0]
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("late", "f32")
+        })
+        .expect("the declaration is accepted");
+    let suppressed = (0..N_ITEMS)
+        .find(|&s| subset_sees(s))
+        .expect("an item the subset viewer sees");
+    let late = |label: &[u8], value: Option<f32>| {
+        let mut scalars = build_columns("low", 1.0);
+        scalars.push(value.map_or(WalScalar::Null, WalScalar::F32));
+        (label.to_vec(), scalars)
+    };
+    // Kept, kept, matched, and kept but outside the subset viewer's grant.
+    let rows = [
+        late(b"1", Some(0.5)),
+        late(b"1", None),
+        late(b"1", Some(2.0)),
+        late(b"0", Some(0.5)),
+    ];
+    let mut ingested = Vec::new();
+    for engine in &engines {
+        let entity = item_of_id(engine, suppressed).unwrap().expect("a built item");
+        engine
+            .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+            .unwrap();
+        let unallocated = rows
+            .iter()
+            .map(|(label, scalars)| row_under(engine, label, scalars.clone()))
+            .collect();
+        ingested.push(ingest(engine, "late-rows", unallocated));
+    }
+    let negation = FilterExpr::NoneOf(vec![leaf("late", at_least(1.0))]);
+    let answer = |engine: &Engine| {
+        let session = engine.authorise(&subset_credential()).unwrap();
+        let mut ids = viewport(engine, &session, Some(negation.clone())).ids;
+        ids.sort_unstable();
+        ids
+    };
+    let id = |engine: &Engine, e: EntityId| engine.mosaica_id_of(e).unwrap().raw();
+    let built_items = |engine: &Engine| -> Vec<u64> {
+        let mut ids: Vec<u64> = (0..N_ITEMS)
+            .filter(|&s| subset_sees(s) && s != suppressed)
+            .map(|s| id(engine, item_of_id(engine, s).unwrap().expect("a built item")))
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+
+    // Before the flush the ingested rows hold no row in the view: every visible built item.
+    for engine in &engines {
+        assert_eq!(answer(engine), built_items(engine));
+    }
+    for engine in &engines {
+        publish_buffered(engine);
+    }
+    for (engine, entities) in engines.iter().zip(&ingested) {
+        let mut want = built_items(engine);
+        want.extend([id(engine, entities[0]), id(engine, entities[1])]);
+        want.sort_unstable();
+        assert_eq!(answer(engine), want);
+    }
+    assert_eq!(answer(&engines[0]), answer(&engines[1]));
 }
 
 /// **A restart replays the declaration**, from the log alone before any publication and from

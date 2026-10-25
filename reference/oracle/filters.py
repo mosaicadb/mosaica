@@ -337,14 +337,17 @@ def matches(expr: dict, columns: dict, entity: int) -> bool:
     if not isinstance(expr, dict) or len(expr) != 1:
         raise ValueError(f"a filter node is one key: {expr!r}")
     (name, body), = expr.items()
-    if name == "all_of":
-        return all(matches(sub, columns, entity) for sub in body)
-    if name == "any_of":
-        return any(matches(sub, columns, entity) for sub in body)
-    if name == "none_of":
+    if name in ("all_of", "any_of", "none_of"):
+        # Every branch is evaluated before any is combined, so an unknown column in a branch the
+        # answer would not need still raises, as the server refuses it.
+        held = [matches(sub, columns, entity) for sub in body]
+        if name == "all_of":
+            return all(held)
+        if name == "any_of":
+            return any(held)
         # Everything the viewer may see, minus the matches: an entity with no value in a column
         # matches no leaf over it, so a negation keeps it.
-        return not any(matches(sub, columns, entity) for sub in body)
+        return not any(held)
     if name not in columns:
         raise UnknownColumn(name)
     if name == "region":

@@ -911,6 +911,48 @@ fn a_derived_value_with_no_visible_carrier_is_indistinguishable_from_no_value() 
     assert_eq!(answer(&["hidden"]), answer(&["unminted"]));
 }
 
+/// **A negation counts the visible items it keeps**, on the row route and the entity route
+/// together, and neither a suppressed item it would keep nor one outside the viewer's grant:
+/// `hidden` is carried only by items the subset viewer cannot see, so a leak would list it.
+#[test]
+fn a_negation_counts_only_the_visible_items_it_keeps() {
+    let fx = fixture();
+    let engine = &fx.engine;
+    let session = fx.session(false);
+    // `mark` is drawn only, so it is answered row by row; `kind` is drawn and indexed.
+    let negation = FilterExpr::NoneOf(vec![fx.is_in("mark", &["q"]), fx.is_in("kind", &["a"])]);
+    let kept = |i: &Item| i.mark.as_deref() != Some("q") && i.kind.as_deref() != Some("a");
+    let suppressed = fx
+        .items
+        .iter()
+        .find(|i| i.subset && kept(i) && i.mark.is_none())
+        .expect("a visible item with no mark")
+        .source;
+    assert!(
+        fx.items
+            .iter()
+            .any(|i| !i.subset && kept(i) && i.shade.as_deref() == Some("hidden")),
+        "an item outside the grant the negation would keep carries `hidden`"
+    );
+    let entity = item_of_id(engine, suppressed).unwrap().expect("a built item");
+    engine.accept_change(entity, ChangeOp::Suppress).unwrap();
+
+    let keep = |i: &Item| kept(i) && i.source != suppressed;
+    let items: Vec<&Item> = fx.visible(false, &keep).collect();
+    let listed = ["x", "y", "z", "hidden"];
+    let listable = |key: &str| fx.visible(false, &|_| true).any(|i| i.shade.as_deref() == Some(key));
+    let groupings = [field("shade", named(&listed)), size()];
+    let mut req = request(&groupings);
+    req.filter = Some(negation.clone());
+    let tables = read_all(engine, &session, req);
+    assert_eq!(tables[&1].1[0].count, items.len() as u64, "the size");
+    assert_eq!(
+        simplified(&tables[&0].1),
+        expected_values(&items, None, "shade", &listed, &listable)
+    );
+    assert_eq!(viewport_matched(engine, &session, Some(negation)), items.len() as u64);
+}
+
 /// **A suppression applies from the next request**, and **between two pages of one table from the
 /// next page**.
 #[test]

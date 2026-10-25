@@ -1256,6 +1256,65 @@ fn a_narrower_viewer_reads_only_what_they_see_and_counts_as_the_viewport_does() 
     }
 }
 
+/// **A negation read on the row route returns the visible items it keeps and counts them**, and
+/// neither a suppressed item it would keep nor one outside the viewer's grant.
+#[test]
+fn a_negation_on_the_row_route_reads_and_counts_only_visible_items() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&subset_credential()).unwrap();
+    let fields: Vec<String> = Vec::new();
+    // `heat` is rendered only, so the negation is answered row by row.
+    let negation = FilterExpr::NoneOf(vec![
+        leaf(
+            "heat",
+            FilterOperand::Range {
+                lo: Some(Endpoint {
+                    value: Scalar::Float(2.0),
+                    inclusive: true,
+                }),
+                hi: None,
+            },
+        ),
+        leaf(
+            "band",
+            FilterOperand::Equals(AttrLocalId::new(band_code("low"))),
+        ),
+    ]);
+    let kept = |s: u64| !heat_of(s).is_some_and(|v| v >= 2.0) && band_of(s) != Some("low");
+    let suppressed = (0..N)
+        .find(|&s| subset_sees(s) && kept(s) && heat_of(s).is_none())
+        .expect("a visible item with no heat");
+    let outside = (0..N)
+        .find(|&s| !subset_sees(s) && kept(s))
+        .expect("an item outside the grant the negation would keep");
+    fx.engine
+        .accept_change(EntityId::new(fx.entity[&suppressed]), ChangeOp::Suppress)
+        .unwrap();
+    let want: Vec<u64> = (0..N)
+        .filter(|&s| subset_sees(s) && s != suppressed && kept(s))
+        .collect();
+
+    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+        let mut req = request("s0", &fields);
+        req.order = Some(order);
+        req.page_rows = Some(64);
+        req.filter = Some(negation.clone());
+        let ids = read_all(&fx.engine, &session, &req).ids();
+        let expected = match order {
+            RecordsOrder::Map => fx.map_order(want.iter().copied(), "s0"),
+            RecordsOrder::Stored => fx.stored_order(want.iter().copied()),
+        };
+        assert_eq!(ids, fx.tids(&expected), "{order:?}");
+        assert!(!ids.contains(&fx.tid(suppressed)) && !ids.contains(&fx.tid(outside)));
+
+        req.count = true;
+        req.pages = Some(1);
+        let (sink, _) = respond(&fx.engine, &session, req).unwrap();
+        let counts = sink.head.unwrap().counts.expect("counts asked for");
+        assert_eq!(counts.matched, want.len() as u64, "{order:?}");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The cursor
 // ---------------------------------------------------------------------------------------------

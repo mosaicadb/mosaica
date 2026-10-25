@@ -1040,6 +1040,38 @@ fn a_filter_counts_matching_members_and_narrows_the_rows() {
     }
 }
 
+/// **A negation counts each artifact's visible members outside it**, and leaves out a suppressed
+/// member it would keep and a member outside the viewer's grant.
+#[test]
+fn a_negation_counts_only_the_visible_members_it_keeps() {
+    let fx = fixture();
+    let engine = fx.engine();
+    let (region, rect) = middle();
+    let first = root_key(0);
+    let suppressed = tree_members(&first)
+        .find(|&s| subset_sees(s) && !inside(rect, s))
+        .expect("a visible member of the first root outside the box");
+    assert!(tree_members(&first).any(|s| !subset_sees(s) && !inside(rect, s)));
+    engine
+        .accept_change(fx.entities([suppressed])[0], ChangeOp::Suppress)
+        .unwrap();
+
+    let session = engine.authorise(&subset_credential()).unwrap();
+    let fields = names(&["key", "masked_count"]);
+    let mut req = request(TREE, &fields);
+    req.filter = Some(FilterExpr::NoneOf(vec![region]));
+    req.keep_unmatched = true;
+    let pages = read_all(engine, &session, &req);
+    let rows = keys(&pages);
+    assert!(rows.contains(&first));
+    for (key, count) in rows.iter().zip(u64s(&pages, "matched_count")) {
+        let want = tree_members(key)
+            .filter(|&s| subset_sees(s) && s != suppressed && !inside(rect, s))
+            .count() as u64;
+        assert_eq!(count, want, "{key}");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Writes during a read
 // ---------------------------------------------------------------------------------------------

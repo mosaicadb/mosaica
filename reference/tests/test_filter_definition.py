@@ -236,6 +236,21 @@ def test_the_empty_combinators_are_their_operators_identities():
     assert _matching({"any_of": []}) == set()
 
 
+def test_an_unknown_column_in_any_branch_raises_whatever_the_others_answer():
+    """The server refuses an unknown column anywhere in the tree, so the oracle evaluates every
+    branch, even after one has settled the answer.
+
+    Working: `colour eq red` holds for entity 1, which settles `any_of` and `none_of`, and `colour
+    eq blue` fails for it, which settles `all_of`; the unknown column after each must still raise.
+    """
+    red = {"colour": {"eq": "red"}}
+    blue = {"colour": {"eq": "blue"}}
+    unknown = {"nope": {"eq": "x"}}
+    for expr in [{"any_of": [red, unknown]}, {"none_of": [red, unknown]}, {"all_of": [blue, unknown]}]:
+        with pytest.raises(UnknownColumn):
+            filters.matches(expr, COLUMNS, 1)
+
+
 def test_a_node_with_more_than_one_key_is_refused():
     """A filter node is exactly one key (contracts §3.2's wire form).
 

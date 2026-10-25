@@ -378,9 +378,9 @@ impl FilterColumns {
         let tag = u16::try_from(declared_index).unwrap_or(u16::MAX);
         let mut out = Bitmap::new();
         for entity in survivors.iter() {
-            // A row that will not read excludes the item rather than refusing the request: the
-            // fail-closed reading narrows, where drill-down's is a refusal because it is about to
-            // serve the row.
+            // A row that will not read is not a match, rather than a refused request. Under a
+            // `none_of` that keeps the item, which is in the candidate and so visible; drill-down
+            // refuses instead, because it is about to serve the row.
             let Ok(Some(fields)) = self.records.fields_of(entity) else {
                 continue;
             };

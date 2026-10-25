@@ -56,10 +56,12 @@ impl Engine {
     /// A routed filter's answer as rows over `domain`, ascending, disjoint and merged ranges of
     /// `side`'s row space holding `rows_in_ranges` rows: an entity-space verdict crossed into row
     /// space, or a tree with row-space leaves evaluated there. `per_tile_only` holds either to the
-    /// domain rather than letting a whole-view projection be chosen where it is cheaper.
+    /// domain rather than letting a whole-view projection be chosen where it is cheaper. `leaf` is
+    /// the side's mask before any filter narrows it.
     pub(crate) fn rows_of_routed(
         &self,
         side: &ServedSide<'_>,
+        leaf: &EffectiveMask,
         routed: crate::filter::RoutedFilter,
         domain: &[Range<u32>],
         rows_in_ranges: u64,
@@ -78,12 +80,18 @@ impl Engine {
                 region: None,
             },
             crate::filter::RoutedFilter::Row(tree) => {
-                let rows =
-                    self.evaluate_row_route(&tree, side, domain, rows_in_ranges, per_tile_only)?;
+                let rows = self.evaluate_row_route(
+                    &tree,
+                    side,
+                    leaf,
+                    domain,
+                    rows_in_ranges,
+                    per_tile_only,
+                )?;
                 self.counters.filter_row_routed.fetch_add(1, Ordering::Relaxed);
                 RoutedRows {
-                    // A region's interior rows have not met the mask, so their count is a
-                    // pre-mask quantity about the region, and is not taken.
+                    // A region's interior rows have not met the mask, and a negation's have, so
+                    // neither count is a quantity about the filter alone, and neither is taken.
                     unmasked: (!tree.has_region()).then(|| rows.rows().cardinality()),
                     region: tree.region_verdict(),
                     rows,
@@ -95,7 +103,8 @@ impl Engine {
     /// Evaluate a routed filter tree with row-space leaves over the request's own rows, exact
     /// over `domain` and silent outside it. A leaf reads every row of the domain whatever the
     /// principal may see, so the bitmap returned here still contains suppressed rows; a caller
-    /// narrows the answer only through `EffectiveMask::with_filter`. Code 0 is the vocabulary's
+    /// narrows the answer only through `EffectiveMask::with_filter`. A negation alone subtracts
+    /// from `leaf`'s visible rows, the side's mask before any filter, so it holds none of them. Code 0 is the vocabulary's
     /// absent sentinel and matches nothing. Every entity-space verdict is crossed in one joint
     /// walk, or projected where cheaper, and the tree combines entirely in row space. A tree
     /// bounded by nothing but region leaves and projected verdicts comes back
@@ -105,13 +114,13 @@ impl Engine {
         &self,
         tree: &crate::filter::RowExpr,
         side: &ServedSide<'_>,
+        leaf: &EffectiveMask,
         domain: &[Range<u32>],
         rows_in_ranges: u64,
         per_tile_only: bool,
     ) -> Result<FilterRows> {
         let row_space = &side.data.row_space;
         let segments = &side.segments[..];
-        let total_rows = row_space.total_rows();
         // Every entity-space verdict's row image, crossed together in one walk.
         let verdicts = tree.entity_verdicts();
         let mut whole_view = tree.is_whole_view();
@@ -158,16 +167,15 @@ impl Engine {
                 }
             }
         };
-        let scope = if whole_view {
-            RowScope::WholeView {
-                total_rows: u32::try_from(total_rows).unwrap_or(u32::MAX),
-            }
-        } else {
-            let mut domain_rows = croaring::Bitmap::new();
-            for range in domain {
-                domain_rows.add_range(range.clone());
-            }
-            RowScope::Domain(domain_rows)
+        let scope = RowScope {
+            visible: crate::compose::WholeMask::visible_all(leaf),
+            domain: (!whole_view).then(|| {
+                let mut domain_rows = croaring::Bitmap::new();
+                for range in domain {
+                    domain_rows.add_range(range.clone());
+                }
+                domain_rows
+            }),
         };
         let mut next_image = 0usize;
         let rows = self
@@ -195,27 +203,25 @@ pub(crate) struct RoutedRows {
 }
 
 /// The rows a row-space evaluation answers over — see [`Engine::evaluate_row_route`].
-enum RowScope {
-    /// Every row of the view: the tree holds nothing the request's domain bounds.
-    WholeView { total_rows: u32 },
-    /// The request's own rows, as one bitmap, because a sibling leaf is bounded by them.
-    Domain(croaring::Bitmap),
+struct RowScope<'a> {
+    /// The side's visible rows, before any filter.
+    visible: &'a croaring::Bitmap,
+    /// The request's own rows, where a sibling leaf is bounded by them; `None` where the tree holds
+    /// nothing the domain bounds and answers over the whole view.
+    domain: Option<croaring::Bitmap>,
 }
 
-impl RowScope {
-    /// Every row in scope, which a negation subtracts its matches from.
-    fn all_rows(&self) -> croaring::Bitmap {
-        match self {
-            RowScope::WholeView { total_rows } => croaring::Bitmap::from_range(0..*total_rows),
-            RowScope::Domain(rows) => rows.clone(),
-        }
+impl RowScope<'_> {
+    /// The visible rows in scope, which a negation subtracts its matches from.
+    fn visible_rows(&self) -> croaring::Bitmap {
+        self.clamp(self.visible)
     }
 
     /// A whole-view row set, narrowed to the scope where the scope is narrower.
     fn clamp(&self, rows: &croaring::Bitmap) -> croaring::Bitmap {
-        match self {
-            RowScope::WholeView { .. } => rows.clone(),
-            RowScope::Domain(domain) => rows.and(domain),
+        match &self.domain {
+            None => rows.clone(),
+            Some(domain) => rows.and(domain),
         }
     }
 }
@@ -253,7 +259,7 @@ fn eval_row_expr(
         RowExpr::NotInRows(kids) => {
             // Every kid is evaluated, even once the difference is empty: `images` is positional,
             // so a skipped kid would leave the cursor short of the verdicts after it.
-            let mut out = scope.all_rows();
+            let mut out = scope.visible_rows();
             for kid in kids {
                 out.andnot_inplace(&eval_row_expr(
                     kid, images, next_image, segments, domain, scope,
@@ -887,7 +893,7 @@ impl Engine {
         let mut filters = Vec::new();
         let mut highlights = Vec::new();
         let resolved = ResolvedLeaves::new(&mask);
-        for (place, side, _) in served.filtered_sides(&mask) {
+        for (place, side, leaf) in served.filtered_sides(&mask) {
             let (domain, rows_in_ranges) = tiling.domain_in(place);
             let (filter_rows, highlight_rows) =
                 self.route_filters(served, side, &resolved, &req.cancel, |route| {
@@ -901,6 +907,7 @@ impl Engine {
                         probe.lap(|t| &mut t.filter_eval_ns);
                         let out = self.rows_of_routed(
                             side,
+                            leaf,
                             routed,
                             &domain,
                             rows_in_ranges,
@@ -1482,6 +1489,38 @@ mod tests {
             "the fixture is degenerate: every matching row is inside the domain, so the two routes \
              would agree even if the domain were ignored"
         );
+    }
+
+    /// Entity verdicts either side of a negation each read their own image, and the negation
+    /// subtracts from the visible rows in scope, so it holds no row the mask leaves out.
+    #[test]
+    fn a_negation_between_entity_verdicts_reads_its_own_image_and_stays_visible() {
+        use crate::filter::RowExpr;
+
+        // Row 12 is in both outer images and the mask leaves it out; row 2 is the negated one.
+        let before = croaring::Bitmap::from_iter([1u32, 2, 3, 12, 25]);
+        let negated = croaring::Bitmap::from_iter([2u32]);
+        let after = croaring::Bitmap::from_iter([1u32, 2, 3, 12]);
+        let images = vec![before, negated, after];
+        let tree = RowExpr::AllOf(vec![
+            RowExpr::Entity(croaring::Bitmap::new()),
+            RowExpr::NotInRows(vec![RowExpr::Entity(croaring::Bitmap::new())]),
+            RowExpr::Entity(croaring::Bitmap::new()),
+        ]);
+        assert_eq!(tree.entity_verdicts().len(), images.len());
+
+        let mut visible = croaring::Bitmap::from_range(0..40);
+        visible.remove(12);
+        let scope = RowScope {
+            visible: &visible,
+            domain: Some(croaring::Bitmap::from_range(0..30)),
+        };
+        let mut next_image = 0usize;
+        let out = eval_row_expr(&tree, &images, &mut next_image, &[], &[0..30], &scope)
+            .expect("a tree of verdicts evaluates");
+
+        assert_eq!(out.iter().collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(next_image, images.len(), "every image is consumed, in order");
     }
 
     /// A view with no `row-entity.u32` declines the per-tile route rather than reading
