@@ -17,7 +17,6 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 import weakref
 from pathlib import Path
@@ -2166,7 +2165,9 @@ def create(path: str | os.PathLike | None = None, replace: bool = False) -> Data
 
     - `path`: the directory. It must be empty or not yet exist. Without it the database goes in
       a temporary directory, in memory where the system offers one (`/dev/shm` on Linux), and is
-      deleted when closed, when nothing refers to it any more, or when Python exits.
+      deleted when closed, when nothing refers to it any more, or when Python exits. One left
+      behind by a process that ended without running its exit handlers, as a killed kernel or a
+      marimo kernel ends, is deleted by the next `create()` without a path, in any process.
     - `replace`: `True` deletes a Mosaica database already at `path` first. A directory that holds
       anything else is refused.
 
@@ -2176,8 +2177,7 @@ def create(path: str | os.PathLike | None = None, replace: bool = False) -> Data
         db = mosaica.create("~/maps/papers", replace=True)
     """
     if path is None:
-        parent = RAM_BACKED if RAM_BACKED.is_dir() else None
-        directory = Path(tempfile.mkdtemp(prefix="mosaica-", dir=parent))
+        directory = _instance.make_temporary(RAM_BACKED if RAM_BACKED.is_dir() else None)
         database = Database(directory, temporary=True)
     else:
         directory = Path(path).expanduser()

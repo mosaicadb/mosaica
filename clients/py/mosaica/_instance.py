@@ -14,8 +14,14 @@ standard input. Closing the pipe stops it, which is how `close()`, a `Database` 
 referenced and the exit handler stop it. The pipe also closes however this process ends, so the
 child stops when a marimo kernel leaves through `os._exit` or a kernel is killed, which run no
 exit handler. Nothing is ever killed by process name, since a kill by name reaches every other
-server on the machine. The server deletes nothing: a temporary database's directory is removed by
-this process, at `close()`, once the `Database` is unreferenced, and at exit.
+server on the machine.
+
+The server deletes nothing. A temporary database's directory is removed by this process, at
+`close()`, once the `Database` is unreferenced, and at exit. A process that ends without its exit
+handler leaves the directory behind, so each one holds a lock file this process keeps locked for
+the directory's life, and the system releases the lock however the process ends. `create()`
+removes every temporary directory beside the one it makes whose lock it can take, its owner
+having gone. Only a directory named `mosaica-*` holding that lock file is a candidate.
 
 The child runs in a session of its own (a process group of its own on Windows). A kernel's signal
 to its own process group, and a Jupyter kernel's wait at shutdown for the children in its group to
@@ -33,6 +39,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -64,6 +71,70 @@ _running: dict[int, subprocess.Popen] = {}
 #: The directories of the temporary databases this process made and has not closed.
 temporary: set[Path] = set()
 
+#: The file a temporary database's directory holds, locked by the process that made it.
+LOCK = "mosaica-temporary.lock"
+
+#: The open, locked lock file of each temporary directory this process made, by directory.
+_locks: dict[Path, int] = {}
+
+
+def _take(descriptor: int) -> bool:
+    """Lock an open file without waiting, and say whether the lock was taken. Two descriptors
+    opened on one file are locked apart, within one process as between two."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def make_temporary(parent: Path | None) -> Path:
+    """A new temporary database directory under `parent`, or the system's temporary directory,
+    holding its lock file locked by this process. The directories whose owners have gone are
+    removed first.
+
+    The lock file is locked under another name and then renamed, so a directory whose lock file
+    has its name is locked from the moment it has one.
+    """
+    sweep(parent)
+    directory = Path(tempfile.mkdtemp(prefix="mosaica-", dir=parent))
+    making = directory / (LOCK + ".new")
+    descriptor = os.open(making, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    if not _take(descriptor):
+        os.close(descriptor)
+        raise Refusal(f"create: {making} could not be locked, so {directory} is not made")
+    os.replace(making, directory / LOCK)
+    _locks[directory] = descriptor
+    return directory
+
+
+def sweep(parent: Path | None) -> None:
+    """Remove each temporary database directory under `parent` whose lock file can be locked,
+    the process that made it having ended. Nothing else is touched: a candidate is a directory,
+    not a link, named `mosaica-*`, holding a regular file named `LOCK`."""
+    base = Path(parent) if parent is not None else Path(tempfile.gettempdir())
+    for directory in base.glob("mosaica-*"):
+        lock = directory / LOCK
+        try:
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            if lock.is_symlink() or not lock.is_file():
+                continue
+            descriptor = os.open(lock, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            continue
+        taken = _take(descriptor)
+        os.close(descriptor)
+        if taken:
+            shutil.rmtree(directory, ignore_errors=True)
+
 
 class Held:
     """What one database holds outside this process: its server, and its directory where it is a
@@ -88,6 +159,11 @@ def release(held: Held) -> None:
 
 
 def remove(directory: Path) -> None:
+    """Remove a temporary directory this process made. Its lock is let go first, since Windows
+    removes no file held open."""
+    descriptor = _locks.pop(directory, None)
+    if descriptor is not None:
+        os.close(descriptor)
     shutil.rmtree(directory, ignore_errors=True)
     temporary.discard(directory)
 

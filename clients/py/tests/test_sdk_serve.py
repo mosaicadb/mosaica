@@ -221,58 +221,119 @@ def test_a_database_at_a_path_the_user_named_is_kept_at_interpreter_exit(tmp_pat
     assert left["path"] == str(tmp_path / "db")
 
 
-#: A committed temporary database in a process that then ends as `how` says, after printing its
-#: directory and its server's pid.
+#: A temporary database in `where`, committed unless `how` is "uncommitted", in a process that then
+#: ends as `how` says, after printing its directory, its server's pid and any child it forked.
 ENDED = """
-    import json, os, signal, sys, time
+    import json, os, pathlib, signal, sys, time
     import pyarrow as pa
     import mosaica
+    from mosaica import _database
 
-    how = sys.argv[1]
+    how, where = sys.argv[1], sys.argv[2]
+    _database.RAM_BACKED = pathlib.Path(where)
     db = mosaica.create()
     db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
     db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
-    db.commit()
-    print(json.dumps({"path": str(db.path), "pid": db._child.pid}), flush=True)
-    if how == "os._exit":
+    if how != "uncommitted":
+        db.commit()
+    forked = None
+    if how == "fork":
+        forked = os.fork()
+        if forked == 0:
+            time.sleep(120)
+            os._exit(0)
+    pid = None if db._child is None else db._child.pid
+    print(json.dumps({"path": str(db.path), "pid": pid, "forked": forked}), flush=True)
+    if how in ("os._exit", "uncommitted", "fork"):
         # How a marimo kernel leaves: its SIGTERM handler exits without running exit handlers.
         os._exit(0)
     time.sleep(120)
 """
 
 
-def gone(path: str, pid: int, within: float = 15.0) -> bool:
+def stopped(pid: int | None, within: float = 15.0) -> bool:
     deadline = time.monotonic() + within
-    while time.monotonic() < deadline:
+    while pid is not None and time.monotonic() < deadline:
         try:
             os.kill(pid, 0)
         except OSError:
-            if not os.path.exists(path):
-                return True
+            return True
         time.sleep(0.1)
-    return False
+    return pid is None
 
 
-@pytest.mark.parametrize("how", ["os._exit", "SIGTERM", "SIGKILL"])
-def test_a_temporary_database_is_removed_however_its_process_ends(how):
-    from conftest import binary
+def swept(where, left: dict, monkeypatch) -> bool:
+    """Whether the next `create()` in `where` removes the directory `left` names."""
+    import mosaica
+    from mosaica import _database
 
-    binary()
+    monkeypatch.setattr(_database, "RAM_BACKED", where)
+    fresh = mosaica.create()
+    try:
+        return not os.path.exists(left["path"])
+    finally:
+        fresh.close()
+
+
+def ended(how: str, where) -> tuple[subprocess.Popen, dict]:
     process = subprocess.Popen(
-        [sys.executable, "-c", textwrap.dedent(ENDED), how],
+        [sys.executable, "-c", textwrap.dedent(ENDED), how, str(where)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
+    return process, json.loads(process.stdout.readline())
+
+
+@pytest.mark.parametrize("how", ["os._exit", "SIGTERM", "SIGKILL", "uncommitted"])
+def test_a_temporary_database_is_removed_however_its_process_ends(how, tmp_path, monkeypatch):
+    """The server stops as the process ends, and the next `create()` removes the directory the
+    process could not, an uncommitted database's among them."""
+    from conftest import binary
+
+    binary()
+    where = tmp_path / "shm"
+    where.mkdir()
+    process, left = ended(how, where)
     try:
-        left = json.loads(process.stdout.readline())
-        if how != "os._exit":
+        if how in ("SIGTERM", "SIGKILL"):
             os.kill(process.pid, getattr(signal, how))
         process.wait(timeout=30)
-        assert gone(left["path"], left["pid"]), process.stderr.read()
+        assert stopped(left["pid"]), process.stderr.read()
+        assert os.path.exists(left["path"]), "nothing ran in the process to remove it"
+        assert swept(where, left, monkeypatch)
     finally:
         if process.poll() is None:
             process.kill()
+
+
+def test_the_sweep_removes_only_directories_whose_owner_has_gone(tmp_path, monkeypatch):
+    import mosaica
+    from mosaica import _database, _instance
+
+    where = tmp_path / "shm"
+    where.mkdir()
+    monkeypatch.setattr(_database, "RAM_BACKED", where)
+    live = mosaica.create()
+    # Not candidates: a directory without the lock file, one not named for the package, and a
+    # link to a directory holding an unlocked lock file.
+    (where / "mosaica-without-a-lock").mkdir()
+    (where / "elsewhere").mkdir()
+    (where / "elsewhere" / _instance.LOCK).write_text("")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / _instance.LOCK).write_text("")
+    (where / "mosaica-link").symlink_to(outside)
+    try:
+        second = mosaica.create()
+        second.close()
+        assert live.path.exists(), "a directory its live owner holds is kept"
+        assert (where / "mosaica-without-a-lock").exists()
+        assert (where / "elsewhere" / _instance.LOCK).exists()
+        assert (outside / _instance.LOCK).exists() and (where / "mosaica-link").is_symlink()
+    finally:
+        live.close()
+    assert not live.path.exists()
 
 
 def test_a_database_nothing_refers_to_stops_its_server_and_removes_its_directory():
@@ -298,24 +359,27 @@ def test_a_database_nothing_refers_to_stops_its_server_and_removes_its_directory
         # A selection reads through its database, so the server runs while one is held.
         assert selection.count() == 2
         selection = None
-        assert gone(path, pid, within=10)
+        assert stopped(pid, within=10) and not os.path.exists(path)
     finally:
         if collecting:
             gc.enable()
 
 
-def test_a_temporary_database_is_removed_when_marimo_exports_its_notebook(tmp_path):
+def test_a_temporary_database_is_removed_when_marimo_exports_its_notebook(tmp_path, monkeypatch):
     """marimo runs the notebook in a kernel that leaves through `os._exit` and kills its process
-    group, so no exit handler of this package runs."""
+    group, so no exit handler of this package runs: the server stops as the pipe closes, and the
+    next `create()` removes the directory."""
     from conftest import binary
 
     binary()
-    where = tmp_path / "left.json"
+    where = tmp_path / "shm"
+    where.mkdir()
+    written = tmp_path / "left.json"
     cell = textwrap.indent(
         textwrap.dedent(ENDED)
-        .replace("how = sys.argv[1]", "how = 'marimo'")
-        .replace("time.sleep(120)", "")
-        .replace("print(json.dumps(", f"open({str(where)!r}, 'w').write(json.dumps(")
+        .replace("how, where = sys.argv[1], sys.argv[2]", f"how, where = 'marimo', {str(where)!r}")
+        .replace("time.sleep(120)\n", "")
+        .replace("print(json.dumps(", f"open({str(written)!r}, 'w').write(json.dumps(")
         .replace("}), flush=True)", "}))"),
         "    ",
     )
@@ -331,12 +395,15 @@ def test_a_temporary_database_is_removed_when_marimo_exports_its_notebook(tmp_pa
         text=True,
         timeout=300,
     )
-    assert where.exists(), done.stderr
-    left = json.loads(where.read_text())
-    assert gone(left["path"], left["pid"]), done.stderr
+    assert written.exists(), done.stderr
+    left = json.loads(written.read_text())
+    assert stopped(left["pid"]), done.stderr
+    assert swept(where, left, monkeypatch)
 
 
-def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down():
+def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down(tmp_path):
+    """A kernel shut down runs its exit handlers, which stop the server and remove the directory
+    without waiting for a sweep."""
     from conftest import binary
 
     binary()
@@ -348,8 +415,10 @@ def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down():
     client.start_channels()
     try:
         client.wait_for_ready(timeout=60)
+        where = tmp_path / "shm"
+        where.mkdir()
         cell = textwrap.dedent(ENDED).replace("time.sleep(120)", "").replace(
-            "how = sys.argv[1]", "how = 'kernel'"
+            "how, where = sys.argv[1], sys.argv[2]", f"how, where = 'kernel', {str(where)!r}"
         )
         printed = ""
         client.execute(cell)
@@ -366,4 +435,4 @@ def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down():
     finally:
         client.stop_channels()
         manager.shutdown_kernel()
-    assert gone(left["path"], left["pid"])
+    assert stopped(left["pid"]) and not os.path.exists(left["path"])
