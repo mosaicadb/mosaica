@@ -1,4 +1,10 @@
-# Mosaica
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/mosaica-lockup-white.svg">
+    <img src="brand/mosaica-lockup.svg" alt="Mosaica" width="300">
+  </picture>
+</h1>
+
 ** Access-controlled visual analytics for very large datasets **
 
 > ** Currently in pre-alpha **
