@@ -577,6 +577,7 @@ describe('draftOf inverts composeFilters', () => {
     expect(() => draftOf({year: {eq: 3}}, operands)).toThrow();
     expect(() => draftOf({all_of: [{year: {range: {gte: 1}}}, {year: {range: {lte: 2}}}]}, operands)).toThrow();
     expect(() => draftOf({year: {range: {gt: 1}}}, operands)).toThrow();
+    expect(() => draftOf({year: {range: {gte: '2020-01-01'}}}, operands)).toThrow();
     expect(() => draftOf({any_of: [{title: {match: 'x'}}, {archive: {in: ['a']}}]}, operands)).toThrow();
   });
 });

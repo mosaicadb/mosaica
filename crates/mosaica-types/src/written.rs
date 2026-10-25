@@ -47,8 +47,8 @@ impl fmt::Display for WrittenError {
                  write at most six"
             }
             WrittenError::OutOfRange => {
-                "is outside what a timestamp holds; write microseconds that fit in a signed \
-                 64-bit integer"
+                "is outside what its field holds; write a value that fits the field's declared \
+                 type"
             }
         })
     }
@@ -71,10 +71,7 @@ impl WrittenAs {
     pub fn parse(self, text: &str) -> Result<i128, WrittenError> {
         let digits = text.strip_prefix('-').unwrap_or(text);
         if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
-            return text.parse::<i128>().map_err(|_| match self {
-                WrittenAs::Integer => WrittenError::NotAnInteger,
-                WrittenAs::Timestamp => WrittenError::OutOfRange,
-            });
+            return text.parse::<i128>().map_err(|_| WrittenError::OutOfRange);
         }
         match self {
             WrittenAs::Integer => Err(WrittenError::NotAnInteger),
@@ -238,6 +235,10 @@ mod tests {
         assert_eq!(ts("9223372036854775808"), Err(OutOfRange));
         assert_eq!(ts("+5"), Err(NotATimestamp));
         assert_eq!(WrittenAs::Integer.parse("+5"), Err(NotAnInteger));
+        assert_eq!(
+            WrittenAs::Integer.parse("170141183460469231731687303715884105728"),
+            Err(OutOfRange)
+        );
         assert_eq!(WrittenAs::Integer.parse("2020-01-01"), Err(NotAnInteger));
         for text in [
             "",

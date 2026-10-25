@@ -210,9 +210,12 @@ function controlOf(column: string, control: Exclude<ColumnDraft, {family: 'text'
     }
     case 'numeric': {
       if (name === 'range' && value && typeof value === 'object') {
-        const r = value as {gte?: number; lte?: number; gt?: number; lt?: number};
+        const r = value as {gte?: unknown; lte?: unknown; gt?: unknown; lt?: unknown};
         if (r.gt !== undefined || r.lt !== undefined) throw new Error(`${column}: the widget's range is inclusive (gte, lte)`);
-        return {family: 'numeric', gte: r.gte ?? null, lte: r.lte ?? null};
+        if ([r.gte, r.lte].some((bound) => bound !== undefined && typeof bound !== 'number')) {
+          throw new Error(`${column}: the widget's range holds numbers; write each bound as a number, a timestamp's in microseconds since the Unix epoch`);
+        }
+        return {family: 'numeric', gte: (r.gte as number | undefined) ?? null, lte: (r.lte as number | undefined) ?? null};
       }
       throw bad();
     }

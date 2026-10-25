@@ -240,20 +240,29 @@ impl ViewRoster {
         }
         // The gate arrives as `Engine::create_view` stored it: each label's canonical text, and
         // `None` for `public`.
-        // **A `timestamp_us` arrives as an integer, and the declaration is what says so.** JSON
-        // carries no date type, so a record's `starts` is microseconds since the epoch as a
-        // number; typing it from the wire alone would make every timestamp an `int` and refuse
-        // every create. Only this one coercion exists — an integer is *not* accepted where a float
-        // is declared, because those two are told apart in every other surface too.
+        // **A `timestamp_us` arrives as an integer or a string, and the declaration is what says
+        // so.** JSON carries no date type, so a record's `starts` is microseconds since the epoch
+        // as a number, or text read as a build reads it ([`mosaica_types::written`]); typing it
+        // from the wire alone would make every timestamp an `int` or a `text` and refuse every
+        // create. These are the only coercions: an integer is *not* accepted where a float is
+        // declared, because those two are told apart in every other surface too.
         let mut metadata = metadata;
         for field in facts.metadata {
             if field.ty != ViewMetadataType::TimestampUs {
                 continue;
             }
-            if let Some(ViewMetadataValue::Int(v)) = metadata.get(&field.name) {
-                let micros = *v;
-                metadata.insert(field.name.clone(), ViewMetadataValue::TimestampUs(micros));
-            }
+            let micros = match metadata.get(&field.name) {
+                Some(ViewMetadataValue::Int(v)) => *v,
+                Some(ViewMetadataValue::Text(text)) => mosaica_types::written::timestamp_us(text)
+                    .map_err(|e| {
+                        RosterError::Refused(format!(
+                            "metadata '{}' is '{text}', which {e}",
+                            field.name
+                        ))
+                    })?,
+                _ => continue,
+            };
+            metadata.insert(field.name.clone(), ViewMetadataValue::TimestampUs(micros));
         }
         // Every declared name, and no others. A missing one is refused rather than defaulted: the
         // record is immutable, so a value left out is a value that can never be supplied, and a

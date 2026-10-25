@@ -1519,6 +1519,8 @@ async fn a_timestamp_is_written_as_text_in_a_filter_and_a_range() {
         (json!("2020-06-01"), json!("2021-01-01T00:00:00Z")),
         // The same instants at another offset, and a leap second that is the next second.
         (json!("2020-06-01T02:00:00.000000+02:00"), json!("2020-12-31T23:59:60Z")),
+        // RFC 3339's lower-case separator and zone.
+        (json!("2020-06-01t00:00:00z"), json!(JAN_2021)),
     ] {
         let filters = json!({ "stamp": { "range": { "gte": gte, "lt": lt } } });
         assert_eq!(total(filters.clone()).await, in_range, "{filters}");
@@ -1532,6 +1534,8 @@ async fn a_timestamp_is_written_as_text_in_a_filter_and_a_range() {
     for refused in [
         json!({ "stamp": { "eq": "2020-06-01T00:00:00" } }),
         json!({ "stamp": { "range": { "lt": "2020-06-01T00:00:00.1234567Z" } } }),
+        // Digits take a '-' and nothing else before them.
+        json!({ "stamp": { "eq": "+5" } }),
     ] {
         let resp = post(server, "/v1/aggregate", token, &body(refused.clone())).await;
         assert_eq!(resp.status().as_u16(), 422, "{refused}");
