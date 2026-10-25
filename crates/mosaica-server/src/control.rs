@@ -1020,7 +1020,7 @@ struct AttributeBody {
 /// `PUT /control/attributes`: declares one attribute column, synchronously, so a batch sent after
 /// the answer may carry it. 201 when new, 200 when the name already has this identity or differed
 /// from it in `unique` alone, 409 when it has another or holds a value twice, 422 for a rule
-/// broken. The engine refuses `render = true` on this route.
+/// broken.
 async fn declare_attribute(
     State(state): State<Arc<AppState>>,
     ApiQuery(wait): ApiQuery<WaitQuery>,

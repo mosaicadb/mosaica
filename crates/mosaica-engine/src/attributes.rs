@@ -13,9 +13,9 @@
 //! runtime ones in declaration order, and a fold writes that list into the next `MANIFEST.json`
 //! unchanged. A row buffered under the shorter arity is padded with each new column's absence
 //! at the commit window's close and at the flush ([`absent_scalar`]), so one flush writes one
-//! schema.
-//!
-//! `render` is not supported on this route yet.
+//! schema. A rendered column joins every view's row tail the same way: a segment written before
+//! the declaration holds no lane for it, and its rows read as absent until a merge or a fold
+//! rewrites them with the absence written out.
 
 use mosaica_lifecycle::wal::{AttributeDeclaration, WalScalar};
 use mosaica_lifecycle::{AttributeRequest, ExecError};
@@ -155,15 +155,6 @@ pub(crate) fn resolve(
             _ => Err(conflict(name)),
         };
     }
-    // Not built: a rendered value lives in a row's hot column, and a column declared here has no
-    // rows written for it yet.
-    if request.render {
-        return Err(refused(format!(
-            "attribute '{name}': `render` is not supported for a column declared at a running \
-             service; declare it without `render`, or at a build"
-        )));
-    }
-
     Ok(Resolution::New(compiled))
 }
 

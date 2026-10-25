@@ -20,12 +20,13 @@ use tempfile::TempDir;
 /// every object below is one the running service created from a payload.
 const ITEMS: u64 = 64;
 
-/// The declaration these tests post: a shard size, two plain views, a view group, two
-/// vocabularies (one with inline values), three attributes and one layer.
+/// The declaration these tests post: a shard size, two plain views, a view group with a category
+/// among its metadata, two vocabularies (one with inline values), three attributes, two of them
+/// rendered, and one layer.
 ///
-/// **No `render` and no `auto`** — both are emitted as declared and both are refused at a running
-/// service, which [`the_route_refuses_render_naming_the_key`] pins separately. Everything else here
-/// is a key some block takes, so a body that arrives wrong arrives wrong in this test.
+/// **No `auto`**: it is emitted as declared and refused at a running service, which has no data
+/// to fit a frame to. Everything else here is a key some block takes, so a body that arrives
+/// wrong arrives wrong in this test.
 const DECLARATION: &str = r#"
 [sources]
 points  = "points.parquet"
@@ -61,7 +62,7 @@ source           = "points"
 fields           = { view = "quarter" }
 extent           = { x = [-40.0, 40.0], y = [-40.0, 40.0] }
 point_visibility = { field = "access", default = "public" }
-metadata         = { label = "text", starts = "timestamp_us" }
+metadata         = { label = "text", starts = "timestamp_us", kind = { type = "category", vocabulary = "kind" } }
 
 [view_group.views]
 source = "roster"
@@ -89,6 +90,7 @@ title           = "Importance"
 field           = "pop"
 type            = "u32"
 index           = true
+render          = true
 
 [[attribute]]
 name       = "feature"
@@ -96,6 +98,7 @@ title      = "Feature class"
 type       = "category"
 vocabulary = "kind"
 index      = true
+render     = true
 
 [[attribute]]
 name     = "note"
@@ -218,38 +221,5 @@ async fn every_emitted_body_is_taken_by_its_route() {
         assert_eq!(status, 200, "view '{name}' restated: {answer}");
     }
 
-    served.server.shutdown().await;
-}
-
-/// **The emitter states the declaration and the route decides** (decision 0136's amendment):
-/// `render` reaches the body, and what comes back is a refusal naming the key rather than a column
-/// quietly declared without it.
-#[tokio::test]
-async fn the_route_refuses_render_naming_the_key() {
-    let served = Served::build(|dir| build_fixture(dir, ITEMS)).await;
-    let dir = TempDir::new().unwrap();
-    let payloads = payloads(
-        dir.path(),
-        r#"
-[[view]]
-name             = "s1"
-extent           = { x = [0.0, 1000.0], y = [0.0, 1000.0] }
-point_visibility = { default = "public" }
-
-[[attribute]]
-name   = "importance"
-type   = "u32"
-render = true
-"#,
-    );
-    let body = &payloads["attributes"][0];
-    assert_eq!(body["render"], true, "emitted as declared: {body}");
-    let (status, answer) = put(&served, "/control/attributes", body).await;
-    assert_eq!(status, 422, "{answer}");
-    assert_eq!(answer["error"], "contract", "{answer}");
-    assert!(
-        answer["detail"].as_str().unwrap_or_default().contains("render"),
-        "the refusal names the key: {answer}"
-    );
     served.server.shutdown().await;
 }

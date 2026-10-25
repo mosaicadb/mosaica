@@ -155,7 +155,6 @@ class Database:
             db.declare("attribute", {"name": "score", "type": "f64", "index": True})
         """
         if kind == "attribute":
-            self._refuse_a_render_column(block.get("name"), block.get("render"))
             self._mark_a_filled_column(block)
         return self._declared(self.blocks.add(kind, block))
 
@@ -227,7 +226,8 @@ class Database:
 
         - `name`: the group's name.
         - `metadata`: the metadata each view carries, as `{name: type}`, filled from the roster.
-          By default there is none.
+          A category is `{"type": "category", "vocabulary": vocabulary}`, and the roster holds
+          its key. By default there is none.
         - `members`: the name of another group whose views this group shares. Such a group has no
           roster or metadata of its own.
         - `extent`, `projection`, `default_label`, `visibility`, `title`: as for `declare_view`,
@@ -315,8 +315,9 @@ class Database:
           `"i64"`, `"f32"`, `"f64"`, `"timestamp_us"`, `"keyword"` (a string matched exactly),
           `"text"` (a string searched by word) or `"category"` (a value from a vocabulary).
         - `render`: `True` sends the value with every point drawn, so a map can colour by it. It
-          is fixed at the first commit, and a keyword or text column cannot be rendered. The
-          default is `False`.
+          is fixed once the column is declared, and a keyword or text column cannot be rendered.
+          Points inserted before a later commit declares the column draw no value for it until an
+          insert gives them one. The default is `False`.
         - `index`: `True` makes the column filterable. The default is `False`.
         - `vocabulary`: for a category, the vocabulary its values come from.
         - `analyser`: for text, how the text is split into words. `"unicode"`, the default, is the
@@ -332,8 +333,8 @@ class Database:
           For `"keyword"`, integer and `"timestamp_us"` columns scoped to the item. The default
           is `False`.
 
-        A name already declared for an attribute is refused, and so are `render=True` after the
-        first commit and a `scope` naming a view group not yet declared.
+        A name already declared for an attribute is refused, and so is a `scope` naming a view
+        group not yet declared.
 
             db.declare_attribute("year", type="i32", render=True, index=True)
             db.declare_attribute("doi", type="keyword", unique=True)
@@ -349,7 +350,6 @@ class Database:
             title=title,
             unique=unique,
         )
-        self._refuse_a_render_column(name, block.get("render"))
         self._refuse_an_undeclared_group("attribute", name, block)
         self._mark_a_filled_column(block)
         return self._declared(self.blocks.add("attribute", block))
@@ -623,21 +623,6 @@ class Database:
         """
         if self.built and not block.get("scope"):
             block[D.FILLED] = True
-
-    def _refuse_a_render_column(self, name: Any, render: Any) -> None:
-        """Refuse `render=True` after the first commit.
-
-        The server cannot add a rendered column to rows that already exist, so the refusal comes
-        here, where the user can still change the declaration.
-        """
-        if not (self.built and render):
-            return
-        raise Refusal(
-            f"attribute {name!r}: render=True is set at the first commit only, since the points "
-            f"already stored cannot take a new drawn value; declare it with index=True to filter "
-            f"by it, or make the database again with create(path, replace=True) and declare it "
-            f"with render=True before the first commit"
-        )
 
     def _refuse_an_undeclared_group(self, kind: str, name: str, block: dict) -> None:
         """A scope names the group that owns the views its values or artifacts are keyed by."""

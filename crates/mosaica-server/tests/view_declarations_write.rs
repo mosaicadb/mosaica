@@ -443,6 +443,143 @@ async fn a_roster_timestamp_written_as_text_is_stored_alike_by_a_build_and_a_cre
     }
 }
 
+/// Each `zones:<key>` view's `region` as `/v1/meta` serves it.
+async fn roster_regions(served: &Served) -> Vec<(String, Value)> {
+    let document = meta(served).await;
+    let mut out: Vec<(String, Value)> = document["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|v| v["id"].as_str().unwrap().starts_with("zones:"))
+        .map(|v| (v["id"].as_str().unwrap().to_string(), v["metadata"]["region"].clone()))
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// The `zones` views and the region key each carries.
+const ZONES: [(&str, &str); 2] = [("east", "north"), ("west", "south")];
+
+/// **A category roster value is stored alike by a build and a create**: a group declared at a
+/// running service names a vocabulary for a metadata name as a build's does, and each view of it
+/// carries its key, served as a build serves it, after a restart, a fold and a restart after that.
+/// A category naming no vocabulary, or one not declared, is refused, and so is a code where a key
+/// belongs.
+#[tokio::test]
+async fn a_roster_category_is_stored_alike_by_a_build_and_a_create() {
+    let expected: Vec<(String, Value)> = ZONES
+        .iter()
+        .map(|(key, region)| (format!("zones:{key}"), json!({ "type": "text", "value": region })))
+        .collect();
+    let group = |vocabulary: Option<&str>| {
+        let mut field = json!({ "name": "region", "type": "category" });
+        if let Some(vocabulary) = vocabulary {
+            field["vocabulary"] = json!(vocabulary);
+        }
+        json!({
+            "extent": frame(),
+            "point_visibility": { "default": "public" },
+            "metadata": [field]
+        })
+    };
+
+    let mut served = Served::build(|dir| build_fixture(dir, N)).await;
+    let (status, body) = put(
+        &served,
+        "/control/vocabularies/regions",
+        json!({
+            "value_set": "closed",
+            "visibility": "public",
+            "width": "u8",
+            "values": [{ "key": "north" }, { "key": "south" }]
+        }),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    for refused in [group(None), group(Some("nothing"))] {
+        let (status, body) = declare_group(&served, "zones", refused).await;
+        assert_eq!(status, 422, "{body}");
+    }
+    let (status, body) = declare_group(&served, "zones", group(Some("regions"))).await;
+    assert_eq!(status, 201, "{body}");
+    for (key, region) in ZONES {
+        let (status, body) = put(
+            &served,
+            &format!("/control/views/zones/{key}"),
+            json!({ "metadata": { "region": region } }),
+        )
+        .await;
+        assert_eq!(status, 201, "{key}: {body}");
+    }
+    let (status, body) = put(
+        &served,
+        "/control/views/zones/coded",
+        json!({ "metadata": { "region": 3 } }),
+    )
+    .await;
+    assert_eq!(status, 422, "a code where a key belongs: {body}");
+
+    served.reauthorise().await;
+    assert_eq!(roster_regions(&served).await, expected, "as created");
+    let mut served = served.restart().await;
+    served.reauthorise().await;
+    assert_eq!(roster_regions(&served).await, expected, "after a restart");
+    assert_eq!(
+        declare_group(&served, "zones", group(Some("regions"))).await.0,
+        200,
+        "the replayed group is the one a redeclaration meets"
+    );
+    assert_eq!(ingest(&served, "rows", "zones:east", &[(100.0, 100.0)]).await, 200);
+    drain(&served.server).await;
+    fold(&served.server).await;
+    let mut served = served.restart().await;
+    served.reauthorise().await;
+    assert_eq!(roster_regions(&served).await, expected, "after a fold and a restart");
+
+    // The same declared at a build.
+    let built = Served::build(|dir| {
+        write_points_n(&dir.join("points.parquet"), N);
+        let mut declaration = r#"
+[sources]
+points = "points.parquet"
+
+[defaults]
+allocation_view = "world"
+
+[[vocabulary]]
+name       = "regions"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+values     = ["north", "south"]
+
+[[view]]
+name             = "world"
+source           = "points"
+extent           = { x = [0.0, 1000.0], y = [0.0, 1000.0] }
+point_visibility = { default = "public" }
+
+[[view_group]]
+name             = "zones"
+extent           = { x = [0.0, 1000.0], y = [0.0, 1000.0] }
+point_visibility = { default = "public" }
+metadata         = { region = { type = "category", vocabulary = "regions" } }
+"#
+        .to_string();
+        for (key, region) in ZONES {
+            declaration.push_str(&format!(
+                "\n[[view_group.view]]\nkey    = \"{key}\"\nsource = \"points\"\nregion = \"{region}\"\n"
+            ));
+        }
+        let path = dir.join("corpus.toml");
+        std::fs::write(&path, declaration).unwrap();
+        mosaica_build::build(&args_from_declaration(&path, &dir.join("bundle")))
+            .expect("the build runs");
+    })
+    .await;
+    assert_eq!(roster_regions(&built).await, expected, "as built");
+}
+
 /// **A plain view created at runtime takes rows at its first flush and serves a viewport**
 /// (decision 0136, R9). Its answers are the group route's, and it shares a namespace with the
 /// groups.

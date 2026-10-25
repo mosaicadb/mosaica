@@ -125,10 +125,6 @@ class Case:
         raise NotImplementedError
 
 
-class RenderRefused(Exception):
-    """The control plane refused a column declared with `render = true`."""
-
-
 class EntityAttributes(Case):
     """Entity-scoped attributes declared live. The items the live build holds get their values
     on rows of `/control/ingest` without coordinates, and the rest arrive over `/control/ingest`
@@ -159,12 +155,7 @@ class EntityAttributes(Case):
         blocks = [fx.plain_view_toml(), fx.fx_column().toml()]
         d = Deployment(work, Corpus(blocks, _world(BUILT), [DEPT, GRADE], items=fx.N_ITEMS))
         for column in self.columns:
-            try:
-                d.control("PUT", "/control/attributes", json=column.payload(), expect=(201,))
-            except fx.Refused as refused:
-                if column.render and refused.status == 422:
-                    raise RenderRefused(str(refused)) from refused
-                raise
+            d.control("PUT", "/control/attributes", json=column.payload(), expect=(201,))
         writes = [
             lambda: d.rows(
                 "/control/ingest",
@@ -301,6 +292,8 @@ class PlainView(Case):
 GROUP = "quarter"
 GROUP_EXTENT = (-40.0, 40.0, -40.0, 40.0)
 KEYS = {"Q1": 11, "Q2": 12}
+#: Each view's category metadata, a key of `MOOD_Q`.
+KEY_MOODS = {"Q1": "calm", "Q2": "wild"}
 KEY_MEMBERS = {
     "Q1": [i for i in ALL if i % 3 != 0],
     "Q2": [i for i in ALL if i % 2 == 0],
@@ -311,7 +304,7 @@ MOOD_Q = Vocabulary(
 
 
 def _scoped(key: str) -> list[Column]:
-    """The group's two families, with this view's values."""
+    """The group's two families, with this view's values. The category is drawn as well."""
     k = KEYS[key]
     return [
         Column("sentiment", "f32", pa.float32(),
@@ -319,7 +312,7 @@ def _scoped(key: str) -> list[Column]:
                index=True, scope=GROUP),
         Column("feel", "category", pa.string(),
                lambda i: None if (i + k) % 6 == 0 else MOOD_Q.values[(i + k) % 3][0],
-               index=True, vocabulary="moodq_v", scope=GROUP),
+               index=True, render=True, vocabulary="moodq_v", scope=GROUP),
     ]
 
 
@@ -328,10 +321,13 @@ def _group_toml() -> str:
     text = (
         f'[[view_group]]\nname = "{GROUP}"\nextent = {{ x = [{x0}, {x1}], y = [{y0}, {y1}] }}\n'
         'visibility = "public"\npoint_visibility = { field = "access", default = "public" }\n'
-        'metadata = { label = "text" }\n'
+        f'metadata = {{ label = "text", mood = {{ type = "category", vocabulary = "{MOOD_Q.name}" }} }}\n'
     )
     for key in KEYS:
-        text += f'\n[[view_group.view]]\nkey = "{key}"\nsource = "{key.lower()}"\nlabel = "{key}"\n'
+        text += (
+            f'\n[[view_group.view]]\nkey = "{key}"\nsource = "{key.lower()}"\nlabel = "{key}"\n'
+            f'mood = "{KEY_MOODS[key]}"\n'
+        )
     return text
 
 
@@ -340,8 +336,9 @@ def _group_view(key: str) -> str:
 
 
 class GroupScoped(Case):
-    """A view group, its views and a group-scoped family of each of two types, all declared
-    live, with each view's rows and scoped values ingested into it. With `recreate`, the second
+    """A view group with a category among its metadata, its views and a group-scoped family of
+    each of two types, one of them drawn, all declared live, with each view's rows and scoped
+    values ingested into it. With `recreate`, the second
     view is then dropped and created again under its key, and its rows sent again."""
 
     def __init__(self, name: str, recreate: bool = False):
@@ -380,7 +377,10 @@ class GroupScoped(Case):
             "extent": _extent_body(GROUP_EXTENT),
             "visibility": "public",
             "point_visibility": {"default": "public"},
-            "metadata": [{"name": "label", "type": "text"}],
+            "metadata": [
+                {"name": "label", "type": "text"},
+                {"name": "mood", "type": "category", "vocabulary": MOOD_Q.name},
+            ],
         }
         d.control("PUT", f"/control/view_groups/{GROUP}", json=group, expect=(201,))
         for key in KEYS:
@@ -401,7 +401,9 @@ class GroupScoped(Case):
     @staticmethod
     def _create(d: Deployment, key: str) -> None:
         d.control(
-            "PUT", f"/control/views/{GROUP}/{key}", json={"metadata": {"label": key}},
+            "PUT",
+            f"/control/views/{GROUP}/{key}",
+            json={"metadata": {"label": key, "mood": KEY_MOODS[key]}},
             expect=(201,),
         )
 
@@ -632,16 +634,9 @@ CASES: dict[str, Case] = {
     )
 }
 
-RENDER_REFUSED = (
-    "the control plane refuses `render = true` on PUT /control/attributes; a rendered column can "
-    "only be declared at a build"
-)
-
 #: Cases and stages expected to fail as a whole, why, and the exception they fail with. Strict,
 #: so each flips when the cause is fixed.
-EXPECTED_FAILURES = {
-    **{("rendered-attributes", stage): (RENDER_REFUSED, RenderRefused) for stage in STAGES},
-}
+EXPECTED_FAILURES: dict[tuple[str, str], tuple[str, type[BaseException]]] = {}
 
 
 @dataclass(frozen=True)

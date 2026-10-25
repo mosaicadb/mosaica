@@ -67,7 +67,7 @@ A running database takes new items, edits to existing ones, and deletions, which
 
 A deletion or a suppression applies to every request that starts after Mosaica accepts it. New and edited items appear at the next flush, which runs every 90 seconds by default, or sooner once 40,000 rows are waiting; an edited item leaves the map when the edit is accepted, and comes back, changed, at that flush. If you need to know when a write is visible, the write can ask to be answered only then. Because Mosaica records every write in a log before it answers, an accepted write survives a restart.
 
-Anything you can declare in the first load, you can also declare to a running database, apart from one thing. Not built yet: declaring a rendered field while the database runs, so declare those in the first load.
+Anything you can declare in the first load, you can also declare to a running database.
 
 [Changing data](write-path.md) covers ingest, flushes and compaction.
 
@@ -100,8 +100,7 @@ The [queries](queries.md) and [serving](serving.md) chapters explain these in fu
 | Several views over one set of items, and view groups | Built |
 | Annotation layers: clusters, hierarchies, regions and hulls | Built |
 | Reading records and annotations in bulk | Built, on all four surfaces. A read pinned to one version of the data is not built yet |
-| Declaring a rendered field while the database runs | Not built yet. Declare it in the first load |
-| Starting from an empty database, and declaring everything to it as it runs | Built. A rendered field is declared in the schema it starts from |
+| Starting from an empty database, and declaring everything to it as it runs | Built |
 | Writing to a running database, and drawing a map, from the command line | Not built yet |
 | Python and TypeScript packages | Built. Not yet published to PyPI or npm |
 | A conformance suite that checks a running database's answers against an independent reference implementation | Built |

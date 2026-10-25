@@ -245,10 +245,7 @@ class Control:
                           {"content-type": JSON})
 
     def declare_attribute(self, body: dict) -> Answer:
-        """`PUT /control/attributes`: declare one column, named in the body.
-
-        A column declared here cannot be rendered.
-        """
+        """`PUT /control/attributes`: declare one column, named in the body."""
         return self._send("PUT", "/control/attributes", _json(body), {"content-type": JSON})
 
     def declare_shards(self, body: dict) -> Answer:

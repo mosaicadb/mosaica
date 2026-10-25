@@ -27,8 +27,8 @@ use parquet::arrow::ArrowWriter;
 use common::*;
 use mosaica_engine::filter::{Endpoint, FilterExpr, FilterOperand, Scalar};
 use mosaica_engine::{
-    AcceptError, AttributeRequest, CategoryQuery, Engine, EngineConfig, ScalarOut, Session,
-    ViewportRequest,
+    AcceptError, AttributeRequest, CategoryQuery, ColumnBuf, Engine, EngineConfig, ScalarOut,
+    Session, ViewportRequest,
 };
 use mosaica_lifecycle::command::UnallocatedRow;
 use mosaica_lifecycle::wal::WalScalar;
@@ -355,8 +355,8 @@ fn partitions_with_base(root: &Path, column: &str) -> (usize, usize) {
 /// **Every family declares at a running service, rows carry it from the acknowledgement, and an
 /// entity that predates the declaration reads absent on every reader.** The absence is answered
 /// from the segment schema: the record-blob read counter does not move for the older entity,
-/// while it does for one whose row the flush wrote into the blob. The render list is the build's
-/// throughout: this route does not accept `render` (decision 0136's amendment).
+/// while it does for one whose row the flush wrote into the blob. None of these columns is
+/// rendered, so the render list stays the build's.
 #[test]
 fn every_family_declares_at_runtime_and_earlier_entities_read_absent_without_a_blob_read() {
     let fx = fixture();
@@ -434,7 +434,7 @@ fn every_family_declares_at_runtime_and_earlier_entities_read_absent_without_a_b
     assert_eq!(
         out.names,
         ["band", "score"],
-        "the render tail is the build's alone: this route does not accept `render`"
+        "no column declared here is rendered, so the render tail is the build's"
     );
     // A built item: a build issues entity ids from 0.
     let old = EntityId::new(0);
@@ -911,6 +911,188 @@ fn the_fold_carries_a_runtime_column_into_the_base() {
     );
 }
 
+/// Each point's `heat` where it carries one, and its `tag` code, 0 where it carries none, by
+/// `mosaica_id`.
+type Drawn = BTreeMap<u64, (Option<f32>, u8)>;
+
+/// Every point the whole viewport serves, as [`Drawn`], and the render tail's names.
+fn drawn(engine: &Engine) -> (Vec<String>, Drawn) {
+    let session = session(engine);
+    let req = ViewportRequest::new("s0", 0, VIEWPORT, (N_ITEMS + 100) as usize);
+    let out = engine.viewport(&session, req).unwrap();
+    let names = out.scalar_names.clone();
+    let at = |name: &str| {
+        names
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| panic!("'{name}' is drawn: {names:?}"))
+    };
+    let (heat, tag) = (&out.points.scalars[at("heat")], &out.points.scalars[at("tag")]);
+    let (ColumnBuf::F32(heats), ColumnBuf::U8(tags)) = (&heat.values, &tag.values) else {
+        panic!("heat is drawn as an f32 and tag as a u8 category");
+    };
+    let points = out
+        .points
+        .mosaica_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (*id, (heat.is_present(i).then(|| heats[i]), tags[i])))
+        .collect();
+    (names, points)
+}
+
+/// **A rendered column declared at a running service is drawn from the next flush.** A row
+/// carrying it draws its value, and an edit gives a built item one. Every other item, built or
+/// flushed before the declaration, draws no value: a null for the number, code 0 for the
+/// category. Each stays so through a merge of segments written before and after the
+/// declaration, a fold and a restart, and the columns filter and reach the item card at each.
+#[test]
+fn a_rendered_column_declared_at_runtime_draws_its_rows_and_earlier_rows_draw_absent() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    engine.set_merge_for_test(false);
+    // Two segments flushed before the declaration and two after, so a merge takes both kinds.
+    let mut before = Vec::new();
+    for (batch, band) in [("before-1", "low"), ("before-2", "mid")] {
+        before.extend(ingest(&engine, batch, vec![row(&engine, build_columns(band, 2.0))]));
+        publish_buffered(&engine);
+    }
+    for declared in [
+        AttributeRequest {
+            render: true,
+            ..request("heat", "f32")
+        },
+        AttributeRequest {
+            vocabulary: Some("dept".to_string()),
+            render: true,
+            ..request("tag", "category")
+        },
+    ] {
+        assert!(
+            !engine
+                .declare_attribute(declared)
+                .expect("a rendered column is declared"),
+            "a new column"
+        );
+    }
+    // Before any flush: every view's tail carries the columns, and no row a value.
+    let (names, points) = drawn(&engine);
+    assert_eq!(names, ["band", "score", "heat", "tag"]);
+    assert_eq!(points.len() as u64, N_ITEMS + 2);
+    assert!(
+        points.values().all(|v| *v == (None, 0)),
+        "a row written before the declaration draws no value"
+    );
+    let carrying = |heat: Option<f32>, tag: &str| {
+        let mut scalars = build_columns("high", 1.0);
+        scalars.extend([
+            heat.map_or(WalScalar::Null, WalScalar::F32),
+            WalScalar::Utf8(tag.to_string()),
+        ]);
+        scalars
+    };
+    let mut after = Vec::new();
+    for (batch, heat, tag) in [("after-1", Some(0.75), "ops"), ("after-2", None, "eng")] {
+        after.extend(ingest(&engine, batch, vec![row(&engine, carrying(heat, tag))]));
+        publish_buffered(&engine);
+    }
+    // A built item, named by its `id`, given both columns.
+    let edited = engine
+        .ingest(mosaica_engine::IngestRequest {
+            principal: String::new(),
+            batch_id: "edit".to_string(),
+            body_hash: [5; 32],
+            view: Some("s0".to_string()),
+            rows: vec![mosaica_lifecycle::IngestRow {
+                mosaica_id: None,
+                labels: Some(vec![b"0".to_vec()]),
+                position: Some((500.0, 500.0)),
+                scalars: vec![
+                    WalScalar::Utf8("low".to_string()),
+                    WalScalar::F32(1.0),
+                    WalScalar::U64(7),
+                    WalScalar::F32(0.25),
+                    WalScalar::Utf8("legal".to_string()),
+                ],
+                scoped: Vec::new(),
+                omitted: Vec::new(),
+            }],
+            artifacts: Default::default(),
+            strict: true,
+            mosaica_id_column: false,
+        })
+        .expect("the edit is accepted");
+    assert_eq!(edited.edited, 1, "the row names the built item");
+    let edited = edited.mosaica_ids[0].unwrap().raw();
+    publish_buffered(&engine);
+
+    let check = |engine: &Engine, stage: &str| {
+        let id = |e: EntityId| engine.mosaica_id_of(e).unwrap().raw();
+        let (names, points) = drawn(engine);
+        assert_eq!(
+            names,
+            ["band", "score", "heat", "tag"],
+            "{stage}: the rendered columns join the tail in declaration order"
+        );
+        assert_eq!(points.len() as u64, N_ITEMS + 4, "{stage}");
+        assert_eq!(points[&id(after[0])], (Some(0.75), 6), "{stage}");
+        assert_eq!(points[&id(after[1])], (None, 5), "{stage}");
+        assert_eq!(points[&edited], (Some(0.25), 7), "{stage}");
+        for entity in &before {
+            assert_eq!(points[&id(*entity)], (None, 0), "{stage}");
+        }
+        assert_eq!(
+            points.values().filter(|v| **v == (None, 0)).count() as u64,
+            N_ITEMS - 1 + 2,
+            "{stage}: every item built or flushed before the declaration, and not edited since, \
+             draws no value"
+        );
+
+        let session = session(engine);
+        assert_eq!(
+            viewport(engine, &session, Some(leaf("heat", at_least(0.0))))
+                .ids
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            [id(after[0]), edited].into_iter().collect(),
+            "{stage}: the number filters over the rows that carry it"
+        );
+        assert_eq!(
+            viewport(
+                engine,
+                &session,
+                Some(leaf("tag", FilterOperand::Equals(AttrLocalId::new(6))))
+            )
+            .ids,
+            vec![id(after[0])],
+            "{stage}: the category filters"
+        );
+        let fields = fields_of(engine, &session, after[0]);
+        assert_eq!(fields["heat"], ScalarOut::F32(0.75), "{stage}");
+        assert_eq!(fields["tag"], ScalarOut::Utf8("ops".to_string()), "{stage}");
+        let fields = fields_of(engine, &session, before[0]);
+        assert!(
+            !fields.contains_key("heat") && !fields.contains_key("tag"),
+            "{stage}: an earlier item's card carries neither: {fields:?}"
+        );
+    };
+    check(&engine, "flushed");
+
+    let merges = engine.write_executor_stats().merges;
+    engine.set_merge_for_test(true);
+    engine.request_flush();
+    wait_until("the merge to publish", std::time::Duration::from_secs(60), || {
+        engine.write_executor_stats().merges > merges
+    });
+    assert_eq!(engine.write_executor_stats().merge_failures, 0);
+    check(&engine, "merged");
+
+    fold(&engine);
+    check(&engine, "folded");
+    let engine = restart(&fx, engine);
+    check(&engine, "restarted");
+}
+
 /// **A runtime category's vocabulary is offered from inside each principal's mask** (I2,
 /// per-point-attributes §3.3): each principal is offered the values its own visible rows carry
 /// and nothing a row outside its mask carries. The fixture's two principals hold one term each
@@ -1123,6 +1305,10 @@ fn an_identical_redeclaration_is_a_no_op_and_a_differing_one_conflicts() {
         ty: "f64".to_string(),
         ..sentiment.clone()
     });
+    conflict(AttributeRequest {
+        render: true,
+        ..sentiment.clone()
+    });
     // The build's own column is a held name too.
     conflict(AttributeRequest {
         index: true,
@@ -1143,7 +1329,7 @@ fn an_identical_redeclaration_is_a_no_op_and_a_differing_one_conflicts() {
         other => panic!("refused at the door: {other:?}"),
     };
     // The shared rules are tested in `mosaica_store::declaration`; this checks the route applies
-    // them, and adds its own: no `render`, and a group that exists.
+    // them, and adds its own: a group that exists.
     for r in [
         request("region", "u8"),
         request("weird", "utf8"),
@@ -1152,14 +1338,8 @@ fn an_identical_redeclaration_is_a_no_op_and_a_differing_one_conflicts() {
             ..request("tag", "category")
         },
         AttributeRequest {
-            index: true,
             render: true,
-            ..request("drawn", "f32")
-        },
-        AttributeRequest {
-            vocabulary: Some("dept".to_string()),
-            render: true,
-            ..request("tag", "category")
+            ..request("drawn", "keyword")
         },
         AttributeRequest {
             scope: LayerScope::Group("nowhere".to_string()),

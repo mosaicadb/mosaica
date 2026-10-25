@@ -307,13 +307,8 @@ def test_open_reads_the_blocks_and_the_inserts_back_from_the_sdks_own_copy(tmp_p
         open_database(tmp_path)
 
 
-def test_a_built_database_takes_every_declaration_but_a_render_column(tmp_path):
-    """Every block kind is declared at any commit; `render=True` is the one the route refuses.
-
-    A rendered value is served from the hot column of the row that carries it, and
-    `PUT /control/attributes` declares a column against entities that already exist, so the SDK
-    refuses it at the verb, naming the first commit.
-    """
+def test_a_built_database_takes_every_declaration(tmp_path):
+    """Every block kind is declared at any commit, a rendered column included."""
     db = Database(tmp_path)
     db.built = True
     assert db.declare_attribute("a", type="u8")["name"] == "a"
@@ -322,12 +317,8 @@ def test_a_built_database_takes_every_declaration_but_a_render_column(tmp_path):
     assert db.declare("layer", {"name": "l"})["name"] == "l"
     assert db.declare_view("v")["name"] == "v"
     assert db.declare_view_group("g")["name"] == "g"
-    for call in (
-        lambda: db.declare_attribute("hot", type="u8", render=True),
-        lambda: db.declare("attribute", {"name": "hot", "type": "u8", "render": True}),
-    ):
-        with pytest.raises(Refusal):
-            call()
+    assert db.declare_attribute("hot", type="u8", render=True)["render"] is True
+    assert db.declare("attribute", {"name": "warm", "type": "u8", "render": True})["render"]
 
 
 def test_a_key_column_is_inserted_into_a_layer_at_any_commit(tmp_path):

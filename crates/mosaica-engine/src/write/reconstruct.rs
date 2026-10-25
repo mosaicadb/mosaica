@@ -235,7 +235,11 @@ impl WritePath {
                     }
                 }
                 WalRecord::ViewGroupCreate { declaration } => {
-                    match crate::view_declarations::resolve_group(declaration, seed.manifest) {
+                    match crate::view_declarations::resolve_group(
+                        declaration,
+                        seed.manifest,
+                        vocabularies,
+                    ) {
                         Ok(crate::view_declarations::Resolution::New(group)) => {
                             if !view_declarations.holds_group(&group.name) {
                                 view_declarations.push_group(*group);

@@ -1051,6 +1051,7 @@ impl Executor {
         let compiled = match crate::view_declarations::resolve_group(
             &declaration,
             &generation.bundle.manifest,
+            &generation.vocabularies,
         ) {
             Ok(crate::view_declarations::Resolution::Existing) => {
                 reply.ack(true);

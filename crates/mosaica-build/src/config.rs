@@ -3775,32 +3775,19 @@ fn compile_metadata_type(
             )))
         }
     };
-    if ty_name == "category" {
-        let vocabulary = vocabulary.ok_or_else(|| {
-            declaration_error(format!(
-                "{object}: `metadata.{name}` is a category and names no `vocabulary`. It names a \
-                 `[[vocabulary]]` block, which is where the width, the value set and the \
-                 visibility live — every one of them a decision nobody can make on the author's \
-                 behalf"
-            ))
-        })?;
-        let declared = vocabularies.get(vocabulary).ok_or_else(|| {
-            declaration_error(format!(
-                "{object}: `metadata.{name}`: no vocabulary named '{vocabulary}'"
-            ))
-        })?;
+    mosaica_types::view::check_metadata_vocabulary(
+        name,
+        ty_name == "category",
+        vocabulary,
+        |vocabulary| vocabularies.contains_key(vocabulary),
+    )
+    .map_err(|detail| declaration_error(format!("{object}: {detail}")))?;
+    if let Some(declared) = vocabulary.and_then(|vocabulary| vocabularies.get(vocabulary)) {
         return Ok(ViewMetadata {
             name: name.to_string(),
             ty: declared.width,
             vocabulary: Some(declared.name.clone()),
         });
-    }
-    if vocabulary.is_some() {
-        return Err(declaration_error(format!(
-            "{object}: `metadata.{name}` is type '{ty_name}', not a category, so `vocabulary` has \
-             no meaning for it. Refused rather than ignored: a value set on a value that has none \
-             is a control its author believes is set"
-        )));
     }
     let ty = ScalarType::parse(ty_name)
         .filter(|ty| *ty != ScalarType::Utf8)
@@ -3963,9 +3950,8 @@ fn compile_metadata_value(
                 value.type_str()
             ))
         })?;
-        // The key is checked against the vocabulary at the build that reads it, exactly as a
-        // category column's values are: an open vocabulary mints, and a closed one refuses, and
-        // neither is a decision this parse can make for it.
+        // Stored as the key, as a create at a running service stores it. Neither checks the key
+        // against the vocabulary.
         return Ok(MetadataValue::Text(key.to_string()));
     }
     Ok(match declared.ty {

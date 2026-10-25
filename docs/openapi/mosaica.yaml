@@ -2926,8 +2926,9 @@ paths:
 
         The name is the column's identity. Declaring it again with the same fields answers `200`
         and changes nothing; with any field but `unique` different it is `409`. A name a layer
-        holds is `422`. `render = true` is refused on a new column: declare a rendered column at a
-        build.
+        holds is `422`. A column declared with `render = true` joins every view's points frame at
+        once; a point stored before the declaration draws it as no value until a batch gives the
+        item one.
 
         `unique` is the one field a column that exists may change. Declaring it `true` builds the
         column's index over every value stored, and the answer waits for the build, as every write
@@ -2980,7 +2981,7 @@ paths:
         "422":
           description: |
             - An unknown field or type
-            - `render = true` on a new column
+            - `render = true` on a `keyword` or `text` column
             - `unique` on a type other than `keyword`, an integer or `timestamp_us`, or on a group-scoped column
             - A name that is not a valid column name or is a layer's
             - A category with no `vocabulary`, or one naming no vocabulary
@@ -3265,7 +3266,8 @@ paths:
             - An unknown projection
             - An extent that is not finite, has a maximum below its minimum, is in degrees on a view with no projection, or is `auto`
             - `members` naming a group that takes its own views from another, or with `metadata`
-            - A metadata name declared twice, or of type `category`
+            - A metadata name declared twice
+            - A `category` metadata name with no `vocabulary`, or one naming no vocabulary; `vocabulary` on another type
             - A `visibility` label or point default that is not an access expression
           content:
             application/json:
@@ -5465,7 +5467,7 @@ components:
                       type: string
                       enum: [bool, int, float, text, timestamp_us]
                     value:
-                      description: The value, of `type`. A `timestamp_us` is microseconds since the Unix epoch.
+                      description: The value, of `type`. A `timestamp_us` is microseconds since the Unix epoch. A name declared as a `category` is served as `text`, holding the vocabulary's key.
                       type: [boolean, number, string]
         groups:
           type: array
@@ -7516,10 +7518,10 @@ components:
         type:
           type: string
           enum: [bool, u8, u16, u32, u64, i8, i16, i32, i64, float, text, timestamp_us, category]
-          description: The value's type. `category` is refused on this route.
+          description: The value's type. A `category` value is a key of its `vocabulary`.
         vocabulary:
           type: [string, "null"]
-          description: The vocabulary a `category` draws on.
+          description: The vocabulary a `category` draws on, which is required for one and refused for any other type.
 
     ViewGroupDeclared:
       type: object
@@ -7593,7 +7595,7 @@ components:
         metadata:
           type: object
           default: {}
-          description: One value for each name the group declares, and no other. A `timestamp_us` is microseconds since the Unix epoch, as an integer or a string of digits, or an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string, read as `schema.toml` reads one; a date-time with no offset, or with more than six fractional-second digits, is `422`. An integer is never read as a float, nor a float as an integer.
+          description: One value for each name the group declares, and no other. A `category` is its vocabulary's key as a string. A `timestamp_us` is microseconds since the Unix epoch, as an integer or a string of digits, or an RFC 3339 date (`2020-01-01`, midnight UTC) or date-time with an offset (`2020-01-01T09:30:00Z`) as a string, read as `schema.toml` reads one; a date-time with no offset, or with more than six fractional-second digits, is `422`. An integer is never read as a float, nor a float as an integer.
           additionalProperties:
             type: [boolean, number, string]
 

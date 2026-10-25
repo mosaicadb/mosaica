@@ -84,18 +84,35 @@ def test_an_indexed_attribute_declared_after_the_first_commit_is_filled_and_filt
     assert matched(db, {"citations": {"range": {"gte": 0}}}) == len(HELD)
 
 
-def test_a_render_column_declared_after_the_first_commit_is_refused_at_the_verb(served, corpus):
-    """Decision 0136's amendment: `PUT /control/attributes` refuses `render` whatever the type.
+def test_a_rendered_column_declared_after_the_first_commit_is_drawn_with_its_inserted_values(
+    tmp_path,
+):
+    """`PUT /control/attributes` with `render`, then an insert naming the item it fills.
 
-    A rendered value is served from the hot column of the row that carries it, and the route
-    declares a column against entities that already exist. The refusal is at the verb, where the
-    declaration is still the user's to change, and it names the first commit.
+    Every point drawn carries the column: the item the insert filled draws its value, and the one
+    it did not draws none.
     """
-    db = notebook(served, corpus)
-    with pytest.raises(Refusal):
-        db.declare_attribute("hotness", type="u8", render=True)
-    # Nothing was declared, so the next commit has nothing to send.
-    assert db.check().plan == []
+    db, _ = small(tmp_path / "db")
+    try:
+        assert db.commit().ok
+        db.declare_attribute("heat", type="f32", render=True)
+        db.insert(
+            "heat",
+            pa.table({"id": pa.array([1], pa.int64()), "heat": pa.array([0.5], pa.float32())}),
+            columns={"id": "id"},
+            value="heat",
+        )
+        plan = db.check()
+        assert plan.ok, plan
+        assert plan.plan[0] == "declare attribute 'heat' (f32)"
+        report = db.commit()
+        assert report.ok, report
+
+        assert declared(db, "heat")["render"] is True
+        drawn = db.view("map").sample(k=100).column("heat").to_pylist()
+        assert sorted(drawn, key=lambda value: (value is None, value)) == [0.5, None]
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------- a category

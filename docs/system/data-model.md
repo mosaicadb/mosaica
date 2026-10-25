@@ -36,7 +36,7 @@ flowchart LR
     A relational database is built to answer any query, planned when you ask it. Mosaica is built to answer one question quickly over billions of rows: what is in this map tile, for this viewer, under these filters.
 
     - **Each layout is stored in its own order.** A tile is quick to read when its points are stored together. A table has one physical order, and a second order needs a second copy, as a covering index is. Mosaica keeps one such copy per view, ordered by position, and keeps what is true of the item in every view apart from them.
-    - **Drawn columns sit beside the positions.** A rendered field is copied next to each position, so drawing a tile reads one place. Turning `render` on later would rewrite every view, so it can only be done by rebuilding.
+    - **Drawn columns sit beside the positions.** A rendered field is copied next to each position, so drawing a tile reads one place. Turning `render` on for a field already declared would rewrite every view, so it can only be done by rebuilding.
     - **Annotations are built in.** In SQL, counting the items a viewer may see in each cluster on screen is a join and a grouping on every request. Mosaica stores each artifact's members as a bitmap over the same item numbers as the viewer's visible items, so each count is one bitmap intersection.
     - **Rows are matched to items when they are written.** Mosaica has no query language and joins none of your tables at request time. Each row from a separate file, such as a field's values or a cluster's members, is tied to its item once, when it is inserted, by a unique field or, once the database is running, a `mosaica_id`. That is why a unique field matters.
 
@@ -109,9 +109,9 @@ When you declare a vocabulary, you choose how many values it can hold (up to 255
 | | While the database runs |
 |---|---|
 | Items | Insert, edit, delete, suppress and lift a suppression |
-| Fields | Declare a new field. Its type, `render` and `index` are fixed once declared. `unique` can be turned on or off |
+| Fields | Declare a new field, rendered or not. Its type, `render` and `index` are fixed once declared. `unique` can be turned on or off. An item stored before a field is declared holds no value in it, and draws none, until an insert gives it one |
 | Plain views | Declare a new view. A view cannot be changed or dropped |
-| View groups | Declare a group, and create and drop its views. A group declared while running cannot carry category-typed facts about its views. A group's view cannot be changed: drop it, create it again empty, and insert its points again. Items that were in no other view come back as new items |
+| View groups | Declare a group, and create and drop its views. A group's view cannot be changed: drop it, create it again empty, and insert its points again. Items that were in no other view come back as new items |
 | Annotation layers | Declare a layer, publish artifacts into it, and drop it |
 | Vocabularies | Declare one, add values, and change values' titles |
 
@@ -123,5 +123,4 @@ Anything else about these needs a rebuild.
 ## Not built yet
 
 - **Fields holding a list of values.** A field holds at most one value per item.
-- **Declaring a rendered field while the database runs.** Declare it in the first load.
 - **Titles of fields and vocabularies.** A declaration may give one, but it is not yet sent to clients. Titles of views, view groups, layers, levels and category values are sent.

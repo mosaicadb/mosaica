@@ -1065,3 +1065,354 @@ async fn a_build_in_shards_of_a_third_answers_as_its_files_ingested() {
         build_equals_ingest(seed, true).await;
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Rendered columns declared at a running service
+// ---------------------------------------------------------------------------------------------
+
+/// What both paths declare at the build: one view and the unique `rid` that names its items. The
+/// vocabulary's codes are pinned, since two builds draw unpinned ones apart.
+const DRAWN_BASE: &str = r#"
+[sources]
+world = "world.parquet"
+
+[defaults]
+source = "world"
+
+[[view]]
+name             = "world"
+extent           = { min = 0.0, max = 100.0 }
+point_visibility = { default = "public" }
+
+[[vocabulary]]
+name       = "kinds"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+values     = { alpha = 1, beta = 2 }
+
+[[attribute]]
+name   = "rid"
+type   = "u64"
+unique = true
+"#;
+
+/// The rendered columns: a number drawn alone, and a category drawn and indexed. A build declares
+/// them after [`DRAWN_BASE`]; the running service is sent them as `mosaica check --payloads`
+/// emits them.
+const DRAWN_COLUMNS: &str = r#"
+[[attribute]]
+name   = "heat"
+type   = "f32"
+render = true
+
+[[attribute]]
+name       = "kind"
+type       = "category"
+vocabulary = "kinds"
+render     = true
+index      = true
+"#;
+
+const DRAWN_ROWS: u64 = 30;
+
+/// Row `i`'s `heat`, absent one row in four, and its `kind`, absent one row in five.
+fn drawn_values(i: u64) -> (Option<f32>, Option<&'static str>) {
+    let heat = (i % 4 != 3).then_some(i as f32 * 1.5);
+    let kind = (i % 5 != 4).then_some(if i.is_multiple_of(3) { "alpha" } else { "beta" });
+    (heat, kind)
+}
+
+fn drawn_position(i: u64) -> (f64, f64) {
+    (((i * 37) % 97) as f64 + 0.5, ((i * 53) % 97) as f64 + 0.5)
+}
+
+/// The view's points file, whole or with no rows.
+fn write_drawn(path: &Path, empty: bool) {
+    let n = if empty { 0 } else { DRAWN_ROWS };
+    let rows = 0..n;
+    let columns: Vec<(&str, ArrayRef)> = vec![
+        ("rid", Arc::new(UInt64Array::from_iter_values(rows.clone()))),
+        (
+            "x",
+            Arc::new(Float64Array::from_iter_values(rows.clone().map(|i| drawn_position(i).0))),
+        ),
+        (
+            "y",
+            Arc::new(Float64Array::from_iter_values(rows.clone().map(|i| drawn_position(i).1))),
+        ),
+        (
+            "heat",
+            Arc::new(arrow::array::Float32Array::from_iter(
+                rows.clone().map(|i| drawn_values(i).0),
+            )),
+        ),
+        (
+            "kind",
+            Arc::new(StringArray::from_iter(rows.map(|i| drawn_values(i).1))),
+        ),
+    ];
+    let fields: Vec<Field> = columns
+        .iter()
+        .map(|(name, array)| Field::new(*name, array.data_type().clone(), true))
+        .collect();
+    let schema = Arc::new(ArrowSchema::new(fields));
+    let batch =
+        RecordBatch::try_new(schema.clone(), columns.into_iter().map(|c| c.1).collect()).unwrap();
+    let mut writer =
+        ArrowWriter::try_new(std::fs::File::create(path).unwrap(), schema, None).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+}
+
+/// The view's rows as one ingest batch, an absent value left out.
+fn drawn_body() -> Value {
+    let rows: Vec<Value> = (0..DRAWN_ROWS)
+        .map(|i| {
+            let (x, y) = drawn_position(i);
+            let mut row = json!({ "rid": i, "x": x, "y": y });
+            let (heat, kind) = drawn_values(i);
+            if let Some(heat) = heat {
+                row["heat"] = json!(heat);
+            }
+            if let Some(kind) = kind {
+                row["kind"] = json!(kind);
+            }
+            row
+        })
+        .collect();
+    Value::Array(rows)
+}
+
+async fn post_viewer(server: &TestServer, token: &str, path: &str, body: &Value) -> Vec<u8> {
+    let resp = server
+        .client
+        .post(server.viewer_url(path))
+        .bearer_auth(token)
+        .json(body)
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status().as_u16();
+    let bytes = resp.bytes().await.unwrap().to_vec();
+    assert_eq!(status, 200, "{path}: {}", String::from_utf8_lossy(&bytes));
+    bytes
+}
+
+/// One point as the points frame draws it: its position code, its `heat`'s bits and its `kind`
+/// code.
+type DrawnPoint = (u64, Option<u32>, u8);
+
+/// Each point of the whole view, sorted, and the frame's column names.
+fn drawn_points(body: &[u8]) -> (Vec<String>, Vec<DrawnPoint>) {
+    let mut names = Vec::new();
+    let mut points = Vec::new();
+    for (kind, payload) in mosaica_wire::split_frames(body).expect("well-formed frames") {
+        if kind != mosaica_wire::FRAME_POINTS {
+            continue;
+        }
+        let reader =
+            arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(payload.to_vec()), None)
+                .unwrap();
+        for batch in reader {
+            let batch = batch.unwrap();
+            names = batch.schema().fields().iter().map(|f| f.name().clone()).collect();
+            let column = |name: &str| {
+                batch
+                    .column_by_name(name)
+                    .unwrap_or_else(|| panic!("the points frame carries '{name}'"))
+                    .clone()
+            };
+            let codes = column("code");
+            let codes = codes.as_any().downcast_ref::<UInt64Array>().unwrap();
+            let heat = column("heat");
+            let heat = heat.as_any().downcast_ref::<arrow::array::Float32Array>().unwrap();
+            let kind = column("kind");
+            let kind = kind.as_any().downcast_ref::<arrow::array::UInt8Array>().unwrap();
+            for row in 0..batch.num_rows() {
+                points.push((
+                    codes.value(row),
+                    heat.is_valid(row).then(|| heat.value(row).to_bits()),
+                    kind.value(row),
+                ));
+            }
+        }
+    }
+    points.sort_unstable();
+    (names, points)
+}
+
+/// Each item's `rid`, `heat` and `kind` as the item route serves them under `filters`, sorted.
+async fn drawn_items(server: &TestServer, token: &str, filters: Option<Value>) -> Value {
+    let mut body = json!({ "view": "world", "fields": ["rid", "heat", "kind"], "order": "map" });
+    if let Some(filters) = filters {
+        body["filters"] = filters;
+    }
+    let mut out: Vec<(u64, Option<u32>, Option<String>)> = Vec::new();
+    loop {
+        let decoded = decode_records(&post_viewer(server, token, "/v1/items", &body).await);
+        for (batch, _) in &decoded.pages {
+            let cast = |name: &str, ty: &arrow::datatypes::DataType| {
+                arrow::compute::cast(batch.column_by_name(name).unwrap(), ty).unwrap()
+            };
+            let rid = cast("rid", &arrow::datatypes::DataType::UInt64);
+            let rid = rid.as_any().downcast_ref::<UInt64Array>().unwrap();
+            let heat = cast("heat", &arrow::datatypes::DataType::Float32);
+            let heat = heat.as_any().downcast_ref::<arrow::array::Float32Array>().unwrap();
+            let kind = cast("kind", &arrow::datatypes::DataType::Utf8);
+            let kind = kind.as_any().downcast_ref::<StringArray>().unwrap();
+            for row in 0..batch.num_rows() {
+                out.push((
+                    rid.value(row),
+                    heat.is_valid(row).then(|| heat.value(row).to_bits()),
+                    kind.is_valid(row).then(|| kind.value(row).to_string()),
+                ));
+            }
+        }
+        match decoded.trailer["next"].clone() {
+            Value::Null => break,
+            cursor => body["cursor"] = cursor,
+        }
+    }
+    out.sort();
+    json!(out)
+}
+
+/// Everything a viewer is served of the rendered columns: their `/v1/meta` entries, the points
+/// frame, the item route with and without a filter on each, and counts by `kind` beside the
+/// figures of `heat`.
+async fn drawn_state(server: &TestServer) -> BTreeMap<String, Value> {
+    let token = token_for(server, &["0"]).await;
+    let mut out = BTreeMap::new();
+
+    let resp = server
+        .client
+        .get(server.viewer_url("/v1/meta"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    let meta: Value = resp.json().await.unwrap();
+    for name in ["heat", "kind"] {
+        let declared = meta["declared_scalars"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["name"] == name)
+            .unwrap_or_else(|| panic!("/v1/meta lists '{name}': {meta}"))
+            .clone();
+        out.insert(format!("meta {name}"), declared);
+    }
+
+    let viewport = json!({ "view": "world", "zoom": 8, "bbox": [0.0, 0.0, 100.0, 100.0], "k": 1000 });
+    let (names, points) = drawn_points(&post_viewer(server, &token, "/v1/viewport", &viewport).await);
+    assert_eq!(points.len() as u64, DRAWN_ROWS, "every point is drawn");
+    out.insert("points columns".to_string(), json!(names));
+    out.insert("points".to_string(), json!(points));
+
+    out.insert("items".to_string(), drawn_items(server, &token, None).await);
+    for (what, filter) in [
+        ("heat", json!({ "heat": { "range": { "gte": 12.0 } } })),
+        ("kind", json!({ "kind": { "eq": "alpha" } })),
+    ] {
+        out.insert(
+            format!("items filtered by {what}"),
+            drawn_items(server, &token, Some(filter)).await,
+        );
+    }
+
+    let aggregate = json!({
+        "view": "world",
+        "groupings": [
+            { "count": true, "by": { "field": "kind", "top": 10 } },
+            { "summary": ["heat"] },
+        ],
+    });
+    let decoded = decode_aggregate(&post_viewer(server, &token, "/v1/aggregate", &aggregate).await);
+    for (head, pages) in &decoded.tables {
+        let grouping = head["grouping"].as_u64().unwrap();
+        let tables: Vec<String> = pages.iter().map(|(batch, _)| format!("{batch:?}")).collect();
+        out.insert(format!("aggregate grouping {grouping}"), json!(tables));
+    }
+    out
+}
+
+/// **A rendered column declared at a running service answers as one declared at the build.** The
+/// build declares a rendered number and a rendered category over its rows; the same view built
+/// empty is sent the two declarations as the payload emitter writes them, then the same rows. The
+/// two serve the same columns, values, filters and counts after a restart, and the service again
+/// after a compaction and a restart.
+#[tokio::test]
+async fn a_rendered_column_declared_at_a_running_service_answers_as_one_built() {
+    let tmp = TempDir::new().unwrap();
+
+    // Path A: the build.
+    let full = tmp.path().join("full");
+    std::fs::create_dir_all(&full).unwrap();
+    write_drawn(&full.join("world.parquet"), false);
+    let declaration = format!("{DRAWN_BASE}{DRAWN_COLUMNS}");
+    let built_root = full.join("bundle");
+    build(&args(&full, &declaration, &built_root)).expect("the build runs");
+
+    // Path B: the view built empty without the rendered columns, which the service is then sent.
+    let empty = tmp.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    write_drawn(&empty.join("world.parquet"), true);
+    let empty_root = empty.join("bundle");
+    build(&args(&empty, DRAWN_BASE, &empty_root)).expect("the empty build runs");
+    let ingested = spawn_server(&empty_root, &empty.join("cache"), &empty.join("wal.log")).await;
+    let config = mosaica_build::config::Config::parse(&full.join("corpus.toml"), &Default::default())
+        .expect("the declaration compiles");
+    let payloads = mosaica_build::config::control_payloads(&config);
+    let declared: Vec<&Value> = payloads["attributes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|body| body["name"] == "heat" || body["name"] == "kind")
+        .collect();
+    assert_eq!(declared.len(), 2);
+    for body in declared {
+        let resp = ingested
+            .client
+            .put(ingested.control_url("/control/attributes"))
+            .bearer_auth(OPERATOR_CREDENTIAL)
+            .json(body)
+            .send()
+            .await
+            .unwrap();
+        let status = resp.status().as_u16();
+        assert_eq!(status, 201, "{body}: {}", resp.text().await.unwrap_or_default());
+    }
+    send(
+        &ingested,
+        reqwest::Method::POST,
+        "/control/ingest",
+        Some("world"),
+        &drawn_body(),
+        false,
+        "drawn",
+    )
+    .await;
+    tick(&ingested).await;
+
+    ingested.shutdown().await;
+    let ingested = spawn_server(&empty_root, &empty.join("cache-2"), &empty.join("wal.log")).await;
+    let built = spawn_server(&built_root, &full.join("cache"), &full.join("wal.log")).await;
+    let expected = drawn_state(&built).await;
+    assert_eq!(
+        expected["points columns"],
+        json!(["mosaica_id", "code", "heat", "kind"])
+    );
+    assert_eq!(drawn_state(&ingested).await, expected, "after a restart");
+
+    fold(&ingested).await;
+    ingested.shutdown().await;
+    let ingested = spawn_server(&empty_root, &empty.join("cache-3"), &empty.join("wal.log")).await;
+    assert_eq!(
+        drawn_state(&ingested).await,
+        expected,
+        "after a compaction and a restart"
+    );
+    built.shutdown().await;
+    ingested.shutdown().await;
+}

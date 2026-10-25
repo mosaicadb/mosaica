@@ -13,7 +13,8 @@ use mosaica_lifecycle::wal::{DeclaredFrame, PlainViewDeclaration, ViewGroupDecla
 use mosaica_lifecycle::ExecError;
 use mosaica_store::manifest::{GroupDescriptor, Manifest, Quantisation, ViewDescriptor};
 use mosaica_types::view::{
-    check_metadata_name, check_view_key, GroupMetadataField, ViewMetadataType, DECLARED_INCARNATION,
+    check_metadata_name, check_metadata_vocabulary, check_view_key, GroupMetadataField,
+    ViewMetadataType, DECLARED_INCARNATION,
 };
 
 /// The groups and plain views declared at a running service and not yet written into a
@@ -108,9 +109,11 @@ pub(crate) enum Resolution<T> {
 }
 
 /// Resolve a group declaration: refuse it, recognise the group already held, or compile it.
+/// `vocabularies` holds every vocabulary declared so far, which a category's metadata must name.
 pub(crate) fn resolve_group(
     declaration: &ViewGroupDeclaration,
     manifest: &Manifest,
+    vocabularies: &mosaica_store::vocabulary::Vocabularies,
 ) -> Result<Resolution<GroupDescriptor>, ExecError> {
     let refused = |detail: String| ExecError::ViewRefused { detail };
     let name = declaration.name.as_str();
@@ -142,7 +145,7 @@ pub(crate) fn resolve_group(
             )));
         }
     }
-    check_metadata(name, &declaration.metadata).map_err(refused)?;
+    check_metadata(name, &declaration.metadata, vocabularies).map_err(refused)?;
 
     let compiled = GroupDescriptor {
         name: declaration.name.clone(),
@@ -248,25 +251,28 @@ fn compile_common(
     Ok((projection, quantisation))
 }
 
-fn check_metadata(name: &str, metadata: &[GroupMetadataField]) -> Result<(), String> {
+fn check_metadata(
+    name: &str,
+    metadata: &[GroupMetadataField],
+    vocabularies: &mosaica_store::vocabulary::Vocabularies,
+) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     for field in metadata {
-        check_metadata_name(&field.name).map_err(|e| format!("view group '{name}': {e}"))?;
+        let in_group = |e: String| format!("view group '{name}': {e}");
+        check_metadata_name(&field.name).map_err(in_group)?;
         if !seen.insert(field.name.as_str()) {
             return Err(format!(
                 "view group '{name}': metadata '{}' is declared twice",
                 field.name
             ));
         }
-        // Not built: the create route resolves no vocabulary key, so a view of this group could
-        // never be created.
-        if field.ty == ViewMetadataType::Category {
-            return Err(format!(
-                "view group '{name}': metadata '{}' is a category, which a group declared at a \
-                 running service does not support yet; declare the group at a build",
-                field.name
-            ));
-        }
+        check_metadata_vocabulary(
+            &field.name,
+            field.ty == ViewMetadataType::Category,
+            field.vocabulary.as_deref(),
+            |vocabulary| vocabularies.get(vocabulary).is_some(),
+        )
+        .map_err(in_group)?;
     }
     Ok(())
 }

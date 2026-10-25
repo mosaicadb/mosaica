@@ -908,8 +908,8 @@ export class Control {
   /**
    * `PUT /control/attributes`: declares one attribute column, named in the body. A batch sent after
    * the answer may carry it. `201` when new, `200` when the name already has this declaration,
-   * `409` when it has another. A new column declared with `render: true` is refused with `422`: a
-   * rendered column is declared at a build.
+   * `409` when it has another. A column declared with `render: true` joins every point drawn; a
+   * point stored before the declaration draws no value for it until a batch gives it one.
    *
    * `unique: true` says no two items hold one value. On a column that exists it is the one field
    * that may change: the answer waits while the column's index is built over the values it holds,

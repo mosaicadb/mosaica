@@ -145,8 +145,8 @@ impl ViewMetadataType {
             | (ViewMetadataType::Float, ViewMetadataValue::Float(_))
             | (ViewMetadataType::Text, ViewMetadataValue::Text(_))
             | (ViewMetadataType::TimestampUs, ViewMetadataValue::TimestampUs(_))
-            // A category is stored as its code, which is how a build writes one.
-            | (ViewMetadataType::Category, ViewMetadataValue::Int(_)) => true,
+            // A category is stored as its vocabulary key, as a build writes one.
+            | (ViewMetadataType::Category, ViewMetadataValue::Text(_)) => true,
             (ty, ViewMetadataValue::Int(v)) => ty
                 .integer_range()
                 .is_some_and(|(min, max)| (min..=max).contains(v)),
@@ -162,6 +162,29 @@ pub struct GroupMetadataField {
     pub ty: ViewMetadataType,
     /// The vocabulary a category's keys are drawn from; `None` for every other type.
     pub vocabulary: Option<String>,
+}
+
+/// A metadata name's vocabulary: a category names one of `declared`, and no other type names one.
+pub fn check_metadata_vocabulary(
+    name: &str,
+    category: bool,
+    vocabulary: Option<&str>,
+    declared: impl Fn(&str) -> bool,
+) -> Result<(), String> {
+    match (category, vocabulary) {
+        (true, None) => Err(format!(
+            "metadata '{name}' is a category and names no vocabulary; name the vocabulary its \
+             keys come from"
+        )),
+        (true, Some(vocabulary)) if !declared(vocabulary) => Err(format!(
+            "metadata '{name}': no vocabulary named '{vocabulary}'; declare it first"
+        )),
+        (false, Some(_)) => Err(format!(
+            "metadata '{name}' is not a category, so it takes no vocabulary; remove it, or \
+             declare the name as a category"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// The keys a roster record has of its own, which a metadata name may not take.
@@ -332,6 +355,18 @@ mod tests {
             ViewMetadataType::I64.integer_range(),
             Some((i64::MIN, i64::MAX))
         );
+    }
+
+    #[test]
+    fn a_category_holds_a_key_and_names_a_declared_vocabulary() {
+        assert!(ViewMetadataType::Category.admits(&ViewMetadataValue::Text("gold".to_string())));
+        assert!(!ViewMetadataType::Category.admits(&ViewMetadataValue::Int(3)));
+        let declared = |name: &str| name == "tiers";
+        assert!(check_metadata_vocabulary("tier", true, Some("tiers"), declared).is_ok());
+        assert!(check_metadata_vocabulary("tier", true, None, declared).is_err());
+        assert!(check_metadata_vocabulary("tier", true, Some("other"), declared).is_err());
+        assert!(check_metadata_vocabulary("label", false, Some("tiers"), declared).is_err());
+        assert!(check_metadata_vocabulary("label", false, None, declared).is_ok());
     }
 
     #[test]

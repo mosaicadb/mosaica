@@ -174,12 +174,12 @@ def _(mo):
     detail, so it is shown when a place is opened, but the map can't be filtered or counted by
     it.
 
-    Each has a cost. A column can only be made rendered before the first commit, but a rendered
-    column makes every point the server sends larger, so render only what the map needs. Here
-    that is the feature class, for colour; it can then be filtered and counted by as well,
-    without an index. An index takes disc and build time, so index the columns people will
-    filter on. We index `name` to search it, `population` to filter on a range, and `division`
-    to filter and count by it. The rest are details, which cost least.
+    Each has a cost. A rendered column makes every point the server sends larger, so render
+    only what the map needs. Here that is the feature class, for colour; it can then be
+    filtered and counted by as well, without an index. An index takes disc and build time, so
+    index the columns people will filter on. We index `name` to search it, `population` to
+    filter on a range, and `division` to filter and count by it. The rest are details, which
+    cost least.
 
     The report under the cell lists every column and what it was declared as. Its second line
     is about the categories. Each category takes its values from a vocabulary, the list of
