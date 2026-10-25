@@ -2616,6 +2616,35 @@ describe('the item a click opens and the record a hover names', () => {
     expect(store.get('selection')).toEqual({item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
   });
 
+  it('does not show an item or an artifact that lands after clearSelection', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {client} = fakeClient(() => response('ck'));
+    const answers: (() => void)[] = [];
+    const held = () => new Promise<void>((resolve) => answers.push(resolve));
+    Object.assign(client, {
+      item: vi.fn(async () => {
+        await held();
+        return {fields: {title: 'paper 7'}, views: [], scoped: {}, labels: []};
+      }),
+      artifact: vi.fn(async () => {
+        await held();
+        return {layer: 'l', key: null, maskedCount: 1n, centroid: null, box: null, shape: null};
+      })
+    });
+    const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10}});
+    await clock.advance(1);
+
+    const picked = store.pick(7n);
+    const opened = store.openArtifact(9n);
+    await clock.advance(1);
+    expect(answers).toHaveLength(2);
+    store.clearSelection();
+    for (const answer of answers) answer();
+    await Promise.all([picked, opened]);
+    expect(store.get('selection')).toEqual({item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+  });
+
   it('writes no projection for a hovered record, and asks again after a clear', async () => {
     const clock = fakeClock();
     const scheduler = fakeScheduler();

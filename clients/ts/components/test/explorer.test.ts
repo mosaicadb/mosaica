@@ -404,6 +404,36 @@ describe('<mosaica-explorer> the item card beside its point', () => {
     expect(shadow.querySelector('.right [part="detail"]')).toBeNull();
   });
 
+  it('moves the ring to the next point picked, and clears it with the card and the selection on a click that finds nothing', async () => {
+    const ctx = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
+    type Clicked = Map & {worldAt: unknown; onClick(info: unknown): void; selectedWorldXY: [number, number] | null};
+    const map = ctx.shadow.querySelector('mosaica-map') as unknown as Clicked;
+    Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(map, 'clientHeight', {configurable: true, value: 600});
+    map.worldAt = (x: number, y: number) => [x, y];
+    const mark = (id: bigint, x: number, y: number) => ({index: 0, x, y, sourceLayer: {id: 'marks-p0', props: {mosaicaIds: new BigUint64Array([id]), mosaicaPositions: new Float32Array([x, y])}}});
+    // The store answers each pick with the item.
+    const pick = async (id: bigint, x: number, y: number) => {
+      map.onClick(mark(id, x, y));
+      ctx.store.set('selection', item(id));
+      await settle(ctx.host);
+      await settle(ctx.host);
+    };
+    await pick(5n, 256, 256);
+    expect(callouts(ctx.shadow).map((c) => c.getAttribute('data-callout'))).toEqual(['live']);
+    expect(map.selectedWorldXY).toEqual([256, 256]);
+    await pick(6n, 300, 200);
+    expect(callouts(ctx.shadow)).toHaveLength(1);
+    expect(map.selectedWorldXY).toEqual([300, 200]);
+
+    map.onClick({index: -1, x: 900, y: 500});
+    await settle(ctx.host);
+    expect(ctx.store.calls.filter((c) => c.name === 'clearSelection')).toHaveLength(1);
+    expect(map.pickedAt).toBeNull();
+    expect(map.selectedWorldXY).toBeNull();
+    expect(callouts(ctx.shadow)).toEqual([]);
+  });
+
   it('places two cards clear of each other', async () => {
     const {shadow} = await pinnedAndLive();
     const [a, b] = callouts(shadow).map((c) => placedAt(c));

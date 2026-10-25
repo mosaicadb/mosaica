@@ -2133,11 +2133,13 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /** A click on empty map closes the card that is not pinned and drops the selection; pinned cards stay. */
   private onMiss(): void {
-    const s = this.resolvedStore;
-    const sel = s?.get('selection');
-    if (s && sel && (sel.item || sel.artifact || sel.itemRefusal || sel.artifactRefusal)) s.clearSelection();
-    const m = this.map;
-    if (m) m.lastPick = null;
+    this.dropSelection();
+  }
+
+  /** Close the selection's card: forget the map's pick and the ring round its point, and clear the store's selection. */
+  private dropSelection(): void {
+    this.map?.clearPick();
+    this.resolvedStore?.clearSelection();
     this.requestUpdate();
   }
 
@@ -2158,9 +2160,7 @@ export class MosaicaExplorer extends MosaicaElement {
       this.pinned = this.pinned.filter((p) => p.key !== key);
       if (key !== live) return;
     } else if (live) this.pinned = this.pinned.filter((p) => p.key !== live);
-    this.map?.clearPick();
-    s.clearSelection();
-    this.requestUpdate();
+    this.dropSelection();
   }
 }
 

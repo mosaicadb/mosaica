@@ -822,7 +822,7 @@ export interface Store {
    * not asked for again, so this may be called on every pointer move. Waits for `/v1/meta`.
    */
   needShape(id: bigint): void;
-  /** Clear the picked item, the opened artifact and their refusals. Publishes `selection`. */
+  /** Clear the picked item, the opened artifact and their refusals; one asked for and not yet answered is not shown. Publishes `selection`. */
   clearSelection(): void;
   /**
    * Select a region, or clear the selection with `null` or a lasso of fewer than three points.
@@ -2424,7 +2424,11 @@ export function createStore(options: StoreOptions): Store {
     askLayers();
   }
 
+  /** How many times the selection has been cleared: an item or artifact asked for before a clear is not shown. */
+  let selectionClears = 0;
+
   function clearSelection(): void {
+    selectionClears += 1;
     replaceProjection('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
   }
 
@@ -2472,13 +2476,13 @@ export function createStore(options: StoreOptions): Store {
   }
 
   async function pick(id: bigint): Promise<void> {
-    const epoch = clears;
+    const epoch = selectionClears;
     try {
       const detail = await client.item(await tokens.get(), id);
-      if (disposed || epoch !== clears) return;
+      if (disposed || epoch !== selectionClears) return;
       replaceProjection('selection', {...projections.selection, item: {id, detail}, itemRefusal: null});
     } catch (error) {
-      if (disposed || epoch !== clears) return;
+      if (disposed || epoch !== selectionClears) return;
       replaceProjection('selection', {
         ...projections.selection,
         item: null,
@@ -2495,16 +2499,16 @@ export function createStore(options: StoreOptions): Store {
   }
 
   async function openArtifact(id: bigint): Promise<void> {
-    const epoch = clears;
+    const epoch = selectionClears;
     try {
       const asked = await viewed();
       const detail = await client.artifact(asked.token, id, {view: asked.view});
-      if (disposed || epoch !== clears) return;
+      if (disposed || epoch !== selectionClears) return;
       // A renewal may have changed the principal under the request, and a shape can be theirs.
       if (tokens.current === asked.token) shapes.hold(id, detail.shape);
       replaceProjection('selection', {...projections.selection, artifact: {id, detail}, artifactRefusal: null, item: null, itemRefusal: null});
     } catch (error) {
-      if (disposed || epoch !== clears) return;
+      if (disposed || epoch !== selectionClears) return;
       replaceProjection('selection', {
         ...projections.selection,
         artifact: null,
@@ -2532,8 +2536,7 @@ export function createStore(options: StoreOptions): Store {
   }
 
   /**
-   * How many times the store has been cleared: an item or artifact asked for before a clear is not
-   * shown, and a warm-up begun before one reads nothing.
+   * How many times the store has been cleared: a warm-up begun before a clear reads nothing.
    */
   let clears = 0;
   /** Whether the host has called `setFilters`. Until it has, the draft is seeded from `meta`. */
