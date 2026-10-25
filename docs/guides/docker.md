@@ -3,7 +3,7 @@
 This guide runs Mosaica in a container managed by Docker Compose, with the database kept in a Docker
 volume. It suits a host where you already run services this way. You'll need Docker with the Compose
 plugin, sudo on the host, and a clone of the Mosaica repository to build the image from. From the
-`~/ireland` directory of [the first tutorial](../start/first-map.md) you need `corpus.toml` and
+`~/ireland` directory of [the first tutorial](../start/first-map.md) you need `schema.toml` and
 `points.parquet`.
 
 Once the container is running, [Operate a deployment](operating.md) takes over. It applies to this
@@ -42,7 +42,7 @@ credentials. The database itself lives in a volume that Docker manages.
 ```console
 $ mkdir -p ~/mosaica-docker/config ~/mosaica-docker/secrets
 $ cd ~/mosaica-docker
-$ cp ~/ireland/corpus.toml ~/ireland/points.parquet config/
+$ cp ~/ireland/schema.toml ~/ireland/points.parquet config/
 ```
 
 The container sees these at fixed paths.
@@ -62,9 +62,6 @@ Save this as `config/mosaica.toml`:
 path  = "/var/lib/mosaica/bundle"
 cache = "/var/lib/mosaica/cache"
 wal   = "/var/lib/mosaica/wal.log"
-
-[build]
-schema = "corpus.toml"
 
 [disclosure]
 token_max_lifetime = 3600

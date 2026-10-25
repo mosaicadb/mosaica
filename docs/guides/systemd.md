@@ -3,7 +3,7 @@
 This guide turns the map you served from a terminal in [the first tutorial](../start/first-map.md)
 into a service on a Linux server, which starts at boot and comes back by itself if it crashes.
 You'll need sudo on the server and the `mosaica` binary you built with cargo. From the tutorial's
-`~/ireland` directory you need `corpus.toml` and `points.parquet`.
+`~/ireland` directory you need `schema.toml` and `points.parquet`.
 
 Once the service is running, [Operate a deployment](operating.md) covers what you do with it, from
 who may reach each address to compaction. [Run Mosaica with Docker](docker.md) does the same job as
@@ -33,7 +33,7 @@ user can open `secrets`.
 ```bash
 sudo install -d -o mosaica -g mosaica -m 0750 /srv/mosaica /srv/mosaica/corpus /srv/mosaica/state /srv/mosaica/state/wal
 sudo install -d -o mosaica -g mosaica -m 0700 /srv/mosaica/secrets
-sudo install -o mosaica -g mosaica -m 0640 ~/ireland/corpus.toml ~/ireland/points.parquet /srv/mosaica/corpus/
+sudo install -o mosaica -g mosaica -m 0640 ~/ireland/schema.toml ~/ireland/points.parquet /srv/mosaica/corpus/
 ```
 
 The server creates its cache directory when it first starts. It does not create the directory the
@@ -64,7 +64,7 @@ cache = "state/cache"
 wal   = "state/wal/wal.log"
 
 [build]
-schema = "corpus/corpus.toml"
+schema = "corpus/schema.toml"
 
 [disclosure]
 token_max_lifetime = 3600

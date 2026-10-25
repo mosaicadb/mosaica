@@ -74,7 +74,7 @@ level = 1
 title = "Topics"
 ```
 
-The [`corpus.toml` reference](../reference/corpus-toml.md) lists every key.
+The [`schema.toml` reference](../reference/corpus-toml.md) lists every key.
 
 ## On the map
 

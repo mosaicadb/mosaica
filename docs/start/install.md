@@ -46,11 +46,11 @@ The clients aren't on PyPI or npm yet either, so install them from the same clon
 
 ## Configure
 
-You configure a deployment with two files. In `corpus.toml` you describe the database's schema: its views, its fields and whether each is rendered or indexed, its vocabularies and annotation layers, and who may see what. Its `[sources]` table also names the files to load first. In `mosaica.toml` you set up how the database runs: where it keeps its files, which schema it starts from, the addresses it listens on, the operator credential and its limits.
+You configure a deployment with two files. In `schema.toml` you describe the database's schema: its views, its fields and whether each is rendered or indexed, its vocabularies and annotation layers, and who may see what. Its `[sources]` table also names the files to load first. In `mosaica.toml` you set up how the database runs: where it keeps its files, which schema it starts from, the addresses it listens on, the operator credential and its limits.
 
 ```mermaid
 flowchart LR
-  schema["corpus.toml<br/>the schema"] --> build["mosaica build"]
+  schema["schema.toml<br/>the schema"] --> build["mosaica build"]
   files["Parquet files"] --> build
   build -->|first load| db[("Mosaica")]
   settings["mosaica.toml<br/>how it runs"] -->|mosaica serve| db
@@ -64,7 +64,7 @@ flowchart LR
     Not built yet: starting from an empty database. For now, a database starts with a build that loads at least one view's data.
 
 ??? info "Where Mosaica looks for the two files"
-    Mosaica looks for `mosaica.toml` in the directory you run it from, then in each directory above, unless you name one with `--deployment`. It finds the schema through `[build] schema`, which defaults to `schema.toml`, the name the examples in the repository and the Python client use, or through `--config`. A relative path in either file is read from that file's own directory.
+    Mosaica looks for `mosaica.toml` in the directory you run it from, then in each directory above, unless you name one with `--deployment`. It reads the schema from `schema.toml` in the same directory, unless `[build] schema` or `--config` names another file. A relative path in either file is read from that file's own directory.
 
     If you'd rather declare a schema to a running database, `mosaica check --payloads` prints it as the requests to send.
 
@@ -76,7 +76,7 @@ The repository has 150,000 GeoNames places in `examples/data/geonames`. Make a d
 mkdir ~/places && cd ~/places
 ```
 
-Save this as `corpus.toml`:
+Save this as `schema.toml`:
 
 ```toml
 [sources]
@@ -113,9 +113,6 @@ Save this as `mosaica.toml`:
 path  = "bundle"
 cache = "cache"
 wal   = "wal.log"
-
-[build]
-schema = "corpus.toml"
 
 # A viewer's session lasts at most an hour.
 [disclosure]
@@ -165,7 +162,7 @@ mosaica serve
 
 You now have a running database with 150,000 places in it. To see them on a map, follow the tutorial's [Open the map](first-map.md#open-the-map) step, using `~/places` where it says `~/ireland`.
 
-Every key this example leaves out is in the [corpus.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the database keeps on disc and how to back it up.
+Every key this example leaves out is in the [schema.toml](../reference/corpus-toml.md) and [mosaica.toml](../reference/mosaica-toml.md) references, and [Operate a deployment](../guides/operating.md#what-the-server-keeps-on-disc) explains what the database keeps on disc and how to back it up.
 
 ## From Python
 

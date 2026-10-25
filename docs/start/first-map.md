@@ -161,7 +161,7 @@ Every line of `IE.txt` is now a row in `points.parquet`.
 
 Next we tell Mosaica what the data means, in a file called a declaration. It's written in TOML. A
 declaration names the files to read and says how to place each row on a map. It lists the columns to
-keep and the kind of value each holds, and it says who may see each row. Save this as `corpus.toml` beside
+keep and the kind of value each holds, and it says who may see each row. Save this as `schema.toml` beside
 `points.parquet`.
 
 ```toml
@@ -201,7 +201,7 @@ type   = "i64"
 render = true
 ```
 
-**The sources.** `[sources]` gives each file a short name, with its path relative to `corpus.toml`.
+**The sources.** `[sources]` gives each file a short name, with its path relative to `schema.toml`.
 `[defaults]` makes `points` the source for every block below it, so we don't have to repeat it.
 You only write these when building from files on disc. The Python client writes them for you from
 the data you insert.
@@ -274,18 +274,16 @@ for filtering. It takes less memory and less disk space than one with either.
 ## Describe the deployment
 
 The declaration describes the data. A second file, `mosaica.toml`, configures the database itself.
-It says where the bundle goes and which declaration to build, and holds the rest of the system's
-settings. `mosaica check`, `mosaica build` and `mosaica serve` all look for it in the directory you
-run them from, and then in the directories above. Save this beside `corpus.toml`.
+It says where the bundle goes and holds the rest of the system's settings. `mosaica check`,
+`mosaica build` and `mosaica serve` all look for `mosaica.toml` in the directory you run them from,
+and then in the directories above, and read the declaration from `schema.toml` beside it. Save this
+beside `schema.toml`.
 
 ```toml
 [bundle]
 path  = "bundle"
 cache = "cache"
 wal   = "wal.log"
-
-[build]
-schema = "corpus.toml"
 
 [disclosure]
 token_max_lifetime = 3600
@@ -304,8 +302,6 @@ dir = "catalogue"
 opens. `cache` is where the server keeps work it can reuse, such as each viewer's set of places.
 `wal` is the server's write-ahead log, where it records every change to the data before applying it,
 so that a change survives a crash.
-
-`[build]` names the declaration to build.
 
 `token_max_lifetime` is how long a browser's permission to read the map lasts, in seconds. An hour
 is plenty here.
@@ -373,7 +369,7 @@ top left. In degrees, that tile runs from longitude −11.25 to 0 and from latit
 The rest repeats what we declared. `labels from default_only` means no column supplies access
 labels, so every place gets the default, `public`.
 
-While nothing depends on it yet, try making a mistake. Open `corpus.toml`, change the last
+While nothing depends on it yet, try making a mistake. Open `schema.toml`, change the last
 attribute's name to `populaton`, and run the check again.
 
 ```bash
@@ -628,7 +624,7 @@ When you've finished, press Ctrl-C in each terminal to stop the page's server an
 ## What you built
 
 `~/ireland` now holds a working deployment. The data is in `points.parquet` and the declaration in
-`corpus.toml`. `mosaica.toml` holds the deployment's settings, `operator.secret` the operator's
+`schema.toml`. `mosaica.toml` holds the deployment's settings, `operator.secret` the operator's
 secret, and `page.key` the page's key. The `catalogue` directory holds the two users, and the
 `bundle` directory is what the build made from the data. To bring the map back, start
 `mosaica serve` in `~/ireland`, then run the three `export` lines and `node server.mjs` in the
