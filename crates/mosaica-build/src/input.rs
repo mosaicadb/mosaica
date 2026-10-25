@@ -1978,6 +1978,57 @@ mod tests {
         assert!(read(1 << 63).is_err(), "a rank past i64::MAX is refused");
     }
 
+    /// A roster file's cell is typed by its declaration as a value in `schema.toml` or a request
+    /// body is: an integer column under a float, and a date written as text under a timestamp.
+    #[test]
+    fn a_roster_file_cell_is_typed_by_its_declaration() {
+        use arrow::array::{Int64Array, StringArray};
+        use arrow::datatypes::{Field, Schema as ArrowSchema};
+        use mosaica_types::view::ViewMetadataValue;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roster.parquet");
+        let schema = Arc::new(ArrowSchema::new(vec![
+            Field::new("key", DataType::Utf8, false),
+            Field::new("weight", DataType::Int64, false),
+            Field::new("starts", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec!["a"])),
+                Arc::new(Int64Array::from(vec![2])),
+                Arc::new(StringArray::from(vec!["1970-01-02"])),
+            ],
+        )
+        .unwrap();
+        let mut writer =
+            parquet::arrow::ArrowWriter::try_new(File::create(&path).unwrap(), schema, None)
+                .unwrap();
+        writer.write(&batch).unwrap();
+        writer.close().unwrap();
+        let declared = |name: &str, ty| crate::config::ViewMetadata {
+            name: name.to_string(),
+            ty,
+            vocabulary: None,
+        };
+        let rows = read_roster_table(
+            &path,
+            &crate::config::Fields::canonical("roster"),
+            &[
+                declared("weight", ScalarType::F64),
+                declared("starts", ScalarType::TimestampUs),
+            ],
+        )
+        .unwrap();
+        assert_eq!(rows[0].metadata["weight"], ViewMetadataValue::Float(2.0));
+        assert_eq!(
+            rows[0].metadata["starts"],
+            ViewMetadataValue::TimestampUs(86_400_000_000)
+        );
+    }
+
     #[test]
     fn deinterleave_inverts_the_worked_example() {
         // R2's worked example: x_cell = 6, y_cell = 3 -> code 30.
@@ -2030,7 +2081,7 @@ pub fn read_roster_table(
     metadata: &[crate::config::ViewMetadata],
 ) -> Result<Vec<RosterRow>> {
     use mosaica_types::view::ViewMetadataValue;
-    use arrow::array::{BooleanArray, LargeStringArray, StringArray};
+    use arrow::array::{LargeStringArray, StringArray};
 
     let file = File::open(path).map_err(|e| BuildError::io(path, e))?;
     let builder =
@@ -2200,116 +2251,47 @@ pub fn read_roster_table(
                      missing for the whole of its life"
                 ),
             };
-            let held: Vec<ViewMetadataValue> = if declared.vocabulary.is_some() {
-                // A category's key, carried as written: it is resolved against the vocabulary
-                // where a category column's values are, which is not this parse's decision.
-                strings(path, column, name)?
-                    .into_iter()
-                    .enumerate()
-                    .map(|(row, value)| value.map(ViewMetadataValue::Text).ok_or_else(|| missing(row)))
-                    .collect::<Result<_>>()?
-            } else {
-                match declared.ty {
-                    ScalarType::Bool => {
-                        let values =
-                            column
-                                .as_any()
-                                .downcast_ref::<BooleanArray>()
-                                .ok_or_else(|| BuildError::Schema {
-                                    path: path.to_path_buf(),
-                                    detail: format!(
-                                        "the roster column '{name}' has type {:?}, and this group \
-                                     declares it 'bool'",
-                                        column.data_type()
-                                    ),
-                                })?;
-                        (0..values.len())
-                            .map(|row| match values.is_null(row) {
-                                true => Err(missing(row)),
-                                false => Ok(ViewMetadataValue::Bool(values.value(row))),
-                            })
-                            .collect::<Result<_>>()?
-                    }
-                    // Read at `f64` whatever the declared width, since a roster float is held
-                    // as one.
-                    ScalarType::F32 | ScalarType::F64 => {
-                        let read = ScalarColumn::new(column, ScalarType::F64).ok_or_else(|| {
-                            BuildError::Schema {
-                                path: path.to_path_buf(),
-                                detail: format!(
-                                    "the roster column '{name}' has type {:?}, and this group \
-                                     declares it '{}'; send float32 or float64",
-                                    column.data_type(),
-                                    declared.ty.arrow_type_name()
-                                ),
-                            }
-                        })?;
-                        (0..column.len())
-                            .map(|row| match read.value(row) {
-                                Ok(ScalarValue::F64(value)) => Ok(ViewMetadataValue::Float(value)),
-                                Ok(_) => Err(missing(row)),
-                                Err(e) => unreachable!("an f64 read refuses nothing: {e}"),
-                            })
-                            .collect::<Result<_>>()?
-                    }
-                    ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => {
-                        strings(path, column, name)?
-                            .into_iter()
-                            .enumerate()
-                            .map(|(row, value)| {
-                                value.map(ViewMetadataValue::Text).ok_or_else(|| missing(row))
-                            })
-                            .collect::<Result<_>>()?
-                    }
-                    ty => {
-                        let read = ScalarColumn::new(column, ty).ok_or_else(|| {
-                            BuildError::Schema {
-                                path: path.to_path_buf(),
-                                detail: format!(
-                                    "the roster column '{name}' has type {:?}, and this group \
-                                     declares it '{}'. A `timestamp_us` reads a microsecond \
-                                     timestamp or an integer, and nothing else; cast a \
-                                     millisecond column to microseconds first",
-                                    column.data_type(),
-                                    ty.arrow_type_name()
-                                ),
-                            }
-                        })?;
-                        let unfit = |row: usize, value: &dyn std::fmt::Display| BuildError::Schema {
-                            path: path.to_path_buf(),
-                            detail: format!(
-                                "the roster column '{name}' at row {row} carries {value}; its \
-                                 declared '{}' cannot hold it, so write a value that fits or \
-                                 declare a wider type",
-                                ty.arrow_type_name()
-                            ),
-                        };
-                        // A roster value is carried as an `i64`, so a `u64` stops at `i64::MAX`.
-                        (0..column.len())
-                            .map(|row| match read.value(row) {
-                                Ok(ScalarValue::Null) => Err(missing(row)),
-                                Ok(ScalarValue::TimestampUs(value)) => {
-                                    Ok(ViewMetadataValue::TimestampUs(value))
-                                }
-                                Ok(ScalarValue::U8(value)) => Ok(ViewMetadataValue::Int(value.into())),
-                                Ok(ScalarValue::U16(value)) => Ok(ViewMetadataValue::Int(value.into())),
-                                Ok(ScalarValue::U32(value)) => Ok(ViewMetadataValue::Int(value.into())),
-                                Ok(ScalarValue::U64(value)) => i64::try_from(value)
-                                    .map(ViewMetadataValue::Int)
-                                    .map_err(|_| unfit(row, &value)),
-                                Ok(ScalarValue::I8(value)) => Ok(ViewMetadataValue::Int(value.into())),
-                                Ok(ScalarValue::I16(value)) => Ok(ViewMetadataValue::Int(value.into())),
-                                Ok(ScalarValue::I32(value)) => Ok(ViewMetadataValue::Int(value.into())),
-                                Ok(ScalarValue::I64(value)) => Ok(ViewMetadataValue::Int(value)),
-                                Ok(other) => {
-                                    unreachable!("read as an integer or a timestamp: {other:?}")
-                                }
-                                Err(e) => Err(unfit(row, &e)),
-                            })
-                            .collect::<Result<_>>()?
-                    }
-                }
+            let read = metadata_cells(column).ok_or_else(|| BuildError::Schema {
+                path: path.to_path_buf(),
+                detail: format!(
+                    "the roster column '{name}' has type {:?}, and metadata is read from a \
+                     boolean, integer, float, string or microsecond timestamp column; cast it to \
+                     one of those",
+                    column.data_type()
+                ),
+            })?;
+            let refused = |row: usize, e: String| BuildError::Schema {
+                path: path.to_path_buf(),
+                detail: format!("the roster's row {row}: {e}"),
             };
+            let ty = declared.declared_type();
+            let held: Vec<ViewMetadataValue> = (0..column.len())
+                .map(|row| {
+                    let written = match read.value(row) {
+                        Ok(ScalarValue::Null) => return Err(missing(row)),
+                        Ok(ScalarValue::Bool(v)) => ViewMetadataValue::Bool(v),
+                        Ok(ScalarValue::F64(v)) => ViewMetadataValue::Float(v),
+                        Ok(ScalarValue::Utf8(v)) => ViewMetadataValue::Text(v),
+                        Ok(ScalarValue::I64(v)) => ViewMetadataValue::Int(v),
+                        Ok(ScalarValue::U64(v)) => {
+                            ViewMetadataValue::Int(i64::try_from(v).map_err(|_| {
+                                refused(
+                                    row,
+                                    format!(
+                                        "metadata '{}' is {v}, and metadata holds integers up to \
+                                         {}; write a smaller value",
+                                        declared.name,
+                                        i64::MAX
+                                    ),
+                                )
+                            })?)
+                        }
+                        other => unreachable!("read as its column holds it: {other:?}"),
+                    };
+                    ty.typed(&declared.name, written)
+                        .map_err(|e| refused(row, e))
+                })
+                .collect::<Result<_>>()?;
             values.push(held);
         }
         for (row, key) in keys.into_iter().enumerate() {
@@ -2332,6 +2314,19 @@ pub fn read_roster_table(
         }
     }
     Ok(rows)
+}
+
+/// A roster metadata column read as it holds its values, for its declaration to type each one;
+/// `None` for a column type metadata is not read from. A timestamp reads as its microseconds.
+fn metadata_cells(column: &arrow::array::ArrayRef) -> Option<ScalarColumn> {
+    let held = match column.data_type() {
+        DataType::Null | DataType::Boolean => ScalarType::Bool,
+        DataType::Float32 | DataType::Float64 => ScalarType::F64,
+        DataType::UInt64 => ScalarType::U64,
+        DataType::Utf8 | DataType::LargeUtf8 => ScalarType::Utf8,
+        _ => ScalarType::I64,
+    };
+    ScalarColumn::new(column, held)
 }
 
 // ---------------------------------------------------------------------------------------------
