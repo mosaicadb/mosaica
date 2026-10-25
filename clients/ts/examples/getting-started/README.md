@@ -1,6 +1,6 @@
 # Getting started: a map in your web page
 
-The finished project of the first TypeScript tutorial, [Your first map in a web page](../../../../docs/start/typescript.md). `mosaica/` holds the server's settings and `web/` the Vite project, with the files the tutorial writes. `web/package.json` names `@mosaicajs/components` as it will be on npm, where a reader's names the tarballs they installed, and adds the live test below. Inside this repository the package comes from the workspace's built `dist/`, so run `npm run build` in `clients/ts` first.
+The finished project of the first TypeScript tutorial, [Your first map in a web page](../../../../docs/start/typescript.md). `mosaica/` holds the server's settings and `web/` the Vite project, with the files the tutorial writes. `web/package.json` asks for any version of `@mosaicajs/components`, which inside this repository is the workspace's build in `dist/`, so run `npm run build` in `clients/ts` first. A project of your own names the version it installed, as npm writes it. The package also adds the live test below.
 
 To run it, start Mosaica in `mosaica/` with a `mosaica` binary on your `PATH`:
 

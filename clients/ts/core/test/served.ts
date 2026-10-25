@@ -33,7 +33,7 @@ const here = import.meta.dirname;
 export const GROUP = {name: 'copies', title: 'Two copies', keys: ['first', 'second'], labels: ['First copy', 'Second copy']};
 
 /** The binary and where it was found, or null where there is none. */
-function findBinary(): {path: string; from: string} | null {
+export function findBinary(): {path: string; from: string} | null {
   const named = process.env.MOSAICA_BIN;
   if (named) {
     if (!existsSync(named)) throw new Error(`MOSAICA_BIN names ${named}, which does not exist; build it or unset MOSAICA_BIN`);

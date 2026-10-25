@@ -3,7 +3,8 @@
 # library packages and import each from `dist/` in Node, run the unit suites, run core's live test
 # against a real `mosaica serve`, then the components' browser suite in headless Chromium, which
 # also decodes through the built worker and renders the built elements, and last the
-# getting-started example's page, served by its own Vite config and drawn in headless Chromium.
+# getting-started example's page, served by Vite over an open Mosaica server and drawn in headless
+# Chromium.
 #
 # It starts by checking that every copy of the release version (the pyprojects, the npm manifests
 # and lockfile, the crates' pins) matches `[workspace.package] version` in Cargo.toml.

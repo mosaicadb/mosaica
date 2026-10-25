@@ -8,8 +8,6 @@ Once `mosaica` is installed, it takes about ten minutes. You need Node.js 22.15 
 git clone https://github.com/mosaicadb/mosaica ~/mosaica
 ```
 
-The finished project is in the clone too, in `clients/ts/examples/getting-started/`, if you want to compare.
-
 Here is what we'll do.
 
 1. Start Mosaica over the sample data.
@@ -66,7 +64,7 @@ Mosaica reads its settings from `mosaica.toml`. This one says:
 
 `[bundle]` names the bundle, Mosaica's own copy of the data, arranged so that any part of the map can be read quickly. `[serve]` gives the address the page will read the map from, port 9141 on this machine.
 
-`open = true` lets anything on this machine read and change the data without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token that says what they may see, and the third tutorial sets that up.
+`open = true` lets anything on this machine read and change the data without signing in. That suits one person working on their own computer, which is what we're doing. A server that other people use gives each of them a token, which decides what that person sees. A later tutorial covers tokens.
 
 Now build the bundle. The repository's sample comes with a declaration, `schema.toml`, which tells Mosaica what each column of the data means. `name` is text to search, for instance, and `feature_class` and `country` are categories. `--config` points the build at it.
 
@@ -94,7 +92,7 @@ mosaica serve
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-The `WARN` line is the server confirming `open = true`. The line of JSON is the one to wait for. It means the server is ready. Besides the viewer address it lists two more, the session and control addresses, which a server with users relies on and this tutorial doesn't need.
+The `WARN` line is the server confirming `open = true`, and the line of JSON says it is ready. Besides the viewer address, that line lists the session and control addresses, which a server with users relies on and this tutorial doesn't need.
 
 ## Make a web project
 
@@ -195,7 +193,7 @@ The explorer's attributes set how it opens. Add four to the element in `index.ht
 
 Save the file. Vite reloads the page.
 
-`pinned-filters` names the fields whose cards are in the panel from the start, so nobody has to find them under "Add field". `colour-by` colours the places by a field. A category gets a colour per value, and a number gets a ramp from its lowest value to its highest. Settlements are blue, and most of Asia is blue. In the United States most dots are orange and red, because GeoNames lists many streams, farms and buildings there. Someone using the map can still change the colouring, with the Layers button on the map or the paint button on a field's card.
+`pinned-filters` names the fields whose cards are in the panel from the start, so nobody has to find them under "Add field". `colour-by` colours the places by a field. A category gets a colour per value, and a number gets a ramp from its lowest value to its highest. Settlements are blue, which is why most of Asia is. In the United States most dots are orange and red, because GeoNames lists many streams, farms and buildings there. Someone using the map can still change the colouring, with the Layers button on the map or the paint button on a field's card.
 
 `title-field` says which field names a place. Hover over one and wait a moment. The label that follows the pointer becomes the place's name, such as Central Heights Shopping Mall. Until the name arrives from Mosaica, the label is a long number such as `#14815421504304620377`. That is the place's `mosaica_id`, the number Mosaica gives each place it serves, and without `title-field` the label would stay that way. Click a place, and the card that opens beside it is headed by the name too. `card-fields` chooses what the card lists under the name, here the place's kind, its country and its population.
 
@@ -215,7 +213,7 @@ And replace `src/style.css` with a grid:
 --8<-- "clients/ts/examples/getting-started/web/src/style.css"
 ```
 
-The explorer asks two things of the space it's given. Its height is 100% of its container's, so the container needs a height of its own. Here the grid gives the body the window's height, the header what it needs, and `main` the rest. `min-height: 0` lets `main` shrink to that row instead of growing to fit what's inside it. The explorer takes its width from its container as well, never from what's inside it, because it lays out its panels by how wide it is. In a grid that is its column, here everything the 260-pixel side column leaves. In a flex row, give it `flex: 1` or a width. Below 1000 pixels wide it puts the filters in a card over the map, and below 720 it moves them behind tabs.
+The explorer asks two things of the space it's given. Its height is 100% of its container's, so the container needs a height of its own. Here the grid gives the body the window's height, the header what it needs, and `main` the rest. `min-height: 0` lets `main` shrink to that row instead of growing to fit what's inside it. The explorer takes its width from its container as well, never from what's inside it, because it lays out its panels by how wide it is. In a grid that is its column, here everything the 260-pixel side column leaves. In a flex row, give it `flex: 1` or a width. Below 1000 pixels wide it puts the filters in a card over the map, and at 720 or narrower it moves them behind tabs.
 
 Save, and the map sits between the header and the column, as wide as the window allows.
 
@@ -223,6 +221,6 @@ Save, and the map sits between the header and the column, as wide as the window 
 
 A page of your own with 150,000 places on a map, which you can search, filter and colour. Nearly all of it came from one element. The explorer learnt the fields from Mosaica and built a card for each, and your attributes chose which cards it starts with, how it colours the places and what it says about each one.
 
-`clients/ts/examples/getting-started/` in the repository holds the same two directories, `mosaica` and `web`, with the same files. The [components reference](../reference/components.md) lists every element, attribute and event.
+The finished project is in the clone, in `clients/ts/examples/getting-started/`: the same two directories, `mosaica` and `web`, with the same files. The [components reference](../reference/components.md) lists every element, attribute and event.
 
 The next tutorial builds your own interface around the map: a panel that shows the place someone clicks, and controls of your own that filter and colour it.

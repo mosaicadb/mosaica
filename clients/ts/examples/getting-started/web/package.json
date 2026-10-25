@@ -13,7 +13,7 @@
     "test:live": "vitest run test/page.live.test.ts"
   },
   "dependencies": {
-    "@mosaicajs/components": "^0.1.0"
+    "@mosaicajs/components": "*"
   },
   "devDependencies": {
     "playwright": "^1.62.1",

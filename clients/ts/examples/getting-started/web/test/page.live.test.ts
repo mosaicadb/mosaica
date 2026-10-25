@@ -1,18 +1,19 @@
 import {spawn, type ChildProcess} from 'node:child_process';
-import {existsSync} from 'node:fs';
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {delimiter, join, resolve} from 'node:path';
+import {join, resolve} from 'node:path';
 import {createInterface} from 'node:readline';
 import {chromium, type Browser} from 'playwright';
 import {createServer, type ViteDevServer} from 'vite';
 import {afterAll, beforeAll, expect, it} from 'vitest';
+import {findBinary} from '../../../../core/test/served.js';
 
 /**
  * The tutorial's finished page in headless Chromium, served by Vite, over an open Mosaica server
  * built from the example's `mosaica.toml` into a temporary directory. The server listens on ports
  * the system chooses, and the browser's requests to the page's `viewer-url`, port 9141, are sent
- * there instead. Skipped, with the reason, where there is no `mosaica` binary.
+ * there instead. The binary is found as core's live tests find it. Skipped, with the reason, where
+ * there is none.
  */
 const web = resolve(import.meta.dirname, '..');
 const example = resolve(web, '..');
@@ -20,14 +21,7 @@ const repo = resolve(example, '../../../..');
 const schema = join(repo, 'examples/data/geonames/schema.toml');
 const pageViewer = 'http://localhost:9141';
 
-/** The `mosaica` binary: `MOSAICA_BIN`, else this checkout's release build, else one on `PATH`. */
-function findMosaica(): string | null {
-  if (process.env.MOSAICA_BIN) return process.env.MOSAICA_BIN;
-  const candidates = [join(repo, 'target/release/mosaica'), ...(process.env.PATH ?? '').split(delimiter).map((dir) => join(dir, 'mosaica'))];
-  return candidates.find((path) => existsSync(path)) ?? null;
-}
-
-const binary = findMosaica();
+const binary = findBinary()?.path ?? null;
 let dir = '';
 let viewer = '';
 let server: ChildProcess | null = null;
@@ -60,7 +54,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   await vite?.close();
-  server?.stdin?.end();
+  if (server && server.exitCode === null) {
+    const exited = new Promise((done) => server!.once('exit', done));
+    server.stdin?.end();
+    await exited;
+  }
   if (dir) await rm(dir, {recursive: true, force: true});
 });
 
