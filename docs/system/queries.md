@@ -52,7 +52,7 @@ A client builds everything it shows from a handful of requests: the points of th
     | [A table or an export](#reading-records) | every matching item or artifact | `mosaica items`, `mosaica artifacts` |
     | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `mosaica aggregate` |
 
-Every answer is computed from the items the viewer may see, as [access control](access-control.md) decides them. A count never includes a hidden item, and a filter can only narrow what the viewer sees. The Python and TypeScript clients wrap each route, and the [HTTP API reference](../reference/http.md) gives every field of every request, with worked examples.
+Every answer is computed from the items the viewer may see, as [access control](access-control.md) decides them. A count never includes a hidden item, and a filter can only narrow what the viewer sees. The Python and TypeScript clients wrap each route. [Query Mosaica over HTTP](../guides/http.md) sends each request with curl, and the [HTTP API reference](../reference/http.md) gives every field of every request, with worked examples.
 
 ## Drawing the map
 
@@ -69,11 +69,11 @@ The counts arrive first, then the points, so a client can start drawing before t
 
 A tile at a wide zoom can hold millions of items, so Mosaica draws a sample of them.
 
-- **Density is kept.** Each tile draws the same share of its items, so a crowded area looks crowded.
+- **Density is kept.** Without a filter, each tile draws about the same share of its items, so a crowded area looks crowded.
 - **No blank tiles.** Every tile with a matching item draws at least a couple of points, even when the viewer may see very few.
 - **A cap per tile** keeps the answer to a size a browser can draw.
 
-The sample is the same on every request, and it nests across zoom levels: a point drawn at one zoom is still drawn when the viewer zooms in, with more appearing around it. When the viewer adds a filter, the points that do not match drop out and the rest stay where they were, so the map thins rather than reshuffling.
+The sample is the same on every request, and it nests across zoom levels: a point drawn at one zoom is still drawn when the viewer zooms in, with more appearing around it. With a filter, a tile draws every match, up to the cap. The points that matched and were already drawn stay where they were, and the other matches appear around them.
 
 The sample is always taken from the items the viewer may see. A viewer with access to a few thousand items sees those items drawn, not a sample of everything with most of it removed.
 
