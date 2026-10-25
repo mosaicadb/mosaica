@@ -9,11 +9,11 @@ This chapter covers users, permissions, attributes and groups, and how users sig
 
 ## Users and service accounts
 
-You create users in Mosaica's catalogue, either for people or as service accounts for your app's server and your scripts. The two kinds behave the same, and the difference is only for your own records. The API calls both *principals*.
+You create users in Mosaica's catalogue, either for people or as service accounts for your app's server and your scripts. You give each one a kind, `person` or `service`, when you create it, but the two behave the same and the kind is only for your own records. The API calls both *principals*.
 
 If your organisation already has an OpenID Connect provider, its users don't need accounts in Mosaica. Mosaica reads who each one is from the access token they present, and gives them attributes and permissions through rules you declare for the provider, as [Single sign-on](#single-sign-on-with-openid-connect) describes.
 
-Mosaica also has one built-in superuser, the operator, which holds every permission. It signs in with the operator credential, which `mosaica.toml` names as a file or an environment variable, so a new database with no users still has an administrator.
+Mosaica also has one built-in superuser, the operator, which holds every permission. It proves itself with the operator credential, which `mosaica.toml` names as a file or an environment variable, so a new database with no users still has an administrator.
 
 ??? info "Where the catalogue is kept"
     The catalogue is a SQLite database in the directory `[catalogue] dir` names. It lives outside the database's data, so users and their grants survive a rebuild. Mosaica holds it in memory, and a change takes effect at once, with no restart. The operator credential is not in the catalogue: to change it, change the file or the variable and restart.
@@ -39,7 +39,7 @@ An access attribute is any string you choose, such as `team:geology`, `clearance
 
 When several users should have the same access, create a group, grant the permissions and attributes to the group, and add the users to it. A user holds everything granted to them directly and to each group they're in. Groups don't nest.
 
-A change to what someone holds takes effect at their next session: Mosaica ends the sessions it affects, and the client starts new ones. Changing a group's grants ends the sessions of all its members, while adding or removing one member ends only that user's.
+A change to what someone holds takes effect at their next session: Mosaica ends the sessions it affects, and the client starts new ones. Changing a group's grants ends the sessions of all its members, and of every provider user a role mapping gives the group to, while adding or removing one member ends only that user's.
 
 ## Signing in
 
@@ -47,7 +47,7 @@ A change to what someone holds takes effect at their next session: Mosaica ends 
 |---|---|---|
 | A password | People | Signing in to read |
 | An API key | Service accounts and scripts | Signing in to read, writing, administering, and starting sessions for other users |
-| An OIDC access token | Your provider's users | Signing in to read, writing and administering |
+| An OIDC access token | Your provider's users | Signing in to read, writing and administering. Your server can also pass one on to start a session for its user |
 | The operator credential | The operator | Writing, administering, and starting sessions |
 
 Signing in to read gives the client a session token, which it sends with each request for the map. Writes and administration take the credential itself. [Getting a token](access-control.md#getting-a-token) describes each way to start a session.
@@ -62,7 +62,7 @@ Signing in to read gives the client a session token, which it sends with each re
 
 ## Single sign-on with OpenID Connect
 
-To accept your provider's users, you tell Mosaica whose tokens to trust and how to turn a token's claims into attributes and groups. Declare the provider in `mosaica.toml`, or at the running database, where an administrator can change it without a restart:
+To accept your provider's users, you tell Mosaica whose tokens to trust and how to turn a token's claims into attributes and groups. Declare the provider in `mosaica.toml`, where it can be changed only by editing the file and restarting, or at the running database, where an administrator can change it at any time:
 
 ```toml
 [[catalogue.providers]]
@@ -97,7 +97,7 @@ Permissions come only through role mappings, so a provider's user can't sign in 
 | A script that loads anything and declares the schema | A service account with an API key | `write` and `write-all` |
 | An administrator | A user or a service account | `admin`, and `read` if they also read |
 
-A session your server starts for a user holds that user's attributes, `read` and `write`, but never `read-all`, `write-all`, `admin` or `authorise-as`. So your server can read whatever any one user may, but can't read everything through a user who holds `read-all`. [Call Mosaica from a backend](../guides/backend.md) sets this up step by step.
+A session your server starts for a user holds that user's attributes and their `read`, but never `read-all`, `write-all`, `admin` or `authorise-as`. So your server can read whatever any one user's attributes admit, but can't read everything through a user who holds `read-all`. [Call Mosaica from a backend](../guides/backend.md) sets this up step by step.
 
 ## Managing users
 

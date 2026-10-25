@@ -72,7 +72,7 @@ A request with an ended session's token is answered `403 expired-token`, or `401
 | A view or view group is declared | It is unknown to the session until it starts again |
 
 !!! note "Attributes new to the database need a new session"
-    A session sees an item only under attributes and conjunctions the database already held when the session started. If a flush brings in an attribute the session holds but no item carried before, the session sees those items only once it starts again. It sees fewer items than its attributes admit, never more, and nothing tells the client. A session that sees everything is not affected.
+    A session sees an item only under attributes and conjunctions that items' labels already used when the session started. If a flush brings in an attribute the session holds but no label used before, the session sees those items only once it starts again. It sees fewer items than its attributes admit, never more, and nothing tells the client. A session that sees everything is not affected.
 
 ## How labels are indexed
 

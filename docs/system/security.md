@@ -64,7 +64,7 @@ The claims are checked by the [conformance suite](https://github.com/mosaicadb/m
 Some things the suite doesn't cover:
 
 - No scan measures response times.
-- The independent comparison of tiles and counts runs over corpora whose items carry single attributes. Labels with conjunctions are covered by the access-expression comparison and by Rust tests.
+- The independent comparison of tiles and counts runs over corpora whose labels are single attributes. Labels with conjunctions are covered by the access-expression comparison and by Rust tests.
 - A hidden value answering as one that does not exist, membership requirements other than "all", and which rows a bulk read serves are checked by Rust tests, not against the independent implementation.
 
 ## Reporting a vulnerability

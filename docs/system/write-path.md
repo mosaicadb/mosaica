@@ -135,7 +135,7 @@ A deletion or suppression applies to every request that starts after Mosaica ans
 
 A deleted item is hidden at once, but its values stay in the database's files until a [compaction](#background-maintenance) rewrites them, and so do the values an edit replaces. To remove them without waiting for the schedule, send `POST /control/compact` after the deletion.
 
-Compaction never removes three things: an access attribute that only deleted items carried, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
+Compaction never removes three things: an access attribute that only deleted items' labels used, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
 
 ??? info "What a compaction removes, and when"
     After the compaction, the previous files are removed once no request is reading them, usually within one flush interval, and the log's copy goes when the log next rotates. The cache directory holds no field values; counts and positions the item contributed to are dropped when the cache is next swept, or evicted sooner.
@@ -169,6 +169,6 @@ A compaction runs alongside requests, which keep being answered. When it finishe
 - **Telling clients what changed.** A response says that the data has changed, not which items or which part of the map. A client that wants to know re-requests what it shows.
 - **Telling a client its session is behind.** Nothing tells a client that items under a new access attribute need a new session.
 - **Notifying clients that annotation content they hold was withdrawn** because an item it was generated from was deleted. Each request checks current state, so the content is not served again, but nothing announces the change.
-- **Removing unused access attributes, vocabulary keys and artifact keys** at compaction. Rebuild from source files that leave them out.
+- **Removing access attributes that no remaining label uses, and unused vocabulary keys and artifact keys,** at compaction. Rebuild from source files that leave them out.
 - **Replicas.** A deployment is one database on one machine.
 - **Writing from the command line.** The `mosaica` command builds and reads. Use the HTTP API or a client to write to a running database.

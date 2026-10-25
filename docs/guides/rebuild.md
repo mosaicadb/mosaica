@@ -92,7 +92,7 @@ Delete the three `.old` directories once the new bundle serves what you expect.
 
 A deletion hides an item at once, and a compaction removes its values from the server's files. Three things outlive both, because no compaction removes them:
 
-- an access attribute that only deleted items carried, such as `user:alice`;
+- an access attribute that only deleted items' labels used, such as `user:alice`;
 - a key an open vocabulary added for a deleted item's category value;
 - an artifact key that a deleted item's insert created on an open annotation layer.
 

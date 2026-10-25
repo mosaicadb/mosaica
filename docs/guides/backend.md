@@ -388,7 +388,7 @@ curl -s http://127.0.0.1:9141/v1/meta -H "$AUTH"
 {"error":"expired-token","detail":"the session has ended: its token expired, was revoked, or a change to what authorised it ended it; authorise again"}
 ```
 
-The revoke answers `204` with no body, and the token stops working at once. A `token_id` that names no live session, or a session another service account started, gets the same `204` and changes nothing.
+The revoke answers `204` with no body, and the token stops working at once. A `token_id` that names no live session, or a session your backend's account did not start, gets the same `204` and changes nothing.
 
 For a load balancer, `/healthz` answers `200` while the process is up, and `/readyz` answers `200` when the server is ready for traffic and `503` when it is not. Neither needs a token, and both answer on the viewer and session addresses.
 

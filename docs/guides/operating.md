@@ -41,7 +41,7 @@ identity key too. Access control applies to what the server sends, not to the fi
 | Control | `/control/*` | You, and whatever loads data into the corpus |
 
 An API key whose user holds `authorise-as` can mint a token for any user in the catalogue,
-and so read whatever any user may. The operator credential holds every permission:
+and so read whatever any user's attributes admit. The operator credential holds every permission:
 it can mint a token for any set of access labels, read every item, change the catalogue, and
 delete your data or add to it. Keep the session and control addresses off the internet. The viewer
 address serves only what each token allows, and it is the one browsers need. It serves plain
