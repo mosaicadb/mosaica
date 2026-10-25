@@ -49,9 +49,10 @@ any later release, and a bundle built by one version may be refused by the next.
     annotation layers; `@mosaicajs/deck` (a deck.gl layer); `@mosaicajs/components` (web
     components and a single-file bundle); and `@mosaicajs/react` (hooks and React wrappers);
   - the `mosaica` command line, which builds a bundle from a declaration and its source files,
-    checks, verifies and serves it, reads items, annotations and aggregates in bulk, and manages
-    principals, groups, API keys, grants, sessions and OIDC providers. It has no command to insert,
-    delete, suppress or annotate on a running server; use the HTTP API or a client for those.
+    checks, verifies and serves it; declares, inserts from Parquet, Arrow IPC or NDJSON, deletes,
+    suppresses and publishes annotation layers on a running server; reads items, annotations and
+    aggregates in bulk; and manages principals, groups, API keys, grants, sessions and OIDC
+    providers.
 - **Distribution**: release binaries for Linux (glibc and musl, x86_64 and aarch64), macOS (arm64
   and x86_64); Python wheels on PyPI; npm packages; a multi-architecture
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and

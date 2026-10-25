@@ -209,4 +209,3 @@ As your items change, the annotations follow them:
 - **Editing an artifact.** Delete it and publish it again.
 - **A fractional or `all` membership requirement on a shape or field layer.** Such a layer has no declared list of members to take a share of, so it takes `any`, a count or `none`.
 - **Withdrawing an artifact when one of its members is deleted.** A deleted member leaves the artifact, and the artifact stays, unless its only content was generated from that member.
-- **Changing a running database's layers from the command line.** Use the HTTP API or a client.

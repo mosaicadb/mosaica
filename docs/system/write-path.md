@@ -169,4 +169,3 @@ A compaction runs alongside requests, which keep being answered. When it finishe
 - **Notifying clients that annotation content they hold was withdrawn** because an item it was generated from was deleted. Each request checks current state, so the content is not served again, but nothing announces the change.
 - **Removing access attributes that no remaining label uses, and unused vocabulary keys and artifact keys,** at compaction. Rebuild from source files that leave them out.
 - **Replicas.** A deployment is one database on one machine.
-- **Writing from the command line.** The `mosaica` command builds and reads. Use the HTTP API or a client to write to a running database.
