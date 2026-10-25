@@ -4,7 +4,7 @@ This tutorial is for a Python user who has never used Mosaica. We'll take 150,00
 
 On the way you'll meet the three steps every Mosaica database is made with: declaring what the data holds, inserting rows, and committing them. You'll also see what each declaration costs and what it buys.
 
-It takes about ten minutes. You need Python 3.10 or later, JupyterLab or marimo, and a clone of the Mosaica repository, which holds the data. The whole tutorial is also a notebook in the clone, `clients/py/examples/01_getting_started.ipynb`, with a marimo version beside it, so you can run it there instead of pasting each block.
+It takes about ten minutes. You need Python 3.10 or later and a clone of the Mosaica repository, which holds the data. The whole tutorial is also a notebook in the clone, `clients/py/examples/01_getting_started.ipynb`, with a marimo version beside it, so you can run it there instead of pasting each block.
 
 1. Install the `mosaica` package.
 2. Read the places into pandas.
@@ -14,6 +14,12 @@ It takes about ten minutes. You need Python 3.10 or later, JupyterLab or marimo,
 6. Find a place GeoNames files under the wrong region.
 
 ## Install Mosaica
+
+Clone the repository, which holds the data:
+
+```bash
+git clone https://github.com/mosaicadb/mosaica ~/mosaica
+```
 
 In a virtual environment, install the package with the notebook map, pandas and JupyterLab:
 
@@ -25,7 +31,6 @@ In a virtual environment, install the package with the notebook map, pandas and 
     Not published yet: the `mosaica` package on PyPI. Until it is, install it from a clone of the repository, with `mosaica-native`, the package that carries the server, first. That needs Rust, a C compiler and Node.js 22.15 or later. [Install and configure](install.md) has the details.
 
     ```bash
-    git clone https://github.com/mosaicadb/mosaica ~/mosaica
     pip install ~/mosaica/clients/py-native
     pip install "$HOME/mosaica/clients/py[widget]" pandas jupyterlab
     ```
@@ -42,7 +47,7 @@ from pathlib import Path
 geonames = Path("~/mosaica/examples/data/geonames").expanduser()
 ```
 
-Then read the places into pandas.
+Then read the places into pandas. JupyterLab shows the first rows as a table, which looks like this.
 
 ```{.python notest}
 --8<-- "clients/py/examples/01_getting_started.py:read"
@@ -57,7 +62,7 @@ Then read the places into pandas.
 4        349     52.05     35.65         Soltān Darreh-ye Bālā    settlement        P.PPL    Iran      Tehran, Iran        <NA>           IR
 ```
 
-Each row is one place: its GeoNames id, its longitude and latitude, its name, the kind of feature it is, its country, the region it is filed under, its population and its country's code. `feature_class` holds one of nine words, such as `settlement`, `water` or `mountain`. `division` is the place's first-level division, such as a state or a province, followed by its country, because division names repeat across countries. Most places have no population figure, and pandas shows `<NA>` for them.
+Each row is one place: its GeoNames id, its longitude and latitude, its name, the kind of feature it is, its country, the region it is filed under, its population and its country's code. `feature_class` holds one of nine words, such as `settlement`, `water` or `mountain`, or nothing. `division` is the place's first-level division, such as a state or a province, followed by its country, because division names repeat across countries. Most places have no population figure, and pandas shows `<NA>` for them.
 
 `dtype_backend="numpy_nullable"` asks pandas for its types that allow a missing value. Without it, the gaps would turn `population` into a column of floats.
 
@@ -84,11 +89,11 @@ and 3 open vocabularies, public, so every reader may list their values: feature_
 
 `projection="web_mercator"` says the view's coordinates are longitude and latitude, to be drawn with the projection web maps use. Without it, a view takes plain x and y coordinates, such as the output of UMAP or t-SNE, and draws them as they are.
 
-`declare_columns` reads the data frame's column types, not its values, and declares every column. A column is a detail unless `render`, `index` or `category` names it. We name `feature_class`, `country` and `division` as categories. Each holds a short list of values repeated across many rows, and a category is what the map colours by and counts by. The other string columns are declared as text, `geonameid` and `population` as 64-bit integers, and `lon` and `lat` as 64-bit floats.
+`declare_columns` reads the data frame's column types, not its values, and declares every column. We name `feature_class`, `country` and `division` as categories, because each holds a short list of values repeated across many rows. A category can colour the map and be counted by group once it is rendered or indexed. The other string columns are declared as text, `geonameid` and `population` as 64-bit integers, and `lon` and `lat` as 64-bit floats.
 
-Every declared column is stored, and shown when someone opens a place. A column can also be **rendered**: its value is sent with every point drawn, so the map can colour or size points by it. It can be **indexed**: Mosaica builds an index on it, so it can be filtered and counted.
+Every declared column is stored, and shown when someone opens a place. A column can also be **rendered**: its value is sent with every point drawn, so the map can colour or size points by it, and it can be filtered and counted. It can be **indexed**: Mosaica builds an index on it, so it can be filtered and counted without being sent with every point. A column that is neither is a detail.
 
-Each has a cost. A rendered column makes every point the server sends larger, so render only what the map needs, which here is the feature class for colour. An index takes disc and build time, so index the columns people will filter on. We index `name` to search it, `population` to filter on a range, and `feature_class` and `division` to filter and count by them. The rest are details, which cost least.
+Each has a cost. A rendered column makes every point the server sends larger, and it is fixed at the first commit, so render only what the map needs, which here is the feature class for colour. An index takes disc and build time, so index the columns people will filter on. We index `name` to search it, `population` to filter on a range, and `division` to filter and count by it. `feature_class` is indexed as well as rendered. The rest, `country` among them, are details, which cost least.
 
 The report lists every column and what it was declared as. Its second line is about the categories. Each category takes its values from a vocabulary, the list of values it can hold. An open vocabulary grows as new values arrive. Public means anyone who can see the map may see the list.
 
@@ -123,7 +128,7 @@ built 150,000 items from world: 150,000 rows
 
 The first commit builds the database. It places every item on the view's grid and stores neighbouring places next to each other on disc, so that drawing one part of the map reads one stretch of the file. Then it starts a Mosaica server for the database on a free local port. Yours will be a different one.
 
-From now on the notebook talks to that server, the same way a browser or another program would. A later commit sends its rows to the running server, which adds them without a rebuild.
+From now on the notebook talks to that server, the same way a browser or another program would.
 
 ## Draw the map
 
@@ -131,9 +136,9 @@ From now on the notebook talks to that server, the same way a browser or another
 --8<-- "clients/py/examples/01_getting_started.py:map"
 ```
 
-The map appears under the cell, with every place coloured by feature class. Drag to pan and scroll to zoom, and more places appear as you zoom in. At a wide zoom the map draws a sample of the points, chosen so that dense and sparse areas both show, and the server sends only the points in view.
+The map appears under the cell, with every place coloured by feature class. Drag to pan and scroll to zoom. A map of more points than it can draw at once shows a sample at a wide zoom, chosen so that dense and sparse areas both show, and more points as you zoom in.
 
-The panel on the left counts the places in view. Its Feature class card lists the classes with a count for each, largest first. Hover over a class and two buttons appear beside it. The highlighter picks out that class's places on the map and dims the rest, and the funnel filters the map to that class. Click the coloured square beside a class to change its colour.
+The panel on the left counts the places in view. Its Feature class card lists the five largest classes, each with two counts: the places in view and all that match. Below them, a link opens the card to show up to twenty. Hover over a class and two buttons take the place of its counts. The highlighter picks out that class's places on the map and dims the rest, and the funnel filters the map to that class. Click the coloured square beside a class to change its colour.
 
 ## Filter from Python
 
@@ -195,11 +200,11 @@ Text columns are searched by word with `match`.
 
 `aggregate` takes a list of groupings and returns one table for each, which is why we unpack a list of one. A grouping says what to group by and what to work out for each group. Here `by` groups by feature class, `top` is how many values to list, the largest first, and `"count": True` asks for the number of places in each. The answer is an Arrow table, like every table Mosaica returns, and `to_pandas()` turns it into a data frame.
 
-Settlements are the largest class, then water, then buildings. The last row, in the group `none`, counts the 47 places GeoNames gives no class. These are the numbers the map's Feature class card showed, because the card makes the same request.
+Settlements are the largest class, then water, then buildings. The last row, in the group `none`, counts the 47 places GeoNames gives no class. While the whole world is in view, these are the numbers the map's Feature class card shows.
 
 ## Find a misfiled place
 
-East Nusa Tenggara is a chain of islands at the south-eastern end of Indonesia. Filter to it, count it and draw it.
+East Nusa Tenggara is a chain of islands at the south-eastern end of Indonesia. Filter to it with `eq`, which keeps the places whose value is exactly the one given, then count it and draw it.
 
 ```{.python notest}
 --8<-- "clients/py/examples/01_getting_started.py:outlier"
