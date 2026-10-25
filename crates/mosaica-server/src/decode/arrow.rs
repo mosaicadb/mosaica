@@ -206,10 +206,11 @@ fn check_columns<'b>(
         };
         if !scalar_column::carries(d.arrow_type, d.vocabulary.is_some(), col.data_type()) {
             return Err(DecodeError(format!(
-                "{body_name}: column '{}' is {:?} but is declared {}; send it as that type",
+                "{body_name}: column '{}' is {:?} but is declared {}; send it as that type{}",
                 d.name,
                 col.data_type(),
-                d.wire_type().arrow_type_name()
+                d.wire_type().arrow_type_name(),
+                scalar_column::unit_hint(col.data_type())
             )));
         }
     }
@@ -221,10 +222,11 @@ fn check_columns<'b>(
         if !scalar_column::carries(f.arrow_type, f.vocabulary.is_some(), col.data_type()) {
             return Err(DecodeError(format!(
                 "{body_name}: column '{}' is {:?} but is a group-scoped attribute declared {}; \
-                 send it as that type",
+                 send it as that type{}",
                 f.name,
                 col.data_type(),
-                scoped_wire_type(f).arrow_type_name()
+                scoped_wire_type(f).arrow_type_name(),
+                scalar_column::unit_hint(col.data_type())
             )));
         }
     }

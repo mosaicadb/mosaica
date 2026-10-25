@@ -1642,11 +1642,13 @@ fn grow_body_from_arrow(body: &[u8]) -> Result<(GrowBody, Vec<MemberList>), ApiE
     ))
 }
 
-/// One column of an Arrow member struct: text, an integer of any width, or a column of another
-/// type, which names nothing and is refused only where it would name items.
+/// One column of an Arrow member struct: text, an integer of any width, a timestamp in
+/// microseconds, or a column of another type, which names nothing and is refused only where it
+/// would name items.
 enum MemberColumn {
     Text(arrow::array::StringArray),
     LargeText(arrow::array::LargeStringArray),
+    /// A signed integer, or a timestamp as its microseconds since the epoch.
     Signed(arrow::array::Int64Array),
     Unsigned(arrow::array::UInt64Array),
     /// Unsigned integers read as their decimal text: a `mosaica_id` column, which a read sends as
@@ -1659,9 +1661,10 @@ enum MemberColumn {
 impl MemberColumn {
     fn of(field: &arrow::datatypes::Field, column: &arrow::array::ArrayRef) -> Self {
         use arrow::array::{Int64Array, LargeStringArray, StringArray, UInt64Array};
-        use arrow::datatypes::DataType;
+        use arrow::datatypes::{DataType, TimeUnit};
         let widened = |to: &DataType| {
-            arrow::compute::cast(column, to).expect("an integer widens to its 64-bit type")
+            arrow::compute::cast(column, to)
+                .expect("an integer or a timestamp casts to a 64-bit integer")
         };
         match field.data_type() {
             DataType::Utf8 => MemberColumn::Text(
@@ -1678,15 +1681,17 @@ impl MemberColumn {
                     .expect("large utf8")
                     .clone(),
             ),
-            DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 => {
-                MemberColumn::Signed(
-                    widened(&DataType::Int64)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .expect("int64")
-                        .clone(),
-                )
-            }
+            DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Timestamp(TimeUnit::Microsecond, _) => MemberColumn::Signed(
+                widened(&DataType::Int64)
+                    .as_any()
+                    .downcast_ref::<Int64Array>()
+                    .expect("int64")
+                    .clone(),
+            ),
             DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 => {
                 let column = widened(&DataType::UInt64)
                     .as_any()
@@ -1698,7 +1703,13 @@ impl MemberColumn {
                     false => MemberColumn::Unsigned(column),
                 }
             }
-            other => MemberColumn::Other(column.clone(), format!("a {other} value")),
+            other => MemberColumn::Other(
+                column.clone(),
+                format!(
+                    "a {other} value{}",
+                    mosaica_engine::scalar_column::unit_hint(other)
+                ),
+            ),
         }
     }
 

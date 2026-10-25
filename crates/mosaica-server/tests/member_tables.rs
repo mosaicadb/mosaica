@@ -2,13 +2,17 @@
 //! names, one row per member, resolved by the identity rule. A member naming no item, or two, is
 //! left out and listed in the answer's `refused`, or, under `strict=true`, refuses the request
 //! with nothing written. A content's generating set is refused whole at any such member, strict or
-//! not. The Arrow growth carries the table as `list<struct>`.
+//! not. The Arrow growth carries the table as `list<struct>`, naming a unique timestamp field as
+//! `timestamp[us]`, as a build's members file does.
 
 mod common;
 
 use std::sync::Arc;
 
-use arrow::array::{ArrayRef, ListArray, RecordBatch, StringArray, StructArray, UInt64Array};
+use arrow::array::{
+    Array, ArrayRef, Int64Array, ListArray, RecordBatch, StringArray, StructArray,
+    TimestampMicrosecondArray, TimestampMillisecondArray, UInt64Array,
+};
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::{DataType, Field, Fields, Schema};
 use arrow::ipc::writer::StreamWriter;
@@ -18,18 +22,18 @@ use tempfile::TempDir;
 
 const LAYER: &str = "clusters/tables";
 
-fn artifacts_url(server: &TestServer, strict: bool) -> String {
+fn artifacts_url(server: &TestServer, layer: &str, strict: bool) -> String {
     let query = if strict { "?strict=true" } else { "" };
     server.control_url(&format!(
         "/control/layers/{}/artifacts{query}",
-        LAYER.replace('/', "%2F")
+        layer.replace('/', "%2F")
     ))
 }
 
 async fn put(server: &TestServer, strict: bool, artifacts: Value) -> (u16, Value) {
     let resp = server
         .client
-        .put(artifacts_url(server, strict))
+        .put(artifacts_url(server, LAYER, strict))
         .bearer_auth(OPERATOR_CREDENTIAL)
         .json(&json!({ "artifacts": artifacts }))
         .send()
@@ -43,10 +47,10 @@ async fn put(server: &TestServer, strict: bool, artifacts: Value) -> (u16, Value
     (status, body)
 }
 
-async fn patch_arrow(server: &TestServer, body: Vec<u8>) -> (u16, Value) {
+async fn patch_arrow(server: &TestServer, layer: &str, body: Vec<u8>) -> (u16, Value) {
     let resp = server
         .client
-        .patch(artifacts_url(server, false))
+        .patch(artifacts_url(server, layer, false))
         .bearer_auth(OPERATOR_CREDENTIAL)
         .header("content-type", "application/vnd.apache.arrow.stream")
         .body(body)
@@ -274,7 +278,7 @@ async fn a_generating_set_grown_by_a_member_naming_nothing_or_two_refuses_the_re
     let patch = |body: Value| {
         server
             .client
-            .patch(artifacts_url(&server, false))
+            .patch(artifacts_url(&server, LAYER, false))
             .bearer_auth(OPERATOR_CREDENTIAL)
             .json(&body)
             .send()
@@ -339,7 +343,7 @@ async fn a_malformed_table_is_refused_whole() {
     }
     let resp = server
         .client
-        .put(artifacts_url(&server, false))
+        .put(artifacts_url(&server, LAYER, false))
         .bearer_auth(OPERATOR_CREDENTIAL)
         .json(&json!({ "field": "id", "artifacts": [{ "key": "a", "members": { "id": [0] } }] }))
         .send()
@@ -396,7 +400,7 @@ async fn an_arrow_growth_names_members_as_a_list_of_structs() {
     let mut writer = StreamWriter::try_new(Vec::new(), &schema).unwrap();
     writer.write(&batch).unwrap();
 
-    let (status, body) = patch_arrow(&server, writer.into_inner().unwrap()).await;
+    let (status, body) = patch_arrow(&server, LAYER, writer.into_inner().unwrap()).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["artifacts"][0]["joined"], 2, "{body}");
     assert_eq!(
@@ -450,7 +454,7 @@ async fn an_arrow_member_column_is_checked_only_where_it_names_items() {
         vec![Field::new("id", DataType::Float64, true)],
         vec![Arc::new(arrow::array::Float64Array::from(vec![1.0])) as ArrayRef],
     );
-    let (status, body) = patch_arrow(&server, float).await;
+    let (status, body) = patch_arrow(&server, LAYER, float).await;
     assert_eq!(status, 422, "{body}");
     let twice = body_of(
         vec![
@@ -462,7 +466,7 @@ async fn an_arrow_member_column_is_checked_only_where_it_names_items() {
             Arc::new(UInt64Array::from(vec![2])) as ArrayRef,
         ],
     );
-    let (status, body) = patch_arrow(&server, twice).await;
+    let (status, body) = patch_arrow(&server, LAYER, twice).await;
     assert_eq!(status, 422, "{body}");
     assert_eq!(count(&server, 1).await, vec![1]);
 
@@ -478,7 +482,7 @@ async fn an_arrow_member_column_is_checked_only_where_it_names_items() {
             Arc::new(arrow::array::BooleanArray::from(vec![true])) as ArrayRef,
         ],
     );
-    let (status, body) = patch_arrow(&server, ignored).await;
+    let (status, body) = patch_arrow(&server, LAYER, ignored).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["ignored_columns"], json!(["weight", "seen"]));
     assert_eq!(count(&server, 1).await, vec![2]);
@@ -487,8 +491,281 @@ async fn an_arrow_member_column_is_checked_only_where_it_names_items() {
         vec![Field::new("mosaica_id", DataType::UInt64, true)],
         vec![Arc::new(UInt64Array::from(vec![mosaica_id_of(&server, 2)])) as ArrayRef],
     );
-    let (status, body) = patch_arrow(&server, read_back).await;
+    let (status, body) = patch_arrow(&server, LAYER, read_back).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["refused"], json!([]));
     assert_eq!(count(&server, 1).await, vec![3]);
+}
+
+/// Items placed by [`scatter`], each holding a unique `seen`, a timestamp an hour after the last.
+const STAMPED_ITEMS: u64 = 40;
+const STAMPED_LAYER: &str = "clusters/stamped";
+/// Three artifacts, by key, and the items each holds.
+const STAMPED: [(&str, &[u64]); 3] = [("one", &[0]), ("two", &[1, 2]), ("three", &[3, 4, 5])];
+
+/// Item `e`'s `seen`, in microseconds since the epoch: 2020-01-01T00:00:00Z plus `e` hours.
+fn seen_of(e: u64) -> i64 {
+    1_577_836_800_000_000 + e as i64 * 3_600_000_000
+}
+
+fn microseconds(values: Vec<i64>) -> ArrayRef {
+    Arc::new(TimestampMicrosecondArray::from(values).with_timezone("UTC"))
+}
+
+fn milliseconds(values: Vec<i64>) -> ArrayRef {
+    let values = values.into_iter().map(|us| us / 1_000).collect::<Vec<_>>();
+    Arc::new(TimestampMillisecondArray::from(values).with_timezone("UTC"))
+}
+
+/// One list per artifact of [`STAMPED`], of structs naming each member by its `seen`, as `seen`
+/// writes the values.
+fn stamped_lists(seen: fn(Vec<i64>) -> ArrayRef) -> ListArray {
+    let values = STAMPED
+        .iter()
+        .flat_map(|(_, items)| items.iter().map(|&e| seen_of(e)))
+        .collect();
+    let column = seen(values);
+    let fields = Fields::from(vec![Field::new("seen", column.data_type().clone(), true)]);
+    let elements = StructArray::new(fields.clone(), vec![column], None);
+    let item = Arc::new(Field::new("item", DataType::Struct(fields), true));
+    ListArray::new(
+        item,
+        OffsetBuffer::from_lengths(STAMPED.iter().map(|(_, items)| items.len())),
+        Arc::new(elements),
+        None,
+    )
+}
+
+fn stamped_keys() -> StringArray {
+    StringArray::from_iter_values(STAMPED.iter().map(|(key, _)| *key))
+}
+
+/// A bundle over items holding a unique timestamp `seen`, built into `dir/bundle`. With `members`,
+/// the build publishes [`STAMPED`] into [`STAMPED_LAYER`] from a members file naming each member
+/// by its `seen`, as `members` writes the values.
+fn build_stamped(
+    dir: &std::path::Path,
+    members: Option<fn(Vec<i64>) -> ArrayRef>,
+) -> Result<mosaica_build::BuildReport, mosaica_build::BuildError> {
+    let points = dir.join("points.parquet");
+    let pairs = dir.join("pairs.parquet");
+    let ids: Vec<u64> = (0..STAMPED_ITEMS).collect();
+    let seen = microseconds(ids.iter().map(|&e| seen_of(e)).collect());
+    write_points(
+        &points,
+        &ids,
+        scatter,
+        vec![(Field::new("seen", seen.data_type().clone(), false), seen)],
+    );
+    write_pairs_n(&pairs, STAMPED_ITEMS);
+    let layer = match members {
+        Some(members) => {
+            write_parquet(
+                &dir.join("members.parquet"),
+                vec![
+                    column("key", false, stamped_keys()),
+                    column("members", false, stamped_lists(members)),
+                ],
+            );
+            format!(
+                r#"
+[sources]
+points  = "points.parquet"
+members = "members.parquet"
+
+[defaults]
+source = "points"
+
+[[view]]
+name             = "s0"
+extent           = {{ min = 0.0, max = 1000.0 }}
+point_visibility = {{ default = "public" }}
+
+[[layer]]
+name                      = "{STAMPED_LAYER}"
+views                     = ["s0"]
+membership                = "enumerated"
+source                    = "members"
+hierarchy                 = {{ kind = "flat", prune_children = false }}
+visibility                = "public"
+artifact_visibility       = {{ default = "inherited" }}
+require_member_visibility = "none"
+"#
+            )
+        }
+        None => String::new(),
+    };
+    let declaration = dir.join("corpus.toml");
+    std::fs::write(
+        &declaration,
+        format!(
+            "{ID_ATTRIBUTE}\n[[attribute]]\nname = \"seen\"\ntype = \"timestamp_us\"\nunique = true\n\
+             {layer}"
+        ),
+    )
+    .unwrap();
+    let config = mosaica_build::config::Config::parse(&declaration, &Default::default())
+        .expect("the declaration parses");
+    mosaica_build::build(&mosaica_build::BuildArgs {
+        attribute_sources: mosaica_build::config::AttributeSource::over(&points, &config.schema),
+        schema: config.schema,
+        layers: config.layers.clone(),
+        layer_inputs: config.layer_sources.clone(),
+        ..build_args(
+            &dir.join("bundle"),
+            vec![view_args("s0", &points, AccessInput::relation(&pairs))],
+        )
+    })
+}
+
+/// A server over a bundle of [`build_stamped`]'s items, with [`STAMPED`]'s artifacts published in
+/// [`STAMPED_LAYER`] and holding no member.
+async fn serve_stamped(dir: &std::path::Path) -> TestServer {
+    build_stamped(dir, None).expect("the stamped fixture builds");
+    let server = open(dir).await;
+    let mut layer = flat_layer(STAMPED_LAYER);
+    layer["visibility"] = json!("public");
+    register(&server, layer).await;
+    let (status, body) = publish(
+        &server,
+        STAMPED_LAYER,
+        "",
+        json!({ "artifacts": STAMPED
+            .iter()
+            .map(|(key, _)| json!({ "key": key, "members": { "seen": [] } }))
+            .collect::<Vec<_>>() }),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    tick(&server).await;
+    server
+}
+
+/// A growth of [`STAMPED`]'s members, each named by its `seen` as `seen` writes the values.
+fn stamped_growth(seen: fn(Vec<i64>) -> ArrayRef) -> Vec<u8> {
+    let members = stamped_lists(seen);
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("key", DataType::Utf8, false),
+        Field::new("members", members.data_type().clone(), false),
+    ]));
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![Arc::new(stamped_keys()), Arc::new(members)],
+    )
+    .unwrap();
+    let mut writer = StreamWriter::try_new(Vec::new(), &schema).unwrap();
+    writer.write(&batch).unwrap();
+    writer.into_inner().unwrap()
+}
+
+/// Each artifact of [`STAMPED_LAYER`] the broad principal is served, by key: its member count and
+/// the `seen` of each member, in microseconds, ascending.
+async fn stamped_state(server: &TestServer) -> std::collections::BTreeMap<String, (u64, Vec<i64>)> {
+    let token = token_for(server, &["0"]).await;
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/artifacts/viewport"))
+        .bearer_auth(&token)
+        .json(&json!({
+            "view": "s0", "zoom": 0, "per_tile": 1000, "bbox": [0.0, 0.0, 1000.0, 1000.0],
+            "layers": [STAMPED_LAYER],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let mut out = std::collections::BTreeMap::new();
+    for artifact in decode_artifact_frames(&resp.bytes().await.unwrap())
+        .artifacts
+        .unwrap_or_default()
+    {
+        let resp = server
+            .client
+            .post(server.viewer_url("/v1/items"))
+            .bearer_auth(&token)
+            .json(&json!({
+                "view": "s0",
+                "fields": ["seen"],
+                "filters": { "member_of": {
+                    "layer": STAMPED_LAYER, "artifact": artifact.mosaica_id.to_string()
+                } },
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        let decoded = decode_records(&resp.bytes().await.unwrap());
+        assert!(
+            decoded.trailer["next"].is_null(),
+            "one page holds every member"
+        );
+        let mut seen = Vec::new();
+        for (batch, _) in &decoded.pages {
+            let column =
+                arrow::compute::cast(batch.column_by_name("seen").unwrap(), &DataType::Int64)
+                    .unwrap();
+            let column = column.as_any().downcast_ref::<Int64Array>().unwrap();
+            seen.extend(column.iter().flatten());
+        }
+        seen.sort_unstable();
+        out.insert(
+            artifact.key.clone().unwrap_or_default(),
+            (artifact.masked_count, seen),
+        );
+    }
+    out
+}
+
+/// **An Arrow growth names members by a unique timestamp field as `timestamp[us]`**, as a build's
+/// members file does: the members a service joins this way are those the build joins from the
+/// same column, and a restart keeps them.
+#[tokio::test]
+async fn an_arrow_growth_names_members_by_a_unique_timestamp_as_a_build_does() {
+    let expected: std::collections::BTreeMap<String, (u64, Vec<i64>)> = STAMPED
+        .iter()
+        .map(|(key, items)| {
+            let seen = items.iter().map(|&e| seen_of(e)).collect::<Vec<_>>();
+            (key.to_string(), (items.len() as u64, seen))
+        })
+        .collect();
+    let built = TempDir::new().unwrap();
+    build_stamped(built.path(), Some(microseconds)).expect("the stamped layer builds");
+    let built = open(&built).await;
+    assert_eq!(
+        stamped_state(&built).await,
+        expected,
+        "the build joins every member"
+    );
+
+    let tmp = TempDir::new().unwrap();
+    let server = serve_stamped(tmp.path()).await;
+    let (status, body) = patch_arrow(&server, STAMPED_LAYER, stamped_growth(microseconds)).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["refused"], json!([]), "{body}");
+    assert_eq!(stamped_state(&server).await, expected);
+
+    let server = restart(server, &tmp).await;
+    assert_eq!(
+        stamped_state(&server).await,
+        expected,
+        "a restart keeps the members"
+    );
+}
+
+/// A timestamp in another unit than microseconds names no member, at a service or a build, and
+/// the service's refusal says to cast it to `timestamp[us]`.
+#[tokio::test]
+async fn an_arrow_member_timestamp_in_another_unit_is_refused_with_the_cast() {
+    let tmp = TempDir::new().unwrap();
+    let server = serve_stamped(tmp.path()).await;
+    let (status, body) = patch_arrow(&server, STAMPED_LAYER, stamped_growth(milliseconds)).await;
+    assert_eq!(status, 422, "{body}");
+    let detail = body["detail"].as_str().unwrap_or_default();
+    assert!(detail.contains("timestamp[us]"), "{detail}");
+
+    let built = TempDir::new().unwrap();
+    assert!(
+        build_stamped(built.path(), Some(milliseconds)).is_err(),
+        "the build refuses the same column"
+    );
 }

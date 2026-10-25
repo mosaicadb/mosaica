@@ -3694,10 +3694,11 @@ paths:
         `large_list<struct>` whose struct fields are the member table's columns, each named once:
         `mosaica_id` as `utf8`, `large_utf8` or an unsigned integer (as a read sends it), a unique
         field as `utf8` or `large_utf8` or, for an integer or timestamp field, as a signed or
-        unsigned integer of any width. Any other type in those columns is `422`; any other column
-        is ignored whatever its type. Optionally `view` as `utf8` and
-        `access` in any form ingest's `access` takes, with `level` in the schema's metadata as a
-        string. It carries joining members and access labels only; every other part travels as
+        unsigned integer of any width or as `timestamp[us]`, read as its microseconds since the
+        epoch. Any other type in those columns is `422`, a timestamp in another unit included; cast
+        it to `timestamp[us]`. Any other column is ignored whatever its type. Optionally `view` as
+        `utf8` and `access` in any form ingest's `access` takes, with `level` in the schema's
+        metadata as a string. It carries joining members and access labels only; every other part travels as
         JSON. Any other column or metadata key is `422`.
 
         At most `ingest.max_members_per_request` members, joining and leaving together, and a body

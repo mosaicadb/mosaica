@@ -69,6 +69,18 @@ pub fn carries(ty: ScalarType, category: bool, found: &DataType) -> bool {
     }
 }
 
+/// The clause a refusal of a column of Arrow type `found` ends with where the column is a
+/// timestamp in a unit other than microseconds, which [`carries`] never reads; empty for any other
+/// type.
+pub fn unit_hint(found: &DataType) -> &'static str {
+    match found {
+        DataType::Timestamp(unit, _) if *unit != TimeUnit::Microsecond => {
+            " (a timestamp is read only in microseconds, so cast it to timestamp[us])"
+        }
+        _ => "",
+    }
+}
+
 /// A category column's value keys, or `None` where [`carries`] says it cannot hold them.
 pub fn category_keys(column: &ArrayRef) -> Option<Utf8Values> {
     match column.data_type() {

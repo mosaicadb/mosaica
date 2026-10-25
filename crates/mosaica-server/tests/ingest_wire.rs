@@ -1526,3 +1526,42 @@ async fn a_finite_float_past_f32_is_refused_at_every_path() {
         "the build refuses the same column"
     );
 }
+
+/// **A timestamp in another unit than microseconds is refused at both paths**, and each refusal
+/// says to cast it to `timestamp[us]`.
+#[tokio::test]
+async fn a_timestamp_in_another_unit_is_refused_with_the_cast_at_both_paths() {
+    let (_tmp, server) = served_declared().await;
+    let mut columns = placed(1);
+    columns.push(column(
+        "seen",
+        true,
+        arrow::array::TimestampMillisecondArray::from(vec![1_700_000_000_000]),
+    ));
+    let (status, answer) = ingest(&server, "milliseconds", Some(ARROW), body_of(columns)).await;
+    assert_eq!(status, 422, "{answer}");
+    let detail = answer["detail"].as_str().unwrap();
+    assert!(detail.contains("timestamp[us]"), "{detail}");
+
+    let tmp = TempDir::new().unwrap();
+    let points = tmp.path().join("points.parquet");
+    let ids: Vec<u64> = (0..N).collect();
+    let score = Int64Array::from_iter_values((0..N).map(|e| e as i64));
+    let weight = Float32Array::from_iter_values((0..N).map(|e| e as f32));
+    let seen = arrow::array::TimestampMillisecondArray::from_iter_values((0..N).map(|e| e as i64));
+    let tag = StringArray::from_iter_values((0..N).map(|e| e.to_string()));
+    write_points(
+        &points,
+        &ids,
+        scatter,
+        vec![
+            column("score", true, score),
+            column("weight", true, weight),
+            column("big", true, UInt64Array::from_iter_values(0..N)),
+            column("seen", true, seen),
+            column("tag", true, tag),
+        ],
+    );
+    let refusal = build_over(tmp.path(), points).expect_err("the build refuses the same column");
+    assert!(refusal.to_string().contains("timestamp[us]"), "{refusal}");
+}
