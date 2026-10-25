@@ -466,6 +466,15 @@ key an open vocabulary added for one, and an artifact key one created on an open
 bundle; a public vocabulary goes on serving such a key. Erasing them today means a rebuild from
 sources that leave them out (`docs/guides/rebuild.md`). No issue exists.
 
+**CSV ingest.** The command line's `mosaica insert` takes Parquet, Arrow IPC and NDJSON. CSV is
+the format most people's data arrives in, and is wanted after the first release. No issue
+exists.
+
+**Dropping a declaration.** An annotation layer and a view of a view group can be dropped. An
+attribute, a vocabulary, a plain view, a view group and the shard settings cannot, on any
+surface, so a declaration made by mistake stays until a rebuild from a schema that leaves it out.
+No issue exists.
+
 [#3]: https://github.com/jennis0/tessera-index/issues/3
 [#4]: https://github.com/jennis0/tessera-index/issues/4
 [#73]: https://github.com/jennis0/tessera-index/issues/73
