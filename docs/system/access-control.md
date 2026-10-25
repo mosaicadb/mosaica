@@ -10,9 +10,9 @@ A label is an expression over terms, with `&` for "and" and `|` for "or":
 |---|---|
 | `public` | anything: every session holds `public` |
 | `team_a` | `team_a` |
-| `team_a\|team_b` | either term |
-| `secret&(team_a\|team_b)` | `secret`, and either `team_a` or `team_b` |
-| `user:alice\|user:bob` | either term, such as for a document shared with two people |
+| <code>team_a&#124;team_b</code> | either term |
+| <code>secret&amp;(team_a&#124;team_b)</code> | `secret`, and either `team_a` or `team_b` |
+| <code>user:alice&#124;user:bob</code> | either term, such as for a document shared with two people |
 
 An item can carry a list of labels, and admits a viewer who satisfies any one of them. An item given no label takes its view's default, `point_visibility.default`.
 
