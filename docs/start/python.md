@@ -83,7 +83,7 @@ A Mosaica database holds items, which here are places, and one or more views. A 
 ```
 
 ```
-declared 10 columns: geonameid (i64), lon (f64), lat (f64), name (text, index), feature_class (category, render, index), feature_code (text), country (category), division (category, index), population (i64, index), country_code (text)
+declared 10 columns: geonameid (i64), lon (f64), lat (f64), name (text, index), feature_class (category, render), feature_code (text), country (category), division (category, index), population (i64, index), country_code (text)
 and 3 open vocabularies, public, so every reader may list their values: feature_class, country, division
 ```
 
@@ -122,7 +122,7 @@ Nothing has been sent anywhere yet. Inserts collect until you commit.
 ```
 built 150,000 items from world: 150,000 rows
   1 view: world
-  in 0.9 s; serving at 127.0.0.1:42661
+  in 2.1 s; serving at 127.0.0.1:45843
   view 'world' (rows): read geonameid, lon, lat, name, feature_class, feature_code, country, division, population, country_code; ignored nothing
 ```
 
@@ -226,11 +226,11 @@ The map opens framed on all 314 places. The islands of East Nusa Tenggara are th
 
 ```
               mosaica_id  geonameid        name        lon      lat
-0    6492955845902091333    7612808       Rokot   99.69063 -2.08728
-39   9955801220826411198    7411484  Galluwawai  119.02320 -9.58230
-38   5456830642059980861    7411544  Ngikahanga  119.02580 -9.55810
-40  15659484933011987253    7556109      Kanaka  119.03400 -9.65290
-43  10180124004428836427    7556480    Radamata  119.20070 -9.54830
+0   12625214655987642250    7612808       Rokot   99.69063 -2.08728
+39   8495083937813982874    7411484  Galluwawai  119.02320 -9.58230
+38  14897736624976177688    7411544  Ngikahanga  119.02580 -9.55810
+40  11580208477392569200    7556109      Kanaka  119.03400 -9.65290
+43  14414396836725556075    7556480    Radamata  119.20070 -9.54830
 ```
 
 `items` reads every place in the selection with the columns you name. `lon` and `lat` are there because we declared them as details. `mosaica_id` is the id Mosaica gives each item, and yours will differ, because every database scrambles them with a key of its own.
