@@ -3,7 +3,7 @@
 # same rows again as new items, flushing and compacting. Writes the cycle's JSON and one JSON line a
 # round; rounds.py turns the lines into rounds.csv and the table in the README.
 #
-#   cargo build --release -p mosaica-cli
+#   cargo build --release -p mosaica
 #   MOSAICA_STAGED=<staged> MOSAICA_LADDER=<ladder> python3 -m test_corpora.geonames.prepare --vintage 2026-10-10
 #   (cd <ladder>/geonames && mosaica check && mosaica build)
 #   LADDER=<ladder> OUT=<dir> bash run.sh && python3 rounds.py <dir>/churn-geonames.jsonl > rounds.csv

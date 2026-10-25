@@ -42,7 +42,7 @@ case "$rung" in
   */gbif) echo "refusing $rung: pass the rung-6 path deliberately, not as a default" >&2 ;;
 esac
 for prog in "$bin/mosaica" "$bin/identity_bands_build" "$bin/identity_bands_probe"; do
-  [ -x "$prog" ] || { echo "missing $prog — build with: CARGO_TARGET_DIR=$tree/target nice -n 19 cargo build --release -j 6 -p mosaica-cli -p mosaica-bench" >&2; exit 1; }
+  [ -x "$prog" ] || { echo "missing $prog — build with: CARGO_TARGET_DIR=$tree/target nice -n 19 cargo build --release -j 6 -p mosaica -p mosaica-bench" >&2; exit 1; }
 done
 mkdir -p "$out"
 

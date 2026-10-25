@@ -2,7 +2,7 @@
 
 **Status:** measurement, 2026-10-25, with `mosaica 0.1.0 (e54c2c6a6)`, the release binary built
 from main at e54c2c6a6 and kept at `data/stage7/bin/mosaica-e54c2c6a6` (sha256 `434041468a55…`),
-and the TypeScript core of the same commit. Host: the 12-core Ryzen 9 5900X with 47 GB under WSL2,
+and the TypeScript core of the same commit. Host: the 12-core Ryzen 9 5900X with 47 GiB under WSL2,
 kernel 6.18, the bundles on its ext4 disc. Every server ran under a 24 GiB memory cap. Every figure
 is measured. The Tree of Life builds at the end were made on 2026-10-22 with the binary of
 e73d47ad6.
@@ -48,7 +48,7 @@ python3 probes/2026-10-25-shard-reads-geonames/collate.py data/stage7/reads geon
 ```
 
 `run.sh` waits for a one-minute load average under 3 before each timed run and records it in
-`load.txt`. The builds' load was not recorded.
+`load.txt`. The builds' load was not recorded; their user CPU time is in Table 2.
 
 | N | before the reference run | before the bench | before the battery |
 |---:|---:|---:|---:|
@@ -59,39 +59,43 @@ python3 probes/2026-10-25-shard-reads-geonames/collate.py data/stage7/reads geon
 | 128 | | 1.00 | 0.48, stopped |
 
 [`ratios.md`](ratios.md) holds every figure as its ratio to one shard, and the build's and the
-server's figures as measured. The tables below are taken from it.
+server's figures as measured. The tables below are taken from it. A cold row there shows "–" where
+fewer than 90% of its samples took a major fault.
 
 ## Findings
 
-**Requests with nothing to combine cost the same up to 32 shards.** An item card took 0.8 to 0.9 ms
-at one shard and 1.00 to 1.12 times that up to N = 32. A unique `eq` lookup took 1.1 to 1.2 ms and
-0.92 to 1.09 times that. A hot viewport, at every zoom and for every principal, took 0.85 to 1.07
-times one shard's 2.6 to 37 ms. A text search over warm pages took 0.86 to 1.08 times one shard's.
-At N = 128 an item card took 1.22 to 1.38 times one shard's and a unique lookup 1.08 to 1.45 times,
-0.1 to 0.5 ms more. A unique lookup reads a run of the field's index in every shard, so it does
-some work per shard. The battery did not reach N = 128, so the hot viewport and text have no
-figure there. The bench's viewport requests over the whole run (198 of them) took 0.90 to 0.93
-times one shard's median up to N = 32 and 1.32 times at N = 128.
+**Requests with nothing to combine cost the same up to 32 shards.** The bench rounds a lookup to 0.1
+ms. An item card and a unique `eq` lookup took within 0.1 ms of one shard's 0.8 to 1.2 ms up to N =
+32, and 0.1 to 0.5 ms more at N = 128. A unique lookup reads a run of the field's index in every
+shard, so it does some work per shard. A hot viewport, at every zoom and for every principal, took
+0.85 to 1.07 times one shard's 2.6 to 37 ms. A hot text search took 0.86 to 1.08 times one shard's.
+The battery did not reach N = 128, so the hot viewport and text have no figure there. The bench's
+viewport requests over the whole run (198 of them) took 0.90 to 0.93 times one shard's median up to
+N = 32 and 1.32 times at N = 128.
 
 **A grant's first request costs 4 to 5 ms a shard, whatever the grant sees.** A session's first
 counts, on a server that has not seen the grant, arrived after 25 to 46 ms at one shard, 147 to 178
 ms at N = 32 and 578 to 610 ms at N = 128, the same for the principal who sees 1% as for the one who
-sees everything (Table 2). The first viewport sends its head after the request has built the grant's
-mask fragment and its row projection in every shard (§3.7 of the plan, `Engine::fragment_for` in
-`crates/mosaica-engine/src/session.rs`): for the 85% principal at N = 32 the head came 156 ms after
-the request was sent, against 22 ms at one shard. The second session for the same grant shares those
-projections, and its first counts took 0.66 to 1.05 times one shard's at N = 32 and 128. A battery
-cell's first viewport, on a fresh session, shows the same growth: 1.96 to 3.48 times at N = 8 and 32
-for the 1% principal.
+sees everything (Table 2). Each is one sample, for each of four principals. Before the first
+viewport sends its head, `Engine::derive_geometry`
+(`crates/mosaica-engine/src/viewport/geometry.rs`) runs for every shard, building the grant's mask
+fragment (`Engine::fragment_for`) and then its row projection (§3.7 of the plan). Which of the two
+costs the time was not traced. For the 85% principal at N = 32 the head came 156 ms after the
+request was sent, against 22 ms at one shard. The second session for the same grant shares those
+projections, and its first counts took 12.7 to 24.5 ms at N = 32 and 128 against 13.8 to 27.6 ms at
+one shard, within the spread of single samples. A battery rung's first viewport, on a fresh session,
+is one request: for the 1%, 7% and 85% principals it took 2.07 to 3.48 times one shard's at N = 32,
+and for the 100% principal 0.63 times.
 
 **A grant's first figures walk every shard once per level.** The first artifacts request for a grant
 sums each level's figures over the shards, walking each shard's rows apart and writing each walk to
 the cache directory (`Engine::part_of` in `crates/mosaica-engine/src/figures/sum.rs`). The server
-counted 20 walks at one shard and 20 × N at N, 2,560 at N = 128. The first session's `layers` time
-was 0.94 to 1.01 times one shard's for the 1% and 7% principals up to N = 32, and 1.21 to 1.59 times
-for the 85% and 100% ones at N = 8 and 32; at N = 128 it was 1.92 to 3.55 times. The second
-session's was 0.99 to 1.02 times one shard's at every N. Writing the walks takes the cache directory
-from 103 MB at one shard to 274 to 277 MB at every other N.
+counted 20 walks at one shard, four grants at five administrative levels, and 20 × N at N, 2,560 at
+N = 128. The first session's `layers` time was 0.94 to 1.01 times one shard's for the 1% and 7%
+principals up to N = 32, and 1.21 to 1.59 times for the 85% and 100% ones at N = 8 and 32; at N =
+128 it was 1.92 to 3.55 times. The second session's was 0.99 to 1.02 times one shard's at every N.
+Writing the walks takes the cache directory from 103 MB at one shard to 274 to 277 MB at every other
+N.
 
 **Opening a bundle costs time and memory per shard.** The server answered `/readyz` after 4.0 s at
 one and two shards, 5.0 s at 8, 10.7 s at 32 and 22.6 s at 128. Its anonymous resident memory at
@@ -106,40 +110,46 @@ and 7% principals' stayed at 0.81 to 1.19. Zooming in at zooms 9 to 11, the dens
 counts took 60 to 73 ms at one shard and 80 to 104 ms at every other N, 1.32 to 1.42 times; the 1%
 principal's took 0.98 to 1.04 times. Neither was traced to its cause here.
 
-**A build's time grows with the shards and its memory does not.** The build took 68 s at one and two
-shards, 82 s at 8, 107 s at 32 and 233 s at 128. Its peak resident memory was 2.48 to 2.61 GiB at
-every N. The bundle grew from 2.001 GB at one shard to 2.050 GB at 32 and 2.132 GB at 128.
+**A build's time grows with the shards and its memory does not.** Each count was built once. The
+build took 68 s at one and two shards, 82 s at 8, 107 s at 32 and 233 s at 128, and 95, 97, 109, 136
+and 273 s of user CPU time. Its peak resident memory was 2.48 to 2.61 GiB at every N. The bundle
+grew from 2.001 GB at one shard to 2.050 GB at 32 and 2.132 GB at 128.
 
-**The cold battery cells at N = 2 and 8 hold no cold sample.** Of 12,000 cold samples at each count,
-the battery counted 1 as cold at N = 2 and 3 at N = 8, against 11,920 at one shard and 5,430 at
-N = 32. The battery takes a sample as cold only where the server's major-fault count rose during
-its request, and reports its percentiles over those samples alone, so a cell with none shows "–".
-Eviction is `posix_fadvise(DONTNEED)` over the bundle's and cache's files and a write to
-`memory.reclaim` on the server's cgroup. On these two runs neither dropped the server's pages: the
-warm-engine condition's median over all samples was 3.1 to 3.3 ms, at the hot condition's 2.7 to
-3.0 ms, against 5.5 to 10.0 ms at one shard. The battery ignores an error writing
-`memory.reclaim`, so the JSON does not say why. The earlier runs on the binary of e73d47ad6 counted
-11,998 cold samples at N = 2 and 5,428 at N = 8, so the failure does not follow the shard count. At
-N = 32 the cold samples are only those that took at least one fault: their warm-engine median, 3.5
-to 4.3 ms, is near the hot one, so the cold ratios of 0.29 to 1.32 at N = 32 do not compare with one
-shard's either. No cold viewport has a figure at several shards.
+**The cold battery cells at N = 2 and 8 hold almost no cold sample.** Of 12,000 cold samples at each
+count, the battery counted 1 as cold at N = 2 and 3 at N = 8, against 11,920 at one shard and 5,430
+at N = 32. The battery takes a sample as cold only where the server's major-fault count rose during
+its request, and reports its percentiles over those samples alone. Eviction is
+`posix_fadvise(DONTNEED)` over the bundle's and cache's files and a write to `memory.reclaim` on the
+server's cgroup. On these two runs neither dropped the server's pages: the warm-engine condition's
+median over all samples was 3.1 to 3.3 ms, at the hot condition's 2.7 to 3.0 ms, against 5.5 to 10.0
+ms at one shard. The battery ignores an error writing `memory.reclaim`, so the JSON does not say
+why. The earlier runs on the binary of e73d47ad6 counted 11,998 cold samples at N = 2 and 5,428 at N
+= 8, so the failure does not follow the shard count. At N = 32 the cold samples are only those that
+took at least one fault: their warm-engine median, 3.5 to 4.3 ms, is near the hot one, so the cold
+ratios of 0.29 to 1.32 at N = 32 do not compare with one shard's either. A cold text search counts
+as cold on one fault, and cannot be told apart in the same way. No cold viewport or cold text search
+has a figure at several shards. `collate.py` shows "–" for a cold row where fewer than 90% of its
+samples took a fault; the zoom-0 rows at N = 32 pass that floor and are still not cold reads.
 
 ## What it decides
 
-`shards.size` stays at 2³² − 2²⁸. No figure here is cheaper at more shards, beyond the noise of
-single samples and the cold cells whose eviction failed. The costs that grow with N are fixed costs
-per shard: a grant's first request, a grant's first figures, the time to `/readyz` and the memory
-held at open, the build, and the region count. Each favours fewer, larger shards.
+`shards.size` stays at 2³² − 2²⁸ on the reads and the build. No figure here is cheaper at more
+shards beyond the 0.56 to 2.29 spread of single samples, leaving aside the cold cells whose eviction
+failed. The costs that grow with N are fixed costs per shard: a grant's first request, a grant's
+first figures, the time to `/readyz` and the memory held at open, the build, and the region count.
+Each favours fewer, larger shards. The costs that could favour smaller shards, a smaller shard's
+compaction time and memory and restart replay, are not measured (§8.3 of the plan).
 
 These runs decide nothing about `REUSE_MIN_FREE` or compaction, which need the churn at several
 shards and one large compaction (§8.3 and §8.4 of the plan). Still unmeasured on the read side: a
-cold viewport at several shards, the aggregate's bins, sampled bins and field summary, a bulk read,
-Tree of Life and GBIF, and what holds the memory each shard adds at open.
+cold viewport or cold text search at several shards, the aggregate's bins, sampled bins and field
+summary, a bulk read, Tree of Life and GBIF, what holds the memory each shard adds at open, and the
+causes of the growth in the region count and the dense principals' camera figures.
 
-The session and camera figures are one to four samples each, so a ratio near 1 within about 0.6 to
-1.5 says nothing. The reference run and its replay at one shard, on the same bundle, differ by 0.56
-to 2.29 times on the session's first counts and first points. A ratio that grows with N, as the
-first counts do, is what the tables can show.
+The session and camera figures are one to four samples each. The reference run and its replay at one
+shard, on the same bundle, differ by 0.56 to 2.29 times on the session's first counts and first
+points, so a ratio within that band says nothing on its own. A ratio that grows steadily with N, as
+the first counts do, is what the tables can show.
 
 ## Table 1: requests with nothing to combine
 
@@ -172,13 +182,14 @@ battery figure the median over the cells of each cell's median server time.
 | first counts, same grant again, 1% to 100% (ms) | 13.8 to 27.6 | 13.4 to 16.8 | 11.6 to 16.9 | 12.7 to 18.6 | 14.5 to 24.5 |
 | settled, new grant, 85% (ms) | 370.7 | 374.7 | 427.0 | 502.7 | 946.5 |
 | layers, new grant, 100% (ms) | 235.5 | 234.5 | 294.3 | 374.1 | 835.7 |
-| figures walks in the run | 20 | 40 | 160 | 640 | 2,560 |
+| figures walks in the run, four grants at five levels | 20 | 40 | 160 | 640 | 2,560 |
 | region count, `/v1/aggregate`, median of 92 (ms) | 1.9 | 1.8 | 2.5 | 5.2 | 17.8 |
 | points' last byte, zooms 1 to 4, 100% (ms) | 247.4 | 249.1 | 327.4 | 417.0 | 487.9 |
 | `/readyz` after start (s) | 4.0 | 4.0 | 5.0 | 10.7 | 22.6 |
 | anonymous memory at `/readyz` (GiB) | 0.92 | 1.01 | 1.41 | 2.57 | 7.47 |
 | peak resident memory after the run (GiB) | 2.46 | 2.42 | 2.89 | 4.11 | 9.29 |
 | build, wall (s) | 68 | 68 | 82 | 107 | 233 |
+| build, user CPU (s) | 95 | 97 | 109 | 136 | 273 |
 | build, peak resident (GiB) | 2.61 | 2.60 | 2.52 | 2.48 | 2.54 |
 | bundle (GB) | 2.001 | 2.007 | 2.020 | 2.050 | 2.132 |
 
@@ -193,8 +204,7 @@ kept here. Each fix is on main at e54c2c6a6, which the figures above measure.
 | a viewport's tiles sorted once per request, and a shard's empty runs passed over in one search (9d087a32c) | a hot request's tile-range stage took 3, 5, 18, 69 and 280 ms at N = 1, 2, 8, 32 and 128 (commit); a hot viewport took 14.4 to 15.0 times one shard's at N = 32 and 52 to 54.5 times at 128, zooms 6 and 12 | about 2 ms at every N to 128 (commit); 0.85 to 1.07 times at N = 32 |
 | a level's figures held as one sum per grant over every shard (dc31a60c3, d5235879a, 3c872b11a) | held per grant and shard, each dense over the level: one grant's level 4 at 128 shards came to 1.3 GB, past the cache's bound, so every repeat read every shard's entry back from disc (commit); the second session's first counts, 100%, took 6.85 times one shard's at N = 32 and 18.3 times at 128 | 12.1 MB held at N = 32 and 128 for the level against 11.1 MB at one (sharding plan §3.6); 0.67 and 0.89 times |
 | the key filter read in order at open, and a batch asking for the filter pages it lacks (dd78dddd5, d6ae4b00d, 7a9234c65) | a cold open of a 2²⁶ run at 10 bits took 2.0 s; a batch of 10,000 absent keys over a cold filter 1.1 s | 35 ms and 27 ms ([key filter probe](../2026-10-22-key-filter-bits/README.md), Table 5) |
-| a compaction of one shard drops another shard's column only where it pairs with that shard's rewritten members (f68d0ec40) | a growth in shard 1, a compaction of shard 0 and a restart served shard 1's level without the growth | the level is composed again on first use; `crates/mosaica-engine/tests/several_shards.rs` |
-| a column behind its level is completed per artifact through another shard's compaction (5f8beddd5, ed2a5ca50) | another shard's column behind its slice was dropped and composed again on disc and in memory | completed against the members its shard's base holds |
+| another shard's row-major column kept through a compaction while it is behind its level, and completed per artifact (5f8beddd5 and ed2a5ca50, superseding f68d0ec40) | a compaction of one shard writes every shard's member packs again. A column written before its slice last moved was completed against the new pack, where the joins since already read as held: a growth in shard 1, a compaction of shard 0 and a restart served shard 1's level without the growth. f68d0ec40 removed such a column from the manifest and composed the level again on first use, which also composed again columns that lacked nothing | a row-major column and its member file stand behind the level's versions and never ahead (`DerivedExtent::stands` in `crates/mosaica-store/src/manifest.rs`), and the reader completes the column per artifact, counting the members with a row in its shard's base (sharding plan §4.7); `crates/mosaica-engine/tests/several_shards.rs` |
 
 The bench's replay (f1991291f, b1ee9b915) came from the same round. Without it the client asks each
 bundle for different work, since each build draws a new `mosaica_id` key and a tile's points are
@@ -221,6 +231,6 @@ No read ran on these bundles.
 - `runs/geonames-<N>/bench.json`: the interactive bench at each N, with `build-time.txt`,
   `bundle-bytes.txt` and `load.txt`. `runs/geonames-reference.json` is the reference run.
 - The battery's JSON, about 4.2 MB a count, is not kept here. It is at
-  `data/stage7/reads/geonames-<N>/battery.json` for N = 1, 2, 8 and 32, with each count's logs. `collate.py` over `runs/` prints the bench's
-  figures and "–" for the battery's.
+  `data/stage7/reads/geonames-<N>/battery.json` for N = 1, 2, 8 and 32, with each count's logs.
+  `collate.py` over `runs/` prints the bench's figures and "–" for the battery's.
 - `runs/treeoflife-<N>/`: the Tree of Life builds' `build-time.txt` and `bundle-bytes.txt`.

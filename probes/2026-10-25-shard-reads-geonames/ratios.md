@@ -1,3 +1,8 @@
+A cold row at N ≥ 2 does not measure a read from disc: the battery's eviction left the
+server's pages resident at N = 2 and 8, and for most samples at 32 (README.md). Rows where fewer
+than 90% of a condition's samples took a major fault show "–". A cold text search counts as cold
+on a single major fault, so its rows at N ≥ 2 do not compare with one shard's either.
+
 | figure | N=1 | N=2 | N=8 | N=32 | N=128 |
 |---|---:|---:|---:|---:|---:|
 | first_viewport.1% | 42.6 ms | 0.96 | 1.96 | 3.48 | – |
@@ -185,65 +190,65 @@
 | text.matches.common.hot | 42.9 ms | 0.86 | 1.00 | 1.07 | – |
 | text.matches.rare.cold | 60.4 ms | 0.83 | 0.92 | 1.20 | – |
 | text.matches.rare.hot | 37.3 ms | 0.91 | 1.01 | 1.08 | – |
-| viewport.1%.z00.cold | 52.0 ms | – | – | 0.39 | – |
-| viewport.1%.z00.cold_pages_warm_engine | 49.6 ms | – | – | 0.40 | – |
+| viewport.1%.z00.cold | 52.0 ms | – | – | – | – |
+| viewport.1%.z00.cold_pages_warm_engine | 49.6 ms | – | – | – | – |
 | viewport.1%.z00.hot | 19.1 ms | 0.94 | 0.87 | 0.90 | – |
-| viewport.1%.z03.cold | 14.8 ms | 0.33 | 0.31 | 0.29 | – |
-| viewport.1%.z03.cold_pages_warm_engine | 10.0 ms | – | – | 0.38 | – |
+| viewport.1%.z03.cold | 14.8 ms | – | – | – | – |
+| viewport.1%.z03.cold_pages_warm_engine | 10.0 ms | – | – | – | – |
 | viewport.1%.z03.hot | 3.5 ms | 0.98 | 0.97 | 0.93 | – |
-| viewport.1%.z06.cold | 11.0 ms | – | – | 0.40 | – |
-| viewport.1%.z06.cold_pages_warm_engine | 5.2 ms | – | – | 0.59 | – |
+| viewport.1%.z06.cold | 11.0 ms | – | – | – | – |
+| viewport.1%.z06.cold_pages_warm_engine | 5.2 ms | – | – | – | – |
 | viewport.1%.z06.hot | 2.7 ms | 1.02 | 1.00 | 0.99 | – |
-| viewport.1%.z09.cold | 11.1 ms | – | – | 0.41 | – |
-| viewport.1%.z09.cold_pages_warm_engine | 5.1 ms | – | – | 0.58 | – |
+| viewport.1%.z09.cold | 11.1 ms | – | – | – | – |
+| viewport.1%.z09.cold_pages_warm_engine | 5.1 ms | – | – | – | – |
 | viewport.1%.z09.hot | 2.7 ms | 0.98 | 0.97 | 0.97 | – |
-| viewport.1%.z12.cold | 11.0 ms | – | – | 0.42 | – |
-| viewport.1%.z12.cold_pages_warm_engine | 5.3 ms | – | – | 0.56 | – |
+| viewport.1%.z12.cold | 11.0 ms | – | – | – | – |
+| viewport.1%.z12.cold_pages_warm_engine | 5.3 ms | – | – | – | – |
 | viewport.1%.z12.hot | 2.6 ms | 1.04 | 1.02 | 1.01 | – |
 | viewport.100%.z00.cold | 81.3 ms | – | – | 0.60 | – |
 | viewport.100%.z00.cold_pages_warm_engine | 74.9 ms | – | – | 0.54 | – |
 | viewport.100%.z00.hot | 36.5 ms | 0.94 | 0.96 | 1.06 | – |
-| viewport.100%.z03.cold | 29.3 ms | – | – | 0.57 | – |
-| viewport.100%.z03.cold_pages_warm_engine | 13.2 ms | – | – | 0.38 | – |
+| viewport.100%.z03.cold | 29.3 ms | – | – | – | – |
+| viewport.100%.z03.cold_pages_warm_engine | 13.2 ms | – | – | – | – |
 | viewport.100%.z03.hot | 4.5 ms | 0.92 | 0.89 | 0.95 | – |
-| viewport.100%.z06.cold | 75.5 ms | – | – | 1.32 | – |
-| viewport.100%.z06.cold_pages_warm_engine | 5.3 ms | – | – | 0.62 | – |
+| viewport.100%.z06.cold | 75.5 ms | – | – | – | – |
+| viewport.100%.z06.cold_pages_warm_engine | 5.3 ms | – | – | – | – |
 | viewport.100%.z06.hot | 2.8 ms | 0.98 | 0.98 | 1.04 | – |
-| viewport.100%.z09.cold | 75.4 ms | – | – | 1.32 | – |
-| viewport.100%.z09.cold_pages_warm_engine | 5.2 ms | – | – | 0.64 | – |
+| viewport.100%.z09.cold | 75.4 ms | – | – | – | – |
+| viewport.100%.z09.cold_pages_warm_engine | 5.2 ms | – | – | – | – |
 | viewport.100%.z09.hot | 2.8 ms | 0.99 | 0.98 | 1.04 | – |
-| viewport.100%.z12.cold | 76.0 ms | – | – | 1.31 | – |
-| viewport.100%.z12.cold_pages_warm_engine | 5.4 ms | – | – | 0.59 | – |
+| viewport.100%.z12.cold | 76.0 ms | – | – | – | – |
+| viewport.100%.z12.cold_pages_warm_engine | 5.4 ms | – | – | – | – |
 | viewport.100%.z12.hot | 2.8 ms | 1.03 | 1.01 | 1.07 | – |
 | viewport.7%.z00.cold | 54.9 ms | – | – | 0.37 | – |
 | viewport.7%.z00.cold_pages_warm_engine | 52.5 ms | – | – | 0.37 | – |
 | viewport.7%.z00.hot | 18.0 ms | 1.01 | 1.00 | 1.01 | – |
-| viewport.7%.z03.cold | 16.1 ms | – | 0.40 | 0.32 | – |
-| viewport.7%.z03.cold_pages_warm_engine | 10.5 ms | – | – | 0.39 | – |
+| viewport.7%.z03.cold | 16.1 ms | – | – | – | – |
+| viewport.7%.z03.cold_pages_warm_engine | 10.5 ms | – | – | – | – |
 | viewport.7%.z03.hot | 3.7 ms | 0.95 | 0.94 | 0.85 | – |
-| viewport.7%.z06.cold | 14.8 ms | – | – | 0.61 | – |
-| viewport.7%.z06.cold_pages_warm_engine | 5.2 ms | – | – | 0.58 | – |
+| viewport.7%.z06.cold | 14.8 ms | – | – | – | – |
+| viewport.7%.z06.cold_pages_warm_engine | 5.2 ms | – | – | – | – |
 | viewport.7%.z06.hot | 2.7 ms | 1.05 | 0.99 | 1.02 | – |
-| viewport.7%.z09.cold | 14.8 ms | – | – | 0.60 | – |
-| viewport.7%.z09.cold_pages_warm_engine | 5.1 ms | – | – | 0.58 | – |
+| viewport.7%.z09.cold | 14.8 ms | – | – | – | – |
+| viewport.7%.z09.cold_pages_warm_engine | 5.1 ms | – | – | – | – |
 | viewport.7%.z09.hot | 2.6 ms | 1.05 | 1.00 | 1.02 | – |
-| viewport.7%.z12.cold | 15.7 ms | – | – | 0.57 | – |
-| viewport.7%.z12.cold_pages_warm_engine | 5.7 ms | – | – | 0.54 | – |
+| viewport.7%.z12.cold | 15.7 ms | – | – | – | – |
+| viewport.7%.z12.cold_pages_warm_engine | 5.7 ms | – | – | – | – |
 | viewport.7%.z12.hot | 3.0 ms | 0.90 | 0.88 | 0.88 | – |
 | viewport.85%.z00.cold | 82.5 ms | – | – | 0.48 | – |
 | viewport.85%.z00.cold_pages_warm_engine | 79.7 ms | – | – | 0.43 | – |
 | viewport.85%.z00.hot | 37.2 ms | 0.90 | 0.87 | 0.88 | – |
-| viewport.85%.z03.cold | 25.7 ms | – | 0.90 | 0.62 | – |
-| viewport.85%.z03.cold_pages_warm_engine | 12.0 ms | – | – | 0.42 | – |
+| viewport.85%.z03.cold | 25.7 ms | – | – | – | – |
+| viewport.85%.z03.cold_pages_warm_engine | 12.0 ms | – | – | – | – |
 | viewport.85%.z03.hot | 4.3 ms | 0.96 | 0.90 | 0.90 | – |
-| viewport.85%.z06.cold | 65.3 ms | – | – | 1.28 | – |
-| viewport.85%.z06.cold_pages_warm_engine | 5.5 ms | – | – | 0.58 | – |
+| viewport.85%.z06.cold | 65.3 ms | – | – | – | – |
+| viewport.85%.z06.cold_pages_warm_engine | 5.5 ms | – | – | – | – |
 | viewport.85%.z06.hot | 3.0 ms | 0.91 | 0.92 | 0.98 | – |
-| viewport.85%.z09.cold | 65.5 ms | – | – | 1.27 | – |
-| viewport.85%.z09.cold_pages_warm_engine | 5.7 ms | – | – | 0.59 | – |
+| viewport.85%.z09.cold | 65.5 ms | – | – | – | – |
+| viewport.85%.z09.cold_pages_warm_engine | 5.7 ms | – | – | – | – |
 | viewport.85%.z09.hot | 3.0 ms | 0.89 | 0.88 | 0.94 | – |
-| viewport.85%.z12.cold | 65.4 ms | – | – | 1.28 | – |
-| viewport.85%.z12.cold_pages_warm_engine | 5.4 ms | – | – | 0.62 | – |
+| viewport.85%.z12.cold | 65.4 ms | – | – | – | – |
+| viewport.85%.z12.cold_pages_warm_engine | 5.4 ms | – | – | – | – |
 | viewport.85%.z12.hot | 3.0 ms | 0.92 | 0.92 | 1.00 | – |
 
 | figure | N=1 | N=2 | N=8 | N=32 | N=128 |

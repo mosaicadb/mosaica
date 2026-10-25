@@ -3,10 +3,11 @@
     python3 collate.py <out dir> <corpus> [<shard count> ...]
 
 The interactive bench's figures are its medians, by measurement name, and the median of its
-`/v1/aggregate` requests' times. The battery's are, per
-principal, condition and zoom, the median over its cells of each cell's median server time; then
-the text searches. A shard count without a battery.json shows only the bench's figures, and "–"
-in the battery's rows. A second table gives the build's and the server's figures as measured.
+`/v1/aggregate` requests' times. The battery's are, per principal, condition and zoom, the median
+over its cells of each cell's median server time; then the text searches. A cold condition's row is
+"–" where fewer than COLD_FLOOR of its samples took a major fault, the battery's proof that a sample
+read from disc. A shard count without a battery.json shows only the bench's figures, and "–" in the
+battery's rows. A second table gives the build's and the server's figures as measured.
 """
 
 import json
@@ -14,6 +15,15 @@ import re
 import statistics
 import sys
 from pathlib import Path
+
+#: The share of a cold condition's samples that must have taken a major fault for its row to show.
+COLD_FLOOR = 0.9
+
+NOTE = """A cold row at N ≥ 2 does not measure a read from disc: the battery's eviction left the
+server's pages resident at N = 2 and 8, and for most samples at 32 (README.md). Rows where fewer
+than 90% of a condition's samples took a major fault show "–". A cold text search counts as cold
+on a single major fault, so its rows at N ≥ 2 do not compare with one shard's either.
+"""
 
 
 def bench(path: Path) -> dict[str, float]:
@@ -46,12 +56,21 @@ def battery(path: Path) -> dict[str, float]:
     out: dict[str, float] = {}
     for rung in b["ladder"]:
         cells: dict[str, list[float]] = {}
+        proven: dict[str, list[int]] = {}
         for cell in rung["cells"]:
             for cond, c in cell["conditions"].items():
+                key = f"z{cell['zoom']:02d}.{cond}"
+                if c.get("proven_cold") is not None:
+                    tally = proven.setdefault(key, [0, 0])
+                    tally[0] += c["proven_cold"]
+                    tally[1] += c["n_samples"]
                 p50 = c["server_ms"]["p50"]
                 if p50 is not None:
-                    cells.setdefault(f"z{cell['zoom']:02d}.{cond}", []).append(p50)
+                    cells.setdefault(key, []).append(p50)
         for key, values in cells.items():
+            cold, samples = proven.get(key, (1, 1))
+            if cold < COLD_FLOOR * samples:
+                continue
             out[f"viewport.{rung['target']:.0%}.{key}"] = statistics.median(values)
         out[f"first_viewport.{rung['target']:.0%}"] = rung["first_viewport_server_ms"]
     walk_conditions("text", b["text_and_drilldown"], out)
@@ -104,6 +123,7 @@ def main() -> None:
         for n in counts
     }
     base = figures[counts[0]]
+    print(NOTE)
     print("| figure | " + " | ".join(f"N={n}" for n in counts) + " |")
     print("|---|" + "---:|" * len(counts))
     for name in sorted(base):
