@@ -1,271 +1,109 @@
 # Access control
 
-A viewer presents a credential once and receives a token. The token names the authorised set:
-everything that credential's terms admit, computed once at that moment and kept for the session.
-Every later request, panning the map, filtering, or opening an item, composes a visible set from
-the authorised set fresh, against whatever the corpus currently hides, and answers from inside
-that visible set alone.
+Each item carries an access label, and each viewer's session holds a set of terms. A viewer may see the items whose labels their terms satisfy, and every answer they get is computed from those items alone: the points, the counts, the densities, the topics and the breakdowns. This chapter covers how labels are written, where a viewer's terms come from, how a session starts and ends, and what happens to an open session as the data changes. The [security](security.md) chapter sets out what a viewer can and cannot learn.
 
-```mermaid
-sequenceDiagram
-  participant A as your application
-  participant S as session plane
-  participant E as engine
-  participant C as client
+## Access labels
 
-  A->>S: POST /session/authorise (API key, principal)
-  S->>S: resolve the principal's terms<br/>from the catalogue
-  S->>E: authorise(terms)
-  E->>E: build the authorised set from the term index
-  Note over E: kept for the session
-  E-->>S: token
-  S-->>A: token
-  A-->>C: token
-  C->>E: POST /v1/viewport (token, bounds, filters)
-  E->>E: load current corpus state
-  E->>E: authorised set minus hidden items,<br/>then filters applied
-  E->>E: project to row order,<br/>tile ranges, count and sample
-  E-->>C: counts, points, artifacts, labels
-```
+A label is an expression over terms, with `&` for "and" and `|` for "or":
 
-*A session minted through `authorise-as`, to its first answer. A login on the viewer plane takes
-the same path from the catalogue to the engine. Authorising happens once; every later request
-composes against what it produced.*
+| Label | Admits a viewer holding |
+|---|---|
+| `public` | anything: every session holds `public` |
+| `team_a` | `team_a` |
+| `team_a\|team_b` | either term |
+| `secret&(team_a\|team_b)` | `secret`, and either `team_a` or `team_b` |
+| `user:alice\|user:bob` | either term, such as for a document shared with two people |
 
-## Terms and access labels
+An item can carry a list of labels, and admits a viewer who satisfies any one of them. An item given no label takes its view's default, `point_visibility.default`.
 
-An operator declares an access label on each item. A label is an access expression over terms, in
-the grammar Accumulo's visibility labels use, without negation: `secret&(team_a|team_b)`. A term
-is written bare when it consists of ASCII letters, digits and `_ - . : /`, and otherwise in
-double quotes, with `\"` and `\\` as escapes. `&` is conjunction and `|` is disjunction, and mixing
-the two needs brackets: `a&b|c` is refused and `(a&b)|c` is accepted. Unicode whitespace outside
-quotes is ignored, so `secret & ( team_a | team_b )` is the same label; two operands with only
-whitespace between them are refused. A quoted term is taken exactly as written, so `"team a"`
-holds a space. A credential's terms are trimmed, so a quoted term with whitespace at either end
-could never be held, and it is refused where it is written. `public` is reserved, is valid only as
-the whole label, and admits every viewer. A term that equals `public` or `inherited` ignoring
-case, or holds a control character, is refused. An item, a view or an artifact may carry a list
-of labels, and admits a viewer who satisfies any one of them.
+Labels also gate more than items. A view, a view group, an annotation layer and each artifact can carry a label of its own, and a viewer who does not satisfy it is answered as if it did not exist. These labels are checked against the viewer's terms directly, so one can name a term no item carries.
 
-One parser in `mosaica-access` reads every label: an item's access column at a build, the `access`
-of an ingest row, a view's, a group's or a layer's `visibility`, an artifact's own label, and a
-default. The build and a running service call it below both paths, so a label one accepts the
-other accepts, and each stores the label's canonical text: nested operators flattened, operands
-sorted and deduplicated, and absorption applied, so that `b&(a)` is stored as `a&b` and `a|(a&b)`
-as `a`. A label that does not parse refuses the build, or the request that carries it, naming the
-label. A label that is empty after trimming is no label, so a list holding only such labels is an
-item with no label, which takes its view's default.
+Mosaica stores each label in a canonical form, so equivalent labels are the same label: `b&(a)` is stored as `a&b`, and `a|(a&b)` as `a`. The same parser reads labels at a build and at a running server.
 
-A credential resolves to the terms it holds. Each is trimmed, and one that is empty, holds a
-control character or is `public` in any case is dropped. Every session holds `public`.
+??? info "The rules for writing a label"
+    - A term written bare holds ASCII letters, digits and `_ - . : /`. Any other term is written in double quotes, with `\"` and `\\` as escapes, so `"team a"` holds a space.
+    - Mixing `&` and `|` needs brackets: `a&b|c` is refused, and `(a&b)|c` is accepted.
+    - Whitespace outside quotes is ignored. Two terms with only whitespace between them are refused.
+    - `public` is reserved, and may only be the whole label. A term equal to `public` or `inherited` in any case, or holding a control character, is refused. So is a quoted term with whitespace at either end, since a viewer's terms are trimmed and could never hold it.
+    - There is no negation.
+    - A label that does not parse refuses the build, or the request that carries it, naming the label.
 
-### How labels are indexed
+## Where a viewer's terms come from
 
-The term index maps each index key to the items that carry it. An item's labels other than
-`public` are read as one disjunction and normalised as a single label is, so a conjunction that
-another operand absorbs is dropped. Each operand of that disjunction is then indexed on its own.
+Viewers and their access are kept in the identity catalogue, a SQLite database beside the data, which the server holds in memory. It records:
 
-| Operand | Indexed under | Satisfied by a session when |
-|---|---|---|
-| `public` | the term `public`, term 0 in every bundle | always |
-| A term | the term | it holds the term |
-| A conjunction, such as `secret&(team_a\|team_b)` | one key of its own: a byte no term can hold, then the conjunction's canonical text | its terms satisfy the conjunction |
+- **principals**: people and services, with their passwords and API keys;
+- **groups** of principals;
+- **grants**: the terms and permissions given to each principal and group;
+- **OIDC providers** whose access tokens the server accepts, with rules that turn a token's claims into terms, and mappings from a provider's roles to local groups.
 
-The label `a|(b&c)` is indexed under `a` and under the key of `b&c`. An item carrying the list
-`a` and `b&c` is indexed under the same two keys, and so is one carrying `a` and `a&d` and `b&c`,
-since `a` absorbs `a&d`. A disjunction inside a conjunction is not expanded, so
-`secret&(team_a|team_b)` is one key. The items listed under the keys a session satisfies are
-therefore exactly the items whose labels it satisfies. Per-document sharing, where nearly every
-item has a label of its own, produces disjunctions of terms, which never enter the expression
-graph below.
+A principal's terms are those granted to it and to each group it belongs to. An OIDC identity's terms are those its provider's rules produce from the token, together with the terms of each group a role mapping names. The `mosaica` command, the Python and TypeScript `Control` clients and the control routes all manage the catalogue.
 
-Every conjunction indexed under a key of its own is compiled into one shared directed acyclic
-graph. A leaf is a
-term and an inner node is an AND or an OR over its children. Structurally identical
-subexpressions are one node, so `secret` appears once however many conjunctions mention it. The
-graph is derived from the dictionary: it is rebuilt from the conjunctions' keys when a bundle
-opens, and extended
-when a flush promotes new keys, so nothing beside the dictionary stores it. A label holding a
-conjunction is refused when it holds more than 1,024 nodes. A disjunction of terms has no limit.
+Terms say what a principal may see. Permissions say what it may do, and each is granted on its own:
 
-At authorise, the service looks each of the credential's terms up in the dictionary, marks the
-graph's leaves for those terms true and propagates upwards: an OR node becomes true with its first
-true child, and an AND node when every child has. The authorised set is every item listed under
-the credential's terms, under `public`, or under the key of a conjunction whose root became true:
-one bitmap over item identity, the whole of what that credential grants, independent of any later
-request. The pass visits only the nodes reachable from the credential's terms. A conjunction's key
-starts with a control character, which a credential's terms cannot hold, so no credential names
-one directly.
+| Permission | Allows |
+|---|---|
+| `read` | starting a session for itself, and reading within its terms |
+| `read-all` | with `read`, a session that sees every item and satisfies every label |
+| `write` | inserting, deleting, suppressing and annotating, within its own terms |
+| `write-all` | with `write`, writing anywhere, declaring and dropping, flushes and compactions |
+| `authorise-as` | starting a session for another principal |
+| `admin` | changing the catalogue |
 
-Each term is indexed in its own item list, and only conjunctions, which term lists cannot express,
-go through the graph. Authorise runs once per session, so its cost is paid at session start and
-never by a map request.
-
-A view's, a group's, a layer's and an artifact's own labels are evaluated against the credential's
-terms directly, so a label no item carries is still one a credential can satisfy.
-
-The terms a session holds come from the identity catalogue
-([getting a token](#getting-a-token)): those granted to its principal and to the principal's
-groups, those an OIDC provider's claim rules produce, or, for a session the operator credential
-mints, the terms the operator names.
-
-A dictionary is sized for at most 200,000,000 index keys, and a flush that would carry it past
-that is refused. An item is expected to carry at most 4,096 keys. One past that is indexed with
-every key and reported, since dropping a key would change who can see it, and a resource limit
-must not produce an authorisation decision.
+`admin` implies neither `read` nor `write`, so an account that manages users can be one that sees nothing.
 
 ## Getting a token
 
-A viewer's terms and permissions come from the identity catalogue, a SQLite database outside the
-bundle that holds local principals, their password hashes and API keys, groups, the terms and
-permissions granted to each, and the OIDC providers whose access tokens the service accepts. The whole catalogue is held in memory,
-and no request reads SQLite.
+A session starts in one of three ways, and each gives the viewer a token: a random string that carries nothing of its own. The terms it stands for stay on the server.
 
-A session is minted in one of three ways.
+- **The viewer logs in.** `POST /v1/login`, at the viewer address, takes a password, an API key or an OIDC access token. The session holds the principal's terms, and its `read`, `write`, `read-all` and `write-all`.
+- **Your server starts a session for the viewer.** `POST /session/authorise`, at the session address, takes an API key whose principal holds `authorise-as`, and names the principal to act as: a local one by name, or an OIDC identity by its access token. The session holds that principal's terms and its `read` and `write`, and never its other permissions. The session address takes a key that can act as any viewer, so it is a listener of its own, reached only by your server.
+- **The operator names the terms.** With the operator credential, the session address can also start a session holding exactly a list of terms, belonging to no principal, or a session that sees everything.
 
-- **At login.** `POST /v1/login` on the viewer plane takes a password, an API key or an OIDC
-  access token. A password is checked with argon2id, and failed attempts are limited per name
-  presented. An API key is found by its public prefix and its secret compared by SHA-256 in
-  constant time. An access token's signature is checked against a key its provider publishes at
-  its JWKS URL, then its issuer, audience, `exp` and `nbf`; only asymmetric algorithms are
-  accepted, and a token whose `typ` header names something other than a JWT or an access token
-  (`at+jwt`) is refused. An OpenID Connect ID token usually carries `typ: JWT`, so the audience
-  check is what refuses it: its `aud` is the client's id, not the API's. A token that more than
-  one provider with its issuer accepts is refused. A provider's keys are fetched again after an
-  hour; when that fetch fails, the keys held are used until they are 24 hours old, and then the
-  provider's tokens are refused until a fetch succeeds. Every reason a credential is refused
-  answers the same `401`. Password checks have an admission limit of their own, about one per
-  core, and past it are answered `429` whether or not the name exists. The session carries the principal's `read`, `write`, `read-all`
-  and `write-all`.
-- **Through `authorise-as`.** `POST /session/authorise` on the session plane takes an API key
-  whose principal holds `authorise-as`, and names the principal to act as: a local principal by
-  name, or an OIDC identity whose access token the integrator's backend passes on. The session
-  carries the target's terms and its `read` and `write`, and never its `admin`, `authorise-as`,
-  `read-all` or `write-all`. The session plane is a listener separate from the viewer plane,
-  because its key acts as any viewer and belongs to the integrator's backend, never to a browser.
-- **With the operator credential.** On the session plane the operator credential may also name a
-  set of terms, `{"terms": [...]}`, for a session holding exactly those terms and `read` and
-  belonging to no principal, or ask for `{"read_all": true}`, a session of the superuser itself
-  holding `read` and `read-all`. An API key may use neither form.
+One token covers every view the deployment serves. A refused credential is always answered with the same `401`, whatever the reason.
 
-A local principal's terms are those granted to it and to each group it belongs to. An OIDC
-identity's terms are those its provider's claim rules produce from the token's claims, together
-with the terms of each local group a role mapping names. The principal must hold `read`. The
-service hands the engine the resolved terms, and the engine builds the authorised set from them.
+??? info "How credentials are checked"
+    - **Passwords** are checked with argon2id. Failed attempts are limited per name, and password checks run about one per core at a time. Past that, they are answered `429`, whether or not the name exists.
+    - **API keys** are found by their public prefix, and their secret compared by SHA-256 in constant time.
+    - **OIDC access tokens** are checked against the keys their provider publishes, then their issuer, audience, `exp` and `nbf`. Only asymmetric algorithms are accepted. An ID token is refused, since its audience is the client's, not the API's. A provider's keys are fetched again every hour; if that fails, the keys held are used for up to 24 hours.
 
-A session holding `read-all` holds no terms. It satisfies every index key, including a key
-promoted after it was authorised, so its authorised set is every item listed under any key in the
-term index or its delta tiers: every item, since a build and an ingest each refuse an item that
-would have no label. The engine rebuilds that set at each publication, as it brings every
-session's set forward, so an item a flush places under a new term or a new label joins the set
-when that publication reaches the session, and the session is never behind the dictionary. The
-set is cached under the bundle, the rule and the watermark, so every `read-all` session at one
-watermark shares one copy. The overlay is subtracted from it at each request as from any other, so a deletion or
-a suppression applies to it. It satisfies every view's, group's, layer's and artifact's own label
-and every layer's default label, as a session holding every term would. An artifact's membership
-requirement still applies, and its members and counts are computed from the visible set. The item
-card and the `labels` column name what a session holding every term is shown: each term among
-the operands of the item's labels, and one clause of each conjunction among them.
+Mosaica checks OIDC access tokens. It does not run a sign-in itself: your application runs the provider's sign-in page and passes the token on. Not built yet: OIDC sign-in in the clients.
 
-A token is a bearer string: unguessable, random, valid until its session ends. It carries no
-claims of its own and nothing that would let a holder work out its terms without asking the
-server; the terms it resolved to, and the authorised set they produced, stay on the server,
-matched to the token by a private table.
+## When a session ends
 
-Building the authorised set costs work proportional to how many terms it unions and how large they
-are, so it is built for each shard when a session first reads it and kept in a cache, in memory
-and on disc, so a later session skips the union. The cache key is the set of index keys the
-session satisfies, together with the shard's identity, the identity of the rule that turns terms
-into keys and a watermark on the shard, so two principals whose terms satisfy the same keys share
-one cache entry.
+A session ends at the first of these:
 
-One token covers every view a deployment serves: a session's terms are resolved once, and every
-view a later request names is answered against the same authorised set.
+- `token_max_lifetime` after it started;
+- the expiry of the API key it was started with, or the `exp` of its access token;
+- a change to the catalogue that could change what it may see or do: a grant or a membership changed, the principal disabled or deleted, a password set or cleared, its key revoked, or its provider's rules changed. A change that widens access ends sessions too, so they pick it up;
+- `POST /v1/logout`, `POST /session/revoke`, or an administrator ending it.
 
-A session ends at the earliest of these:
+A request with an ended session's token is answered `403 expired-token`, and the client starts a new session.
 
-- `token_max_lifetime` after it was minted;
-- the expiry of the API key that authenticated or minted it;
-- the `exp` of the access token that authenticated it;
-- a catalogue change that could change what authorised it: a term or permission granted to or
-  revoked from its principal or a group the principal belongs to, a membership changed, the
-  principal disabled or deleted, a password set or cleared, the key revoked, or the provider, its
-  rules or mappings, or a group one of its mappings names, changed. A change that widens access
-  ends the sessions too;
-- `POST /v1/logout`, `POST /session/revoke`, or an administrator ending it on the control plane.
+## When the data changes under an open session
 
-A change commits to the catalogue, then ends the sessions it affects, under the lock a session is
-registered under. A session is registered only if the catalogue is still at the generation its
-terms were resolved at, so no session outlives a change that was committed while it was being
-minted. An ended session's token is answered `403 expired-token`, and the client authorises again.
+| Change | What an open session sees |
+|---|---|
+| An item is deleted or suppressed, or a suppression is lifted | The change applies from the session's next request |
+| New items under terms the session holds are flushed | They appear once the server has brought the session's state up to date, usually by its next request. Until then it is answered from the previous version |
+| The session's own access changes in the catalogue | The session ends |
 
-**Not built yet:** an audit log of authorisations, refused authentications and catalogue changes.
+!!! note "Terms new to the database need a new session"
+    A session sees an item only under terms and conjunctions the database already held when the session started. If a flush brings in a term the session holds but no item carried before, the session sees those items only once it starts again. It sees fewer items than its terms admit, never more, and nothing tells the client. A session that sees everything is not affected.
 
-**Not built yet:** partitions, each holding its own term index, and a router that fans a
-credential's terms out to every one it may reach. A deployment runs one process against one store,
-so an authorised set is built against the whole corpus's term index in a single pass.
+## How labels are indexed
 
-## What a request answers from
+A session's start does the work that access control needs, once:
 
-The authorised set is fixed at authorise, but the corpus is not. Items are deleted, suppressed, or
-unsuppressed continuously, and a suppression has to apply to every session immediately, including
-ones that authorised before it happened. So a request does not read the authorised set on its own:
-it composes the authorised set against the overlay, the record of every item currently hidden by a
-delete or a suppression, at the moment the request is made. The result is the visible set. An item
-the overlay covers is removed from the visible set even though the authorised set still names it.
-An item the overlay has stopped covering, because an unsuppress lifted it, is no longer subtracted,
-and so is visible again.
+- Each term has a list of the items that carry it. An item's labels are read as one "or", and each part is listed on its own: `a|(b&c)` is listed under `a` and under `b&c`.
+- When a session starts, the server unions the lists for the session's terms, and for every conjunction its terms satisfy, into one bitmap of what the session may see. Conjunctions are kept in one shared graph, so the check visits only what the session's terms reach.
 
-A request loads one generation, one version of the corpus published as a whole, once, at the start, and answers entirely from what it
-names: the tiles, the columns and the overlay a request reads all come from that one generation. A
-filter then narrows which of the visible set is drawn or counted, and can only remove from it,
-never add to it ([queries](queries.md#filters)).
+Sessions whose terms satisfy the same lists share one result, kept in memory and on disc, so most sessions start without doing the union again. Labels that only join terms with `|`, as per-user sharing does with labels such as `user:alice|user:bob`, are lists alone and add nothing to the graph. Each user then has a grant of their own, whose first request pays the cost [serving](serving.md#what-the-server-keeps-ready) describes.
 
-Composing the visible set touches only the items a session's authorised set could ever contain,
-not the whole corpus, so the work stays cheap on every request even though the overlay itself can
-grow without bound. What is cached across requests is not the visible set, which changes with the
-overlay on every one, but the authorised set's projection from item identity into the row order a
-view stores its geometry in. That projection is cached per grant, view and shard, shared by every
-session with the same grant, and extended forward as new rows are written; a request applies the
-overlay to the cached projection as a difference rather than rebuilding either from scratch.
+A label with a conjunction may hold at most 1,024 parts. An item is expected to carry at most 4,096 listed labels. One with more is listed under all of them and reported, since dropping one would change who can see it.
 
-## When the corpus changes under a live session
+## Not built yet
 
-| Change | Effect on an open session | How |
-|---|---|---|
-| An item is deleted, suppressed, or unsuppressed | Applies on the session's very next request | The overlay is read fresh at composition, every time |
-| A flush publishes new rows for a term the session already holds | A session already served the view sees them once the background refresh has reached its grant, usually by its next request; until then it is served the previous generation's answer, which is still correct. A session's first read in a view is answered at the live generation | A background pass rebuilds the cached projection for every resident grant at each geometry publication; a session whose grant has no resident entry rebuilds on its next request instead |
-| A grant, membership, password, key or provider behind the session changes | The session ends, and its next request is answered `403 expired-token` | There is no partial update to the authorised set. The catalogue reports which principals, keys and providers a change affects, and the server ends their sessions; a new token picks up the change |
-
-**Not built yet:** adding to an open session a term it holds that the dictionary did not carry
-at authorise, or a conjunction that a flush promoted after it and that the
-session's terms satisfy. The session sees fewer items than its terms admit until it authorises
-again, never more. A `read-all` session is the exception: it satisfies every key, whenever the key
-was promoted. The engine can tell whether a session is behind in this way, from the keys
-promoted since it authorised, but nothing outside its tests asks. **Not built yet:** a signal to
-the client when this happens; nothing on the wire announces it. A client that wants to stay
-current has to re-authorise on its own schedule, bounded only by the token's configured lifetime.
-The signal that does exist on the wire is a `403 expired-token` refusal once a token has expired
-or been revoked; a corpus change on its own produces no such refusal.
-
-## The identity key
-
-The `mosaica_id` a client holds for an item is derived from the item's
-[entity id](security.md#a-client-never-sees-an-entity-id) by a keyed permutation
-([security](security.md#a-client-never-sees-an-entity-id) covers what that hides). The key is
-drawn at random by `mosaica build` each time it creates a bundle and is stored in the bundle's
-manifest. Nobody configures, supplies or changes it. A rebuild creates a new bundle with a new key,
-so every `mosaica_id` changes, and one from the old bundle does not name an item in the new one.
-The change takes effect on the restart that loads the new bundle. A client holding `mosaica_id`s
-from the old bundle reads its items again, by a unique field's values or afresh.
-
-## Where this is tested and where it lives
-
-The grammar, normalisation, the rules for a declared or a held label and the expression graph
-live in `mosaica-access`, which depends on no other crate of the workspace. The index keys an
-item's labels give it, the term index, authorised-set construction and the on-disk cache live in
-`mosaica-authz`. Session composition
-against the overlay, the row-space projection it feeds, and the background refresh that keeps a
-resident projection current live in `mosaica-engine`. The catalogue lives in `mosaica-catalogue`.
-Login, the session plane, OIDC token checks, the session registry that ends sessions on a
-catalogue change, and the catalogue's verbs on the control plane live in `mosaica-server`.
+- **An audit log** of sessions started, credentials refused and catalogue changes.
+- **Adding newly seen terms to an open session**, or telling the client that it is behind.
+- **OIDC sign-in in the clients.**
