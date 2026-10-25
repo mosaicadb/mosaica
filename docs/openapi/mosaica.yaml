@@ -7669,7 +7669,7 @@ components:
         views:
           type: array
           items: { type: string }
-          description: The views the layer is drawn on. A view group's name stands for every view the group holds at registration.
+          description: The views the layer is drawn on. A view group's name stands for every view the group holds, and for each view created in it later.
         membership:
           description: "Where artifacts get their members: `enumerated`, a stored set per artifact; `spatial`, the items inside the artifact's shape; `{\"attribute\": \"<column>\"}`, the items carrying each value of an attribute."
           oneOf:

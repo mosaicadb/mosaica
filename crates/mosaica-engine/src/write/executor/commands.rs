@@ -931,25 +931,10 @@ impl Executor {
         };
         self.live.with_roster(|roster| roster.apply(&record));
         self.publish_roster(&generation, started, &[]);
-        self.follow_groups();
         // Durable in the log and not yet in a manifest, and a rotation reclaims the log: so the
         // roster reaches `SEGMENTS-<n>.json` on the mechanism a deny already uses.
         self.side_manifests.behind_live = true;
         reply.ack(false);
-    }
-
-    /// Draw each layer that named a view group on the views the group holds in the generation
-    /// just published, after a view of a group was created or dropped. Nothing is appended: the
-    /// views follow from the roster, which the log already holds, and a replay draws them again.
-    fn follow_groups(&mut self) {
-        let generation = self.generation.load_full();
-        let group = mosaica_store::manifest::group_views(&generation.bundle.manifest.groups);
-        if self
-            .live
-            .with_registry(|registry| registry.follow_groups(&group))
-        {
-            self.side_manifests.behind_live = true;
-        }
     }
 
     /// `PUT /control/attributes`: declare an attribute column while the service runs.
@@ -1500,7 +1485,6 @@ impl Executor {
         }
         self.live.with_roster(|roster| roster.apply(&record));
         self.publish_roster(&generation, started, &ids);
-        self.follow_groups();
         if !targets.is_empty() {
             self.apply_changes(
                 targets
@@ -1544,6 +1528,12 @@ impl Executor {
             .bundle
             .manifest
             .with_roster(&created, &tombstones);
+        // Each layer naming a view group is drawn on the views the group holds in this
+        // publication, before it is published, so no request sees a view without its layers.
+        // Nothing is appended: the views follow from the roster, and a replay draws them again.
+        self.live.with_registry(|registry| {
+            registry.follow_groups(mosaica_store::manifest::group_views(&manifest.groups))
+        });
         let bundle = generation.bundle.with_views(manifest);
         let shards: Vec<(
             ShardId,
