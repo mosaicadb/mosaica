@@ -3,8 +3,6 @@
 # `01_getting_started.ipynb` beside it is generated from this file, and is not edited by hand:
 #
 #     marimo export ipynb clients/py/examples/01_getting_started.py -o clients/py/examples/01_getting_started.ipynb
-#
-# Each pair of `--8<--` markers names a section for the docs site to include.
 
 import marimo
 
@@ -51,11 +49,9 @@ def _(mo):
 
     In a virtual environment, install the package with the notebook map, pandas and JupyterLab:
 
-    <!-- --8<-- [start:install] -->
     ```bash
     pip install "mosaica[widget]" pandas jupyterlab
     ```
-    <!-- --8<-- [end:install] -->
 
     `mosaica` is the Python package. It brings the Mosaica server with it, compiled for your
     platform, so you don't need Rust or a separate install. The `[widget]` part adds the map.
@@ -93,12 +89,10 @@ def _():
 
 @app.cell
 def _(geonames):
-    # --8<-- [start:read]
     import pandas as pd
 
     places = pd.read_parquet(geonames / "points.parquet", dtype_backend="numpy_nullable")
     places.head()
-    # --8<-- [end:read]
     return (places,)
 
 
@@ -123,11 +117,9 @@ def _(mo):
 
 @app.cell
 def _():
-    # --8<-- [start:create]
     import mosaica
 
     db = mosaica.create()
-    # --8<-- [end:create]
     return (db,)
 
 
@@ -149,7 +141,6 @@ def _(mo):
 
 @app.cell
 def _(db, places):
-    # --8<-- [start:declare]
     db.declare_view("world", projection="web_mercator")
     db.declare_columns(
         places,
@@ -157,7 +148,6 @@ def _(db, places):
         render=["feature_class"],
         index=["name", "division", "population"],
     )
-    # --8<-- [end:declare]
     return
 
 
@@ -206,9 +196,7 @@ def _(mo):
 
 @app.cell
 def _(db, places):
-    # --8<-- [start:insert]
     db.insert("world", places, lon="lon", lat="lat")
-    # --8<-- [end:insert]
     return
 
 
@@ -227,9 +215,7 @@ def _(mo):
 
 @app.cell
 def _(db):
-    # --8<-- [start:commit]
     db.commit()
-    # --8<-- [end:commit]
     return
 
 
@@ -252,9 +238,7 @@ def _(mo):
 
 @app.cell
 def _(db):
-    # --8<-- [start:map]
     db.map(colour_by="feature_class")
-    # --8<-- [end:map]
     return
 
 
@@ -283,10 +267,8 @@ def _(mo):
 
 @app.cell
 def _(db):
-    # --8<-- [start:filter]
     big = db.view("world").filter({"population": {"range": {"gte": 1_000_000}}})
     big.count()
-    # --8<-- [end:filter]
     return (big,)
 
 
@@ -304,9 +286,7 @@ def _(mo):
 
 @app.cell
 def _(big):
-    # --8<-- [start:filter-map]
     big.map(colour_by="feature_class")
-    # --8<-- [end:filter-map]
     return
 
 
@@ -327,9 +307,7 @@ def _(mo):
 
 @app.cell
 def _(db):
-    # --8<-- [start:search]
     db.view("world").filter({"name": {"match": "san"}}).count()
-    # --8<-- [end:search]
     return
 
 
@@ -349,12 +327,10 @@ def _(mo):
 
 @app.cell
 def _(db):
-    # --8<-- [start:counts]
     (by_class,) = db.aggregate(
         "world", [{"by": {"field": "feature_class", "top": 9}, "count": True}]
     )
     by_class.to_pandas()
-    # --8<-- [end:counts]
     return
 
 
@@ -382,18 +358,14 @@ def _(mo):
 
 @app.cell
 def _(db):
-    # --8<-- [start:outlier]
     nusa_tenggara = db.view("world").filter({"division": {"eq": "East Nusa Tenggara, Indonesia"}})
     nusa_tenggara.count()
-    # --8<-- [end:outlier]
     return (nusa_tenggara,)
 
 
 @app.cell
 def _(nusa_tenggara):
-    # --8<-- [start:outlier-map]
     nusa_tenggara.map(colour_by="feature_class")
-    # --8<-- [end:outlier-map]
     return
 
 
@@ -410,10 +382,8 @@ def _(mo):
 
 @app.cell
 def _(nusa_tenggara):
-    # --8<-- [start:outlier-find]
     region = nusa_tenggara.items(["geonameid", "name", "lon", "lat"]).to_pandas()
     region.sort_values("lon").head()
-    # --8<-- [end:outlier-find]
     return
 
 
