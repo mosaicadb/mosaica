@@ -43,6 +43,7 @@ exclude_docs: |
   /README.md
   /writing.md
   /sharding.md
+  /dev/
   /pytest.ini
   /tests/
   /openapi/templates/

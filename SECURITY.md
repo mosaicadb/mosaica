@@ -4,7 +4,7 @@ Report a suspected vulnerability through GitHub's private vulnerability reportin
 tab of this repository. Do not open a public issue.
 
 Mosaica computes every count, density, cluster, label and sample over the records the requesting
-viewer is permitted to see. [docs/system/security.md](docs/system/security.md) is the threat model
+viewer is permitted to see. [docs/dev/threat-model.md](docs/dev/threat-model.md) is the threat model
 and states what the system claims. A report is most useful when it names the claim that is broken.
 
 The defects the threat model covers:

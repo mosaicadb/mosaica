@@ -13,7 +13,7 @@ under Compose.
 
 Inside the server every item has an internal number, which never leaves it. A browser gets a
 `mosaica_id` instead, which is the internal number scrambled with a key. The [security
-chapter](../system/security.md#a-client-never-sees-an-entity-id) explains why. `mosaica build`
+chapter](../system/security.md#what-is-guaranteed) explains why. `mosaica build`
 draws a new random key each time it creates a bundle and stores it in the bundle, where the server
 reads it. You never see or supply the key.
 

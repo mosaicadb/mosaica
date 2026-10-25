@@ -48,7 +48,7 @@ reformatted files the change did not touch.
 comments and tests. [docs/system/overview.md](docs/system/overview.md) describes the system and
 [docs/writing.md](docs/writing.md) is the style for prose, in British spelling. A change that
 alters what a viewer can see must keep every claim in
-[docs/system/security.md](docs/system/security.md).
+[docs/dev/threat-model.md](docs/dev/threat-model.md), the threat model.
 
 ## Proposing a change
 

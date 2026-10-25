@@ -399,7 +399,7 @@ leaves the server, because a viewer who collected a few of them could estimate h
 they aren't allowed to see. Browsers get a `mosaica_id` for each place instead. It's the internal
 number scrambled with a secret key, which the build makes up at random and keeps inside the bundle.
 There is nothing for you to set up. The [security
-chapter](../system/security.md#a-client-never-sees-an-entity-id) explains what the scrambling
+chapter](../system/security.md#what-is-guaranteed) explains what the scrambling
 hides and what it doesn't. Each build makes a new key, so building again gives every place a new
 `mosaica_id`, and any `mosaica_id` a viewer had saved will no longer point at the same place.
 

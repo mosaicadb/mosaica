@@ -30,7 +30,7 @@ Nothing is deployed, so there is no backwards compatibility: change a format and
 
 ## The security boundary
 
-[docs/system/security.md](docs/system/security.md) is the threat model. The mistakes a reasonable-looking change most often makes:
+[docs/dev/threat-model.md](docs/dev/threat-model.md) is the threat model, and [docs/system/security.md](docs/system/security.md) its published summary. The mistakes a reasonable-looking change most often makes:
 
 - Computing an aggregate over the whole dataset and then filtering it. Every count, histogram and cluster is computed from inside the viewer's visible set.
 - Sampling before masking. A viewer with few visible items then gets a blank map and no error.
