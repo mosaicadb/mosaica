@@ -28,7 +28,7 @@ use mosaica_wire::{
 };
 
 use crate::error::{map_engine_error, ApiError};
-use crate::state::{ApiJson, AppState, GatePermits, ViewerSession};
+use crate::state::{ApiJson, AppState, ViewerSession};
 use crate::stream::{CancelGuard, Producer};
 use crate::viewer::FilterParser;
 
@@ -128,10 +128,6 @@ pub(crate) struct Opening {
 /// The engine's [`RecordsSink`]: the head to the handler, then each page as a records frame and a
 /// page end. The engine's batches carry `mosaica_id` and the named columns only.
 pub(crate) struct FrameSink {
-    /// Held until the last frame is queued: a bulk read computes for its whole length. Declared
-    /// before `producer` so it drops first, and the slot is free before the client can see the
-    /// response end.
-    _permits: GatePermits,
     pub(crate) producer: Producer<Opening>,
     compression: RecordsCompression,
     /// The head's name for the count before the filter: `visible` items, `served` artifacts.
@@ -140,19 +136,6 @@ pub(crate) struct FrameSink {
     pub(crate) start: Instant,
     /// A batch the IPC writer refused, for the log; the engine sees only a closed sink.
     unwritable: Option<arrow::error::ArrowError>,
-}
-
-impl FrameSink {
-    /// Frees the slot, then answers the waiting handler with the refusal.
-    fn refuse(self, e: ApiError) {
-        let FrameSink {
-            _permits: permits,
-            mut producer,
-            ..
-        } = self;
-        drop(permits);
-        producer.refuse(e);
-    }
 }
 
 impl RecordsSink for FrameSink {
@@ -233,7 +216,7 @@ pub(crate) enum Lane {
 
 /// Admit a paged read on `lane`, run `read` on a blocking thread under the stream deadline, and
 /// answer with its head once the engine sends one. `read` answers the engine's trailer, or its
-/// refusal, and the view it read for the log. The permits are held until the response ends.
+/// refusal, and the view it read for the log. The producer holds the permits; see [`Producer`].
 pub(crate) async fn bulk_read(
     state: Arc<AppState>,
     session: Arc<mosaica_engine::Session>,
@@ -269,12 +252,12 @@ pub(crate) async fn bulk_read(
     let timer = AbortOnDrop(timer.abort_handle());
 
     let (producer, pending) = crate::stream::channel(
+        permits,
         cancel_guard,
         Duration::from_millis(state.limits.stream_write_stall_ms),
         None,
     );
     let mut sink = FrameSink {
-        _permits: permits,
         producer,
         compression: match compression {
             Some(CompressionReq::Zstd) => RecordsCompression::Zstd,
@@ -288,7 +271,7 @@ pub(crate) async fn bulk_read(
     drop(tokio::task::spawn_blocking(move || {
         let _timer = timer;
         match read(&closure_state, &session, cancel, &mut sink) {
-            Read::Refused(e) => sink.refuse(e),
+            Read::Refused(e) => sink.producer.refuse(e),
             Read::Ran {
                 view,
                 outcome,
@@ -321,8 +304,7 @@ pub(crate) enum Read {
     },
 }
 
-/// The trailer, or a refusal while nothing is committed, or an aborted body after the head. The
-/// bulk-read permits release when `sink` drops at the end, before the body can end.
+/// The trailer, or a refusal while nothing is committed, or an aborted body after the head.
 fn finish(
     route: &str,
     view: &str,
@@ -347,7 +329,7 @@ fn finish(
         }
         // Before the head nothing is committed and the handler is waiting, so the refusal keeps
         // its status.
-        Err(e) if !sink.producer.is_open() => sink.refuse(map_engine_error(e)),
+        Err(e) if !sink.producer.is_open() => sink.producer.refuse(map_engine_error(e)),
         // After it the 200 is committed: the body ends without a trailer, which a client reads as
         // incomplete and resumes from the last page end. A client that went away logs nothing.
         Err(e) => {

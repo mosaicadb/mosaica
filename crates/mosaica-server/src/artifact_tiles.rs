@@ -22,7 +22,7 @@ use mosaica_types::GenerationStamp;
 use mosaica_wire::{artifacts_frame, trailer_frame, ArtifactRow};
 
 use crate::error::{map_engine_error, ApiError};
-use crate::state::{ApiJson, AppState, GatePermits, ViewerSession};
+use crate::state::{ApiJson, AppState, ViewerSession};
 use crate::stream::{CancelGuard, Producer};
 use crate::viewer::{
     check_extent, distinct_tiles, layer_names, layer_selection, layers_named, level_numbers,
@@ -81,8 +81,6 @@ struct Opening {
 struct WireSink {
     head: Option<ViewportArtifactsHead>,
     producer: Producer<Opening>,
-    /// Held until the response ends: the walk computes until its last tile.
-    _permits: GatePermits,
     start: Instant,
     arrow_serialise_ns: u64,
     rows: u64,
@@ -286,6 +284,7 @@ pub(crate) async fn viewport_artifacts(
     let start = Instant::now();
 
     let (producer, pending) = crate::stream::channel(
+        permits,
         cancel_guard,
         Duration::from_millis(state.limits.stream_write_stall_ms),
         Some(Duration::from_millis(state.limits.stream_deadline_ms)),
@@ -293,7 +292,6 @@ pub(crate) async fn viewport_artifacts(
     let sink = WireSink {
         head: None,
         producer,
-        _permits: permits,
         start,
         arrow_serialise_ns: 0,
         rows: 0,

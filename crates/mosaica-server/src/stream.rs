@@ -22,6 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use mosaica_engine::{CancelToken, RegionVerdict, SinkClosed, SinkResult};
 
 use crate::error::ApiError;
+use crate::state::GatePermits;
 
 /// The channel's capacity in frames: one in flight, one built ahead. This bounds what a stalled
 /// client holds beyond hyper's write buffer.
@@ -84,8 +85,12 @@ impl Shed {
 }
 
 /// The producer's half of a stream, moved onto the blocking thread with the engine call. It
-/// answers the handler once, through [`Self::open`] or [`Self::refuse`], then sends frames.
+/// answers the handler once, through [`Self::open`] or [`Self::refuse`], then sends frames. It
+/// holds the request's admission permits and frees them before the client can have its answer:
+/// before a refusal, after the trailer is queued and before the body can end, and on drop before
+/// its sender goes.
 pub(crate) struct Producer<T> {
+    permits: Option<GatePermits>,
     opening: Option<oneshot::Sender<Result<T, ApiError>>>,
     tx: mpsc::Sender<Bytes>,
     /// Signalled by the body each time it takes a frame, which a send waits on while the channel
@@ -115,6 +120,7 @@ pub(crate) struct Opened(StreamBody);
 /// A stream whose sends are refused after `stall` of a full channel, and, with a `deadline`, after
 /// that long from [`Producer::start_deadline`]. `cancel_guard` moves into the body.
 pub(crate) fn channel<T>(
+    permits: GatePermits,
     cancel_guard: CancelGuard,
     stall: Duration,
     deadline: Option<Duration>,
@@ -124,6 +130,7 @@ pub(crate) fn channel<T>(
     let state = Arc::new(AtomicU8::new(RUNNING));
     let room = Arc::new(Room::default());
     let producer = Producer {
+        permits: Some(permits),
         opening: Some(opening_tx),
         tx,
         room: Arc::clone(&room),
@@ -152,6 +159,7 @@ impl<T> Producer<T> {
     /// stream is open.
     pub(crate) fn refuse(&mut self, e: ApiError) {
         if let Some(tx) = self.opening.take() {
+            self.permits = None;
             let _ = tx.send(Err(e));
         }
     }
@@ -229,6 +237,13 @@ impl<T> Producer<T> {
         }
     }
 
+    /// Returns the compute permit once the sweep is done, keeping the slot for the emit phase.
+    pub(crate) fn release_compute(&mut self) {
+        if let Some(permits) = &mut self.permits {
+            permits.release_compute();
+        }
+    }
+
     /// Sends the last frame. The body ends cleanly exactly when it went out.
     pub(crate) fn finish(&mut self, trailer: Vec<u8>) {
         let end = if self.send(trailer).is_ok() {
@@ -236,12 +251,21 @@ impl<T> Producer<T> {
         } else {
             ABORTED
         };
+        self.permits = None;
         self.state.store(end, Ordering::SeqCst);
     }
 
     /// Ends the body by cutting the connection, after an error mid-body.
-    pub(crate) fn abort(&self) {
+    pub(crate) fn abort(&mut self) {
+        self.permits = None;
         self.state.store(ABORTED, Ordering::SeqCst);
+    }
+}
+
+impl<T> Drop for Producer<T> {
+    fn drop(&mut self) {
+        // Before the sender drops with the other fields, which is what lets the body end.
+        self.permits = None;
     }
 }
 
@@ -428,6 +452,8 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::task::Wake;
 
+    use crate::state::ComputeGate;
+
     struct Wakes(AtomicUsize);
 
     impl Wake for Wakes {
@@ -445,11 +471,56 @@ mod tests {
         (polled, wakes.0.load(Ordering::SeqCst) > 0)
     }
 
+    /// A stream holding a permit of `gate`, whose sends give up after `stall`.
+    fn stream_on(gate: &ComputeGate, stall: Duration) -> (Producer<()>, Pending<()>) {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let (permits, _) = runtime.block_on(gate.admit()).expect("the gate has room");
+        channel::<()>(permits, CancelGuard::new(CancelToken::new()), stall, None)
+    }
+
     fn opened_stream() -> (Producer<()>, StreamBody) {
-        let guard = CancelGuard::new(CancelToken::new());
-        let (mut producer, pending) = channel::<()>(guard, Duration::from_secs(1), None);
+        let (mut producer, pending) =
+            stream_on(&ComputeGate::for_bulk_reads(1), Duration::from_secs(1));
         producer.open(()).expect("the opening is received");
         (producer, pending.body)
+    }
+
+    /// A refusal, a trailer or a cut leaves the producer with its slot already free, so a client
+    /// that has its answer and sends again at once is admitted, however long the producer lives
+    /// on.
+    #[test]
+    fn the_slot_is_free_once_the_client_can_have_its_answer() {
+        let gate = ComputeGate::for_bulk_reads(1);
+        let in_flight = |gate: &ComputeGate| gate.status().in_flight;
+
+        let (mut producer, mut pending) = stream_on(&gate, Duration::from_secs(1));
+        assert_eq!(in_flight(&gate), 1);
+        producer.refuse(ApiError::Unknown("no such view".into()));
+        assert!(
+            matches!(pending.opening.try_recv(), Ok(Err(_))),
+            "the refusal is sent"
+        );
+        assert_eq!(in_flight(&gate), 0, "a refusal frees the slot");
+
+        let (mut producer, pending) = stream_on(&gate, Duration::from_secs(1));
+        producer.open(()).expect("the opening is received");
+        producer.finish(b"trailer".to_vec());
+        assert_eq!(in_flight(&gate), 0, "a trailer frees the slot");
+        drop((producer, pending));
+
+        let (mut producer, pending) = stream_on(&gate, Duration::from_secs(1));
+        producer.open(()).expect("the opening is received");
+        producer.abort();
+        assert_eq!(in_flight(&gate), 0, "a cut frees the slot");
+        drop((producer, pending));
+
+        let (producer, pending) = stream_on(&gate, Duration::from_secs(1));
+        drop(producer);
+        assert_eq!(in_flight(&gate), 0, "a dropped producer frees the slot");
+        drop(pending);
     }
 
     /// A body's end wakes the connection polling it, so a server that buffers the end and
@@ -479,9 +550,9 @@ mod tests {
     /// falls against its send, rather than waiting out its stall budget.
     #[test]
     fn a_dropped_body_stops_a_waiting_send_at_once() {
+        let gate = ComputeGate::for_bulk_reads(1);
         for _ in 0..2_000 {
-            let guard = CancelGuard::new(CancelToken::new());
-            let (mut producer, pending) = channel::<()>(guard, Duration::from_secs(5), None);
+            let (mut producer, pending) = stream_on(&gate, Duration::from_secs(5));
             producer.open(()).expect("the opening is received");
             for _ in 0..CHANNEL_FRAMES {
                 producer.send(vec![0]).expect("the channel has room");

@@ -25,7 +25,7 @@ use mosaica_engine::{
 
 use crate::error::{map_engine_error, ApiError};
 use crate::health::{healthz, readyz};
-use crate::state::{ApiJson, ApiQuery, AppState, GatePermits, ViewerSession};
+use crate::state::{ApiJson, ApiQuery, AppState, ViewerSession};
 use crate::stream::{CancelGuard, Producer};
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -842,7 +842,6 @@ struct WireSink {
     head: Option<ViewportHead>,
     /// The stream; its whole-stream deadline starts at the first flush.
     producer: Producer<FirstFlush>,
-    permits: GatePermits,
     /// Taken after admission and before spawning, so blocking-pool wait counts in `server_us`.
     start: Instant,
     /// Whether [`Self::points`] writes the `(mosaica_id, highlighted)` frame where a chunk carries
@@ -880,9 +879,8 @@ impl ViewportSink for WireSink {
         }
         self.arrow_serialise_ns += serialise_start.elapsed().as_nanos() as u64;
 
-        // The sweep is done, so the compute permit goes back now; the slot permit is held until
-        // the producer returns.
-        self.permits.release_compute();
+        // The sweep is done, so the compute permit goes back now; the producer keeps the slot.
+        self.producer.release_compute();
         self.producer.start_deadline();
 
         let head = self.head.as_ref().expect("head precedes counts");
@@ -1003,7 +1001,7 @@ impl<'a> FilterParser<'a> {
 
 /// The producer: the engine call and frame serialisation, run on a blocking thread for the whole
 /// stream. It answers the handler once (an error before the first flush, or the first flush) and
-/// then sends frames; the permits release when `sink` drops at the end.
+/// then sends frames.
 fn run_viewport_stream(
     state: &AppState,
     session: &mosaica_engine::Session,
@@ -1148,7 +1146,7 @@ fn run_viewport_stream(
             sink.producer.abort();
         }
     }
-    // `sink` drops here, after the state stores, releasing the channel sender and the slot permit.
+    // `sink` drops here, after the state stores, releasing the channel sender.
 }
 
 /// Refuses a request's extent unless it names a depth of at most 16 and exactly one of a valid
@@ -1277,6 +1275,7 @@ async fn viewport(
     // only the first flush; a producer panic shows as a 500 or, later, as a body abort. Only a
     // clone of `cancel` moves in; the guard keeps the original.
     let (producer, pending) = crate::stream::channel(
+        gate_permits,
         cancel_guard,
         Duration::from_millis(state.limits.stream_write_stall_ms),
         Some(Duration::from_millis(state.limits.stream_deadline_ms)),
@@ -1284,7 +1283,6 @@ async fn viewport(
     let sink = WireSink {
         head: None,
         producer,
-        permits: gate_permits,
         start,
         // Set from the request inside the producer.
         highlight_rows: false,
