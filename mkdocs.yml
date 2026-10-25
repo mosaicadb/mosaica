@@ -114,6 +114,7 @@ nav:
       - start/index.md
       - Install and configure: start/install.md
       - Your first map from files: start/first-map.md
+      - Your first map in Python: start/python.md
   - How it works:
       - Overview: system/overview.md
       - Data model: system/data-model.md
