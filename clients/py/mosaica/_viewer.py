@@ -847,7 +847,7 @@ class Selection:
         """The interactive map of this selection, as a notebook widget.
 
         It opens on this view with this selection's filters applied, framed on its box if it
-        has one.
+        has one and otherwise on where its items are.
 
         - `colour_by`: the column to colour points by, or `"cluster:<layer>"` to colour them by
           the clusters of that layer.

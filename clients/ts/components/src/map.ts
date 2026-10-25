@@ -11,7 +11,7 @@ import {
   type SelectionShape
 } from '@mosaicajs/client';
 import {assertCompositionMatchesServed, chosenColour, hasValue} from '@mosaicajs/client/internal';
-import {DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DensityCounter, MosaicaLayer, densityCountAt, resolvePick, viewInputOf, type Picked, type ResolutionStop} from '@mosaicajs/deck';
+import {DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DensityCounter, MosaicaLayer, cameraFitting, densityCountAt, frameMatches, resolvePick, viewInputOf, type Picked, type ResolutionStop} from '@mosaicajs/deck';
 import {DENSITY_COLOUR_TITLES, MarkSlab, artifactOfMark, clusterLayerOf, contourShapes, drawnLevel, densityStops, drawnCells, encodingOf, encodingSignature, hoverAt, maxCount, type ContourShape} from '@mosaicajs/deck/internal';
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import type {PaletteName, Quantisation, Rgba} from '@mosaicajs/client';
@@ -106,17 +106,20 @@ let mapsMade = 0;
  * The map: the points, the density wash, the artifacts' outlines and labels, hover, pick and the
  * selection, drawn with deck.gl in an orthographic view. The refused, expired and empty states, and
  * a server that cannot be reached or did not answer, are drawn over the canvas, so none of them
- * reads as an empty corpus. The toolbar switches between
- * pan, box select and lasso select, and fits the whole extent; shift-drag in pan mode draws a box.
+ * reads as an empty corpus. The toolbar switches between pan, box select and lasso select, and
+ * fits the camera to the items the filters match; shift-drag in pan mode draws a box.
  * A settled box or lasso becomes the store's selection, a filter every count narrows to; a tag on
  * its top-left corner gives the count matched inside it and a button that clears it.
  *
- * The map owns the camera and tells the store where it is looking on every move. It starts on the
- * whole extent, fitted as the Fit button fits it, unless the camera was moved before `meta`. Density is asked
- * for once the camera has rested for 200 ms, as counts by cell over the view and a margin round
- * it, with coarser counts reaching further for a zoom out, and the last counts are drawn at their
- * own positions until the next land. Keys, with the
- * map focused: the arrow keys pan, `+` and `-` zoom, and Escape cancels a shape being drawn, else
+ * The map owns the camera and tells the store where it is looking on every move. When it is given
+ * a store, and when the store switches to a view with another extent, it opens framed on the items
+ * the store's filters match, as the Fit button frames them ({@link MosaicaMap.fit}). It sends the
+ * store no camera until then, so no points are fetched for a camera it is about to leave. A camera
+ * the user or the host moves first is kept, and a later change of filter leaves the camera where
+ * it is. Density is asked for once the camera has rested for 200 ms, as counts by cell over the
+ * view and a margin round it, with coarser counts reaching further for a zoom out, and the last
+ * counts are drawn at their own positions until the next land. Keys, with the map focused: the
+ * arrow keys pan, `+` and `-` zoom, and Escape cancels a shape being drawn, else
  * clears the selected region, else drops the picked point or artifact and its ring. A press hides
  * the hover tooltip until the pointer is released. The canvas is one tab stop, after the toolbar
  * and before the content of the other corners: it carries `role="application"`, the `tabindex`
@@ -640,10 +643,20 @@ export class MosaicaMap extends MosaicaElement {
       this.finalizeTimer = null;
     }
     if (this.measure) this.startFrameLoop();
+    if (this.frameOnConnect) {
+      this.frameOnConnect = false;
+      if (this.clientWidth > 0 && this.clientHeight > 0) void this.fit();
+      else this.pushView();
+    }
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    // A camera is not sent for a map off the page; the framing starts again when it is back.
+    if (this.framing) {
+      this.cancelFraming();
+      this.frameOnConnect = true;
+    }
     this.askPointColumns(null);
     if (this.describeTimer !== null) {
       clearTimeout(this.describeTimer);
@@ -822,7 +835,8 @@ export class MosaicaMap extends MosaicaElement {
       : null;
     this.slab.clear();
     this.metaSeen = false;
-    // A new store's view starts on its whole extent, as the first did.
+    // A new store opens framed on its matches, as the first did.
+    this.cancelFraming();
     this.cameraSet = false;
     this.selectedWorldXY = null;
     this.pickedAt = null;
@@ -850,8 +864,9 @@ export class MosaicaMap extends MosaicaElement {
     if (!s) return;
     if (!this.metaSeen && s.get('meta')) {
       this.metaSeen = true;
-      // A camera no one has moved starts on the whole extent, where the map has a size to fit.
-      if (!this.cameraSet && this.clientWidth > 0 && this.clientHeight > 0) this.fit();
+      // A camera no one has moved opens on the matches, where the map has a size to fit them in,
+      // or once it is back on the page.
+      if (!this.cameraSet && (!this.isConnected || (this.clientWidth > 0 && this.clientHeight > 0))) void this.fit();
       else this.pushView();
     }
     const view = s.get('view');
@@ -862,11 +877,15 @@ export class MosaicaMap extends MosaicaElement {
       this.hover = null;
       this.hoveredArtifact = null;
     }
-    // A switch to another frame refits; a switch within a group, whose views share a frame, keeps
-    // the camera. Compared on every change rather than on a new view id, so the refit does not
-    // need the id and extent to change together. Before the first camera, `cameraFrame` is null.
+    // A switch to another frame frames the matches in it; a switch within a group, whose views
+    // share a frame, keeps the camera. Compared on every change rather than on a new view id, so
+    // the refit does not need the id and extent to change together. Before the first camera,
+    // `cameraFrame` is null.
     const frame = s.frame();
-    if (frame && this.cameraFrame && !sameFrame(frame, this.cameraFrame)) this.fit();
+    if (frame && this.cameraFrame && !sameFrame(frame, this.cameraFrame)) {
+      this.cameraFrame = frame;
+      void this.fit();
+    }
     const status = s.get('status');
     const p = this.probe;
     p.view = {
@@ -1032,6 +1051,7 @@ export class MosaicaMap extends MosaicaElement {
       onViewStateChange: ({viewState}) => {
         const v = viewState as {target: number[]; zoom: number};
         this.cameraSet = true;
+        this.cancelFraming();
         this.viewState = {...this.viewState, target: [v.target[0]!, v.target[1]!, 0], zoom: v.zoom};
         this.deck?.setProps({viewState: this.viewState});
         // The tooltip names what was under the pointer before the move.
@@ -1392,6 +1412,7 @@ export class MosaicaMap extends MosaicaElement {
 
   private setViewState(next: Partial<ViewState>): void {
     this.cameraSet = true;
+    this.cancelFraming();
     this.viewState = {...this.viewState, ...next};
     this.deck?.setProps({viewState: this.viewState});
     this.pushView();
@@ -1453,13 +1474,39 @@ export class MosaicaMap extends MosaicaElement {
     return this.viewState.zoom;
   }
 
+  /** The framing asked for and not yet applied; a camera move cancels it. */
+  private framing: AbortController | null = null;
+  /** Whether the map frames the matches when it is next connected: it left the page with a framing pending. */
+  private frameOnConnect = false;
+
   /**
-   * Fit the whole extent into the map's narrower axis, at 92% of it, so the points at the extent's
-   * edges and their labels stay on screen.
+   * Frame the items the store's filters and selected region match: the box {@link frameMatches}
+   * gives, which holds every one of them, fitted to 92% of the map along the side that limits it.
+   * Where nothing matches, or the server refuses the count, the whole extent is fitted instead.
+   * The camera moves once the count lands, unless it is moved before then. A map off the page
+   * frames once it is back on it. Resolves when the camera has moved or the framing was cancelled.
    */
-  fit(): void {
+  async fit(): Promise<void> {
+    const s = this.resolvedStore;
+    if (!s) return;
+    this.cancelFraming();
+    if (!this.isConnected) {
+      this.frameOnConnect = true;
+      return;
+    }
+    const asked = new AbortController();
+    this.framing = asked;
+    const box = await frameMatches(s, {signal: asked.signal});
+    if (this.framing !== asked || this.resolvedStore !== s) return;
+    this.framing = null;
     const {width, height} = this.size;
-    this.setViewState({target: [WORLD_SIZE / 2, WORLD_SIZE / 2, 0], zoom: Math.log2((0.92 * Math.min(width, height)) / WORLD_SIZE)});
+    this.setViewState(cameraFitting(box ?? [0, 0, WORLD_SIZE, WORLD_SIZE], width, height));
+  }
+
+  private cancelFraming(): void {
+    this.framing?.abort();
+    this.framing = null;
+    this.frameOnConnect = false;
   }
 
   /**
@@ -1492,12 +1539,7 @@ export class MosaicaMap extends MosaicaElement {
     const [x0, y0] = dataToWorldXY(extent[0], extent[1], q);
     const [x1, y1] = dataToWorldXY(extent[2], extent[3], q);
     const {width, height} = this.size;
-    const bw = Math.abs(x1 - x0) || 1;
-    const bh = Math.abs(y1 - y0) || 1;
-    this.setViewState({
-      target: [(x0 + x1) / 2, (y0 + y1) / 2, 0],
-      zoom: Math.min(MAX_DEPTH, Math.log2(Math.min(width / bw, height / bh)) - 0.3)
-    });
+    this.setViewState(cameraFitting([Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)], width, height, 2 ** -0.3));
     return true;
   }
 
@@ -1615,7 +1657,7 @@ export class MosaicaMap extends MosaicaElement {
           <button type="button" aria-label="Pan" aria-pressed=${this.mode === 'pan'} title="Pan (shift-drag selects)" @click=${() => (this.mode = 'pan')}>${icon('pan', 16, 1.2)}</button>
           <button type="button" aria-label="Box select" aria-pressed=${this.mode === 'box'} title="Box select" @click=${() => (this.mode = 'box')}>${icon('box', 16, 1.2)}</button>
           <button type="button" aria-label="Lasso select" aria-pressed=${this.mode === 'lasso'} title="Lasso select" @click=${() => (this.mode = 'lasso')}>${icon('lasso', 16, 1.2)}</button>
-          <button type="button" aria-label="Fit to extent" title="Fit to extent" @click=${() => this.fit()}>${icon('fit', 16, 1.2)}</button>
+          <button type="button" aria-label="Fit to matches" title="Fit to matches" @click=${() => void this.fit()}>${icon('fit', 16, 1.2)}</button>
         </div>`;
     const slots = {
       'top-left': html`<slot name="top-left"></slot>`,

@@ -6,7 +6,7 @@ import '../src/item-card.js';
 import '../src/map.js';
 import '../src/explorer.js';
 import type {MosaicaItemCard} from '../src/item-card.js';
-import {deep, deepAll, deepText, fakeStore, mount, settle, status, type FakeStore, meta, scalar} from './fake-store.js';
+import {aggregateEntry, answerAggregate, deep, deepAll, deepText, fakeStore, mount, settle, status, type FakeStore, meta, scalar} from './fake-store.js';
 
 /**
  * What the two view pickers, the map and the item card draw and call, against the fake store. The
@@ -261,6 +261,9 @@ describe('<mosaica-map> at a switch', () => {
     const before = pushes(store);
     store.setFrame(m.views.find((v) => v.id === 'world:2026-Q2')!.quantisation);
     store.set('view', {...store.get('view'), id: 'world:2026-Q2'});
+    await settle(host);
+    // The camera moves once the matches in the new view are counted.
+    answerAggregate(store, 'frame#', aggregateEntry([{rows: []}], 'world:2026-Q2'));
     await settle(host);
     expect(pushes(store)).toBeGreaterThan(before);
     expect(el.hover).toBeNull();

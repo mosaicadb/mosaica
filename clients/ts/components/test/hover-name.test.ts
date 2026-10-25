@@ -186,7 +186,7 @@ describe('the map in the tab order', () => {
     const {el} = await map([]);
     const root = (el as unknown as HTMLElement).shadowRoot!;
     const stops = [...root.querySelectorAll<HTMLElement>('button, [tabindex]')].filter((e) => e.tabIndex >= 0).map((e) => e.getAttribute('part') ?? e.getAttribute('aria-label'));
-    expect(stops).toEqual(['Pan', 'Box select', 'Lasso select', 'Fit to extent', 'canvas']);
+    expect(stops).toEqual(['Pan', 'Box select', 'Lasso select', 'Fit to matches', 'canvas']);
     expect((el as unknown as HTMLElement).tabIndex).toBe(-1);
     (el as unknown as HTMLElement).focus();
     expect(root.activeElement?.getAttribute('part')).toBe('canvas');

@@ -2,18 +2,20 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {DENSITY_SETTLE_MS} from '@mosaicajs/deck';
 import '../src/explorer.js';
 import type {MosaicaMap} from '../src/map.js';
-import {aggregateEntry, answerAggregate, fakeStore, meta, mount, settle, status} from './fake-store.js';
+import {aggregateEntry, answerAggregate, fakeStore, meta, mount, settle, status, type FakeStore} from './fake-store.js';
 
 /**
  * Density's colour scale through the elements: the map's `density-scale`, the explorer's Scale
  * choice under Resolution and what it reports, and the figures the map's key shows for each scale.
  */
 
-/** A map 1000 × 800 px, fitted, so its camera has rested somewhere the counter can ask about. */
-function sized(map: MosaicaMap): void {
+/** A map 1000 × 800 px, fitted where nothing matches, so its camera has rested somewhere the counter can ask about. */
+async function sized(map: MosaicaMap, store: FakeStore): Promise<void> {
   Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
   Object.defineProperty(map, 'clientHeight', {configurable: true, value: 800});
-  map.fit();
+  const fitted = map.fit();
+  answerAggregate(store, 'frame#', aggregateEntry([{rows: []}], store.get('view').id));
+  await fitted;
 }
 
 /** The figures under the density key's ramp, left to right. */
@@ -38,7 +40,7 @@ describe('density scale', () => {
     const store = fakeStore({meta: meta(), status: status({})});
     map.store = store;
     await settle(host);
-    sized(map);
+    await sized(map, store);
     vi.advanceTimersByTime(DENSITY_SETTLE_MS);
     const before = keyFigures(map);
     answerAggregate(store, 'density#', aggregateEntry([{rows: counts.map((count, i) => ({cell: BigInt(i), count}))}], store.get('view').id));

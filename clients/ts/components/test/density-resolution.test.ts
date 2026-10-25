@@ -3,7 +3,7 @@ import type {AggregateSpec} from '@mosaicajs/client';
 import {DENSITY_SETTLE_MS, cellDepth} from '@mosaicajs/deck';
 import '../src/explorer.js';
 import type {MosaicaMap} from '../src/map.js';
-import {fakeStore, meta, mount, registered, settle, status, type FakeStore} from './fake-store.js';
+import {aggregateEntry, answerAggregate, fakeStore, meta, mount, registered, settle, status, type FakeStore} from './fake-store.js';
 import {SELECTION} from '../../core/test/support.js';
 
 /**
@@ -12,11 +12,16 @@ import {SELECTION} from '../../core/test/support.js';
  * offers only the sizes the server will count, and reports what it set.
  */
 
-/** A map 1000 × 800 px wide, fitted, so the whole 512-unit world is 800 px across at zoom log2(800 / 512). */
-function sized(map: MosaicaMap): number {
+/**
+ * A map 1000 × 800 px wide, fitted where nothing matches, so the whole 512-unit world is 92% of
+ * 800 px across.
+ */
+async function sized(map: MosaicaMap, store: FakeStore): Promise<number> {
   Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
   Object.defineProperty(map, 'clientHeight', {configurable: true, value: 800});
-  map.fit();
+  const fitted = map.fit();
+  answerAggregate(store, 'frame#', aggregateEntry([{rows: []}], store.get('view').id));
+  await fitted;
   return map.zoom;
 }
 
@@ -35,7 +40,7 @@ describe('density resolution', () => {
     map.store = store;
     await settle(host);
     expect(map.densityResolution).toBe(8);
-    const zoom = sized(map);
+    const zoom = await sized(map, store);
     expect(depthsAsked(store)).toEqual([]);
     vi.advanceTimersByTime(DENSITY_SETTLE_MS);
     expect(depthsAsked(store)).toEqual([cellDepth(zoom, 8)]);
@@ -59,7 +64,7 @@ describe('density resolution', () => {
     await settle(host);
     const shadow = el.shadowRoot!;
     const map = shadow.querySelector('mosaica-map') as MosaicaMap;
-    sized(map);
+    await sized(map, store);
     shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
     await settle(host);
     expect(map.densityStops().map((s) => [s.px, s.enabled])).toEqual([
@@ -108,7 +113,7 @@ describe('density resolution', () => {
     const store = fakeStore({meta: meta(), status: status({})});
     map.store = store;
     await settle(host);
-    sized(map);
+    await sized(map, store);
     vi.advanceTimersByTime(DENSITY_SETTLE_MS);
     const specs = () => store.calls.filter((c) => c.name === 'setAggregate' && String(c.args[0]).startsWith('density#')).map((c) => c.args[1] as AggregateSpec | null);
     expect(specs().map((s) => s?.highlighted)).toEqual([true]);

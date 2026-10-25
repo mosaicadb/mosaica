@@ -1,7 +1,8 @@
-import {describe, expect, it} from 'vitest';
-import {composeFilters, type FilterExpr, type FilterOperandSet, type Store} from '@mosaicajs/client';
+import {describe, expect, it, onTestFinished} from 'vitest';
+import {composeFilters, type FilterExpr, type FilterOperandSet, type Store, type ViewInput} from '@mosaicajs/client';
+import {mortonOfTile} from '@mosaicajs/client/internal';
 import {draftOf, initialize, render, stateOf, type KernelMessage, type WidgetModel} from '../src/widget.js';
-import {fakeStore, settle, status, type FakeStore} from './fake-store.js';
+import {aggregateEntry, answerAggregate, fakeStore, settle, status, type FakeStore} from './fake-store.js';
 
 /**
  * The widget's JavaScript half against a fake model and a fake store: the token protocol (never
@@ -324,6 +325,31 @@ describe('the down-sync', () => {
     expect(fitted).toEqual([]);
     store.set('meta', META as never);
     expect(fitted).toEqual([[1, 2, 3, 4]]);
+  });
+
+  it('a bbox stated in the kernel is the opening camera, and the framing of the matches does not move it', async () => {
+    // Every map is 1000 × 800 px, whenever the explorer renders it.
+    const proto = customElements.get('mosaica-map')!.prototype as HTMLElement;
+    Object.defineProperty(proto, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(proto, 'clientHeight', {configurable: true, value: 800});
+    onTestFinished(() => {
+      delete (proto as {clientWidth?: number}).clientWidth;
+      delete (proto as {clientHeight?: number}).clientHeight;
+    });
+    const {store} = setUp({bbox: [0.1, 0.1, 0.2, 0.2]});
+    await settle(document.body);
+    store.set('meta', {...META, selection: {...META.selection, maxAggregateCells: 1_048_576}} as never);
+    store.set('view', {...store.get('view'), id: 's0'});
+    await settle(document.body);
+    answerAggregate(store, 'frame#', aggregateEntry([{rows: [{cell: mortonOfTile(250, 250, 8), count: 9}]}]));
+    await settle(document.body);
+    const cameras = store.calls.filter((c) => c.name === 'setView').map((c) => (c.args[0] as ViewInput).bbox);
+    expect(cameras.length).toBeGreaterThan(0);
+    // The stated box, 0.1 to 0.2 of the unit square, is 51.2 to 102.4 in world units.
+    for (const [x0, y0, x1, y1] of cameras) {
+      expect((x0 + x1) / 2).toBeCloseTo(76.8);
+      expect((y0 + y1) / 2).toBeCloseTo(76.8);
+    }
   });
 
   it('layers null leaves the default and [] is none', () => {

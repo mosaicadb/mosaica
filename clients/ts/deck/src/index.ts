@@ -4,8 +4,8 @@
  * selection. {@link CATEGORY_PALETTES} and {@link RAMPS} are the named colour sets a
  * {@link Colouring} chooses from, and {@link Sizing} the sizes a number column sizes marks
  * between. {@link viewInputOf} turns the host's camera into a view for the store,
- * {@link DensityCounter} keeps the counts density is drawn from, and {@link resolvePick} reads a
- * pick.
+ * {@link DensityCounter} keeps the counts density is drawn from, {@link frameMatches} and
+ * {@link cameraFitting} open the camera on the matched items, and {@link resolvePick} reads a pick.
  *
  * @module @mosaicajs/deck
  */
@@ -36,5 +36,6 @@ export {
   type DensitySettings,
   type ResolutionStop
 } from './density-counter.js';
-export {viewInputOf, type OrthographicCamera} from './camera.js';
+export {cameraFitting, viewInputOf, type OrthographicCamera} from './camera.js';
+export {frameMatches} from './frame.js';
 export {resolvePick, type Picked, type PickInfo} from './pick.js';

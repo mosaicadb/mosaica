@@ -99,7 +99,7 @@ A merge of segments never reaches a client. A compaction reaches it only through
 The store keeps what it has fetched for each view the viewer has visited, so a view they return to is as they left it. All views share one memory budget, and another view's tiles leave before the current view's.
 
 - **Within a view group sharing one layout**, such as a year shown quarter by quarter, a switch keeps the camera and the selection, and asks the next view for the same tiles.
-- **Between layouts**, a switch drops the selection and the camera, since a position in one layout means nothing in another. The host sets a camera for the new view. The components fit it to the view's extent.
+- **Between layouts**, a switch drops the selection and the camera, since a position in one layout means nothing in another. The host sets a camera for the new view. The components frame it on the items the filters match in the new view.
 
 ## What the deck layer and the components add
 

@@ -127,7 +127,8 @@ class Map(anywidget.AnyWidget):
       `"rank"` among a sample of the values the map has drawn. `None` leaves the map's choice,
       linear until one is made.
     - `filters`: a filter expression, as `Selection.filter` takes one.
-    - `bbox`: the box to frame the camera on, as `(min_x, min_y, max_x, max_y)`.
+    - `bbox`: the box to frame the camera on, as `(min_x, min_y, max_x, max_y)`. Without it the
+      map opens framed on where the items `filters` matches are.
     - `height`: the widget's height in pixels in the notebook. The default is 480. While the
       output holding the map is shown full screen, the map fills the screen instead.
     - `explorer_layout`: `"docked"`, the default, puts the controls in a sidebar beside the map;

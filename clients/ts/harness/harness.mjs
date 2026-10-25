@@ -231,7 +231,7 @@ const refusedState = await untilState(['refused', 'expired'], 30_000);
   );
 }
 await page.unroute('**/v1/viewport');
-await page.locator('mosaica-map [part="controls"] button[aria-label="Fit to extent"]').first().click().catch(() => {});
+await page.locator('mosaica-map [part="controls"] button[aria-label="Fit to matches"]').first().click().catch(() => {});
 await untilState(['shown'], 60_000);
 await settled();
 
@@ -293,7 +293,7 @@ await settled();
 // At the overview the world is 512 px, so any cover under the 4,096-tile bound is coarser than a
 // pixel. The box is shift-dragged in pan mode.
 await page.locator('mosaica-map').first().focus();
-await page.locator('mosaica-map [part="controls"] button[aria-label="Fit to extent"]').first().click().catch(() => {});
+await page.locator('mosaica-map [part="controls"] button[aria-label="Fit to matches"]').first().click().catch(() => {});
 await settled();
 const requestsBefore = viewportRequests.length;
 const selectStarted = Date.now();
@@ -384,7 +384,7 @@ const listCounts = async () =>
     })
     .catch(() => ({}));
 
-await page.locator('mosaica-map [part="controls"] button[aria-label="Fit to extent"]').first().click().catch(() => {});
+await page.locator('mosaica-map [part="controls"] button[aria-label="Fit to matches"]').first().click().catch(() => {});
 // The viewer opens with a layer on; on a page with none on, turn the first on for the claims below.
 if ((await page.evaluate(() => window.__mosaicaProbeOf()?.cluster.layersOn.length ?? 0)) === 0) {
   // A minute, since headless swiftshader can block the main thread for 10 to 14 s drawing a

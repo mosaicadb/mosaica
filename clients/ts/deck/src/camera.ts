@@ -1,4 +1,4 @@
-import {type Store, type ViewInput} from '@mosaicajs/client';
+import {MAX_DEPTH, type Store, type ViewInput} from '@mosaicajs/client';
 import {worldBbox} from '@mosaicajs/client/internal';
 
 /** The part of a deck.gl `OrthographicView` view state that {@link viewInputOf} reads. */
@@ -26,4 +26,23 @@ export function viewInputOf(store: Pick<Store, 'frame' | 'dataXY'>, camera: Orth
   const [x0, y0] = store.dataXY(wb[0], wb[1]);
   const [x1, y1] = store.dataXY(wb[2], wb[3]);
   return {bbox: [x0, y0, x1, y1], zoom: camera.zoom, width, height};
+}
+
+/**
+ * The camera that fits a box of the 512-unit world into a canvas: centred on the box, at the zoom
+ * where the box takes `fill` of the canvas along whichever side limits it, and at most
+ * {@link MAX_DEPTH}. The rest of the canvas is the margin round the box.
+ *
+ * @param box - `[x0, y0, x1, y1]` in world units, as {@link frameMatches} gives it.
+ * @param width - The canvas width in CSS pixels.
+ * @param height - The canvas height in CSS pixels.
+ * @param fill - The share of the canvas the box takes, 0.92 unless given.
+ */
+export function cameraFitting(box: readonly [number, number, number, number], width: number, height: number, fill = 0.92): {target: [number, number, number]; zoom: number} {
+  const across = Math.abs(box[2] - box[0]) || 1;
+  const down = Math.abs(box[3] - box[1]) || 1;
+  return {
+    target: [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2, 0],
+    zoom: Math.min(MAX_DEPTH, Math.log2(fill * Math.min(width / across, height / down)))
+  };
 }

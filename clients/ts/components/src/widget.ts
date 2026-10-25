@@ -274,12 +274,14 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   };
   model.on('msg:custom', onCustom);
 
+  // A `bbox` the kernel held when the model was made is fitted as one it sets later is.
+  const stated = model.get('bbox');
   const state: ModelState = {
     supplier: tokenSupplier(model, (cb) => listeners.push(cb)),
     storeFactory,
     views: new Map(),
     active: null,
-    pendingFit: null,
+    pendingFit: Array.isArray(stated) && stated.length === 4 ? (stated as [number, number, number, number]) : null,
     syncingUp: false,
     dispose() {
       for (const v of state.views.values()) teardown(v);
