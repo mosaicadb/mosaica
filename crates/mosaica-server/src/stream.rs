@@ -341,6 +341,9 @@ impl Room {
 
 impl Drop for StreamBody {
     fn drop(&mut self) {
+        // Closed before the producer is woken, so the send it wakes finds the channel closed and
+        // does not wait out its stall budget for a wake that has already come.
+        self.rx.close();
         self.room.took_one();
     }
 }
@@ -470,5 +473,32 @@ mod tests {
         let (end, woke) = poll_once(&mut body);
         assert!(matches!(end, Poll::Ready(Some(Err(_)))), "the body is cut");
         assert!(woke, "a cut end asks to be polled again");
+    }
+
+    /// A producer waiting on a full channel stops as soon as the body is dropped, however the drop
+    /// falls against its send, rather than waiting out its stall budget.
+    #[test]
+    fn a_dropped_body_stops_a_waiting_send_at_once() {
+        for _ in 0..2_000 {
+            let guard = CancelGuard::new(CancelToken::new());
+            let (mut producer, pending) = channel::<()>(guard, Duration::from_secs(5), None);
+            producer.open(()).expect("the opening is received");
+            for _ in 0..CHANNEL_FRAMES {
+                producer.send(vec![0]).expect("the channel has room");
+            }
+            let body = pending.body;
+            let dropping = std::thread::spawn(move || drop(body));
+            let started = Instant::now();
+            assert!(
+                producer.send(vec![0]).is_err(),
+                "a send to a dropped body is refused"
+            );
+            assert!(
+                started.elapsed() < Duration::from_secs(1),
+                "the send waited {:?} for a body already gone",
+                started.elapsed()
+            );
+            dropping.join().unwrap();
+        }
     }
 }

@@ -132,11 +132,12 @@ const column = (tables: Table[], name: string): unknown[] => tables.flatMap((t) 
 /** Each column's name and Arrow type. */
 const typesOf = (table: Table) => table.schema.fields.map((f) => `${f.name}: ${String(f.type)}`);
 
-/** The first page of a read, and the read stopped after it. */
+/** The first page of a read, and the read stopped after it and its slot freed. */
 async function firstPage<Head>(opening: Promise<RecordsRead<Head>>): Promise<Table> {
   const read = await opening;
   const {value} = await read.next();
   await read.return();
+  await lanesFree();
   return value as Table;
 }
 
@@ -190,6 +191,7 @@ describe('bulk reads against a live server', () => {
       first.push(table);
       if (first.length === 5) break;
     }
+    await lanesFree();
     const rest = await items({...request, pages: 2, cursor: stopped.cursor!});
     expect(dump([...first, ...rest.tables])).toEqual(dump(one.tables));
   });
@@ -389,6 +391,7 @@ describe('bulk reads against a live server', () => {
     live(ctx);
     const first = await client.items(session.token, {view: 's0', fields: [], pageRows: 10});
     for await (const _ of first) break;
+    await lanesFree();
     const cursor = first.cursor!;
     const refusals: (() => Promise<unknown>)[] = [
       () => client.items(session.token, {view: 's0', fields: ['no_such_field']}),

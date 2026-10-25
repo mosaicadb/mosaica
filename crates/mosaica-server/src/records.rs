@@ -128,9 +128,11 @@ pub(crate) struct Opening {
 /// The engine's [`RecordsSink`]: the head to the handler, then each page as a records frame and a
 /// page end. The engine's batches carry `mosaica_id` and the named columns only.
 pub(crate) struct FrameSink {
-    pub(crate) producer: Producer<Opening>,
-    /// Held until the response ends: a bulk read computes for its whole length.
+    /// Held until the last frame is queued: a bulk read computes for its whole length. Declared
+    /// before `producer` so it drops first, and the slot is free before the client can see the
+    /// response end.
     _permits: GatePermits,
+    pub(crate) producer: Producer<Opening>,
     compression: RecordsCompression,
     /// The head's name for the count before the filter: `visible` items, `served` artifacts.
     served_as: &'static str,
@@ -138,6 +140,19 @@ pub(crate) struct FrameSink {
     pub(crate) start: Instant,
     /// A batch the IPC writer refused, for the log; the engine sees only a closed sink.
     unwritable: Option<arrow::error::ArrowError>,
+}
+
+impl FrameSink {
+    /// Frees the slot, then answers the waiting handler with the refusal.
+    fn refuse(self, e: ApiError) {
+        let FrameSink {
+            _permits: permits,
+            mut producer,
+            ..
+        } = self;
+        drop(permits);
+        producer.refuse(e);
+    }
 }
 
 impl RecordsSink for FrameSink {
@@ -259,8 +274,8 @@ pub(crate) async fn bulk_read(
         None,
     );
     let mut sink = FrameSink {
-        producer,
         _permits: permits,
+        producer,
         compression: match compression {
             Some(CompressionReq::Zstd) => RecordsCompression::Zstd,
             None => RecordsCompression::None,
@@ -273,7 +288,7 @@ pub(crate) async fn bulk_read(
     drop(tokio::task::spawn_blocking(move || {
         let _timer = timer;
         match read(&closure_state, &session, cancel, &mut sink) {
-            Read::Refused(e) => sink.producer.refuse(e),
+            Read::Refused(e) => sink.refuse(e),
             Read::Ran {
                 view,
                 outcome,
@@ -307,7 +322,7 @@ pub(crate) enum Read {
 }
 
 /// The trailer, or a refusal while nothing is committed, or an aborted body after the head. The
-/// bulk-read permits release when `sink` drops at the end.
+/// bulk-read permits release when `sink` drops at the end, before the body can end.
 fn finish(
     route: &str,
     view: &str,
@@ -332,7 +347,7 @@ fn finish(
         }
         // Before the head nothing is committed and the handler is waiting, so the refusal keeps
         // its status.
-        Err(e) if !sink.producer.is_open() => sink.producer.refuse(map_engine_error(e)),
+        Err(e) if !sink.producer.is_open() => sink.refuse(map_engine_error(e)),
         // After it the 200 is committed: the body ends without a trailer, which a client reads as
         // incomplete and resumes from the last page end. A client that went away logs nothing.
         Err(e) => {
