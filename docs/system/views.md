@@ -92,5 +92,5 @@ If the value doesn't fit the view the map opens on, the map says so and draws th
 ## Not built yet
 
 - **Dropping a plain view.** A view in a view group can be dropped.
-- **Category-typed view facts in a group declared while the database runs.** A group declared in the first load can carry a category fact about each view, such as a region drawn from a vocabulary, but the same group declared later is refused. Declare such a group in the first load.
+- **A per-view field on every view of its group from the moment it is declared.** A field with a value per view, declared while the database runs, reaches each view at that view's next flush. Until then that view's points carry no such column, which reads as no value.
 - **Animating items between layouts.** A switch between views with different layouts redraws, rather than moving each item to its new position.

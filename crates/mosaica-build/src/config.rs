@@ -1354,7 +1354,8 @@ pub struct ViewGroup {
     /// `None` where it owns them. Chains are refused, so this always names an owner.
     pub members: Option<String>,
     /// The per-view values a view of this group carries, in declaration order. Empty on a
-    /// `members` group and on one whose views are minted from a discriminator.
+    /// `members` group and on one whose views are minted from its `source`'s discriminator; a
+    /// group declared empty carries the metadata its views will be created with.
     pub metadata: Vec<ViewMetadata>,
     pub roster: Roster,
 }
