@@ -32,8 +32,8 @@
 use std::collections::BTreeMap;
 
 use mosaica_types::view::{
-    check_view_key, CreatedView, DeadIncarnation, GroupMetadataField, ViewIncarnation,
-    ViewMetadataValue, DECLARED_INCARNATION,
+    check_view_key, group_view_id, CreatedView, DeadIncarnation, GroupMetadataField,
+    ViewIncarnation, ViewMetadataValue, DECLARED_INCARNATION,
 };
 
 use crate::wal::WalRecord;
@@ -61,13 +61,14 @@ impl std::fmt::Display for RosterError {
         match self {
             RosterError::Exists { group, key } => write!(
                 f,
-                "view '{group}:{key}' already exists. A roster record is immutable (views §3.2, \
-                 decision 0108): a wrong gate or wrong metadata is a drop and a recreate under a \
-                 NEW key, never an update, because an updatable gate is a narrowing that does not \
-                 bite live sessions"
+                "view '{}' already exists. A roster record is immutable (views §3.2, decision \
+                 0108): a wrong gate or wrong metadata is a drop and a recreate under a NEW key, \
+                 never an update, because an updatable gate is a narrowing that does not bite \
+                 live sessions",
+                group_view_id(group, key)
             ),
             RosterError::Unknown { group, key } => {
-                write!(f, "no view '{group}:{key}' — nothing to drop")
+                write!(f, "no view '{}' — nothing to drop", group_view_id(group, key))
             }
             RosterError::Refused(detail) => write!(f, "{detail}"),
         }
