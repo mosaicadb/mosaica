@@ -9,7 +9,7 @@ You'll need the `mosaica` binary from [the first tutorial](../start/first-map.md
 ## What we'll do
 
 1. Build the arXiv example and serve it.
-2. Make a principal for your backend, and one for a user.
+2. Make a service account for your backend, and a user.
 3. Start a session for the user, as your backend would.
 4. Read the deployment's shape from `/v1/meta`.
 5. Fill a filter list and a typeahead.
@@ -77,11 +77,11 @@ mosaica serve
 
 Your backend uses two of the three addresses. It starts sessions on the session address, port 9142, which only answers the operator credential and API keys allowed to act for other users. It reads on the viewer address, port 9141, as the browser does.
 
-## Make the principals
+## Make the users
 
-Mosaica keeps its users, which it calls principals, in its catalogue. We need two.
+Mosaica keeps its users in its catalogue. We need two.
 
-`portal` is your backend. It holds `authorise-as`, which lets it start a session for another principal, and it proves who it is with an API key. Mosaica shows a key once, when it makes it, so save it to a file only you can read.
+`portal` is a service account for your backend. It holds `authorise-as`, which lets it start a session for another user, and it proves who it is with an API key. Mosaica shows a key once, when it makes it, so save it to a file only you can read.
 
 ```bash
 cd ~/arxiv
@@ -97,7 +97,7 @@ umask 077; mosaica key create portal --control http://127.0.0.1:9143 > portal.ke
 {"key":"msk_8be7dd8c7421_455e9cd873ab7c8fc9b5be94b5b80355f5f7eb5e7c5d0c751dc5146718985342","prefix":"8be7dd8c7421"}
 ```
 
-`ada` is a user. She holds `read`, and two terms, `cs.LG` and `stat.ML`. Each paper's access label lists its arXiv categories, and a viewer holding any one of them may see the paper, so Ada sees the machine learning papers and nothing else.
+`ada` is a user. She holds `read`, and two access attributes, `cs.LG` and `stat.ML`. Each paper's access label lists its arXiv categories, and a viewer holding any one of them may see the paper, so Ada sees the machine learning papers and nothing else.
 
 ```bash
 mosaica principal create ada --kind person --control http://127.0.0.1:9143
@@ -113,7 +113,7 @@ mosaica grant --principal ada --term cs.LG --term stat.ML --control http://127.0
 
 ## Start a session for a user
 
-When Ada opens your app, your backend has already signed her in its own way. It then asks Mosaica for a session for her, with `POST /session/authorise`. The API key goes in the `authorization` header, and the body names the principal.
+When Ada opens your app, your backend has already signed her in its own way. It then asks Mosaica for a session for her, with `POST /session/authorise`. The API key goes in the `authorization` header, and the body names the user, as `principal`.
 
 ```bash
 KEY=$(python3 -c 'import json; print(json.load(open("portal.key"))["key"])')
@@ -126,7 +126,7 @@ echo "$SESSION"
 {"token":"5d8b7c7b1acae3c166d8988fdfa8b1e388f3eea4074d5e351cd344893b0a0c5f","token_id":0,"expires_at":1792903916}
 ```
 
-The session holds Ada's terms and her `read`. A session started this way never carries `read-all`, `write-all`, `admin` or `authorise-as`, even for a principal that holds them. It lasts until `expires_at`, in seconds since 1970, which is an hour away: the `token_max_lifetime` in `mosaica.toml`.
+The session holds Ada's access attributes and her `read`. A session started this way never carries `read-all`, `write-all`, `admin` or `authorise-as`, even for a user who holds them. It lasts until `expires_at`, in seconds since 1970, which is an hour away: the `token_max_lifetime` in `mosaica.toml`.
 
 Your backend sends `token` to the browser and keeps `token_id`, the handle it ends the session with later. The `plain-html` example's [server.mjs](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/examples/plain-html/server.mjs) mints sessions this way, in 140 lines of Node.
 
@@ -205,7 +205,7 @@ curl -s "http://127.0.0.1:9141/v1/categories/primary_category/suggest?q=stat.m&v
 {"column":"primary_category","more":false,"q":"stat.m","total":4081,"values":[{"code":168,"count":48,"key":"stat.ME","match":{"field":"key","len":6,"start":0},"title":"stat.ME"},{"code":169,"count":347,"key":"stat.ML","match":{"field":"key","len":6,"start":0},"title":"stat.ML"}]}
 ```
 
-The counts are Ada's. `total` is the 4,081 papers she may see, out of 50,000. Of those, 347 have `stat.ML` as their subject class, and 48 have `stat.ME`, which she sees because they are cross-listed under one of her terms. To count under a filter, send the same fields as a JSON body with `POST`, adding `filters`.
+The counts are Ada's. `total` is the 4,081 papers she may see, out of 50,000. Of those, 347 have `stat.ML` as their subject class, and 48 have `stat.ME`, which she sees because they are cross-listed under one of her attributes. To count under a filter, send the same fields as a JSON body with `POST`, adding `filters`.
 
 ```bash
 curl -s http://127.0.0.1:9141/v1/categories/primary_category/suggest -H "$AUTH" -H "$JSON" \
@@ -290,7 +290,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 }
 ```
 
-This name is the cluster's keyphrases: Ada can see the three papers they came from, but not all six behind its title. A user with other terms would get other counts, other names and possibly no match.
+This name is the cluster's keyphrases: Ada can see the three papers they came from, but not all six behind its title. A user with other attributes would get other counts, other names and possibly no match.
 
 `POST /v1/artifacts/{mosaica_id}`, with a body naming the `view`, returns one artifact's card: its count, centre, box and outline over the papers the session may see, on the grid described [below](#read-one-paper). It carries no name, which comes from browse.
 
@@ -344,7 +344,7 @@ curl -s http://127.0.0.1:9141/v1/items/5880092981833195251 -H "$AUTH" -H "$JSON"
 }
 ```
 
-The record has every field the paper holds, with categories as their keys and `submitted_at` in microseconds since 1970. The paper's subject class is computer vision, outside Ada's terms. `labels` shows why she may see it: it is cross-listed under `cs.LG`.
+The record has every field the paper holds, with categories as their keys and `submitted_at` in microseconds since 1970. The paper's subject class is computer vision, outside Ada's attributes. `labels` shows why she may see it: it is cross-listed under `cs.LG`.
 
 `views` gives the paper's position in each view on a grid of 2^32 steps a side. To turn it into the view's own coordinates, take `x_min + (x + 0.5) / 2^32 × (x_max − x_min)`, with the view's `quantisation` from `/v1/meta`, and the same for `y`.
 
@@ -366,10 +366,10 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 | Status and code | Means | What to do |
 |---|---|---|
 | `422 contract` | The request is wrong. | Change it, as the detail says. |
-| `404 unknown` | No such view, item, artifact or principal, or one this session may not see. | Nothing to retry. |
+| `404 unknown` | No such view, item, artifact or user, or one this session may not see. | Nothing to retry. |
 | `401 bad-credential` | No token or key, or one the server does not know. A session token gets this once the server has forgotten the session, and after a restart. | For a session token, start a new session. For an API key, check the key. |
 | `403 expired-token` | The session has ended. | Start a new one. |
-| `403 forbidden` | The credential lacks a permission: a key without `authorise-as`, or a principal without `read`. | Grant the permission. |
+| `403 forbidden` | The credential lacks a permission: a key without `authorise-as`, or a user without `read`. | Grant the permission. |
 | `429 backpressure` | The server is busy, or a suggestion is already running for this session. | Send the same request after the seconds in `Retry-After`. |
 | `500 fail-closed` | The server could not compute a correct answer, and sent none. | Retry, and check the server's log if it keeps happening. |
 
@@ -388,7 +388,7 @@ curl -s http://127.0.0.1:9141/v1/meta -H "$AUTH"
 {"error":"expired-token","detail":"the session has ended: its token expired, was revoked, or a change to what authorised it ended it; authorise again"}
 ```
 
-The revoke answers `204` with no body, and the token stops working at once. A `token_id` that names no live session, or a session another principal started, gets the same `204` and changes nothing.
+The revoke answers `204` with no body, and the token stops working at once. A `token_id` that names no live session, or a session another service account started, gets the same `204` and changes nothing.
 
 For a load balancer, `/healthz` answers `200` while the process is up, and `/readyz` answers `200` when the server is ready for traffic and `503` when it is not. Neither needs a token, and both answer on the viewer and session addresses.
 
@@ -421,5 +421,5 @@ A backend in Python reads them with the Python client, and one in Node with `Mos
 ## Next
 
 - The [HTTP API reference](../reference/http.md) gives every field of every request and every refusal, with examples on this same data.
-- [Access control](../system/access-control.md) explains labels, terms and sessions.
+- [Access control](../system/access-control.md) explains labels, access attributes and sessions.
 - [Put Mosaica behind TLS](tls.md) sets up nginx in front of the viewer address, for a page on another origin.

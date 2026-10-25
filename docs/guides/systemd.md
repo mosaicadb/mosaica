@@ -149,9 +149,9 @@ mosaica serve: No such file or directory (os error 2)
 ```
 
 In a second `mosaica` shell, ask the viewer address whether the server is ready, and ask the session
-address for a token. Your backend will ask with an API key whose principal holds `authorise-as`,
-naming the principal to read as. The operator credential can instead name the access terms the
-token holds, which needs no principal in the catalogue:
+address for a token. Your backend will ask with an API key whose user holds
+`authorise-as`, naming the user to read as. The operator credential can instead name the access
+attributes the token holds, which needs no user in the catalogue:
 
 ```console
 mosaica$ curl -sSi http://127.0.0.1:9151/readyz

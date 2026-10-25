@@ -92,7 +92,7 @@ Delete the three `.old` directories once the new bundle serves what you expect.
 
 A deletion hides an item at once, and a compaction removes its values from the server's files. Three things outlive both, because no compaction removes them:
 
-- an access-label term that only deleted items carried, such as `user:alice`;
+- an access attribute that only deleted items carried, such as `user:alice`;
 - a key an open vocabulary added for a deleted item's category value;
 - an artifact key that a deleted item's insert created on an open annotation layer.
 
@@ -100,7 +100,7 @@ A rebuild from sources that leave these out is the way to erase them. Follow the
 
 1. **Delete the items on the running server**, so they stop being served at once. See [deleting and suppressing](../system/write-path.md#deleting-and-suppressing).
 2. **Bring the sources up to date.** The new bundle holds exactly what the sources hold, so anything inserted, edited, deleted or declared through the running server since the last build must be in the sources first. Read the current items with `mosaica items` if you need them.
-3. **Remove the data from the sources.** Take out the deleted items' rows from every file that names them: the points files, attribute files, the access relation and annotation member files. Then remove the access terms, category values and artifact keys only those items used: from vocabulary files or `values` lists in the declaration, and from annotation artifact files.
+3. **Remove the data from the sources.** Take out the deleted items' rows from every file that names them: the points files, attribute files, the access relation and annotation member files. Then remove the access attributes, category values and artifact keys only those items used: from vocabulary files or `values` lists in the declaration, and from annotation artifact files.
 4. **Build the new bundle** into `bundle.next`, as in [build the new bundle](#build-the-new-bundle).
 5. **Swap it in**, as in [swap it in](#swap-it-in): stop the server, move the old bundle, `state/wal` and `state/cache` aside, and start the server.
 6. **Delete the old copies**: `bundle.old`, `state/wal.old` and `state/cache.old`. Until they are gone, they still hold the data.

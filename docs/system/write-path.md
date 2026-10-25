@@ -112,8 +112,8 @@ If you need a write on the map sooner, ask for a flush. `POST /control/flush` as
 !!! warning "An edited item leaves the map until the next flush"
     An edit replaces the item's stored row. The old row is hidden as soon as the edit is accepted, and the new one appears at the flush. For up to one flush interval the item is on no map and in no count. Its `mosaica_id`, its views, its annotation memberships and any suppression carry across the edit.
 
-!!! note "New access terms need a new session"
-    A viewer whose session started before the flush that first used one of an item's access terms does not see the item until they start a new session. Nothing tells the client this has happened.
+!!! note "New access attributes need a new session"
+    A viewer whose session started before the flush that first used one of an item's access attributes does not see the item until they start a new session. Nothing tells the client this has happened.
 
 A viewer's client learns from the content key on its next response that the data has changed, but not what changed.
 
@@ -135,7 +135,7 @@ A deletion or suppression applies to every request that starts after Mosaica ans
 
 A deleted item is hidden at once, but its values stay in the database's files until a [compaction](#background-maintenance) rewrites them, and so do the values an edit replaces. To remove them without waiting for the schedule, send `POST /control/compact` after the deletion.
 
-Compaction never removes three things: an access-label term that only deleted items carried, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
+Compaction never removes three things: an access attribute that only deleted items carried, a key an open vocabulary added for a deleted item, and an artifact key a deleted item's insert created on an open annotation layer. To erase those, rebuild the database from sources that leave them out. [Erase deleted data completely](../guides/rebuild.md#erase-deleted-data-completely) gives the steps.
 
 ??? info "What a compaction removes, and when"
     After the compaction, the previous files are removed once no request is reading them, usually within one flush interval, and the log's copy goes when the log next rotates. The cache directory holds no field values; counts and positions the item contributed to are dropped when the cache is next swept, or evicted sooner.
@@ -167,8 +167,8 @@ A compaction runs alongside requests, which keep being answered. When it finishe
 ## Not built yet
 
 - **Telling clients what changed.** A response says that the data has changed, not which items or which part of the map. A client that wants to know re-requests what it shows.
-- **Telling a client its session is behind.** Nothing tells a client that items under a new access term need a new session.
+- **Telling a client its session is behind.** Nothing tells a client that items under a new access attribute need a new session.
 - **Notifying clients that annotation content they hold was withdrawn** because an item it was generated from was deleted. Each request checks current state, so the content is not served again, but nothing announces the change.
-- **Removing unused access-label terms, vocabulary keys and artifact keys** at compaction. Rebuild from source files that leave them out.
+- **Removing unused access attributes, vocabulary keys and artifact keys** at compaction. Rebuild from source files that leave them out.
 - **Replicas.** A deployment is one database on one machine.
 - **Writing from the command line.** The `mosaica` command builds and reads. Use the HTTP API or a client to write to a running database.

@@ -79,7 +79,7 @@ Anything you can declare in the first load, you can also declare to a running da
 
 ## Who sees what
 
-Mosaica can give each viewer a map computed only from the items they're allowed to see. You give an item an **access label**, an expression over terms such as `secret&(team_a|team_b)`, and each viewer's session holds a set of terms. The viewer sees the items whose labels their terms satisfy, and nothing they receive is computed from anything else: every count, sample, density and annotation count comes from those items alone. A filter can narrow that set but never widen it, and a viewer who may see only a few items still gets a full sample of them.
+Mosaica can give each viewer a map computed only from the items they're allowed to see. You give an item an **access label**, such as `secret&(team_a|team_b)`, and each viewer a set of access attributes. The viewer sees the items whose labels their attributes satisfy, and nothing they receive is computed from anything else: every count, sample, density and annotation count comes from those items alone. A filter can narrow that set but never widen it, and a viewer who may see only a few items still gets a full sample of them.
 
 A viewer signs in with a password or an API key, or with an access token from your OpenID Connect provider, or your own backend starts a session on their behalf. If your data has no access rules, give every item the default label `public`, which every viewer holds. The Python client does this unless you say otherwise.
 

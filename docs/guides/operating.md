@@ -37,11 +37,11 @@ identity key too. Access control applies to what the server sends, not to the fi
 | Address | Routes | Who should reach it |
 |---|---|---|
 | Viewer | `/v1/*`, `/healthz`, `/readyz` | Browsers, each with its own token, through a TLS proxy. People who log in with a password or an API key do it here, at `/v1/login`. |
-| Session | `/session/authorise`, `/session/revoke`, `/healthz`, `/readyz` | Your application's backend, which signs people in and asks Mosaica for their tokens with an API key whose principal holds `authorise-as` |
+| Session | `/session/authorise`, `/session/revoke`, `/healthz`, `/readyz` | Your application's backend, which signs people in and asks Mosaica for their tokens with an API key whose user holds `authorise-as` |
 | Control | `/control/*` | You, and whatever loads data into the corpus |
 
-An API key whose principal holds `authorise-as` can mint a token for any principal in the
-catalogue, and so read whatever any principal may. The operator credential holds every permission:
+An API key whose user holds `authorise-as` can mint a token for any user in the catalogue,
+and so read whatever any user may. The operator credential holds every permission:
 it can mint a token for any set of access labels, read every item, change the catalogue, and
 delete your data or add to it. Keep the session and control addresses off the internet. The viewer
 address serves only what each token allows, and it is the one browsers need. It serves plain
@@ -65,9 +65,9 @@ mosaica serve: refused to start: there is no operator credential; set `operator_
 ```
 
 A browser's token lasts `token_max_lifetime` seconds, set under `[disclosure]`, and keeps the
-labels its principal held when it was issued. A change in the catalogue that could change them,
-such as a label granted or taken away, a group membership or a disabled principal, ends every token
-of the principals it affects. Their next request is answered `403 expired-token`, and the client
+access attributes its user held when it was issued. A change in the catalogue that could change
+them, such as an attribute granted or taken away, a group membership or a disabled user, ends every
+token of the users it affects. Their next request is answered `403 expired-token`, and the client
 asks for a new token.
 
 ## Memory
@@ -78,7 +78,7 @@ The server holds these caches, each with a limit you can set under `[serve]`:
 |---|---|---|
 | `row_projection_cache_bytes` | 2 GiB | For each grant, view and shard, which rows of the bundle the grant may see, shared by every session with that grant |
 | `fragment_cache_bytes` | 1 GiB | For each distinct set of granted labels, the items it covers. Copies on disc in the cache directory outlive the memory |
-| `masked_count_cache_bytes` | 1 GiB | Visible member counts, centroids and boxes for annotation levels served from a column, one entry per grant and level, whatever the number of shards. Per artifact: 4 B for counts alone, 40 B with a centroid and a box, and for a layer serving a box 4 B more plus 128 B for each artifact with more than sixteen placed rows, 256 B in a bundle of several shards. A level of 1.4 million artifacts is 56 MB a grant counted with geometry, and a layer serving a box keeps at most 185 MB more of reserves in the same entry, 364 MB over several shards, so the default holds the counts of about nineteen such grant-levels, and at least four with their reserves, two over several shards. Deployments where every user holds their own terms need one entry per user per level. An entry larger than the bound is served and not kept, and an entry that fits only without its reserve is kept without it; `masked_count_cache.not_admitted` on `/control/status` counts both. Empty in a corpus without such a layer |
+| `masked_count_cache_bytes` | 1 GiB | Visible member counts, centroids and boxes for annotation levels served from a column, one entry per grant and level, whatever the number of shards. Per artifact: 4 B for counts alone, 40 B with a centroid and a box, and for a layer serving a box 4 B more plus 128 B for each artifact with more than sixteen placed rows, 256 B in a bundle of several shards. A level of 1.4 million artifacts is 56 MB a grant counted with geometry, and a layer serving a box keeps at most 185 MB more of reserves in the same entry, 364 MB over several shards, so the default holds the counts of about nineteen such grant-levels, and at least four with their reserves, two over several shards. Deployments where every user holds their own attributes need one entry per user per level. An entry larger than the bound is served and not kept, and an entry that fits only without its reserve is kept without it; `masked_count_cache.not_admitted` on `/control/status` counts both. Empty in a corpus without such a layer |
 | `figures_disk_bytes` | 8 GiB | The same entries, and the labels of denied rows they are corrected with, kept in the cache directory, so a restart reads them back and does not walk each grant's rows again. In a bundle of several shards it also keeps each shard's walk of each grant's items, which a compaction of one shard reads back so as to walk that shard alone: up to 172 B for each artifact a shard holds a member of, for each level version the shard was walked at, until this bound removes the older ones. Size it as the memory bound above times the number of grant-levels a restart should find, plus those walks, plus about 24 B per denied row per level. Past it, the files least recently written or read are removed |
 | `region_cache_bytes` | 256 MiB | Drawn filter regions broken into map tiles, shared between viewers |
 | `occupancy_cache_bytes` | 32 MiB | How many tiles at each zoom hold something a session can see |

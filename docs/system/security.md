@@ -1,10 +1,10 @@
 # Security
 
-Mosaica computes every figure a viewer receives from the items that viewer may see: every count, density, cluster, label, sample and breakdown, not only which items they can open. This chapter sets out exactly what that guarantees, whom it trusts, what a viewer can still learn, what is not claimed, and how the claims are checked. [Access control](access-control.md) describes the labels, terms and sessions themselves, and the full [threat model](https://github.com/mosaicadb/mosaica/blob/main/docs/dev/threat-model.md) states each claim in detail, with its evidence.
+Mosaica computes every figure a viewer receives from the items that viewer may see: every count, density, cluster, label, sample and breakdown, not only which items they can open. This chapter sets out exactly what that guarantees, whom it trusts, what a viewer can still learn, what is not claimed, and how the claims are checked. [Access control](access-control.md) describes the labels, access attributes and sessions themselves, and the full [threat model](https://github.com/mosaicadb/mosaica/blob/main/docs/dev/threat-model.md) states each claim in detail, with its evidence.
 
 ## What is guaranteed
 
-Everything rests on a viewer's **visible set**: the items their terms admit, less every item currently deleted or suppressed. Each request works it out afresh before anything reads it, and every answer is computed from inside it.
+Everything rests on a viewer's **visible set**: the items their access attributes admit, less every item currently deleted or suppressed. Each request works it out afresh before anything reads it, and every answer is computed from inside it.
 
 - **Counts, densities and breakdowns** are taken over the visible set, never over everything and then filtered. A filter narrows what is drawn and counted within the visible set, and cannot widen it.
 - **Samples are drawn from the visible set.** A viewer who may see few items gets a full sample of those, not a sample of everything with most of it removed.
@@ -20,9 +20,9 @@ Everything rests on a viewer's **visible set**: the items their terms admit, les
 |---|---|---|
 | A viewer | No | Holds a token and can make any number of requests. The guarantees above hold against them |
 | Client code | No | Computes nothing about what is visible. A bug in it can only misdraw what the server sent |
-| A writer with `write` but not `write-all` | Within its terms | Writes only to the items, layers and artifacts its terms reach, except that deleting an artifact also deletes the artifacts attached to it. It can learn that a unique value or an artifact key it tried to set is held outside its terms, and nothing else about the holder |
-| Your server, with an `authorise-as` key | Yes | Can start a session as any principal, holding that principal's terms |
-| A principal with `admin` | Yes, as the operator | Can grant itself any permission. A role mapping from an OIDC provider to a group holding `admin` extends that trust to the provider |
+| A writer with `write` but not `write-all` | Within its attributes | Writes only to the items, layers and artifacts its attributes reach, except that deleting an artifact also deletes the artifacts attached to it. It can learn that a unique value or an artifact key it tried to set is held outside its attributes, and nothing else about the holder |
+| Your server, with an `authorise-as` key | Yes | Can start a session as any user, holding that user's attributes |
+| A user with `admin` | Yes, as the operator | Can grant itself any permission. A role mapping from an OIDC provider to a group holding `admin` extends that trust to the provider |
 | An OIDC provider | Yes | Its claims are taken as it asserts them. A change at the provider reaches a session when the session's token expires |
 | The operator | Yes | Holds every permission |
 | Anyone holding the database's files | Yes | Has everything the server has. Nothing here defends against them |
@@ -54,17 +54,17 @@ A viewer can still learn a little beyond their own items, through the channels b
 
 The claims are checked by the [conformance suite](https://github.com/mosaicadb/mosaica/tree/main/conformance), which runs Mosaica alongside an independent implementation and compares their answers:
 
-- **Counts, tiles and density** are compared, value for value, across planted states and principals who see different parts of the data.
+- **Counts, tiles and density** are compared, value for value, across planted states and users who see different parts of the data.
 - **Annotations** are compared tile by tile, before and after a suppression. A server test also shows that an artifact withheld by its own label leaves every answer exactly as if it had never been published.
-- **Samples, histograms, breakdowns and field figures** are compared with figures worked out from each principal's own visible items.
-- **Access expressions** are checked over fifteen principals, comparing which items each one reads and the labels shown beside them.
+- **Samples, histograms, breakdowns and field figures** are compared with figures worked out from each user's own visible items.
+- **Access expressions** are checked over fifteen users, comparing which items each one reads and the labels shown beside them.
 - **Identifiers** are scanned for: every answer, cursor and log line is searched for internal numbers, with a planted case in each scan to show the scan itself works. Counts, coordinates, text and logs are searched only for numbers of 100,000 and above, and cursors for 8-byte values.
 - **One shard against several**: each corpus is built both ways, and the answers are compared, through ingests, edits, deletions, a compaction and a restart. Samples drawn by rank, and figures kept per shard, are not compared.
 
 Some things the suite doesn't cover:
 
 - No scan measures response times.
-- The independent comparison of tiles and counts runs over corpora whose items carry single terms. Labels with conjunctions are covered by the access-expression comparison and by Rust tests.
+- The independent comparison of tiles and counts runs over corpora whose items carry single attributes. Labels with conjunctions are covered by the access-expression comparison and by Rust tests.
 - A hidden value answering as one that does not exist, membership requirements other than "all", and which rows a bulk read serves are checked by Rust tests, not against the independent implementation.
 
 ## Reporting a vulnerability

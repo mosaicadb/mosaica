@@ -519,13 +519,12 @@ dist/mosaica-components.js             1,699.17 kB │ gzip: 468.39 kB
 ```
 
 `examples/plain-html` holds a web page with the map on it, and a small Node server that signs you
-in. Mosaica needs to know who you are signed in as. It keeps its users, which it calls principals,
-in the catalogue, and the page's server asks the session address for a token on your behalf.
+in. Mosaica needs to know who you are signed in as. It keeps its users in the catalogue, and the page's server asks the session address for a token on your behalf.
 
-So we need two principals. `everyone` is the person reading the map. It holds the `read`
-permission, which lets it read, and no labels of its own, since every place is labelled `public`
-and every principal holds that. `page` is the page's server. It holds `authorise-as`, which lets it
-ask for a token for another principal. Changes to the catalogue go to the control address, with the
+So we need two users. `everyone` is the person reading the map. It holds the `read` permission,
+which lets it read, and no access attributes of its own, since every place is labelled `public` and
+every user holds that. `page` is a service account for the page's server. It holds `authorise-as`,
+which lets it ask for a token for another user. Changes to the catalogue go to the control address, with the
 operator secret.
 
 ```bash
@@ -560,7 +559,7 @@ cat page.key
 ```
 
 The page's server signs you in as one of the people listed in `users.json`, each with the
-principal it reads as. The list that comes with the example belongs to a different dataset, so
+user it reads as. The list that comes with the example belongs to a different dataset, so
 replace it with a single person, Everyone.
 
 ```bash
@@ -630,10 +629,10 @@ When you've finished, press Ctrl-C in each terminal to stop the page's server an
 
 `~/ireland` now holds a working deployment. The data is in `points.parquet` and the declaration in
 `corpus.toml`. `mosaica.toml` holds the deployment's settings, `operator.secret` the operator's
-secret, and `page.key` the page's key. The `catalogue` directory holds the two principals, and the
+secret, and `page.key` the page's key. The `catalogue` directory holds the two users, and the
 `bundle` directory is what the build made from the data. To bring the map back, start
 `mosaica serve` in `~/ireland`, then run the three `export` lines and `node server.mjs` in the
-example's directory. The principals and the key are still in the catalogue.
+example's directory. The users and the key are still in the catalogue.
 
 ## What you learned
 
@@ -645,7 +644,7 @@ example's directory. The principals and the key are still in the catalogue.
   Ours all carry `public`, which everyone holds.
 - The server listens on three addresses. Browsers read the map from the viewer address, your own
   server gets them permission from the session address, and changes to the data and to the
-  catalogue of principals go to the control address.
+  catalogue of users go to the control address.
 - Everything a viewer is sent, every count and every point, is computed from the places their
   labels allow.
 

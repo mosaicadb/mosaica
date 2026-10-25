@@ -207,9 +207,9 @@ NAME                       IMAGE     COMMAND                  SERVICE   CREATED 
 mosaica-docker-mosaica-1   mosaica   "/usr/local/bin/mosa…"   mosaica   7 seconds ago   Up 7 seconds (healthy)   127.0.0.1:9161->8080/tcp, 127.0.0.1:9162->8081/tcp, 127.0.0.1:9163->8082/tcp
 ```
 
-From the host, ask for a token. Your application's backend will ask with an API key whose
-principal holds `authorise-as`, naming the principal to read as. The operator credential can
-instead name the access terms the token holds, which needs no principal in the catalogue:
+From the host, ask for a token. Your application's backend will ask with an API key whose user holds
+`authorise-as`, naming the user to read as. The operator credential can instead name the access
+attributes the token holds, which needs no user in the catalogue:
 
 ```console
 $ curl -sS http://127.0.0.1:9162/session/authorise \
