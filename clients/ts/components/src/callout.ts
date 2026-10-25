@@ -44,7 +44,10 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, Ma
  * slid further, still level with the point, to clear a rectangle in the way. Beside the point, a
  * card that fits nowhere at its own height is shortened, down to `minHeight`, to the clear span
  * level with the point. The first side where the card fits inside the map and meets no rectangle
- * in `avoid` wins. Where none does, the card takes the side with most room, kept inside the map.
+ * in `avoid` wins. Where none does, the card is slid along a side, most room first, to the clear
+ * place nearest the point, level with it or not, shortened as above where it must be. Where there
+ * is none, the card takes the side with
+ * most room, kept inside the map.
  */
 export function placeCallout(
   point: readonly [number, number],
@@ -70,9 +73,9 @@ export function placeCallout(
   const clear = (r: Rect) => inside(r) && !avoid.some((a) => overlaps(r, a));
   /**
    * The side's card centred on the point, else slid along the side to just past a card in the way,
-   * as long as it still spans the point there so the leader stays short.
+   * where `level` as long as it still spans the point there so the leader stays short.
    */
-  const fitted = (s: (typeof sides)[number]): Rect | null => {
+  const fitted = (s: (typeof sides)[number], level = true): Rect | null => {
     if (clear(s.rect)) return s.rect;
     const along = s.side === 'right' || s.side === 'left' ? 'top' : 'left';
     const size = along === 'top' ? h : w;
@@ -80,26 +83,31 @@ export function placeCallout(
     const slides = avoid.flatMap((a) => (along === 'top' ? [a.top + a.height + EDGE, a.top - EDGE - size] : [a.left + a.width + EDGE, a.left - EDGE - size]));
     for (const v of slides.sort((x, y) => Math.abs(x + size / 2 - at) - Math.abs(y + size / 2 - at))) {
       const r = {...s.rect, [along]: v};
-      if (v <= at && at <= v + size && clear(r)) return r;
+      if ((!level || (v <= at && at <= v + size)) && clear(r)) return r;
     }
     return null;
   };
-  /** Beside the point, the card shortened to the clear span level with it, where that is at least `minHeight`. */
-  const shortened = (s: (typeof sides)[number]): Rect | null => {
+  /**
+   * Beside the point, the card shortened to a clear span of its column at least `minHeight` tall:
+   * the span level with the point, or where not `level`, the span nearest it.
+   */
+  const shortened = (s: (typeof sides)[number], level = true): Rect | null => {
     if (s.side !== 'right' && s.side !== 'left') return null;
     const {left} = s.rect;
     if (left < EDGE - 0.5 || left + w > map.width - EDGE + 0.5) return null;
+    const spans: [number, number][] = [];
     let lo = EDGE;
-    let hi = map.height - EDGE;
-    for (const a of avoid) {
-      if (!(left < a.left + a.width && a.left < left + w)) continue;
-      if (a.top + a.height <= py) lo = Math.max(lo, a.top + a.height + EDGE);
-      else if (a.top >= py) hi = Math.min(hi, a.top - EDGE);
-      else return null;
+    for (const a of [...avoid].filter((a) => left < a.left + a.width && a.left < left + w).sort((a, b) => a.top - b.top)) {
+      if (a.top - EDGE > lo) spans.push([lo, a.top - EDGE]);
+      lo = Math.max(lo, a.top + a.height + EDGE);
     }
-    const height = Math.min(h, hi - lo);
-    if (height < minHeight) return null;
-    return {left, top: clamp(py - height / 2, lo, hi - height), width: w, height};
+    if (map.height - EDGE > lo) spans.push([lo, map.height - EDGE]);
+    const away = ([top, bottom]: [number, number]) => Math.max(0, top - EDGE - py, py - bottom - EDGE);
+    const usable = spans.filter(([top, bottom]) => bottom - top >= minHeight && (!level || away([top, bottom]) === 0));
+    const span = usable.sort((a, b) => away(a) - away(b))[0];
+    if (!span) return null;
+    const height = Math.min(h, span[1] - span[0]);
+    return {left, top: clamp(py - height / 2, span[0], span[1] - height), width: w, height};
   };
   const keptRect = (k: Kept): Rect | null => {
     const s = sides.find((x) => x.side === k.side)!;
@@ -117,6 +125,10 @@ export function placeCallout(
     }
     for (const s of ranked) {
       const r = shortened(s);
+      if (r) return {side: s.side, rect: r};
+    }
+    for (const s of ranked) {
+      const r = fitted(s, false) ?? shortened(s, false);
       if (r) return {side: s.side, rect: r};
     }
     return ranked[0]!;

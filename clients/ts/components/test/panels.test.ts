@@ -95,8 +95,30 @@ describe('<mosaica-item-card>', () => {
       expect(a.getAttribute('rel')).toContain('noopener');
     });
 
-    it('is hidden for an item with no value for a field the template names', async () => {
+    it('is hidden for an item with no value, or an empty one, for a field the template names, and for a name only a built-in answers', async () => {
       expect((await card('<mosaica-item-card open-url="https://example.org/{wikidata}"></mosaica-item-card>')).open()).toBeNull();
+      expect((await card('<mosaica-item-card open-url="https://example.org/{constructor}/{toString}"></mosaica-item-card>')).open()).toBeNull();
+      const blank = await card('<mosaica-item-card open-url="https://example.org/{note}"></mosaica-item-card>');
+      blank.el.item = {...geonames, detail: {...geonames.detail, fields: {note: ''}}};
+      await settle(blank.host);
+      expect(blank.open()).toBeNull();
+    });
+
+    it('is hidden where a value cannot be URL-encoded, and the card still renders', async () => {
+      const {host, el, open} = await card('<mosaica-item-card open-url="https://example.org/{note}"></mosaica-item-card>');
+      el.item = {...geonames, detail: {...geonames.detail, fields: {note: 'a\uD800b'}}};
+      await settle(host);
+      expect(open()).toBeNull();
+      expect(deep(host, '[part="field"][data-name="note"]')).not.toBeNull();
+    });
+
+    it('fires mosaica-open on a middle-click of the link', async () => {
+      const {host, open} = await card('<mosaica-item-card open-url="https://www.geonames.org/{geonameid}"></mosaica-item-card>');
+      let fired = 0;
+      host.addEventListener('mosaica-open', () => (fired += 1));
+      open()!.dispatchEvent(new MouseEvent('auxclick', {button: 1, bubbles: true}));
+      open()!.dispatchEvent(new MouseEvent('auxclick', {button: 2, bubbles: true}));
+      expect(fired).toBe(1);
     });
 
     it('never links to an address that is not http or https, whatever a value holds', async () => {

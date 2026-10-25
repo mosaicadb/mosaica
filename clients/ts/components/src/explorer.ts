@@ -135,17 +135,19 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * bottom-right.
  *
  * Picking a point opens its item card beside the point, joined to it by a short leader: on the side
- * with most room, clear of the cards over the map, following the point as the map pans and zooms,
- * hidden while the point is off the map, and clear of the other cards beside points. The card shows
- * the headline, the `subtitle-field` field, the `card-fields` fields (else the first three),
- * "Show all N fields", and Open where `open-url` or `open` says what it does. Show all grows the
- * card up to the height of the map, clear of the cards over it; past that the card scrolls. Picking another point replaces it unless Pin was pressed, which keeps it
- * open; Close or Escape closes it and drops the selection, and a click on the map that finds
- * nothing does the same for the card that is not pinned. Tab from the map goes to the card, which
- * is named by its item's title and gives focus back to the map as it closes. A picked cluster's
- * card behaves the same way. While a region is selected its card stands in the map's top-right
- * corner, and where the map holds no position for the selection, as after following an item into
- * another view, the item's card goes there too.
+ * with most room, clear of the cards over the map, the map's tools and the Layers button, following
+ * the point as the map pans and zooms, hidden while the point is off the map, and clear of the
+ * other cards beside points. Where no side beside the point is clear, the card goes to the clear
+ * place nearest it. The card shows the headline, the `subtitle-field` field, the `card-fields`
+ * fields (else the first three), "Show all N fields", and Open where `open-url` or `open` says what
+ * it does. Show all grows the card as far as the map's height and the same things allow; past that
+ * the card scrolls. Picking another point replaces it unless Pin was pressed, which keeps it open;
+ * Close or Escape closes it and drops the selection, and a click on the map that finds nothing does
+ * the same for the card that is not pinned. Tab from the map goes to the card, which is named by
+ * its item's title and gives focus back to the map as it closes. A picked cluster's card behaves
+ * the same way. While a region is selected its card stands in the map's top-right corner, and where
+ * the map holds no position for the selection, as after following an item into another view, the
+ * item's card goes there too.
  *
  * The Layers button opens a popover in four sections. Points: whether the points are drawn; Most
  * points, a slider from `budget-min` to `budget-max` on a log scale that sets the store's budget
@@ -1182,7 +1184,16 @@ export class MosaicaExplorer extends MosaicaElement {
   private liveCard(showArtifact: boolean, pin: TemplateResult | typeof nothing = nothing): TemplateResult {
     return html`<slot name="detail">${showArtifact
       ? html`<mosaica-artifact-card exportparts=${FORWARD['artifact-card']}>${pin}</mosaica-artifact-card>`
-      : html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open} .pick=${this.map?.lastPick ?? null}>${pin}</mosaica-item-card>`}</slot>`;
+      : this.itemCard(null, pin)}</slot>`;
+  }
+
+  /**
+   * A compact item card with the explorer's settings: the store's selection, with the map's last
+   * click while nothing is selected, or `item` for a pinned card.
+   */
+  private itemCard(item: {id: bigint; detail: ItemDetail} | null, actions: TemplateResult | typeof nothing): TemplateResult {
+    return html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact .item=${item} .pick=${item ? null : (this.map?.lastPick ?? null)}
+      title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open}>${actions}</mosaica-item-card>`;
   }
 
   /** Whether the card for the selection is the artifact card: the artifact, or its refusal, changed last. */
@@ -1265,7 +1276,7 @@ export class MosaicaExplorer extends MosaicaElement {
         const unpin = pinButton(true, () => (this.pinned = this.pinned.filter((q) => q.key !== p.key)));
         const body =
           p.kind === 'item'
-            ? html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact .item=${p.item} title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open}>${unpin}</mosaica-item-card>`
+            ? this.itemCard(p.item, unpin)
             : html`<mosaica-artifact-card exportparts=${FORWARD['artifact-card']} .artifact=${p.artifact}>${unpin}</mosaica-artifact-card>`;
         return {key: p.key, world: p.world, body, pinned: true, name: this.cardName(p.key)};
       });
@@ -1353,10 +1364,11 @@ export class MosaicaExplorer extends MosaicaElement {
     this.placeCallouts();
   }
 
-  /** The cards over the map that callouts keep clear of. */
+  /** The cards over the map that callouts keep clear of, and the map's tools and the Layers button. */
   private keptClear(): Element[] {
     const q = (sel: string) => Array.from(this.renderRoot.querySelectorAll(sel));
-    return [...q('[part="panel"]'), ...q('.right > *'), ...q('.in-map-strip'), ...q('.layers .group')];
+    const tools = this.map?.shadowRoot?.querySelector('[part="controls"]');
+    return [...q('[part="panel"]'), ...q('.right > *'), ...q('.in-map-strip'), ...q('.layers .group'), ...(tools ? [tools] : [])];
   }
 
   /**

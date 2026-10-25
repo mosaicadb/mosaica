@@ -39,7 +39,42 @@ await showAll(callout.querySelector('mosaica-item-card')!);
 await frames(4);
 const box = callout.getBoundingClientRect();
 const mapBox = map.getBoundingClientRect();
+const overlapping = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+/**
+ * Pick points across the map's top-left, the card expanded, and list those whose card is shown over the map's
+ * tools or the Layers button. A point under a card over the map cannot be clicked, so is skipped.
+ */
+async function covering(): Promise<string[]> {
+  const tools = [map.shadowRoot!.querySelector('[part="controls"]'), explorer.shadowRoot!.querySelector('.layers .group')].flatMap((e) => (e ? [e.getBoundingClientRect()] : []));
+  const over = [...explorer.shadowRoot!.querySelectorAll('[part="panel"], .in-map-strip')].map((e) => e.getBoundingClientRect()).concat(tools);
+  const covered: string[] = [];
+  const [ax, ay] = map.screenOf([0, 0]);
+  const scale = map.screenOf([1, 1])[0] - ax;
+  // Only a point within a card's width of the tools, which sit at the map's top-left, can put a card over them.
+  for (let sx = 10; sx < 800; sx += 40)
+    for (let sy = 10; sy < 500; sy += 40) {
+      const [x, y] = [mapBox.left + sx, mapBox.top + sy];
+      if (over.some((o) => o.left <= x && x <= o.right && o.top <= y && y <= o.bottom)) continue;
+      map.pickedAt = {kind: 'item', id: 5n, world: [(sx - ax) / scale, (sy - ay) / scale]};
+      (explorer as unknown as {requestUpdate(): void}).requestUpdate();
+      await settle(document.body);
+      await frames(3);
+      const card = explorer.shadowRoot!.querySelector('[part~="callout"]') as HTMLElement | null;
+      if (!card || card.hidden) continue;
+      const r = card.getBoundingClientRect();
+      if (tools.some((t) => overlapping(r, t))) covered.push(`${sx},${sy}`);
+    }
+  return covered;
+}
+const covered = await covering();
+// Without the Layers button under them, the map's tools alone.
+explorer.setAttribute('panels', 'toolbar filters selection detail');
+await settle(document.body);
+await frames(3);
+const coveredToolsAlone = await covering();
 (window as unknown as {result: unknown}).result = {
+  covered,
+  coveredToolsAlone,
   alone: alone.getBoundingClientRect().height,
   before,
   after: box.height,

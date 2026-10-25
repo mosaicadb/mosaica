@@ -35,8 +35,8 @@ import {chrome, tokens} from './tokens.js';
  * is called with the item's `mosaica_id` and fields. Otherwise `open-url` is a link template, such
  * as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for the
  * field `name`, URL-encoded, and `{mosaica_id}` by its id where the record has no field of that
- * name. Open is then a link to that address, opening in a new tab. An item with no value for a
- * field the template names, or whose address is not `http:` or `https:` once filled and resolved
+ * name. Open is then a link to that address, opening in a new tab. An item with no value, or an
+ * empty one, for a field the template names, or whose address is not `http:` or `https:` once filled and resolved
  * against the page, has no Open. Where both are set, `open` is called and `open-url` is unused.
  *
  * @summary The selected item's fields, with Open and Copy id.
@@ -402,7 +402,8 @@ export class MosaicaItemCard extends MosaicaElement {
       }}>${label}</button>`;
     const href = this.openUrl ? openAddress(this.openUrl, {mosaica_id: id, ...fields}) : null;
     if (!href) return nothing;
-    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed}>${label}</a>`;
+    // A middle-click opens the link too, and is a press.
+    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed} @auxclick=${(e: MouseEvent) => e.button === 1 && pressed()}>${label}</a>`;
   }
 
   /** The fields of `fields` that `card-fields` names, in its order. */
@@ -486,17 +487,18 @@ const titleKey = (field: string, key: string) => `${field}\u0000${key}`;
 
 /**
  * `template` with each `{name}` replaced by `values[name]`, URL-encoded, and resolved against the
- * page; `null` where a name has no value or the address is not `http:` or `https:`.
+ * page; `null` where a name has no value or an empty one, a value cannot be encoded, or the address
+ * is not `http:` or `https:`.
  */
 function openAddress(template: string, values: Record<string, unknown>): string | null {
   let missing = false;
-  const filled = template.replace(/\{([^{}]+)\}/g, (_, name: string) => {
-    const value = values[name];
-    if (value === undefined || value === null) missing = true;
-    return encodeURIComponent(String(value));
-  });
-  if (missing) return null;
   try {
+    const filled = template.replace(/\{([^{}]+)\}/g, (_, name: string) => {
+      const value = Object.hasOwn(values, name) ? values[name] : undefined;
+      if (value === undefined || value === null || value === '') missing = true;
+      return encodeURIComponent(String(value));
+    });
+    if (missing) return null;
     const url = new URL(filled, document.baseURI);
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
   } catch {

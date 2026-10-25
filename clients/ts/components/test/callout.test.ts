@@ -91,6 +91,18 @@ describe('placing a card beside its point', () => {
     expect(at.top + at.height).toBeLessThanOrEqual(map.height - 8);
   });
 
+  it('where no side beside the point is clear, goes to the clear place nearest it, shortened if need be', () => {
+    // A point between the panel and the map's tools, level with both, and a card nearly the map's height.
+    const map = {width: 1200, height: 700};
+    const panel = {left: 8, top: 8, width: 352, height: 300};
+    const tools = {left: 372, top: 16, width: 40, height: 142};
+    const at = placeCallout([366, 50], {width: 300, height: 684}, map, [panel, tools], undefined, null, 180)!;
+    const r = {left: at.left, top: at.top, width: 300, height: at.height};
+    for (const a of [panel, tools]) expect(r.left < a.left + a.width && a.left < r.left + r.width && r.top < a.top + a.height && a.top < r.top + r.height).toBe(false);
+    expect(at.height).toBeGreaterThanOrEqual(180);
+    expect(at.top + at.height).toBeLessThanOrEqual(map.height - 8);
+  });
+
   it('hides while its point is off the map', () => {
     expect(placeCallout([-1, 300], CARD, MAP)).toBeNull();
     expect(placeCallout([300, 901], CARD, MAP)).toBeNull();
