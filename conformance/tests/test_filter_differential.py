@@ -637,15 +637,17 @@ def test_none_of_is_the_visible_set_minus_the_matches(
     carried = set(catalogue_filter_columns["department"].values)
     assert m_auth - carried, "no entity here lacks a department, so this proves nothing"
 
+    one_field = {"none_of": [{"department": {"eq": "alpha"}}]}
     for expr in [
-        {"none_of": [{"department": {"eq": "alpha"}}]},
+        one_field,
         {"none_of": [{"department": {"eq": "alpha"}}, {"title": {"prefix": "smith"}}]},
     ]:
         raw = catalogue_server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=expr)
         served = _served_entities(raw, entity_of_fx)
         assert served == filt.evaluate(expr, catalogue_filter_columns, m_auth), expr
-        assert m_auth - carried <= served, expr
         assert served < m_auth, f"the negation excluded nothing: {expr}"
+        if expr is one_field:
+            assert m_auth - carried <= served, "an item with no department was left out"
 
     # An empty negation names no column and is refused.
     resp = catalogue_server.viewport_request(
