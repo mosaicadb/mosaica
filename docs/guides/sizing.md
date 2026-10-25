@@ -10,18 +10,18 @@ With the default limits, the caches and the paged reads add up to about 7.7 GiB.
 
 The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap above the cache limits, and every gigabyte beyond that keeps more of the bundle in memory. A cap that's too low makes the server slower before it makes it fail, so if the whole bundle fits in memory alongside the caches, that's the fastest a server gets.
 
-A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine.
+A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build's own structures within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine.
 
 ## Disc
 
 Plan disc space for four things:
 
-- **The bundle.** It grows as you insert items and as deletions and edits leave old rows behind, until a compaction reclaims them. By default a compaction starts once the files the bundle no longer uses take as much space as the ones it does, so a bundle can reach about twice its live size.
-- **Room for a compaction**, which needs free space of one and a half times the bundle's current size. Without it the compaction is refused.
-- **The cache directory**, which holds work the server can redo. Its largest part is bounded by `figures_disk_bytes`, 8 GiB by default.
-- **The write-ahead log**, which holds every change since the last flush, so it stays small unless writes arrive faster than flushes.
+- **The bundle.** Deleted and edited rows stay in it until a compaction, which by default starts once they're a fifth of all rows. Merging segments also leaves files behind, and a compaction starts once those take as much space as the files the bundle uses. So a bundle can reach about twice its live size before a compaction reclaims it, and a little more in the day after one, since compactions are at least a day apart.
+- **Room for a compaction**, which needs free space of one and a half times the size of the files the bundle uses. Without it the compaction is refused. In a bundle of several shards, each shard is compacted on its own, so the space needed is that of the largest.
+- **The cache directory**, which holds work the server can redo. The saved counts are bounded by `figures_disk_bytes`, 8 GiB by default. The copies of each distinct set of granted labels' visible items aren't bounded: they grow with the number of such sets, and with each flush, until the next compaction removes them.
+- **The write-ahead log**, which holds every change since the last flush, so it usually stays small. An annotation level that has grown or been filled holds the log until the next compaction, and `wal_pin` in `/control/status` says what is holding it.
 
-Taken together, a database that's written to and compacted on the default schedule needs about five times its live bundle size, plus the cache. A database you only build and read needs the bundle and the cache.
+Taken together, a database that's written to and compacted on the default schedule needs about three and a half times its live bundle size, plus the cache. A database you only build and read needs the bundle and the cache.
 
 Keep the bundle and the log on a local disc. A fast SSD matters most when the bundle doesn't fit in memory, since every read the page cache misses goes to disc.
 
@@ -37,12 +37,12 @@ Bundle size per item varies widely with the schema: a rendered field travels wit
 |---|---|---|---|---|
 | [Ireland](../start/first-map.md) | 29,935 | One geographic view; an indexed text field, a rendered category and a rendered number | 2.2 MB | 73 B |
 | [GeoNames](../start/install.md#try-it) | 150,000 | One geographic view; an indexed text field and a rendered number | 11.7 MB | 78 B |
-| [arXiv](backend.md) | 50,000 | Two views; six fields, including indexed text and an indexed keyword; two annotation layers; 175 access attributes | 15.0 MB | 300 B |
+| [arXiv](backend.md) | 50,000 | Two views; six fields, including indexed text and an indexed keyword; two clusterings, one with a layer of names; 175 access attributes | 15.0 MB | 300 B |
 
-To estimate your own, build a sample of your data with your real schema, read the size from the build's last line, and scale it by the number of items you expect. A sample keeps per-item costs right, but fixed costs and the size of annotation layers don't scale the same way, so treat the result as a starting point and check it against a larger build before you buy hardware.
+To estimate your own, build a sample of your data with your real schema, read the size from the line that starts `built`, and scale it by the number of items you expect. A sample keeps per-item costs right, but fixed costs and the size of annotation layers don't scale the same way, so treat the result as a starting point and check it against a larger build before you buy hardware.
 
 ```bash
-mosaica build 2>&1 | tail -n 1
+mosaica build 2>&1 | grep '^built'
 ```
 
 ```
