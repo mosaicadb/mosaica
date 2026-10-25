@@ -4,9 +4,29 @@ Mosaica has three clients beside the HTTP API: a Python package, a TypeScript cl
 
 ## Which client
 
-- **Python**, the `mosaica` package, makes a database from data frames and files, reads one as pyarrow tables, and draws a map in a Jupyter notebook. `create` and `open` give a `Database` in a directory, which runs its own server. `connect` gives a `Viewer` that reads from a server someone else runs, and `Control` writes to one.
-- **TypeScript** runs maps in the browser: a store that drives a map, web components from a whole explorer down to a single count, a deck.gl layer, and React wrappers. `MosaicaClient` and `Control` send single requests. [Maps in the browser](browser-maps.md) explains how the pieces fit. The Python notebook map embeds the same components.
-- **The `mosaica` command** builds a database from a declaration and its source files, serves it, and reads from a running server with a session token: items, artifacts and aggregates, as Arrow or Parquet.
+### Python: analysis and prototyping
+
+The Python package is designed for data scientists, and for trying an idea out before building an application. It works in two ways, with the same reads, filters and notebook map in each:
+
+- **On your own machine.** `create` makes a database in a directory from data frames or Parquet files, and the package runs a server for it in the background. There is nothing to deploy.
+- **Against a shared server.** `connect` reads from a server someone else runs, and `Control` writes to one. Reading and mapping are the same calls on both, so analysis written against a local database runs against a shared one. Writing differs: a local database takes inserts and a commit, and a shared server takes its writes through `Control`.
+
+Results come back as pyarrow tables, and the map is a Jupyter widget built from the TypeScript components.
+
+### TypeScript: applications in the browser
+
+The TypeScript client is designed for maps that other people use:
+
+- **As an application of its own.** The `<mosaica-explorer>` element is a whole map, with filters, layers and record cards, on any page. The single-file bundle needs no build step.
+- **Inside an application you already have.** The map, its panels, the store or the deck.gl layer fit into your own page, in any framework, with React wrappers. [Maps in the browser](browser-maps.md) explains the pieces and how to build on them.
+
+### The command line: operators and scripts
+
+The `mosaica` command builds a database from a declaration and its source files, serves it, exports items, artifacts and aggregates as Arrow or Parquet, and manages users and their access.
+
+### The HTTP API: anything else
+
+Both clients are built on the HTTP API, and any other language can call it directly. The [HTTP API reference](../reference/http.md) describes every route.
 
 ## Connecting
 

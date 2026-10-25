@@ -95,7 +95,7 @@ The [access control](access-control.md) chapter covers labels and sign-in, and t
 | `mosaica` command line | Builds from files. Writing to a running server is not built yet | Not built yet | Yes | Yes |
 | HTTP API | Yes | Yes, as tiles of points | Yes | Yes |
 
-The [capabilities](../reference/capabilities.md) table names the call for each capability on each surface.
+The Python client runs a database on your own machine, with nothing to deploy, or connects to a shared server, with the same reads and notebook map either way. The [clients](clients.md) chapter compares them, and the [capabilities](../reference/capabilities.md) table names the call for each capability on each surface.
 
 ## How it serves large data
 
