@@ -19,7 +19,7 @@ You'll need the `mosaica` binary from [the first tutorial](../start/first-map.md
 
 ## Serve the arXiv example
 
-The papers are in `examples/data/arxiv`, with a declaration, `schema.toml`, that describes them. Each paper has a position in two layouts, called views, and carries its arXiv archive, its subject class, its submission date, its title and its arXiv identifier. Three annotation layers lie over the papers: Toponymy's clusters at four levels, a name for each cluster, and arXiv's own classification. The [NOTICE](https://github.com/mosaicadb/mosaica/blob/main/examples/data/arxiv/NOTICE.md) beside the data says where each part came from.
+The papers are in `examples/data/arxiv`, with a declaration, `schema.toml`, that describes them. Each paper has a position in two layouts, called views, and carries its arXiv archive, its subject class, its submission date, its title and its arXiv identifier. Over the papers lie Toponymy's clusters at four levels, with a layer of names for them, and arXiv's own classification. The [NOTICE](https://github.com/mosaicadb/mosaica/blob/main/examples/data/arxiv/NOTICE.md) beside the data says where each part came from.
 
 Make a directory for the deployment and save this as `mosaica.toml` in it. It is the tutorial's configuration, with the declaration pointing into the clone.
 
@@ -64,6 +64,7 @@ built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 1502
 Make the operator's secret and start the server in a terminal of its own.
 
 ```bash
+cd ~/arxiv
 openssl rand -hex 16 > operator.secret
 chmod 600 operator.secret
 mosaica serve
@@ -74,7 +75,7 @@ mosaica serve
 {"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
 ```
 
-Your backend uses two of the three addresses. It starts sessions on the session address, port 9142, which only answers callers holding a key allowed to act for other users. It reads on the viewer address, port 9141, as the browser does.
+Your backend uses two of the three addresses. It starts sessions on the session address, port 9142, which only answers the operator credential and API keys allowed to act for other users. It reads on the viewer address, port 9141, as the browser does.
 
 ## Make the principals
 
@@ -129,7 +130,7 @@ The session holds Ada's terms and her `read`. A session started this way never c
 
 Your backend sends `token` to the browser and keeps `token_id`, the handle it ends the session with later. The `plain-html` example's [server.mjs](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/examples/plain-html/server.mjs) mints sessions this way, in 140 lines of Node.
 
-If Ada signs in with your OpenID Connect provider, send her access token in place of the name, as `{"access_token": "..."}`. A user who holds a password or an API key of their own can also sign in directly, with `POST /v1/login`. The [access control chapter](../system/access-control.md#getting-a-token) covers all three.
+If Ada signs in with your OpenID Connect provider, send her access token in place of the name, as `{"access_token": "..."}`. A user who holds a password or an API key of their own can also sign in directly, with `POST /v1/login`. The [access control chapter](../system/access-control.md#getting-a-token) covers all three. From a shell, `mosaica session authorise` and `mosaica session revoke` send the same requests.
 
 For the rest of this guide we'll read as Ada. Keep the token and the two headers in shell variables.
 
@@ -182,7 +183,7 @@ The fields are those a filter can name, with the operators each takes. A filter 
 
 ## Fill a filter list and a typeahead
 
-`GET /v1/categories/{field}` lists a category field's values, a page at a time. The `key` is what a filter names, and the `title` what you show. This vocabulary has no titles of its own, so each title is its key.
+`GET /v1/categories/{field}` lists a category field's values, a page at a time. The `key` is what a filter names, and the `title` what you show. This vocabulary's titles are the same as its keys.
 
 ```bash
 curl -s "http://127.0.0.1:9141/v1/categories/archive?limit=4" -H "$AUTH"
@@ -219,7 +220,7 @@ Each session runs one suggestion at a time, and a second sent while the first is
 
 ## List and search the topics
 
-`POST /v1/artifacts/browse` lists a layer's artifacts by their place in its hierarchy, largest first, whatever part of the map is on screen. This asks for the three largest clusters at the coarsest level.
+`POST /v1/artifacts/browse` lists a layer's artifacts by their place in its hierarchy, whatever part of the map is on screen, with those holding the most papers Ada may see first. This asks for the three largest clusters at the coarsest level.
 
 ```bash
 curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
@@ -264,7 +265,7 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 
 `masked_count` is how many of the cluster's papers Ada may see. Send `parent` with one of these `mosaica_id`s to list its children, or `next` back as `cursor` for the next page. The ids arrive as strings, because a JavaScript number cannot hold a 64-bit integer exactly.
 
-These rows have no `name`. The declaration serves a cluster's name only to a viewer who can see all six papers the name was written from, and Ada can't see all six for any of the coarse clusters. She sees names further down. Searching with `q` matches a key or a name.
+These rows have no `name`. Each cluster's label holds two texts: a title, written from six of its papers, and keyphrases, drawn from three. The declaration serves each text only to a viewer who can see every paper it was drawn from, and a row's `name` is the first of the two the viewer gets. For none of these coarse clusters can Ada see all of either set. She gets names further down, where the clusters are smaller. Searching with `q` matches a key or a name.
 
 ```bash
 curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
@@ -289,7 +290,9 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 }
 ```
 
-A user with other terms would get other counts, other names and possibly no match. `POST /v1/artifacts/{mosaica_id}` returns one artifact's card, with its content and its centre and box over the papers the session may see.
+This name is the cluster's keyphrases: Ada can see the three papers they came from, but not all six behind its title. A user with other terms would get other counts, other names and possibly no match.
+
+`POST /v1/artifacts/{mosaica_id}`, with a body naming the `view`, returns one artifact's card: its count, centre, box and outline over the papers the session may see, on the grid described [below](#read-one-paper). It carries no name, which comes from browse.
 
 ## Read one paper
 
@@ -349,7 +352,7 @@ An identifier that names nothing, and one that names a paper Ada may not see, ge
 
 ## When a request is refused
 
-A refusal is JSON, with an `error` code and a `detail` that says what to change.
+A refusal is JSON, with an `error` code and a `detail` that says what to change. The exceptions are a body that is not JSON, answered `400`, and a request without `content-type: application/json`, answered `415`, which come back as plain text.
 
 ```bash
 curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
@@ -360,20 +363,19 @@ curl -s http://127.0.0.1:9141/v1/artifacts/browse -H "$AUTH" -H "$JSON" \
 {"error":"contract","detail":"browse refused: layer 'clusters/toponymy': it holds 4 level(s), so level 4 names nothing — /v1/meta publishes the level set"}
 ```
 
-The code tells your backend what to do next.
-
 | Status and code | Means | What to do |
 |---|---|---|
 | `422 contract` | The request is wrong. | Change it, as the detail says. |
 | `404 unknown` | No such view, item, artifact or principal, or one this session may not see. | Nothing to retry. |
-| `401 bad-credential` | No token or key, or one the server does not know. | Start a session, or check the key. |
+| `401 bad-credential` | No token or key, or one the server does not know. A session token gets this once the server has forgotten the session, and after a restart. | For a session token, start a new session. For an API key, check the key. |
 | `403 expired-token` | The session has ended. | Start a new one. |
+| `403 forbidden` | The credential lacks a permission: a key without `authorise-as`, or a principal without `read`. | Grant the permission. |
 | `429 backpressure` | The server is busy, or a suggestion is already running for this session. | Send the same request after the seconds in `Retry-After`. |
 | `500 fail-closed` | The server could not compute a correct answer, and sent none. | Retry, and check the server's log if it keeps happening. |
 
 ## End the session
 
-A session ends at `expires_at`, and earlier when a change to the catalogue affects it, such as a grant to Ada or to `portal`. When Ada signs out of your app, end it yourself with `POST /session/revoke` and the `token_id`. The token is never sent back to the session address.
+A session ends at `expires_at`, and earlier when a change to the catalogue affects it, such as a grant to Ada or to `portal`. Sessions are held in memory, so a restart ends them all. When Ada signs out of your app, end it yourself with `POST /session/revoke` and the `token_id`. The token is never sent back to the session address.
 
 ```bash
 curl -s -w '%{http_code}\n' http://127.0.0.1:9142/session/revoke -H "authorization: Bearer $KEY" \
@@ -386,7 +388,7 @@ curl -s http://127.0.0.1:9141/v1/meta -H "$AUTH"
 {"error":"expired-token","detail":"the session has ended: its token expired, was revoked, or a change to what authorised it ended it; authorise again"}
 ```
 
-The revoke answers `204` with no body, and the token stops working at once. A `token_id` that names no live session gets the same `204`.
+The revoke answers `204` with no body, and the token stops working at once. A `token_id` that names no live session, or a session another principal started, gets the same `204` and changes nothing.
 
 For a load balancer, `/healthz` answers `200` while the process is up, and `/readyz` answers `200` when the server is ready for traffic and `503` when it is not. Neither needs a token, and both answer on the viewer and session addresses.
 
