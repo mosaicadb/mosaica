@@ -68,7 +68,7 @@ The store is the part of Mosaica's client that has no pixels. It asks the server
 
 Make the web project as before, and install the elements and the client they are built on. `@mosaicajs/client` holds the store.
 
-While the packages are unpublished, install the three tarballs from the first tutorial in place of the `npm install @mosaicajs/components @mosaicajs/client` line below:
+While the packages are unpublished, the `npm install @mosaicajs/components @mosaicajs/client` line in the block below is replaced by this one, which installs the first tutorial's three tarballs. Run it at that point, in `web`, after `cd web`:
 
 ```bash
 npm install ~/mosaica-packs/mosaicajs-*.tgz
