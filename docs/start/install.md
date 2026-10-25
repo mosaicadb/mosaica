@@ -61,7 +61,7 @@ flowchart LR
   build --> bundle[("bundle")]
   deployment --> serve["mosaica serve"]
   bundle --> serve
-  serve -. "flushes and compactions" .-> bundle
+  serve -.->|flushes and compactions| bundle
   serve --- disc[("write-ahead log<br/>cache<br/>catalogue")]
   serve --> viewer["viewer address<br/>browsers and notebooks"]
   serve --> session["session address<br/>your app's server"]
