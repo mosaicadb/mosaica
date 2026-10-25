@@ -368,9 +368,11 @@ enum Command {
     ///
     /// Each page is sent before the next is read, under a fresh batch id. A page the server
     /// answers with `429` is sent again, the same bytes under the same id, once the wait it names
-    /// has passed, at most 600 times. A page no answer came for is sent once more, a second later,
-    /// which the server answers as a replay where the first arrived. Inserting a file again inserts its rows again, except that a row naming its
-    /// item by a unique attribute is then answered as unchanged.
+    /// has passed, at least 1 second and at most 30, while the waits total at most five minutes. A
+    /// page no answer came for is sent once more, a second later and outside that budget, which
+    /// the server answers as a replay where the first arrived. Inserting a file again inserts its
+    /// rows again, except that a row naming its item by a unique attribute is then answered as
+    /// unchanged.
     ///
     /// It prints one JSON object on stdout totalling the answers: `pages` and `rows` sent;
     /// `created`, `edited`, `added`, `unchanged`, `joined`, `minted`, `clamped`, `clipped` and

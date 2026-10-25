@@ -20,11 +20,17 @@ const IDENTITY_TIMEOUT: Duration = Duration::from_secs(120);
 /// `serve.visible_wait_max_secs` beside.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// How long one `429` may hold a request, in seconds. The server's own figure is clamped to this.
+/// The longest wait between attempts after a `429`, in seconds. A longer one asked for is cut to
+/// this.
 const MAX_BACKOFF: f64 = 30.0;
 
-/// How many times a request is sent while it is answered `429`.
-const MAX_ATTEMPTS: u32 = 600;
+/// The shortest wait a `429` asks for, in seconds, and the wait where it names none.
+const MIN_BACKOFF: f64 = 1.0;
+
+/// The most one request waits in all between attempts after a `429`, in seconds. A `429` is waited
+/// out and the request sent again while the waits stay within this; the `429` whose wait would
+/// take them past it is the answer.
+const RETRY_BUDGET_S: f64 = 300.0;
 
 /// Where a request goes: `http://host:port`, or `unix:<path>` for a control plane on a Unix
 /// socket.
@@ -230,6 +236,48 @@ fn dechunk(mut rest: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
+/// One request's retries: the waits taken after a `429`, and whether an unanswered request was
+/// sent once more.
+#[derive(Default)]
+struct Retry {
+    waited: f64,
+    resent: bool,
+}
+
+impl Retry {
+    /// The wait before sending the request again after `sent`, or `None` where `sent` is the
+    /// answer: a `429` whose wait keeps the waits within the budget, or, for a request carrying a
+    /// batch id, the first time no answer came, which takes nothing from the budget.
+    fn after(&mut self, sent: &Result<Answer, String>, replayable: bool) -> Option<f64> {
+        match sent {
+            Ok(answer) if answer.status == 429 => {
+                let wait = retry_after(answer).min(MAX_BACKOFF);
+                (self.waited + wait <= RETRY_BUDGET_S).then(|| {
+                    self.waited += wait;
+                    wait
+                })
+            }
+            Err(_) if replayable && !self.resent => {
+                self.resent = true;
+                Some(MIN_BACKOFF)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The wait an answer asks for before the request is sent again, in seconds: its `retry-after`
+/// header, then its body's `retry_after_s`, then 1 second, and never less than 1 second.
+fn retry_after(answer: &Answer) -> f64 {
+    answer
+        .retry_after
+        .as_deref()
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| answer.json()["retry_after_s"].as_f64())
+        .filter(|seconds| seconds.is_finite())
+        .map_or(MIN_BACKOFF, |seconds| seconds.max(MIN_BACKOFF))
+}
+
 /// A path segment, percent-encoded so a name holding `/` or a space reaches the route whole.
 pub(crate) fn segment(raw: &str) -> String {
     raw.bytes()
@@ -360,7 +408,8 @@ impl Plane {
     }
 
     /// One request, sent again with the same headers and bytes after a `429`, once the wait it
-    /// names has passed: at most 30 seconds a wait and 600 attempts in all.
+    /// names has passed: at least 1 second and at most 30 a wait, while the waits total at most
+    /// five minutes.
     pub(crate) fn send(
         &self,
         method: &str,
@@ -392,8 +441,7 @@ impl Plane {
         body: Option<Body>,
         replayable: bool,
     ) -> Result<Answer, String> {
-        let mut attempts = 1;
-        let mut resent = false;
+        let mut retry = Retry::default();
         loop {
             let sent = send(
                 &self.target,
@@ -404,25 +452,10 @@ impl Plane {
                 body,
                 self.timeout,
             );
-            let again = match &sent {
-                // The resend of an unanswered request is not one of a `429`'s attempts.
-                Ok(answer) => answer.status == 429 && attempts - u32::from(resent) < MAX_ATTEMPTS,
-                Err(_) => replayable && !resent,
-            };
-            if !again {
-                return sent;
+            match retry.after(&sent, replayable) {
+                Some(wait) => std::thread::sleep(Duration::from_secs_f64(wait)),
+                None => return sent,
             }
-            resent |= sent.is_err();
-            attempts += 1;
-            let named = sent.as_ref().ok().and_then(|answer| {
-                answer
-                    .retry_after
-                    .as_deref()
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .or_else(|| answer.json()["retry_after_s"].as_f64())
-            });
-            let wait = named.unwrap_or(1.0).clamp(0.0, MAX_BACKOFF);
-            std::thread::sleep(Duration::from_secs_f64(wait));
         }
     }
 }
@@ -438,6 +471,24 @@ mod tests {
             Some(&b"abcde"[..])
         );
         assert_eq!(dechunk(b"3\r\nab"), None);
+    }
+
+    #[test]
+    fn a_resend_takes_nothing_from_the_429_budget() {
+        let busy = Ok(Answer {
+            status: 429,
+            body: Vec::new(),
+            retry_after: Some("30".to_string()),
+        });
+        let mut retry = Retry::default();
+        assert_eq!(
+            retry.after(&Err("no answer".to_string()), true),
+            Some(MIN_BACKOFF)
+        );
+        let waits = std::iter::from_fn(|| retry.after(&busy, true)).count();
+        assert_eq!(waits as f64, RETRY_BUDGET_S / MAX_BACKOFF);
+        let mut once = Retry::default();
+        assert_eq!(once.after(&Err("no answer".to_string()), false), None);
     }
 
     #[test]

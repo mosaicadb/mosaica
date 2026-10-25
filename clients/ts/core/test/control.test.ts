@@ -326,6 +326,27 @@ describe('an answer', () => {
     expect(sent[1]).toEqual(sent[0]);
   });
 
+  it('takes nothing from the 429 budget for the resend of an ingest no server answered', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError('fetch failed');
+      return {
+        status: 429,
+        headers: new Headers({'retry-after': '7'}),
+        text: async () => '{"error": "backpressure"}'
+      } as unknown as Response;
+    });
+    const started = Date.now();
+    const pending = control.ingest(rows);
+    await vi.runAllTimersAsync();
+    const answer = await pending;
+    const waits = Math.floor(RETRY_BUDGET_S / 7);
+    expect(answer).toMatchObject({status: 429, attempts: waits + 2});
+    expect(Date.now() - started).toBe(MIN_BACKOFF * 1000 + waits * 7 * 1000);
+  });
+
   it('keeps a non-object JSON body under `value`, and a non-JSON body only as text', async () => {
     recording({status: 200, body: [1, 2]});
     expect((await control.status()).body).toEqual({value: [1, 2]});

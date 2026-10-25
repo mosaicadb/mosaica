@@ -1,6 +1,7 @@
 """The control-plane client on its own: the retry rule and the batch id.
 
-The `429` is the one status the SDK retries, and it must resend identical bytes: a batch id maps to
+The `429` is the one status the SDK retries, and a page of rows no server answered the one request
+it sends once more, and each must resend identical bytes: a batch id maps to
 the SHA-256 of the raw request body, so a body re-serialised before the retry would be a new batch
 rather than a replay. That is what this file fakes a server for. Everything else about the plane is
 tested against a real one.
@@ -30,6 +31,8 @@ class _Backpressure(http.server.BaseHTTPRequestHandler):
     its `Retry-After` header and `retry_after_s` in its body, where each is not `None`."""
 
     refusals = 2
+    #: Requests to close without an answer before any is answered.
+    silences = 0
     retry_after: str | None = "0.01"
     retry_after_s: float | None = 0.01
     bodies: list = []
@@ -39,6 +42,10 @@ class _Backpressure(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("content-length", "0"))
         _Backpressure.bodies.append(self.rfile.read(length))
         _Backpressure.batches.append(self.headers.get("x-mosaica-batch-id"))
+        if _Backpressure.silences > 0:
+            _Backpressure.silences -= 1
+            self.close_connection = True
+            return
         if _Backpressure.refusals > 0:
             _Backpressure.refusals -= 1
             said = {"error": "backpressure", "detail": "busy"}
@@ -69,6 +76,7 @@ def waits(monkeypatch):
     slept: list = []
     monkeypatch.setattr(_control, "sleep", slept.append)
     _Backpressure.refusals = 2
+    _Backpressure.silences = 0
     _Backpressure.retry_after = "0.01"
     _Backpressure.retry_after_s = 0.01
     _Backpressure.bodies = []
@@ -197,19 +205,67 @@ def test_a_429_waits_its_header_then_its_body_then_one_second_and_never_less(
     assert answer.ok and waits == [waited]
 
 
-def test_a_request_that_reaches_no_server_is_an_answer_and_not_an_exception():
-    """A page that was never answered is a refusal the report carries: whether it landed is the
-    database's to say, and a commit after it is a new request."""
+def test_a_page_no_server_answered_is_sent_once_more_with_identical_bytes(waits):
+    """The server answers a body it already accepted under the batch id as a replay, so the page
+    goes once more, as it was, after the one-second wait."""
+    _Backpressure.refusals = 0
+    _Backpressure.silences = 1
     server, base = serving()
-    server.shutdown()
-    server.server_close()
-    answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
+    try:
+        answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert answer.ok and answer.attempts == 2 and waits == [1.0]
+    assert _Backpressure.bodies == [b"rows"] * 2
+    assert len(set(_Backpressure.batches)) == 1
+
+
+def test_a_page_unanswered_twice_is_an_answer_and_not_an_exception(waits):
+    """A page sent once more and still unanswered is a refusal the report carries: whether it
+    landed is the database's to say."""
+    _Backpressure.silences = 3
+    server, base = serving()
+    try:
+        answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
+    finally:
+        server.shutdown()
+        server.server_close()
     assert not answer.ok and answer.status == UNANSWERED
+    assert answer.attempts == 2 and _Backpressure.bodies == [b"rows"] * 2
     assert "did not answer" in answer.detail
 
 
-def test_a_commit_whose_pages_reach_no_server_reports_it_and_does_not_raise(tmp_path, monkeypatch):
-    """A page that was never answered is a refusal the report carries, not an exception."""
+def test_the_resend_takes_nothing_from_the_429_budget(waits):
+    """After a resend, a `429` is still waited out for the whole budget."""
+    _Backpressure.silences = 1
+    _Backpressure.refusals = 1_000
+    _Backpressure.retry_after = "7"
+    server, base = serving()
+    try:
+        answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert answer.status == 429
+    assert waits == [1.0] + [7.0] * int(RETRY_BUDGET_S // 7)
+
+
+def test_a_request_that_reaches_no_server_is_an_answer_and_not_an_exception(waits):
+    """A request that never reached a server is a refusal the report carries."""
+    server, base = serving()
+    server.shutdown()
+    server.server_close()
+    answer = Control(base, "credential").changes([{"op": "delete", "match": {"mosaica_id": "1"}}])
+    assert not answer.ok and answer.status == UNANSWERED and answer.attempts == 1
+    assert "did not answer" in answer.detail
+
+
+def test_a_commit_whose_pages_reach_no_server_reports_it_and_does_not_raise(
+    tmp_path, monkeypatch, waits
+):
+    """A page that was never answered is a refusal the report carries, not an exception, and the
+    pages after it are not sent."""
     from conftest import small
     from mosaica._database import Database
 

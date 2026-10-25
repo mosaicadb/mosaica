@@ -762,8 +762,11 @@ function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> 
  * A `429` is backpressure. The call waits the `Retry-After` it carries, between 1 and 30 seconds,
  * and sends the request again while the waits total at most five minutes ({@link RETRY_BUDGET_S});
  * the `429` whose wait would take them past it is returned. Every other status is returned as an {@link Answer}, neither
- * thrown nor retried. A request that reaches no server is returned with status
- * {@link UNANSWERED}. A call whose `signal` aborts rejects with the signal's reason.
+ * thrown nor retried. An `ingest` that reaches no server is sent once more a second later, the
+ * same bytes under the same batch id, which the server answers as a replay where the first
+ * arrived; that wait is not taken from the budget. Any other request that reaches no server, and
+ * an `ingest` that reaches none twice, is returned with status {@link UNANSWERED}. A call whose
+ * `signal` aborts rejects with the signal's reason.
  *
  * `ingest` sends a batch id: the caller's `batch`, or a random id made once per call.
  * The server holds each accepted batch id against its body, so the same bytes sent again under it
@@ -792,7 +795,8 @@ export class Control {
     path: string,
     options: CallOptions,
     body?: string | Uint8Array,
-    headers: Record<string, string> = {}
+    headers: Record<string, string> = {},
+    replayable = false
   ): Promise<Answer> {
     const url = this.base + path;
     // The route's own headers replace a host header of the same name in any case.
@@ -808,6 +812,7 @@ export class Control {
     const seconds = () => (performance.now() - started) / 1000;
     let attempts = 0;
     let waited = 0;
+    let resent = false;
     for (;;) {
       attempts += 1;
       let response: Response;
@@ -817,6 +822,13 @@ export class Control {
         text = await response.text();
       } catch (error) {
         if (options.signal?.aborted) throw options.signal.reason;
+        // A request carrying a batch id is safe to send once more: the server answers a body it
+        // already accepted under the id as a replay.
+        if (replayable && !resent) {
+          resent = true;
+          await pause(retryAfterOf(429, null, null)!, options.signal);
+          continue;
+        }
         return {status: UNANSWERED, ok: false, body: {}, text: `${url} did not answer: ${String(error)}`, attempts, seconds: seconds()};
       }
       const answered = decoded(text);
@@ -839,7 +851,7 @@ export class Control {
     const batch = options.batch ?? freshBatch();
     const headers: Record<string, string> = {'content-type': ARROW, 'x-mosaica-batch-id': batch};
     if (options.view !== undefined) headers['x-mosaica-view'] = options.view;
-    const answer = (await this.send('POST', withQuery(path, naming(options)), options, body, headers)) as Answer<IngestResponse>;
+    const answer = (await this.send('POST', withQuery(path, naming(options)), options, body, headers, true)) as Answer<IngestResponse>;
     return {...answer, batch};
   }
 
@@ -888,9 +900,11 @@ export class Control {
 
   /**
    * `PUT /control/layers`: declares one annotation layer. The answer is `201` with the layer's
-   * `name` and `mosaica_id`; a declaration that breaks the deployment's rules is refused with `422`
-   * saying why, and one past the last layer space, or declaring more levels than a space holds,
-   * with `409`. A dropped layer's name may be declared again.
+   * `name` and `mosaica_id`, or `200` with the held layer's where a layer of that name already has
+   * this declaration as written; another declaration under a held name, or one that breaks the
+   * deployment's rules, is refused with `422` saying why, and one past the last layer space, or
+   * declaring more levels than a space holds, with `409`. A dropped layer's name may be declared
+   * again.
    */
   declareLayer(declaration: object, options: WriteOptions = {}): Promise<Answer> {
     return this.sendJson('PUT', withQuery('/control/layers', waiting(options)), declaration, options);

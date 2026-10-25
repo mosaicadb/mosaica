@@ -11,9 +11,11 @@ given. Two requests carrying the same rows are two requests: nothing derives an 
 a page contains, so a frame inserted and committed twice lands twice.
 
 **A `429` is backpressure.** Every `429` carries `Retry-After`, whatever shed the request, and
-the client waits that long and sends the same bytes again. Every other status is an answer: a
-`409` on a differing part is reported and not retried, since an edit is a delete and a re-ingest,
-and the SDK does not do that on the user's behalf.
+the client waits that long and sends the same bytes again. A page of rows no server answered is
+sent once more, the same bytes under its batch id, which the server answers as a replay where the
+first arrived; unanswered twice, it is the answer. Every other status is an answer: a `409` on a
+differing part is reported and not retried, since an edit is a delete and a re-ingest, and the SDK
+does not do that on the user's behalf.
 
 The transport is `urllib`, so the SDK's only dependency outside the standard library stays
 pyarrow.
@@ -121,6 +123,7 @@ class Control:
         path: str,
         body: bytes | None = None,
         headers: dict | None = None,
+        replayable: bool = False,
     ) -> Answer:
         head = {} if self.credential is None else {"authorization": f"Bearer {self.credential}"}
         head.update(headers or {})
@@ -135,6 +138,7 @@ class Control:
         started = time.monotonic()
         attempts = 0
         waited = 0.0
+        resent = False
         while True:
             attempts += 1
             try:
@@ -159,11 +163,15 @@ class Control:
                     refusal.code, _decoded(text), text, attempts, time.monotonic() - started
                 )
             except (urllib.error.URLError, OSError) as unreachable:
-                # A connection that never answered is a refusal the report carries, not an
-                # exception out of `commit()`: the pages already acknowledged stay acknowledged,
-                # and the report names the one that was not. **A commit after it is a new
-                # request**, under a new id: whether the unanswered page landed is the database's
-                # to say, and a client that needs to ask carries an id column.
+                # A request carrying a batch id is sent once more, the same bytes under the same
+                # id, which the server answers as a replay where the first arrived; the wait is
+                # not taken from a `429`'s budget. Any other, and one unanswered twice, is a
+                # refusal the report carries, not an exception out of `commit()`: the pages already
+                # acknowledged stay acknowledged, and the report names the one that was not.
+                if replayable and not resent:
+                    resent = True
+                    sleep(retry_after(429, None, None))
+                    continue
                 return Answer(
                     UNANSWERED,
                     {},
@@ -219,21 +227,26 @@ class Control:
 
         - `body`: the rows, as an Arrow IPC stream.
         - `batch`: the request's batch id. A retry sends the same id with the same bytes, and the
-          server answers it as a replay; the same id with other bytes is refused.
+          server answers it as a replay; the same id with other bytes is refused. A request no
+          server answers is sent once more under it.
         - `view`: the view the rows are for. It may be left out where the database has one view.
         - `strict`: `True` refuses the whole batch at its first refused row, with `409`.
         """
         headers = {"content-type": ARROW, "x-mosaica-batch-id": batch}
         if view is not None:
             headers["x-mosaica-view"] = view
-        return self._send("POST", "/control/ingest" + _query(strict=strict), body, headers)
+        return self._send(
+            "POST", "/control/ingest" + _query(strict=strict), body, headers, replayable=True
+        )
 
     def declare_layer(self, payload: dict) -> Answer:
         """`PUT /control/layers`: declare one annotation layer.
 
         `payload` is the layer's block as `mosaica check --payloads` prints it. The answer carries
-        the layer's `mosaica_id`. A dropped layer's name may be declared again. A declaration past
-        the last layer space, or declaring more levels than a space holds, is refused with `409`.
+        the layer's `mosaica_id`: `201` for a new layer, `200` for a layer of that name that
+        already has this declaration as written. Another declaration under a held name is refused
+        with `422`. A dropped layer's name may be declared again. A declaration past the last layer
+        space, or declaring more levels than a space holds, is refused with `409`.
         """
         return self._send(
             "PUT", "/control/layers", json.dumps(payload).encode(), {"content-type": JSON}
