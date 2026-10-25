@@ -1485,10 +1485,9 @@ export type BrowsePage = {
  *
  * The columns of each page are `mosaica_id` (`uint64`), the named fields in the order named, the
  * position under `position`, the labels under `labels`, then `mosaica:matched` (`bool`) under
- * `keepUnmatched`. Every
- * named field is present whether or not an item carries a value, and an absent value is null. A
- * category field is a dictionary column of its keys, each page's dictionary holding only the keys
- * its rows carry.
+ * `keepUnmatched`. Every named field is present whether or not an item carries a value, and an
+ * absent value is null. A category field is a dictionary column of its keys, each page's
+ * dictionary holding only the keys its rows carry.
  *
  * @category Requests and responses
  */

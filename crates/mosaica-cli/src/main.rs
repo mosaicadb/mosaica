@@ -282,9 +282,9 @@ enum Command {
     ///
     /// The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y`
     /// under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under
-    /// `--keep-unmatched`. A category field is a dictionary
-    /// column of its value keys, each page's dictionary holding the keys of its own rows. A read
-    /// that returns no row writes these columns with no rows.
+    /// `--keep-unmatched`. A category field is a dictionary column of its value keys, each page's
+    /// dictionary holding the keys of its own rows. A read that returns no row writes these
+    /// columns with no rows.
     ///
     /// A read cut short leaves the whole pages read before it in the output, exits 1 and prints
     /// the cursor to read the rest with. The first response's head, with the counts under

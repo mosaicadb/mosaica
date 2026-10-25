@@ -966,9 +966,9 @@ class Viewer:
         `count` goes on the first request only, which is where the server takes it.
 
         The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y`
-        under `position`, `mosaica:labels` under `labels`, then `mosaica:matched`. A column is present even where no item has a value,
-        and a missing value is null. A category column holds each value's key, as a dictionary
-        column. The table's schema metadata `mosaica.head` is the first response's head as JSON:
+        under `position`, `mosaica:labels` under `labels`, then `mosaica:matched`. A column is
+        present even where no item has a value, and a missing value is null. A category column
+        holds each value's key, as a dictionary column. The table's schema metadata `mosaica.head` is the first response's head as JSON:
         `page_rows`, the page size used, `order`, the order used, and the counts under `count`.
         A read that returns no row is a table of no rows with these columns.
 
