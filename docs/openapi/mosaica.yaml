@@ -457,7 +457,7 @@ paths:
                   value:
                     {
                       "api_version": 1,
-                      "bundle_format": 46,
+                      "bundle_format": 47,
                       "declared_scalars": [
                         {
                           "analyser": null,
