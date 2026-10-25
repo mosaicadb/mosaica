@@ -137,6 +137,46 @@ describe('a server still busy after the store’s retries', () => {
   });
 });
 
+describe('a 429 from a proxy', () => {
+  it('is busy as Mosaica’s own is, with the code that came on data-code', async () => {
+    const proxied = {code: 'http-error', detail: 'Too Many Requests', status: 429};
+    expect(stateOf(status({status: 'refused', refusal: proxied}))).toBe('busy');
+    const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');
+    const store = fakeStore({status: status({status: 'refused', refusal: proxied}), view});
+    for (const el of host.querySelectorAll('mosaica-status, mosaica-map')) (el as unknown as {store: unknown}).store = store;
+    await settle(host);
+    for (const tag of ['mosaica-status', 'mosaica-map']) {
+      const state = host.querySelector(tag)!.shadowRoot!.querySelector('[part="state"]')!;
+      expect(state.getAttribute('data-state')).toBe('busy');
+      expect(state.querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('http-error');
+      expect(state.querySelector('[part="retry"]')).not.toBeNull();
+    }
+  });
+});
+
+describe('<mosaica-selection> on a busy server', () => {
+  it('says what the strip says, with the refusal’s code, in place of a refusal of the selection', async () => {
+    const host = await mount('<mosaica-selection></mosaica-selection><mosaica-status></mosaica-status>');
+    const busy = {code: 'backpressure', detail: 'shed', status: 429};
+    const store = fakeStore({status: status({status: 'refused', refusal: busy}), view});
+    for (const el of host.querySelectorAll('mosaica-selection, mosaica-status')) (el as unknown as {store: unknown}).store = store;
+    const held = {ids: BigUint64Array.from([1n]), positions: new Float32Array(2), count: 1};
+    const shape = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
+    store.set('region', {shape, status: 'refused' as const, refusal: busy, visible: null, matched: {value: 0, exact: false}, served: {shown: 1, total: 0, exact: false}, verdict: null, held});
+    await settle(host);
+    const state = (tag: string) => deep(host.querySelector(tag)!.shadowRoot!, '[part="state"]')!;
+    const words = (tag: string) => state(tag).querySelector('[part="refusal"]')?.textContent?.trim();
+    expect(state('mosaica-selection').getAttribute('data-state')).toBe('busy');
+    expect(state('mosaica-selection').querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('backpressure');
+    expect(words('mosaica-selection')).toBe(words('mosaica-status'));
+
+    // The strip still shown, and only the selection's count shed.
+    store.set('status', status({status: 'shown'}));
+    await settle(host);
+    expect(state('mosaica-selection').getAttribute('data-state')).toBe('busy');
+  });
+});
+
 describe('a refusal shows the server’s reason under its words', () => {
   it('on the strip and over the map, as the server sent it, and no reason where no server refused', async () => {
     const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');

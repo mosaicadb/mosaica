@@ -88,11 +88,12 @@ export function isUnanswered(refusal: Refusal | null | undefined): boolean {
 }
 
 /**
- * Whether a refusal is the server shedding load: a `429 backpressure` still answered after the
- * store's retries. It says nothing about what this viewer may see.
+ * Whether a refusal is a server too busy to answer: a `429` still answered after the store's
+ * retries, from Mosaica (`backpressure`) or from a proxy in front of it. It says nothing about what
+ * this viewer may see.
  */
 export function isBusy(refusal: Refusal | null | undefined): boolean {
-  return refusal?.code === 'backpressure';
+  return refusal?.status === 429;
 }
 
 /** The driver's verdict; see `DriverEvents.onFrame`. */

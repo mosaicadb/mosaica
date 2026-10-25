@@ -1,7 +1,7 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
 import {type RegionProjection} from '@mosaicajs/client';
-import {isUnanswered} from '@mosaicajs/client/internal';
+import {isBusy, isUnanswered} from '@mosaicajs/client/internal';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
@@ -17,9 +17,9 @@ import './count.js';
  * other filter narrows the view. Clicking a listed mark picks it. *Outside* flips the selection to its
  * complement, and *Clear* drops it.
  *
- * While its counts are not shown and the server cannot be reached or did not answer, the state line
- * says so in the status strip's words, Server unreachable or Server did not answer, in place of
- * Counting or Selection refused.
+ * While its counts are not shown and the server cannot be reached, did not answer or is too busy,
+ * the state line says so in the status strip's words, Server unreachable, Server did not answer or
+ * Server busy, in place of Counting or Selection refused.
  *
  * A selection is a filter: the map and every count narrow to it once it settles. Not built yet:
  * *Export* and *Save as artifact*, which need server routes; their buttons are disabled with the
@@ -109,13 +109,14 @@ export class MosaicaSelection extends MosaicaElement {
             ${r.visible ? kv(r.shape.outside ? 'Visible outside' : 'Visible inside', html`<mosaica-count part="count-visible" .masked=${r.visible} .stale=${stale}></mosaica-count>`) : nothing}
           </div>`
         : nothing;
-    // A server that cannot be reached or did not answer is named as the status strip names it,
-    // since nothing about the selection was refused.
+    // A server that cannot be reached, did not answer or is too busy is named as the status strip
+    // names it, since nothing about the selection was refused.
     const unreachable = stateOf(status) === 'retrying' && status?.unreachable === true;
     const unanswered = (r.status === 'refused' && isUnanswered(r.refusal)) || stateOf(status) === 'unanswered';
+    const busy = (r.status === 'refused' && isBusy(r.refusal)) || stateOf(status) === 'busy';
     const stateRegion =
-      r.status !== 'shown' && (unreachable || unanswered)
-        ? renderState(unreachable ? 'retrying' : 'unanswered', status)
+      r.status !== 'shown' && (unreachable || unanswered || busy)
+        ? renderState(unreachable ? 'retrying' : unanswered ? 'unanswered' : 'busy', status && r.status === 'refused' ? {...status, refusal: r.refusal} : status)
         : r.status === 'loading'
         ? html`<span part="state" data-state="loading"><span class="dot quiet"></span>Counting<span class="skel" aria-hidden="true"></span></span>`
         : r.status === 'refused'

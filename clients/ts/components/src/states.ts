@@ -17,7 +17,7 @@ import {HeldAggregate} from './aggregate.js';
  * | empty | `empty` |
  * | refused | `refused` |
  * | unanswered | `refused` with a `5xx` whose body is not a Mosaica error, such as a gateway's `504` |
- * | busy | `refused` with a `429 backpressure` the server still answered after the store's retries |
+ * | busy | `refused` with a `429` still answered after the store's retries, whatever its code |
  * | expired | the `expired` flag: `expired-token`, a `bad-credential` on a token this store used, or `expiresAt` passed |
  * | stale | `shown` with `stale` |
  *
