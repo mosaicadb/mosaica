@@ -179,7 +179,8 @@ enum Command {
         ///
         /// Printed only when the check has no finding. The output is one object with the keys
         /// `layers`, `attributes`, `vocabularies`, `views` and `view_groups`, each an array in
-        /// declaration order. A layer or attribute entry is the request body itself. A
+        /// declaration order, except that a view group naming `members` comes after the groups
+        /// that own their views. A layer or attribute entry is the request body itself. A
         /// vocabulary, view or view group entry is `{ "name", "body" }`, because its name goes
         /// in the route's path. A vocabulary entry also has `values`, the body for `PATCH
         /// /control/vocabularies/{name}/values`, or `values_source`, the `[sources]` name its
