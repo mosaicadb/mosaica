@@ -1516,7 +1516,15 @@ mod tests {
             domain: Some(croaring::Bitmap::from_range(0..30)),
         };
         let mut next_image = 0usize;
-        let out = eval_row_expr(&tree, &images, &mut next_image, &[], &[0..30], &scope)
+        let domain = 0..30u32;
+        let out = eval_row_expr(
+            &tree,
+            &images,
+            &mut next_image,
+            &[],
+            std::slice::from_ref(&domain),
+            &scope,
+        )
             .expect("a tree of verdicts evaluates");
 
         assert_eq!(out.iter().collect::<Vec<_>>(), vec![1, 3]);

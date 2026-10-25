@@ -550,9 +550,9 @@ fn a_negated_highlight_lights_only_visible_items() {
     // `archive` is drawn and `topic` indexed only, so the tree mixes both spaces.
     let negation = FilterExpr::NoneOf(vec![
         category_is(&fx, "archive", "xx"),
-        category_is(&fx, "topic", "yy"),
+        category_is(&fx, "topic", "zz"),
     ]);
-    let kept = |e: u64| archive_of(e) == "zz";
+    let kept = |e: u64| archive_of(e) == "yy";
     let suppressed = (0..N)
         .find(|&e| subset_sees(e) && kept(e))
         .expect("a visible item the negation keeps");
