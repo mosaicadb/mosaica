@@ -197,7 +197,6 @@ describe('configuration after connection', () => {
         store.setLayers(['clusters/x']);
         store.setView({bbox: [0, 0, 1000, 1000], zoom: 0, width: 512, height: 512});
         await vi.waitFor(() => expect(perTile).toContain(asked), {timeout: 4_000});
-        expect(store.get('artifacts').refusal?.code).not.toBe('per-tile');
         el.dispose();
         document.body.innerHTML = '';
       }

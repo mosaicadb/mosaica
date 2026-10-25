@@ -378,8 +378,9 @@ that many seconds. A later request of `items`, `artifacts` or `aggregate` that i
 
 `map(view=None, layers=None, colour_by=None, filters=None, height=480)` is the notebook widget
 described below, pointed at this database's server with a token made for the reader.
-`artifacts_per_tile` is the most annotations each level shows in one tile of the map, 50 unless
-you give another number. The map asks for annotations by tile at map zoom + 2, at most 558 tiles in a request (a 3840 by 2160
+`artifacts_per_tile` is the most annotations each level shows in one tile of the map: 50 unless
+you give another number, or the server's `max_artifacts_per_tile` where that is smaller. The map
+asks for annotations by tile at map zoom + 2, at most 558 tiles in a request (a 3840 by 2160
 screen), stepping to a coarser depth for a larger screen, so the tiles in view times
 `artifacts_per_tile` bounds the annotations one level draws.
 

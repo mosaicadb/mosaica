@@ -864,7 +864,7 @@ class Selection:
         - `size_by`: a number column to size points by; `None` draws them at one size.
         - `artifacts_per_tile`: the most annotations each level of a layer shows in one tile of
           the map, largest first, at most the server's `max_artifacts_per_tile`. `None`, the
-          default, asks for 50.
+          default, asks for 50, or the server's maximum where that is smaller.
         - `budget`: how many points the map aims to draw on screen. `0`, the default, leaves the
           map's own, 250,000.
         - `budget_min`, `budget_max`: the ends of the Most points slider in the map's Layers
@@ -1009,10 +1009,10 @@ class Viewer:
         - `basemap`: what is drawn under the points, as `Map` takes it.
 
         Other keywords go to `Map` unchanged, such as `bbox` to frame the camera on a box, and
-        `artifacts_per_tile`, the most annotations each level shows in one tile, 50 unless given.
-        The page in the browser fetches its own data from the database with this
-        reader's token. The token is sent to the page as a message and is never saved with the
-        notebook.
+        `artifacts_per_tile`, the most annotations each level shows in one tile: 50 unless given,
+        or the server's maximum where that is smaller. The page in the browser fetches its own
+        data from the database with this reader's token. The token is sent to the page as a
+        message and is never saved with the notebook.
 
         A view, a layer, a `colour_by` or a `size_by` that this reader's `meta()` does not list is
         refused, and the refusal names those it does. `colour_by` and `size_by` name a column

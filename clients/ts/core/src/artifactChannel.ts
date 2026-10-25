@@ -217,11 +217,8 @@ export type ArtifactChannelOptions = {
    * it is the cap instead.
    */
   maxTiles?: number;
-  /**
-   * The request's `per_tile`: the most artifacts one level shows in one tile. `null` asks for
-   * nothing: the channel reports a refusal saying what to set.
-   */
-  perTile: number | null;
+  /** The request's `per_tile`: the most artifacts one level shows in one tile. */
+  perTile: number;
   /** The treed frame's `budget`. Omitted, the request names none and the cut is unbounded. */
   budget?: number;
   /** The request's `palette_size`, so each artifact carries its slot. Omitted, the request names none. */
@@ -655,7 +652,7 @@ export class ArtifactChannel {
         tiles,
         layers: walked ? [...want.held, ...want.walked] : want.held,
         ...(want.levels === undefined ? {} : {levels: want.levels}),
-        perTile: this.opts.perTile!,
+        perTile: this.opts.perTile,
         ...(want.expression === null ? {} : {filters: want.expression}),
         ...(walked && this.budget !== undefined ? {budget: this.budget} : {}),
         ...(paletteSize === undefined ? {} : {paletteSize})
@@ -712,17 +709,6 @@ export class ArtifactChannel {
       // No layer: the served set is cleared and the tiles kept, so turning a layer back on draws
       // without a refetch.
       this.state = {...this.state, artifacts: [], status: 'idle', refusal: null, version: this.state.version + 1};
-      this.emit();
-      return;
-    }
-    if (this.opts.perTile === null) {
-      this.state = {
-        ...this.state,
-        artifacts: [],
-        status: 'refused',
-        refusal: {code: 'per-tile', detail: "no number of artifacts per tile was given: set createStore's artifacts.perTile, at most meta.selection.maxArtifactsPerTile", status: null},
-        version: this.state.version + 1
-      };
       this.emit();
       return;
     }
@@ -799,7 +785,7 @@ export class ArtifactChannel {
 
   /** One prefetch request; the tiles it brings are held and change nothing drawn. */
   private async prefetch(): Promise<void> {
-    if (this.inFlight || this.opts.perTile === null) return;
+    if (this.inFlight) return;
     const next = this.prefetchNext();
     if (!next) return;
     const signal = new AbortController();

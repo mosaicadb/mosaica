@@ -643,6 +643,37 @@ describe('setLayers before meta', () => {
   });
 });
 
+describe('the artifacts asked for per tile', () => {
+  it('is 50 unless given, or the deployment’s maximum where that is smaller, and a number given is sent as it is', async () => {
+    for (const [max, given, sent] of [[20, undefined, 20], [1000, undefined, 50], [20, 70, 70]] as const) {
+      const clock = fakeClock();
+      const scheduler = fakeScheduler();
+      const {client, viewportArtifacts} = fakeClient(() => response('ck'), {...META, selection: {...META.selection, maxArtifactsPerTile: max}});
+      const store = createStore({
+        viewerUrl: 'http://viewer',
+        token: 'tok',
+        client,
+        clock,
+        scheduler,
+        prefetch: false,
+        replica: {revalidateAfterMs: Infinity},
+        ...(given === undefined ? {} : {artifacts: {perTile: given}})
+      });
+      // Asked for before meta, so the number comes from meta when the request is built.
+      store.setLayers(['clusters/a']);
+      await clock.advance(1);
+      store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 800, 800));
+      await clock.advance(600);
+      scheduler.flush();
+      await clock.advance(600);
+      const asked = viewportArtifacts.mock.calls.map((call) => call[1].perTile);
+      expect(asked.length).toBeGreaterThan(0);
+      expect(new Set(asked)).toEqual(new Set([sent]));
+      store.dispose();
+    }
+  });
+});
+
 describe('the depth artifacts are asked at', () => {
   it('follows the camera’s zoom alone: a zoom in and back out to the world asks at map zoom + 2 each time', async () => {
     const clock = fakeClock();

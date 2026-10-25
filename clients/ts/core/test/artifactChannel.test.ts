@@ -154,17 +154,6 @@ describe('the artifact channel asks by tile', () => {
     expect(ch.heldTiles).toBe(4);
   });
 
-  it('refuses to ask with no quota, saying what to set', async () => {
-    const {client, viewportArtifacts} = fakeClient();
-    const {ch} = channel(client, {perTile: null});
-    ch.setLayer('clusters/x');
-    ch.refresh(view, 200, 150);
-    await settle();
-    expect(viewportArtifacts).not.toHaveBeenCalled();
-    expect(ch.current.status).toBe('refused');
-    expect(ch.current.refusal?.code).toBe('per-tile');
-  });
-
   it('asks nothing and shows nothing with no layer, and keeps the tiles for when one is back', async () => {
     const {client, viewportArtifacts} = fakeClient();
     const {ch} = channel(client);

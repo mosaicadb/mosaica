@@ -156,10 +156,9 @@ export type StoreOptions = {
   replica?: Pick<ReplicaOptions, 'cacheBytes' | 'cache' | 'revalidateAfterMs' | 'onPhase'>;
   /**
    * How the drawn layers' artifacts are asked for. `perTile` is the most artifacts one level shows
-   * in one tile, largest first, at most `meta.selection.maxArtifactsPerTile`; the store has no
-   * number of its own, so without it a drawn layer shows nothing, colouring by a layer
-   * (`setColourBy('cluster:<layer>')`) has no colours either, and the `artifacts` projection is
-   * `refused`, saying what to set. `budget` is the most artifacts a `nested` or `dag` layer is cut
+   * in one tile, largest first. Omitted, it is 50, or `meta.selection.maxArtifactsPerTile` where
+   * that is smaller. A number over that maximum is sent as given, and the server's refusal is the
+   * `artifacts` projection's. `budget` is the most artifacts a `nested` or `dag` layer is cut
    * to, met by drawing ancestors in place of their descendants, and the most it tags the points
    * with; omitted, the cut is unbounded. {@link Store.setClusterBudget} changes it. `heldTiles` is how many tiles of artifacts the store keeps
    * per view, the least recently drawn leaving first; it defaults to `4096`.
@@ -958,6 +957,8 @@ function bearerOf(headers: HeadersInit | undefined): string | null {
 
 /** How many tiles of artifacts a view keeps where `artifacts.heldTiles` names no number. */
 const DEFAULT_HELD_TILES = 4096;
+/** The `perTile` asked for where the caller gives none, when the deployment allows that many. */
+const DEFAULT_ARTIFACTS_PER_TILE = 50;
 
 const NO_STATUS: StatusProjection = {
   status: 'idle',
@@ -1524,7 +1525,7 @@ export function createStore(options: StoreOptions): Store {
       view: id,
       quantisation: q,
       projection: m.views.find((v) => v.id === id)?.projection ?? 'none',
-      perTile: options.artifacts?.perTile ?? null,
+      perTile: options.artifacts?.perTile ?? Math.min(DEFAULT_ARTIFACTS_PER_TILE, m.selection.maxArtifactsPerTile),
       ...(clusterBudget === null ? {} : {budget: clusterBudget}),
       paletteSize: paletteSize(colours.palette),
       heldTiles: options.artifacts?.heldTiles ?? DEFAULT_HELD_TILES,

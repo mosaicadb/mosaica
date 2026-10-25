@@ -59,9 +59,6 @@ from ._viewer import _json_value, decimal_id
 
 _HERE = pathlib.Path(__file__).parent
 _BUNDLE = "mosaica-components.js"
-# The annotations per level per tile a map asks for where the caller gives no number, as the
-# TypeScript elements do.
-ARTIFACTS_PER_TILE = 50
 
 
 def bundle_path() -> Optional[pathlib.Path]:
@@ -277,8 +274,8 @@ class Map(anywidget.AnyWidget):
       `None`, the default, titles a point by its id.
     - `artifacts_per_tile`: the most annotations each level of a layer shows in one tile of the
       map, largest first, at most the server's `max_artifacts_per_tile`. `None`, the default,
-      asks for 50. The map asks for annotations by tile at map zoom + 2, the map's own zoom rounded
-      down, a tile of 128 to 256 pixels, and at most 558 tiles in one request, the most a 3840 by 2160
+      asks for 50, or the server's `max_artifacts_per_tile` where that is smaller. The map asks
+      for annotations by tile at map zoom + 2, the map's own zoom rounded down, a tile of 128 to 256 pixels, and at most 558 tiles in one request, the most a 3840 by 2160
       screen touches, or the server's `max_tiles_per_request` where that is fewer; a larger
       screen is asked for at zoom + 1, then coarser, until its tiles fit. So the tiles in view
       times `artifacts_per_tile` bounds the annotations one level draws.
@@ -351,8 +348,8 @@ class Map(anywidget.AnyWidget):
     height = traitlets.Int(480).tag(sync=True)
     # The record field that titles a point in the hover and the item card; `None` titles it by id.
     title_field = traitlets.Unicode(None, allow_none=True).tag(sync=True)
-    # The store's quota of annotations per level per tile; `None` is stored as 50.
-    artifacts_per_tile = traitlets.Int(ARTIFACTS_PER_TILE, allow_none=True).tag(sync=True)
+    # The store's quota of annotations per level per tile; `None` leaves the store's default.
+    artifacts_per_tile = traitlets.Int(None, allow_none=True).tag(sync=True)
     budget = traitlets.Int(0).tag(sync=True)
     budget_min = traitlets.Int(1_000).tag(sync=True)
     budget_max = traitlets.Int(2_000_000).tag(sync=True)
@@ -564,12 +561,6 @@ class Map(anywidget.AnyWidget):
         if proposal["value"] is None:
             return None
         return json.loads(json.dumps(proposal["value"], default=_json_value))
-
-    # An observer, since traitlets passes `None` by a validator on a trait that allows it.
-    @traitlets.observe("artifacts_per_tile")
-    def _default_artifacts_per_tile(self, change: dict) -> None:
-        if change["new"] is None:
-            self.artifacts_per_tile = ARTIFACTS_PER_TILE
 
     @traitlets.validate("layers")
     def _validate_layers(self, proposal: dict) -> Optional[list]:
