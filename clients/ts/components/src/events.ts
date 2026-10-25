@@ -128,7 +128,10 @@ export type MosaicaEventDetails = {
   'mosaica-filterchange': {column: string | null; expr?: FilterExpr | null; verb?: ClauseVerb};
   /** A column's chip was pressed under `chips-only`: its card is to be shown; `verb` is the chip's position. */
   'mosaica-chipopen': {column: string; verb: ClauseVerb};
-  /** Open was pressed on the item `id`: `fields` is its record's fields. */
+  /**
+   * Open was pressed on the item `id`: `fields` is its record's fields. It fires whether Open calls
+   * the card's `open` or follows its `open-url`.
+   */
   'mosaica-open': {id: string; fields: Record<string, unknown>};
   /**
    * The view changed from `from` to `to`. `sameFrame` is true where both views are quantised

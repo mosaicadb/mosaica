@@ -24,6 +24,7 @@ import './map.js';
 import './status.js';
 import './filter-panel.js';
 import './item-card.js';
+import type {MosaicaItemCard} from './item-card.js';
 import './selection.js';
 import './layer-picker.js';
 import './view-picker.js';
@@ -136,8 +137,9 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * Picking a point opens its item card beside the point, joined to it by a short leader: on the side
  * with most room, clear of the cards over the map, following the point as the map pans and zooms,
  * hidden while the point is off the map, and clear of the other cards beside points. The card shows
- * the headline, the `subtitle-field` field, the `card-fields` fields (else the first three) and
- * "Show all N fields". Picking another point replaces it unless Pin was pressed, which keeps it
+ * the headline, the `subtitle-field` field, the `card-fields` fields (else the first three),
+ * "Show all N fields", and Open where `open-url` or `open` says what it does. Show all grows the
+ * card up to the height of the map, clear of the cards over it; past that the card scrolls. Picking another point replaces it unless Pin was pressed, which keeps it
  * open; Close or Escape closes it and drops the selection, and a click on the map that finds
  * nothing does the same for the card that is not pinned. Tab from the map goes to the card, which
  * is named by its item's title and gives focus back to the map as it closes. A picked cluster's
@@ -779,6 +781,10 @@ export class MosaicaExplorer extends MosaicaElement {
   @property({attribute: 'subtitle-field'}) accessor subtitleField = '';
   /** Passed to the item card's `card-fields`: the fields it shows before "Show all", in this order. Unset, the first three. */
   @property({attribute: 'card-fields'}) accessor cardFields = '';
+  /** Passed to the item card's `open-url`: the address Open goes to, filled from the item's fields. Unset, and without `open`, there is no Open. */
+  @property({attribute: 'open-url'}) accessor openUrl = '';
+  /** Passed to the item card's `open`: called when Open is pressed. Set, it wins over `open-url`. */
+  @property({attribute: false}) accessor open: MosaicaItemCard['open'] = null;
   /**
    * How many marks to aim for on screen, passed to the map's `budget`. `0`, the default, leaves the
    * store's own, which starts at 250000. Most points in the Layers popover sets the store's budget
@@ -1176,7 +1182,7 @@ export class MosaicaExplorer extends MosaicaElement {
   private liveCard(showArtifact: boolean, pin: TemplateResult | typeof nothing = nothing): TemplateResult {
     return html`<slot name="detail">${showArtifact
       ? html`<mosaica-artifact-card exportparts=${FORWARD['artifact-card']}>${pin}</mosaica-artifact-card>`
-      : html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} .pick=${this.map?.lastPick ?? null}>${pin}</mosaica-item-card>`}</slot>`;
+      : html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open} .pick=${this.map?.lastPick ?? null}>${pin}</mosaica-item-card>`}</slot>`;
   }
 
   /** Whether the card for the selection is the artifact card: the artifact, or its refusal, changed last. */
@@ -1259,7 +1265,7 @@ export class MosaicaExplorer extends MosaicaElement {
         const unpin = pinButton(true, () => (this.pinned = this.pinned.filter((q) => q.key !== p.key)));
         const body =
           p.kind === 'item'
-            ? html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact .item=${p.item} title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing}>${unpin}</mosaica-item-card>`
+            ? html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact .item=${p.item} title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open}>${unpin}</mosaica-item-card>`
             : html`<mosaica-artifact-card exportparts=${FORWARD['artifact-card']} .artifact=${p.artifact}>${unpin}</mosaica-artifact-card>`;
         return {key: p.key, world: p.world, body, pinned: true, name: this.cardName(p.key)};
       });

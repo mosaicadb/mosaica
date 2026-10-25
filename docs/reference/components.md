@@ -64,6 +64,8 @@ map.addEventListener('mosaica-itemopen', async (e) => {
 
 `<mosaica-item-card>` and `<mosaica-explorer>` take `card-fields`, the fields the compact card shows before "Show all", separated by spaces or commas and in that order. A name the record has no value for shows nothing.
 
+The item card's Open does what the host says, and is shown only where the host says something. `open-url` is a link template such as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for the field `name`, URL-encoded, and `{mosaica_id}` by its id. Open is then a link to that address, opening in a new tab. An item with no value for a field the template names has no Open, nor has one whose address, filled and resolved against the page, is not `http:` or `https:`. The `open` property is a function, called with `{id, fields}` when Open is pressed; where both are set, `open` is called and `open-url` is unused. `mosaica-open` fires on every press. `<mosaica-explorer>` passes both to its item cards, and the React wrappers take them as the props `openUrl` and `open`.
+
 An element's parts are styled with `::part()`. An element that renders another inside its shadow root forwards the inner element's parts under its name: through `<mosaica-explorer>`, the map's toolbar is `::part(map-controls)` and the item card's title is `::part(item-card-title)`. `PARTS` in `@mosaicajs/components` lists each element's parts, for a host that renders an element in its own shadow root and forwards them.
 
 ## When the server is busy

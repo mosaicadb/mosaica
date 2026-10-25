@@ -95,6 +95,8 @@ export const MosaicaStore = withStableAuthorise(wrap('mosaica-store', StoreEleme
  * `onDisplayChange`, `onSizeChange`, `onBudgetChange`, `onClusterBudgetChange`, `onFold`,
  * `onFilterChange`, `onStateChange`, `onExpired`, `onOpen`, `onClose`, `onClauseChange`,
  * `onViewSwitch` and `onViewFollow`, each for the `mosaica-` event of the same name in lower case.
+ * The `open` prop is the function the item card's Open calls, and `openUrl` the address it goes
+ * to; `onOpen` hears every press.
  */
 export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', ExplorerElement, {
   ...mapEvents,
@@ -133,7 +135,8 @@ export const MosaicaStatus = wrap('mosaica-status', StatusElement, {onStateChang
 export const MosaicaCount = wrap('mosaica-count', CountElement, {});
 /**
  * `<mosaica-item-card>` as a React component. Event props: `onOpen` (`mosaica-open`), `onClose`
- * (`mosaica-close`) and `onViewFollow` (`mosaica-viewfollow`).
+ * (`mosaica-close`) and `onViewFollow` (`mosaica-viewfollow`). The `open` prop is the function
+ * Open calls, and `openUrl` the address it goes to; `onOpen` hears every press.
  */
 export const MosaicaItemCard = wrap('mosaica-item-card', ItemCardElement, {onOpen: ev('mosaica-open'), onClose: ev('mosaica-close'), onViewFollow: ev('mosaica-viewfollow')});
 /**

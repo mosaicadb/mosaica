@@ -2,6 +2,7 @@ import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit'
 import {property, state} from 'lit/decorators.js';
 import type {DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal, Store} from '@mosaicajs/client';
 import {GRID32} from '@mosaicajs/client';
+import type {MosaicaEventDetails} from './events.js';
 import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
@@ -25,9 +26,18 @@ import {chrome, tokens} from './tokens.js';
  *
  * `compact` shows less: the headline, cut at three lines, the field `subtitle-field` names under
  * it, cut at two, the fields `card-fields` names (else the first three others), then "Show all N
- * fields" beside Open. Show all lists every field, the views and the group-scoped values, which
- * scroll inside the card past 300 px. A host's buttons in the `actions` slot sit beside the close
+ * fields" beside Open. Show all lists every field, the views and the group-scoped values, and the
+ * card grows to hold them; a container that sets the card a height, such as the explorer's card
+ * beside a point, scrolls past it. A host's buttons in the `actions` slot sit beside the close
  * button.
+ *
+ * What Open does is the host's to say, and Open is shown only where it says. The `open` property
+ * is called with the item's `mosaica_id` and fields. Otherwise `open-url` is a link template, such
+ * as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for the
+ * field `name`, URL-encoded, and `{mosaica_id}` by its id where the record has no field of that
+ * name. Open is then a link to that address, opening in a new tab. An item with no value for a
+ * field the template names, or whose address is not `http:` or `https:` once filled and resolved
+ * against the page, has no Open. Where both are set, `open` is called and `open-url` is unused.
  *
  * @summary The selected item's fields, with Open and Copy id.
  * @tagname mosaica-item-card
@@ -114,10 +124,6 @@ export class MosaicaItemCard extends MosaicaElement {
         -webkit-line-clamp: 2;
         line-clamp: 2;
       }
-      :host([compact]) .body {
-        max-height: 300px;
-        overflow-y: auto;
-      }
       :host([compact]) .foot {
         display: flex;
         align-items: center;
@@ -126,6 +132,10 @@ export class MosaicaItemCard extends MosaicaElement {
         margin: 10px calc(-1 * var(--_mosaica-panel-inline, 14px)) 0;
         padding: 8px var(--_mosaica-panel-inline, 14px) 0;
         border-top: 1px solid var(--_mosaica-line-2);
+      }
+      a[part='open'] {
+        color: inherit;
+        text-decoration: none;
       }
       :host([compact]) [part='open'] {
         height: 24px;
@@ -220,6 +230,13 @@ export class MosaicaItemCard extends MosaicaElement {
    * `compact`, list these fields first and then the rest.
    */
   @property({attribute: 'card-fields'}) accessor cardFields = '';
+  /**
+   * The address Open goes to, with `{name}` for the value of the field `name` and `{mosaica_id}`
+   * for the item's id. Unset, and without `open`, there is no Open.
+   */
+  @property({attribute: 'open-url'}) accessor openUrl = '';
+  /** Called when Open is pressed, with the item's `mosaica_id` and fields. Set, it wins over `open-url`. */
+  @property({attribute: false}) accessor open: ((item: MosaicaEventDetails['mosaica-open']) => void) | null = null;
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;
   private expandedFor: bigint | null = null;
@@ -329,7 +346,7 @@ export class MosaicaItemCard extends MosaicaElement {
       </div>
       ${this.scoped(item.detail.scoped)}
       <div class="row actions">
-        <button part="open" class="btn" type="button" @click=${() => emit(this, 'mosaica-open', {id, fields})}>${icon('open', 14)}Open</button>
+        ${this.openButton(id, fields, html`${icon('open', 14)}Open`)}
         <button part="copy" class="btn" type="button" @click=${copy}>Copy id</button>
       </div>
     </div>`;
@@ -346,6 +363,11 @@ export class MosaicaItemCard extends MosaicaElement {
     const headline = titleName
       ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${this.text(titleName, fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
       : html`<div part="headline" class="card-title mono" data-name="mosaica_id">${id}</div>`;
+    const showAll =
+      total > shown.length || this.expanded
+        ? html`<button part="show-all" class="more-link" type="button" aria-expanded=${this.expanded ? 'true' : 'false'} @click=${() => (this.expanded = !this.expanded)}>${this.expanded ? 'Show fewer' : `Show all ${total.toLocaleString('en-GB')} fields`}</button>`
+        : null;
+    const open = this.openButton(id, fields, 'Open');
     const subtitle = subtitleName
       ? html`<div part="subtitle" data-name=${subtitleName}><slot name=${`field-${subtitleName}`}>${this.text(subtitleName, fields[subtitleName], declared.find((c) => c.name === subtitleName))}</slot></div>`
       : nothing;
@@ -362,13 +384,25 @@ export class MosaicaItemCard extends MosaicaElement {
         </div>
         ${this.expanded ? this.scoped(item.detail.scoped) : nothing}
       </div>
-      <div class="foot">
-        ${total > shown.length || this.expanded
-          ? html`<button part="show-all" class="more-link" type="button" aria-expanded=${this.expanded ? 'true' : 'false'} @click=${() => (this.expanded = !this.expanded)}>${this.expanded ? 'Show fewer' : `Show all ${total.toLocaleString('en-GB')} fields`}</button>`
-          : html`<span></span>`}
-        <button part="open" class="btn" type="button" @click=${() => emit(this, 'mosaica-open', {id, fields})}>Open</button>
-      </div>
+      ${showAll || open !== nothing ? html`<div class="foot">${showAll || html`<span></span>`}${open}</div>` : nothing}
     </div>`;
+  }
+
+  /**
+   * Open, where the host says what it does: a button that calls `open`, else a link to `open-url`
+   * filled from the item, else nothing. Each fires `mosaica-open`.
+   */
+  private openButton(id: string, fields: Record<string, unknown>, label: TemplateResult | string): TemplateResult | typeof nothing {
+    const pressed = () => emit(this, 'mosaica-open', {id, fields});
+    const open = this.open;
+    if (open)
+      return html`<button part="open" class="btn" type="button" @click=${() => {
+        pressed();
+        open({id, fields});
+      }}>${label}</button>`;
+    const href = this.openUrl ? openAddress(this.openUrl, {mosaica_id: id, ...fields}) : null;
+    if (!href) return nothing;
+    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed}>${label}</a>`;
   }
 
   /** The fields of `fields` that `card-fields` names, in its order. */
@@ -449,6 +483,26 @@ export class MosaicaItemCard extends MosaicaElement {
 }
 
 const titleKey = (field: string, key: string) => `${field}\u0000${key}`;
+
+/**
+ * `template` with each `{name}` replaced by `values[name]`, URL-encoded, and resolved against the
+ * page; `null` where a name has no value or the address is not `http:` or `https:`.
+ */
+function openAddress(template: string, values: Record<string, unknown>): string | null {
+  let missing = false;
+  const filled = template.replace(/\{([^{}]+)\}/g, (_, name: string) => {
+    const value = values[name];
+    if (value === undefined || value === null) missing = true;
+    return encodeURIComponent(String(value));
+  });
+  if (missing) return null;
+  try {
+    const url = new URL(filled, document.baseURI);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
 
 /** A value as text, by the column's declared type. */
 function present(value: unknown, column: DeclaredScalar | undefined): string {

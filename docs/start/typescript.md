@@ -179,7 +179,7 @@ Click "Mountain, hill, rock" on the Feature class card. The two filters apply to
 
 ## Shape the explorer
 
-The explorer's attributes set how it opens. Add four to the element in `index.html`:
+The explorer's attributes set how it opens. Add five to the element in `index.html`:
 
 ```html
 <mosaica-explorer
@@ -188,6 +188,7 @@ The explorer's attributes set how it opens. Add four to the element in `index.ht
   colour-by="feature_class"
   title-field="name"
   card-fields="feature_class country population"
+  open-url="https://www.geonames.org/{geonameid}"
 ></mosaica-explorer>
 ```
 
@@ -196,6 +197,8 @@ Save the file. Vite reloads the page.
 `pinned-filters` names the fields whose cards are in the panel from the start, so nobody has to find them under "Add field". `colour-by` colours the places by a field. A category gets a colour per value, and a number gets a ramp from its lowest value to its highest. Settlements are blue, which is why most of Asia is. In the United States most dots are orange and red, because GeoNames lists many streams, farms and buildings there. Someone using the map can still change the colouring, with the Layers button on the map or the paint button on a field's card.
 
 `title-field` says which field names a place. Hover over one and wait a moment. The label that follows the pointer becomes the place's name, such as Central Heights Shopping Mall. Until the name arrives from Mosaica, the label is a long number such as `#14815421504304620377`. That is the place's `mosaica_id`, the number Mosaica gives each place it serves, and without `title-field` the label would stay that way. Click a place, and the card that opens beside it is headed by the name too. `card-fields` chooses what the card lists under the name, here the place's kind, its country and its population.
+
+`open-url` gives the card an Open button, which takes the reader to the place's own page on GeoNames in a new tab. Mosaica fills `{geonameid}` with the place's `geonameid` field. Without `open-url` the card has no Open, because only your application knows where an item should open.
 
 The [components reference](../reference/components/mosaica-explorer.md) lists the explorer's other attributes, from the most points it draws to how density is shaded.
 

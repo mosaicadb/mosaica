@@ -34,14 +34,16 @@ describe('@mosaicajs/react/components', () => {
     expect(deep(host, '[part="count"]')?.textContent).toBe(formatCount({shown: 221, total: 1_994_089, exact: true}));
   });
 
-  it('an on* prop receives the element’s event with its detail', async () => {
+  it('an on* prop receives the element’s event with its detail, and a function prop is called', async () => {
     const ref = createRef<ItemCardElement>();
     const seen: string[] = [];
+    const opened: string[] = [];
     await act(async () =>
       root.render(
         createElement(MosaicaItemCard, {
           ref,
           item: {id: 7n, detail: {fields: {title: 'x'}, labels: [], views: [], scoped: {}}},
+          open: (item) => opened.push(item.id),
           onOpen: (e) => seen.push(e.detail.id)
         })
       )
@@ -49,6 +51,16 @@ describe('@mosaicajs/react/components', () => {
     await settle(host);
     (deep(host, '[part="open"]') as HTMLButtonElement).click();
     expect(seen).toEqual(['7']);
+    expect(opened).toEqual(['7']);
+  });
+
+  it('openUrl on the explorer reaches its item card, whose Open links to it', async () => {
+    const ref = createRef<ExplorerElement>();
+    const store = fakeStore({meta: meta(), status: status({})});
+    await act(async () => root.render(createElement(MosaicaExplorer, {ref, store, openUrl: 'https://example.org/{title}'})));
+    store.set('selection', {item: {id: 7n, detail: {fields: {title: 'x y'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    expect(deep(host, '[part="open"]')?.getAttribute('href')).toBe('https://example.org/x%20y');
   });
 
   it('the pickers take a store as a property and switch through it', async () => {

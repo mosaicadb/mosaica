@@ -267,6 +267,21 @@ describe('<mosaica-explorer> detail', () => {
   });
 });
 
+describe('<mosaica-explorer> Open', () => {
+  it('passes open-url and open to its item card', async () => {
+    const {host, el, shadow, store} = await explorer('<mosaica-explorer open-url="https://example.org/{author}"></mosaica-explorer>');
+    store.set('selection', {item: {id: 5n, detail: {fields: {author: 'A B'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    const open = () => shadow.querySelector('mosaica-item-card')!.shadowRoot!.querySelector('[part="open"]') as HTMLElement;
+    expect(open().getAttribute('href')).toBe('https://example.org/A%20B');
+    const calls: unknown[] = [];
+    (el as unknown as {open: (item: unknown) => void}).open = (item) => calls.push(item);
+    await settle(host);
+    open().click();
+    expect(calls).toEqual([{id: '5', fields: {author: 'A B'}}]);
+  });
+});
+
 describe('<mosaica-explorer> the item card beside its point', () => {
   type Map = HTMLElement & {pickedAt: {kind: 'item' | 'artifact'; id: bigint; world: [number, number]} | null; screenOf(w: [number, number]): [number, number]; lookAt(x: number, y: number): boolean};
   const item = (id: bigint) => ({item: {id, detail: {fields: {author: `A${id}`}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});

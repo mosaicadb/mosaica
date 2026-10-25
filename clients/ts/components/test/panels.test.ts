@@ -61,6 +61,7 @@ describe('<mosaica-item-card>', () => {
   it('fires mosaica-open with the id as a decimal string, bubbling and composed', async () => {
     const host = await mount('<mosaica-item-card></mosaica-item-card>');
     const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+    el.open = () => {};
     el.item = {id: 2n ** 63n + 1n, detail: {fields: {}, labels: [], views: [], scoped: {}}};
     await settle(host);
     let detail: {id?: string} | null = null;
@@ -68,6 +69,55 @@ describe('<mosaica-item-card>', () => {
     (deep(host, '[part="open"]') as HTMLButtonElement).click();
     expect(detail!.id).toBe('9223372036854775809');
     expect(typeof detail!.id).toBe('string');
+  });
+
+  describe('Open', () => {
+    const geonames = {id: 7n, detail: {fields: {geonameid: 2643743, name: 'St. Mary’s & Co/Ltd?', link: 'javascript:alert(1)'}, labels: [], views: [], scoped: {}}};
+    async function card(markup: string, set: (el: MosaicaItemCard) => void = () => {}) {
+      const host = await mount(markup);
+      const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+      set(el);
+      el.item = geonames;
+      await settle(host);
+      return {host, el, open: () => deep(host, '[part="open"]') as HTMLElement | null};
+    }
+
+    it('is hidden where neither open-url nor open is set, on the full and the compact card', async () => {
+      expect((await card('<mosaica-item-card></mosaica-item-card>')).open()).toBeNull();
+      expect((await card('<mosaica-item-card compact></mosaica-item-card>')).open()).toBeNull();
+    });
+
+    it('links to open-url filled from the item, each value URL-encoded, in a new tab', async () => {
+      const {open} = await card('<mosaica-item-card compact open-url="https://www.geonames.org/{geonameid}?q={name}&id={mosaica_id}"></mosaica-item-card>');
+      const a = open() as HTMLAnchorElement;
+      expect(a.getAttribute('href')).toBe('https://www.geonames.org/2643743?q=St.%20Mary%E2%80%99s%20%26%20Co%2FLtd%3F&id=7');
+      expect(a.getAttribute('target')).toBe('_blank');
+      expect(a.getAttribute('rel')).toContain('noopener');
+    });
+
+    it('is hidden for an item with no value for a field the template names', async () => {
+      expect((await card('<mosaica-item-card open-url="https://example.org/{wikidata}"></mosaica-item-card>')).open()).toBeNull();
+    });
+
+    it('never links to an address that is not http or https, whatever a value holds', async () => {
+      // A value cannot supply the scheme: it is encoded, so the address stays on the page's scheme or is refused.
+      const fromValue = (await card('<mosaica-item-card open-url="{link}"></mosaica-item-card>')).open();
+      expect(new URL(fromValue!.getAttribute('href')!).protocol).toMatch(/^https?:$/);
+      expect((await card('<mosaica-item-card open-url="javascript:void({name})"></mosaica-item-card>')).open()).toBeNull();
+      expect((await card('<mosaica-item-card open-url="data:text/html,{name}"></mosaica-item-card>')).open()).toBeNull();
+    });
+
+    it('calls open with the id and fields, in place of open-url, and fires mosaica-open', async () => {
+      const calls: unknown[] = [];
+      const {host, open} = await card('<mosaica-item-card open-url="https://www.geonames.org/{geonameid}"></mosaica-item-card>', (el) => (el.open = (item) => calls.push(item)));
+      let fired = 0;
+      host.addEventListener('mosaica-open', () => (fired += 1));
+      const button = open()!;
+      expect(button.tagName).toBe('BUTTON');
+      button.click();
+      expect(calls).toEqual([{id: '7', fields: geonames.detail.fields}]);
+      expect(fired).toBe(1);
+    });
   });
 
   it('distinguishes a miss from a broken pick from a refusal', async () => {
