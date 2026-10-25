@@ -2038,13 +2038,15 @@ class Database:
 
         A temporary database is deleted when it is closed, so this is how to keep one. The copy
         can be reopened with `open(path)` or served with
-        `mosaica serve --deployment <path>/mosaica.toml`.
+        `mosaica serve --deployment <path>/mosaica.toml`. The copy leaves out the lock file that
+        marks a temporary directory, so it is never removed as one.
         """
         self._refuse_when_closed()
         target = Path(path).expanduser()
         if target.exists() and any(target.iterdir()):
             raise Refusal(f"save: {target} is not empty")
-        shutil.copytree(self.path, target, dirs_exist_ok=True)
+        locks = shutil.ignore_patterns(_instance.LOCK, _instance.LOCK + ".new")
+        shutil.copytree(self.path, target, dirs_exist_ok=True, ignore=locks)
         return target
 
     def close(self) -> None:

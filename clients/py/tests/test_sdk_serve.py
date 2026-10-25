@@ -358,6 +358,33 @@ def test_the_sweep_removes_only_directories_whose_owner_has_gone(tmp_path, monke
     assert not live.path.exists()
 
 
+def test_a_copy_saved_where_temporary_databases_live_is_never_swept(tmp_path, monkeypatch):
+    from conftest import binary
+
+    binary()
+    import pyarrow as pa
+
+    import mosaica
+    from mosaica import _database
+
+    where = tmp_path / "shm"
+    where.mkdir()
+    monkeypatch.setattr(_database, "RAM_BACKED", where)
+    db = mosaica.create()
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.insert("map", pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
+    db.commit()
+    kept = db.save(where / "mosaica-kept")
+    db.close()
+    mosaica.create().close()
+    assert (kept / "mosaica.toml").exists()
+    again = mosaica.open(kept)
+    try:
+        assert again.view("map").count() == 2
+    finally:
+        again.close()
+
+
 def test_a_refused_start_leaves_the_temporary_database_to_retry_or_save(tmp_path, monkeypatch):
     from conftest import binary
 
