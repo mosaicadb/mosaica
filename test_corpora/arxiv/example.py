@@ -56,9 +56,28 @@ CLUSTERINGS = ["clusters-toponymy", "taxonomy-arxiv"]
 #: The label kept as written, every one of whose generating papers is in the sample.
 KEPT_LABELS = {"topics-toponymy": "clusters-toponymy"}
 VOCABULARIES = ["archive.parquet", "primary_category.parquet"]
-#: arXiv's name for each archive and subject class, as https://arxiv.org/category_taxonomy gives it.
-#: The archives retired before that page was written are not on it, and keep their code as title.
+#: arXiv's name for each archive and subject class, as https://arxiv.org/category_taxonomy gives it,
+#: and for the retired archives that page leaves out, as arXiv's arxiv-base code
+#: (`arxiv/taxonomy/definitions.py`) gives it. A key named in neither keeps its code as title.
 NAMES = {
+    "acc-phys": "Accelerator Physics",
+    "adap-org": "Adaptation, Noise, and Self-Organizing Systems",
+    "alg-geom": "Algebraic Geometry",
+    "ao-sci": "Atmospheric-Oceanic Sciences",
+    "atom-ph": "Atomic, Molecular and Optical Physics",
+    "bayes-an": "Bayesian Analysis",
+    "chao-dyn": "Chaotic Dynamics",
+    "chem-ph": "Chemical Physics",
+    "cmp-lg": "Computation and Language",
+    "comp-gas": "Cellular Automata and Lattice Gases",
+    "dg-ga": "Differential Geometry",
+    "funct-an": "Functional Analysis",
+    "mtrl-th": "Materials Theory",
+    "patt-sol": "Pattern Formation and Solitons",
+    "plasm-ph": "Plasma Physics",
+    "q-alg": "Quantum Algebra and Topology",
+    "solv-int": "Exactly Solvable and Integrable Systems",
+    "supr-con": "Superconductivity",
     "cs": "Computer Science",
     "cs.AI": "Artificial Intelligence",
     "cs.AR": "Hardware Architecture",
@@ -331,8 +350,8 @@ def main() -> None:
         write(vocabulary.set_column(vocabulary.schema.get_field_index("title"), "title", titles),
               args.out / name)
         unnamed = [key for key in keys if key not in NAMES]
-        print(f"  {name}: {len(keys) - len(unnamed)} of {len(keys)} keys named; "
-              f"titled by their code: {', '.join(unnamed)}")
+        print(f"  {name}: {len(keys) - len(unnamed)} of {len(keys)} keys named"
+              + (f"; titled by their code: {', '.join(unnamed)}" if unnamed else ""))
 
     write(second_layout(points, args.data, args.seed), args.out / "points-umap200.parquet")
 

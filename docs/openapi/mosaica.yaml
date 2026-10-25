@@ -878,22 +878,22 @@ paths:
                         {
                           "code": 1,
                           "key": "acc-phys",
-                          "title": "acc-phys"
+                          "title": "Accelerator Physics"
                         },
                         {
                           "code": 2,
                           "key": "adap-org",
-                          "title": "adap-org"
+                          "title": "Adaptation, Noise, and Self-Organizing Systems"
                         },
                         {
                           "code": 3,
                           "key": "alg-geom",
-                          "title": "alg-geom"
+                          "title": "Algebraic Geometry"
                         },
                         {
                           "code": 4,
                           "key": "ao-sci",
-                          "title": "ao-sci"
+                          "title": "Atmospheric-Oceanic Sciences"
                         },
                         {
                           "code": 5,

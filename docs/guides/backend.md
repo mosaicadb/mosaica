@@ -56,7 +56,7 @@ mosaica build 2>&1 | tail -n 3
 ```
 
 ```
-built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024856 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
+built /home/you/arxiv/bundle (v00000): 50000 items, 175 terms, 86144 pairs, 15024296 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s), 0 row(s) refused
   view topics: 50000 row(s)
   view topics-wide: 50000 row(s)
 ```
@@ -183,14 +183,14 @@ The fields are those a filter can name, with the operators each takes. A filter 
 
 ## Fill a filter list and a typeahead
 
-`GET /v1/categories/{field}` lists a category field's values, a page at a time. The `key` is what a filter names, and the `title` what you show. Here a title is arXiv's name for the code, such as Machine Learning for `cs.LG`. The archives that come first in key order were retired before arXiv published its names, so their titles are their codes.
+`GET /v1/categories/{field}` lists a category field's values, a page at a time. The `key` is what a filter names, and the `title` what you show. Here a title is arXiv's name for the code, such as Machine Learning for `cs.LG`.
 
 ```bash
 curl -s "http://127.0.0.1:9141/v1/categories/archive?limit=4" -H "$AUTH"
 ```
 
 ```
-{"column":"archive","next":"ao-sci","values":[{"code":1,"key":"acc-phys","title":"acc-phys"},{"code":2,"key":"adap-org","title":"adap-org"},{"code":3,"key":"alg-geom","title":"alg-geom"},{"code":4,"key":"ao-sci","title":"ao-sci"}]}
+{"column":"archive","next":"ao-sci","values":[{"code":1,"key":"acc-phys","title":"Accelerator Physics"},{"code":2,"key":"adap-org","title":"Adaptation, Noise, and Self-Organizing Systems"},{"code":3,"key":"alg-geom","title":"Algebraic Geometry"},{"code":4,"key":"ao-sci","title":"Atmospheric-Oceanic Sciences"}]}
 ```
 
 Pass `next` back as `after` for the next page. The archive vocabulary is declared `public`, so every session gets every value, including archives Ada has no paper in. A vocabulary declared `derived` lists only the values held by a paper the session may see.
