@@ -5862,7 +5862,7 @@ components:
         underlay_offset:
           type: integer
           minimum: 0
-          description: Serve exact masked counts at depth `zoom + underlay_offset` as the sub-cells frame. Absent or `0` serves none and adds no bytes. Above `max_underlay_offset`, past depth 16, or over the sub-cell budget, it is refused, not clamped.
+          description: Serve exact counts of the visible set at depth `zoom + underlay_offset` as the sub-cells frame. They ignore `filters` and `highlight`; for filtered counts per cell, ask `POST /v1/aggregate` for `cells`. Absent or `0` serves none and adds no bytes. Above `max_underlay_offset`, past depth 16, or over the sub-cell budget, it is refused, not clamped.
         layers:
           description: |
             The annotation layers whose artifacts tag the points, one membership column each.

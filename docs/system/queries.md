@@ -60,7 +60,8 @@ A map is drawn tile by tile. The client names a view, a zoom level and the area 
 
 - **counts**: the items the viewer may see there, how many of them match the filter, and how many of those match the [highlight](#highlighting);
 - **a sample of the matching points**, each with its `mosaica_id`, its position and its rendered fields;
-- **each point's topic**, for each annotation layer the request names, so the client can colour points by topic.
+- **each point's topic**, for each annotation layer the request names, so the client can colour points by topic;
+- **optionally, counts for finer cells** within each tile, which a client can draw as shading where there are too many points to draw. These count everything the viewer may see and ignore the filter. For filtered density, ask for a [density grid](#charts-and-breakdowns).
 
 The counts arrive first, then the points, so a client can start drawing before the whole answer is in.
 

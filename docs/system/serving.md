@@ -9,7 +9,7 @@ A map answer is streamed in frames, so a client can start drawing before the ser
 | Frame | Carries | How many |
 |---|---|---|
 | counts | each tile's visible, matched, highlighted and drawn counts | one, first |
-| density | counts for each tile's finer cells, where the request asked for them | one, when asked for |
+| density | counts for each tile's finer cells, over everything the viewer may see, ignoring the filter | one, when asked for |
 | points | the drawn points of one or more tiles, with each point's topic in each layer the request names | any number |
 | trailer | how many points were sent, marking the answer complete | one, last |
 
