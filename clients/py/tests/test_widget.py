@@ -6,6 +6,7 @@ the comm would use), which is the whole surface the protocol has.
 """
 
 import json
+import pathlib
 import warnings
 
 import pytest
@@ -27,9 +28,9 @@ def make(monkeypatch, tmp_path):
 
     def build(**kw):
         m = Map(kw.pop("url", "http://viewer.test"), **kw)
-        sent = []
-        monkeypatch.setattr(m, "send", lambda content, buffers=None: sent.append(content))
-        m.sent = sent
+        sent, buffers = [], []
+        monkeypatch.setattr(m, "send", lambda content, buffers=None: (sent.append(content), m.buffers.append(buffers)))
+        m.sent, m.buffers = sent, buffers
         return m
 
     return build
@@ -154,7 +155,7 @@ def test_the_synced_surface_is_exactly_the_design_s(make):
     assert synced == {
         "url", "view", "explorer_layout", "height", "title_field", "artifacts_per_tile",
         "budget", "budget_min", "budget_max", "cluster_budget", "cluster_budget_min", "cluster_budget_max", "bbox", "layers", "colour_by", "palette", "value_colours", "cluster_colours", "size_by", "size_min", "size_max", "size_scale", "filters",
-        "selected", "selected_artifact", "region",
+        "selected", "selected_artifact", "region", "basemap",
     }
 
 
@@ -240,3 +241,95 @@ def test_the_cluster_budget_and_its_range_are_synced_down_with_their_defaults(ma
     assert [m.get_state()[k] for k in keys] == [300, 5, 5_000]
     m.cluster_budget = 40
     assert m.get_state()["cluster_budget"] == 40
+
+
+def test_the_basemap_is_synced_down_exactly_as_given_and_defaults_to_the_map_s_own(make):
+    assert make(token="t").get_state()["basemap"] is None
+    for value in (
+        "world",
+        "none",
+        {"tiles": "https://tiles.example.org/{z}/{x}/{y}.png", "attribution": "Example"},
+        {"image": "https://example.org/plan.png", "bounds": [0.0, 0.0, 10.0, 5.0]},
+        {"image": "data:image/png;base64,iVBORw0KGgo="},
+        {"geo": "world", "xy": "none"},
+        {},
+        # Every value a basemap value: a mapping, here for the views `image` and `tiles`.
+        {"image": "world", "tiles": {"image": "https://example.org/a.png"}},
+    ):
+        m = make(token="t", basemap=value)
+        assert m.basemap == value and m.get_state()["basemap"] == value
+    m = make(token="t")
+    m.basemap = {"xy": {"image": "http://example.org/a.png", "bounds": (0, 0, 1, 1)}}
+    assert m.get_state()["basemap"] == {"xy": {"image": "http://example.org/a.png", "bounds": [0.0, 0.0, 1.0, 1.0]}}
+    m.basemap = None
+    assert m.get_state()["basemap"] is None
+
+
+def test_a_basemap_of_the_wrong_shape_is_refused_at_the_call(make):
+    m = make(token="t", basemap="world")
+    for bad in (
+        "osm",
+        3,
+        ["world"],
+        {"tiles": "https://tiles.example.org/tile.png"},
+        {"tiles": "https://tiles.example.org/{z}/{x}/{y}.png", "attribution": 7},
+        {"tiles": "https://tiles.example.org/{z}/{x}/{y}.png", "credit": "Example"},
+        {"image": ""},
+        {"image": 4},
+        {"image": "http://example.org/a.png", "bounds": [0, 0, 1]},
+        {"image": "http://example.org/a.png", "bounds": [0, 0, 1, float("nan")]},
+        {"image": "http://example.org/a.png", "bounds": "0,0,1,1"},
+        {"image": "http://example.org/a.png", "tiles": "https://t.example.org/{z}/{x}/{y}.png"},
+        {"geo": "osm"},
+        {"geo": {"imgae": "a.png"}},
+        {1: "world"},
+        {"image": "none", "bounds": [0, 0, 1, 1]},
+    ):
+        with pytest.raises(traitlets.TraitError):
+            m.basemap = bad
+    assert m.basemap == "world"
+
+
+def test_a_local_image_goes_to_the_page_as_a_message_and_never_into_saved_state(make, tmp_path, monkeypatch):
+    png = b"\x89PNG\r\n\x1a\n" + b"pixels" * 50
+    (tmp_path / "plan.png").write_bytes(png)
+    monkeypatch.chdir(tmp_path)
+    m = make(token="t", basemap={"geo": "world", "xy": {"image": pathlib.Path("plan.png"), "bounds": [0, 0, 4, 3]}})
+    assert m.basemap == {"geo": "world", "xy": {"image": "plan.png", "bounds": [0.0, 0.0, 4.0, 3.0]}}
+    state = m.get_state()
+    assert "pixels" not in json.dumps({k: v for k, v in state.items() if k != "_esm"})
+    assert m.sent == []
+    # The page asks when it starts, and again after a reload.
+    page_says(m, {"type": "basemap-images"})
+    page_says(m, {"type": "basemap-images"})
+    message, again = m.sent
+    assert message == again and m.buffers == [[png], [png]]
+    assert message["type"] == "basemap-image" and message["path"] == "plan.png" and message["mime"] == "image/png"
+    assert state["_basemap_images"] == {"plan.png": message["digest"]}
+    # Set again in a later cell, the file is read again, and sent only where its bytes changed.
+    m.sent.clear()
+    m.buffers.clear()
+    m.basemap = {"image": "plan.png"}
+    assert m.sent == []
+    (tmp_path / "plan.png").write_bytes(png + b"more")
+    m.basemap = {"image": str(tmp_path / "plan.png")}
+    [message] = m.sent
+    assert message["path"] == str(tmp_path / "plan.png") and m.buffers == [[png + b"more"]]
+    assert m.get_state()["_basemap_images"] == {str(tmp_path / "plan.png"): message["digest"]}
+    m.basemap = "world"
+    assert m.get_state()["_basemap_images"] == {}
+
+
+def test_a_local_image_that_is_not_a_file_raises_at_the_call(make, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        make(token="t", basemap={"image": tmp_path / "missing.png"})
+    m = make(token="t", basemap="world")
+    with pytest.raises(FileNotFoundError):
+        m.basemap = {"geo": {"image": str(tmp_path)}}
+    assert m.basemap == "world" and m.get_state()["_basemap_images"] == {}
+
+
+def test_an_image_url_is_not_read_here(make):
+    m = make(token="t", basemap={"image": "HTTPS://example.org/plan.png"})
+    page_says(m, {"type": "basemap-images"})
+    assert m.sent == [] and m.get_state()["_basemap_images"] == {}

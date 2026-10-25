@@ -843,6 +843,7 @@ class Selection:
         palette: Optional[str] = None,
         value_colours: Optional[dict] = None,
         cluster_colours: Optional[dict] = None,
+        basemap: Any = None,
     ) -> Map:
         """The interactive map of this selection, as a notebook widget.
 
@@ -869,6 +870,10 @@ class Selection:
         - `palette`: the palette clusters are coloured from, as `Map` takes it.
         - `value_colours`, `cluster_colours`: colours for single category values and single
           clusters in place of their palette colours, as `Map` takes them.
+        - `basemap`: what is drawn under the points: `"world"`, `"none"`, `{"tiles": ...,
+          "attribution": ...}`, `{"image": url_or_path, "bounds": ...}`, or a dictionary from
+          view id to one of those, as `Map` takes it. `None`, the default, is `"world"` on a view
+          with a map projection and nothing on one without.
 
         Items outside the box are still drawn when they are in frame. A layer, a `colour_by` or
         a `size_by` this reader cannot see is refused, as `Viewer.map` says.
@@ -893,6 +898,7 @@ class Selection:
             palette=palette,
             value_colours=value_colours,
             cluster_colours=cluster_colours,
+            basemap=basemap,
         )
 
     def _expression(self) -> Optional[dict]:
@@ -984,6 +990,7 @@ class Viewer:
         filters: Optional[dict] = None,
         height: int = 480,
         size_by: Optional[str] = None,
+        basemap: Any = None,
         **kwargs: Any,
     ) -> Map:
         """The interactive map, as a notebook widget, showing what this reader may see.
@@ -995,6 +1002,10 @@ class Viewer:
         - `filters`: a filter expression to apply, as `Selection.filter` takes one.
         - `height`: the widget's height in pixels.
         - `size_by`: a number column to size points by; `None` draws them at one size.
+        - `basemap`: what is drawn under the points: `"world"`, `"none"`, `{"tiles": ...,
+          "attribution": ...}`, `{"image": url_or_path, "bounds": ...}`, or a dictionary from
+          view id to one of those, as `Map` takes it. `None`, the default, is `"world"` on a view
+          with a map projection and nothing on one without.
 
         Other keywords go to `Map` unchanged, such as `bbox` to frame the camera on a box, and
         `artifacts_per_tile`, without which the map draws no annotation and colouring by a layer
@@ -1035,6 +1046,7 @@ class Viewer:
             filters=filters,
             height=height,
             size_by=size_by,
+            basemap=basemap,
             **kwargs,
         )
 

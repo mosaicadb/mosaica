@@ -526,6 +526,94 @@ describe('the down-sync', () => {
   });
 });
 
+describe('the basemap', () => {
+  type Basemapped = {basemap: unknown};
+  const explorerOf = (el: HTMLElement) => el.querySelector('mosaica-explorer') as unknown as Basemapped;
+  const bytes = (text: string) => new TextEncoder().encode(text).buffer;
+  const image = (path: string, digest: string) => ({type: 'basemap-image', path, digest, mime: 'image/png'}) satisfies KernelMessage;
+
+  it('is handed to every view’s explorer as the kernel set it, and follows a change', () => {
+    const {model, el} = setUp();
+    expect(explorerOf(el).basemap).toBeNull();
+    const plan = {image: 'https://example.org/plan.png', bounds: [0, 0, 1, 1]};
+    model.set('basemap', plan);
+    expect(explorerOf(el).basemap).toEqual(plan);
+    model.set('basemap', {s0: 'none', geo: 'world'});
+    expect(explorerOf(el).basemap).toEqual({s0: 'none', geo: 'world'});
+    // A mapping for the view `image`, not an image.
+    model.set('basemap', {image: 'world'});
+    expect(explorerOf(el).basemap).toEqual({image: 'world'});
+    model.set('basemap', {s0: 'none', geo: 'world'});
+    const other = document.createElement('div');
+    render({model, el: other});
+    expect(explorerOf(other).basemap).toEqual({s0: 'none', geo: 'world'});
+    model.set('basemap', null);
+    expect(explorerOf(el).basemap).toBeNull();
+    expect(model.sent).toEqual([]);
+  });
+
+  it('draws a local image from the bytes the kernel sends, as an object URL revoked when it is replaced or torn down', () => {
+    const made: string[] = [];
+    const revoked: string[] = [];
+    const create = URL.createObjectURL;
+    const revoke = URL.revokeObjectURL;
+    URL.createObjectURL = (blob: Blob) => {
+      made.push(`blob:test/${made.length}:${blob.type}:${blob.size}`);
+      return made.at(-1)!;
+    };
+    URL.revokeObjectURL = (url: string) => void revoked.push(url);
+    onTestFinished(() => {
+      URL.createObjectURL = create;
+      URL.revokeObjectURL = revoke;
+    });
+    const bounds = [0, 0, 4, 3];
+    const {model, el, dispose} = setUp({basemap: {s0: {image: 'plan.png', bounds}, geo: 'world'}, _basemap_images: {'plan.png': 'd1'}});
+    // The page asks for the bytes, and draws no basemap until they come.
+    expect(model.sent.map((s) => s.content)).toEqual([{type: 'basemap-images'}]);
+    expect(explorerOf(el).basemap).toBe('none');
+    // Bytes for a digest the model does not list are dropped.
+    model.fire('msg:custom', image('plan.png', 'stale'), [bytes('old')]);
+    expect(made).toEqual([]);
+    model.fire('msg:custom', image('plan.png', 'd1'), [new DataView(bytes('pixels'))]);
+    expect(made).toEqual(['blob:test/0:image/png:6']);
+    expect(explorerOf(el).basemap).toEqual({s0: {image: made[0], bounds}, geo: 'world'});
+    // The same bytes again make no new URL; new bytes for the path replace the old URL.
+    model.fire('msg:custom', image('plan.png', 'd1'), [bytes('pixels')]);
+    expect(made).toHaveLength(1);
+    model.set('_basemap_images', {'plan.png': 'd2'});
+    expect(revoked).toEqual([made[0]]);
+    expect(explorerOf(el).basemap).toBe('none');
+    model.fire('msg:custom', image('plan.png', 'd2'), [bytes('pixels2')]);
+    expect(explorerOf(el).basemap).toEqual({s0: {image: made[1], bounds}, geo: 'world'});
+    // A single value names the image as a mapping's entry does.
+    model.set('basemap', {image: 'plan.png'});
+    expect(explorerOf(el).basemap).toEqual({image: made[1]});
+    // An image URL is the kernel's to give as it is.
+    model.set('basemap', {image: 'https://example.org/plan.png'});
+    expect(explorerOf(el).basemap).toEqual({image: 'https://example.org/plan.png'});
+    dispose();
+    expect(revoked).toEqual([made[0], made[1]]);
+  });
+
+  it('a message carrying an image does not settle a token request', async () => {
+    const {model, supplier} = setUp({_basemap_images: {'plan.png': 'd1'}});
+    const p = supplier()();
+    model.fire('msg:custom', image('plan.png', 'd1'), [bytes('pixels')]);
+    model.fire('msg:custom', {type: 'token', token: 'tok-1', expires_at: null});
+    expect((await p).token).toBe('tok-1');
+  });
+
+  it('a basemap the map refuses reaches the kernel; a note that it draws nothing under this view does not', () => {
+    const {model, el} = setUp();
+    const explorer = el.querySelector('mosaica-explorer')!;
+    const say = (detail: {refusal: string | null; note: string | null}) => explorer.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail, bubbles: true, composed: true}));
+    say({refusal: null, note: 'View s1 has no map projection.'});
+    expect(model.sent).toEqual([]);
+    say({refusal: 'View s0 has no map projection, so the world outline cannot be drawn under it; use "none" or an image.', note: null});
+    expect(model.sent.map((s) => s.content)).toEqual([{type: 'error', what: 'basemap', detail: 'View s0 has no map projection, so the world outline cannot be drawn under it; use "none" or an image.'}]);
+  });
+});
+
 describe('draftOf inverts composeFilters', () => {
   const operands: FilterOperandSet[] = [
     {column: 'title', family: 'text', operands: ['match', 'phrase']},

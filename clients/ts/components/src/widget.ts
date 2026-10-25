@@ -13,7 +13,7 @@ import {
   type TokenSupplier
 } from '@mosaicajs/client';
 import type {Sizing} from '@mosaicajs/deck';
-import {hexOf} from '@mosaicajs/deck/internal';
+import {basemapValueError, hexOf} from '@mosaicajs/deck/internal';
 import {idString} from './base.js';
 import {colouringOf, setSizing, sizingOf} from './colouring.js';
 import type {MosaicaExplorer} from './explorer.js';
@@ -46,6 +46,14 @@ import './explorer.js';
  * round trip. Up-syncs come from the active view, the one whose camera last moved; down-syncs go
  * to every view.
  *
+ * `basemap` comes down and is handed to the explorer as it is, except that an image the kernel read
+ * from a local path arrives as a `basemap-image` message carrying its bytes, which `_basemap_images`
+ * lists by path and digest. The page asks for them at the start with `basemap-images`, makes an
+ * object URL of each, and gives the explorer that URL in the path's place; until every image listed
+ * has arrived the explorer draws no basemap. An object URL is revoked when its path's bytes are
+ * replaced or no longer listed, and when the model is torn down. A basemap the map refuses goes to
+ * the kernel as an `error` message.
+ *
  * Backbone fires `change:<key>` for a `model.set` made here as well as one from the kernel, so
  * each up-sync sets a flag the down-sync handlers check. Without it a `bbox` from Python would fit
  * the camera, the settle would report a box of a different aspect, and that would fit the camera
@@ -65,10 +73,11 @@ export type WidgetModel = {
 /** What the kernel sends the page. `expires_at` is seconds since the epoch, as `/v1/login` and `/session/authorise` report it, or `null` when unknown. */
 export type KernelMessage =
   | {type: 'token'; token: string; expires_at: number | null}
-  | {type: 'refused'; detail: string};
+  | {type: 'refused'; detail: string}
+  | {type: 'basemap-image'; path: string; digest: string; mime: string};
 
 /** What the page sends the kernel. */
-export type PageMessage = {type: 'ready'} | {type: 'reauthorise'} | {type: 'error'; what: string; detail: string};
+export type PageMessage = {type: 'ready'} | {type: 'reauthorise'} | {type: 'basemap-images'} | {type: 'error'; what: string; detail: string};
 
 type ViewState = {
   explorer: MosaicaExplorer;
@@ -91,6 +100,8 @@ type ModelState = {
    */
   pendingFit: [number, number, number, number] | null;
   syncingUp: boolean;
+  /** The local images the kernel sent, by path: the digest of their bytes and their object URL. */
+  images: Map<string, {digest: string; url: string}>;
   dispose(): void;
 };
 
@@ -115,7 +126,7 @@ function tokenSupplier(model: WidgetModel, onMessage: (cb: (msg: KernelMessage) 
   let asked = false;
   let held: Got | null = null;
   onMessage((msg) => {
-    if (!outstanding) return;
+    if (!outstanding || (msg.type !== 'token' && msg.type !== 'refused')) return;
     const o = outstanding;
     outstanding = null;
     if (msg.type === 'token') {
@@ -274,10 +285,11 @@ function fitHeight(explorer: HTMLElement, model: WidgetModel): void {
 const MIN_FULL_SCREEN = 320;
 
 export function initialize({model, storeFactory = createStore}: {model: WidgetModel; storeFactory?: StoreFactory}): () => void {
-  const listeners: ((msg: KernelMessage) => void)[] = [];
+  const listeners: ((msg: KernelMessage, buffers: readonly unknown[]) => void)[] = [];
   const onCustom = (...args: unknown[]) => {
     const msg = args[0] as KernelMessage;
-    for (const l of listeners) l(msg);
+    const buffers = Array.isArray(args[1]) ? (args[1] as unknown[]) : [];
+    for (const l of listeners) l(msg, buffers);
   };
   model.on('msg:custom', onCustom);
 
@@ -290,14 +302,42 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     active: null,
     pendingFit: Array.isArray(stated) && stated.length === 4 ? (stated as [number, number, number, number]) : null,
     syncingUp: false,
+    images: new Map(),
     dispose() {
       for (const v of state.views.values()) teardown(v);
       state.views.clear();
       state.active = null;
+      for (const {url} of state.images.values()) URL.revokeObjectURL(url);
+      state.images.clear();
       model.off('msg:custom', onCustom);
     }
   };
   states.set(model, state);
+
+  // The local images: kept while `_basemap_images` lists them with these bytes.
+  listeners.push((msg, buffers) => {
+    if (msg.type !== 'basemap-image' || listedImages(model)[msg.path] !== msg.digest) return;
+    if (state.images.get(msg.path)?.digest === msg.digest) return;
+    const bytes = buffers[0];
+    if (!(bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes))) return;
+    const held = state.images.get(msg.path);
+    if (held) URL.revokeObjectURL(held.url);
+    state.images.set(msg.path, {digest: msg.digest, url: URL.createObjectURL(new Blob([bytes as BlobPart], {type: msg.mime}))});
+    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
+  });
+  model.on('change:_basemap_images', () => {
+    const listed = listedImages(model);
+    for (const [path, {digest, url}] of state.images) {
+      if (listed[path] === digest) continue;
+      URL.revokeObjectURL(url);
+      state.images.delete(path);
+    }
+    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
+  });
+  model.on('change:basemap', () => {
+    for (const v of state.views.values()) applyBasemap(v.explorer, model, state.images);
+  });
+  if (Object.keys(listedImages(model)).length > 0) model.send({type: 'basemap-images'} satisfies PageMessage);
 
   const report = (what: string, e: unknown) => {
     model.send({type: 'error', what, detail: e instanceof Error ? e.message : String(e)} satisfies PageMessage);
@@ -587,7 +627,15 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     };
     explorer.addEventListener('mosaica-valuecolour', onValueColour);
     explorer.addEventListener('mosaica-clustercolour', onClusterColour);
+    // A basemap the map refuses reaches the kernel as a bad filter does. The note that one value
+    // draws nothing under a view switched to later stays in the map's corner.
+    const onBasemap = (e: Event) => {
+      const {refusal} = (e as CustomEvent<{refusal: string | null}>).detail;
+      if (refusal) report('basemap', new Error(refusal));
+    };
+    explorer.addEventListener('mosaica-basemapchange', onBasemap);
     return () => {
+      explorer.removeEventListener('mosaica-basemapchange', onBasemap);
       explorer.removeEventListener('mosaica-valuecolour', onValueColour);
       explorer.removeEventListener('mosaica-clustercolour', onClusterColour);
       explorer.removeEventListener('mosaica-budgetchange', onBudget);
@@ -638,6 +686,34 @@ function applyColours(explorer: MosaicaExplorer, model: WidgetModel): void {
   if (clusters && typeof clusters === 'object') explorer.clusterColours = clusters as Record<string, Record<string, string>>;
 }
 
+/** The local images `basemap` names, by path, to the digest of the bytes the kernel read. */
+function listedImages(model: WidgetModel): Readonly<Record<string, string>> {
+  const listed = model.get('_basemap_images');
+  return listed && typeof listed === 'object' ? (listed as Record<string, string>) : {};
+}
+
+/**
+ * The basemap the kernel set, given to the explorer with each local image's object URL in place of
+ * its path, or `none` while a listed image has not arrived. `null` leaves the map's default.
+ */
+function applyBasemap(explorer: MosaicaExplorer, model: WidgetModel, images: ReadonlyMap<string, {url: string}>): void {
+  const basemap = model.get('basemap') as MosaicaExplorer['basemap'] | undefined;
+  const listed = listedImages(model);
+  let waiting = false;
+  const local = (value: unknown): unknown => {
+    if (typeof value !== 'object' || value === null || !('image' in value)) return value;
+    const image = (value as {image: unknown}).image;
+    if (typeof image !== 'string' || !(image in listed)) return value;
+    const held = images.get(image);
+    if (!held) waiting = true;
+    return {...value, image: held?.url ?? ''};
+  };
+  // A mapping as the map reads one: an object every one of whose values is a basemap value.
+  const isMapping = typeof basemap === 'object' && basemap !== null && Object.getPrototypeOf(basemap) === Object.prototype && Object.values(basemap).every((v) => basemapValueError(v) === null);
+  const given = !isMapping ? local(basemap) : Object.fromEntries(Object.entries(basemap as Record<string, unknown>).map(([view, value]) => [view, local(value)]));
+  explorer.basemap = waiting ? 'none' : ((given ?? null) as MosaicaExplorer['basemap']);
+}
+
 const mounts = new WeakMap<ModelState, (explorer: MosaicaExplorer) => () => void>();
 
 export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement; signal?: AbortSignal}): () => void {
@@ -652,6 +728,7 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
   explorer.titleField = titleFieldOf(model);
   applyBudget(explorer, model);
   applyColours(explorer, model);
+  applyBasemap(explorer, model, state.images);
   el.append(explorer);
   fitHeight(explorer, model);
   const refit = () => fitHeight(explorer, model);

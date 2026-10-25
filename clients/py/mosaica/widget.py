@@ -24,11 +24,20 @@ every frame. `budget` goes both ways, and up when the map's Most points slider i
 `selected` and `selected_artifact` go up on a pick, and `region` when a region's
 counts arrive. Ids are decimal strings, because a `mosaica_id` is a `u64`, which is not a
 JavaScript number, and a `BigInt` does not serialise.
+
+`basemap` goes down. An image it names by a local path is read here, and its bytes go to the page
+as a `basemap-image` message with a binary buffer, sent when it is set and again whenever the page
+asks with `basemap-images`; `_basemap_images` lists each such path with a digest of its bytes, so
+the saved state holds the path and never the image.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import mimetypes
+import os
 import pathlib
 import re
 import warnings
@@ -87,6 +96,89 @@ def _by_name(value: Any, trait: str, outer: str, inner: str) -> dict:
     return value
 
 
+_BASEMAP_FORMS = '"world", "none", {"tiles": url_template, "attribution": text} or {"image": url_or_path, "bounds": [x0, y0, x1, y1]}'
+
+
+def _basemap_value(value: Any, where: str) -> Any:
+    """One basemap value, checked for its shape, with an image's path as a string."""
+    if value in ("world", "none"):
+        return value
+    if isinstance(value, dict) and "tiles" in value:
+        unknown = sorted(set(value) - {"tiles", "attribution"}, key=str)
+        if unknown:
+            raise traitlets.TraitError(f"{where} is a tile basemap, which holds only tiles and attribution; remove {unknown}")
+        tiles, attribution = value["tiles"], value.get("attribution")
+        if not isinstance(tiles, str) or not all(t in tiles for t in ("{z}", "{x}", "{y}")):
+            raise traitlets.TraitError(
+                f"{where}'s tiles is a URL template holding {{z}}, {{x}} and {{y}}, such as "
+                f"'https://tiles.example.org/{{z}}/{{x}}/{{y}}.png', not {tiles!r}"
+            )
+        if attribution is not None and not isinstance(attribution, str):
+            raise traitlets.TraitError(f"{where}'s attribution is the text of the credit the tile server asks for, not {attribution!r}")
+        return {"tiles": tiles, **({} if attribution is None else {"attribution": attribution})}
+    if isinstance(value, dict) and "image" in value:
+        unknown = sorted(set(value) - {"image", "bounds"}, key=str)
+        if unknown:
+            raise traitlets.TraitError(f"{where} is an image basemap, which holds only image and bounds; remove {unknown}")
+        image, bounds = value["image"], value.get("bounds")
+        if not isinstance(image, (str, os.PathLike)) or os.fspath(image) in ("", "world", "none"):
+            raise traitlets.TraitError(f"{where}'s image is the image's http(s) or data: URL or its path, not {image!r}")
+        out: dict = {"image": os.fspath(image)}
+        if bounds is not None:
+            numbers = list(bounds) if isinstance(bounds, (list, tuple)) else None
+            if numbers is None or len(numbers) != 4 or not all(
+                isinstance(b, (int, float)) and not isinstance(b, bool) and math.isfinite(b) for b in numbers
+            ):
+                raise traitlets.TraitError(
+                    f"{where}'s bounds are four numbers, [x0, y0, x1, y1], in the view's coordinates, "
+                    f"not {bounds!r}; leave them out to cover the whole frame"
+                )
+            out["bounds"] = [float(b) for b in numbers]
+        return out
+    raise traitlets.TraitError(f"{where} is {_BASEMAP_FORMS}, not {value!r}")
+
+
+def _is_local(image: str) -> bool:
+    """Whether an image basemap's `image` is a path on this machine rather than a URL."""
+    return re.match(r"(?i)(https?|data):", image) is None
+
+
+def _basemap_images(basemap: Any) -> dict:
+    """Each local image `basemap` names, read: its path as written, to its digest, type and bytes."""
+    values = [] if basemap is None else list(basemap.values()) if _is_mapping(basemap) else [basemap]
+    images = {}
+    for value in values:
+        if not (isinstance(value, dict) and "image" in value and _is_local(value["image"])):
+            continue
+        path = value["image"]
+        if not pathlib.Path(path).is_file():
+            raise FileNotFoundError(
+                f"the basemap image {path!r} is not a file here (relative paths start at "
+                f"{os.getcwd()}); give the path of an image file, or the image's http(s) or data: URL"
+            )
+        data = pathlib.Path(path).read_bytes()
+        mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        images[path] = (hashlib.sha256(data).hexdigest()[:16], mime, data)
+    return images
+
+
+def _is_value(value: Any) -> bool:
+    """Whether `value` is one basemap value."""
+    try:
+        _basemap_value(value, "basemap")
+    except traitlets.TraitError:
+        return False
+    return True
+
+
+def _is_mapping(basemap: Any) -> bool:
+    """Whether `basemap` maps view ids to values: a dict every one of whose values is a value, or
+    one with no `tiles` or `image` key, which the page reads the same way."""
+    if not isinstance(basemap, dict):
+        return False
+    return all(_is_value(v) for v in basemap.values()) or ("tiles" not in basemap and "image" not in basemap)
+
+
 class Map(anywidget.AnyWidget):
     """The interactive map in a notebook cell, reading a Mosaica database with a token.
 
@@ -131,6 +223,22 @@ class Map(anywidget.AnyWidget):
       map opens framed on where the items `filters` matches are.
     - `height`: the widget's height in pixels in the notebook. The default is 480. While the
       output holding the map is shown full screen, the map fills the screen instead.
+    - `basemap`: what is drawn under the points. `"world"` is land, coastlines and country
+      borders from the database's world outline, on a view with a map projection. `"none"` is
+      nothing. `{"tiles": url_template, "attribution": text}` is raster tiles from a server you
+      name, whose template holds `{z}`, `{x}` and `{y}`, on a view whose frame lines up with web
+      map tiles; the map shows `attribution` in its corner. `{"image": url_or_path, "bounds":
+      [x0, y0, x1, y1]}` is one image stretched over `bounds` in the view's coordinates (degrees
+      on a geographic view), or over the whole frame without them, and not reprojected. An image
+      that is not an `http(s):` or `data:` URL is a path here, a `str` or a `pathlib.Path`, which
+      is read when it is given and sent to the page as a message, so its bytes are never saved
+      with the notebook; a path that is not a file raises `FileNotFoundError`. A dictionary
+      every one of whose values is one of these, or one without `tiles` or `image`, maps view
+      ids to values, for the views the map can switch to; so `{"image": "world"}` draws the
+      world outline under the view `image`. `None`, the default, is `"world"` on a view with a
+      map projection and nothing on one without. A value of the wrong shape raises
+      `traitlets.TraitError`; one that does not fit the view is refused by the page, and
+      `last_error` and a warning say why.
     - `explorer_layout`: `"docked"`, the default, puts the controls in a sidebar beside the map;
       `"overlay"` draws the map across the whole widget with the controls floating over it.
     - `title_field`: the field whose value titles a point in the hover and the item card.
@@ -173,6 +281,8 @@ class Map(anywidget.AnyWidget):
     - `value_colours`, `cluster_colours`: every colour chosen, here or in the map, which the map
       changes when a colour is chosen on a field card or in Edit colours, at once. Setting one
       replaces every colour of its kind the map holds.
+    - `basemap`: as given, with each image path as a string. Setting it in a later cell applies
+      it, and reads a local image again.
     - `url`, `height`, `explorer_layout`, `title_field`, `artifacts_per_tile`, `budget_min`,
       `budget_max`, `cluster_budget_min`, `cluster_budget_max`: as given. Setting one in a later
       cell applies it.
@@ -230,6 +340,11 @@ class Map(anywidget.AnyWidget):
     size_max = traitlets.Float(None, allow_none=True).tag(sync=True)
     size_scale = traitlets.Enum(["linear", "log", "rank"], default_value=None, allow_none=True).tag(sync=True)
     filters = traitlets.Dict(default_value=None, allow_none=True).tag(sync=True)
+    # A string, one value as a dict, or a dict from view id to value; `None` is the map's default.
+    basemap = traitlets.Any(None, allow_none=True).tag(sync=True)
+    # The local images `basemap` names, by path, to a digest of their bytes. The bytes go to the
+    # page as messages, which ask for them again when it reloads.
+    _basemap_images = traitlets.Dict({}).tag(sync=True)
     # Up.
     # `Any` rather than `Unicode` so the validator below runs on an int and stringifies it.
     selected = traitlets.Any(None, allow_none=True).tag(sync=True)
@@ -265,6 +380,7 @@ class Map(anywidget.AnyWidget):
         cluster_budget: int = 1_000,
         cluster_budget_min: int = 10,
         cluster_budget_max: int = 10_000,
+        basemap: Any = None,
         **kwargs: Any,
     ) -> None:
         if token is None:
@@ -283,6 +399,8 @@ class Map(anywidget.AnyWidget):
         self._token_source: TokenSource = token
         self._token: Optional[Token] = None
         self.tokens_sent = 0
+        # The local images `basemap` names, as `_basemap_images` lists them: path to digest, type, bytes.
+        self._images: dict = {}
         super().__init__(
             url=url,
             view=view,
@@ -307,6 +425,7 @@ class Map(anywidget.AnyWidget):
             cluster_budget=cluster_budget,
             cluster_budget_min=cluster_budget_min,
             cluster_budget_max=cluster_budget_max,
+            basemap=basemap,
             _esm=bundle.read_text(encoding="utf-8"),
             **kwargs,
         )
@@ -335,10 +454,35 @@ class Map(anywidget.AnyWidget):
                 return
             self.tokens_sent += 1
             self.send(message)
+        elif kind == "basemap-images":
+            self._send_images(self._images)
         elif kind == "error":
             detail = f"{content.get('what')}: {content.get('detail')}"
             self.last_error = detail
             warnings.warn(f"mosaica widget refused {detail}", stacklevel=2)
+
+    # ---- the basemap's images ----------------------------------------------------------------
+
+    def _send_images(self, images: dict) -> None:
+        for path, (digest, mime, data) in images.items():
+            self.send({"type": "basemap-image", "path": path, "digest": digest, "mime": mime}, buffers=[data])
+
+    @traitlets.validate("basemap")
+    def _validate_basemap(self, proposal: dict) -> Any:
+        value = proposal["value"]
+        if _is_mapping(value):
+            bad = next((k for k in value if not isinstance(k, str)), None)
+            if bad is not None:
+                raise traitlets.TraitError(f"basemap maps view ids, as strings, to basemaps; {bad!r} is not a view id")
+            value = {view: _basemap_value(v, f"basemap[{view!r}]") for view, v in value.items()}
+        elif value is not None:
+            value = _basemap_value(value, "basemap")
+        images = _basemap_images(value)
+        sent = self._images
+        self._images = images
+        self._basemap_images = {path: digest for path, (digest, _, _) in images.items()}
+        self._send_images({p: i for p, i in images.items() if sent.get(p, (None,))[0] != i[0]})
+        return value
 
     # ---- validation --------------------------------------------------------------------------
 

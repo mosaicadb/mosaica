@@ -391,3 +391,17 @@ def test_a_box_counted_over_a_cover_counts_at_least_the_items_inside(served, cor
         assert type(count) is int and count >= exact
     finally:
         again.close()
+
+
+def test_every_route_to_a_map_takes_the_basemap_as_given(db, stub_bundle, tmp_path):
+    image = tmp_path / "plan.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    routes = (db.map, db.viewer(["cs.LG"]).map, db.view("s0").map)
+    for route in routes:
+        assert route().basemap is None
+        assert route(basemap="none").basemap == "none"
+        m = route(basemap={"s0": {"image": image, "bounds": [0, 0, 1, 1]}})
+        assert m.basemap == {"s0": {"image": str(image), "bounds": [0.0, 0.0, 1.0, 1.0]}}
+        assert list(m.get_state()["_basemap_images"]) == [str(image)]
+        with pytest.raises(FileNotFoundError):
+            route(basemap={"image": tmp_path / "missing.png"})
