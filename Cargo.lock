@@ -1977,7 +1977,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "clap",
@@ -2003,7 +2003,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-access"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "rand 0.8.7",
  "rustc-hash 1.1.0",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-analyse"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "icu_casemap",
  "icu_normalizer",
@@ -2023,7 +2023,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-authz"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "croaring",
@@ -2040,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-bench"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "axum",
@@ -2078,7 +2078,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-build"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "chrono",
@@ -2109,14 +2109,14 @@ dependencies = [
 
 [[package]]
 name = "mosaica-cache"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "rustc-hash 1.1.0",
 ]
 
 [[package]]
 name = "mosaica-catalogue"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "argon2",
  "getrandom 0.2.17",
@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-config"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "mosaica-docgen",
  "mosaica-engine",
@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-corpus"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "mosaica-spatial",
@@ -2157,14 +2157,14 @@ dependencies = [
 
 [[package]]
 name = "mosaica-docgen"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "syn 2.0.119",
 ]
 
 [[package]]
 name = "mosaica-engine"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arc-swap",
  "arrow",
@@ -2202,7 +2202,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-filter"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "croaring",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-filter-write"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "croaring",
@@ -2231,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-lifecycle"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "crc32fast",
  "criterion",
@@ -2250,7 +2250,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-python"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "mosaica-build",
  "mosaica-config",
@@ -2261,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-roaring"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "croaring",
  "croaring-sys",
@@ -2270,7 +2270,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-server"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "axum",
@@ -2308,7 +2308,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-spatial"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "mosaica-types",
  "proptest",
@@ -2318,7 +2318,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-store"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "base64",
@@ -2348,7 +2348,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-types"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "getrandom 0.2.17",
  "libc",
@@ -2361,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "mosaica-wire"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "arrow",
  "arrow-ipc",

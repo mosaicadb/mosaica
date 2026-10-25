@@ -1,6 +1,6 @@
 {
   "name": "@mosaicajs/client",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0-rc.2",
   "description": "The Mosaica browser client: a headless store over a Mosaica server's map, filters, counts, items and writes, with no DOM.",
   "keywords": [
     "mosaica",

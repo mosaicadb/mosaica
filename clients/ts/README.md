@@ -55,13 +55,13 @@ mkdir -p ~/mosaica-packs
 npm pack -w @mosaicajs/client -w @mosaicajs/deck -w @mosaicajs/components -w @mosaicajs/react --pack-destination ~/mosaica-packs
 ```
 
-That writes `mosaicajs-client-0.1.0-rc.1.tgz`, `mosaicajs-deck-0.1.0-rc.1.tgz`, `mosaicajs-components-0.1.0-rc.1.tgz` and `mosaicajs-react-0.1.0-rc.1.tgz`. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly version 0.1.0-rc.1 of the Mosaica packages they import, and `@mosaicajs/react` on 0.1.0-rc.1 or a later 0.1 release. Version 0.1.0-rc.1 exists only in these tarballs. Install the tarballs together, in one `npm install` in the other project:
+That writes `mosaicajs-client-0.1.0-rc.2.tgz`, `mosaicajs-deck-0.1.0-rc.2.tgz`, `mosaicajs-components-0.1.0-rc.2.tgz` and `mosaicajs-react-0.1.0-rc.2.tgz`. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly version 0.1.0-rc.2 of the Mosaica packages they import, and `@mosaicajs/react` on 0.1.0-rc.2 or a later 0.1 release. Version 0.1.0-rc.2 exists only in these tarballs. Install the tarballs together, in one `npm install` in the other project:
 
 ```bash
-npm install ~/mosaica-packs/mosaicajs-client-0.1.0-rc.1.tgz ~/mosaica-packs/mosaicajs-deck-0.1.0-rc.1.tgz ~/mosaica-packs/mosaicajs-components-0.1.0-rc.1.tgz ~/mosaica-packs/mosaicajs-react-0.1.0-rc.1.tgz
+npm install ~/mosaica-packs/mosaicajs-client-0.1.0-rc.2.tgz ~/mosaica-packs/mosaicajs-deck-0.1.0-rc.2.tgz ~/mosaica-packs/mosaicajs-components-0.1.0-rc.2.tgz ~/mosaica-packs/mosaicajs-react-0.1.0-rc.2.tgz
 ```
 
-Installing `@mosaicajs/components` without the client and deck tarballs fails with `No matching version found for @mosaicajs/client@0.1.0-rc.1`, because npm looks for that version on the registry. The project's `package.json` records each tarball by its path, so leave the files where they are.
+Installing `@mosaicajs/components` without the client and deck tarballs fails with `No matching version found for @mosaicajs/client@0.1.0-rc.2`, because npm looks for that version on the registry. The project's `package.json` records each tarball by its path, so leave the files where they are.
 
 The host provides these peer dependencies. npm 7 and later installs the required ones itself; the optional ones it leaves to the host.
 
@@ -70,7 +70,7 @@ The host provides these peer dependencies. npm 7 and later installs the required
 | `@mosaicajs/client` | None. |
 | `@mosaicajs/deck` | `@deck.gl/core`, `@deck.gl/layers` and `@deck.gl/aggregation-layers` `^9.3.7`, and `@luma.gl/core` `^9.3.6`. |
 | `@mosaicajs/components` | The same four, and `lit` `^3.3.0`. |
-| `@mosaicajs/react` | `react` `^18.0.0` or `^19.0.0`. For the `/components` entry, also `@mosaicajs/components` `^0.1.0-rc.1` and `@lit/react` `^1.0.0`, both optional. |
+| `@mosaicajs/react` | `react` `^18.0.0` or `^19.0.0`. For the `/components` entry, also `@mosaicajs/components` `^0.1.0-rc.2` and `@lit/react` `^1.0.0`, both optional. |
 
 ## Testing
 

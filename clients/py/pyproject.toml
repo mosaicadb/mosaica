@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mosaica"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 description = "Read and map a Mosaica database from Python, and make one from data frames."
 readme = "README.md"
 license = "Apache-2.0"
@@ -36,7 +36,7 @@ requires-python = ">=3.10"
 # `MOSAICA_BIN` at a `mosaica` binary, or put one on `PATH`, to make or serve a database.
 dependencies = [
   "pyarrow>=14",
-  "mosaica-native==0.1.0-rc.1; sys_platform != 'win32' and platform_machine in 'x86_64 aarch64 arm64'",
+  "mosaica-native==0.1.0-rc.2; sys_platform != 'win32' and platform_machine in 'x86_64 aarch64 arm64'",
 ]
 
 [project.urls]
