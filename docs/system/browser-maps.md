@@ -1,10 +1,10 @@
 # Maps in the browser
 
-A Mosaica map in the browser is built from four layers. Each one uses the layer below it, and each can be used on its own, so an application takes as much as suits it and replaces the rest.
+When you put a Mosaica map in a web page, you're using four layers, each built on the one below. You can stop at any of them: take the whole explorer, or take only the parts that suit your application and write the rest yourself.
 
 ```mermaid
 flowchart TB
-  server["Mosaica server"]
+  server["Mosaica"]
   client["MosaicaClient<br/>sends one request, decodes the answer"]
   store["Store<br/>decides what to ask, caches the answers,<br/>publishes what to draw"]
   layer["MosaicaLayer<br/>draws points, topics and density in deck.gl"]
@@ -21,10 +21,9 @@ flowchart TB
 
 *Each layer uses the one below it. Your own drawing or panels can read the store's projections directly.*
 
-- **`MosaicaClient`**, in `@mosaicajs/client`, sends one request and decodes its answer, in a web worker where one is available.
-- **The store**, in the same package, decides what to ask for, caches what comes back, and publishes what to draw as projections: the points, the counts, the topics, a legend and the state of the view. It draws nothing itself.
-- **`MosaicaLayer`**, in `@mosaicajs/deck`, draws a store's points, topics and density as a deck.gl layer.
-- **The components**, in `@mosaicajs/components`, are web components built on the store and the layer: a whole explorer, a map, and panels such as a filter panel, a field card or a count. `@mosaicajs/react` wraps each one for React, and the Python notebook map embeds them.
+At the bottom, `MosaicaClient` in `@mosaicajs/client` sends one request and decodes its answer, in a web worker where one is available. The store, in the same package, sits on top of it: it decides what to ask for, caches what comes back, and publishes what to draw as projections, such as the points, the counts, the topics, a legend and the state of the view. The store draws nothing itself. That's the job of `MosaicaLayer`, in `@mosaicajs/deck`, which draws a store's points, topics and density as a deck.gl layer.
+
+The components in `@mosaicajs/components` are web components built on the store and the layer: a whole explorer, a map, and panels such as a filter panel, a field card or a count. `@mosaicajs/react` wraps each one for React, and the Python notebook map embeds them too.
 
 ## Building on it
 
@@ -40,42 +39,42 @@ The [TypeScript reference](../reference/typescript.md) and the [components refer
 
 ## What the store does
 
-The store exists to make the database cheap and simple to use from a browser. Its caching follows how Mosaica serves a map, so it asks the server for as little as it can and reuses everything an answer allows:
+Most of the store's value is its caching, which is tuned to how Mosaica serves a map. It asks for as little as it can and reuses everything an answer allows, so that using the database from a browser stays cheap and simple:
 
 - **Samples nest across zoom levels.** A tile's points are always the start of the points its deeper tiles draw. So while new tiles load after a zoom, the store draws the points it already holds from another depth in their place. The map never goes blank, and the stand-in points are ones the finished map will draw too.
-- **It asks only for tiles it does not hold.** The server does no work for a tile a request leaves out, so a pan costs only the tiles newly on screen. Held tiles are kept within a memory budget. When it is full, tiles of other views leave first, then empty tiles, then the deepest, then the least recently used.
+- **It asks only for tiles it does not hold.** Mosaica does no work for a tile a request leaves out, so a pan costs only the tiles newly on screen. Held tiles are kept within a memory budget. When it is full, tiles of other views leave first, then empty tiles, then the deepest, then the least recently used.
 - **It fetches ahead.** Once the camera settles, it asks for a margin around the screen, reaching further in the direction the camera was moving.
 - **It picks the zoom level** whose tiles give about as many points as its point budget, 250,000 by default.
 - **It draws as answers arrive.** Counts come first, then points, decoded off the page's main thread and drawn tile by tile.
 - **It knows when what it holds is out of date.** It compares each answer's content key and identity key with what it holds, marks the view stale when the data has moved on, and drops everything when the viewer changes.
 - **It batches the panels' counts.** A component registers the breakdowns it needs, such as a histogram for a field card. The store sends registrations asked for together that differ only in their groupings as one aggregate request, and asks again only when the filter, the highlight, the selected region or the view changes, at a refresh, and when the data changes.
 
-It also handles the rest of talking to the server:
+It also takes care of the rest of talking to Mosaica:
 
 - **Tokens.** The host gives it a fixed `token`, or an `authorise` function, which the store calls for a token and again to renew it 30 seconds before it expires.
 - **Topics** come from a request of their own, tile by tile, so they stay put as the held points change.
-- **Stable colours.** The server gives each topic a colour slot, the same for this viewer at every zoom and filter, in one of four palettes: Okabe-Ito, Tableau 10 (the default), Tableau 20 or Kelly. Category values are ranked for colouring by the server's count of each over the viewer's items, so a value has the same colour on every load. If that count is refused, the store ranks the values already drawn.
+- **Stable colours.** Mosaica gives each topic a colour slot, the same for this viewer at every zoom and filter, in one of four palettes: Okabe-Ito, Tableau 10 (the default), Tableau 20 or Kelly. Category values are ranked for colouring by Mosaica's count of each over the viewer's items, so a value has the same colour on every load. If that count is refused, the store ranks the values already drawn.
 
 ### What the view shows
 
-The store reports the view's state:
+The store reports the state of the view, so your page can say what's happening:
 
 | State | Meaning |
 |---|---|
 | `idle` | nothing asked for yet |
 | `loading` | a request is out |
-| `retrying` | the server was busy (`429`) or still starting (`503`), and the request will be sent again |
+| `retrying` | Mosaica was busy (`429`) or still starting (`503`), and the request will be sent again |
 | `shown` | points are on screen, with their counts |
 | `empty` | the answer holds nothing this viewer may see in view |
 | `refused` | the request failed, so what is here is not known |
 
-A refusal carries the server's error code and the HTTP status. An error with no answer from Mosaica in it, such as a gateway's `504`, has the code `http-error`.
+A refusal carries Mosaica's error code and the HTTP status. An error with no answer from Mosaica in it, such as a gateway's `504`, has the code `http-error`.
 
-Flags sit beside the state:
+Beside the state, three flags tell you about the data and the connection:
 
 - **`stale`**: the data has changed since the points on screen were fetched. The store keeps the points on screen and marks the view, and a refresh is one action away. It fetches the topics and the panels' counts again at once.
-- **`unreachable`**: a request could not reach the server, or a proxy in front of it answered `502`. The store asks the server again after a second, then twice as long each time, up to 30 seconds, and redraws once it answers. A refused request, or an `authorise` that fails, is not an outage.
-- **`expired`**: the session has ended, and a new token is needed. On a `401` for a token that had worked, the store calls `authorise` once for a new one. When the server answers `403 expired-token`, because it ended the session, the store shows `expired` and leaves renewal to the host.
+- **`unreachable`**: a request could not reach Mosaica, or a proxy in front of it answered `502`. The store asks again after a second, then twice as long each time, up to 30 seconds, and redraws once it answers. A refused request, or an `authorise` that fails, is not an outage.
+- **`expired`**: the session has ended, and a new token is needed. On a `401` for a token that had worked, the store calls `authorise` once for a new one. When Mosaica answers `403 expired-token`, because it ended the session, the store shows `expired` and leaves renewal to the host.
 
 A store given a `MosaicaClient` of its own does not watch that client's requests, so `unreachable` stays false and a `401` does not call `authorise`.
 
@@ -84,13 +83,13 @@ A store given a `MosaicaClient` of its own does not watch that client's requests
 | What happened | What the store does |
 |---|---|
 | The data changed under the same viewer | Marks the view `stale` and keeps the points on screen until it is refreshed. Fetches topics and counts again |
-| An answer carries a different identity key: another viewer, a renewed token whose viewer now holds different access, or a compaction | Drops what the server answered, reads the deployment's description again, and redraws |
+| An answer carries a different identity key: another viewer, a renewed token whose viewer now holds different access, or a compaction | Drops what Mosaica answered, reads the deployment's description again, and redraws |
 | The host calls `clear()` | The same, and also drops a drawn region and the token, then asks `authorise` again. For a host that changes viewer itself |
 | The database was rebuilt | Every `mosaica_id` it holds names nothing. Read the items again by a unique field's values |
 
-When the identity key changes, the store keeps the host's own choices: a drawn region, the filter controls, the layers, the colouring, the view and the camera. It drops what came from the server, including a topic picked as a filter or a region taken from a topic's shape.
+When the identity key changes, the store keeps the host's own choices: a drawn region, the filter controls, the layers, the colouring, the view and the camera. It drops what came from Mosaica, including a topic picked as a filter or a region taken from a topic's shape.
 
-After a token renewal, the store asks whose the new token is. If the answer does not come, because the server is busy, starting or unreachable, it asks again with a growing wait until an answer confirms the viewer or shows another. Until then the previous viewer's data stays on screen, so a host that changes viewer calls `clear()` rather than relying on renewal.
+After a token renewal, the store asks whose the new token is. If the answer doesn't come, because Mosaica is busy, starting or unreachable, it asks again with a growing wait until an answer confirms the viewer or shows another. Until then the previous viewer's data stays on screen, so a host that changes viewer calls `clear()` rather than relying on renewal.
 
 A merge of segments never reaches a client. A compaction reaches it only through the identity key, and every `mosaica_id` stays valid across it.
 

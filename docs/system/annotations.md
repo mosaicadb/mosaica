@@ -1,12 +1,12 @@
 # Annotations
 
-Annotation layers add structure on top of the items: clusters, a hierarchy of topics, regions such as country borders, and the names that label them. This chapter describes what you declare for a layer, how its annotations appear on the map, who sees which of them, and how they change as the data changes. The examples continue with the research papers of the [data model](data-model.md), with a `topics` layer over them.
+Annotation layers let you put structure over your items: clusters, a hierarchy of topics, regions such as country borders, and the names that label them. The examples here continue with the research papers of the [data model](data-model.md), with a `topics` layer over them.
 
-Each annotation in a layer is an **artifact**: a named thing with a set of member items. A topic is an artifact, and its members are the papers on that topic. Like an item, an artifact has a `mosaica_id`, which clients use to name it.
+Mosaica calls each annotation in a layer an **artifact**. A topic is an artifact, for instance, and its members are the papers on that topic. Like an item, an artifact has a `mosaica_id`, which clients use to name it.
 
 ## Declaring a layer
 
-A layer's declaration answers these questions.
+When you declare a layer, you decide how its members are found, how its artifacts relate to each other, what each one carries, and who may see it.
 
 ### How members are found
 
@@ -32,19 +32,17 @@ A tiered or stacked layer declares its levels, each with an optional title and a
 
 ### What each artifact carries
 
-- **Computed by the server** from the members each viewer may see: a `centroid`, a bounding `box`, and a `hull`, a shape that follows the outline of the members. Where the members fall into separate groups, the hull has one ring per group.
-- **Supplied by you**: text such as a name or description, a polygon, a box or a point.
-- **A count** of the members the viewer may see, always.
+Every artifact carries a count of the members the viewer may see. Beyond that, you can ask Mosaica to compute a `centroid`, a bounding `box` and a `hull` from those same members, where the hull follows the outline of the members and has one ring for each separate group of them. You can also supply content of your own: text such as a name or description, a polygon, a box or a point.
 
-A layer draws one shape: a computed hull, a spatial layer's own shape, or a supplied polygon. A field layer is flat and carries only its key and count. Its artifacts are made from the field's values, so nothing is published into it.
+A layer draws one shape, whether that's a computed hull, a spatial layer's own shape or a supplied polygon. A field layer is the exception to most of this. Its artifacts are made from the field's values, so nothing is published into it, and it's flat and carries only each value's key and count.
 
 ### Names from a label layer
 
-Names can live in a layer of their own, attached to another layer's artifacts. A `topics` layer's clusters might be named by a `topic_names` label layer, each label attached to one cluster. Label layers let you control who sees a name separately from who sees the cluster. That matters when a name was generated from the members: on the cluster's own layer, a name a viewer may not read hides the whole cluster from them. See [who sees what](#who-sees-an-annotation).
+You can keep names in a layer of their own, attached to another layer's artifacts: a `topics` layer's clusters might be named by a `topic_names` label layer, with each label attached to one cluster. The point of a label layer is that you control who sees a name separately from who sees the cluster. That matters when a name was generated from the members, because on the cluster's own layer, a name a viewer may not read hides the whole cluster from them, as [who sees an annotation](#who-sees-an-annotation) explains.
 
 ### Who may see it
 
-Each layer has its own access label, can give each artifact its own label, and states how much of an artifact's membership a viewer must see before it is served. These are described [below](#who-sees-an-annotation).
+A layer has an access label of its own, can give each artifact a label too, and says how much of an artifact's membership a viewer must see before it's served. [Who sees an annotation](#who-sees-an-annotation) covers all three.
 
 A shortened declaration:
 
@@ -80,7 +78,7 @@ The [`corpus.toml` reference](../reference/corpus-toml.md) lists every key.
 
 ## On the map
 
-A client asks for the artifacts in each map tile, as described under [annotations by tile](queries.md#annotations-on-the-map).
+A client asks for the artifacts in each map tile, as described under [annotations by tile](queries.md#annotations-on-the-map), and Mosaica chooses which to send so the map stays readable at every zoom:
 
 - **The largest first.** On a flat, stacked or tiered layer, each tile returns at most `per_tile` artifacts of each level, the largest first by how many members the viewer may see. A small cluster in a crowded tile is left out there, and appears where it is among the largest, or when the viewer zooms in.
 - **The same figures everywhere.** An artifact's count, centre and box cover all the members the viewer may see, wherever they are, so an artifact that spans several tiles has the same figures in each.
@@ -92,7 +90,7 @@ An artifact deep in a large tree, or a small one in tiles crowded with larger on
 
 ## Who sees an annotation
 
-Three tests decide whether a viewer is served an artifact. It must pass all three.
+A viewer is served an artifact only if it passes three tests.
 
 1. **The layer's access label.** A viewer who does not satisfy it cannot learn the layer exists. A request naming the layer is answered as if it had never been declared.
 2. **The artifact's own label**, if the layer names a field for it in `artifact_visibility.field`. It can only narrow what the layer's label allows. `artifact_visibility.default` decides an artifact with no label of its own: `"inherited"` leaves it to the layer's label, and a label gives it that label.
@@ -140,7 +138,7 @@ The computed hull follows only the members the viewer may see, so it reveals not
 
 ## Publishing and changing annotations
 
-At a build, a layer and its artifacts come from the declaration and its files. At a running server:
+You can declare a layer and its artifacts in your first load, from the schema and its files, or at any time while the database runs:
 
 === "HTTP"
 
@@ -155,7 +153,7 @@ At a build, a layer and its artifacts come from the declaration and its files. A
 
 === "Python"
 
-    On a server elsewhere, `Control` has the TypeScript client's calls: `declare_layer`, `publish`, `grow`, `changes` and `drop_layer`.
+    On a shared database, `Control` has the TypeScript client's calls: `declare_layer`, `publish`, `grow`, `changes` and `drop_layer`.
 
     | To | Call |
     |---|---|
@@ -179,7 +177,7 @@ At a build, a layer and its artifacts come from the declaration and its files. A
 
 === "CLI"
 
-    The `mosaica` command builds layers into a new database, and cannot change a running server's layers.
+    The `mosaica` command builds layers into a new database, and can't yet change a running database's layers.
 
     | To | Command |
     |---|---|
@@ -190,7 +188,7 @@ At a build, a layer and its artifacts come from the declaration and its files. A
     | Delete or suppress an artifact, or suppress a whole layer | Not built yet |
     | Drop a layer | Not built yet |
 
-As the items change, the annotations follow:
+As your items change, the annotations follow them:
 
 | When | What happens to the annotations |
 |---|---|
@@ -211,4 +209,4 @@ As the items change, the annotations follow:
 - **Editing an artifact.** Delete it and publish it again.
 - **A fractional or `all` membership requirement on a shape or field layer.** Such a layer has no declared list of members to take a share of, so it takes `any`, a count or `none`.
 - **Withdrawing an artifact when one of its members is deleted.** A deleted member leaves the artifact, and the artifact stays, unless its only content was generated from that member.
-- **Changing a running server's layers from the command line.** Use the HTTP API or a client.
+- **Changing a running database's layers from the command line.** Use the HTTP API or a client.
