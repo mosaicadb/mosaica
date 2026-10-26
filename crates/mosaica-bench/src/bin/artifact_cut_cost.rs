@@ -50,7 +50,7 @@
 //! corpus passes every artifact**, so at a 10⁷-artifact treed layer and whole-map zoom the cut is
 //! handed the entire population and costs **a second**. That is now the largest single term in such
 //! a request — larger than the verdict pass it rides on, which
-//! [the serving-scale probe](../../../../probes/2026-08-20-artifact-serving-scale/README.md) brings
+//! the serving-scale probe brings
 //! to ~135 ms with the same population.
 //!
 //! It does not contradict the ~100 ns per *passing* artifact rule; it is that rule at a passing

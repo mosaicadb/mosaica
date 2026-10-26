@@ -131,7 +131,7 @@ one has 10⁸ membership rows and a few hundred ranked generating-set rows in th
 
 ## Measured
 
-**The raw output is [`../../probes/2026-09-03-rung-4-build-stall/`](../../probes/2026-09-03-rung-4-build-stall/README.md)**
+**The raw output is `../../probes/2026-09-03-rung-4-build-stall/`**
 — every log, every RSS and fault sample, and the four drive results — because the headline here is a
 negative one, and a negative result that cannot be re-read is an assertion.
 
@@ -313,8 +313,8 @@ The process was stopped after 3 h 25 m and its partial bundle deleted.
 
 | | |
 |---|---|
-| `text_index` at 10⁸ | *over four hours, unfinished* → **2,371.9 s (39.5 min)**, 4,131 major faults over the whole stage and 153.3 GiB read against a 128 GiB arena. [`../../probes/2026-09-03-text-arena-streaming/`](../../probes/2026-09-03-text-arena-streaming/README.md) |
-| `record_blob` at 10⁷ under a 4 GB cap | *> 2,134 s, unfinished*, 2,348 GiB read for a 10.2 GiB arena → **64.31 s**, its uncapped wall. [`../../probes/2026-09-03-entity-ordered-arena/`](../../probes/2026-09-03-entity-ordered-arena/README.md) |
+| `text_index` at 10⁸ | *over four hours, unfinished* → **2,371.9 s (39.5 min)**, 4,131 major faults over the whole stage and 153.3 GiB read against a 128 GiB arena. `../../probes/2026-09-03-text-arena-streaming/` |
+| `record_blob` at 10⁷ under a 4 GB cap | *> 2,134 s, unfinished*, 2,348 GiB read for a 10.2 GiB arena → **64.31 s**, its uncapped wall. `../../probes/2026-09-03-entity-ordered-arena/` |
 | what the second fixed | the attribute join's **scatter** — resolved in source-id order, written at signature-then-Morton entity indices — and, behind the switch `--arena-order`, an arena filled in entity order by a second decode of the source's prose |
 | the bundle | **byte-identical** under every arm, at 10⁶ and 10⁷ |
 

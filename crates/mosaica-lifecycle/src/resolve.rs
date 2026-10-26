@@ -654,7 +654,7 @@ mod tests {
         );
     }
 
-    /// Joe's example: items (a=x, b=p) and (a=k, b=y) exist. (a=x, b=y) names both and is
+    /// Items (a=x, b=p) and (a=k, b=y) exist. (a=x, b=y) names both and is
     /// refused; (a=x, b=q) edits the first; (a=z, b=q) would create, and sets the value the edit
     /// sets, so it is the later of two rows setting one value.
     #[test]

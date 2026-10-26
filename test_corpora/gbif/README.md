@@ -10,7 +10,7 @@ is the row count. 3.65×10⁹ rows is 85.1% of one `u32` entity space and artifa
 downward into the same space ([`sharding.md`](../../docs/design/sharding.md)), so this is the first
 rung whose entity space is nearly spent and the first where the question "does it need sharding"
 had to be answered before anything was built. It does not
-([`probes/2026-09-09-gbif-census/`](../../probes/2026-09-09-gbif-census/README.md)).
+(`probes/2026-09-09-gbif-census/`).
 
 **Three things make this rung different from the five below it.**
 
@@ -129,7 +129,7 @@ Owner ruling, 2026-09-09. Distinct and null figures are the census's, over its 2
 every file names a record by it: the points file in its `gbifid` column, the member file in its
 `entity` column, which `[layer.members]` maps with `fields = { gbifid = "entity" }`. Its
 index is 42.1 GB over the placed rows
-([`probes/2026-09-26-identity-gbif-scale/`](../../probes/2026-09-26-identity-gbif-scale/README.md)).
+(`probes/2026-09-26-identity-gbif-scale/`).
 
 ⊘ **`occurrenceid` is taken only under `prepare.py --occurrenceid`.** It is the publisher's
 identifier, about 42 bytes a row and not required by GBIF to be unique, and stored as a keyword it

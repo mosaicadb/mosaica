@@ -668,7 +668,7 @@ action is a memtest (§8), not more detection machinery.
 All figures **local NVMe on this box** (WSL2, 12 cores, 47 GB, one RTX 3080) unless the medium says
 otherwise. The rung is [`../test_corpora/paperseek/`](../test_corpora/paperseek/README.md), which
 carries the per-step tables, and the raw output is
-[`../probes/2026-09-03-rung-4-build-stall/`](../probes/2026-09-03-rung-4-build-stall/README.md);
+`../probes/2026-09-03-rung-4-build-stall/`;
 this section is what the campaign takes from them.
 
 **The rung was chosen to put a bundle past the box's memory**, and nothing in the declaration was
@@ -729,7 +729,7 @@ refuse; what happened is neither — the build stays well inside memory and stop
 first two walls fired at neither rung 2 nor rung 3, and this is the first time either has been met
 at all.
 
-⊘ **[`../probes/2026-09-02-text-peak-split/`](../probes/2026-09-02-text-peak-split/README.md)
+⊘ **`../probes/2026-09-02-text-peak-split/`
 extrapolated the right quantity and could not have predicted this.** Its ~6 GB for the abstracts'
 own anonymous share at 10⁸ is close to the 5.19 GB measured — which is exactly why it does not
 predict the stall. It measured to 10⁷, where the arena is ~13 GiB and fits, and the wall it named as
@@ -740,7 +740,7 @@ neither of the two it separated. §8's abstracts entry should be read with that 
 abstracts were not dropped: each answers a different question from the one the rung was built to
 ask. What to do about it is the owner's, and the options are visibly (a) a budget arm, (b) an arena
 the text pass streams rather than maps, (c) a smaller corpus, (d) more RAM. **(b) was then built and
-measured**: [`../probes/2026-09-03-text-arena-streaming/`](../probes/2026-09-03-text-arena-streaming/README.md)
+measured**: `../probes/2026-09-03-text-arena-streaming/`
 reproduces the stall in isolation at 10⁷ under a 4 GB cap, attributes it to an arena walk that is
 uniformly random rather than sequential, and takes this rung's own `text_index` from *over four
 hours without finishing* to **2,371.9 s** at 1.74 major faults a second and byte-identical output —
@@ -758,7 +758,7 @@ a 10.2 GiB arena, 85.5 MB of a 4.4 GB `blocks.bin` written — to **64.31 s**, w
 wall, *in arrival order*. In entity order it is 60.72 s. The second decode costs 2.04× the join
 (32.45 s → 66.18 s uncapped). Both orders build byte-identical bundles at 10⁶ and 10⁷, against each
 other and against the code before either change.
-[`../probes/2026-09-03-entity-ordered-arena/`](../probes/2026-09-03-entity-ordered-arena/README.md).
+`../probes/2026-09-03-entity-ordered-arena/`.
 
 **And then the 10⁸ build completed.** 2026-09-04, on 448 GB of free disk — the pre-flight had
 refused it 16.3 GiB short until another session's 209 GB `target/debug` was reclaimed — over the
@@ -1082,7 +1082,7 @@ and a layer with no supplied content travels as the ingest batch's column named 
 Proved on `treeoflife-1m` at *f* = 10%: zoom 0 exact at all six principals where three had differed,
 `taxonomy/tree` exact where it had been absent, and with `--state-extent` every surface exact
 ([the rung's README](../test_corpora/treeoflife/README.md); records under
-[`probes/2026-09-05-publish-streaming/runs/`](../probes/2026-09-05-publish-streaming/runs/)). ⊘ This 50% cell is not yet re-run
+`probes/2026-09-05-publish-streaming/runs/`). ⊘ This 50% cell is not yet re-run
 under the list.
 
 **The 0091 census, retaken.** The run's own was shed mid-body on the zoom-0 whole-extent request
@@ -1136,7 +1136,7 @@ merged. The observations that drove the design are
 the design itself is
 [`evidence/memos/2026-09-12-bounded-assembly-design.md`](evidence/memos/2026-09-12-bounded-assembly-design.md);
 the acceptance measurement is
-[`../probes/2026-09-12-bounded-assembly/`](../probes/2026-09-12-bounded-assembly/README.md).
+`../probes/2026-09-12-bounded-assembly/`.
 
 **The wall fell across two rounds of work: 15% for the bounded-assembly design, then a further 18%
 for the serve fixes below.** 4 h 09 m 35 s → 3 h 30 m 55 s → **2 h 52 m 33 s**; the bundle 207 GiB
@@ -1416,7 +1416,7 @@ server's own cache accounting held 127 MB (measured on the live third-serve serv
 `/proc/<pid>/smaps` and `/control/status`). That retention evicted the bundle's page cache:
 `memory.events max` 19,915,452, `workingset_refault_file` 1.2×10⁹, 8 TB read in 104 minutes. The
 probe record is
-[`../probes/2026-09-14-serve-allocator-retention/`](../probes/2026-09-14-serve-allocator-retention/README.md).
+`../probes/2026-09-14-serve-allocator-retention/`.
 
 #### Served, under a 24 GiB cap
 
@@ -1620,7 +1620,7 @@ is now the only path an item's labels take at either entry point, and the driver
   ~81 GB) were `VmHWM`, which counts file-backed pages the kernel may evict alongside heap it must
   keep — and since 2026-08-30 the columns are mapped, the text index spills under a budget and the
   blob streams, so on prose most of that is page cache.
-  [`probes/2026-09-02-text-peak-split/`](../probes/2026-09-02-text-peak-split/README.md) split the
+  `probes/2026-09-02-text-peak-split/` split the
   two at 10⁶ and 10⁷ against a control that is the same 10⁷ corpus with the column undeclared: the
   abstracts cost **+9,594 MiB of `VmHWM` and +562 MiB of anonymous memory** at 10⁷, and **+208 MiB**
   under `--memory-budget 6g`, where the text pass spills 298 runs against 96 and the cascade fires.

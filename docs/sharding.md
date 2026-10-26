@@ -639,7 +639,7 @@ on GeoNames' term sizes scaled to 1,000,000 items, with a fresh random half dele
   water, and every view's `permutation.bin` and a compaction's memory with it, grows with every
   round instead of following the live count.
 
-Ruled by Joe 2026-10-11: lowest first, to be measured again on larger corpora.
+Decided 2026-10-11: lowest first, to be measured again on larger corpora.
 
 ### 4.2 Resolving a batch
 

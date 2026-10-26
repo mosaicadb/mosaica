@@ -75,8 +75,8 @@
 # controls from `/v1/meta`, so the abstract box is simply absent on the large bundle — the honest
 # rendering of a column that is not there, and not a case the client special-cases.
 #
-# The four arXiv scales are built from `data/demo/`, which `probes/build_demo_datasets.py` writes. Run that first if
-# the directory is missing; it needs `probes/build_prose.py`'s output, which is a scan of the raw
+# The four arXiv scales are built from `data/demo/`, which `scripts/build_demo_datasets.py` writes. Run that first if
+# the directory is missing; it needs `scripts/build_prose.py`'s output, which is a scan of the raw
 # arXiv snapshot.
 #
 # ## Filtering
@@ -533,10 +533,10 @@ build_scale() {
         exit 1
       fi
       echo "build the demo inputs first:" >&2
-      echo "  reference/.venv/bin/python probes/build_prose.py \\" >&2
+      echo "  reference/.venv/bin/python scripts/build_prose.py \\" >&2
       echo "      ~/.cache/kagglehub/datasets/Cornell-University/arxiv/versions/296/arxiv-metadata-oai-snapshot.json \\" >&2
       echo "      $DATA/corpus.parquet $DATA/demo/prose.parquet" >&2
-      echo "  reference/.venv/bin/python probes/build_demo_datasets.py --data $DATA" >&2
+      echo "  reference/.venv/bin/python scripts/build_demo_datasets.py --data $DATA" >&2
       echo "or set MOSAICA_DATA to the checkout holding data/ (it is gitignored, so a worktree" >&2
       echo "has none), or pass --bundle PATH to serve a bundle you already have." >&2
       exit 1
