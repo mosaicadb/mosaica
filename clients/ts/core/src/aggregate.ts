@@ -110,7 +110,10 @@ export class PartialAggregate extends Error {
   readonly refusal: MosaicaError | null;
   /** The refusal's HTTP status, or `null` if no refusal stopped the read. */
   readonly status: number | null;
-  /** The refusal's `retryAfterS`, or `null` if no refusal stopped the read. */
+  /**
+   * On a `429`, how many seconds the server asked you to wait. `null` if no refusal stopped the
+   * read, or if the refusal names no wait.
+   */
   readonly retryAfterS: number | null;
 
   constructor(

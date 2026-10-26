@@ -64,8 +64,9 @@ export type AuthoriseTarget =
   | {
       /**
        * A set of terms, for a session that belongs to no principal and has `read` permission only.
-       * Only the operator credential may ask for one. Each term is trimmed, and empty ones are
-       * dropped.
+       * Only the operator credential may ask for one. Each term is trimmed, and a term that is
+       * empty or holds a control character is dropped. Every session holds `public`, so naming it
+       * changes nothing.
        */
       terms: string[];
     }

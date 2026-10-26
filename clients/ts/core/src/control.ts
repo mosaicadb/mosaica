@@ -34,8 +34,8 @@ export const UNANSWERED = 0;
 
 /**
  * The result of a {@link Control} call. Every response, including a refusal, is returned as an
- * answer and not thrown. If `ok` is `true`, `body` is the route's response, `B`. Otherwise it is
- * the refusal, with `error` and `detail`.
+ * `Answer`. None is thrown. If `ok` is `true`, `body` is the route's response, `B`. Otherwise it
+ * is the refusal, with `error` and `detail`.
  *
  * @category Control plane
  */
@@ -430,7 +430,7 @@ export type MembershipsGrown = PublicationAck & {
  * What a principal may do. Its terms, which say what it may see, are granted separately.
  *
  * - `read`: start a session for itself and make viewer requests with it.
- * - `write`: ingest, delete, suppress and annotate within its own terms, flush and compact.
+ * - `write`: ingest, delete, suppress and annotate within its own terms, and flush and compact.
  * - `authorise-as`: start sessions for other principals.
  * - `admin`: read the server's status, and manage principals, keys, groups, grants, providers and
  *   sessions.
@@ -612,7 +612,10 @@ export type SessionRecord = {
   api_key: string | null;
   /** The principal that started it with `authorise-as`, or `null`. */
   minted_by: string | null;
-  /** What the session may do: `read`, and `write` if its principal holds it. */
+  /**
+   * What the session may do: `read`, and `write` if its principal holds it. A session from `login`
+   * also carries `read-all` and `write-all` if the principal holds them.
+   */
   permissions: Permission[];
   /** When it started, in seconds since the Unix epoch. */
   created_at: number;
@@ -784,14 +787,15 @@ function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> 
  * Every method resolves to an {@link Answer}, including refusals and requests that reached no
  * server. A call rejects only if its `signal` aborts, with the signal's reason.
  *
- * Writes become visible to viewers at the next publication, a cycle the server runs on its own
- * schedule. Deletions and suppressions apply at once. {@link Control.flush} and the `wait` option
- * bring the next publication forward.
+ * Writes become visible to viewers at the next publication. The server publishes every
+ * `ingest.flush_max_age_secs` (90 seconds by default), or sooner once `ingest.flush_max_items`
+ * rows (40,000 by default) are buffered. Deletions and suppressions apply at once.
+ * {@link Control.flush} and the `wait` option bring the next publication forward.
  *
  * A busy server answers `429`. The call then waits as long as the server asks, between 1 and 30
  * seconds, and tries again, up to five minutes of waiting in all. After that it returns the `429`.
- * A request that reaches no server is returned with status {@link UNANSWERED}, except that `ingest`
- * tries once more a second later.
+ * A request that reaches no server is returned with status {@link UNANSWERED}. `ingest` first tries
+ * once more a second later.
  *
  * `ingest` sends a batch id with each request: your `batch`, or a new random id. The server
  * remembers each accepted batch id with its body. The same body sent again under that id is
@@ -905,9 +909,10 @@ export class Control {
   /**
    * `POST /control/ingest`: insert or update items from one page of rows, given as an Arrow IPC
    * stream. A row names an item by its `mosaica_id` and the values of any unique columns it
-   * carries. A row that names no item creates one at its position. A row that names an item with
-   * no row in this view adds the item to the view. A row identical to the item it names changes
-   * nothing, and any other row edits the item, which keeps its `mosaica_id`.
+   * carries. A row that names no item creates one at its position. A row whose values all equal
+   * what the item already stores changes nothing. A row that names an item with no row in this
+   * view, and changes nothing else, adds the item to the view. Any other row edits the item, which
+   * keeps its `mosaica_id`.
    *
    * A column left out keeps the item's stored value, and a null clears it. A row without
    * coordinates changes only the columns it carries. A row that only places its item in an
@@ -1011,8 +1016,8 @@ export class Control {
   /**
    * `PUT /control/layers/{name}/artifacts`: publish artifacts into one level of a layer, each with
    * a first page of members, and return each artifact's `mosaica_id`. Members, excluded items and
-   * a content's `generated_from` are each a {@link MemberTable} of items. An artifact's or a
-   * layer's `mosaica_id` in one names nothing.
+   * a content's `generated_from` are each a {@link MemberTable}. A `mosaica_id` in a member table
+   * must be an item's; an artifact's or a layer's names nothing.
    *
    * A member that names no item, or two, is left out and listed in `refused`, and the rest are
    * published. With `strict` the request is refused at the first such member, with `404` if it
@@ -1084,10 +1089,12 @@ export class Control {
    * A compaction can be refused when its turn comes, for example for lack of disc space, or it can
    * fail. To follow a request, read `compaction.requests` in {@link Control.status}. `answered`
    * reaches your request's number once it has been answered. If `last_refusal.request` is then
-   * your number, a shard was refused while answering it, and `detail` says why and what to do. To
-   * confirm the deleted rows are gone, check that `compaction.folds` rose and `overlay.retirable`
-   * fell; `compaction.fold_failures` counts compactions that failed or were discarded. If no
-   * compaction can start until the server restarts, the answer is `503` with that detail.
+   * your number, a shard was refused while answering it, and `detail` says why and what to do.
+   * Below your number, none of its shards was refused. Above it, a later request's refusal has
+   * replaced the record and may or may not concern yours. To confirm the deleted rows are gone,
+   * check that `compaction.folds` rose and `overlay.retirable` fell; `compaction.fold_failures`
+   * counts compactions that failed or were discarded. If no compaction can start until the server
+   * restarts, the answer is `503` with that detail, and no compaction is requested.
    */
   compact(options: CallOptions = {}): Promise<Answer> {
     return this.send('POST', '/control/compact', options);

@@ -288,8 +288,7 @@ export type MosaicaClientOptions = {
  * No method retries on its own. A server too busy to take a request answers `429 backpressure`,
  * and the error's `retryAfterS` says how many seconds to wait before calling again with the same
  * arguments. {@link MosaicaClient.suggest} returns this as `{status: 'shed', retryAfterS}` instead
- * of rejecting. The store and {@link Control} retry for you. Here is a helper that makes five
- * attempts:
+ * of rejecting. The store retries for you. Here is a helper that makes five attempts:
  *
  * ```ts
  * async function retrying<T>(call: () => Promise<T>, attempts = 5): Promise<T> {
@@ -396,9 +395,10 @@ export class MosaicaClient {
   /**
    * `POST /session/authorise`: start a session on someone's behalf, sending the `sessionCredential`
    * option. A session for a principal or an OIDC identity carries its terms and its `read` and
-   * `write` permissions, and the target must hold `read`. A session for `terms` holds those terms
-   * and `read`. A term is trimmed, and a term that is empty, holds a control character or is
-   * `public` is dropped. Only the operator credential may ask for `terms` or `readAll`.
+   * `write` permissions, if it holds them, and the target must hold `read`. A session for `terms`
+   * holds those terms and `read`. A term is trimmed, and a term that is empty or holds a control
+   * character is dropped. Every session holds `public`, so naming it changes nothing. Only the
+   * operator credential may ask for `terms` or `readAll`.
    *
    * @param target - The local principal to act as, the access token of the OIDC identity to act as,
    *   the terms the session holds, or `readAll` for a session that sees every item.
@@ -406,8 +406,8 @@ export class MosaicaClient {
    *   `expiresAt`, in seconds since the Unix epoch.
    * @throws {@link MosaicaError} if the server refuses: `401` for a credential it does not accept;
    *   `403` if the key's principal does not hold `authorise-as`, the target does not hold `read`, or
-   *   a key asks for `terms`; `404` if `principal` names no enabled principal; `422` for an access
-   *   token it does not accept.
+   *   a key asks for `terms` or `readAll`; `404` if `principal` names no enabled principal; `422`
+   *   for an access token it does not accept.
    * @throws `Error` if the client has no `sessionUrl`.
    */
   async authorise(target: AuthoriseTarget, signal?: AbortSignal): Promise<Session> {
@@ -829,10 +829,11 @@ export class MosaicaClient {
 
   /**
    * `POST /v1/artifacts/viewport`: the artifacts of the named layers in each tile of one area of a
-   * view at one zoom. A tile lists the artifacts that have a member the viewer can see inside it, at
-   * most `perTile` per level, largest first. An artifact that spans several tiles appears in each,
-   * with the same figures. A `nested` or `dag` layer is answered for all the tiles together, in one
-   * frame that comes first. Fields of `req` you leave unset take the server's defaults.
+   * view at one zoom. A tile lists the artifacts the viewer is served that have a member it can see
+   * inside the tile, at most `perTile` per level, largest first. An artifact that spans several
+   * tiles appears in each, with the same figures. A `nested` or `dag` layer is answered for all the
+   * tiles together, in one frame that comes first. Fields of `req` you leave unset take the
+   * server's defaults.
    *
    * @param opts.signal - Aborts the request and the reading of its body.
    * @param opts.background - Decode on a separate worker, as for {@link MosaicaClient.viewport}.
