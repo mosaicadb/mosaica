@@ -142,6 +142,19 @@ describe('@mosaicajs/react/components', () => {
     expect(seen).toEqual([{id: '7'}, {id: '7', record}]);
   });
 
+  it('onBasemapChange on the map and the explorer receives the basemap event', async () => {
+    const store = fakeStore({meta: meta(), status: status({})});
+    const seen: unknown[] = [];
+    const onBasemapChange = (e: CustomEvent<{refusal: string | null; note: string | null}>) => seen.push(e.detail);
+    const detail = {refusal: null, note: 'Tiles from a third party'};
+    for (const Element of [MosaicaMap, MosaicaExplorer]) {
+      await act(async () => root.render(createElement(Element as typeof MosaicaMap, {store, onBasemapChange})));
+      await settle(host);
+      host.firstElementChild!.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail, bubbles: true, composed: true}));
+    }
+    expect(seen).toEqual([detail, detail]);
+  });
+
   it('cardFields on the explorer reaches its item card', async () => {
     const ref = createRef<ExplorerElement>();
     await act(async () => root.render(createElement(MosaicaExplorer, {ref, cardFields: 'author'})));

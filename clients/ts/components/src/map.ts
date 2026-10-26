@@ -409,10 +409,6 @@ export class MosaicaMap extends MosaicaElement {
   accessor layers: string[] | null = null;
   /** How many marks to aim for on screen. `0` keeps the store's budget, which starts at 250000. */
   @property({type: Number}) accessor budget = 0;
-  /** The lowest value a control for `budget` offers. The map itself does not use it. */
-  @property({type: Number, attribute: 'budget-min'}) accessor budgetMin = 1_000;
-  /** The highest value a control for `budget` offers. The map itself does not use it. */
-  @property({type: Number, attribute: 'budget-max'}) accessor budgetMax = 2_000_000;
   /**
    * The most clusters a `nested` or `dag` layer is cut to (`Store.setClusterBudget`). `0` keeps the
    * store's setting; setting `0` after another value removes the limit, giving the finest cut.

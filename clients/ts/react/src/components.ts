@@ -101,7 +101,8 @@ const mapEvents = {
   onViewChange: ev('mosaica-viewchange'),
   onSelectChange: ev('mosaica-selectchange'),
   onArtifactOpen: ev('mosaica-artifactopen'),
-  onLayerChange: ev('mosaica-layerchange')
+  onLayerChange: ev('mosaica-layerchange'),
+  onBasemapChange: ev('mosaica-basemapchange')
 };
 
 /** `<mosaica-store>` as a React component. It has no event props. */
@@ -109,7 +110,7 @@ export const MosaicaStore = withStableAuthorise(wrap('mosaica-store', StoreEleme
 /**
  * `<mosaica-explorer>` as a React component. The events of the elements inside it bubble out, so
  * it has a handler prop for each of them: `onPick` for `mosaica-pick`, and so on for every event
- * in {@link MosaicaEvents} except `mosaica-chipopen` and `mosaica-basemapchange`. The `open` prop
+ * in {@link MosaicaEvents} except `mosaica-chipopen`, which it does not fire. The `open` prop
  * is the function the item card's Open button calls, and `openUrl` the address it goes to.
  * `onOpen` is called on every press.
  */
@@ -140,7 +141,8 @@ export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', Expl
  * `<mosaica-map>` as a React component. Event props: `onPick` (`mosaica-pick`), `onItemOpen`
  * (`mosaica-itemopen`), `onMiss` (`mosaica-miss`), `onHover` (`mosaica-hover`), `onViewChange`
  * (`mosaica-viewchange`), `onSelectChange` (`mosaica-selectchange`), `onArtifactOpen`
- * (`mosaica-artifactopen`) and `onLayerChange` (`mosaica-layerchange`).
+ * (`mosaica-artifactopen`), `onLayerChange` (`mosaica-layerchange`) and `onBasemapChange`
+ * (`mosaica-basemapchange`).
  */
 export const MosaicaMap = withStableAuthorise(wrap('mosaica-map', MapElement, mapEvents));
 /**

@@ -782,12 +782,12 @@ describe('<mosaica-explorer> layouts', () => {
 
 describe('<mosaica-explorer> the point budget', () => {
   const budgets = (store: FakeStore) => store.calls.filter((c) => c.name === 'setBudget').map((c) => c.args[0]);
-  const mapOf = (shadow: ShadowRoot) => shadow.querySelector('mosaica-map') as unknown as {budget: number; budgetMin: number; budgetMax: number};
+  const mapOf = (shadow: ShadowRoot) => shadow.querySelector('mosaica-map') as unknown as {budget: number};
 
-  it('leaves the store’s budget unless the host sets one, and offers 1,000 to 2,000,000', async () => {
+  it('leaves the store’s budget unless the host sets one', async () => {
     const {store, shadow} = await explorer();
     expect(budgets(store)).toEqual([]);
-    expect(mapOf(shadow)).toMatchObject({budget: 0, budgetMin: 1_000, budgetMax: 2_000_000});
+    expect(mapOf(shadow)).toMatchObject({budget: 0});
   });
 
   it('offers Most points on a log scale from budget-min to budget-max, and sets the store’s budget only when it is let go', async () => {
@@ -816,10 +816,10 @@ describe('<mosaica-explorer> the point budget', () => {
     expect(seen).toEqual([{budget: 45_000}]);
   });
 
-  it('passes the host’s budget and range to the map and the budget to the store, and a change of budget too', async () => {
+  it('passes the host’s budget to the map and the store, and a change of budget too', async () => {
     const {host, el, store, shadow} = await explorer('<mosaica-explorer budget="40000" budget-min="500" budget-max="90000"></mosaica-explorer>');
     expect(budgets(store)).toEqual([40_000]);
-    expect(mapOf(shadow)).toMatchObject({budget: 40_000, budgetMin: 500, budgetMax: 90_000});
+    expect(mapOf(shadow)).toMatchObject({budget: 40_000});
     (el as unknown as {budget: number}).budget = 60_000;
     await settle(host);
     expect(budgets(store)).toEqual([40_000, 60_000]);

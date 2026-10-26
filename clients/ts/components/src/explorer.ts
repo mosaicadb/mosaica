@@ -1098,8 +1098,6 @@ export class MosaicaExplorer extends MosaicaElement {
           tooltip-fields=${this.tooltipFields}
           title-field=${this.titleField || nothing}
           budget=${this.budget || nothing}
-          .budgetMin=${this.budgetMin}
-          .budgetMax=${this.budgetMax}
           .clusterBudget=${this.clusterBudget}
           controls-corner=${compact ? 'bottom-left' : 'top-left'}
           .clusterLevel=${level}
