@@ -199,15 +199,27 @@ def test_a_column_the_build_reads_under_its_own_name_takes_no_other(tmp_path):
     assert insert.read == ["k", "level"]
 
 
-def test_a_canonical_column_the_call_did_not_name_is_refused_with_its_two_remedies(tmp_path):
-    """A table in Mosaica's own shape is no exception to the rule that names are named."""
+def test_a_table_in_mosaicas_own_shape_reads_its_columns_by_name(tmp_path):
+    """Each column under a name the target reads is read, and a keyword the call states wins."""
     db = create(tmp_path / "db")
     db.declare_layer("clusters", kind="flat")
-    table = pd.DataFrame({"k": ["a"], "parent": ["b"]})
+    insert = db.insert("clusters", artifacts=pd.DataFrame({"key": ["a"], "parent": ["b"]}))
+    assert insert.read == ["key", "parent"] and insert.ignored == []
+    db.declare_layer("others", kind="flat")
+    stated = db.insert(
+        "others", artifacts=pd.DataFrame({"k": ["c"], "up": ["a"], "note": ["x"]}),
+        key="k", parent="up",
+    )
+    assert stated.columns == {"key": "k", "parent": "up"} and stated.ignored == ["note"]
+
+
+def test_a_column_under_a_name_the_build_reads_is_refused_when_the_call_reads_another(tmp_path):
+    """The build reads `key` under its own name, so a table naming its key in another column and
+    carrying a `key` column besides is refused rather than read two ways."""
+    db = create(tmp_path / "db")
+    db.declare_layer("clusters", kind="flat")
     with pytest.raises(Refusal):
-        db.insert("clusters", artifacts=table, key="k")
-    insert = db.insert("clusters", artifacts=table, key="k", parent="parent")
-    assert insert.read == ["k", "parent"] and insert.ignored == []
+        db.insert("clusters", artifacts=pd.DataFrame({"k": ["a"], "key": ["b"]}), key="k")
 
 
 def test_a_shape_is_named_by_its_kind_and_read_under_its_own_columns(tmp_path):

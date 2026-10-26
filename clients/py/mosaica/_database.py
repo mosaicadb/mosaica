@@ -655,8 +655,15 @@ class Database:
           either a unique attribute that names the rows' items or an attribute that a view's rows
           fill.
         - the other keywords: the column that holds each thing the target reads, such as `x=`, `y=`
-          and `access=` for a view. The call is refused when it names a column the table lacks,
-          gives a keyword the target does not read or leaves out one the target needs.
+          and `access=` for a view. A table in Mosaica's own shape, which is a layer's annotations
+          or memberships, a label set's table read with `contents=`, a roster or a vocabulary's
+          values, has each column named like one of its keywords read without the keyword, such
+          as `key`, `level`, `parent` or `attached_key`; a keyword given names the column read in
+          its place. A label set's table given with `text=` matches only `key`. The call is
+          refused when it names a column the table lacks, gives a keyword the target does not
+          read, leaves out one the target needs that the table does not carry, or names another
+          column for a keyword whose own column the table carries too, since the build reads that
+          column under its own name.
 
         Each row of a view, attribute or membership table names its item by its `mosaica_id` column
         or by its values of the unique attributes, read from each attribute's own column or the one
@@ -665,11 +672,12 @@ class Database:
 
         A view's rows also fill each declared attribute whose name a column carries, from the anchor
         view's rows at the first commit and from any view's rows after it. The `Insert` returned
-        lists the columns read and the columns ignored, which are those neither named nor matching
-        an attribute.
+        lists the columns read and the columns ignored, which are those neither named, matched by
+        name nor matching an attribute.
 
             db.insert("papers", frame, x="x", y="y", access="labels")
             db.insert("clusters", frame, key="cluster", columns={"paper": "paper_id"})
+            db.insert("topics", artifacts="clusters.parquet")  # key, level, parent by name
         """
         self._refuse_when_closed()
         kind, block = self._target(target, named, roster, artifacts, members)
@@ -679,6 +687,10 @@ class Database:
         if (kind, role) not in _inserts.CONTRACTS:
             raise Refusal(
                 f"insert into {kind} {target!r}: a {kind} takes no {role} table"
+            )
+        if not isinstance(data, dict):
+            named = _inserts.with_columns_by_name(
+                _inserts.CONTRACTS[(kind, role)], _inserts.schema_of(data), named
             )
         self._refuse_an_insert_the_target_cannot_take(target, kind, role, block, named)
         self._refuse_a_label_column_the_layer_does_not_read(target, kind, role, block, named)
@@ -972,18 +984,15 @@ class Database:
         groups = set()
         if kind == "view_group":
             groups = {target, self.blocks.group(target).get("members")} - {None}
-        schema = _inserts.schema_of(data)
-        matched = {}
-        for block in self.blocks.blocks["attribute"]:
-            group = C._scoped_to(block)
-            if group is not None and (not self.built or group not in groups):
-                continue
-            name = block["name"]
-            column = (columns or {}).get(name, name)
-            # The view column fills no attribute. A coordinate or label column can fill one.
-            if column in schema and column != named.get("view"):
-                matched[name] = column
-        return matched
+        names = [
+            block["name"]
+            for block in self.blocks.blocks["attribute"]
+            if C._scoped_to(block) is None or (self.built and C._scoped_to(block) in groups)
+        ]
+        # The view column fills no attribute. A coordinate or label column can fill one.
+        return _inserts.by_name(
+            names, _inserts.schema_of(data), columns or {}, taken={named.get("view")}
+        )
 
     def _source_key(self, target: str, kind: str, role: str, view_key: str | None = None) -> str:
         """The `[sources]` key an insert is written under, unique among this database's inserts."""

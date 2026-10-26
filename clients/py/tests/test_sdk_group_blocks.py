@@ -169,8 +169,8 @@ def test_a_roster_refuses_a_keyword_that_is_no_metadata_name(db):
         db.insert("quarter", roster=roster(["2026-Q1"]), key="quarter", colour="label")
 
 
-def test_a_roster_column_the_call_did_not_name_is_refused(db):
-    """`key` and `visibility` are the roster's own, so a table carrying one names it."""
+def test_a_roster_reads_its_own_columns_by_name(db):
+    """`key` and `visibility` are the roster's own, so a table carrying them is read by name."""
     db.declare_view_group("quarter", extent=BOX, metadata={"label": "text"})
     table = pa.table(
         {
@@ -179,12 +179,8 @@ def test_a_roster_column_the_call_did_not_name_is_refused(db):
             "visibility": pa.array(["public"], pa.string()),
         }
     )
-    with pytest.raises(Refusal):
-        db.insert("quarter", roster=table, key="key", label="label")
-    insert = db.insert(
-        "quarter", roster=table, key="key", label="label", visibility="visibility"
-    )
-    assert insert.ignored == []
+    insert = db.insert("quarter", roster=table, label="label")
+    assert insert.read == ["key", "label", "visibility"] and insert.ignored == []
 
 
 def test_a_groups_rows_name_the_view_one_way_or_the_other(db):

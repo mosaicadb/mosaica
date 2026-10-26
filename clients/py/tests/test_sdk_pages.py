@@ -1630,3 +1630,42 @@ def test_labels_on_a_layer_with_levels_are_refused_without_the_level_they_attach
         assert not [one for one in db.inserts if one.target == "names"]
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("after_the_build", [False, True], ids=["at the build", "after it"])
+def test_a_clustering_and_its_names_in_mosaicas_own_shape_need_no_keyword(tmp_path, after_the_build):
+    """Tables as a clustering library writes them, with the columns they leave empty: each column
+    is read by its name, and the names are served on the clusters they are attached to."""
+    db, _ = two_items(tmp_path / "db")
+    try:
+        if after_the_build:
+            assert db.commit().ok
+        db.declare_layer("topics", kind="tiered", levels=[(0, "broad"), (1, "fine")])
+        db.declare_labels("names", of="topics")
+        none = pa.array([None, None], pa.string())
+        db.insert("topics", artifacts=pa.table({
+            "level": pa.array([0, 1], pa.uint32()), "key": ["b", "f"], "parent": [None, "b"],
+            "contents": pa.array([None, None], pa.list_(pa.list_(pa.string()))),
+            "attached_layer": none, "attached_level": pa.array([None, None], pa.uint32()),
+            "attached_key": none,
+        }))
+        db.insert("topics", members=pa.table({
+            "level": pa.array([0, 0, 1], pa.uint32()), "key": ["b", "b", "f"],
+            "rank": pa.array([None, None, None], pa.uint32()), "id": [1, 2, 1],
+        }))
+        db.insert("names", pa.table({
+            "level": pa.array([0, 0], pa.uint32()), "key": ["nb", "nf"],
+            "contents": [[["Broad"]], [["Fine"]]], "attached_layer": ["topics", "topics"],
+            "attached_level": pa.array([0, 1], pa.uint32()), "attached_key": ["b", "f"],
+            "parent": none,
+        }))
+        assert db.commit().ok
+        clusters = db.artifacts("map", "topics", ["key", "masked_count"]).to_pylist()
+        assert {row["key"]: row["masked_count"] for row in clusters} == {"b": 2, "f": 1}
+        names = db.artifacts("map", "names", ["content", "target"]).to_pylist()
+        named = {row["target"]: row["content"] for row in names}
+        assert {row["key"]: named[row["mosaica_id"]] for row in clusters} == {
+            "b": ["Broad"], "f": ["Fine"],
+        }
+    finally:
+        db.close()

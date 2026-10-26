@@ -1,19 +1,23 @@
 """`insert`, which hands a table to something declared and names the columns that thing reads.
 
 A `declare_*` method says what exists and takes no data, and `insert(target, table, **columns)`
-hands a table to a declared target and names every column the target needs. The package guesses
-no column name and rewrites no data: a frame is written to disc as it was given, a path is read
-where it lies, and the declaration names the columns. Every insert reports the columns it read
-and the columns it ignored.
+hands a table to a declared target and names the columns the target reads. The package rewrites
+no data: a frame is written to disc as it was given, a path is read where it lies, and the
+declaration names the columns. Every insert reports the columns it read and the columns it
+ignored.
 
-The coordinates, the access labels, a layer's key and a group's view column are named on every
-call and never matched by name. A table names the item each row belongs to by the columns it
-carries of the attributes declared `unique`, each under the attribute's own name or the one
-`columns=` names for it. An artifacts table, a members table, a roster and a value set are in
-Mosaica's own shape, and the build and the publication routes read their columns under the
-canonical names whatever the call says. A column with a canonical name is therefore named on
-the call like any other, and one the call passed over is refused, because the build and the
-routes would read it although the insert listed it as ignored. `level` and `attached_level` are
+The coordinates, the access labels, the key column of a table of items inserted into a layer
+(`insert(layer, table, key=)`) and a group's view column are named on every call and never
+matched by name. A table names the item each row belongs to by the columns it carries of the
+attributes declared `unique`, each under the attribute's own name or the one `columns=` names for
+it. An artifacts table, a label set's table read with `contents=`, a members table, a roster and
+a value set are in Mosaica's own shape, and the build and the publication routes read their
+columns under the canonical names whatever the call says. So each column with the name of a
+keyword the call left out, `key` among them, is read as that keyword, and a keyword the call
+gives names the column read for it. A label set's text given with `text=` is written into such a
+table by the package, so only its `key` is matched. A canonical column that the call reads
+another column in place of is refused, because the build and the routes would read it although
+the insert listed it as ignored. `level` and `attached_level` are
 read under their own names alone, because the build's `fields` map cannot move them, so those
 keywords take the canonical name and a column with any other name has to be renamed in the
 table. A membership shape is named by its kind, as in `shape="polygon"`, and its columns are
@@ -98,10 +102,10 @@ class Contract:
     optional: tuple[str, ...] = ()
     #: One of these must be named, where the contract names a pair.
     either: tuple[str, ...] = ()
-    #: The column names this kind of table carries meaning under. A table in Mosaica's own shape
-    #: is no exception to the rule that every column a target reads is named on the call: one of
-    #: these the call did not name is refused, naming the column and the two remedies, so nothing
-    #: is read silently at either door.
+    #: The column names this kind of table carries meaning under. A keyword among them that the
+    #: call leaves out is read from the column of its name; one of these the call reads another
+    #: column in place of is refused, naming the column and the two remedies, so nothing is read
+    #: silently at either door.
     canonical: tuple[str, ...] = ()
     #: The keywords whose column the build reads under its own name alone.
     canonical_only: tuple[str, ...] = ()
@@ -161,6 +165,32 @@ CONTRACTS: dict[tuple[str, str], Contract] = {
 #: Under a projection a view's coordinates are `lon` and `lat`, so those are the two names the
 #: call gives rather than `x` and `y`.
 PROJECTED = {"x": "lon", "y": "lat"}
+
+
+def by_name(names, schema, stated: dict, taken=()) -> dict:
+    """Each of `names` with the column it is read from, as `{name: column}`: the column `stated`
+    gives it, else the column of its own name, where the table carries that column and it is not
+    one of `taken`."""
+    matched = {}
+    for name in names:
+        column = stated.get(name, name)
+        if column in schema and column not in taken:
+            matched[name] = column
+    return matched
+
+
+def with_columns_by_name(contract: Contract, schema, named: dict) -> dict:
+    """The call's keywords, and for a table in Mosaica's own shape each keyword it left out whose
+    column the table carries under the keyword's own name. A column the call names for another
+    keyword is not read twice."""
+    if not contract.canonical:
+        return named
+    keywords = [
+        one
+        for one in contract.required + contract.optional + contract.either
+        if one in contract.canonical and one not in named
+    ]
+    return {**by_name(keywords, schema, {}, taken=set(named.values())), **named}
 
 
 def projected(block: dict) -> bool:
@@ -471,12 +501,11 @@ def _shape_columns(insert: Insert, shape: str | None) -> tuple[str, ...]:
 def _refuse_a_column_read_silently(
     insert: Insert, contract: Contract, shaped: tuple[str, ...]
 ) -> None:
-    """A canonical column the call did not name.
+    """A canonical column the call did not name, after the keywords left out were matched by name.
 
-    A table in Mosaica's own shape is no exception to the rule that every column a target reads
-    is named on the call: the build reads such a column under its own name whatever the SDK
-    prints, so a column the call passed over is refused rather than read silently at one door and
-    ignored at the other.
+    The build reads such a column under its own name whatever the SDK prints, so one the call read
+    another column in place of, or a shape column `shape=` did not name, is refused rather than
+    read silently at one door and ignored at the other.
     """
     if not contract.canonical:
         return
