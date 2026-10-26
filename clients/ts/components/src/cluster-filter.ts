@@ -42,7 +42,7 @@ type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
  * (`Store.setMembers`), and choosing it again removes the clause. The arrow keys move through the
  * list, Enter chooses a row and Escape closes the list.
  *
- * @summary A search box that filters by a layer's clusters.
+ * @summary A search box that filters the map by a layer's clusters.
  * @tagname mosaica-cluster-filter
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - Choosing a

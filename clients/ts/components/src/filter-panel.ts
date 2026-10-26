@@ -53,7 +53,7 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * `compact` keeps one card open at a time. `chips-only` shows only the chips, for placing them
  * apart from the cards, and `controls-only` shows the cards without the subject row and chips.
  *
- * @summary A field card per field, with the filters in force as chips.
+ * @summary A panel of field cards for filtering and highlighting the map by any field.
  * @tagname mosaica-filter-panel
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A

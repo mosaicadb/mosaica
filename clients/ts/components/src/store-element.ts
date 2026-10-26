@@ -14,7 +14,7 @@ import {attachContextRoot, defineOnce} from './define.js';
  * It uses the store in its `store` property, or builds one from `viewer-url` and `token` or
  * `authorise`. It renders only its children (`display: contents`).
  *
- * @summary Shares one store with the elements inside it.
+ * @summary A wrapper that shares one store between the elements inside it.
  * @tagname mosaica-store
  * @category Elements
  * @slot - The elements that use the store.

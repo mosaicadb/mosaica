@@ -23,7 +23,7 @@ import './count.js';
  * figures below the strip. The state cell is an `aria-live` region, so screen readers announce a
  * refusal, an expiry or a change of data, but not the counts as the map pans.
  *
- * @summary One line with the view's state and counts.
+ * @summary A status line showing whether the map is up to date and how many items it shows.
  * @tagname mosaica-status
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-statechange']>} mosaica-statechange - The panel

@@ -50,7 +50,7 @@ type Found = {key: string; name: string; path: string; rung: number};
  * cluster it changed. The colours apply to every element that uses the same store, such as the
  * map and the field cards; the dialog keeps none itself.
  *
- * @summary A dialog for choosing the colour of each value or cluster.
+ * @summary A dialog for choosing the colour of each category value or cluster.
  * @tagname mosaica-colour-editor
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-valuecolour']>} mosaica-valuecolour - Colours

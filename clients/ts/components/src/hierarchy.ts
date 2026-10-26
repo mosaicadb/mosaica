@@ -39,7 +39,7 @@ const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
  * highlights it. A row with a filter or highlight on it is shaded, with a × to remove each. The
  * panel makes no requests while it is hidden.
  *
- * @summary A layer's tree of artifacts, browsed apart from the map.
+ * @summary A tree for browsing a layer's artifacts and filtering by them.
  * @tagname mosaica-hierarchy
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A row's

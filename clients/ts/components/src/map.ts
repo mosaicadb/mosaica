@@ -131,7 +131,7 @@ let mapsMade = 0;
  * `--mosaica-map-height`. A map removed from the page releases its GPU resources a quarter of a
  * second later unless it is put back.
  *
- * @summary The interactive map on its own, without panels.
+ * @summary An interactive map with no panels around it.
  * @tagname mosaica-map
  * @category Elements
  * @slot top-left - Content in the top-left corner, below the toolbar when it is there.

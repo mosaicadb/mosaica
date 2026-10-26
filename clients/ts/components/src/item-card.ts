@@ -30,7 +30,7 @@ import {chrome, tokens} from './tokens.js';
  * `http:` or `https:`, gets no Open button. `open` is a function called with the item's
  * `mosaica_id` and fields, and takes precedence over `open-url`.
  *
- * @summary The picked item's record, with Open and Copy id.
+ * @summary A card showing an item's fields, with an optional Open button.
  * @tagname mosaica-item-card
  * @category Elements
  * @slot field-<name> - Replaces the value of the field `<name>`, in the grid or the headline.

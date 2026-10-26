@@ -38,7 +38,7 @@ const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
  * viewer may see and does not change as the map moves. A filter layer draws nothing, so its
  * artifacts have no Fit button. The server refuses every artifact it withholds in the same way.
  *
- * @summary An opened artifact, such as a cluster, with its parents, children and filters.
+ * @summary A card showing an artifact's details, parents and children.
  * @tagname mosaica-artifact-card
  * @category Elements
  * @slot actions - Buttons beside the close button, such as the explorer's Pin.

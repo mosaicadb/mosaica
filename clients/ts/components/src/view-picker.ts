@@ -14,7 +14,7 @@ import {chrome, tokens} from './tokens.js';
  * view, if there is one, else the view last chosen in that group, else its first view. It shows nothing if there
  * is only one entry.
  *
- * @summary A menu for switching views.
+ * @summary A drop-down menu for switching views.
  * @tagname mosaica-view-picker
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewswitch']>} mosaica-viewswitch - The view

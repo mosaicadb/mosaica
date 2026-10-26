@@ -13,7 +13,7 @@ import {tokens} from './tokens.js';
  *
  * The element has no store: you, or another element, set its properties.
  *
- * @summary A count, formatted as the other elements show it.
+ * @summary A single formatted count.
  * @tagname mosaica-count
  * @category Elements
  * @csspart count - The figure, with `data-kind` (`sample`, `scalar` or `none`), `data-exact` (`true`

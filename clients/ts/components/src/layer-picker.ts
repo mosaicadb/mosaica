@@ -12,7 +12,7 @@ import {chrome, tokens} from './tokens.js';
  * the layers in it. Filter layers draw nothing, so they get no checkbox; a note below the list names
  * them, and viewers filter by them with `<mosaica-hierarchy>`.
  *
- * @summary Checkboxes for the annotation layers the map draws.
+ * @summary A list of checkboxes for choosing which annotation layers the map draws.
  * @tagname mosaica-layer-picker
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - A checkbox

@@ -12,7 +12,7 @@ import {chrome, tokens} from './tokens.js';
  * year, and viewers should step between them. It shows a select over the group's views in the
  * order they were created, each with its label and key, and previous and next buttons. It shows nothing if the current view is in no group.
  *
- * @summary Steps through the views in the current view's group.
+ * @summary A drop-down with previous and next buttons for stepping through a group of views.
  * @tagname mosaica-key-picker
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewswitch']>} mosaica-viewswitch - The view

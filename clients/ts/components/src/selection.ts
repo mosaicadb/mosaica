@@ -19,7 +19,7 @@ import './count.js';
  * counts are exact unless the server counted an area covering the shape, which the state line's
  * tooltip says. Export and Save as artifact are shown disabled, as they are not available yet.
  *
- * @summary The counts and marks inside the selected region.
+ * @summary A card showing the counts and marks inside the selected region.
  * @tagname mosaica-selection
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - Clear,

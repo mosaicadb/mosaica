@@ -2,29 +2,29 @@
 
 # Components
 
-The `mosaica-*` elements are web components that put a Mosaica map and its controls in a page, with or without a framework. They are built with Lit and live in the `@mosaicajs/components` package. Each element draws from a store, the client-side state of the map described in the [TypeScript reference](typescript.md), so the elements on a page stay in step: a filter set in one changes the counts in all of them.
+The `mosaica-*` elements are web components that put a Mosaica map and its controls in a page, with or without a framework. They are built with Lit and live in the `@mosaicajs/components` package. Each element draws from a store, the client-side state of the map described in the [TypeScript reference](typescript.md), and elements that share a store stay in step: a filter set in one changes the counts in all of them.
 
 `<mosaica-explorer>` is a complete map with its panels. For a layout of your own, put `<mosaica-map>` and the controls you need inside a `<mosaica-store>`. Each element's page lists its attributes, properties, methods, events, slots, parts and CSS custom properties.
 
 | Element | What it is |
 |---|---|
-| [`<mosaica-explorer>`](components/mosaica-explorer.md) | The map and all its panels, in a ready-made layout. |
-| [`<mosaica-map>`](components/mosaica-map.md) | The interactive map on its own, without panels. |
-| [`<mosaica-store>`](components/mosaica-store.md) | Shares one store with the elements inside it. |
-| [`<mosaica-status>`](components/mosaica-status.md) | One line with the view's state and counts. |
-| [`<mosaica-count>`](components/mosaica-count.md) | A count, formatted as the other elements show it. |
-| [`<mosaica-layer-picker>`](components/mosaica-layer-picker.md) | Checkboxes for the annotation layers the map draws. |
-| [`<mosaica-view-picker>`](components/mosaica-view-picker.md) | A menu for switching views. |
-| [`<mosaica-key-picker>`](components/mosaica-key-picker.md) | Steps through the views in the current view's group. |
-| [`<mosaica-filter-panel>`](components/mosaica-filter-panel.md) | A field card per field, with the filters in force as chips. |
-| [`<mosaica-field-card>`](components/mosaica-field-card.md) | A chart of one field's values, for filtering and highlighting by them. |
-| [`<mosaica-filter>`](components/mosaica-filter.md) | A search box that filters by one column. |
-| [`<mosaica-cluster-filter>`](components/mosaica-cluster-filter.md) | A search box that filters by a layer's clusters. |
-| [`<mosaica-selection>`](components/mosaica-selection.md) | The counts and marks inside the selected region. |
-| [`<mosaica-item-card>`](components/mosaica-item-card.md) | The picked item's record, with Open and Copy id. |
-| [`<mosaica-artifact-card>`](components/mosaica-artifact-card.md) | An opened artifact, such as a cluster, with its parents, children and filters. |
-| [`<mosaica-hierarchy>`](components/mosaica-hierarchy.md) | A layer's tree of artifacts, browsed apart from the map. |
-| [`<mosaica-colour-editor>`](components/mosaica-colour-editor.md) | A dialog for choosing the colour of each value or cluster. |
+| [`<mosaica-explorer>`](components/mosaica-explorer.md) | A complete map application in a single element. |
+| [`<mosaica-map>`](components/mosaica-map.md) | An interactive map with no panels around it. |
+| [`<mosaica-store>`](components/mosaica-store.md) | A wrapper that shares one store between the elements inside it. |
+| [`<mosaica-status>`](components/mosaica-status.md) | A status line showing whether the map is up to date and how many items it shows. |
+| [`<mosaica-count>`](components/mosaica-count.md) | A single formatted count. |
+| [`<mosaica-layer-picker>`](components/mosaica-layer-picker.md) | A list of checkboxes for choosing which annotation layers the map draws. |
+| [`<mosaica-view-picker>`](components/mosaica-view-picker.md) | A drop-down menu for switching views. |
+| [`<mosaica-key-picker>`](components/mosaica-key-picker.md) | A drop-down with previous and next buttons for stepping through a group of views. |
+| [`<mosaica-filter-panel>`](components/mosaica-filter-panel.md) | A panel of field cards for filtering and highlighting the map by any field. |
+| [`<mosaica-field-card>`](components/mosaica-field-card.md) | A card that charts one field's values and filters or highlights by them. |
+| [`<mosaica-filter>`](components/mosaica-filter.md) | A search box that filters the map by one column. |
+| [`<mosaica-cluster-filter>`](components/mosaica-cluster-filter.md) | A search box that filters the map by a layer's clusters. |
+| [`<mosaica-selection>`](components/mosaica-selection.md) | A card showing the counts and marks inside the selected region. |
+| [`<mosaica-item-card>`](components/mosaica-item-card.md) | A card showing an item's fields, with an optional Open button. |
+| [`<mosaica-artifact-card>`](components/mosaica-artifact-card.md) | A card showing an artifact's details, parents and children. |
+| [`<mosaica-hierarchy>`](components/mosaica-hierarchy.md) | A tree for browsing a layer's artifacts and filtering by them. |
+| [`<mosaica-colour-editor>`](components/mosaica-colour-editor.md) | A dialog for choosing the colour of each category value or cluster. |
 
 
 ## Loading the elements
@@ -51,7 +51,7 @@ With none of these, the element shows its detached state.
 
 `viewer-url` is the base URL of the viewer server. Left unset, the element uses the page's own origin, which suits a page served by Mosaica or by a server that passes `/v1/` through to it. A server on another origin must list the page's origin in `serve.cors_origins`. Set `viewer-url` together with the token or `authorise`: an element given only one of them builds a store at once, and replaces it when the other arrives.
 
-An element replaces a store it built when `viewer-url`, `token`, `authorise` or `artifacts-per-tile` changes, and disposes of it in `dispose()`. Moving an element in the page keeps its store. A store you pass in is yours to dispose of. A store serves one viewer, so to show the map to another viewer, give the element a new `token` or `authorise` function, or replace the element.
+An element replaces a store it built when `viewer-url`, `token`, `authorise` or `artifacts-per-tile` changes, and disposes of it in `dispose()`. Moving an element in the page keeps its store, and so does a `<mosaica-store>` appearing above it later. A store you pass in is yours to dispose of. A store serves one viewer, so to show the map to another viewer, give the element a new `token` or `authorise` function, or replace the element. If the same `authorise` function starts returning another viewer's token, the previous viewer's data stays until the next renewal, as `Store` describes.
 
 ## Events
 
@@ -67,9 +67,9 @@ map.addEventListener('mosaica-itemopen', async (e) => {
 
 ## The item card's Open button
 
-`<mosaica-item-card>` and `<mosaica-explorer>` show an Open button only if you say what it does. Set `open-url` to a link template such as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for that field, URL-encoded, and `{mosaica_id}` by its id, and Open becomes a link that opens in a new tab. Write the host in full, followed by a `/`, before the first field, since a field in the host part could name any host. An item with no value for a field the template names, or whose filled address is not `http:` or `https:`, gets no Open button.
+`<mosaica-item-card>` and `<mosaica-explorer>` show an Open button only if you say what it does. Set `open-url` to a link template such as `https://www.geonames.org/{geonameid}`. Each `{name}` is replaced by the item's value for that field, URL-encoded, and `{mosaica_id}` by its id. Open then becomes a link that opens in a new tab. Write the host in full, followed by a `/`, before the first field, since a field in the host part could name any host. An item with no value, or an empty one, for a field the template names, or whose filled address is not `http:` or `https:`, gets no Open button.
 
-To handle Open yourself, set the `open` property to a function; it is called with `{id, fields}` and takes precedence over `open-url`. Either way, `mosaica-open` fires on every press, including a middle-click. In React the props are `openUrl` and `open`.
+To handle Open yourself, set the `open` property to a function; it is called with `{id, fields}` and takes precedence over `open-url`. Either way, `mosaica-open` fires on every press, and on a middle-click of the `open-url` link. In React the props are `openUrl` and `open`.
 
 `card-fields` lists the fields the compact card shows before Show all, in order, separated by spaces or commas.
 

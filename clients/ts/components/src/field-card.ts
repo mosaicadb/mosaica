@@ -132,7 +132,7 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *
  * `folded` shows the heading alone, with a small chart of the counts in view.
  *
- * @summary A chart of one field's values, for filtering and highlighting by them.
+ * @summary A card that charts one field's values and filters or highlights by them.
  * @tagname mosaica-field-card
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A row's

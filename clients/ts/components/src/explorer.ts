@@ -149,7 +149,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * to the bottom-left. At 720 px or less, the heading moves to a bar above the map and the panels
  * open as sheets from a tab bar of Fields, Layers and Item.
  *
- * @summary The map and all its panels, in a ready-made layout.
+ * @summary A complete map application in a single element.
  * @tagname mosaica-explorer
  * @category Elements
  * @slot toolbar - Replaces the view picker and the key picker.

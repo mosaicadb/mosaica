@@ -36,7 +36,7 @@ const BAR_FLOOR = 2;
  * The box sets the column's filter on the store (`Store.setFilters`) 350 ms after the last
  * keystroke, and at once when a suggestion is chosen.
  *
- * @summary A search box that filters by one column.
+ * @summary A search box that filters the map by one column.
  * @tagname mosaica-filter
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - The box
