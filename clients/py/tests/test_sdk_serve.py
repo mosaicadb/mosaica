@@ -620,3 +620,25 @@ def test_a_saved_copy_reads_its_own_files_and_commits_its_inserts_once_the_origi
         assert copy.commit().ok
     finally:
         copy.close()
+
+
+def test_a_database_saved_before_its_first_commit_reopens_and_builds(tmp_path):
+    import pyarrow as pa
+
+    from conftest import binary
+    from mosaica import create, open as reopen
+
+    binary()
+    db = create()
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.declare_attribute("id", type="i64", unique=True)
+    db.insert("map", pa.table({"id": [1, 2], "x": [1.0, 2.0], "y": [1.0, 2.0]}), x="x", y="y")
+    saved = db.save(tmp_path / "copy")
+    db.close()
+
+    copy = reopen(saved)
+    try:
+        assert copy.commit().ok
+        assert copy.view("map").count() == 2
+    finally:
+        copy.close()

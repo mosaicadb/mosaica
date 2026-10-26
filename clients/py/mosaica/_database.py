@@ -2236,7 +2236,8 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
     A committed database reopens ready to read, and its next commit adds to it. A database saved
     before its first commit reopens with its declarations and inserts as they were left.
 
-    - `path`: the database's directory, which holds its `mosaica.toml`.
+    - `path`: the database's directory, which holds its `mosaica.toml`, or before its first
+      commit the package's own record of it.
 
     A temporary directory that a crashed process left behind opens too, unless another live
     process has it open. The next `create()` removes it once you close it, so call `save(path)`
@@ -2246,11 +2247,11 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
         db.view("papers").count()
     """
     directory = Path(path).expanduser()
-    if not (directory / "mosaica.toml").exists():
+    state = directory / ".mosaica" / "declaration.json"
+    if not (directory / "mosaica.toml").exists() and not state.exists():
         raise Refusal(f"open: {directory} holds no mosaica.toml. create() makes a new database")
     _instance.hold(directory)
     database = Database(directory)
-    state = directory / ".mosaica" / "declaration.json"
     if state.exists():
         _load(database, json.loads(state.read_text(encoding="utf-8")))
     elif (directory / "schema.toml").exists():
