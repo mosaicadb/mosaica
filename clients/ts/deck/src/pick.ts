@@ -3,13 +3,13 @@ import {NO_ORDINAL, type ArtifactsProjection, type Band} from '@mosaicajs/client
 /**
  * What {@link resolvePick} found under the pointer, by `kind`:
  *
- * - `mark`: an item's mark. `id` is the item's `mosaicaId`. `worldXY` is the mark's position in
- *   world units, or the pointer's where the sublayer holds no positions, or `null` with neither.
- * - `artifact`: an artifact's name label. `id` is the artifact's `mosaicaId`.
- * - `miss`: nothing under the pointer.
- * - `broken`: a hit on a sublayer with no id array, or at an `index` past its end. This is a defect
- *   in the layer, reported apart from a miss so the host can show it. `layer` is the sublayer's
- *   id, `hasIds` whether it has an id array and `idCount` that array's length.
+ * - `mark`: an item. `id` is its `mosaicaId`, and `worldXY` the mark's position in world units, or
+ *   the pointer's if the mark's position is not known.
+ * - `artifact`: an artifact's name. `id` is the artifact's `mosaicaId`.
+ * - `miss`: nothing.
+ * - `broken`: a hit the layer cannot resolve to an id, which is a bug in the layer. It is kept
+ *   apart from a miss so that you can report it. `layer` is the sublayer's id, `hasIds` whether it
+ *   has ids and `idCount` how many.
  */
 export type Picked =
   | {kind: 'mark'; id: bigint; worldXY: [number, number] | null}
@@ -17,7 +17,7 @@ export type Picked =
   | {kind: 'miss'}
   | {kind: 'broken'; index: number; layer: string | null; hasIds: boolean; idCount: number};
 
-/** The fields of deck.gl's `PickingInfo` that {@link resolvePick} reads. A `PickingInfo` can be passed as it is. */
+/** The fields of deck.gl's `PickingInfo` that {@link resolvePick} reads. Pass deck's `PickingInfo` as it is. */
 export type PickInfo = {
   /** The index of the hit within the sublayer's data, or -1 for no hit. */
   index: number;
@@ -25,14 +25,25 @@ export type PickInfo = {
   layer?: {id: string; props: object} | null;
   /** The sublayer that drew the hit. */
   sourceLayer?: {id: string; props: object} | null;
-  /** The pointer's position in world units, used as a mark's `worldXY` when the sublayer holds no positions. */
+  /** The pointer's position in world units, used as a mark's `worldXY` if the mark's own position is not known. */
   coordinate?: number[] | null;
 };
 
 /**
- * Resolves a deck.gl pick on a {@link MosaicaLayer} to the item's mark or the artifact's name under
- * the pointer. Pass the pick info deck gives `onClick` or `onHover`. Only marks and artifact names
- * are pickable, so a pointer over an outline, a count or the wash away from any mark is a `miss`.
+ * Finds the item or artifact under the pointer from a deck.gl pick on a {@link MosaicaLayer}. Pass
+ * it the pick info that deck gives `onHover` or `onClick`. Only marks and artifact names can be
+ * picked, so anything else, such as an outline or the density wash, is a `miss`.
+ *
+ * @example
+ * ```ts
+ * new Deck({
+ *   // ...
+ *   onClick: (info) => {
+ *     const picked = resolvePick(info);
+ *     if (picked.kind === 'mark') store.pick(picked.id);
+ *   }
+ * });
+ * ```
  */
 export function resolvePick(info: PickInfo): Picked {
   if (info.index < 0) return {kind: 'miss'};

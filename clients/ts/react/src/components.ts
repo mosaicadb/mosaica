@@ -1,18 +1,36 @@
 /**
- * Every `mosaica-*` element as a React component with typed props and event handlers, made with
- * `@lit/react`. `MosaicaMap` wraps `<mosaica-map>`, and so on. A prop that names an element
- * property is set as that property, so an object such as `store` reaches the element under React
- * 18, which sets a custom element's props as attributes. Each element's events are handler props, such as `onPick` for
- * `mosaica-pick`. The element classes are exported as types with an `Element` suffix, such as
- * `MapElement`, for typing a ref. Each element's attributes, properties, events, slots and parts
- * are on its page in the Components reference, which each wrapper's type links to.
+ * `@mosaicajs/react/components` is every element of `@mosaicajs/components` as a React component,
+ * such as `MosaicaMap` for `<mosaica-map>`. Each component takes the element's properties as props,
+ * including objects such as `store` that React 18 would otherwise set as attributes. Each event
+ * the element fires is a handler prop, such as `onPick` for `mosaica-pick`. The element's
+ * attributes, properties, events, slots and parts are on its page in the Components reference,
+ * which each component's type below links to.
  *
- * `MosaicaStore`, `MosaicaMap` and `MosaicaExplorer` read their `authorise` prop through a ref, so
- * an inline function does not build a new store on every render. To show the map to another
- * viewer, change `token` or `viewerUrl`, or give the component a new `key`.
+ * A component draws from the store you pass as `store`, such as one from `useMosaicaStore` in
+ * `@mosaicajs/react`, or else from an enclosing `MosaicaStore` or `MosaicaExplorer`. Those two and
+ * `MosaicaMap` can also make their own store from `viewerUrl` and `token` or `authorise`. An
+ * inline `authorise` function is fine: a new function on each render does not create a new store.
+ * To show the map to another viewer, change `token` or `viewerUrl`, or give the component a new
+ * `key`.
  *
- * This entry imports `@mosaicajs/components`, and with it Lit and deck.gl. The hooks are in the
- * package root, `@mosaicajs/react`, which imports neither.
+ * The element classes are exported as types with an `Element` suffix, such as `MapElement`, for
+ * typing a ref. This entry imports `@mosaicajs/components`, and with it Lit and deck.gl.
+ *
+ * @example
+ * ```tsx
+ * import {useMosaicaStore} from '@mosaicajs/react';
+ * import {MosaicaMap, MosaicaItemCard} from '@mosaicajs/react/components';
+ *
+ * function Map({token}: {token: string}) {
+ *   const store = useMosaicaStore({viewerUrl: 'http://localhost:8080', token});
+ *   return (
+ *     <>
+ *       <MosaicaMap store={store} onPick={(e) => console.log(e.detail.id)} />
+ *       <MosaicaItemCard store={store} />
+ *     </>
+ *   );
+ * }
+ * ```
  *
  * @module @mosaicajs/react/components
  */
@@ -41,10 +59,7 @@ import {
 import type {TokenSupplier} from '@mosaicajs/client';
 
 
-/**
- * The events the elements emit, by name, each a `CustomEvent` with its detail: `MosaicaEventMap`
- * from `@mosaicajs/components`.
- */
+/** The events the elements fire, by name, each a `CustomEvent` with its `detail`. The same type as `MosaicaEventMap` in `@mosaicajs/components`. */
 export type MosaicaEvents = MosaicaEventMap;
 
 const ev = <K extends keyof MosaicaEvents>(name: K) => name as EventName<MosaicaEvents[K]>;
@@ -88,15 +103,11 @@ const mapEvents = {
 /** `<mosaica-store>` as a React component. It has no event props. */
 export const MosaicaStore = withStableAuthorise(wrap('mosaica-store', StoreElement, {}));
 /**
- * `<mosaica-explorer>` as a React component. It has a handler prop for every event, since the
- * elements inside it emit them and each event bubbles out of it: `onPick`, `onItemOpen`, `onMiss`, `onHover`,
- * `onViewChange`, `onSelectChange`, `onArtifactOpen`, `onLayerChange`, `onArtifactFit`,
- * `onColourChange`, `onLevelChange`, `onValueColour`, `onClusterColour`, `onPaletteChange`, `onClusterPaletteChange`,
- * `onDisplayChange`, `onSizeChange`, `onBudgetChange`, `onClusterBudgetChange`, `onFold`,
- * `onFilterChange`, `onStateChange`, `onExpired`, `onOpen`, `onClose`, `onClauseChange`,
- * `onViewSwitch` and `onViewFollow`, each for the `mosaica-` event of the same name in lower case.
- * The `open` prop is the function the item card's Open calls, and `openUrl` the address it goes
- * to; `onOpen` hears every press.
+ * `<mosaica-explorer>` as a React component. The events of the elements inside it bubble out, so
+ * it has a handler prop for each of them: `onPick` for `mosaica-pick`, and so on for every event
+ * in {@link MosaicaEvents} except `mosaica-chipopen` and `mosaica-basemapchange`. The `open` prop is the function the item
+ * card's Open button calls, and `openUrl` the address it goes to. `onOpen` is called on every
+ * press.
  */
 export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', ExplorerElement, {
   ...mapEvents,
@@ -123,10 +134,9 @@ export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', Expl
 }));
 /**
  * `<mosaica-map>` as a React component. Event props: `onPick` (`mosaica-pick`), `onItemOpen`
- * (`mosaica-itemopen`), `onMiss`
- * (`mosaica-miss`), `onHover` (`mosaica-hover`), `onViewChange` (`mosaica-viewchange`), `onSelectChange`
- * (`mosaica-selectchange`), `onArtifactOpen` (`mosaica-artifactopen`) and `onLayerChange`
- * (`mosaica-layerchange`).
+ * (`mosaica-itemopen`), `onMiss` (`mosaica-miss`), `onHover` (`mosaica-hover`), `onViewChange`
+ * (`mosaica-viewchange`), `onSelectChange` (`mosaica-selectchange`), `onArtifactOpen`
+ * (`mosaica-artifactopen`) and `onLayerChange` (`mosaica-layerchange`).
  */
 export const MosaicaMap = withStableAuthorise(wrap('mosaica-map', MapElement, mapEvents));
 /** `<mosaica-status>` as a React component. Event props: `onStateChange` (`mosaica-statechange`) and `onExpired` (`mosaica-expired`). */
@@ -135,8 +145,8 @@ export const MosaicaStatus = wrap('mosaica-status', StatusElement, {onStateChang
 export const MosaicaCount = wrap('mosaica-count', CountElement, {});
 /**
  * `<mosaica-item-card>` as a React component. Event props: `onOpen` (`mosaica-open`), `onClose`
- * (`mosaica-close`) and `onViewFollow` (`mosaica-viewfollow`). The `open` prop is the function
- * Open calls, and `openUrl` the address it goes to; `onOpen` hears every press.
+ * (`mosaica-close`) and `onViewFollow` (`mosaica-viewfollow`). The `open` prop is the function the
+ * Open button calls, and `openUrl` the address it goes to. `onOpen` is called on every press.
  */
 export const MosaicaItemCard = wrap('mosaica-item-card', ItemCardElement, {onOpen: ev('mosaica-open'), onClose: ev('mosaica-close'), onViewFollow: ev('mosaica-viewfollow')});
 /**

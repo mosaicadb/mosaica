@@ -10,15 +10,15 @@ export type OrthographicCamera = {
 };
 
 /**
- * Converts a deck.gl `OrthographicView` camera over the 512-unit world into the input
- * `store.setView` takes: the box the canvas covers, clamped to the world and converted to data
- * coordinates through the store's frame, the camera's zoom, and the canvas size.
+ * Converts a deck.gl `OrthographicView` camera into the {@link ViewInput} that the store's
+ * `setView` takes. Call it whenever the view state or the canvas size changes. The box the canvas
+ * shows is clamped to the world and converted to the current view's data coordinates.
  *
- * @param store - The store whose frame converts world units to data coordinates.
+ * @param store - The store, which converts world units to data coordinates.
  * @param camera - The view state's `target` and `zoom`.
  * @param width - The canvas width in CSS pixels.
  * @param height - The canvas height in CSS pixels.
- * @returns The view input, or `null` before `meta` has arrived, when the store has no frame.
+ * @returns The view input, or `null` until the store has `/v1/meta`.
  */
 export function viewInputOf(store: Pick<Store, 'frame' | 'dataXY'>, camera: OrthographicCamera, width: number, height: number): ViewInput | null {
   if (!store.frame()) return null;
@@ -29,14 +29,14 @@ export function viewInputOf(store: Pick<Store, 'frame' | 'dataXY'>, camera: Orth
 }
 
 /**
- * The camera that fits a box of the 512-unit world into a canvas: centred on the box, at the zoom
- * where the box takes `fill` of the canvas along whichever side limits it, and at most
- * {@link MAX_DEPTH}. The rest of the canvas is the margin round the box.
+ * The deck.gl camera that fits a box of the world into a canvas. It centres the box and zooms until
+ * the box fills `fill` of the canvas's width or height, whichever it reaches first, up to a zoom of
+ * {@link MAX_DEPTH}. Spread the result into the `OrthographicView` view state.
  *
  * @param box - `[x0, y0, x1, y1]` in world units, as {@link frameMatches} gives it.
  * @param width - The canvas width in CSS pixels.
  * @param height - The canvas height in CSS pixels.
- * @param fill - The share of the canvas the box takes, 0.92 unless given.
+ * @param fill - The share of the canvas the box fills.
  */
 export function cameraFitting(box: readonly [number, number, number, number], width: number, height: number, fill = 0.92): {target: [number, number, number]; zoom: number} {
   const across = Math.abs(box[2] - box[0]) || 1;

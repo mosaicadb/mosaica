@@ -11,32 +11,32 @@ import {numericValues, sizesPoints} from '@mosaicajs/client/internal';
 import {fractionOf} from './colour.js';
 
 /**
- * How a number is placed between the smallest and largest size: `linear` in the value; `log`, which
- * places `log(1 + (v − min))`, so a long tail of counts does not leave most points at the smallest
- * size; or `rank`, the value's rank among a sample of the values drawn, which spreads skewed values
- * evenly. A rank is an estimate from the points drawn, which are themselves a sample.
+ * How a number is placed between the smallest and largest size: `linear`, in proportion to the
+ * value; `log`, in proportion to `log(1 + (v − min))`, so a long tail does not leave most marks at
+ * the smallest size; or `rank`, by the value's rank in a sample of the values drawn, which spreads
+ * skewed values evenly. The rank is an estimate, because the marks drawn are themselves a sample.
  *
  * @category Size
  */
 export type SizeScale = 'linear' | 'log' | 'rank';
 
 /**
- * The size choices for a number column: the radius in pixels of the smallest and the largest value,
+ * How to size marks by a number column: the radius in pixels of the smallest and largest values,
  * and the scale between them.
  *
  * @category Size
  */
 export type Sizing = {
-  /** The radius in pixels of the smallest value, and of a point with no value. */
+  /** The radius in pixels of the smallest value. A mark with no value is drawn as a ring, at this radius or 3 px, whichever is larger. */
   min: number;
   /** The radius in pixels of the largest value. */
   max: number;
-  /** How a value is placed between the two. */
+  /** How a value is placed between `min` and `max`. */
   scale: SizeScale;
 };
 
 /**
- * The sizing with nothing chosen: from 2 to 9 pixels, on a linear scale.
+ * The default sizing: 2 to 9 pixels on a linear scale.
  *
  * @category Size
  */

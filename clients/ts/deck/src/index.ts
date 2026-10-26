@@ -1,12 +1,53 @@
 /**
- * A deck.gl layer that draws a Mosaica store, for a host that builds its own `Deck`.
- * {@link MosaicaLayer} draws the marks, density, the artifacts' names and outlines and the
- * selection. {@link CATEGORY_PALETTES} and {@link RAMPS} are the named colour sets a
- * {@link Colouring} chooses from, and {@link Sizing} the sizes a number column sizes marks
- * between. {@link viewInputOf} turns the host's camera into a view for the store,
- * {@link DensityCounter} keeps the counts density is drawn from, {@link frameMatches} and
- * {@link cameraFitting} open the camera on the matched items, {@link resolvePick} reads a pick, and
- * {@link basemapLayers} draws a basemap under the points.
+ * `@mosaicajs/deck` draws a Mosaica map with deck.gl, for an app that builds its own `Deck`. If
+ * you want a ready-made map, the `<mosaica-map>` element in `@mosaicajs/components` wraps this
+ * package and handles the camera for you.
+ *
+ * {@link MosaicaLayer} is a deck.gl layer that draws what a store from `@mosaicajs/client`
+ * publishes: the points, density, the artifacts' names and outlines, and the selected region. It
+ * fetches nothing itself. Your app owns the camera. Each time the view state changes, pass the
+ * camera to {@link viewInputOf} and give the result to the store's `setView`. The store fetches
+ * what the new view needs, and the layer redraws when the store's projections change.
+ *
+ * The rest of the package works alongside the layer. {@link resolvePick} turns a deck.gl pick into
+ * the item or artifact under the pointer. {@link frameMatches} and {@link cameraFitting} move the
+ * camera to where the filtered items are. {@link basemapLayers} draws a world outline, map tiles or
+ * an image under the points. {@link DensityCounter} fetches the counts that density is drawn from,
+ * and the layer keeps one of its own unless you pass yours. {@link Colouring}, {@link Sizing} and
+ * the named palettes and ramps are the choices for colouring and sizing points by a column.
+ *
+ * @example
+ * ```ts
+ * import {Deck, OrthographicView} from '@deck.gl/core';
+ * import {createStore} from '@mosaicajs/client';
+ * import {MosaicaLayer, viewInputOf} from '@mosaicajs/deck';
+ *
+ * const store = createStore({viewerUrl: 'http://localhost:8080', token});
+ * let viewState = {target: [256, 256, 0], zoom: 0};
+ *
+ * // Tell the store where the camera is. viewInputOf returns null until /v1/meta has arrived.
+ * function tell() {
+ *   const input = viewInputOf(store, viewState, deck.width, deck.height);
+ *   if (input) store.setView(input);
+ * }
+ *
+ * const deck = new Deck({
+ *   parent: document.getElementById('map'),
+ *   views: new OrthographicView({flipY: true}),
+ *   viewState,
+ *   controller: true,
+ *   layers: [new MosaicaLayer({id: 'mosaica', store})],
+ *   onViewStateChange: ({viewState: next}) => {
+ *     viewState = next;
+ *     deck.setProps({viewState});
+ *     tell();
+ *   }
+ * });
+ *
+ * store.subscribe('meta', (meta) => {
+ *   if (meta) tell();
+ * });
+ * ```
  *
  * @module @mosaicajs/deck
  */

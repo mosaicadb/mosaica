@@ -35,160 +35,143 @@ import {MarkSlab, type GpuSlab} from './slab.js';
 
 /**
  * The props of a {@link MosaicaLayer}: deck.gl's `CompositeLayerProps` and the props below, all
- * optional. `pickable` defaults to true. Set `store`, or set the projection props (`marks`,
- * `depth`, `artifacts`, `meta`, `legend`, `status`) yourself. A projection prop set beside
- * `store` is drawn in place of the store's.
+ * optional. `pickable` defaults to true.
+ *
+ * Usually you set `store` and the layer reads `marks`, `depth`, `artifacts`, `meta`, `legend` and
+ * `status` from the store's projections. You can set any of those six yourself, and your value is
+ * drawn in place of the store's. Without a `store`, set them all.
  */
 export type MosaicaLayerProps = CompositeLayerProps & {
-  /** The store to read projections from. The layer subscribes to it and redraws on each change. Defaults to `null`. */
+  /** The store to draw. The layer redraws whenever its projections change. Defaults to `null`. */
   store?: Store | null;
-  /** The marks to draw, in place of the store's `marks`. Defaults to `null`. */
+  /** The marks to draw. Defaults to the store's `marks`. */
   marks?: MarksProjection | null;
-  /**
-   * The depth of the frame's bands, which chooses the mark buffers drawn. Defaults to 0, which with
-   * `store` reads the store's `view.depth`.
-   */
+  /** The tile depth of the frame drawn. Defaults to the store's `view.depth`, or 0 without a store. */
   depth?: number;
-  /** The served artifacts to name, outline and colour by, in place of the store's `artifacts`. Defaults to `null`. */
+  /** The artifacts to name, outline and colour by. Defaults to the store's `artifacts`. */
   artifacts?: ArtifactsProjection | null;
   /**
-   * The `/v1/meta` answer, in place of the store's `meta`. Column colour reads its columns and the
-   * labels and outlines read its layers; without it the marks draw in one colour. Defaults to
-   * `null`.
+   * The server's `/v1/meta` response, which describes the columns and artifact layers. Defaults to
+   * the store's `meta`. Without it every mark is drawn in one colour.
    */
   meta?: Meta | null;
   /**
-   * The colouring and sizing, in place of the store's `legend`. Its `colourBy` names a column, or
-   * `cluster:<layer>` to colour each mark by the artifact it belongs to, and its `sizeBy` a number
-   * column to size each mark by. Defaults to `null`, which draws every mark in one colour and one
-   * size. The store's points carry a column only when the store is asked for it, through
-   * `setColourBy`, `setSizeBy` or `setPointColumns`.
+   * The column the marks are coloured and sized by. Defaults to the store's `legend`. Its
+   * `colourBy` is a column, or `cluster:<layer>` to colour each mark by the artifact it belongs to.
+   * Its `sizeBy` is a number column. The store fetches a column with the points only after you call
+   * its `setColourBy`, `setSizeBy` or `setPointColumns`.
    */
   legend?: LegendProjection | null;
-  /**
-   * The display status, in place of the store's `status`. Under `refused` no marks are drawn.
-   * Defaults to `idle`, which with `store` reads the store's.
-   */
+  /** The map's status. Defaults to the store's `status`. No marks are drawn while it is `refused`. */
   status?: PresentedStatus;
   /**
-   * The level of a `stacked` or `tiered` layer to colour, name and outline artifacts at. Defaults to
-   * `undefined`, the layer's top (coarsest) level; on a `nested` or `dag` layer, the cut served.
+   * The level of a `stacked` or `tiered` artifact layer to colour, name and outline artifacts at.
+   * Defaults to the coarsest level served. On a `nested` or `dag` layer, leave it unset, and each
+   * mark takes the nearest artifact served.
    */
   clusterLevel?: number;
-  /** Whether the artifacts' names are drawn at their centroids, with the hovered one's count. Defaults to true. */
+  /** Whether to draw the artifacts' names, with the count of the one under the pointer. Defaults to `true`. */
   labels?: boolean;
   /**
-   * The ground under the map, `light` or `dark`. The ink and halo of names, the hovered outline's
-   * fill and the colours of the picked mark's ring and the selected region follow it. Defaults to
-   * `dark`.
+   * Whether the map's background is `light` or `dark`. The colours of names, outlines, the
+   * picked mark's ring and the selected region are chosen to suit it. Defaults to `dark`.
    */
   scheme?: 'light' | 'dark';
   /**
-   * The picked mark's position in world units, where a ring is drawn. {@link resolvePick} gives it
-   * as `worldXY`. Defaults to `null`, which draws no ring.
+   * Where to draw a ring round the picked mark, in world units. {@link resolvePick} returns it as
+   * `worldXY`. Defaults to `null`, no ring.
    */
   selectedWorldXY?: [number, number] | null;
   /**
-   * The `mosaicaId` of the opened artifact, whose outline is drawn. Under cluster colour, the marks
-   * coloured by any other artifact, or by none, draw dimmed. Defaults to `null`.
+   * The `mosaicaId` of the opened artifact, which is outlined. While marks are coloured by
+   * artifact, every mark outside it is dimmed. Defaults to `null`.
    */
   openedArtifact?: bigint | null;
-  /** The `mosaicaId` of the artifact under the pointer, whose outline is drawn. Defaults to `null`. */
+  /** The `mosaicaId` of the artifact under the pointer, which is outlined. Defaults to `null`. */
   hoveredArtifact?: bigint | null;
-  /** The selected region as a box `[x0, y0, x1, y1]` in world units. Defaults to `null`. */
+  /** The selected region as a box, `[x0, y0, x1, y1]` in world units. Defaults to `null`. */
   region?: [number, number, number, number] | null;
   /**
-   * The selected region as a polygon of world points. With two or more points it is drawn in place
-   * of `region` and of `drag`. Defaults to `null`.
+   * The selected region as a polygon of world points. If it has two or more points it is drawn in
+   * place of `region` and `drag`. Defaults to `null`.
    */
   regionPolygon?: [number, number][] | null;
   /**
-   * The box being dragged, `[x0, y0, x1, y1]` in world units, drawn in place of `region` with a
-   * fainter fill and an opaque line. Defaults to `null`.
+   * The box the user is dragging, `[x0, y0, x1, y1]` in world units. It is drawn in place of
+   * `region`, with a fainter fill. Defaults to `null`.
    */
   drag?: [number, number, number, number] | null;
   /**
-   * The lasso being drawn, as world points, drawn in place of `regionPolygon` and `drag` with a
-   * fainter fill and an opaque line. Defaults to `null`.
+   * The lasso the user is drawing, as world points. It is drawn in place of `regionPolygon` and
+   * `drag`, with a fainter fill. Defaults to `null`.
    */
   dragPolygon?: [number, number][] | null;
   /**
-   * Whether the request carried a highlight. When true, the marks that satisfy it keep their
-   * colour, draw larger and carry a soft glow of their own colour, and the rest draw light grey and
-   * faint. The layer does not read this from `store`: pass the store's `view.highlighting`.
-   * Defaults to false.
+   * Whether a highlight is set. If it is, the marks it matches keep their colour and are drawn
+   * larger with a glow, and the rest are drawn faint grey. The layer does not read this from the
+   * store, so pass the store's `view.highlighting`. Defaults to `false`.
    */
   highlighting?: boolean;
-  /** Whether the marks are drawn. Off, only density, outlines, labels and the selection draw. Defaults to true. */
+  /** Whether to draw the marks. Density, outlines, names and the selection are drawn either way. Defaults to `true`. */
   points?: boolean;
   /**
-   * A fixed mark radius in pixels. Defaults to `null`, which sizes marks by how many are drawn and
-   * by the zoom: 1.7 px at a hundred marks or fewer down to 1.1 px at a million, plus 0.05 px per
-   * zoom level up to zoom 10. Under the legend's `sizeBy`, `sizing` sizes the marks in its place.
+   * A fixed mark radius in pixels. Defaults to `null`, which chooses a radius from the number of
+   * marks and the zoom: 2 px for ten thousand marks or fewer, down to 1.1 px for a million, plus
+   * 0.05 px per zoom level up to zoom 10. While the legend has a `sizeBy`, `sizing` is used instead.
    */
   radius?: number | null;
   /**
-   * The smallest and largest radius and the scale a number column sizes marks on, under the
-   * legend's `sizeBy`. A mark with no value, NaN or an infinity draws as a ring, at the smallest
-   * radius or 3 px, whichever is larger. A radius that is not a finite number above zero is the
-   * default's. Under `rank` the store keeps the sample ranked against only where it was asked to,
-   * with `setSizeBy(column, {rank: true})`. Defaults to {@link DEFAULT_SIZING}.
+   * How marks are sized while the legend has a `sizeBy`. A radius that is not a positive finite
+   * number is replaced by the default's. For the `rank` scale, call the store's
+   * `setSizeBy(column, {rank: true})`, or every mark is drawn at the smallest size. Defaults to
+   * {@link DEFAULT_SIZING}.
    */
   sizing?: Sizing;
   /**
-   * A fixed mark alpha from 0 to 1, as a fraction of the colour's own alpha. Defaults to `null`,
-   * which sets it by how many marks are drawn: 0.78 at a hundred or fewer down to 0.34 at a
-   * million, plus a little per zoom level.
+   * A fixed mark opacity from 0 to 1, multiplied by the colour's own alpha. Defaults to `null`,
+   * which chooses it from the number of marks: 0.8 for ten thousand or fewer, down to 0.34 for a
+   * million, plus 0.015 per zoom level up to zoom 10, and at most 0.9.
    */
   pointOpacity?: number | null;
   /**
-   * How density is drawn under the marks, from `densityCounts`: `none`, `smooth` (a soft wash),
-   * `hex` (hexagons), `grid` (square cells one cell wide) or `contours` (lines of equal density).
-   * Defaults to `none`, as on `<mosaica-map>`.
+   * How density is drawn under the marks: `none`, `smooth` (a soft wash), `hex` (hexagons), `grid`
+   * (square cells) or `contours` (lines of equal density). Defaults to `none`.
    */
   density?: DensityMode;
   /**
-   * The counts by cell density is drawn from, in place of `densityCounter`'s. A new object rebuilds
-   * the smooth wash or the grid outside the render, and the previous one is drawn until then.
-   * Defaults to `null`.
+   * The counts by cell that density is drawn from. Set it to draw counts you fetched yourself.
+   * Defaults to `null`, which draws the counts from `densityCounter` or the layer's own counter.
    */
   densityCounts?: DensityCounts | null;
   /**
-   * The {@link DensityCounter} whose counts density is drawn from, where the host keeps one, as
-   * `<mosaica-map>` does. Defaults to `null`: with `store` set and no `densityCounts`, the layer
-   * keeps a counter of its own over `store`, told of the layer's viewport and of `density` and
-   * `densityResolution`.
+   * A {@link DensityCounter} to draw density from, if you keep one yourself. Defaults to `null`, in
+   * which case a layer with a `store` keeps its own counter, which follows the layer's camera,
+   * `density` and `densityResolution`.
    */
   densityCounter?: DensityCounter | null;
-  /**
-   * The cell size on screen, in CSS pixels, the layer's own counter asks for; see
-   * {@link DensityCounter}. Defaults to 12.
-   */
+  /** The size on screen of a density cell, in CSS pixels, for the layer's own counter. Defaults to 12. */
   densityResolution?: number;
   /**
    * The colours density is drawn in. Defaults to `null`, which draws the smooth wash in warm grey
-   * while the marks are drawn, and every other case in Viridis.
+   * while marks are drawn, and Viridis otherwise.
    */
   densityColours?: DensityColours | null;
   /** How strongly density is drawn, from 0 (not at all) to 1 (fully). Defaults to 1. */
   densityStrength?: number;
   /**
-   * How a cell's count is placed between no items and the largest count drawn, which picks its
-   * colour, its alpha in the wash and the contour levels: `linear` or `log`. Defaults to `log`.
+   * How a cell's count maps to its colour, its opacity in the wash and the contour levels: `linear`
+   * or `log`. Defaults to `log`.
    */
   densityScale?: DensityScale;
-  /**
-   * The palette, ramp and chosen value colours column colour uses. Defaults to
-   * {@link DEFAULT_COLOURING}.
-   */
+  /** The palette, ramp and per-value colours used when colouring by a column. Defaults to {@link DEFAULT_COLOURING}. */
   colouring?: Colouring;
   /**
-   * Called each time the layer renders, with the marks it drew: `drawn` exact marks held for the
-   * frame, and `provisional` stand-ins drawn until the exact bands arrive. Called with `(0, 0)`
-   * when no marks are drawn. Defaults to `null`.
+   * Called after each render with the number of marks drawn: `drawn` marks of the current frame,
+   * and `provisional` stand-ins from another depth, shown until the frame's own marks arrive.
+   * Defaults to `null`.
    */
   onDrawn?: ((drawn: number, provisional: number) => void) | null;
-  /** Called each time the layer renders, with what the render cost and drew. Defaults to `null`. */
+  /** Called after each render with what it cost and drew. Defaults to `null`. */
   onTimings?: ((t: LayerTimings) => void) | null;
 };
 
@@ -197,34 +180,34 @@ export type MosaicaLayerProps = CompositeLayerProps & {
  * milliseconds. On a render that draws no marks, `slabMs`, `densityMs` and the mark figures are 0.
  */
 export type LayerTimings = {
-  /** Time spent writing new bands into the mark buffers. */
+  /** Time spent writing newly arrived marks into the GPU buffers. */
   slabMs: number;
   /**
-   * Time spent on the density layers. The smooth wash's image is built later, outside the render,
-   * and the other modes aggregate inside deck.gl's own update; neither is counted.
+   * Time spent building the density layers. It excludes the smooth wash's image, which is built
+   * after the render, and the aggregation deck.gl does for the other modes.
    */
   densityMs: number;
-  /** Time spent updating the cluster colour lookup texture. */
+  /** Time spent updating the texture that colours marks by artifact. */
   lutMs: number;
   /** Time spent building the outlines. */
   outlinesMs: number;
-  /** Time spent placing labels. */
+  /** Time spent placing names. */
   labelsMs: number;
-  /** Time for the whole render, every stage included. */
+  /** Time for the whole render. */
   layersMs: number;
-  /** Writes to the cluster colour lookup texture since the layer made it. */
+  /** How many times the texture that colours marks by artifact has been written since the layer was created. */
   lutWrites: number;
   /** Outline parts drawn. An artifact in several pieces has several parts. */
   outlines: number;
   /** Artifacts outlined: 0, 1 or 2 (the hovered and the opened). */
   outlinesDrawn: number;
-  /** Labels placed. */
+  /** Names placed. */
   labels: number;
-  /** The mark radius drawn, in pixels; under sizing by a column, the largest. */
+  /** The mark radius drawn, in pixels. While marks are sized by a column, the largest. */
   markRadius: number;
-  /** The alpha the marks are composited at, from 0 to 1, as a fraction of their colour's own alpha. */
+  /** The opacity the marks are drawn at, from 0 to 1, multiplied by their colour's own alpha. */
   markAlpha: number;
-  /** The number of marks the radius and alpha were chosen for: the exact marks held and the stand-ins. */
+  /** The number of marks the radius and opacity were chosen for, stand-ins included. */
   markCount: number;
 };
 
@@ -758,29 +741,22 @@ export type MosaicaLayerInternalProps = MosaicaLayerProps & {
 };
 
 /**
- * A deck.gl `CompositeLayer` that draws a Mosaica store's marks and artifacts and density from
- * counts by cell. From bottom to top it draws the hovered and the opened artifact's outline, the
- * density from `densityCounts`, the marks, the artifacts' names at their centroids (with the hovered one's
- * count), the selected region and the picked mark's ring. The props are {@link MosaicaLayerProps}.
+ * A deck.gl layer that draws a Mosaica map. Give it a `store` and it draws the store's projections
+ * and redraws whenever they change. From bottom to top it draws the outlines of the hovered and
+ * opened artifacts, density, the points as marks, the artifacts' names, the selected region and a
+ * ring round the picked mark. The props are {@link MosaicaLayerProps}.
  *
- * The layer draws in the 512-unit world square (`WORLD_SIZE`) for an `OrthographicView` with
- * `flipY: true`, and {@link viewInputOf} turns that view's camera into what `store.setView` takes.
- * It has no adapter for a geographic `MapView` or a MapLibre host.
+ * The layer fetches nothing itself. The store decides what to fetch from the camera you give it,
+ * and the layer draws every mark the store holds. Use it in an `OrthographicView` with
+ * `flipY: true`. It draws in a world square 512 units across, and {@link viewInputOf} converts
+ * that view's camera for the store's `setView`. It cannot be used in a geographic `MapView` or
+ * with MapLibre.
  *
- * With `store` set, the layer subscribes to it and redraws on each change. The layer does not
- * fetch. Every served mark is drawn, with no budget, cap or filter applied in the layer, and a
- * value the colouring cannot resolve draws grey.
- *
- * Only an artifact at the level drawn (`clusterLevel`) is outlined. On a layer that declares a
- * shape, the outline appears once `store.needShape` has fetched the shape. On a layer that declares
- * none, the outline is the artifact's box, drawn as a thin unfilled rectangle.
- *
- * Hover and pick are the host's: pass deck's pick info to {@link resolvePick}, which returns the
- * mark or the artifact name under the pointer. Outlines, the wash and the selected region are not
- * pickable.
- *
- * The layer makes its mark buffers and colour lookup texture on its deck's device, and releases
- * them when deck finalises it.
+ * The layer does not handle hover or clicks. Pass the pick info from deck's `onHover` or `onClick`
+ * to {@link resolvePick} to find the item or artifact under the pointer, then set the props that
+ * show it, such as `selectedWorldXY` and `hoveredArtifact`. If the artifact's layer declares
+ * shapes, call the store's `needShape` with its id: the outline appears once the shape arrives.
+ * Otherwise the outline is the artifact's bounding box.
  */
 export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
   /** @internal */

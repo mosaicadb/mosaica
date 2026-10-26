@@ -5,19 +5,17 @@ import type {DensityCamera} from './density-counter.js';
 import {importBasemap} from './lazy.js';
 
 /**
- * What is drawn under the points of one view:
+ * What to draw under the points of a view:
  *
- * - `'world'`: land, coastlines and country borders from the server's world outline
- *   (`GET /v1/basemaps/world`), projected as the view's positions were. Only on a view whose
- *   projection is not `none`.
+ * - `'world'`: land, coastlines and country borders from the server's world outline, projected as
+ *   the view's points are. Only for a view with a map projection.
  * - `'none'`: nothing.
- * - `{tiles, attribution}`: raster tiles from `tiles`, a URL template with `{z}`, `{x}` and `{y}`,
- *   composed at the camera's depth. `attribution` is the credit the tile server asks for. Only on a
- *   view with a {@link ViewInfo.tileScheme}. There is no default server.
- * - `{image, bounds}`: one image stretched over `bounds`, `[x0, y0, x1, y1]` in the view's own
- *   coordinates (longitude and latitude in degrees on a geographic view, whose corners are
- *   projected; x and y otherwise), or over the whole frame where `bounds` is left out. The image is
- *   not reprojected.
+ * - `{tiles, attribution}`: raster map tiles. `tiles` is the tile server's URL template, with
+ *   `{z}`, `{x}` and `{y}`, and `attribution` the credit the tile server asks for. Only for a view
+ *   with a {@link ViewInfo.tileScheme}. There is no default tile server.
+ * - `{image, bounds}`: one image, stretched over `bounds` without reprojection. `bounds` is
+ *   `[x0, y0, x1, y1]` in the view's own coordinates: longitude and latitude in degrees on a
+ *   geographic view, x and y otherwise. Leave it out to cover the whole frame.
  *
  * @category Basemaps
  */
@@ -42,15 +40,15 @@ export type WorldColours = {
  */
 export type BasemapOptions = {
   /**
-   * The ground the map draws on. The world outline is a little darker than a light ground and a
-   * little lighter than a dark one. Defaults to `light`.
+   * The map's background, `light` or `dark`. The world outline is drawn a little darker than a
+   * light background and a little lighter than a dark one. Defaults to `light`.
    */
   scheme?: 'light' | 'dark';
-  /** Colours in place of the world outline's own for `scheme`. */
+  /** Colours for the world outline in place of the defaults for `scheme`. */
   colours?: Partial<WorldColours>;
   /**
-   * The camera, for tiles: they are composed for the box it shows at its depth. Without it the
-   * whole frame is composed at a coarse depth.
+   * The current camera. Map tiles are fetched for the area it shows, at its zoom. Without it, tiles
+   * for the whole frame are fetched at a coarse zoom.
    */
   camera?: DensityCamera;
 };
@@ -173,8 +171,8 @@ const FORMS: readonly [string, readonly string[], (value: Record<string, unknown
 ];
 
 /**
- * Why `value` cannot be drawn under `view`, in a sentence that says what to write instead, or
- * `null` where it can: the world outline needs a map projection, and tiles a
+ * Why `value` cannot be drawn under `view`, as a sentence that says what to use instead, or `null`
+ * if it can. The world outline needs a view with a map projection, and map tiles need a view with a
  * {@link ViewInfo.tileScheme}.
  *
  * @category Basemaps
@@ -191,21 +189,20 @@ export function basemapMisfit(view: ViewInfo, value: BasemapValue): string | nul
 }
 
 /**
- * The deck.gl layers that draw `value` under `view`, in the 512-unit world {@link MosaicaLayer}
- * draws in: put them before it in the `Deck`'s `layers`. `'none'` is no layers. The code that
- * draws a basemap is loaded the first time this is called, so a page that draws none does not load
- * it.
+ * The deck.gl layers that draw `value` under `view`. Put them before the {@link MosaicaLayer} in
+ * the `Deck`'s `layers`. For `'none'` the list is empty. The code that draws basemaps is loaded the
+ * first time you call this, so a page without a basemap never loads it.
  *
- * The world outline is fetched once per server ({@link Store.basemapWorld}) and placed once per
- * frame. Each call returns new layer instances over the geometry already placed, so deck.gl keeps
- * its buffers and every map gets layers of its own; for tiles, a camera that still shows the same
- * tiles draws the image already composed.
+ * For map tiles, call it again with the new `camera` when the camera moves. Repeated calls are
+ * cheap: the world outline is fetched once per server, and a camera that still shows the same
+ * tiles reuses the image already drawn.
  *
- * @param store - The store whose server serves the world outline.
+ * @param store - The store, whose server serves the world outline.
  * @param view - The view drawn, from `meta.views`.
  * @param value - What to draw.
- * @throws `Error` where `value` is not one of the forms or does not fit `view` ({@link basemapMisfit}), and where the world
- *   outline does not load or is in a format this client does not read.
+ * @param options - The background, colours and camera.
+ * @throws `Error` if `value` is not a valid basemap or does not suit `view` (see
+ *   {@link basemapMisfit}), or if the world outline fails to load.
  *
  * @category Basemaps
  */

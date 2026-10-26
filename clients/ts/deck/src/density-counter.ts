@@ -3,21 +3,21 @@ import {worldBbox} from '@mosaicajs/client/internal';
 import {densityCellsOf, densityOfTiles, type DensityCounts} from './density.js';
 
 /**
- * The cell sizes on screen density's resolution is chosen from, in CSS pixels, coarse to fine.
+ * The cell sizes on screen that density can be drawn at, in CSS pixels, from coarse to fine.
  *
  * @category Colour
  */
 export const DENSITY_CELL_SIZES: readonly number[] = [32, 24, 16, 12, 8, 6, 4];
 
 /**
- * The cell size density is drawn at until one is chosen, in CSS pixels.
+ * The cell size density is drawn at by default, in CSS pixels.
  *
  * @category Colour
  */
 export const DEFAULT_DENSITY_CELL_PX = 12;
 
 /**
- * How long the camera rests before {@link DensityCounter} asks for counts, in milliseconds.
+ * How long the camera must rest before {@link DensityCounter} fetches counts, in milliseconds.
  *
  * @category Colour
  */
@@ -41,8 +41,7 @@ const RINGS = 2;
 const DEEPEST = 32;
 
 /**
- * A camera over the 512-unit world, as deck's `OrthographicView` view state holds it, with the
- * canvas size.
+ * A deck.gl `OrthographicView` camera over the 512-unit world, with the canvas size.
  *
  * @category Colour
  */
@@ -58,38 +57,37 @@ export type DensityCamera = {
 };
 
 /**
- * One resolution stop: its cell size on screen, the depth whose cells come closest to it at the
- * camera's zoom, and whether that depth's cells over the asked area fit
- * `selection.maxAggregateCells`.
+ * One cell size density can be drawn at, at the current camera. A menu of resolutions can disable
+ * the stops that are not `enabled`.
  *
  * @category Colour
  */
 export type ResolutionStop = {
   /** The cell size on screen, in CSS pixels. */
   px: number;
-  /** The depth whose cells are nearest that size at the camera's zoom. */
+  /** The depth of the cells fetched for this size at the camera's zoom (see {@link DensityCounts}). */
   depth: number;
-  /** Whether that depth's cells over the area asked for number at most `selection.maxAggregateCells`. */
+  /** Whether the server's `selection.maxAggregateCells` allows this many cells over the area fetched. */
   enabled: boolean;
 };
 
 /**
- * What {@link DensityCounter} asks for.
+ * The settings {@link DensityCounter.set} takes.
  *
  * @category Colour
  */
 export type DensitySettings = {
-  /** Whether density is drawn. Off, nothing is asked for and nothing is held. */
+  /** Whether density is drawn. While it is off, the counter fetches nothing and holds nothing. */
   on: boolean;
-  /** The cell size on screen, in CSS pixels, taken as the nearest of {@link DENSITY_CELL_SIZES}. */
+  /** The cell size on screen in CSS pixels, rounded to the nearest of {@link DENSITY_CELL_SIZES}. */
   cellPx: number;
 };
 
 type Box = [number, number, number, number];
 
 /**
- * The depth whose cells are closest to `cellPx` across on screen at `zoom`, nearest on a log scale.
- * A cell at depth `d` is `WORLD_SIZE · 2^zoom / 2^d` pixels wide.
+ * The depth whose cells are closest to `cellPx` wide on screen at `zoom`, measured on a log scale.
+ * A cell at depth `d` is `512 · 2^zoom / 2^d` pixels wide.
  *
  * @category Colour
  */
@@ -124,8 +122,8 @@ function areaOf(camera: DensityCamera, margin: number): Box {
 }
 
 /**
- * The stops of {@link DENSITY_CELL_SIZES} at `camera`, each with the depth it asks for and whether
- * that depth fits `limit` cells over the area asked for.
+ * Each size in {@link DENSITY_CELL_SIZES} at `camera`, with its depth and whether its cells over
+ * the area fetched number at most `limit`, the server's `selection.maxAggregateCells`.
  *
  * @category Colour
  */
@@ -149,7 +147,7 @@ function densityDepth(camera: DensityCamera, cellPx: number, limit: number): num
 }
 
 /**
- * The stop of {@link DENSITY_CELL_SIZES} nearest `px` on a log scale.
+ * The size in {@link DENSITY_CELL_SIZES} nearest `px`, measured on a log scale.
  *
  * @category Colour
  */
@@ -191,33 +189,20 @@ function levelsAt(camera: DensityCamera, depth: number, limit: number, groupings
 }
 
 /**
- * Keeps the counts density is drawn from for a camera: one `POST /v1/aggregate` grouping of cells,
- * registered with the store, which sends its filters and its highlight with it and asks again when
- * either changes. The counts are the highlighted items' under a highlight and the filtered items'
- * otherwise.
+ * Fetches the counts that density is drawn from, for the area around a camera. It registers an
+ * aggregate with the store, so the counts cover only what the viewer may see under the store's
+ * filters, and it fetches again when the filters, the highlight or the view change. While a
+ * highlight is set, it counts the highlighted items.
  *
- * A camera change asks nothing while the camera moves. {@link DENSITY_SETTLE_MS} after the last
- * one, the counter works out the depth whose cells are nearest the chosen size on screen and asks
- * for that depth over the viewport and a margin, unless the counts asked for last are at that depth
- * and their area holds the viewport. The same request asks for up to {@link RINGS} coarser levels,
- * each a depth coarser over twice the reach, as the points' ring is fetched coarser further out. A
- * move that leaves the finest area asked for drops the registration at once, so a filter changed
- * during the move asks nothing for an area no longer shown. The counts held are drawn at their own
- * world positions until the next answer lands, so a zoom scales them with the map and a pan within
- * the margin asks nothing: the finest level held whose area holds the viewport is drawn, so a zoom
- * out draws the coarser levels' counts to the edges, and where no level holds it the widest is
- * drawn. A view switch asks again at once.
+ * Tell it where the camera is with `look` and what to draw with `set`. Once the camera has rested
+ * for {@link DENSITY_SETTLE_MS}, it fetches cells of about the chosen size on screen over the
+ * viewport and a margin round it, so a short pan needs no new request. Until that answer arrives,
+ * `counts` returns the coarser counts that come with the map's tiles. `onChange` is called
+ * whenever the counts to draw change.
  *
- * A depth whose cells over the area would pass `selection.maxAggregateCells` is never asked for.
- * Where the server refuses a request with `422` anyway, the counter asks one depth coarser, up to
- * three times. After any other refusal it drops the answer it held, so density is drawn from the
- * frame's tile counts as below, and it asks again at the camera's next rest.
- *
- * Until an answer is held for the view, density is drawn from the counts the frame's tiles carry,
- * which land with each viewport response ahead of its points. They count the same items, at the
- * tiles' coarser cells, and are not drawn once an answer is held.
- *
- * `onChange` is called when the counts to draw change.
+ * A {@link MosaicaLayer} with a `store` keeps a counter of its own. Make one yourself and pass it
+ * as the layer's `densityCounter` if your own code also needs the counts, as `<mosaica-map>` does
+ * for its density key.
  *
  * @category Colour
  */
@@ -236,6 +221,11 @@ export class DensityCounter {
   private tiles: {tiles: unknown; counts: DensityCounts} | null = null;
   private readonly unsubscribe: () => void;
 
+  /**
+   * @param store - The store to fetch through.
+   * @param onChange - Called whenever the counts to draw change.
+   * @param settleMs - How long the camera must rest before counts are fetched, in milliseconds.
+   */
   constructor(
     private readonly store: Store,
     private readonly onChange: () => void,
@@ -247,7 +237,7 @@ export class DensityCounter {
     this.unsubscribe = store.subscribe(() => this.read());
   }
 
-  /** The camera moved or the canvas was resized. Counts are asked for once it has rested. */
+  /** Tell the counter the camera has moved or the canvas has been resized. */
   look(camera: DensityCamera): void {
     const drawn = this.answered();
     this.camera = camera;
@@ -257,7 +247,7 @@ export class DensityCounter {
     this.schedule();
   }
 
-  /** What to draw. Off drops the registration and the counts held at once. */
+  /** Turn density on or off and choose the cell size. Turning it off drops the counts held. */
   set(settings: DensitySettings): void {
     const was = this.settings;
     this.settings = settings;
@@ -269,8 +259,8 @@ export class DensityCounter {
   }
 
   /**
-   * The counts to draw: the last answer, while it was counted in the store's current view, and
-   * until there is one the frame's tile counts. Nothing while density is off.
+   * The counts to draw, or `null` while density is off or there are none. Until the first answer
+   * for the current view arrives, these are the coarser counts that come with the map's tiles.
    */
   counts(): DensityCounts | null {
     if (!this.settings.on) return null;
@@ -292,14 +282,17 @@ export class DensityCounter {
     return this.tiles.counts.cells.length > 0 ? this.tiles.counts : null;
   }
 
-  /** The resolution stops at the camera as it stands; every stop is enabled before a camera and `meta`. */
+  /**
+   * The cell sizes density can be drawn at for the current camera. Every stop is enabled until the
+   * counter has a camera and the store has `meta`.
+   */
   stops(): ResolutionStop[] {
     const meta = this.store.get('meta');
     if (!this.camera || !meta) return DENSITY_CELL_SIZES.map((px) => ({px, depth: 0, enabled: true}));
     return resolutionStops(this.camera, meta.selection.maxAggregateCells);
   }
 
-  /** Drop the registration and stop following the store. */
+  /** Stop fetching counts and unsubscribe from the store. */
   dispose(): void {
     this.stop();
     this.unsubscribe();

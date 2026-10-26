@@ -23,38 +23,38 @@ import {RAMPS, rampAt, type Rgb} from './colour.js';
  */
 
 /**
- * How density is drawn: `none`; `smooth`, a soft wash; `hex`, hexagonal bins; `grid`, square bins
- * one cell wide; or `contours`, lines of equal density.
+ * How density is drawn: `none`, `smooth` (a soft wash), `hex` (hexagonal bins), `grid` (square
+ * cells) or `contours` (lines of equal density).
  *
  * @category Colour
  */
 export type DensityMode = 'none' | 'smooth' | 'hex' | 'grid' | 'contours';
 
 /**
- * The colours density is drawn in: `warm-grey`, one neutral hue whose strength follows the count,
- * or a ramp (`viridis`, `cividis`, `magma`, `greys`) whose dense end contrasts with the ground, so
- * dense ground is dark on a light map and bright on a dark one.
+ * The colours density is drawn in: `warm-grey`, one neutral colour that strengthens with the
+ * count, or one of the ramps `viridis`, `cividis`, `magma` and `greys`. A ramp runs whichever way
+ * makes dense areas dark on a light map and bright on a dark one.
  *
  * @category Colour
  */
 export type DensityColours = 'warm-grey' | 'viridis' | 'cividis' | 'magma' | 'greys';
 
 /**
- * How a count is placed between no items and the largest count drawn: `linear`, in proportion to
- * the count, or `log`, in proportion to the logarithm of one more than the count, which spreads
- * counts that span several orders of magnitude.
+ * How a cell's count is placed between zero and the largest count drawn: `linear`, in proportion
+ * to the count, or `log`, in proportion to `log(1 + count)`, which suits counts that span several
+ * orders of magnitude.
  *
  * @category Colour
  */
 export type DensityScale = 'linear' | 'log';
 
-/** The density scale used where none is set. */
+/** The density scale used when none is set: `log`. */
 export const DEFAULT_DENSITY_SCALE: DensityScale = 'log';
 
 /**
- * Where `count` sits on `scale`, from 0 at no items to 1 at `max`: `count / max` under `linear` and
- * `log1p(count) / log1p(max)` under `log`. A count is clamped to `[0, max]`, and every count is at
- * 0 where `max` is 0 or less.
+ * Where `count` falls on `scale`, from 0 for no items to 1 for `max`: `count / max` under `linear`,
+ * and `log1p(count) / log1p(max)` under `log`. The count is clamped to `[0, max]`, and the result
+ * is 0 if `max` is 0 or less.
  */
 export function densityPosition(count: number, max: number, scale: DensityScale): number {
   if (!(max > 0)) return 0;
@@ -62,7 +62,7 @@ export function densityPosition(count: number, max: number, scale: DensityScale)
   return scale === 'log' ? Math.log1p(c) / Math.log1p(max) : c / max;
 }
 
-/** The count at `position` on `scale` up to `max`: the inverse of {@link densityPosition}. */
+/** The count at `position` on `scale`, the inverse of {@link densityPosition}. Use it to label a density key. */
 export function densityCountAt(position: number, max: number, scale: DensityScale): number {
   if (!(max > 0)) return 0;
   const p = Math.min(1, Math.max(0, position));
@@ -142,15 +142,16 @@ export type DensityCell = {
 };
 
 /**
- * The counts density is drawn from: one {@link DensityCell} per non-empty cell at `depth`, where a
- * cell at depth `d` is one of `2^d` by `2^d` over the view, as a tile is at depths up to 16.
+ * Counts of items by cell, which density is drawn from. At depth `d` the view's square is divided
+ * into `2^d` by `2^d` cells, so each depth halves the cell's width. Only cells with a count are
+ * listed.
  *
  * @category Colour
  */
 export type DensityCounts = {
   /** The depth the cells are at. */
   depth: number;
-  /** The cells with a count, in any order. */
+  /** The cells, in any order. */
   cells: readonly DensityCell[];
 };
 

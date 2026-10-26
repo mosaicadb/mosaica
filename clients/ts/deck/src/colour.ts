@@ -37,8 +37,7 @@ export const UNMAPPED: Rgba = [110, 118, 132, ALPHA];
 export type CategoryPaletteName = 'tableau10' | 'okabe-ito' | 'set2' | 'dark2';
 
 /**
- * A qualitative palette: its title, whether it stays distinguishable under the common colour-vision
- * deficiencies, and its colours in rank order.
+ * A qualitative palette, for colouring a category column.
  *
  * @category Colour
  */
@@ -54,9 +53,9 @@ export type CategoryPalette = {
 const hex = (h: string): Rgb => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
 /**
- * The qualitative palettes, by name. A value's colour is the palette's entry at its rank among the
- * values drawn, ordered by frequency; a value ranked past the palette's end is drawn in
- * {@link UNMAPPED} and listed as "Other".
+ * The qualitative palettes, by name. The most frequent category values among the marks drawn take
+ * the palette's colours in order, and a value keeps its colour as the camera moves. Values past the
+ * end of the palette are drawn grey.
  *
  * @category Colour
  */
@@ -85,8 +84,8 @@ export const CATEGORY_PALETTES: Readonly<Record<CategoryPaletteName, CategoryPal
 export type RampName = 'viridis' | 'cividis' | 'magma' | 'greys' | 'red-blue';
 
 /**
- * A colour ramp: its title, whether it diverges from a midpoint, and its stops from the low end to
- * the high end, interpolated linearly in RGB.
+ * A colour ramp, for colouring a number column. Colours between its stops are interpolated
+ * linearly in RGB.
  *
  * @category Colour
  */
@@ -94,8 +93,8 @@ export type Ramp = {
   /** The ramp's name as a menu shows it. */
   title: string;
   /**
-   * Whether the ramp diverges from a midpoint: zero where the range spans zero, else the middle of
-   * the range. The midpoint takes the ramp's middle colour.
+   * Whether the ramp diverges from a midpoint, which takes the ramp's middle colour. The midpoint
+   * is zero if the range spans zero, and the middle of the range otherwise.
    */
   diverging: boolean;
   /** The stops from the low end to the high end. */
@@ -128,40 +127,40 @@ export const RAMPS: Readonly<Record<RampName, Ramp>> = {
 };
 
 /**
- * How a number is placed on a ramp: `linear` in the value, or `log`, which places
- * `log(1 + (v − min))` so that a long tail does not push most values into one colour. On a
- * diverging ramp, `log` applies either side of the midpoint.
+ * How a number is placed on a ramp: `linear`, in proportion to the value, or `log`, in proportion
+ * to `log(1 + (v − min))`, so that a long tail does not push most values into one colour. On a
+ * diverging ramp, `log` applies on each side of the midpoint.
  *
  * @category Colour
  */
 export type RampScale = 'linear' | 'log';
 
 /**
- * The colour choices for a column: the palette for a category, the ramp for a number, and colours
- * chosen for single category values. The same choices colour the marks and the legend.
+ * How to colour marks by a column: a palette for a category column, a ramp for a number column,
+ * and any colours you choose for single category values. The same choices colour the legend.
  *
  * @category Colour
  */
 export type Colouring = {
-  /** The palette a category column's values take in order of rank. */
+  /** The palette for a category column. */
   palette: CategoryPaletteName;
-  /** The ramp a number column's values are placed on. */
+  /** The ramp for a number column. */
   ramp: RampName;
   /** How a number is placed on the ramp. */
   scale: RampScale;
   /** Whether the ramp runs from its high end to its low end. */
   reverse: boolean;
   /**
-   * Colours chosen for single category values, per column, per category key, as `#rrggbb`. A value
-   * named here takes this colour in place of its palette colour. A key that is not a drawn value of
-   * the column colours nothing.
+   * Colours you choose for single category values, as `#rrggbb`, keyed by column and then by
+   * category key. A chosen colour replaces the value's palette colour. A key that is not among the
+   * column's drawn values has no effect.
    */
   values: Readonly<Record<string, Readonly<Record<string, string>>>>;
 };
 
 /**
- * The colouring with nothing chosen: Tableau 10, Viridis on a linear scale, and no value's colour
- * chosen.
+ * The default colouring: Tableau 10 for categories, Viridis on a linear scale for numbers, and no
+ * chosen colours.
  *
  * @category Colour
  */

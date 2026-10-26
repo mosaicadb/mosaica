@@ -12,17 +12,28 @@ const FRAME_DEPTH = 8;
 let framings = 0;
 
 /**
- * A box in world units, `[x0, y0, x1, y1]`, around where the items the store's filters admit are:
- * the smallest box of whole cells, at depth 8 over the view's extent, that holds every one of
- * them. An item far from the rest widens the box to take it in.
+ * Finds the box round the items that the store's filters match, so you can move the camera there
+ * with {@link cameraFitting}. The box is `[x0, y0, x1, y1]` in world units, made of whole cells 2
+ * units wide, or wider if the server's `selection.maxAggregateCells` is low. It holds every match,
+ * so one item far from the rest widens it.
  *
- * It asks one `POST /v1/aggregate` of the store, a count by cells over the store's filters and its
- * selected region, so the box is computed over the items this viewer may see. The request carries
- * the filters as they stand when it is sent, and is sent again if they change before the answer
- * lands. The registration is dropped once the answer lands.
+ * The count goes through the store, so the box covers only items this viewer may see, under the
+ * store's filters and selected region. If the filters change before the answer arrives, the count
+ * is made again. The promise waits for the store's `/v1/meta`.
  *
- * Resolves to `null` where no item matches, where the server refuses the count, where its
- * `selection.maxAggregateCells` admits no cell level, and once `signal` aborts. Waits for `meta`.
+ * @param store - The store whose filters are matched.
+ * @param options.signal - Aborts the search, which then resolves to `null`.
+ * @returns The box, or `null` if no item matches, if the server refuses the count, or once
+ *   `signal` aborts.
+ *
+ * @example
+ * ```ts
+ * const box = await frameMatches(store);
+ * if (box) {
+ *   viewState = {...viewState, ...cameraFitting(box, deck.width, deck.height)};
+ *   deck.setProps({viewState});
+ * }
+ * ```
  */
 export function frameMatches(store: Store, options: {signal?: AbortSignal} = {}): Promise<[number, number, number, number] | null> {
   framings += 1;

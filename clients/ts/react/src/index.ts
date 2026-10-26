@@ -1,34 +1,55 @@
 /**
- * React hooks for the headless store. {@link useMosaicaStore} creates a store for a component's
- * lifetime, and {@link useProjection} reads one of its projections and re-renders when it changes.
- * The React components for the elements are in the `@mosaicajs/react/components` entry. This
- * entry imports neither Lit nor deck.gl.
+ * `@mosaicajs/react` connects the store from `@mosaicajs/client` to React. {@link useMosaicaStore}
+ * creates a store that lives as long as your component. {@link useProjection} reads one of the
+ * store's projections, the read-only snapshots it publishes of the map's state, and re-renders
+ * your component when that projection changes.
+ *
+ * The elements of `@mosaicajs/components`, such as the map, are React components in the
+ * `@mosaicajs/react/components` entry, and you can pass them a store as the `store` prop. This
+ * entry imports neither Lit nor deck.gl, so a page that uses only the hooks does not load them.
+ *
+ * @example
+ * ```tsx
+ * import {useMosaicaStore, useProjection} from '@mosaicajs/react';
+ * import {MosaicaMap} from '@mosaicajs/react/components';
+ *
+ * function Map({token}: {token: string}) {
+ *   const store = useMosaicaStore({viewerUrl: 'http://localhost:8080', token});
+ *   const status = useProjection(store, 'status');
+ *   return (
+ *     <>
+ *       <MosaicaMap store={store} />
+ *       <p>{status?.status}</p>
+ *     </>
+ *   );
+ * }
+ * ```
  *
  * @module @mosaicajs/react
  */
 import {useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {createStore, type ProjectionName, type Projections, type Store, type StoreOptions, type TokenSupplier} from '@mosaicajs/client';
 
-/** The options of {@link useMosaicaStore}: the options of {@link createStore}, with `authorise` read through a ref. */
+/** The options of {@link useMosaicaStore}, which are those of {@link createStore}. */
 export type UseMosaicaStoreOptions = Omit<StoreOptions, 'authorise'> & {
   /**
-   * A function the store calls for a new token before the current one expires. The hook reads it
-   * through a ref, so an inline function neither rebuilds the store nor goes stale. A store serves
-   * one viewer: to show another, call `clear()` on the store or give the component a new `key`.
+   * A function that returns a viewer token, which the store calls at the start and before each
+   * token expires. An inline function is fine: the hook calls the latest one and does not create a
+   * new store when it changes. A store serves one viewer. To show the map to another, call the
+   * store's `clear()` or give the component a new `key`.
    */
   authorise?: TokenSupplier;
 };
 
 /**
- * Creates a store with {@link createStore} for the component's lifetime, and disposes of it on
- * unmount. The store is rebuilt when `viewerUrl`, `client`, `token` or `view` changes, or when
- * `authorise` is given or removed. A change to any other option takes effect at the next rebuild.
- * With a `client`, `viewerUrl` may be left out, as `createStore` allows. Keep the `client` the
- * same object across renders, such as with `useMemo`: a new client each render rebuilds the store
- * each render.
+ * Creates a store with {@link createStore} for the lifetime of the component, and disposes of it on
+ * unmount. The store is created in an effect, so the first render returns `null`.
  *
- * The store is built in an effect, so the first render returns `null`. Options `createStore`
- * refuses, such as neither `viewerUrl` nor `client`, throw from that effect.
+ * The store is created again when `viewerUrl`, `client`, `token` or `view` changes, or when
+ * `authorise` is added or removed. Other options take effect the next time it is created. If you
+ * pass a `client`, keep it the same object across renders, for example with `useMemo`, or every
+ * render creates a new store. Options that `createStore` refuses, such as neither `viewerUrl` nor
+ * `client`, throw from the effect.
  */
 export function useMosaicaStore(options: UseMosaicaStoreOptions): Store | null {
   const [store, setStore] = useState<Store | null>(null);
@@ -57,12 +78,12 @@ const noop = () => {};
 const unsubscribed = () => noop;
 
 /**
- * Reads one projection of `store` through `useSyncExternalStore`, and re-renders the component
- * when that projection is replaced. A change to another projection does not re-render it.
+ * Returns one of the store's projections, and re-renders the component whenever that projection
+ * changes. Changes to other projections do not re-render it.
  *
  * @param store - The store, such as the one {@link useMosaicaStore} returns.
  * @param name - The projection to read, such as `marks` or `legend`.
- * @returns The projection, or `null` while `store` is `null`.
+ * @returns The projection, or `null` while `store` is `null`, as it is on the first render.
  */
 export function useProjection<K extends ProjectionName>(store: Store, name: K): Projections[K];
 export function useProjection<K extends ProjectionName>(store: Store | null, name: K): Projections[K] | null;
