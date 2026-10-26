@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The TypeScript half of the gate: typecheck every package and the operator scripts, build the four
-# library packages and import each from `dist/` in Node, run the unit suites, run core's live test
+# The TypeScript half of the gate: build the four library packages and import each from `dist/` in
+# Node, typecheck every package and the operator scripts, run the unit suites, run core's live test
 # against a real `mosaica serve`, then the components' browser suite in headless Chromium, which
 # also decodes through the built worker and renders the built elements, and last the two
 # tutorial examples' pages, getting-started and own-ui, each served by Vite over an open Mosaica
@@ -33,12 +33,13 @@ if [ ! -d clients/ts/node_modules ]; then
   exit 1
 fi
 
-echo "check-clients: typechecking every package and the operator scripts"
-npm --prefix clients/ts run typecheck --silent
-
 echo "check-clients: building the packages and importing each from dist/"
 npm --prefix clients/ts run build --silent
 node clients/ts/scripts/smoke-dist.mjs
+
+# After the build: the tutorial examples resolve the packages as a user's project does, from dist/.
+echo "check-clients: typechecking every package and the operator scripts"
+npm --prefix clients/ts run typecheck --silent
 
 echo "check-clients: running the client test suites"
 npm --prefix clients/ts test --silent
