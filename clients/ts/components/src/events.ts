@@ -46,8 +46,8 @@ export type MosaicaEventDetails = {
   'mosaica-artifactfit': {id: string};
   /**
    * The selected region changed. `shape` is the new shape in data coordinates, or null if the
-   * selection was cleared. It fires with `status` `loading` when a shape is selected, or `cleared`,
-   * and again with `shown` or `refused` when the server answers. Then `visible`, `matched` and
+   * selection was cleared. It fires with `status` `loading` when a shape is selected or `cleared`
+   * when it is cleared, then again with `shown` or `refused` when the server answers. Then `visible`, `matched` and
    * `served` carry the region's counts, and `verdict` says whether they are exact for the shape.
    */
   'mosaica-selectchange': {
@@ -97,8 +97,9 @@ export type MosaicaEventDetails = {
   'mosaica-clusterpalettechange': {palette: PaletteName};
   /**
    * A display setting changed in the explorer's Layers popover. The detail holds every setting as it
-   * now stands, named as the map's attributes are. `radius`, `pointOpacity` and `densityColours`
-   * are null while the map chooses them itself.
+   * now stands. `points` is the opposite of the map's `noPoints`; the other fields match the map's
+   * properties of the same name. `radius`, `pointOpacity` and `densityColours` are null while the
+   * map chooses them itself.
    */
   'mosaica-displaychange': {
     points: boolean;
@@ -115,6 +116,7 @@ export type MosaicaEventDetails = {
    * all and for clearing the highlight. `verb` is `filter` or `highlight` (`filter` if absent).
    * After an edit, `expr` is the combined expression of every control's clause for that `verb`, or
    * null if there are none. When a chip is removed, or Clear all is pressed, `expr` is null.
+   * `member_of` clauses are reported by `mosaica-clausechange`.
    */
   'mosaica-filterchange': {column: string | null; expr?: FilterExpr | null; verb?: ClauseVerb};
   /** A column's chip was pressed in a filter panel with `chips-only`, so you can show its card. `verb` is `filter` or `highlight`. */

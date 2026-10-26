@@ -21,9 +21,9 @@ const TYPING_DEBOUNCE_MS = 350;
 const BAR_FLOOR = 2;
 
 /**
- * Use `<mosaica-filter>` for a search box that filters the map by one column. Field cards use it,
- * and you can place one on its own. Set `column` to a column `meta.filterOperands` lists, and the
- * box takes the form that column's kind needs:
+ * Place `<mosaica-filter>` on its own when you want a search box for one column without a field
+ * card; the field cards for text, keyword and category columns already have one. Set `column` to a
+ * column `meta.filterOperands` lists, and the box takes the form that column's kind needs:
  *
  * - A text column takes words, all of which must appear. Put words in double quotes for a phrase,
  *   if the column supports phrases, and `OR` between terms to match either. A text filter the box

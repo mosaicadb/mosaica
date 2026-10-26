@@ -16,8 +16,8 @@ import './count.js';
  * While the view is up to date, the first cell is a dot alone. Otherwise it names the state in a few
  * words, such as Reconnecting, Server busy, View refused or Session expired, with a button if there
  * is something to do: Refresh when the data has changed, Retry after a refusal, no answer or a
- * busy server, and Sign in when the session expires and `reauthorise` is set. The counts grey out while they
- * are out of date.
+ * busy server, and Sign in when the session expires and `reauthorise` is set. The counts grey out
+ * while they are out of date.
  *
  * `compact` shortens the figures and drops the shown count, and `expanded` adds a card of the
  * figures below the strip. The state cell is an `aria-live` region, so screen readers announce a

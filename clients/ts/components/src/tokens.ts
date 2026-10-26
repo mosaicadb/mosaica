@@ -3,8 +3,8 @@ import {css} from 'lit';
 /**
  * The theme every element shares, as a Lit `CSSResult`. Add it to your own Lit element's `styles`
  * to use the same tokens. The elements take every colour and font, the corner radii, the shadow,
- * the map's height and the spacing of the map's corners from these `--mosaica-*` custom
- * properties; other spacing is fixed. Set a token on an element or any ancestor, including an
+ * the map's height and the spacing of the map's corners from the `--mosaica-*` custom properties
+ * that the components reference lists under Theme tokens; other spacing is fixed. Set a token on an element or any ancestor, including an
  * enclosing `<mosaica-explorer>`, to override its default. Each colour has a light and a dark
  * default, chosen by the page's `color-scheme`.
  *

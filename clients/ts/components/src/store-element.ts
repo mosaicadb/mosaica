@@ -6,8 +6,8 @@ import {storeContext} from './context.js';
 import {attachContextRoot, defineOnce} from './define.js';
 
 /**
- * Use `<mosaica-store>` to share one store among elements you lay out yourself, such as a map, a
- * filter panel and an item card. The elements inside it find the store through context. For two
+ * Use `<mosaica-store>` when you lay out the elements yourself instead of using
+ * `<mosaica-explorer>`. Wrap a map, a filter panel and an item card in it, and they share one store. The elements inside it find the store through context. For two
  * maps of different views side by side, use two `<mosaica-store>` elements. `<mosaica-explorer>`
  * provides its own store and does not need one.
  *

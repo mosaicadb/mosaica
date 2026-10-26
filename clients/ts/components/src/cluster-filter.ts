@@ -29,9 +29,9 @@ const PATH_DEPTH = 3;
 type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
 
 /**
- * Use `<mosaica-cluster-filter>` for a search box that filters the map by a layer's clusters. A
- * layer's field card uses it, and you can place one on its own. Set `layer` to a layer
- * `meta.layers` lists.
+ * Place `<mosaica-cluster-filter>` on its own when you want cluster search without a field card;
+ * each layer's field card already has one. It filters the map by a layer's clusters. Set `layer`
+ * to a layer `meta.layers` lists.
  *
  * With the box empty, the list offers the layer's top-level clusters, largest first. Typing
  * searches the cluster names at every level, and each match shows the names of its nearest

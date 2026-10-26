@@ -8,9 +8,9 @@ import {switchView} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * Use `<mosaica-key-picker>` to step through the views in the current view's group. It shows a
- * select over the group's views in the order they were created, each with its label and key, and
- * previous and next buttons. It shows nothing if the current view is in no group.
+ * Use `<mosaica-key-picker>` when a view group's views follow one another, such as one view per
+ * year, and viewers should step between them. It shows a select over the group's views in the
+ * order they were created, each with its label and key, and previous and next buttons. It shows nothing if the current view is in no group.
  *
  * @summary Steps through the views in the current view's group.
  * @tagname mosaica-key-picker

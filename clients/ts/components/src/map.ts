@@ -112,7 +112,7 @@ let mapsMade = 0;
  *
  * The map owns the camera and tells its store where it is looking as the camera moves. When the
  * map first gets a store, and when the view switches to one with a different extent, it frames the
- * items the filters match, as {@link MosaicaMap.fit} does. It does not move a camera that the user
+ * items the filters match, as `fit()` does. It does not move a camera that the user
  * or your code has already moved, and a change of filter never moves the camera.
  *
  * The toolbar switches between pan, box select and lasso select, and has a button that fits the
@@ -126,7 +126,8 @@ let mapsMade = 0;
  * reached or is too busy, the map says so over the canvas, with the server's reason for a refusal.
  *
  * The canvas is a single tab stop with `role="application"`. A `tabindex` or `aria-label` you set
- * on the map is applied to the canvas, and `focus()` focuses it. The map's height comes from
+ * on the map is applied to the canvas, and `focus()` focuses it. Without an `aria-label`, the canvas
+ * is labelled with its keys: "map: arrow keys pan, + and - zoom". The map's height comes from
  * `--mosaica-map-height`. A map removed from the page releases its GPU resources a quarter of a
  * second later unless it is put back.
  *
@@ -150,7 +151,7 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved onto
  *   or over a point.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An
- *   artifact was opened and its drill-down arrived.
+ *   artifact was opened and its details arrived.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - A
  *   selection was drawn or cleared (`status` `loading` or `cleared`), and again when its counts
  *   arrive.
@@ -469,15 +470,15 @@ export class MosaicaMap extends MosaicaElement {
   @property({type: Number, attribute: 'point-opacity'}) accessor pointOpacity: number | null = null;
   /**
    * How density is drawn under the points: `none`, `smooth` (a soft wash), `hex` (hexagons),
-   * `grid` (square cells) or `contours` (lines of equal density). Density comes from exact counts
-   * by the server, not from the points drawn, which are a sample. It counts the highlighted items
-   * if there is a highlight, otherwise the items the filters and selection match.
+   * `grid` (square cells) or `contours` (lines of equal density). Density is counted by the server
+   * over every matching item, so it covers more than the sampled points drawn. It counts the
+   * highlighted items if there is a highlight, otherwise the items the filters and selection match.
    */
   @property({reflect: true}) accessor density: DensityMode = 'none';
   /**
    * The size of density's cells on screen, in CSS pixels: 32, 24, 16, 12, 8, 6 or 4. Other values
    * are rounded to the nearest of these. If the server's `selection.maxAggregateCells` does not
-   * allow that many cells, the finest size that fits is drawn; {@link MosaicaMap.densityStops} says
+   * allow that many cells, the finest size that fits is drawn; `densityStops()` says
    * which sizes fit.
    */
   @property({type: Number, attribute: 'density-resolution'}) accessor densityResolution = DEFAULT_DENSITY_CELL_PX;
@@ -544,12 +545,14 @@ export class MosaicaMap extends MosaicaElement {
    */
   @property({attribute: 'size-by'}) accessor sizeBy = '';
   /**
-   * The radius in pixels of the smallest value under `size-by`. It must be above zero. Unset, the
+   * The radius in pixels of the smallest value under `size-by`. A value that is not above zero is
+   * ignored. Unset, the
    * current choice stands, which starts at 2.
    */
   @property({type: Number, attribute: 'size-min'}) accessor sizeMin: number | null = null;
   /**
-   * The radius in pixels of the largest value under `size-by`. It must be above zero. Unset, the
+   * The radius in pixels of the largest value under `size-by`. A value that is not above zero is
+   * ignored. Unset, the
    * current choice stands, which starts at 9.
    */
   @property({type: Number, attribute: 'size-max'}) accessor sizeMax: number | null = null;
@@ -585,7 +588,7 @@ export class MosaicaMap extends MosaicaElement {
   /**
    * What the last click picked, an item or an artifact, and where in world coordinates: the point's
    * position, or where the click landed on an artifact. `null` before a pick, after a miss and after
-   * a switch of view. Pass `world` to {@link MosaicaMap.screenOf} to place a card beside it.
+   * a switch of view. Pass `world` to `screenOf()` to place a card beside it.
    */
   pickedAt: {kind: 'item' | 'artifact'; id: bigint; world: [number, number]} | null = null;
   /** The map's probe, one object mutated in place, for instruments and tests. @internal */
@@ -1607,7 +1610,10 @@ export class MosaicaMap extends MosaicaElement {
     return true;
   }
 
-  /** Fit the camera to an artifact's bounding box. Returns false if the store has not been served that artifact. */
+  /**
+   * Fit the camera to an artifact's bounding box. Returns false if the artifact is not among those
+   * currently drawn (`artifacts.served`) or has no box.
+   */
   fitTo(artifactId: bigint): boolean {
     const extent = this.resolvedStore?.extentOf(artifactId);
     if (!extent) return false;

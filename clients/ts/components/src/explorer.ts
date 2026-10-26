@@ -117,7 +117,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 
 /**
  * Use `<mosaica-explorer>` to put a complete map application on a page with one element. It holds
- * a `<mosaica-map>` with a heading, the filter panel, a Layers popover, the status strip, and cards
+ * a heading, a `<mosaica-map>`, the filter panel, a Layers popover, the status strip, and cards
  * for the picked item or cluster and the selected region. To change one region, put your own
  * element in its slot; for a different arrangement, lay out the separate elements yourself.
  *
@@ -166,7 +166,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-basemapchange']>} mosaica-basemapchange - The map's basemap refusal or note changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click on the map found nothing. The explorer closes the unpinned card.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved over a point.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An artifact was opened and its drill-down arrived.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An artifact was opened and its details arrived.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - A selection was drawn, changed or cleared, or its counts arrived.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - The layers chosen changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-colourchange']>} mosaica-colourchange - Colour by changed, in the Layers popover or by a card's paint button.
@@ -251,7 +251,8 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  *   drawn in colours.
  * @csspart density-strength - The Strength slider, while density is drawn.
  * @csspart detail - The item or artifact card in the map's top-right corner, used when the picked
- *   item has no position on the map, such as after switching views.
+ *   item or artifact has no position on the map, such as after following an item into another
+ *   view.
  * @csspart sheet - The open sheet, in the narrow layout.
  * @csspart strip-row - The full-width status strip, in the narrow layout.
  * @csspart tabs - The tab bar, in the narrow layout.

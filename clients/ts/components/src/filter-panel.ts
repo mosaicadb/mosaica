@@ -47,7 +47,7 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * The panel lists a card for each field in `pinned`, each field that holds a filter or highlight,
  * the field the map is coloured by, and each field the viewer added. Add field lists every
  * filterable column and layer, with a search box, to add a card or take one off. Taking a card off
- * clears its field's filters. A new card joins the end of the list, so the cards already shown do
+ * clears its field's filters and highlights. A new card joins the end of the list, so the cards already shown do
  * not move.
  *
  * `compact` keeps one card open at a time. `chips-only` shows only the chips, for placing them
@@ -57,8 +57,9 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * @tagname mosaica-filter-panel
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A
- *   column's chip was removed, Clear all was pressed, or the highlight was cleared from the subject
- *   row. Removing a `member_of` chip fires nothing. Each card fires its own as well.
+ *   column's chip was removed, Clear all was pressed, the highlight was cleared from the subject
+ *   row, or a card was taken off in Add field. Removing a `member_of` chip fires nothing. Each card
+ *   fires its own as well.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-chipopen']>} mosaica-chipopen - A column's chip
  *   was pressed while `chips-only` is set, so you can show its card.
  * @csspart state - The state line, with `data-state`.

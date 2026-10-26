@@ -10,8 +10,8 @@ import {chrome, tokens} from './tokens.js';
 /**
  * Use `<mosaica-view-picker>` to let viewers switch between the views they may see. It is a select
  * showing the current view's title, with an entry for each view and each view group, in the order
- * `/v1/meta` lists them. Choosing a group opens the view in it with the current view's key, if it
- * has one, else the view last chosen in that group, else its first view. It shows nothing if there
+ * `/v1/meta` lists them. Choosing a group opens the group's view with the same key as the current
+ * view, if there is one, else the view last chosen in that group, else its first view. It shows nothing if there
  * is only one entry.
  *
  * @summary A menu for switching views.

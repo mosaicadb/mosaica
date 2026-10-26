@@ -18,7 +18,7 @@ import {HeldAggregate} from './aggregate.js';
  * | `unanswered` | The server failed with a `5xx` that is not a Mosaica error, such as a gateway's `504`. |
  * | `busy` | The server is too busy (`429`), even after the store's retries. |
  * | `expired` | The session expired: the token is past its expiry, or the server no longer accepts it. |
- * | `stale` | The panel shows an answer, but the picture is older than the numbers. |
+ * | `stale` | The panel shows an answer, but the data has changed since it was fetched. Refresh fetches it again. |
  *
  * In the `unanswered` and `busy` states the store does not ask again until the viewer presses
  * Retry.

@@ -47,13 +47,16 @@ export abstract class MosaicaElement extends LitElement {
   @property() accessor token = '';
   /**
    * A function that returns a viewer token, used instead of `token` and called again before the
-   * token expires. A different function builds a new store, so keep it stable across renders.
+   * token expires. A different function builds a new store, so keep it stable across renders. Set
+   * it together with `viewer-url`: a store built from `viewer-url` alone first sends a request with
+   * no token, and is replaced when `authorise` arrives.
    */
   @property({attribute: false}) accessor authorise: TokenSupplier | null = null;
   /**
    * The most artifacts one level of a layer shows per map tile, for the store the element builds.
-   * Unset, 50, or the server's `selection.max_artifacts_per_tile` if lower. Read only by the map,
-   * the explorer and `<mosaica-store>`. Changing it builds a new store.
+   * Unset, 50, or the server's `selection.max_artifacts_per_tile` if lower. A value above that
+   * maximum is refused. Read only by the map, the explorer and `<mosaica-store>`. Changing it
+   * builds a new store.
    */
   @property({type: Number, attribute: 'artifacts-per-tile'}) accessor artifactsPerTile: number | null = null;
 
