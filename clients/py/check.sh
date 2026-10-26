@@ -6,7 +6,7 @@
 # `pip install mosaica[widget]` and a widget with no JavaScript in it, and a hook that fails
 # silently (npm absent, a dist path renamed, hatchling dropping the untracked file) produces a wheel
 # that installs cleanly and raises at the first `Map()`. So this builds the wheel and reads its
-# listing. It needs Python >= 3.10, `uv` or `python3 -m venv`, Node for the hook — the same Node
+# listing. It needs Python >= 3.12, `uv` or `python3 -m venv`, Node for the hook — the same Node
 # `check-clients.sh` already needs — and a cargo toolchain for the companion wheel below.
 #
 # The demo notebooks are in the pytest step: `tests/test_sdk_examples.py` executes the cells of
@@ -27,10 +27,15 @@ py=.venv/bin/python
 if [ ! -x "$py" ]; then
   echo "check-python: making clients/py/.venv"
   if command -v uv >/dev/null 2>&1; then
-    uv venv -q .venv
+    uv venv -q --python '>=3.12' .venv
   else
     python3 -m venv .venv
   fi
+fi
+if ! "$py" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
+  echo "check-python: clients/py/.venv is $("$py" -V), and mosaica needs Python 3.12 or later." >&2
+  echo "  Remove clients/py/.venv and re-run with a Python 3.12 or later as python3, or with uv." >&2
+  exit 1
 fi
 
 install() {

@@ -38,8 +38,8 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-# `abi3-py310` in mosaica-python's Cargo.toml: one object serves every Python from 3.10 up.
-ABI_TAG = "cp310-abi3"
+# `abi3-py312` in mosaica-python's Cargo.toml: one object serves every Python from 3.12 up.
+ABI_TAG = "cp312-abi3"
 
 
 def is_macos(target: str | None) -> bool:

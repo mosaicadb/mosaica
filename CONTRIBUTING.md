@@ -7,7 +7,7 @@ checks a change must pass, and how to propose the change.
 
 - Rust stable (`rust-toolchain.toml` names the channel).
 - Node 22.15 or later, for the TypeScript packages and the Python wheel's build hook.
-- Python 3.10 or later, with `uv` or `venv`.
+- Python 3.12 or later, with `uv` or `venv`.
 - Tens of gigabytes of free disc for a full test build. A build without debug info is much
   smaller: set `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`.
 

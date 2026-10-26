@@ -35,7 +35,7 @@ def _(mo):
     the data holds, inserting rows, and committing them. You'll also see what each declaration
     costs and what it buys.
 
-    It takes about ten minutes. You need Python 3.10 or later and a clone of the Mosaica
+    It takes about ten minutes. You need Python 3.12 or later and a clone of the Mosaica
     repository, which holds the data.
 
     1. Install the `mosaica` package.

@@ -7,10 +7,16 @@
 # where it is used, from Python.
 #
 # No wheel and no packaging: the object is copied to `_mosaica.so` in a scratch directory and put
-# on `PYTHONPATH`. Needs Python >= 3.10 and a cargo toolchain, nothing else.
+# on `PYTHONPATH`. Needs Python >= 3.12 and a cargo toolchain, nothing else.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
+
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
+  echo "check-python-binding: python3 is $(python3 -V), and the module needs Python 3.12 or later." >&2
+  echo "  Put a Python 3.12 or later first on PATH as python3 and re-run." >&2
+  exit 1
+fi
 
 echo "check-python-binding: building"
 cargo build -p mosaica-python

@@ -23,7 +23,7 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Visualization",
   "Topic :: Scientific/Engineering :: GIS",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 # Two dependencies. pyarrow carries every table the package reads or writes. The companion
 # platform wheel `mosaica-native` carries the `mosaica` binary and the `_mosaica` extension
 # module, so `pip install mosaica` can make and serve a database without a Rust toolchain. It is
@@ -53,12 +53,11 @@ Changelog = "https://github.com/mosaicadb/mosaica/blob/main/CHANGELOG.md"
 widget = ["anywidget>=0.9"]
 # The tests. pandas is here because the tests compute expected answers with it; the package
 # never needs it. marimo and scikit-learn run the demo notebook; nbformat lets marimo export its
-# Jupyter copy.
-# `tomli` reads TOML on Pythons below 3.11, which have no `tomllib`. hatchling is imported by the
-# tests of the wheel's build hook, and ipykernel runs the test of a Jupyter kernel's shutdown.
+# Jupyter copy. hatchling is imported by the tests of the wheel's build hook, and ipykernel runs
+# the test of a Jupyter kernel's shutdown.
 dev = [
   "anywidget>=0.9", "hatchling>=1.27", "ipykernel", "marimo", "nbformat", "pandas", "pytest",
-  "pytest-cov", "ruff", "scikit-learn", "tomli>=2; python_version < '3.11'",
+  "pytest-cov", "ruff", "scikit-learn",
 ]
 
 [tool.hatch.build.targets.wheel]

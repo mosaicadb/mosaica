@@ -13,7 +13,7 @@
 # against a bundle format that refuses it.
 #
 # **One object per platform, not one per Python.** `mosaica-python` builds against the stable ABI
-# (`abi3-py310`), so a platform's wheel is `cp310-abi3` and serves every Python from 3.10 up. That
+# (`abi3-py312`), so a platform's wheel is `cp312-abi3` and serves every Python from 3.12 up. That
 # is why this is cargo and not cibuildwheel: cibuildwheel's value is a matrix over interpreter
 # versions, and there is no such matrix here. Six cargo builds and six `python -m build` calls
 # are the whole job.
