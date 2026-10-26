@@ -4,12 +4,11 @@ Mosaica's Python package: one package whether you want the widget, the SDK or
 both. It needs Python 3.12 or later.
 
 ```
-pip install --pre 'mosaica[widget]'
+pip install 'mosaica[widget]'
 ```
 
-`--pre` is needed until 0.1.0, because only release candidates are published. On Linux or macOS on
-x86_64 or ARM64 (a `platform_machine` of `x86_64`, `aarch64` or `arm64`), `mosaica` depends on
-`mosaica-native` at exactly its own version. That companion wheel carries the `mosaica` binary,
+On Linux or macOS on x86_64 or ARM64 (a `platform_machine` of `x86_64`, `aarch64` or `arm64`),
+`mosaica` depends on `mosaica-native` at exactly its own version. That companion wheel carries the `mosaica` binary,
 which pip puts on `PATH`, and the `_mosaica` extension module. Its wheels are built for Linux on
 x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and
 macOS 10.12 or later on x86_64. On a machine the marker leaves out, Windows included, `mosaica`
@@ -18,7 +17,7 @@ installs without it. It still connects to a running server; making or serving a 
 without anywidget and the map.
 
 Every table the package returns is a pyarrow table; `.to_pandas()` on it gives a DataFrame where
-pandas is installed. `pip install --pre --no-deps mosaica` installs neither pyarrow nor
+pandas is installed. `pip install --no-deps mosaica` installs neither pyarrow nor
 `mosaica-native`: install `pyarrow>=14.0.1` by hand, and put a `mosaica` binary on `PATH` or name
 it with `MOSAICA_BIN` to make or serve a database.
 

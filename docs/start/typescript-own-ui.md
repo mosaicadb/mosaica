@@ -72,7 +72,7 @@ Make the web project as before, and install the elements and the client they are
 cd ~/papers
 npm create vite@latest web -- --template vanilla-ts --no-interactive
 cd web
-npm install @mosaicajs/components@next @mosaicajs/client@next
+npm install @mosaicajs/components @mosaicajs/client
 rm -r src/counter.ts src/assets public/icons.svg
 ```
 

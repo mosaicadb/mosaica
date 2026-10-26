@@ -14,7 +14,7 @@ The TypeScript client puts a Mosaica map in a web page. It is four packages buil
 
 Each page lists what its package exports, and every name on it is imported from that package, as in `import {createStore} from '@mosaicajs/client'`. The `/internal` entries of `@mosaicajs/client` and `@mosaicajs/deck` are shared between the packages and are not a public API.
 
-The packages are on npm. Until Mosaica's first full release, install them by the `next` tag, as in `npm install @mosaicajs/client@next`; [Install a client](../start/install.md#install-a-client) says which package to start from. Each package's peer dependencies are below. npm 7 and later installs the required ones itself and leaves the optional ones to the host.
+Install the packages from npm, as in `npm install @mosaicajs/client`. [Install a client](../start/install.md#install-a-client) says which package to start from. npm 7 and later installs the required peer dependencies below itself, and leaves the optional ones to the host.
 
 | Package | Peer dependencies |
 |---|---|

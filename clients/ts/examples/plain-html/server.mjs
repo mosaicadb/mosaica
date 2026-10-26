@@ -5,8 +5,9 @@
 //
 //   node server.mjs            # http://localhost:5180, against the demo's servers
 //
-// It also serves the page and the self-contained bundle, and proxies `/v1/*` to the viewer server
-// on the same origin with every response header, including those the client's replica is keyed by.
+// It also serves the page and the self-contained bundle from the installed `@mosaicajs/components`,
+// and proxies `/v1/*` to the viewer server on the same origin with every response header, including
+// those the client's replica is keyed by.
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {Readable} from 'node:stream';
@@ -80,7 +81,7 @@ export function createHandler(cfg) {
   };
   /** @param {import('node:http').ServerResponse} res */
   const unbuilt = (res) =>
-    json(res, 503, {error: `${join(cfg.bundleDir, 'mosaica-components.js')} is not built; run: npm run bundle -w @mosaicajs/components`});
+    json(res, 503, {error: `${join(cfg.bundleDir, 'mosaica-components.js')} is missing; install the package with \`npm install @mosaicajs/components\`, or in a checkout of Mosaica run \`npm run bundle -w @mosaicajs/components\``});
   /** @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res */
   return async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -133,7 +134,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     viewerUrl: process.env.MOSAICA_VIEWER_URL ?? 'http://127.0.0.1:37585',
     apiKey,
     users,
-    bundleDir: join(here, '..', '..', 'components', 'dist')
+    bundleDir: dirname(fileURLToPath(import.meta.resolve('@mosaicajs/components/mosaica-components.js')))
   });
   const port = Number(process.env.PORT ?? 5180);
   createServer((req, res) => void handler(req, res)).listen(port, () => console.log(`plain-html example on http://localhost:${port}`));

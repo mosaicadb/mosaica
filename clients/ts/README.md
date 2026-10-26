@@ -20,7 +20,7 @@ The packages depend on each other in one line: `components` on `deck`, and both 
 
 `deck` and `components` also import `@mosaicajs/client/internal`, and `components` imports `@mosaicajs/deck/internal`. These entries hold what those packages share and a host does not use. They are not a public API and change without notice, so the packages that use them depend on an exact version of the package they import from.
 
-The four `@mosaicajs` packages are published to npm. Until 0.1.0 a release goes out under the `next` dist-tag, and `latest` still points at an empty 0.0.0 placeholder, so `npm install @mosaicajs/client` installs no Mosaica code and `npm install @mosaicajs/client@next` installs the newest release candidate. [Install a client](../../docs/start/install.md#install-a-client) is the user's install, and the [TypeScript client reference](../../docs/reference/typescript.md) lists each package's peer dependencies.
+The four `@mosaicajs` packages are published to npm. [Install a client](../../docs/start/install.md#install-a-client) is the user's install, and the [TypeScript client reference](../../docs/reference/typescript.md) lists each package's peer dependencies.
 
 ## Building
 

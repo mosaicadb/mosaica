@@ -1,17 +1,34 @@
 # Install and configure
 
-This page shows how to install Mosaica as a standalone database and configure it. Once it is running, you can reach it over its HTTP API, with the `mosaica` command line, or from the TypeScript and Python clients.
+Your programs reach a Mosaica database over its HTTP API, with the `mosaica` command line, or from the TypeScript and Python clients. Install the database first, on a machine of its own or beside your code, and then the client you'll use.
 
-!!! tip "Prototyping in Python"
-    For local prototyping and analysis, you don't need a separate database. The Python client can run one itself, privately, for your notebook or script. [Your first map in Python](python.md) shows how.
+!!! tip "Working in Python"
+    For prototyping and analysis in a notebook or script, you can skip the database install. On Linux and macOS the Python client brings `mosaica` with it and can run a private database of its own, as [Install a client](#install-a-client) and [Your first map in Python](python.md) show.
 
 ## Install Mosaica
 
-Download the archive for your machine from the [releases page](https://github.com/mosaicadb/mosaica/releases). Each archive holds the `mosaica` program, which creates databases and runs them, beside its licence and changelog. Unpack it and copy `mosaica` onto your `PATH`. On Linux on x86_64, for instance:
+Each release has an archive for each platform Mosaica runs on, named after the platform's target. Find the target for your machine:
+
+| Platform | Target |
+|---|---|
+| Linux on x86_64, glibc 2.28 or later | `x86_64-unknown-linux-gnu` |
+| Linux on x86_64, musl 1.2 or later, as on Alpine | `x86_64-unknown-linux-musl` |
+| Linux on aarch64, glibc 2.28 or later | `aarch64-unknown-linux-gnu` |
+| Linux on aarch64, musl 1.2 or later | `aarch64-unknown-linux-musl` |
+| macOS 11 or later on Apple silicon | `aarch64-apple-darwin` |
+| macOS 10.12 or later on Intel | `x86_64-apple-darwin` |
+
+Then download the newest archive for that target with curl, unpack it and put `mosaica` on your `PATH`. For Linux on x86_64:
 
 ```bash
-tar xzf mosaica-*-x86_64-unknown-linux-gnu.tar.gz
-sudo install -m 0755 mosaica-*-x86_64-unknown-linux-gnu/mosaica /usr/local/bin/mosaica
+curl -LO https://github.com/mosaicadb/mosaica/releases/latest/download/mosaica-x86_64-unknown-linux-gnu.tar.gz
+tar xzf mosaica-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 0755 mosaica-x86_64-unknown-linux-gnu/mosaica /usr/local/bin/mosaica
+```
+
+Check that it runs:
+
+```bash
 mosaica --version
 ```
 
@@ -19,36 +36,25 @@ mosaica --version
 mosaica 0.1.0-rc.4 (135216816)
 ```
 
-The version is the release you installed, and the number in brackets is the commit it was built from. The archive's name ends in the platform it is built for:
-
-| Platform | Archive name ends in |
-|---|---|
-| Linux on x86_64, glibc 2.28 or later | `x86_64-unknown-linux-gnu.tar.gz` |
-| Linux on x86_64, musl 1.2 or later, as on Alpine | `x86_64-unknown-linux-musl.tar.gz` |
-| Linux on aarch64, glibc 2.28 or later | `aarch64-unknown-linux-gnu.tar.gz` |
-| Linux on aarch64, musl 1.2 or later | `aarch64-unknown-linux-musl.tar.gz` |
-| macOS 11 or later on Apple silicon | `aarch64-apple-darwin.tar.gz` |
-| macOS 10.12 or later on Intel | `x86_64-apple-darwin.tar.gz` |
+That's the version you installed, with the commit it was built from in brackets. Beside `mosaica`, the archive holds `README.md`, `CHANGELOG.md`, `LICENSE` and `THIRD_PARTY_LICENSES`. Every release, with its archives, is on the [releases page](https://github.com/mosaicadb/mosaica/releases).
 
 ??? info "Checking the download"
     `SHA256SUMS`, on the same release, lists the SHA-256 digest of every archive. Download it beside the archive and check the archive against it:
 
     ```bash
+    curl -LO https://github.com/mosaicadb/mosaica/releases/latest/download/SHA256SUMS
     sha256sum -c SHA256SUMS --ignore-missing
-    ```
-
-    ```
-    ./mosaica-0.1.0-rc.4-x86_64-unknown-linux-gnu.tar.gz: OK
     ```
 
     On macOS, `shasum -a 256 mosaica-*.tar.gz` prints the digest to compare with the archive's line in `SHA256SUMS`.
 
-To run a database as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md). The Docker guide uses Mosaica's published image, `ghcr.io/mosaicadb/mosaica`, in place of an archive.
+??? info "Downloading with a browser on macOS"
+    curl downloads the archive without the quarantine attribute a browser adds. If macOS blocks a `mosaica` you downloaded with a browser, remove the attribute with `xattr -d com.apple.quarantine ./mosaica`.
 
-If you'll use Mosaica from Python, you can skip the archive: on Linux and macOS the Python client installs `mosaica` with it, as [Install a client](#install-a-client) shows.
+To run the database as a service, follow [Run Mosaica under systemd](../guides/systemd.md), or [Run Mosaica with Docker](../guides/docker.md), which uses Mosaica's published image in place of an archive.
 
 ??? info "Building from source"
-    To work on Mosaica, or to run a build of your own, compile it with cargo. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu), which builds the C libraries Mosaica links in.
+    To work on Mosaica, or to run a build of your own, compile it with cargo. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu), which builds the C libraries Mosaica links in. If you have already cloned the repository to `~/mosaica`, run `git pull` in it instead of cloning.
 
     ```bash
     git clone https://github.com/mosaicadb/mosaica ~/mosaica
@@ -56,43 +62,49 @@ If you'll use Mosaica from Python, you can skip the archive: on Linux and macOS 
     cargo install --locked --path crates/mosaica-cli
     ```
 
-    Cargo puts `mosaica` in `~/.cargo/bin`. The crates are on crates.io too, and `cargo install --locked mosaica --version` followed by a version from the releases page builds that release.
+    Cargo puts `mosaica` in `~/.cargo/bin`. The crates are on crates.io too. To build a release from there, write its version without the leading `v`:
 
-!!! note "Pre-releases"
-    Mosaica has published release candidates only, so each install names the pre-release explicitly. pip needs `--pre`, npm needs the `@next` tag, `cargo install` needs `--version`, and the Docker image has a tag for each version but no `latest`. From the first full release, the plain commands install it.
+    ```bash
+    cargo install --locked mosaica --version VERSION
+    ```
+
+!!! note "Release candidates"
+    Every release so far is a release candidate. cargo builds one only when `--version` names it, so the crates.io install above names the version. The Docker guide uses the image's `next` tag, which follows every release. Once there is a full release, `cargo install --locked mosaica` builds the newest one without `--version`, and the image's `latest` tag follows full releases.
 
 ## Platforms
 
+The archives above cover the platforms `mosaica` runs on. There is no Windows build. The test suite runs on Linux on x86_64.
+
 | Part | Runs on |
 |---|---|
-| `mosaica`, the database and command line | Linux on x86_64 and aarch64, with glibc 2.28 or later or musl 1.2 or later; macOS 11 or later on Apple silicon; macOS 10.12 or later on Intel. There is no Windows build. |
 | The Docker image | `linux/amd64` and `linux/arm64` |
-| The Python client | Python 3.12 or later. On the platforms above it includes `mosaica`, so it can make and serve a database. Elsewhere, Windows included, it installs without it and connects to a database running on another machine. |
+| The Python client | Python 3.12 or later, anywhere. It includes `mosaica` on the platforms in the [table of targets](#install-mosaica), so it can make and serve a database there. Elsewhere, Windows included, it connects to a database running on another machine. |
 | The TypeScript client | Browsers, from an npm project |
-
-The tests run on Linux on x86_64.
 
 ## Install a client
 
 === "Python"
 
-    You'll need Python 3.12 or later.
+    You'll need Python 3.12 or later. Make a virtual environment for the client, then install it:
 
     ```bash
-    pip install --pre 'mosaica[widget]'
+    python3 -m venv .venv && . .venv/bin/activate
+    pip install 'mosaica[widget]'
     ```
 
-    This installs two packages from PyPI: `mosaica`, the client, and `mosaica-native`, which carries the `mosaica` program and puts it on your `PATH`. The client uses it when it runs a database of its own. The `widget` extra adds the map for Jupyter and marimo notebooks; leave it out if you only read and write data. Every table the client returns is a pyarrow table.
+    You get two packages from PyPI. `mosaica` is the client. `mosaica-native` carries the `mosaica` program, which the client runs when it makes a database of its own, and puts it on your `PATH`. The `widget` extra adds the map for Jupyter and marimo notebooks. Leave it out if you only read and write data.
+
+    On Linux with a glibc older than 2.28, there is no `mosaica-native` for your machine. Install the client with `pip install --no-deps mosaica`, then `pip install pyarrow`, and `anywidget` for the map. The client then connects to a database running elsewhere.
 
 === "TypeScript"
 
     You'll need Node.js 22.15 or later. In your project, install the elements:
 
     ```bash
-    npm install @mosaicajs/components@next
+    npm install @mosaicajs/components
     ```
 
-    That brings `@mosaicajs/client` and `@mosaicajs/deck` with it, and the Lit and deck.gl packages they draw with. A page that draws the map itself needs only `@mosaicajs/client`, and a React app adds `@mosaicajs/react`. The [TypeScript client reference](../reference/typescript.md) says what each package holds.
+    npm installs `@mosaicajs/client` and `@mosaicajs/deck` with them, and the Lit and deck.gl packages they draw with. A page that draws the map itself needs only `@mosaicajs/client`, and a React app adds `@mosaicajs/react`. The [TypeScript client reference](../reference/typescript.md) says what each package holds.
 
 ## Configure
 
@@ -120,7 +132,7 @@ flowchart LR
 
 ## Try it
 
-The repository has 150,000 GeoNames places in `examples/data/geonames`. Clone it, and make a directory beside the clone:
+The repository has 150,000 GeoNames places in `examples/data/geonames`. Clone it, and make a directory beside the clone. If you have already cloned it to `~/mosaica`, skip the `git clone`.
 
 ```bash
 git clone https://github.com/mosaicadb/mosaica ~/mosaica

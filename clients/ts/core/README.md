@@ -5,7 +5,7 @@ The browser client for [Mosaica](https://github.com/mosaicadb/mosaica), which se
 This package is the headless part: a store that asks a Mosaica server for the map tiles, counts, filters and items the host's camera needs, and publishes them for the host to draw. It has no DOM and no renderer. It also holds `MosaicaClient` for the viewer and session routes, `Control` for the operator's control plane, and the bulk records read.
 
 ```bash
-npm install @mosaicajs/client@next
+npm install @mosaicajs/client
 ```
 
 ```ts

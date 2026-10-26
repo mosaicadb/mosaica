@@ -13,6 +13,6 @@ both by default. An unsupported platform installs `mosaica` pure Python, and so 
 The version is pinned exactly. A bundle format change refuses a stale bundle, so the binary and
 the SDK move together.
 
-`pip install --pre mosaica` installs it from PyPI. To build it yourself, install it from a checkout
+`pip install mosaica` installs it from PyPI. To build it yourself, install it from a checkout
 of the repository, where `clients/py-native` sits beside the Rust workspace; a cargo toolchain is
 the only thing needed beyond Python.

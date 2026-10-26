@@ -31,7 +31,7 @@ The `mosaica-*` elements are web components that put a Mosaica map and its contr
 
 `import '@mosaicajs/components'` defines every element. To load fewer, import an element's own entry, such as `import '@mosaicajs/components/map'`, which defines that element and the ones it renders. The map, the explorer, the field card, the filter panel and the colour editor depend on deck.gl through `@mosaicajs/deck`; the other elements do not. `@deck.gl/aggregation-layers` is a peer dependency too, loaded only when a map first draws density as contours, so your bundler can put it in a chunk of its own.
 
-For a page with no build step, use the single-file bundle `mosaica-components.js`, which includes Lit, deck.gl and the decode worker. Run `npm run bundle -w @mosaicajs/components` in `clients/ts` to write it to `components/dist/`, with its subresource-integrity hash in `mosaica-components.js.sri`:
+For a page with no build step, use the single-file bundle, which includes Lit, deck.gl and the decode worker. The package ships it as `@mosaicajs/components/mosaica-components.js`, in its `dist/` directory, beside `mosaica-components.js.sri`, which holds its subresource-integrity hash. In a checkout of Mosaica, `npm run bundle -w @mosaicajs/components` in `clients/ts` writes both to `components/dist/`. Serve the bundle with your page, and put the hash in the tag's `integrity` attribute:
 
 ```html
 <script type="module" src="./mosaica-components.js" integrity="sha384-..."></script>

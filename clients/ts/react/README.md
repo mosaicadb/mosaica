@@ -3,7 +3,7 @@
 React bindings for [Mosaica](https://github.com/mosaicadb/mosaica), which serves an interactive map over billions of points from one machine, with every count, cluster and sample computed over what the signed-in viewer may see. `useMosaicaStore` and `useProjection` hold a [`@mosaicajs/client`](https://www.npmjs.com/package/@mosaicajs/client) store in a component. `@mosaicajs/react/components` wraps each `mosaica-*` element of [`@mosaicajs/components`](https://www.npmjs.com/package/@mosaicajs/components) as a React component; it needs `@mosaicajs/components` and `@lit/react`, which the hooks alone do not.
 
 ```bash
-npm install @mosaicajs/react@next @mosaicajs/components@next @lit/react
+npm install @mosaicajs/react @mosaicajs/components @lit/react
 ```
 
 ```tsx

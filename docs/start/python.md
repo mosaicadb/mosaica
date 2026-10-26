@@ -4,14 +4,15 @@ The Python tutorial is available as a Jupyter or marimo notebook in the reposito
 
 ## Run it
 
-You need Python 3.12 or later on Linux or macOS, and a clone of the repository, which holds the notebook and the data. `pip install --pre` installs the newest release candidate of the client, with the `mosaica` program the notebook runs its database with.
+You need Python 3.12 or later on Linux or macOS, and a clone of the repository, which holds the notebook and the data. If you have already cloned it to `~/mosaica`, skip the `git clone`. The commands make a virtual environment in the clone and install the client into it, with the `mosaica` program the notebook runs its database with.
 
 === "Jupyter"
 
     ```bash
     git clone https://github.com/mosaicadb/mosaica ~/mosaica
     cd ~/mosaica
-    pip install --pre 'mosaica[widget]' pandas jupyterlab
+    python3 -m venv .venv && . .venv/bin/activate
+    pip install 'mosaica[widget]' pandas jupyterlab
     jupyter lab clients/py/examples/01_getting_started.ipynb
     ```
 
@@ -20,7 +21,8 @@ You need Python 3.12 or later on Linux or macOS, and a clone of the repository, 
     ```bash
     git clone https://github.com/mosaicadb/mosaica ~/mosaica
     cd ~/mosaica
-    pip install --pre 'mosaica[widget]' pandas marimo
+    python3 -m venv .venv && . .venv/bin/activate
+    pip install 'mosaica[widget]' pandas marimo
     marimo edit clients/py/examples/01_getting_started.py
     ```
 

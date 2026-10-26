@@ -4,7 +4,7 @@ This tutorial is for someone who has never used Mosaica. We'll take the 29,935 p
 for Ireland and put them on a map in your browser, where you can search them by name and filter them
 by kind of place and by population.
 
-This tutorial should take about 30 minutes to complete. You'll need `git`, `curl`, `unzip`,
+This tutorial should take about 30 minutes to complete. You'll need sudo, `git`, `curl`, `unzip`,
 `openssl`, Python 3, Node.js 22.15 or later with npm, and a web browser, on Linux or macOS.
 
 ## What we'll do
@@ -18,8 +18,17 @@ This tutorial should take about 30 minutes to complete. You'll need `git`, `curl
 
 ## Install Mosaica
 
-Install `mosaica` from a release archive, as [Install Mosaica](install.md#install-mosaica) shows,
-then check that it runs.
+Download `mosaica` from Mosaica's latest release, unpack it and put it on your `PATH`. These
+commands are for Linux on x86_64. On another machine, write its target from [the table on the
+install page](install.md#install-mosaica) in place of `x86_64-unknown-linux-gnu`.
+
+```bash
+curl -LO https://github.com/mosaicadb/mosaica/releases/latest/download/mosaica-x86_64-unknown-linux-gnu.tar.gz
+tar xzf mosaica-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 0755 mosaica-x86_64-unknown-linux-gnu/mosaica /usr/local/bin/mosaica
+```
+
+Check that it runs.
 
 ```bash
 mosaica --version
@@ -28,9 +37,6 @@ mosaica --version
 ```
 mosaica 0.1.0-rc.4 (135216816)
 ```
-
-The first part is the release you installed, so yours may be newer. The number in brackets is the
-commit it was built from.
 
 ## Get the data
 
@@ -480,36 +486,33 @@ line is the one to look for. It means all three addresses are open.
 
 ## Open the map
 
-The map itself is drawn by Mosaica's browser components, and the page that shows them is an example
-in the Mosaica repository. Use a second terminal to clone the repository.
+The map is drawn by Mosaica's browser components, on a web page with a small Node server that
+signs you in. The page and its server are an example in the Mosaica repository, so use a second
+terminal to clone it. If you have already cloned it to `~/mosaica`, run `git pull` in it instead.
 
 ```bash
 git clone https://github.com/mosaicadb/mosaica ~/mosaica
 ```
 
-The example's server, in `clients/ts/examples/plain-html`, serves the components from one file,
-which it looks for in `clients/ts/components/dist`, where a build of the components would put it.
-Rather than build them, fetch the published package from npm and unpack its `dist` directory there.
+Copy the page and its server into a directory of your own, and install the components beside them
+from npm.
 
 ```bash
-cd ~/ireland
-npm pack @mosaicajs/components@next
-tar xzf mosaicajs-components-*.tgz -C ~/mosaica/clients/ts/components --strip-components=1 package/dist
-ls ~/mosaica/clients/ts/components/dist/mosaica-components.js*
+mkdir ~/ireland/page && cd ~/ireland/page
+cp ~/mosaica/clients/ts/examples/plain-html/index.html ~/mosaica/clients/ts/examples/plain-html/server.mjs .
+npm install @mosaicajs/components
 ```
 
 ```
-/home/you/mosaica/clients/ts/components/dist/mosaica-components.js
-/home/you/mosaica/clients/ts/components/dist/mosaica-components.js.LICENSE.txt
-/home/you/mosaica/clients/ts/components/dist/mosaica-components.js.sri
+
+added 48 packages in 7s
 ```
 
-`npm pack` downloads the package as a single file without installing it. `mosaica-components.js`
-holds every element in one file, and the `.sri` file beside it holds the hash the page checks the
-file against before running it.
+The package holds the components in one file, `mosaica-components.js`, which the page's server
+finds in `node_modules` and serves to the page.
 
-`examples/plain-html` holds a web page with the map on it, and a small Node server that signs you
-in. Mosaica needs to know who you are signed in as. It keeps its users in the catalogue, and the page's server asks the session address for a token on your behalf.
+Mosaica needs to know who you are signed in as. It keeps its users in the catalogue, and the
+page's server asks the session address for a token on your behalf.
 
 So we need two users. `everyone` is the person reading the map. It holds the `read` permission,
 which lets it read, and no access attributes of its own, since every place is labelled `public` and
@@ -549,16 +552,12 @@ cat page.key
 ```
 
 The page's server signs you in as one of the people listed in `users.json`, each with the
-user it reads as. The list that comes with the example belongs to a different dataset, so
-replace it with a single person, Everyone.
+user it reads as. Write a list with a single person, Everyone.
 
 ```bash
-cd ~/mosaica/clients/ts/examples/plain-html
+cd ~/ireland/page
 echo '{"everyone": {"label": "Everyone", "principal": "everyone"}}' > users.json
 ```
-
-`users.json` is a file in the clone, so git now shows it as changed. `git restore users.json` puts
-the original back when you have finished.
 
 Tell the page's server where Mosaica is listening and give it the key, then start it.
 

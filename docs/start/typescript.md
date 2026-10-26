@@ -2,7 +2,7 @@
 
 This tutorial is for a developer who wants Mosaica's map inside their own web application, and wants to see it working before reading much else. We'll start a Mosaica server over 150,000 places from GeoNames, a free gazetteer of the world's place names. Then we'll make a new web project with Vite, put the `<mosaica-explorer>` element on its page, and end with the map sitting in an ordinary page layout of our own, with a search box and filters built from the data.
 
-Once `mosaica` is installed, as [Install Mosaica](install.md#install-mosaica) shows, it takes about ten minutes. You need Node.js 22.15 or later with npm, and a clone of the Mosaica repository, which holds the sample data:
+Once `mosaica` is installed, as [Install Mosaica](install.md#install-mosaica) shows, it takes about ten minutes. You need Node.js 22.15 or later with npm, and a clone of the Mosaica repository, which holds the sample data. If you have already cloned it to `~/mosaica`, run `git pull` in it instead:
 
 ```bash
 git clone https://github.com/mosaicadb/mosaica ~/mosaica
@@ -76,10 +76,10 @@ Open a second terminal. We'll use Vite, a build tool with a development server, 
 cd ~/places
 npm create vite@latest web -- --template vanilla-ts --no-interactive
 cd web
-npm install @mosaicajs/components@next
+npm install @mosaicajs/components
 ```
 
-`@mosaicajs/components` holds Mosaica's elements for the browser. `@next` asks npm for the newest release candidate, since Mosaica has published no full release yet. npm also installs what they're built on: Lit, which the elements are written with, and deck.gl, which draws the map.
+`@mosaicajs/components` holds Mosaica's elements for the browser. npm also installs what they're built on: Lit, which the elements are written with, and deck.gl, which draws the map.
 
 The template comes with a demo page and a counter that we won't need. Remove them:
 

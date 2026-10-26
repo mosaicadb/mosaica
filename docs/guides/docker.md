@@ -11,22 +11,17 @@ install and to [the systemd one](systemd.md) alike.
 ## Get the image
 
 Mosaica's image is published to the GitHub Container Registry as `ghcr.io/mosaicadb/mosaica`, for
-`linux/amd64` and `linux/arm64`, with a tag for each release. Until the first full release there is
-no `latest` tag. Write the newest version on the [releases
-page](https://github.com/mosaicadb/mosaica/releases), without its leading `v`, in place of `VERSION`,
-here and in `compose.yaml` below.
+`linux/amd64` and `linux/arm64`. Each release is tagged with its version, and the `next` tag
+follows the newest release. Pull it and check the version:
 
-```console
-$ docker pull ghcr.io/mosaicadb/mosaica:VERSION
-...
-$ docker run --rm ghcr.io/mosaicadb/mosaica:VERSION --version
-mosaica 0.1.0-rc.4 (135216816)
+```bash
+docker pull ghcr.io/mosaicadb/mosaica:next
+docker run --rm ghcr.io/mosaicadb/mosaica:next --version
 ```
 
-The image holds `mosaica` on a distroless base image, which holds the C library and certificates
-and nothing else. With no shell in the image, every command you run in the container is a `mosaica`
-command. It runs `mosaica serve` unless you give it another command, runs as user 65532, not as
-root, and looks for `mosaica.toml` in `/etc/mosaica`.
+The image puts `mosaica` on a distroless base, which has the C library and certificates and no
+shell, so every command you run in the container is a `mosaica` command. Given no command, it runs
+`mosaica serve`. It runs as user 65532 and reads `mosaica.toml` from `/etc/mosaica`.
 
 ??? info "Building the image yourself"
     The Dockerfile at the root of the repository compiles `mosaica` and copies it onto the same
@@ -34,7 +29,7 @@ root, and looks for `mosaica.toml` in `/etc/mosaica`.
     images apart later.
 
     ```console
-    $ git clone https://github.com/mosaicadb/mosaica ~/mosaica
+    $ git clone https://github.com/mosaicadb/mosaica ~/mosaica    # or git pull in an existing clone
     $ cd ~/mosaica
     $ docker build --build-arg MOSAICA_BUILD_COMMIT=$(git rev-parse HEAD) -t mosaica .
     ...
@@ -108,7 +103,7 @@ Save this as `compose.yaml`:
 ```yaml
 services:
   mosaica:
-    image: ghcr.io/mosaicadb/mosaica:VERSION
+    image: ghcr.io/mosaicadb/mosaica:next
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -254,12 +249,17 @@ mosaica-1  | mosaica serve: stopped on SIGTERM
 in progress. `docker compose down` removes the container and keeps the volume. `docker compose down
 -v` deletes the volume too, and with it the database and every change made to it since the build.
 
-To upgrade, change the tag in `compose.yaml` to the new version and start the service again.
-Compose pulls the new image, replaces the container and keeps the volume.
+To upgrade, pull the newest image and start the service again. Compose sees that the image has
+changed, replaces the container and keeps the volume.
 
 ```bash
-cd ~/mosaica-docker && docker compose up -d
+cd ~/mosaica-docker
+docker compose pull
+docker compose up -d
 ```
+
+To stay on one release, write its version, without the leading `v`, in place of `next` in
+`compose.yaml`.
 
 A new version may not read a bundle an older one built. When the bundle's format differs, the server
 refuses to start and says the bundle must be recreated. Rebuild it from the sources as the next
