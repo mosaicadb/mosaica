@@ -86,7 +86,7 @@ class Declared(Summarised):
         """The lines `print()` shows: each column with its type, then the vocabularies."""
 
         def flags(column: DeclaredColumn) -> str:
-            named = [flag for flag in ("render", "index") if getattr(column, flag)]
+            named = [flag for flag in ("render", "index", "unique") if getattr(column, flag)]
             return column.declared_as + "".join(f", {flag}" for flag in named)
 
         out = [

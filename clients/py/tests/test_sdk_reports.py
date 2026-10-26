@@ -66,6 +66,15 @@ def test_declare_columns_reports_every_column_and_prints_nothing(tmp_path, capsy
     assert capsys.readouterr().out == ""
 
 
+def test_declare_columns_reports_which_columns_are_unique(tmp_path):
+    db = create(tmp_path / "db")
+    frame = pa.table({"id": ["p"], "x": [0.0], "y": [0.0], "title": ["t"]})
+    report = db.declare_columns(frame, skip=["x", "y"], keyword=["id"], unique=["id"])
+    entries = {column.name: column for column in report.columns}
+    assert entries["id"].unique and not entries["title"].unique
+    assert "id (keyword, unique)" in str(report) and "title (text)" in str(report)
+
+
 def test_an_insert_reports_its_rows_and_columns_and_prints_nothing(tmp_path, capsys):
     db = create(tmp_path / "db")
     db.declare_view("map")
