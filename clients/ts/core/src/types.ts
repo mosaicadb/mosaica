@@ -1,12 +1,12 @@
 import type {Table} from 'apache-arrow';
 
 /**
- * A session minted on the session plane, as {@link MosaicaClient.authorise} returns it.
+ * A session created by {@link MosaicaClient.authorise}.
  *
  * @category Requests and responses
  */
 export type Session = Login & {
-  /** The session's handle for {@link MosaicaClient.revoke}. It is not a credential. */
+  /** The session's id, which {@link MosaicaClient.revoke} takes. It is not a credential. */
   tokenId: number;
 };
 
@@ -16,18 +16,18 @@ export type Session = Login & {
  * @category Requests and responses
  */
 export type Login = {
-  /** The bearer token every viewer route takes. It is a credential. */
+  /** The bearer token every viewer route takes. Treat it as a credential. */
   token: string;
   /**
-   * When the session ends, in seconds since the Unix epoch: the earliest of the server's
-   * `token_max_lifetime` after the request, the expiry of the API key it was authorised with, and
-   * the `exp` of the access token it was authorised with. A catalogue change can end it sooner.
+   * When the session expires, in seconds since the Unix epoch. It is no later than the server's
+   * `token_max_lifetime` after the request, nor than the expiry of the API key or access token
+   * used to create it. A change to the catalogue can end it sooner.
    */
   expiresAt: number;
 };
 
 /**
- * The one credential {@link MosaicaClient.login} sends.
+ * The credential {@link MosaicaClient.login} sends: a password, an API key or an OIDC access token.
  *
  * @category Requests and responses
  */
@@ -43,12 +43,12 @@ export type LoginCredential =
       apiKey: string;
     }
   | {
-      /** An OIDC access token a declared provider issued. */
+      /** An OIDC access token issued by a declared provider. */
       accessToken: string;
     };
 
 /**
- * Whom {@link MosaicaClient.authorise} mints a session for.
+ * Who {@link MosaicaClient.authorise} creates a session for.
  *
  * @category Requests and responses
  */
@@ -58,30 +58,29 @@ export type AuthoriseTarget =
       principal: string;
     }
   | {
-      /** The access token of an OIDC identity, as its provider issued it. */
+      /** An OIDC identity, by the access token its provider issued. */
       accessToken: string;
     }
   | {
       /**
-       * The terms the session holds, with `read` and no other permission, for no principal of the
-       * catalogue. Only the operator credential may name them. Each is trimmed and an empty one is
+       * A set of terms, for a session that belongs to no principal and has `read` permission only.
+       * Only the operator credential may ask for one. Each term is trimmed, and empty ones are
        * dropped.
        */
       terms: string[];
     }
   | {
       /**
-       * A session of the superuser itself, holding `read` and `read-all`: its authorised set is
-       * every item, including an item a flush places under a new term or label after the session
-       * was minted, deletions and suppressions still apply, and it satisfies every label. Only the
-       * operator credential may ask for it.
+       * A superuser session with `read` and `read-all`, which sees every item and satisfies every
+       * label, including items added after it was created. Deletions and suppressions still apply.
+       * Only the operator credential may ask for one.
        */
       readAll: true;
     };
 
 /**
- * The extent of a view's data coordinates. Each axis maps onto 32-bit grid units: `0` at the
- * minimum, the top of the grid at the maximum, which is inclusive.
+ * The extent of a view's data coordinates. Positions are stored as 32-bit grid units on each axis:
+ * `0` at the minimum and the top of the grid at the maximum, which is inclusive.
  *
  * @category Meta
  */
@@ -97,10 +96,9 @@ export type Quantisation = {
 };
 
 /**
- * The storage type `/v1/meta` publishes for a declared column. `timestamp_us` is an `i64` of
- * microseconds since the Unix epoch. `keyword` is a short string matched exactly, and `text` is
- * prose searched by analysed words. Neither string type can be `render`, so neither arrives in a
- * viewport response; both are read with {@link MosaicaClient.item}. `utf8` cannot be declared.
+ * A declared column's storage type. `timestamp_us` is microseconds since the Unix epoch.
+ * `keyword` is a short string matched exactly and `text` is prose searched by word. Neither string
+ * type is sent with points; read them with {@link MosaicaClient.item}. `utf8` cannot be declared.
  *
  * @category Meta
  */
@@ -122,154 +120,138 @@ export type ArrowType =
   | 'text';
 
 /**
- * What makes an integer column a category. The points frame carries a category as a bare integer
- * code of the declared width, so this block is the only sign that a column is one. The codes are
- * drawn at random from the width and their numeric order means nothing, so a continuous colour
- * ramp over them is meaningless. {@link MosaicaClient.categories} resolves a code to its value.
+ * Marks an integer column as a category. Points carry a category as an integer code, and this
+ * object is the only sign that a column is one. The codes are random and their order means
+ * nothing, so do not colour them on a continuous scale. {@link MosaicaClient.categories} turns
+ * codes into values.
  *
  * @category Meta
  */
 export type CategoryDescriptor = {
   /**
-   * The name of the value set the codes index. Columns sharing a vocabulary share its keys, codes
-   * and titles, so one palette serves them all. Which values are visible is per column, so a value
-   * visible under one column may be hidden under another that shares the vocabulary.
+   * The name of the value set the codes refer to. Columns that share a vocabulary share its keys,
+   * codes and titles, so one palette serves them all. Which values are visible is decided per
+   * column.
    */
   vocabulary: string;
   /**
-   * `declared`: the value set is closed and a write naming an unknown key is refused.
-   * `discovered`: a new key gets a code when it is first written.
+   * `declared`: the value set is fixed, and a write with an unknown key is refused. `discovered`: a
+   * new key gets a code when it is first written.
    */
   kind: 'declared' | 'discovered';
   /**
-   * `public`: every session is offered the whole value set. `derived`: `/v1/categories` offers a
-   * value only where this principal can see at least one item carrying it.
+   * `public`: every viewer is offered every value. `derived`: a viewer is offered only the values
+   * held by at least one item they can see.
    */
   visibility: 'derived' | 'public';
 };
 
 /**
- * One declared per-item column.
+ * A declared column with one value per item.
  *
  * @category Meta
  */
 export type DeclaredScalar = {
-  /**
-   * The column's name, unique in the bundle. Filters, `/v1/categories/{column}` and
-   * `ViewportResult.scalars` all address the column by it.
-   */
+  /** The column's name, which filters, `/v1/categories/{column}` and `ViewportResult.scalars` use. */
   name: string;
   /** The column's storage type. */
   arrowType: ArrowType;
-  /** Present for a category column; `null` for any other. */
+  /** How the column works as a category, or `null` if it is not one. */
   category: CategoryDescriptor | null;
   /**
-   * Whether the column can arrive with each point in a viewport response: every point carries it
-   * under `pointRows: 'full'`, and under a list that names it. Only a `render` column can colour or
-   * size points. A point with no value arrives as null, except in a category, where
-   * it arrives as code `0`. A column with `render: false` may still be filterable (see
-   * {@link Meta.filterOperands}) and is returned by {@link MosaicaClient.item}.
+   * Whether points can carry the column in a viewport response, which is what lets it colour or
+   * size them. A missing value arrives as null, or as code `0` in a category. A column without
+   * `render` can still be filterable (see {@link Meta.filterOperands}) and is returned by
+   * {@link MosaicaClient.item}.
    */
   render: boolean;
   /**
-   * Whether the column has a filter index. A column with neither `render`, `index` nor `unique`
-   * can be read on an item and cannot be filtered on.
+   * Whether the column has a filter index. A column with none of `render`, `index` and `unique`
+   * can be read on an item but not filtered on.
    */
   index: boolean;
   /**
-   * Whether no two items hold one value. `eq` and `in` on the column answer from its unique index,
-   * so a filter `{column: {in: values}}` finds the items holding the values; a unique column with
-   * neither `render` nor `index` takes those two operators alone.
+   * Whether every item holds a different value. A unique column takes `eq` and `in` filters, which
+   * find items by value, even without `render` or `index`.
    */
   unique: boolean;
-  /**
-   * For a `text` column, the `<name>/<version>` of the analyser that split its values into terms;
-   * `null` for every other type.
-   */
+  /** For a `text` column, its analyser as `<name>/<version>`; otherwise `null`. */
   analyser: string | null;
   /**
-   * Where `POST /v1/items` reads the value from: `rendered`, the view's point columns;
-   * `value_column`, a per-item column; `record`, the record store. A column whose only home is
+   * Where `POST /v1/items` reads the value from: `rendered` (the view's point columns),
+   * `value_column` (a per-item column) or `record` (the record store). A column held only in
    * `record` reads fastest in `stored` order.
    */
   homes: ('rendered' | 'value_column' | 'record')[];
 };
 
 /**
- * One group-scoped column family: one column per view of the group `scope` names, each with a
- * value per item. Absent from `/v1/meta` when this principal cannot reach the group.
+ * A group-scoped column: a family with one column per view of a view group, so an item can hold a
+ * different value in each view. Absent from `/v1/meta` if the viewer cannot reach the group.
  *
  * @category Meta
  */
 export type ScopedScalar = {
-  /** The family's name, unique in the bundle. A filter names it, pinned to a view where needed (see {@link FilterOperandSet.scope}). */
+  /** The family's name. A filter uses it, pinned to a view if needed (see {@link FilterOperandSet.scope}). */
   name: string;
   /** The storage type, as on a {@link DeclaredScalar}. */
   arrowType: ArrowType;
   /** The view group whose views each have a column of this family. */
   scope: {group: string};
-  /** Present for a category family; `null` for any other. */
+  /** How the family works as a category, or `null` if it is not one. */
   category: CategoryDescriptor | null;
-  /** For a `text` family, the `<name>/<version>` of its analyser; `null` for every other type. */
+  /** For a `text` family, its analyser as `<name>/<version>`; otherwise `null`. */
   analyser: string | null;
-  /**
-   * Whether the column can arrive with each point in a viewport response under one of
-   * {@link views}, as a declared `render` column does. Under any other view it does not arrive.
-   */
+  /** Whether points can carry the column in a viewport response, under one of {@link views} only. */
   render: boolean;
-  /** Whether a filter can be answered from the family's columns. */
+  /** Whether the family can be filtered on. */
   index: boolean;
   /**
-   * The ids of the views whose points carry this column and that this principal may reach: the
-   * group's own views, and the same keys under each group that shares them through `members`. A
-   * view created while the service runs is not listed until a flush has written its values.
+   * The views the viewer can reach whose points carry this column: the group's own views, and the
+   * same keys in any group that shares them. A view created on a running service appears once a
+   * flush has written its values.
    */
   views: string[];
 };
 
 /**
- * One column a request may filter on, and how. `family` says which control fits: a `category` has
- * a value set {@link MosaicaClient.categories} lists, a `keyword` has none and takes typed text, a
- * `text` column is searched by words, and a `numeric` one by range.
+ * A column you can filter on, and how. Build filter controls from these. `family` says which
+ * control fits: a `category` has a list of values ({@link MosaicaClient.categories}), a `keyword`
+ * takes typed text, a `text` column is searched by words, and a `numeric` one by range.
  *
  * @category Meta
  */
 export type FilterOperandSet = {
-  /** The column or family name a filter leaf uses. */
+  /** The column or family name a filter uses. */
   column: string;
   /** The column's filter family, which decides its operators. */
   family: 'category' | 'keyword' | 'text' | 'numeric';
   /**
-   * The operators this column accepts: `eq` and `in` for a category; `eq`, `in`, `prefix` and
-   * `contains` for a keyword; `eq`, `in` and `range` for a numeric column; `match` and `phrase`
-   * for text; `eq` and `in` alone for a unique column with neither `render` nor `index`.
+   * The operators the column accepts: `eq` and `in` for a category; `eq`, `in`, `prefix` and
+   * `contains` for a keyword; `eq`, `in` and `range` for a number; `match` and `phrase` for text.
+   * A unique column with neither `render` nor `index` takes only `eq` and `in`.
    */
   operands: string[];
   /**
-   * Present only on a group-scoped column: the view group whose views each hold their own value.
-   * Absent for a column with one value per item under every view.
-   *
-   * Under a view of that group, or of a group sharing its views, the leaf names the column bare
-   * and the request's own view decides which value it reads. Under any other view the leaf pins a
-   * view as `column@key`. An unpinned leaf there is a `422`, and a pin naming no view of the group
-   * is the `404` an unknown view gets.
+   * The view group, if the column is group-scoped. In a view of that group, or of a group that
+   * shares its views, a filter names the column plainly and reads the value for the request's view.
+   * In any other view it must name a view as `column@key`, or the request is refused with `422`.
    */
   scope?: {group: string};
 };
 
 /**
- * A filter expression, as `/v1/viewport` and `/v1/artifacts/browse` take it.
+ * A filter expression, as the viewer routes take it.
  *
  * Each node has exactly one key: a column name mapped to a {@link FilterOperator}, `region`,
  * `member_of`, or one of the combinators `all_of`, `any_of` and `none_of`. `all_of: []` matches
- * every item and `any_of: []` matches none. `none_of` matches every item this principal may see
- * that none of its branches matches, an item holding no value in a column included, so
- * `none_of: []` matches every item. The server refuses with a `422` a node with two keys, an
- * unknown column, and an operator outside the column's family. Nesting deeper than the deployment
- * allows is refused.
+ * every item and `any_of: []` matches none. `none_of` matches every visible item that none of its
+ * branches matches, including items with no value in the column. The server refuses with `422` a
+ * node with two keys, an unknown column, an operator the column does not take, or nesting deeper
+ * than the deployment allows.
  *
- * A value that does not exist and a value this principal cannot see both match nothing, with the
- * same status, body and counts. Present both as "no matches".
+ * A value that does not exist and a value the viewer cannot see both match nothing, with the same
+ * response.
  *
  * @category Filters
  */
@@ -282,21 +264,19 @@ export type FilterExpr =
   | {[column: string]: FilterOperator};
 
 /**
- * The `region` leaf: the items whose stored position lies inside a shape. Give exactly one of:
+ * The `region` filter: the items whose position lies inside a shape. Give exactly one of:
  *
- * - `polygon`: at least three `[x, y]` vertices, closed implicitly. More than
- *   `selection.maxRegionVertices` is a `422`.
- * - `bbox`: `[x0, y0, x1, y1]`, closed on every side.
+ * - `polygon`: at least three `[x, y]` vertices, closed automatically. More than
+ *   `selection.maxRegionVertices` is refused with `422`.
+ * - `bbox`: `[x0, y0, x1, y1]`, edges included.
  * - `circle`: `[cx, cy, r]`.
  * - `ellipse`: `[cx, cy, a, b, angle_degrees]`.
- * - `artifact`: a published artifact's `mosaica_id` as a decimal string, matching its members.
- *   An id naming nothing, an artifact this principal would not be served, one on another view and
- *   one whose layer draws an authored shape all match nothing.
+ * - `artifact`: an artifact's `mosaica_id` as a decimal string, matching its members. An artifact
+ *   that does not exist, is not served to the viewer, is on another view, or has an authored shape
+ *   matches nothing.
  *
- * Coordinates are in the view's data coordinates (`space: 'view'`, the default) and are
- * quantised to the view's grid before any point is tested. A shape with a long perimeter may be
- * answered for a cover of it; the response's `region` says so ({@link RegionVerdict}). `region`
- * is a reserved column name.
+ * Coordinates are in the view's data coordinates. A shape with a very long boundary may be
+ * answered for a slightly larger area; the response's {@link RegionVerdict} says so.
  *
  * @category Filters
  */
@@ -308,46 +288,39 @@ export type RegionOperand =
   | {artifact: string};
 
 /**
- * The `member_of` leaf: the members of one artifact of one layer that this principal may see.
- * It works the same in `filters` and in `highlight`, so one clause can narrow the map to a cluster
- * or light it. {@link memberOf} builds one. `member_of` is a reserved column name.
+ * The `member_of` filter: the visible members of one artifact, such as a cluster. It works in
+ * `filters` to narrow the map and in `highlight` to light it. {@link memberOf} builds one.
  *
- * A layer this principal's `/v1/meta` does not list is a `422`. An artifact is never refused: an
- * id naming nothing, an artifact of another layer, a suppressed one and one this principal is not
- * served all match nothing, so the leaf does not reveal whether an artifact exists.
+ * A layer the viewer's `/v1/meta` does not list is refused with `422`. An artifact that does not
+ * exist, belongs to another layer, is suppressed or is not served to the viewer matches nothing.
  *
  * @category Filters
  */
 export type MemberOfOperand = {
   /** The layer's name, as `/v1/meta` lists it. */
   layer: string;
-  /**
-   * The artifact's `mosaica_id` as a decimal string. A JSON number cannot hold every 64-bit id,
-   * so a number here would lose the top of the range.
-   */
+  /** The artifact's `mosaica_id` as a decimal string, since a JSON number cannot hold every 64-bit id. */
   artifact: string;
 };
 
 /**
- * The `x-mosaica-region` verdict on a response whose filter had a `region` leaf. `exact: true`
- * means each region's answer is exact for the shape against every point's stored position.
- * `exact: false` means a shape's boundary needed more than `selection.maxRegionCells` cells, so the
- * answer is exact for a cover of the shape (a superset) taken at depth `depth`. The verdict
- * depends on the shape and the grid alone, never on the items. With several region leaves it is
- * the coarsest.
+ * Whether a response with a `region` filter is exact (the `x-mosaica-region` header). With
+ * `exact: false`, a shape's boundary needed more than `selection.maxRegionCells` cells, so the
+ * answer covers a slightly larger area made of cells at depth `depth`. It depends only on the
+ * shapes, never on the items. With several regions it reports the coarsest.
  *
  * @category Filters
  */
 export type RegionVerdict = {exact: true; depth: null} | {exact: false; depth: number};
 
 /**
- * One column's predicate, with exactly one key; the server refuses a leaf with two. A category
- * takes its vocabulary key (a string) or its code (a number). A keyword takes exact strings. A
- * numeric column takes numbers, and `range` takes at least one bound and at most one per side.
- * An integer or timestamp column also takes a `bigint`, sent as its decimal digits, which is exact
- * past 2^53 where a `number` is not. A timestamp column's numbers are microseconds since the Unix
- * epoch, and it also takes a date (`'2020-01-01'`, midnight UTC) or a date-time with an offset
- * (`'2020-01-01T09:30:00Z'`) as a string. A `text` column takes `match` or `phrase`.
+ * One column's condition, with exactly one key.
+ *
+ * A category takes its key (a string) or its code (a number), and a keyword takes exact strings.
+ * A numeric column takes numbers, and `range` takes at least one bound and at most one per side.
+ * An integer or timestamp column also takes a `bigint`, which stays exact above 2^53. A timestamp
+ * takes microseconds since the Unix epoch, a date (`'2020-01-01'`, midnight UTC) or a date-time
+ * with an offset (`'2020-01-01T09:30:00Z'`). A `text` column takes `match` or `phrase`.
  *
  * @category Filters
  */
@@ -356,69 +329,61 @@ export type FilterOperator =
   | {in: (string | number | bigint)[]}
   | {prefix: string}
   | {contains: string}
-  /** Every analysed term must appear, unless `minimum_should_match` says how many must. */
+  /** Every word must appear, unless `minimum_should_match` says how many must. */
   | {match: string | {query: string; minimum_should_match?: number}}
-  /** The analysed terms must appear next to each other, in order. */
+  /** The words must appear next to each other, in order. */
   | {phrase: string}
   | {range: {gte?: number | bigint | string; gt?: number | bigint | string; lte?: number | bigint | string; lt?: number | bigint | string}};
 
 /**
- * One annotation layer, as `/v1/meta` publishes it to this principal.
- *
- * A layer this principal cannot reach is absent, as a layer nobody registered is. The entry does
- * not say how many artifacts the layer holds, since that would count artifacts this principal may
- * not see, and it does not carry the layer's access label.
+ * An annotation layer, such as a clustering or a set of boundaries, as `/v1/meta` lists it. A
+ * layer the viewer cannot reach is not listed. The entry does not say how many artifacts the layer
+ * holds.
  *
  * @category Meta
  */
 export type Layer = {
-  /** The layer's name, which a viewport request's `layers` names. */
+  /** The layer's name, which requests use. */
   name: string;
-  /** The layer's display title; `null` where the declaration gave none. */
+  /** The layer's display title, or `null` if it has none. */
   title: string | null;
-  /** The ids of the views the layer appears in that this principal may reach. The layer is served in no other view. */
+  /** The views the layer appears in that the viewer can reach. */
   views: string[];
   /**
-   * Where the layer's artifacts get their members: `enumerated`, a stored set per artifact;
-   * `spatial`, the items inside each artifact's shape; or, for an attribute layer, the items
-   * holding a value of one column. An attribute layer arrives as `{attribute: <column>}`, which
-   * this type does not declare.
+   * How an artifact's members are decided: `enumerated`, a stored list; `spatial`, the items inside
+   * its shape; or by a column's value. A column-based layer arrives as `{attribute: <column>}`,
+   * which this type does not declare.
    */
   membership: 'enumerated' | 'spatial' | 'attribute';
   /**
-   * `kind` is where the layer's lineage lives: `flat` has none; `nested` is a tree held in parent
-   * links, with no levels; `dag` is `nested` where a child may have several parents; `stacked` is
-   * independent analyses, one per level, with no links between them; `tiered` is levels whose
-   * artifacts sit inside those of the level above, linked. `pruneChildren` is the default cut:
-   * `true` serves only the deepest artifact per branch where a parent and its child both qualify.
-   * A request's `artifactBudget` may ask for more detail.
+   * How artifacts relate. `flat`: no hierarchy. `nested`: a tree of parent links, with no levels.
+   * `dag`: like `nested`, but a child may have several parents. `stacked`: independent levels.
+   * `tiered`: levels whose artifacts sit inside those of the level above. With `pruneChildren`, a
+   * parent and its child that both qualify serve only the child, unless a request's
+   * `artifactBudget` asks for more detail.
    */
   hierarchy: {kind: 'flat' | 'nested' | 'dag' | 'stacked' | 'tiered'; pruneChildren: boolean};
   /**
-   * The levels the layer declares, each with its number, its title (`null` where none) and `zoom`:
-   * the `[min, max]` tile depths at which a viewport request naming no `levels` serves it, or
-   * `null` for every depth. Empty for a `nested` or `dag` layer, which declares none.
+   * The layer's levels, each with its number, title and `zoom`: the `[min, max]` tile depths at
+   * which it is shown by default, or `null` for every depth. Empty for a `nested` or `dag` layer.
    */
   levels: {level: number; title: string | null; zoom: [number, number] | null}[];
   /**
-   * The computed properties the layer declares: any of `centroid`, `box` and `hull`. Each is
-   * computed per request from the members this principal can see. A viewport request asks for a
-   * hull as `shape` ({@link ComputedProperty}).
+   * The geometry computed per request from the members the viewer can see: any of `centroid`,
+   * `box` and `hull`.
    */
   computedContent: string[];
   /**
-   * The kind of the layer's one drawn outline, or `null` where it draws none. A `derived` shape is
-   * the hull of the members this principal can see and differs between principals, so it must not
-   * be kept against a `mosaicaId` across a change of principal. A `predicate` shape (a spatial
-   * layer's membership shape) and an `authored` one (supplied by the publisher) are the same for
-   * every principal served the artifact and may be kept.
+   * The kind of outline the layer draws, or `null` if it draws none. A `derived` outline is the
+   * hull of the members the viewer can see, so it differs between viewers; do not reuse it for
+   * another viewer. A `predicate` or `authored` outline is the same for everyone.
    */
   shape: ShapeKind | null;
   /** The types of publisher-supplied content each artifact carries, in the order of {@link Artifact.content}. */
   suppliedContent: string[];
-  /** The layers whose artifacts this layer's artifacts attach to, as a clustering's labels attach to its clusters. Empty for most layers. */
+  /** The layers whose artifacts this layer's artifacts attach to, as topic labels attach to clusters. Usually empty. */
   depsOn: string[];
-  /** A number that changes when the layer's access rule is edited, so a client can notice the edit. */
+  /** A number that changes when the layer's access rule is edited. */
   version: number;
 };
 
@@ -430,59 +395,49 @@ export type Layer = {
 export type MapProjection = 'web_mercator' | 'equirectangular' | 'gall_isographic' | 'none';
 
 /**
- * The tile schemes a view's frame may be addressed in. There is one: `xyz`, the slippy-map
- * `z/x/y` scheme basemap servers publish. See {@link ViewInfo.tileScheme}.
+ * A basemap tile scheme. The only one is `xyz`, the `z/x/y` scheme slippy-map tile servers use.
+ * See {@link ViewInfo.tileScheme}.
  *
  * @category Meta
  */
 export type TileScheme = 'xyz';
 
 /**
- * One view this principal may reach, as `/v1/meta` publishes it. The frame and projection fields
- * are the same for every principal, and a host decides from them which basemap fits
- * ({@link ViewInfo.projection}, {@link ViewInfo.tileScheme}) and how to turn a position into longitude and latitude
- * ({@link lonLatOfCell}).
+ * A view, one 2D layout of the items, as `/v1/meta` lists it. Use its projection fields to choose
+ * a basemap, and {@link lonLatOfCell} to turn a position into longitude and latitude.
  *
  * @category Meta
  */
 export type ViewInfo = {
-  /** The view's id, which every viewer request names: a plain view's name, or `<group>:<key>` for a view in a group. */
+  /** The view's id, which requests use: the view's name, or `<group>:<key>` for a view in a group. */
   id: string;
-  /** The view's name for display. For a view in a group it is the id. */
+  /** The view's display name. For a view in a group it is the id. */
   displayName: string;
-  /**
-   * The data extent this view's positions are quantised over. Each view has its own, so a
-   * position is decoded against the extent of the view it came from.
-   */
+  /** The extent of this view's data coordinates. Each view has its own. */
   quantisation: Quantisation;
-  /**
-   * What placed this view's positions: `web_mercator`, `equirectangular`, `gall_isographic`, or
-   * `none` for a view that projects nothing.
-   */
+  /** The map projection that placed the positions, or `none` if the view is not a map. */
   projection: MapProjection;
   /**
    * The width-to-height ratio to draw the world at: `1` for `web_mercator`, `2cos φ₁` for
    * `equirectangular` and `gall_isographic` (φ₁ being the standard parallel), and `null` for
-   * `none`, which has no world to draw.
+   * `none`.
    */
   worldAspect: number | null;
   /**
-   * `xyz` where this view's frame lines up with the slippy-map tiling, so raster tiles may be
-   * drawn under the points. `null` means no tiles line up with it; the world outline and an image
-   * need no scheme. Only an aligned `web_mercator` view has one.
+   * `xyz` if the view lines up with slippy-map tiles, so raster tiles can be drawn under the
+   * points; otherwise `null`. Only a `web_mercator` view can line up.
    */
   tileScheme: TileScheme | null;
-  /** The tile of {@link tileScheme} this view's frame covers; `null` exactly when `tileScheme` is. */
+  /** The tile the view covers, or `null` if `tileScheme` is `null`. */
   tile: {z: number; x: number; y: number} | null;
-  /** The view's place in its group, or `null` for a view in no group. */
+  /** The view's place in its group, or `null` if it is in no group. */
   roster: ViewRoster | null;
 };
 
 /**
- * A view's place in its group: the group, the view's key, and the per-view values the group
- * declared. The view's id is `<group>:<key>`. The order of a group's views is the order
- * {@link ViewGroup.views} lists them in, which is creation order; step through that list rather
- * than comparing keys, which are the caller's own strings.
+ * A view's place in its group. The view's id is `<group>:<key>`. The group's views are ordered as
+ * {@link ViewGroup.views} lists them, in creation order; step through that list to move between
+ * views, since keys are your own strings.
  *
  * @category Meta
  */
@@ -492,16 +447,16 @@ export type ViewRoster = {
   /** The view's key within its group. */
   key: string;
   /**
-   * One entry per metadata name the group declared. Empty on the views of a group declared with
-   * `members`, whose metadata belongs to the group that owns the keys.
+   * The view's metadata, one entry per name the group declares. Empty in a group that borrows
+   * another group's keys; read the metadata there.
    */
   metadata: Record<string, ViewMetadataValue>;
 };
 
 /**
- * One per-view metadata value, typed as the group's declaration typed it. `timestamp_us` is
- * microseconds since the Unix epoch. A metadata value is one value per view; it is not an item
- * attribute and cannot be filtered on.
+ * One metadata value of a view, such as the date a snapshot was taken. `timestamp_us` is
+ * microseconds since the Unix epoch. Metadata describes the view as a whole and cannot be filtered
+ * on.
  *
  * @category Meta
  */
@@ -513,29 +468,29 @@ export type ViewMetadataValue =
   | {type: 'timestamp_us'; value: number};
 
 /**
- * One view group this principal may reach. A group cannot be named where a view is expected. Its
- * frame and projection are on each of its views.
+ * A view group: many views of the same kind, such as one layout per year. A request names one of
+ * its views, never the group.
  *
  * @category Meta
  */
 export type ViewGroup = {
   /** The group's name. */
   name: string;
-  /** The group's display title, or `null` where the deployment declared none. */
+  /** The group's display title, or `null` if it has none. */
   title: string | null;
   /**
-   * The group whose keys this group's views use, where this group is a second layout over another
-   * group's views; `null` where it owns its keys.
+   * The group whose keys this group's views use, if this group is a second layout over another
+   * group's views; otherwise `null`.
    */
   membersOf: string | null;
-  /** The ids of this group's views that this principal may reach, as `<group>:<key>`, in creation order. */
+  /** The ids of the group's views the viewer can reach, as `<group>:<key>`, in creation order. */
   views: string[];
 };
 
 /**
- * `GET /v1/meta`, as {@link MosaicaClient.meta} decodes it: the views, column schema, filterable
- * columns, annotation layers and request limits. The lists are filtered to what this principal
- * may reach, so one principal's `Meta` must not be shown to another.
+ * The server's description of what the viewer can use, from `GET /v1/meta`: views, columns,
+ * filterable columns, annotation layers and request limits. It lists only what the viewer can
+ * reach, so do not show one viewer's `Meta` to another.
  *
  * @category Meta
  */
@@ -545,73 +500,65 @@ export type Meta = {
   /** The bundle format version the server opened. */
   bundleFormat: number;
   /**
-   * The views this principal may reach: the plain views, then each group's in creation order.
-   * A view this principal cannot reach is absent, and naming it gets the `404` an unknown view
-   * gets.
+   * The views the viewer can reach: views in no group first, then each group's in creation order.
+   * Asking for any other view is a `404`.
    */
   views: ViewInfo[];
-  /** The view groups this principal may reach. Empty where there are none. */
+  /** The view groups the viewer can reach. */
   groups: ViewGroup[];
-  /** Every entity-scoped column, in declaration order. */
+  /** The columns with one value per item, in declaration order. */
   declaredScalars: DeclaredScalar[];
-  /** The group-scoped column families this principal may reach. */
+  /** The group-scoped columns the viewer can reach. */
   scopedScalars: ScopedScalar[];
-  /** The annotation layers this principal may reach. Empty when it reaches none. */
+  /** The annotation layers the viewer can reach. */
   layers: Layer[];
-  /**
-   * The deployment's point-selection parameters and request limits. They are the same for every
-   * principal.
-   */
+  /** How many points the server selects per tile, and the deployment's request limits. */
   selection: {
-    /** The fewest points a tile serves when it has that many to serve, whatever the density threshold says. */
+    /** The fewest points a tile serves if it has that many. */
     kMin: number;
-    /** The most points one tile serves, and the default for a request's `k`. */
+    /** The most points one tile serves, and the default `k`. */
     kMaxMarks: number;
-    /** The machine ceiling on `k`. A request is served at most `min(k, maxK, kMaxMarks)` points per tile. */
+    /** The largest `k` a request can ask for. A tile serves at most `min(k, maxK, kMaxMarks)` points. */
     maxK: number;
     /**
-     * The number of points the density threshold aims for in the average occupied tile, at any
-     * depth, on an unfiltered request. A filtered request serves every match up to the per-tile
-     * cap.
+     * How many points an unfiltered request serves in an average tile. A filtered request serves
+     * every match up to the per-tile limit.
      */
     thetaTargetMarks: number;
     /** The largest `underlayOffset` a viewport request may ask for. */
     maxUnderlayOffset: number;
-    /** The largest `perTile` a {@link MosaicaClient.viewportArtifacts} request may name. */
+    /** The largest `perTile` a {@link MosaicaClient.viewportArtifacts} request may ask for. */
     maxArtifactsPerTile: number;
-    /**
-     * The page size, and the largest one, of {@link MosaicaClient.categories}. A page shorter than
-     * this means the value set ended.
-     */
+    /** The page size of {@link MosaicaClient.categories}, and its largest. A shorter page is the last. */
     maxCategoryValues: number;
-    /** The most vertices a `region` leaf's polygon may have; over it the request is a `422`. */
+    /** The most vertices a `region` polygon may have; more is a `422`. */
     maxRegionVertices: number;
     /**
-     * The most boundary cells a `region` leaf may use at one depth. Over it the request is not
-     * refused: the answer is exact for a cover of the shape, and {@link RegionVerdict} says so.
+     * The most boundary cells a `region` may use. A larger shape is still answered, for a slightly
+     * larger area, and {@link RegionVerdict} says so.
      */
     maxRegionCells: number;
-    /** The page size, and the largest one, of {@link MosaicaClient.browse}. */
+    /** The page size of {@link MosaicaClient.browse}, and its largest. */
     maxBrowseRows: number;
     /** The most vertices a published shape may have. */
     maxShapeVertices: number;
-    /** The default and the largest `limit` of {@link MosaicaClient.suggest}. */
+    /** The default and largest `limit` of {@link MosaicaClient.suggest}. */
     maxSuggestions: number;
     /** The most values one suggestion request examines before it stops and answers `more: true`. */
     maxSuggestionWalk: number;
     /**
-     * The visible-set size at or below which a suggestion is answered from the values this
-     * session can see. Above it, `more` may mean that `maxSuggestionWalk` ran out.
+     * Up to this many visible items, suggestions come only from values the viewer can see. Above
+     * it, `more` may mean the search reached `maxSuggestionWalk`.
      */
     maxSuggestSetEntities: number;
-    /** The most rows a `POST /v1/items` or `POST /v1/artifacts` page holds. */
+    /** The most rows in one page of {@link MosaicaClient.items} or {@link MosaicaClient.artifacts}. */
     maxPageRows: number;
     /**
-     * The most Arrow bytes a `POST /v1/items` or `POST /v1/artifacts` page holds before
-     * compression. A single larger row is sent alone.
+     * The most bytes in one page of {@link MosaicaClient.items} or {@link MosaicaClient.artifacts},
+     * before compression. A single larger row is sent on its own.
      */
     maxPageBytes: number;
-    /** The most groupings one {@link MosaicaClient.aggregate} request may carry. */
+    /** The most groupings one {@link MosaicaClient.aggregate} request may have. */
     maxAggregateGroupings: number;
     /** The largest `top` of an aggregate grouping. */
     maxAggregateTop: number;
@@ -619,16 +566,15 @@ export type Meta = {
     maxAggregateNamed: number;
     /** The largest `bins` of an aggregate grouping. */
     maxAggregateBins: number;
-    /** The most cells an aggregate grouping's cell level may list: the cells at its `depth` in its `area`. */
+    /** The most cells an aggregate grouping's `cells` may cover. */
     maxAggregateCells: number;
   };
-  /** The most tiles one viewport request may span; over it the request is a `422`. */
+  /** The most tiles one viewport request may cover; more is a `422`. */
   maxTilesPerRequest: number;
   /**
-   * The columns a request may filter on, with their operators. Empty when nothing is filterable.
-   * Filter controls come from this list. It differs from {@link Meta.declaredScalars}: a
-   * filterable column need not arrive with the points, and a declared column need not be
-   * filterable.
+   * The columns you can filter on, with their operators. Build filter controls from this list. It
+   * differs from {@link Meta.declaredScalars}: a filterable column need not arrive with the points,
+   * and a column that arrives with them need not be filterable.
    */
   filterOperands: FilterOperandSet[];
 };
@@ -639,24 +585,23 @@ export type Meta = {
  * @category Requests and responses
  */
 export type CategoryValue = {
-  /** The code the points carry. Never `0`, which marks an absent value. */
+  /** The integer code that points carry for this value. Never `0`, which means no value. */
   code: number;
-  /** The value's key, which filters use. Show it where there is no title. */
+  /** The value's key, which filters use. Show it if there is no title. */
   key: string;
-  /** The value's display title, or `null` where none was written, as for every value a discovered vocabulary mints. */
+  /** The value's display title, or `null` if none was written. Values of a discovered vocabulary have none. */
   title: string | null;
 };
 
 /**
- * Where a suggestion matched, in the string the server served (`key` or `title`), so a client
- * can mark the match without repeating the server's case folding. `start` and `len` count Unicode
- * code points, which differ from JavaScript string indices for characters outside the Basic
- * Multilingual Plane; index `Array.from(text)` to be exact.
+ * Where a suggestion matched the query, so you can highlight the match. `start` and `len` count
+ * Unicode code points, which differ from JavaScript string indices for characters such as emoji;
+ * index `Array.from(text)` to be exact.
  *
  * @category Requests and responses
  */
 export type MatchSpan = {
-  /** The field that matched. A match at the start of a word reports the field the word is in; on a value with no title it is `key`. */
+  /** The field that matched. For a value with no title it is `key`. */
   field: 'key' | 'title';
   /** The code point the match starts at. */
   start: number;
@@ -665,7 +610,7 @@ export type MatchSpan = {
 };
 
 /**
- * One suggested category value, with where it matched and, on request, a count.
+ * One suggested category value, with where it matched and, if asked for, a count.
  *
  * @category Requests and responses
  */
@@ -674,53 +619,48 @@ export type SuggestValue = {
   code: number;
   /** The value's key. */
   key: string;
-  /** The value's display title, or `null` where none was written. */
+  /** The value's display title, or `null` if none was written. */
   title: string | null;
   /** Where the query matched. */
   match: MatchSpan;
   /**
-   * How many items carrying this value this principal can see, computed exactly per request, in
-   * the request's view where it named one and among the items passing its `filters` where it
-   * sent them. Present only when the request set `counts: true`.
+   * How many visible items hold this value, in the request's view and matching its `filters` if
+   * it gave them. Present only if the request set `counts: true`.
    */
   count?: number;
 };
 
 /**
- * One page of `/v1/categories/{column}/suggest`.
+ * One page of suggestions from {@link MosaicaClient.suggest}.
  *
  * @category Requests and responses
  */
 export type SuggestPage = {
-  /** The column, spelt as the caller sent it. */
+  /** The column, as the request spelt it. */
   column: string;
-  /** The query as received, before folding, so a caller can match a page to the request it answers. */
+  /** The query as the request sent it, so you can match a page to its request. */
   q: string;
-  /** The matching values this principal can see, ordered by the matched text. */
+  /** The matching values the viewer can see, ordered by the matched text. */
   values: SuggestValue[];
   /**
-   * `true` when the server stopped before running out of matches: the page filled, or it examined
-   * `selection.maxSuggestionWalk` values. There is no cursor; a longer query narrows the answer.
+   * `true` if there may be more matches: the page filled, or the server examined
+   * `selection.maxSuggestionWalk` values. There is no next page; a longer query narrows the list.
    */
   more: boolean;
   /**
-   * The number of items the counts are taken over: those this principal can see, in the request's
-   * view where it named one, passing its `filters` where it sent them. A value's share is `count /
-   * total`. Present only when the request set `counts: true`.
+   * How many items the counts are taken over, so a value's share is `count / total`. Present only
+   * if the request set `counts: true`.
    */
   total?: number;
-  /** The verdict on the counts' `region` leaves (`x-mosaica-region`), present only where the request's `filters` carried one and asked for counts. */
+  /** Whether the counts are exact, if the request's `filters` had a `region` and it asked for counts. */
   region?: RegionVerdict;
 };
 
 /**
- * The outcome of {@link MosaicaClient.suggest}. `status: 'ok'` carries the page.
- *
- * `status: 'shed'` is any `429` the server answered, returned rather than thrown: the
- * request was shed and may be sent again after `retryAfterS` seconds. `detail` is the server's
- * reason. Usually the session's previous suggestion is still running, since a session has one in
- * flight at a time. A request with `view` and `counts` can also be shed by compute admission, or
- * while another request builds the session's view of the map.
+ * What {@link MosaicaClient.suggest} returns: `status: 'ok'` with the page, or `status: 'shed'` if
+ * the server was too busy (`429`). A shed request may be sent again after `retryAfterS` seconds,
+ * and `detail` gives the server's reason. A viewer can have one suggestion request running at a
+ * time, so the usual cause is that the previous one has not finished.
  *
  * @category Requests and responses
  */
@@ -729,196 +669,182 @@ export type SuggestResult =
   | {status: 'shed'; retryAfterS: number; detail: string | null};
 
 /**
- * The body of `POST /v1/viewport`, as {@link MosaicaClient.viewport} takes it. Send exactly one of
- * `bbox` and `tiles`; the server refuses both and neither. A field left unset is not sent, so the
- * server's default applies.
+ * The request {@link MosaicaClient.viewport} sends: the points and counts for an area of the map.
+ * Give exactly one of `bbox` and `tiles`. A field you leave unset takes the server's default.
  *
  * @category Requests and responses
  */
 export type ViewportRequest = {
-  /** A view id from {@link Meta.views}. An unknown view, or one this principal cannot reach, is a `404`. */
+  /** A view id from {@link Meta.views}. Any other view is a `404`. */
   view: string;
   /** The tile depth to answer at, `0` to `16`. */
   zoom: number;
   /**
-   * The region to answer for, as `[x0, y0, x1, y1]` in the view's data coordinates, with
-   * `x0 <= x1` and `y0 <= y1`. The response covers every depth-`zoom` tile the box touches, edges
-   * included.
+   * The area, as `[x0, y0, x1, y1]` in the view's data coordinates with `x0 <= x1` and
+   * `y0 <= y1`. The response covers every tile at depth `zoom` that the box touches.
    */
   bbox?: [number, number, number, number];
   /**
-   * The depth-`zoom` tiles to answer for, as Morton prefixes, in place of `bbox`. Answered in the
-   * order given, with duplicates removed. A prefix with bits above `zoom` is refused. A tile left
-   * out costs the server nothing, so a client that holds a tile leaves it out.
+   * The tiles at depth `zoom` to answer, in place of `bbox`, as Morton prefixes (the tile's
+   * position code). They are answered in the order given, without duplicates. Leave out the tiles
+   * you already hold.
    */
   tiles?: bigint[];
   /**
-   * The most points each tile serves. Defaults to `selection.kMaxMarks`, and is capped at the
-   * smaller of `selection.maxK` and `selection.kMaxMarks`. `0` asks for the counts with no
-   * points. Do not decrease it as the view zooms in, or points already drawn drop out.
+   * The most points each tile serves. Defaults to `selection.kMaxMarks`, and is capped at
+   * `selection.maxK` and `selection.kMaxMarks`. `0` asks for counts only. Keep it the same as the
+   * map zooms in, or points already drawn drop out.
    */
   k?: number;
   /**
-   * Also serve exact visible counts per cell at depth `zoom + underlayOffset`, as
-   * {@link ViewportResult.subCells}. Omitted or `0` serves none. Above
-   * `selection.maxUnderlayOffset`, past depth 16, or over the deployment's cell budget, the
-   * request is a `422`.
+   * Also return exact visible counts for the cells `underlayOffset` levels below `zoom`, as
+   * {@link ViewportResult.subCells}, to draw a density underlay. `0` or unset returns none. Above
+   * `selection.maxUnderlayOffset`, past depth 16, or over the deployment's cell limit, the request
+   * is a `422`.
    */
   underlayOffset?: number;
   /**
-   * The {@link ViewportResponse.pin} of the response on screen, sent back so the server can say
-   * whether the data has moved since ({@link ViewportResponse.stale}). Omitted, every response
-   * reports `stale: false`.
+   * The {@link ViewportResponse.pin} of the response on screen, so the server can report whether
+   * the data has changed since ({@link ViewportResponse.stale}).
    */
   stamp?: string | null;
   /**
    * The filter, or `null` for none. It narrows which points are served and each tile's `matched`
-   * count; `visible` does not change. The
-   * response's `identityKey` does not change with the filter either, so a client holding points
-   * from one filter drops them itself when the filter changes.
+   * count. It does not change `visible` or the response's `identityKey`, so drop the points you
+   * hold yourself when the filter changes.
    */
   filters?: FilterExpr | null;
   /**
-   * A second expression in the grammar of `filters`, or `null` for none. It does not change which
-   * points are served. It adds a `highlighted` count to each tile and a bit to each point, each
-   * answering `all_of[filters, highlight]`. Several highlights are one
-   * expression under `any_of` or `all_of`.
+   * An expression to highlight, or `null` for none. It does not change which points are served. It
+   * adds a `highlighted` count to each tile and a flag to each point, for the items that match both
+   * `filters` and `highlight`. Combine several highlights with `any_of` or `all_of`.
    */
   highlight?: FilterExpr | null;
   /**
-   * Which columns each served point carries. `'full'`, the default, is every render column. A list
-   * names the render columns to carry: each point is its `mosaica_id`, its position and those
-   * columns, with the highlight bit and the membership columns as under `'full'`, and the server
-   * reads no other render column. `[]` is the position alone. A name that is not a render column
-   * of the view is refused with `422`. `'highlight'` is the `mosaica_id` and the highlight bit
-   * only, for a client that changed only its highlight and already holds the points; once
-   * {@link ViewportResponse.stale} is `true`, ask again with the columns. Without a `highlight`,
-   * `'highlight'` is answered as `'full'`. The points served, and each tile's `served` count, are
-   * the same under every value.
+   * Which columns each point carries. `'full'`, the default, is every `render` column. A list
+   * names the `render` columns to carry, and `[]` gives the position alone; any other name is a
+   * `422`. `'highlight'` gives only each point's `mosaica_id` and highlight flag, for when only the
+   * highlight has changed; once {@link ViewportResponse.stale} is `true`, ask for the columns again.
+   * Without a `highlight`, `'highlight'` is answered as `'full'`. The same points are served
+   * whichever you choose.
    */
   pointRows?: 'full' | 'highlight' | readonly string[];
   /**
-   * The annotation layers whose artifacts tag the points: each named layer this principal reaches
-   * adds a membership column ({@link ViewportResult.membership}). Omitted or `[]` is none; `'all'`
-   * is every layer this principal reaches. A name it cannot reach is ignored, as an unknown name
-   * is. The artifacts themselves come from {@link MosaicaClient.viewportArtifacts}.
+   * The annotation layers to tag points with: each adds a column saying which of its artifacts
+   * holds each point ({@link ViewportResult.membership}). Unset or `[]` is none and `'all'` is
+   * every layer the viewer can reach. Unknown names are ignored. The artifacts themselves come from
+   * {@link MosaicaClient.viewportArtifacts}.
    */
   layers?: string[] | 'all';
   /**
-   * Which declared levels of each named layer tag the points. Omitted follows the levels whose
-   * `zoom` range covers the request's `zoom`, or every level where no level declares a range.
-   * `'all'` is every level, `[]` is none, and an array is those levels. A layer with no levels
-   * ignores it. A level a layer does not hold is left out and is not refused.
+   * Which levels of each named layer tag the points. Unset uses the levels whose `zoom` range
+   * covers the request's `zoom`, or every level if none declares a range. `'all'` is every level,
+   * `[]` is none, and a level a layer does not have is ignored.
    */
   levels?: number[] | 'all';
   /**
-   * The most artifacts a `nested` or `dag` layer tags with. The server meets it by tagging with
-   * ancestors in place of their descendants. Any other layer ignores it. Unbounded when omitted.
+   * The most artifacts a `nested` or `dag` layer tags points with. The server meets it by using
+   * ancestors in place of their descendants. Unset means no limit; other layers ignore it.
    */
   artifactBudget?: number;
 };
 
 /**
- * The body of `POST /v1/artifacts/viewport`, as {@link MosaicaClient.viewportArtifacts} takes it:
- * the artifacts of the named layers in each tile of a region. Send exactly one of `bbox` and
- * `tiles`. A field left unset is not sent, so the server's default applies.
+ * The request {@link MosaicaClient.viewportArtifacts} sends: the artifacts of the named layers in
+ * each tile of an area. Give exactly one of `bbox` and `tiles`. A field you leave unset takes the
+ * server's default.
  *
  * @category Requests and responses
  */
 export type ViewportArtifactsRequest = {
-  /** A view id from {@link Meta.views}. An unknown view, or one this principal cannot reach, is a `404`. */
+  /** A view id from {@link Meta.views}. Any other view is a `404`. */
   view: string;
   /** The tile depth to answer at, `0` to `16`. */
   zoom: number;
-  /** The region, as {@link ViewportRequest.bbox} names it. */
+  /** The area, as for {@link ViewportRequest.bbox}. */
   bbox?: [number, number, number, number];
-  /**
-   * The depth-`zoom` tiles to answer for, as Morton prefixes, in place of `bbox`. Each is answered
-   * by one frame, in the order given, with repeats removed.
-   */
+  /** The tiles to answer, in place of `bbox`, as for {@link ViewportRequest.tiles}. Each gets one frame. */
   tiles?: bigint[];
-  /** The layers to answer for, as {@link ViewportRequest.layers} names them. Omitted or `[]` is none. */
+  /** The layers to answer for, as for {@link ViewportRequest.layers}. Unset or `[]` is none. */
   layers?: string[] | 'all';
-  /** Which levels of each named layer to answer for, as {@link ViewportRequest.levels} names them. */
+  /** Which levels of each layer to answer for, as for {@link ViewportRequest.levels}. */
   levels?: number[] | 'all';
   /**
    * The most artifacts one level serves in one tile, largest first. Required, and at most
-   * `selection.maxArtifactsPerTile` from {@link MosaicaClient.meta}; over it the request is a `422`.
+   * `selection.maxArtifactsPerTile`; more is a `422`.
    */
   perTile: number;
   /**
-   * Which declared geometry each artifact carries: any of `'centroid'` and `'box'`. Omitted is each
-   * layer's declaration; an array is intersected with it, and `[]` is none. A shape is read by
-   * identifier with {@link MosaicaClient.artifact}.
+   * Which geometry each artifact carries: any of `'centroid'` and `'box'`. Unset gives what the
+   * layer declares, and `[]` gives none. Read an artifact's outline with
+   * {@link MosaicaClient.artifact}.
    */
   computed?: ComputedProperty[];
-  /** Answered as each artifact's {@link Artifact.matched}, inside its tile. It changes nothing else. */
+  /** A filter, answered as each artifact's {@link Artifact.matched}. It changes nothing else. */
   filters?: FilterExpr | null;
-  /** Answered, with `filters`, as each artifact's {@link Artifact.highlighted}, inside its tile. */
+  /** An expression to highlight, answered as each artifact's {@link Artifact.highlighted}. */
   highlight?: FilterExpr | null;
-  /** As {@link ViewportRequest.stamp}. */
+  /** As for {@link ViewportRequest.stamp}. */
   stamp?: string | null;
   /**
-   * The most artifacts the treed frame holds, met by serving ancestors in place of their
-   * descendants. It applies to the `nested` and `dag` layers named; unbounded when omitted.
+   * The most artifacts to serve from the `nested` and `dag` layers named, using ancestors in place
+   * of their descendants. Unset means no limit.
    */
   budget?: number;
   /**
-   * How many colours the client's palette holds, from 2 to 32: each artifact then carries this
-   * viewer's {@link Artifact.slot} below it. Outside that range the request is a `422`.
+   * The number of colours in your palette, from 2 to 32. Each artifact then carries a
+   * {@link Artifact.slot}. Outside that range the request is a `422`.
    */
   paletteSize?: number;
 };
 
 /**
- * The geometries an artifacts request may ask for. An artifact's drawn outline is read by
- * identifier, with {@link MosaicaClient.artifact}.
+ * A geometry an artifacts request can ask for. Read an artifact's outline with
+ * {@link MosaicaClient.artifact}.
  *
  * @category Meta
  */
 export type ComputedProperty = 'centroid' | 'box';
 
 /**
- * The kinds of a layer's drawn outline: `derived`, the hull of the members this principal can
- * see; `predicate`, a spatial layer's membership shape; `authored`, a shape the publisher
- * supplied. See {@link Layer.shape}.
+ * The kind of outline a layer draws: `derived`, the hull of the members the viewer can see;
+ * `predicate`, the shape that decides a spatial layer's membership; `authored`, a shape the
+ * publisher supplied. See {@link Layer.shape}.
  *
  * @category Meta
  */
 export type ShapeKind = 'derived' | 'predicate' | 'authored';
 
 /**
- * A served outline: parts, then rings, then `[x, y]` vertices, in 32-bit grid units. A part's
- * first ring is its outer boundary and the others are holes. Two parts are two separate shapes.
- * A derived hull has one part per separate group of visible members and no holes.
+ * An artifact's outline: a list of parts, each a list of rings, each a list of `[x, y]` vertices
+ * in 32-bit grid units. A part's first ring is its outer boundary and the others are holes. A
+ * derived hull has one part per separate group of visible members, and no holes.
  *
- * The outline is simplified for the zoom it was asked at and may differ from the membership by up
- * to a cell. Do not test a point against it to decide membership; the points' membership column
- * ({@link ViewportResult.membership}) gives that answer.
+ * The outline is simplified for the zoom it was requested at and may be off by up to a cell. To
+ * know whether a point is a member, use {@link ViewportResult.membership}.
  *
  * @category Requests and responses
  */
 export type Shape = [number, number][][][];
 
 /**
- * One tile's exact counts, computed over the items this principal may see. The `served` points
- * are a sample of `matched`. Show `served` beside `matched` or `visible`: alone, it reads as the
- * whole set.
+ * One tile's counts, exact and over the items the viewer can see. The `served` points are a
+ * sample of the `matched` ones, so show `served` alongside `matched` or `visible`.
  *
  * @category Requests and responses
  */
 export type TileCounts = {
   /** The tile's Morton prefix at the request's `zoom`. */
   tile: bigint;
-  /** How many items in the tile this principal may see. A filter does not change it. */
+  /** How many items in the tile the viewer can see. Filters do not change it. */
   visible: bigint;
-  /** How many of `visible` the request's filter admits; equal to `visible` with no filter. */
+  /** How many of `visible` match the request's filter; equal to `visible` with no filter. */
   matched: bigint;
-  /** How many points the response carries for this tile. */
+  /** How many points the response carries for the tile. */
   served: bigint;
   /**
-   * How many of `matched` also satisfy the request's `highlight`; equal to `matched` when the
-   * request carried none. It counts every matching item, drawn or not.
+   * How many of `matched` also match the request's `highlight`, whether served or not. Equal to
+   * `matched` with no highlight.
    */
   highlighted: bigint;
 };
@@ -931,177 +857,156 @@ export type TileCounts = {
 export type SubCell = {
   /** The cell's Morton prefix at depth `zoom + underlayOffset`. */
   cell: bigint;
-  /** How many items in the cell this principal may see. Never `0`: empty cells are left out. */
+  /** How many items in the cell the viewer can see. Never `0`: empty cells are left out. */
   count: bigint;
 };
 
 /**
- * One annotation artifact (a cluster, a boundary, a topic) as an artifacts frame serves it.
+ * One annotation artifact, such as a cluster, a boundary or a topic label, as
+ * {@link MosaicaClient.viewportArtifacts} serves it.
  *
- * `maskedCount` is how many of the artifact's members this principal can see. It is not the
- * artifact's size, and two principals can get different numbers for the same `mosaicaId`. It
- * counts members out of view too, so it does not change as the map moves, and an artifact served
- * in several tiles carries the same figures in each.
- *
- * An artifact withheld from this principal is absent, and nothing in the response shows that it
- * exists.
+ * Counts and geometry cover only the members the viewer can see, so two viewers can get different
+ * figures for the same `mosaicaId`. They cover members outside the current view too, so they do
+ * not change as the map moves. An artifact the viewer may not see is left out of the response.
  *
  * @category Requests and responses
  */
 export type Artifact = {
-  /** The name of the layer the artifact belongs to. */
+  /** The artifact's layer. */
   layer: string;
-  /** The artifact's `mosaica_id`, the same for every principal and session. */
+  /** The artifact's `mosaica_id`, the same for every viewer. */
   mosaicaId: bigint;
-  /** The publisher's own key, or `null` where none was supplied. */
+  /** The publisher's key for the artifact, or `null` if it has none. */
   key: string | null;
-  /** How many of the artifact's members this principal can see. */
+  /** How many of the artifact's members the viewer can see. */
   maskedCount: bigint;
   /**
-   * The centre of the members this principal can see, in 32-bit grid units
-   * ({@link gridToWorldXY} converts to world space). `null` where the layer does not declare it or
-   * the request's `computed` left it out; a served artifact's geometry is never withheld. It moves
-   * with the principal, as the count does, so do not reuse one principal's value for another.
+   * The centre of the visible members, in 32-bit grid units ({@link gridToWorldXY} converts it).
+   * `null` if the layer does not declare it or the request's `computed` left it out.
    */
   centroid: [number, number] | null;
-  /** The bounding box of the members this principal can see, `[minX, minY, maxX, maxY]` in 32-bit grid units; `null` as for `centroid`. */
+  /** The bounding box of the visible members, `[minX, minY, maxX, maxY]` in 32-bit grid units; `null` as for `centroid`. */
   box: [number, number, number, number] | null;
   /**
-   * The publisher's supplied content (label text, a name, a polygon), one entry per type in the
-   * layer's {@link Layer.suppliedContent}. Empty where the layer declares none. Where an artifact
-   * has several ranked descriptions, this is the one this principal qualifies for, so two
-   * principals may see different text for one `mosaicaId`.
+   * The publisher's content, such as label text, one entry per type in the layer's
+   * {@link Layer.suppliedContent}. If the artifact has several descriptions for different access
+   * levels, this is the one the viewer qualifies for.
    */
   content: string[];
   /**
-   * The artifact's parents that are also in this frame, ascending by `mosaicaId`. A tree gives
-   * at most one; a `dag` layer may give several, and the first is the same one every time. Empty
-   * for a root, for a flat artifact and for one whose parent this principal was not served; the
-   * three are not told apart. Treat an artifact with no parent here as a root.
+   * The artifact's parents in the same frame, in ascending order. A `dag` layer may give several,
+   * and the first is always the same one. Empty for a root, for a flat layer, and when the parent is not served
+   * to the viewer; treat all three as a root.
    */
   parentIds: bigint[];
   /**
    * The level to draw the artifact at: its declared level on a `stacked` or `tiered` layer, its
-   * depth among the treed frame's parent links on a `nested` or `dag` layer (a root reads `0`), and
-   * `0` on a flat layer. Draw by this value; do not derive it from `parentIds`.
+   * depth in the tree on a `nested` or `dag` layer (a root is `0`), and `0` on a flat layer. Use
+   * this rather than counting `parentIds`.
    */
   rung: number;
   /**
-   * Whether a member this principal can see, inside the frame's tile (the requested tiles, in the
-   * treed frame), satisfies the request's filter. `null` where the request carried no filter. A
-   * filter changes only this field: which artifacts are served, their counts and their geometry
-   * stay the same. Do not derive it from the points held, which are a sample.
+   * Whether any visible member in the frame's tiles matches the request's filter, or `null` with
+   * no filter. The filter changes nothing else about the artifact. The points you hold are a
+   * sample, so do not work this out from them.
    */
   matched: boolean | null;
   /**
-   * `matched` for `all_of[filters, highlight]`: whether a member this principal can see, inside the
-   * same tiles, satisfies both. `null` where the request carried no `highlight`. The cautions
-   * on `matched` apply.
+   * Whether any visible member in the frame's tiles matches both the filter and the highlight, or
+   * `null` with no highlight.
    */
   highlighted: boolean | null;
   /**
    * The `mosaicaId` of the artifact this one attaches to, as a topic label attaches to its
-   * cluster; `null` where it attaches to nothing. The target is in the same frame or in the
-   * response's treed frame: an artifact whose target is not served is not served either. An attached artifact's
-   * `matched` and `highlighted` are its target's. Its `maskedCount` counts its own members, or its
-   * target's where it declares none, and is not the number to show beside a label.
+   * cluster, or `null`. An attached artifact is served only with its target. It takes `matched`
+   * and `highlighted` from its target. Its `maskedCount` counts its own members, or its target's
+   * if it has none, so it is not the number to show beside a label.
    */
   target: bigint | null;
   /**
-   * The artifact's palette slot for this viewer, below the request's `paletteSize`: the index of
-   * its colour, chosen so that artifacts drawn beside each other differ, and the same at any zoom,
-   * box, budget or filter. `null` where the request carried no `paletteSize`.
+   * The artifact's colour index, below the request's `paletteSize`, or `null` without one. Slots
+   * are chosen so that neighbouring artifacts differ, and stay the same at any zoom, area, budget
+   * or filter.
    */
   slot: number | null;
 };
 
 /**
- * A decoded viewport response. The per-point arrays all follow the order of `ids`.
+ * A decoded viewport response: per-tile counts and the served points. The per-point arrays are
+ * all in the order of `ids`.
  *
  * @category Requests and responses
  */
 export type ViewportResult = {
-  /** One entry per tile with anything visible to this principal, in the response's tile order. */
+  /** One entry per tile with anything visible to the viewer, in the response's tile order. */
   tiles: TileCounts[];
-  /** Each served point's `mosaica_id`. */
+  /** Each point's `mosaica_id`. */
   ids: BigUint64Array;
   /**
-   * Each point's 64-bit Morton position code, its two 32-bit grid coordinates interleaved. The
-   * high 32 bits are the point's cell at depth 16; shifting right by `64 - 2z` gives the depth-`z`
-   * tile that holds it.
+   * Each point's 64-bit Morton code, its two 32-bit grid coordinates interleaved. Shifting right by
+   * `64 - 2z` gives the tile at depth `z` that holds it.
    */
   codes: BigUint64Array;
-  /**
-   * Interleaved x, y per point in cell space: `[0, 65536)` per axis, with a fraction below the
-   * cell. A `Float64Array`, since a position has 32 bits per axis and an `f32` holds 24.
-   */
+  /** Interleaved x, y per point in cell space, `[0, 65536)` per axis, with a fraction for the position inside the cell. */
   positions: Float64Array;
   /**
-   * The same points in world space, `[0, 512)` per axis ({@link WORLD_SIZE}), as `f32`: cell space
-   * divided by 128. This is the space the renderer draws in.
+   * The same positions in world space, `[0, 512)` per axis ({@link WORLD_SIZE}): cell space divided
+   * by 128. This is the space the renderer draws in.
    */
   world: Float32Array;
-  /** The `render` columns the request's `pointRows` named, keyed by column name. */
+  /** The `render` columns the request asked for in `pointRows`, by column name. */
   scalars: Record<string, ScalarColumn>;
   /**
-   * One column per layer the request named that tags some point, keyed by layer name. For point
-   * `i`, `index[i]` is `0` where the point is under no artifact of the layer this principal is
-   * served, and otherwise `1 + d`, where `ids[d]` is the `mosaica_id` of the deepest such artifact
-   * holding it. {@link MosaicaClient.artifacts} with `ids` reads those artifacts.
+   * One column per layer the request named in `layers` that tags any point, by layer name. Each
+   * gives, per point, the deepest artifact of the layer that holds it; see {@link MembershipColumn}.
+   * {@link MosaicaClient.artifacts} with `ids` reads those artifacts.
    */
   membership: Record<string, MembershipColumn>;
-  /**
-   * One byte per point: `1` where the point satisfies the request's `highlight`, `0` where it
-   * does not. `null` when the request carried no `highlight`.
-   */
+  /** One byte per point: `1` if it matches the request's `highlight`, otherwise `0`. `null` with no highlight. */
   highlighted: Uint8Array | null;
   /**
-   * Which columns the points came with. `'full'` for an ordinary response. `'highlight'` carries
-   * `ids` and `highlighted` only: {@link codes}, {@link positions}, {@link world}, {@link scalars}
-   * and {@link membership} are empty, and a caller joins the bits to the points it holds by
-   * `mosaica_id`.
+   * `'highlight'` if the request's `pointRows` was `'highlight'`: then only `ids` and
+   * `highlighted` are filled, and you match the flags to the points you hold by `mosaica_id`.
+   * Otherwise `'full'`.
    */
   pointsProjection: 'full' | 'highlight';
-  /** The underlay's cells, where the request set `underlayOffset`; `null` otherwise. */
+  /** The density underlay's cells if the request set `underlayOffset`; otherwise `null`. */
   subCells: SubCell[] | null;
 };
 
 /**
- * One layer's membership column, as the decoder returns it. See {@link ViewportResult.membership}.
+ * One layer's membership column. See {@link ViewportResult.membership}.
  *
  * @category Requests and responses
  */
 export type MembershipColumn = {
   /**
-   * Per point, `0` for no artifact, otherwise one more than the position in `ids` of the artifact
-   * holding the point. A `Uint16Array` when there are at most 65,535 points.
+   * Per point, `0` if no artifact holds it, otherwise `1 + d`, where `ids[d]` is the artifact.
+   * A `Uint16Array` for at most 65,535 points.
    */
   index: Uint16Array | Uint32Array;
-  /** The distinct artifact `mosaica_id`s the column names, in the order first seen. */
+  /** The artifacts' `mosaica_id`s, in the order first seen. */
   ids: BigUint64Array;
 };
 
 /**
- * One `render` column's values for a response's points, in point order.
- *
- * `arrowType` is the storage type the points came in; whether the column is a category is on
- * {@link DeclaredScalar.category}. The values are the typed array the decoder already holds, so
- * they can go into a GPU attribute without copying.
- *
- * `present`, where set, says which points have a value: `present[i]` is `0` where the server sent
- * null, and `values[i]` is then a zero that means nothing. Where `present` is missing or `null`,
- * every point has a value. A category has no nulls; code `0` is its absent value.
+ * One `render` column's values for a response's points, in point order. The values are a typed
+ * array you can pass to a GPU attribute without copying. Whether the column is a category is on
+ * {@link DeclaredScalar.category}.
  *
  * @category Requests and responses
  */
 export type ScalarColumn = ScalarValues & {
-  /** Per point, `1` where it has a value and `0` where the server sent null. Missing or `null` when every point has a value. */
+  /**
+   * Per point, `1` if it has a value and `0` if not, in which case `values[i]` is a meaningless
+   * zero. Missing or `null` if every point has a value. A category uses code `0` for no value.
+   */
   present?: Uint8Array | null;
 };
 
 /**
- * A column's storage type and its values, one arm per type. 64-bit integers and `timestamp_us`
- * (microseconds since the Unix epoch) are `bigint` arrays.
+ * A column's storage type and its values. 64-bit integers and `timestamp_us` (microseconds since
+ * the Unix epoch) are `bigint` arrays.
  *
  * @category Requests and responses
  */
@@ -1121,177 +1026,163 @@ export type ScalarValues =
   | {arrowType: 'timestamp_us'; values: BigInt64Array};
 
 /**
- * The server's timings for one viewport response, read from its headers and its trailer.
+ * The server's timings for one response.
  *
  * @category Requests and responses
  */
 export type Timings = {
   /**
-   * Microseconds from admission to the server's first flush (`x-mosaica-server-us`); `0` when the
-   * header is absent. It does not cover the rest of the stream.
+   * Microseconds from admission to the server's first write (`x-mosaica-server-us`), or `0` if the
+   * header is missing. It does not cover the rest of the stream.
    */
   serverUs: number;
-  /** Microseconds the request waited for admission (`x-mosaica-admission-us`); `0` when the header is absent. */
+  /** Microseconds the request waited to be admitted (`x-mosaica-admission-us`), or `0` if the header is missing. */
   admissionUs: number;
   /**
-   * Per-stage timings from the trailer's `stage_ns`, as numbers in its field order, or `null`
-   * where the trailer has none. The server sends them only when it was built with the
-   * `bench-timing` feature and `serve.stage_timing` is on.
+   * Per-stage timings in nanoseconds, or `null`. The server sends them only if it was built with
+   * the `bench-timing` feature and `serve.stage_timing` is on.
    */
   stageNs: number[] | null;
 };
 
 /**
- * One points frame of a streamed viewport response, handed to a {@link PartSink} as it arrives.
- *
- * A part holds whole tiles: `result.tiles` is the run of tiles its points cover, in the
- * response's tile order. Its `subCells` is `null`.
- * A part carries the response's keys because it arrives before the response resolves, so it can
- * be stored under the right principal and matched to the request it answers.
+ * Part of a viewport response, passed to a {@link PartSink} as it arrives so you can draw points
+ * before the whole response has loaded. A part holds whole tiles, listed in `result.tiles`; its
+ * `subCells` is `null`.
  *
  * @category Requests and responses
  */
 export type ViewportPart = {
-  /** This frame's points, with the tiles they cover. */
+  /** The part's points, with the tiles they cover. */
   result: ViewportResult;
-  /** As {@link ViewportResponse.identityKey}. */
+  /** As for {@link ViewportResponse.identityKey}. */
   identityKey: string;
-  /** As {@link ViewportResponse.contentKey}. */
+  /** As for {@link ViewportResponse.contentKey}. */
   contentKey: string;
-  /** As {@link ViewportResponse.columnsAsked}. */
+  /** As for {@link ViewportResponse.columnsAsked}. */
   columnsAsked?: readonly string[] | null;
-  /** As {@link ViewportResponse.layersAsked}. */
+  /** As for {@link ViewportResponse.layersAsked}. */
   layersAsked?: readonly string[] | 'all';
 };
 
 /**
- * A viewport response's counts, handed to a {@link CountsSink} once the tiles frame has landed,
- * and the sub-cells frame where the request set `underlayOffset`. The server sends them first, so
- * they arrive before any point.
+ * A viewport response's counts, passed to a {@link CountsSink}. The server sends the counts before
+ * any point, so you can show them first.
  *
  * @category Requests and responses
  */
 export type ViewportCounts = {
   /** Every tile's counts, in the response's tile order. */
   tiles: TileCounts[];
-  /** The density underlay, or `null` where the request asked for none. */
+  /** The density underlay, or `null` if the request asked for none. */
   subCells: SubCell[] | null;
-  /** As {@link ViewportResponse.identityKey}. */
+  /** As for {@link ViewportResponse.identityKey}. */
   identityKey: string;
-  /** As {@link ViewportResponse.contentKey}. */
+  /** As for {@link ViewportResponse.contentKey}. */
   contentKey: string;
 };
 
 /**
- * Receives a viewport response's counts as soon as they land; see {@link ViewportCounts}.
+ * Receives a viewport response's counts as soon as they arrive; see {@link ViewportCounts}.
  *
  * @category Requests and responses
  */
 export type CountsSink = (counts: ViewportCounts) => void;
 
 /**
- * A viewport response, as {@link MosaicaClient.viewport} returns it.
+ * What {@link MosaicaClient.viewport} returns.
  *
  * @category Requests and responses
  */
 export type ViewportResponse = {
-  /**
-   * The decoded response. Where the call was given a part sink, the points went to the sink and
-   * this result's per-point arrays are empty.
-   */
+  /** The decoded response. If the call was given a part sink, the points went there and this result's per-point arrays are empty. */
   result: ViewportResult;
   /** The server's timings. */
   timings: Timings;
   /**
-   * The key held data is partitioned by (`x-mosaica-identity-key`). It hashes the exact credential
-   * bytes presented at authorisation, the identity of the principal's visible-set fragment, which a
-   * compaction or a rebuilt bundle changes, and the view. Data held under one key must not be shown
-   * under another, so a client drops what it holds when this changes.
+   * The key to keep cached data under (`x-mosaica-identity-key`). It is derived from the viewer's
+   * access terms, the view and the data, and changes when the data is compacted or rebuilt. Do not
+   * show data cached under one key when the key changes.
    */
   identityKey: string;
   /**
-   * The response's entity tag (`etag`), without its quotes. It changes when the visible set could
-   * have gained rows. A merge or compaction that only rearranges rows leaves it unchanged. A tile
-   * held under an older content key may still be drawn; list it in {@link ViewportRequest.tiles}
-   * to fetch it again.
+   * The response's entity tag (`etag`), without quotes. It changes when the visible set may have
+   * gained items. You may still draw a tile cached under an older content key; to refresh it, list
+   * it in {@link ViewportRequest.tiles}.
    */
   contentKey: string;
   /**
-   * The render columns the request named in {@link ViewportRequest.pointRows}, or `null` where it
-   * named none: a column outside the list is absent because it was not asked for.
+   * The `render` columns the request asked for in {@link ViewportRequest.pointRows}, or `null` if it
+   * did not name any.
    */
   columnsAsked?: readonly string[] | null;
   /**
-   * The layers the request named in {@link ViewportRequest.layers}: a points frame carries a
-   * membership column for a named layer only where some point has a tag, so an absent column of a
-   * named layer is a column of nulls.
+   * The layers the request named in {@link ViewportRequest.layers}. A named layer with no column in
+   * {@link ViewportResult.membership} tags no point.
    */
   layersAsked?: readonly string[] | 'all';
   /**
-   * The generation this response was answered from (`x-mosaica-pin`, a JSON string). Send it back
-   * as {@link ViewportRequest.stamp}; its only effect is {@link ViewportResponse.stale}. Until the
-   * refresh after a flush reaches this session, it names the previous generation, and the flush's
-   * new rows are not yet visible. Deletions and suppressions apply at once whatever it names.
-   * `null` when the header is absent.
+   * The version of the data this response was computed from (`x-mosaica-pin`), or `null` if the
+   * header is missing. Send it back as {@link ViewportRequest.stamp} to learn whether the data has
+   * changed. Shortly after a write, it can still name the previous version, and the new items are
+   * not yet visible. Deletions and suppressions apply at once.
    */
   pin: string | null;
   /**
-   * Whether the request's `stamp` differs from this response's {@link pin}; `false` when no stamp
-   * was sent. It changes at every flush, merge and compaction, whether or not anything this
-   * principal can see changed. It is advisory: nothing expires and nothing is withheld while it is
-   * `true`.
+   * Whether the data has changed since the request's `stamp`, or `false` if no stamp was sent. It
+   * changes with every write and compaction, even if nothing the viewer can see changed. It is
+   * advisory: nothing expires while it is `true`.
    */
   stale: boolean;
-  /** The verdict on the request's `region` leaves (`x-mosaica-region`); `null` when the request carried none. */
+  /** Whether the request's `region` filters were answered exactly, or `null` if it had none. */
   region: RegionVerdict | null;
   /** The size of the response body, in bytes. */
   bytes: number;
 };
 
 /**
- * One artifacts frame of a `POST /v1/artifacts/viewport` response, handed to the `onTile` sink of
- * {@link MosaicaClient.viewportArtifacts} as it arrives.
+ * One frame of a {@link MosaicaClient.viewportArtifacts} response, passed to its `onTile` callback
+ * as it arrives.
  *
  * @category Requests and responses
  */
 export type ViewportArtifactsFrame = {
   /**
-   * Whether this is the treed frame: the `nested` and `dag` layers' artifacts over every requested
-   * tile, cut to the request's `budget`. It comes first, and is absent where it would hold none.
+   * Whether this is the treed frame, which holds the `nested` and `dag` layers' artifacts for the
+   * whole area, cut to the request's `budget`. It comes first, and is left out if it would be empty.
    */
   treed: boolean;
   /**
-   * The tile this frame answers, as its Morton prefix at the request's `zoom`; `null` for the
-   * treed frame. A tile with no artifact is a frame of no rows, and a `bbox` request's frame of no
-   * rows does not name its tile, so it is `null` there too.
+   * The tile this frame answers, as its Morton prefix at the request's `zoom`. `null` for the
+   * treed frame, and for an empty frame of a `bbox` request.
    */
   tile: bigint | null;
   /**
-   * The artifacts of each named layer and level that hold a member this principal can see inside
-   * the tile, at most `perTile` per level, largest first: by `maskedCount`, then by `mosaicaId`.
+   * The artifacts with a visible member in the tile, at most `perTile` per layer and level, largest
+   * `maskedCount` first.
    */
   artifacts: Artifact[];
 };
 
 /**
- * A `POST /v1/artifacts/viewport` response, as {@link MosaicaClient.viewportArtifacts} returns it.
+ * What {@link MosaicaClient.viewportArtifacts} returns.
  *
  * @category Requests and responses
  */
 export type ViewportArtifactsResponse = {
-  /** Every frame, in wire order: the treed frame where there is one, then one per tile. */
+  /** Every frame in order: the treed frame if there is one, then one per tile. */
   frames: ViewportArtifactsFrame[];
-  /** The server's timings. `stageNs` is always `null`: this route reports none. */
+  /** The server's timings. `stageNs` is always `null`. */
   timings: Timings;
-  /** As {@link ViewportResponse.identityKey}. */
+  /** As for {@link ViewportResponse.identityKey}. */
   identityKey: string;
-  /** As {@link ViewportResponse.contentKey}. */
+  /** As for {@link ViewportResponse.contentKey}. */
   contentKey: string;
-  /** As {@link ViewportResponse.pin}. */
+  /** As for {@link ViewportResponse.pin}. */
   pin: string | null;
-  /** As {@link ViewportResponse.stale}. */
+  /** As for {@link ViewportResponse.stale}. */
   stale: boolean;
-  /** As {@link ViewportResponse.region}. */
+  /** As for {@link ViewportResponse.region}. */
   region: RegionVerdict | null;
   /** The size of the response body, in bytes. */
   bytes: number;
@@ -1304,30 +1195,24 @@ export type ViewportArtifactsResponse = {
  */
 export type ItemDetail = {
   /**
-   * The record, keyed by declared column name. Numbers of every width are JavaScript numbers, so
-   * a 64-bit integer past 2^53 loses precision. A category is its vocabulary key. A column the
-   * item has no value for is absent.
+   * The item's values, by column name. Numbers are JavaScript numbers, so a 64-bit integer above
+   * 2^53 loses precision. A category value is its key. A column with no value is left out.
    */
   fields: Record<string, unknown>;
   /**
-   * The views this item is in that this principal may reach, sorted by id, each with the item's
-   * position in it. A view this principal cannot reach is absent, as an undeclared one is, so an
-   * empty list means none of the item's views is reachable. An item in no view at all is a `404`.
+   * The item's position in each view it is in that the viewer can reach, sorted by id. An item in
+   * no view at all is a `404`.
    */
   views: ItemViewPosition[];
   /**
-   * The item's group-scoped values, by family name and then by the view's key within the group:
-   * `{mood: {'2026-Q1': 'calm'}}`. Two views sharing a key through a `members` group share one
-   * entry. Which group a family belongs to is on {@link Meta.scopedScalars}. Keys this principal
-   * cannot reach are absent, and so is a family with no value this principal may see.
+   * The item's group-scoped values, by family name and then by view key, such as
+   * `{mood: {'2026-Q1': 'calm'}}`. {@link Meta.scopedScalars} gives each family's group. Views the
+   * viewer cannot reach are left out.
    */
   scoped: Record<string, Record<string, unknown>>;
   /**
-   * Why this session sees the item, as label text, sorted. The item's labels are read as one
-   * disjunction: each held term among its operands, and one satisfied clause of each conjunction
-   * among them.
-   * A held term that appears only inside a conjunction is not listed on its own. Every term is one the
-   * session holds. It does not say how the item is labelled. An empty list is an answer.
+   * Why the viewer can see the item: the parts of its access labels the viewer satisfies, sorted.
+   * It does not give the item's full labels. It can be empty.
    */
   labels: string[];
 };
@@ -1338,12 +1223,11 @@ export type ItemDetail = {
  * @category Requests and responses
  */
 export type ItemViewPosition = {
-  /** The view's id: a plain view's name, or `<group>:<key>`. */
+  /** The view's id. */
   id: string;
   /**
-   * The item's x in that view's 32-bit grid units, over the view's own
-   * {@link ViewInfo.quantisation}. Two views quantise differently, so the same item has a different
-   * position in each.
+   * The item's x in that view's 32-bit grid units ({@link ViewInfo.quantisation}). Each view has
+   * its own extent, so the same item has a different position in each.
    */
   x: number;
   /** The item's y, in the same units as `x`. */
@@ -1351,82 +1235,71 @@ export type ItemViewPosition = {
 };
 
 /**
- * One artifact opened by `mosaica_id`, as {@link MosaicaClient.artifact} returns it. Its count and
- * geometry are those the viewport serves for the same artifact in the same view. It carries no
- * member list and no unmasked size.
+ * One artifact, as {@link MosaicaClient.artifact} returns it. Its count and geometry match what
+ * the viewport serves for it in the same view. It does not list the members.
  *
  * @category Requests and responses
  */
 export type ArtifactDetail = {
-  /** The name of the layer the artifact belongs to. */
+  /** The artifact's layer. */
   layer: string;
-  /** The publisher's own key, or `null` where none was supplied. */
+  /** The publisher's key for the artifact, or `null` if it has none. */
   key: string | null;
-  /** How many of the artifact's members this principal can see, in the requested view. */
+  /** How many of the artifact's members the viewer can see in the requested view. */
   maskedCount: bigint;
-  /**
-   * The centre of the members this principal can see, in 32-bit grid units; `null` where the
-   * layer does not declare it.
-   */
+  /** The centre of the visible members, in 32-bit grid units; `null` if the layer does not declare it. */
   centroid: [number, number] | null;
-  /** The bounding box of those members, `[minX, minY, maxX, maxY]` in 32-bit grid units; `null` where the layer does not declare it. */
+  /** The bounding box of the visible members, `[minX, minY, maxX, maxY]` in 32-bit grid units; `null` if the layer does not declare it. */
   box: [number, number, number, number] | null;
   /**
-   * The artifact's drawn outline, `null` where its layer draws none. A predicate or authored shape
-   * is simplified for the `zoom` the call gave, or served whole without one. This is the route to
-   * fetch an outline from; see {@link ViewportRequest.computed}.
+   * The artifact's outline, or `null` if its layer draws none. A predicate or authored outline is
+   * simplified for the call's `zoom`, or sent whole without one.
    */
   shape: Shape | null;
 };
 
 /**
- * The body of `POST /v1/artifacts/browse`, as {@link MosaicaClient.browse} takes it: a layer's
- * artifacts by lineage, independent of the map's viewport. It has three forms:
+ * The request {@link MosaicaClient.browse} sends: one page of a layer's artifacts by hierarchy,
+ * whatever the map shows. It has three forms:
  *
- * - Roots, with neither `parent` nor `q`: the layer's artifacts with no served parent.
- * - Children, with `parent`: the artifacts naming it among their parents, and the parent's own
- *   parents in {@link BrowsePage.parents}. On a `dag` layer a child appears under each served
- *   parent.
- * - Search, with `q`: the artifacts whose key, or whose first supplied text, contains `q`,
- *   ignoring case.
+ * - Roots, with neither `parent` nor `q`: the artifacts with no parent served to the viewer.
+ * - Children, with `parent`: its children, and its own parents in {@link BrowsePage.parents}. On a
+ *   `dag` layer a child appears under each of its parents.
+ * - Search, with `q`: the artifacts whose key or {@link BrowseRow.name} contains `q`, ignoring
+ *   case.
  *
- * Sending both `parent` and `q` is a `422`. Pages are ordered by `matchedCount` where `filters` is
- * set and by `maskedCount` otherwise, then by `mosaicaId` ascending, so a cursor neither repeats
- * nor skips a row.
+ * Giving both `parent` and `q` is a `422`. Rows are ordered by `matchedCount` if `filters` is set,
+ * otherwise by `maskedCount`, then by `mosaicaId`.
  *
  * @category Requests and responses
  */
 export type BrowseRequest = {
-  /** The view whose items the counts are taken over. Required, since a masked count is per view. */
+  /** The view the counts are taken in. */
   view: string;
   /**
-   * The layer to browse. A layer `/v1/meta` does not list for this principal is a `422`, and so is
-   * a layer whose artifacts attach to another layer's.
+   * The layer to browse. A layer `/v1/meta` does not list, or one whose artifacts attach to
+   * another layer's, is a `422`.
    */
   layer: string;
-  /**
-   * The level the form addresses, on a `stacked` or `tiered` layer. A `422` on a `flat`, `nested`
-   * or `dag` layer, and on a level the layer does not hold.
-   */
+  /** The level to browse, on a `stacked` or `tiered` layer only; otherwise, or for a level the layer lacks, a `422`. */
   level?: number;
   /**
-   * The children form's parent, by `mosaica_id`. An id naming nothing, an artifact of another
-   * layer, a suppressed one and one this principal is not served all answer an empty page.
+   * The parent whose children to list, by `mosaica_id`. An artifact that does not exist, belongs to
+   * another layer, is suppressed or is not served to the viewer gives an empty page.
    */
   parent?: bigint;
-  /** The search form: the artifacts whose key or {@link BrowseRow.name} contains this, ignoring case. */
+  /** Text to search for in each artifact's key or {@link BrowseRow.name}, ignoring case. */
   q?: string;
   /**
-   * The viewport's filter. Each row then carries `matchedCount` and the page is ordered by it.
-   * Which rows are served and their `maskedCount` do not change, and a row whose `matchedCount` is
-   * zero is still served.
+   * A filter. Each row then carries `matchedCount` and the page is ordered by it. The same rows are
+   * served, including those with a `matchedCount` of zero.
    */
   filters?: FilterExpr | null;
   /** The page size. Defaults to `selection.maxBrowseRows` and is capped at it; `0` is a `422`. */
   limit?: number;
-  /** A previous page's {@link BrowsePage.next}, unchanged. */
+  /** The previous page's {@link BrowsePage.next}. */
   cursor?: string;
-  /** As {@link ViewportArtifactsRequest.paletteSize}: each row then carries its {@link BrowseRow.slot}. */
+  /** As for {@link ViewportArtifactsRequest.paletteSize}: each row then carries a {@link BrowseRow.slot}. */
   paletteSize?: number;
 };
 
@@ -1438,353 +1311,294 @@ export type BrowseRequest = {
 export type BrowseRow = {
   /** The artifact's `mosaica_id`. */
   mosaicaId: bigint;
-  /** The publisher's own key, or `null` where none was supplied. */
+  /** The publisher's key for the artifact, or `null` if it has none. */
   key: string | null;
   /**
-   * The artifact's first supplied text; where it has none, the first text of an artifact attached
-   * to it that this principal is served, such as a cluster's topic label, taking label layers in
-   * `meta`'s order. `null` where neither gives text.
+   * A name to show: the artifact's first supplied text, or if it has none, the text of an artifact
+   * attached to it, such as a cluster's topic label. `null` if neither has text.
    */
   name: string | null;
-  /** How many of the artifact's members this principal can see. A filter does not change it. */
+  /** How many of the artifact's members the viewer can see. Filters do not change it. */
   maskedCount: bigint;
-  /** How many of those members the request's filter admits; `null` where the request carried no `filters`. */
+  /** How many of those members match the request's filter, or `null` with no filter. */
   matchedCount: bigint | null;
   /**
-   * The artifact's level: its declared level on a `stacked` or `tiered` layer, its depth among the
-   * artifacts this principal is served on a `nested` or `dag` layer, and `0` on a flat layer.
+   * The artifact's level: its declared level on a `stacked` or `tiered` layer, its depth in the
+   * tree on a `nested` or `dag` layer, and `0` on a flat layer.
    */
   rung: number;
-  /** The artifact's parents that this principal is also served, ascending. A parent it is not served is absent. */
+  /** The artifact's parents that are served to the viewer, in ascending order. */
   parentIds: bigint[];
-  /**
-   * How many artifacts this principal is served name this one among their parents: the rows the
-   * children form with this artifact as `parent` lists across its pages. `0` for a leaf, and on a
-   * `flat` or `stacked` layer.
-   */
+  /** How many children of this artifact are served to the viewer. `0` for a leaf, and on a `flat` or `stacked` layer. */
   childCount: number;
-  /** As {@link Artifact.slot}: `null` where the request carried no `paletteSize`. */
+  /** As for {@link Artifact.slot}: `null` if the request had no `paletteSize`. */
   slot: number | null;
 };
 
 /**
- * One page of `POST /v1/artifacts/browse`.
+ * One page of {@link MosaicaClient.browse}.
  *
  * @category Requests and responses
  */
 export type BrowsePage = {
   /** The page's rows. */
   artifacts: BrowseRow[];
-  /** In the children form, the requested parent's own served parents; `[]` in the other forms. */
+  /** In the children form, the parent's own parents; otherwise `[]`. */
   parents: BrowseRow[];
-  /** The cursor for the next page, or `null` where this was the last. */
+  /** The cursor for the next page, or `null` if this is the last. */
   next: string | null;
 };
 
 /**
- * The body of `POST /v1/items`, which {@link MosaicaClient.items} sends: every item this
- * principal may see in `view` that matches `filters`. A field left unset is not sent, and the
- * server's default applies.
+ * The request {@link MosaicaClient.items} sends: every visible item in `view` that matches
+ * `filters`, as pages of Arrow rows. A field you leave unset takes the server's default.
  *
- * The columns of each page are `mosaica_id` (`uint64`), the named fields in the order named, the
- * position under `position`, the labels under `labels`, then `mosaica:matched` (`bool`) under
- * `keepUnmatched`. Every named field is present whether or not an item carries a value, and an
- * absent value is null. A category field is a dictionary column of its keys, each page's
- * dictionary holding only the keys its rows carry.
+ * Each page's columns are `mosaica_id` (`uint64`), then the `fields` in the order named, then
+ * `mosaica:x` and `mosaica:y` with `position`, `mosaica:labels` with `labels`, and
+ * `mosaica:matched` with `keepUnmatched`. A missing value is null. A category is a dictionary
+ * column of its keys.
  *
  * @category Requests and responses
  */
 export type ItemsRequest = {
-  /** The view to read, from `/v1/meta`. An item with no position in it is not returned. */
+  /** The view to read. Items with no position in it are not returned. */
   view: string;
   /**
-   * Declared fields, by name, each once, in the order their columns come back. A group-scoped
-   * field outside its group is pinned as `<field>@<key>`. An empty list returns `mosaica_id`
-   * alone. An undeclared or repeated field is a `422`.
+   * The columns to return, by name, each once. Pin a group-scoped column outside its group as
+   * `<field>@<key>`. `[]` returns `mosaica_id` alone. An unknown or repeated name is a `422`.
    */
   fields: string[];
-  /**
-   * Return each item's position as `mosaica:x` and `mosaica:y` (`float64`) in the view's
-   * coordinates, so degrees on a geographic view.
-   */
+  /** Return each item's position as `mosaica:x` and `mosaica:y` (`float64`) in the view's coordinates, such as degrees on a geographic view. */
   position?: boolean;
-  /**
-   * Return `mosaica:labels` (`list<utf8>`), the clauses of each item's labels that this principal
-   * satisfies, as the item card gives them.
-   */
+  /** Return `mosaica:labels` (`list<utf8>`): the parts of each item's labels the viewer satisfies, as {@link ItemDetail.labels} gives them. */
   labels?: boolean;
-  /** The viewport's filter. Only the items matching it are returned, unless `keepUnmatched` is set. */
+  /** A filter. Only matching items are returned, unless `keepUnmatched` is set. */
   filters?: FilterExpr;
-  /**
-   * Every visible item, with a `mosaica:matched` column, in place of the matching ones only.
-   * Without `filters` every row is marked matched.
-   */
+  /** Return every visible item, with a `mosaica:matched` column saying which match `filters`. */
   keepUnmatched?: boolean;
   /**
-   * Put {@link ItemsHead.visible} and {@link ItemsHead.matched} in the head. A `422` together with
-   * `cursor`. {@link MosaicaClient.items} sends it on the read's first request only.
+   * Put the {@link ItemsHead.visible} and {@link ItemsHead.matched} counts in the head. A `422`
+   * with `cursor`. {@link MosaicaClient.items} sends it on the first request only.
    */
   count?: boolean;
   /**
-   * `map` returns rows by map cell in `view`, then by `mosaica_id`. `stored` returns them in the
-   * order the record store holds items, which is faster for a field held only there. Unset takes
-   * the cursor's order, or with no cursor the server's choice. A value different from the
-   * cursor's is a `422`.
+   * `map` orders rows by their place on the map. `stored` orders them as the record store holds
+   * them, which is faster for columns held only there. Unset keeps the cursor's order, or lets the
+   * server choose. An order different from the cursor's is a `422`.
    */
   order?: 'map' | 'stored';
-  /**
-   * Rows per page, capped by `meta.selection.maxPageRows`; the head reports the size used. Unset
-   * is the cap, and `0` is a `422`.
-   */
+  /** Rows per page, at most `meta.selection.maxPageRows`, which is the default. `0` is a `422`. */
   pageRows?: number;
-  /** The most pages one response may carry. Unset is as many as the response's budgets allow, and `0` is a `422`. */
+  /** The most pages one response may carry. Unset carries as many as the server's limits allow; `0` is a `422`. */
   pages?: number;
-  /** A previous response's cursor, unchanged: where the read resumes. Unset starts from the beginning. */
+  /** A previous response's cursor, to continue the read. */
   cursor?: string;
-  /** Compress each page's Arrow buffers with zstd. The client decodes either form. */
+  /** Compress each page with zstd. The client decodes either form. */
   compression?: 'zstd';
 };
 
 /**
- * The body of `POST /v1/artifacts`, which {@link MosaicaClient.artifacts} sends: every artifact of
- * `layer` this principal is served, ordered by level and then by publication order within the
- * level. A field left unset is not sent, and the server's default applies.
+ * The request {@link MosaicaClient.artifacts} sends: every artifact of `layer` served to the
+ * viewer, as pages of Arrow rows ordered by level and then by publication order. A field you leave
+ * unset takes the server's default.
  *
- * The columns of each page are `mosaica_id` (`uint64`), the named properties in the order named,
- * then `matched_count` (`uint64`) where the request carries `filters`.
+ * Each page's columns are `mosaica_id` (`uint64`), then the `fields` in the order named, then
+ * `matched_count` (`uint64`) if the request has `filters`.
  *
  * @category Requests and responses
  */
 export type ArtifactsRequest = {
-  /** The view the counts, centroids, boxes and shapes are taken in. */
+  /** The view the counts and geometry are taken in. */
   view: string;
-  /** A layer `/v1/meta` publishes to this principal. Any other is a `422`. */
+  /** A layer `/v1/meta` lists. Any other is a `422`. */
   layer: string;
   /**
-   * Properties, each once, in the order their columns come back. `centroid` is the columns
-   * `centroid_x` and `centroid_y`, and `box` the columns `box_x_min`, `box_y_min`, `box_x_max` and
-   * `box_y_max`, in the view's coordinates. `shape` is a WKB `MultiPolygon`. `slot` is the
-   * artifact's palette slot under {@link ArtifactsRequest.paletteSize}. A repeated property is a
-   * `422`.
+   * The properties to return, each once. `centroid` gives the columns `centroid_x` and
+   * `centroid_y`, and `box` gives `box_x_min`, `box_y_min`, `box_x_max` and `box_y_max`, in the
+   * view's coordinates. `shape` is a WKB `MultiPolygon`. `slot` needs
+   * {@link ArtifactsRequest.paletteSize}. A repeated property is a `422`.
    */
   fields: ('key' | 'level' | 'parents' | 'target' | 'masked_count' | 'content' | 'centroid' | 'box' | 'shape' | 'slot')[];
-  /** Only the artifacts at this level. A `422` on a layer with one level, and past the levels the layer holds. */
+  /** Only the artifacts at this level. A `422` on a layer with one level, or past its last level. */
   level?: number;
-  /** Only the artifacts naming this one among their parents. A `422` together with `q`. */
+  /** Only the children of this artifact. A `422` with `q`. */
   parent?: bigint;
-  /** Only the artifacts whose key, or first served text content, contains this, ignoring case. A `422` together with `parent`. */
+  /** Only the artifacts whose key or first text contains this, ignoring case. A `422` with `parent`. */
   q?: string;
-  /**
-   * Only the artifacts of `layer` these `mosaica_id`s name, such as a point's tags. One this
-   * principal is not served has no row, as one naming nothing does.
-   */
+  /** Only these artifacts, such as the ones that tag a point. An id not served to the viewer gives no row. */
   ids?: bigint[];
-  /** Only artifacts with a visible member matching it, and a `matched_count` column. */
+  /** Only the artifacts with a visible member that matches, and a `matched_count` column. */
   filters?: FilterExpr;
-  /** With `filters`, every served artifact, one with no matching member having a `matched_count` of zero. */
+  /** With `filters`, return every artifact, with a `matched_count` of zero for those with no match. */
   keepUnmatched?: boolean;
   /**
-   * Put {@link ArtifactsHead.served} and {@link ArtifactsHead.matched} in the head. A `422`
-   * together with `cursor`. {@link MosaicaClient.artifacts} sends it on the read's first request
-   * only.
+   * Put the {@link ArtifactsHead.served} and {@link ArtifactsHead.matched} counts in the head. A
+   * `422` with `cursor`. {@link MosaicaClient.artifacts} sends it on the first request only.
    */
   count?: boolean;
-  /** As {@link ItemsRequest.pageRows}. */
+  /** As for {@link ItemsRequest.pageRows}. */
   pageRows?: number;
-  /** As {@link ItemsRequest.pages}. */
+  /** As for {@link ItemsRequest.pages}. */
   pages?: number;
-  /** As {@link ItemsRequest.cursor}. */
+  /** As for {@link ItemsRequest.cursor}. */
   cursor?: string;
-  /** As {@link ItemsRequest.compression}. */
+  /** As for {@link ItemsRequest.compression}. */
   compression?: 'zstd';
-  /**
-   * As {@link ViewportArtifactsRequest.paletteSize}, for the `slot` field: a `uint8` column, null
-   * where this is not sent.
-   */
+  /** As for {@link ViewportArtifactsRequest.paletteSize}. Without it the `slot` column is null. */
   paletteSize?: number;
 };
 
 /**
- * The head of a `POST /v1/items` response, as {@link RecordsRead.head} carries it.
+ * The head of a {@link MosaicaClient.items} response, as {@link RecordsRead.head}.
  *
  * @category Requests and responses
  */
 export type ItemsHead = {
-  /** The order this response's rows are in. */
+  /** The order of the rows. */
   order: 'map' | 'stored';
-  /** The page size used, after the cap. */
+  /** The page size used. */
   pageRows: number;
-  /** Visible items in the view at the start of the response; `null` unless the request asked for `count`. */
+  /** How many items in the view the viewer can see, or `null` unless the request set `count`. */
   visible: number | null;
-  /** Of those, the ones matching the filter; `null` unless the request asked for `count`. */
+  /** How many of those match the filter, or `null` unless the request set `count`. */
   matched: number | null;
 };
 
 /**
- * The head of a `POST /v1/artifacts` response, as {@link RecordsRead.head} carries it.
+ * The head of a {@link MosaicaClient.artifacts} response, as {@link RecordsRead.head}.
  *
  * @category Requests and responses
  */
 export type ArtifactsHead = {
-  /** The page size used, after the cap. */
+  /** The page size used. */
   pageRows: number;
-  /** Artifacts the request selects that this principal is served; `null` unless the request asked for `count`. */
+  /** How many artifacts the request selects, or `null` unless the request set `count`. */
   served: number | null;
-  /** Of those, the ones with a visible member matching the filter; `null` unless the request asked for `count`. */
+  /** How many of those have a visible member that matches the filter, or `null` unless the request set `count`. */
   matched: number | null;
 };
 
 /**
- * The frame after each page of a bulk read.
+ * Sent after each page of an items or artifacts read.
  *
  * @category Requests and responses
  */
 export type PageEnd = {
-  /** The cursor to resume after this page; `null` where no row remains. */
+  /** The cursor to continue after this page, or `null` if no rows remain. */
   next: string | null;
   /**
-   * `rows`: the page holds `pageRows` rows. `bytes`: the next row would have taken it past
-   * `meta.selection.maxPageBytes`. `time`: the response's time ran out, or the stream deadline
-   * cancelled it, and the response ends after this page. `end`: no row remains.
+   * Why the page ended. `rows`: it holds `pageRows` rows. `bytes`: the next row would have taken
+   * it past `meta.selection.maxPageBytes`. `time`: the response ran out of time and ends after this
+   * page. `end`: no rows remain.
    */
   endedBy: 'rows' | 'bytes' | 'time' | 'end';
 };
 
 /**
- * The last frame of a bulk read's response.
+ * Sent at the end of an items or artifacts response.
  *
  * @category Requests and responses
  */
 export type RecordsTrailer = {
-  /** The pages this response carried. A page of no rows, which a response that found no row carries, counts. */
+  /** How many pages the response carried, including an empty one. */
   pages: number;
-  /** The rows this response carried. */
+  /** How many rows the response carried. */
   rows: number;
-  /** The cursor to resume from, which can be past the last page end; `null` where no row remains. */
+  /** The cursor to continue from, or `null` if no rows remain. */
   next: string | null;
   /**
-   * `end`: no row remains. `pages`: the response carried the request's `pages` pages.
-   * `budget_bytes` and `budget_time`: the response's byte or time budget ran out. `deadline`: the
-   * stream deadline cancelled it.
+   * Why the response ended. `end`: no rows remain. `pages`: it carried the request's `pages`.
+   * `budget_bytes` and `budget_time`: it reached the server's size or time limit. `deadline`: the
+   * stream timed out.
    */
   endedBy: 'end' | 'pages' | 'budget_bytes' | 'budget_time' | 'deadline';
-  /** The whole response's wall time on the server, in microseconds, including waits on the client. */
+  /** How long the response took on the server, in microseconds, including time spent waiting for the client. */
   streamUs: number;
 };
 
 /**
- * The body of `POST /v1/aggregate`, which {@link MosaicaClient.aggregate} sends: how the items this
- * principal may see in `view` are distributed, as one table per grouping of the figures it names.
- * A field left unset is not sent, and the server's default applies.
+ * The request {@link MosaicaClient.aggregate} sends: summary tables over the visible items in
+ * `view`, such as counts per category, a histogram, or counts per map cell. Each
+ * {@link Grouping} gives one table. A field you leave unset takes the server's default.
  *
  * @category Requests and responses
  */
 export type AggregateRequest = {
-  /** The view the counts are taken in, from `/v1/meta`. An item with no position in it is not counted. */
+  /** The view to count in. Items with no position in it are not counted. */
   view: string;
-  /** The set every count is taken over, in the viewport's grammar. Unset is every item this principal may see in `view`. */
+  /** The items to count. Unset counts every visible item in `view`. */
   filters?: FilterExpr;
   /**
-   * The set each count is compared with, in the same grammar and view, drawn from the same visible
-   * set. `{}` is the whole visible set. Unset adds no comparison columns.
+   * A second set to compare each count with, from the same visible items. `{}` is every visible
+   * item. With it, each table gains `reference_count` and `lift` columns.
    */
   reference?: FilterExpr;
-  /** One table each, in this order. At most `meta.selection.maxAggregateGroupings`. */
+  /** The tables to compute, at most `meta.selection.maxAggregateGroupings`. */
   groupings: Grouping[];
-  /** As {@link ItemsRequest.pageRows}. */
+  /** As for {@link ItemsRequest.pageRows}. */
   pageRows?: number;
-  /** As {@link ItemsRequest.pages}. */
+  /** As for {@link ItemsRequest.pages}. */
   pages?: number;
-  /** A previous result's {@link AggregateResult.next}, unchanged, under the same request. */
+  /** A previous result's {@link AggregateResult.next}, to continue the same request. */
   cursor?: string;
-  /** As {@link ItemsRequest.compression}. */
+  /** As for {@link ItemsRequest.compression}. */
   compression?: 'zstd';
 };
 
 /**
- * One table of an aggregate: how it divides the set, and the figures each row holds. `by` picks
- * groups; `cells` divides the set, or each group, into cells of the view. A grouping names at
- * least one figure, and one that names none is refused, so `{count: true}` is the size of the set.
+ * One table of an aggregate: how to divide the items into rows, and which figures each row holds.
+ * `by` divides them into groups and `cells` into map cells; with both, each group is divided into
+ * cells. Name at least one figure; `{count: true}` alone counts the whole set.
  *
- * `count` gives the `count` column, and with a `reference` the `reference_count` and `lift`
- * columns. `values`, `missing`, `min`, `max` and `mean` each list number or timestamp fields
- * declared with `index` or `render`, resolved as {@link AggregateBy}'s `field` is, and give one
- * column per field, named `<figure>_<field>` with the field as written: `values_<field>` (a
- * `bigint`, the items holding a finite value), `missing_<field>` (a `bigint`, the items holding no
- * value), `min_<field>` and `max_<field>` (the smallest and largest finite value, typed as a
- * histogram's edges) and `mean_<field>` (a timestamp on a timestamp field, rounded to the nearest
- * microsecond, and a number on any other); the last three are null where `values_<field>` is 0.
- * `summary` names all five over each field it lists. The field columns follow `count`, in the
- * order values, missing, min, max, mean; each figure's columns run over the fields of its own list
- * in order, then over those of `summary` not already listed, a field named twice giving one
- * column. Every figure is exact, the mean rounded once from the
- * exact sum, a tie to even.
- *
- * The field figures are taken over every item this principal may see in the view, and only over
- * it: they are refused in a grouping with `by` or `cells` and in a request with `filters` or a
- * `reference`. A table of field figures is one row; without `count` it has no `count` column.
+ * The field figures (`values`, `missing`, `min`, `max`, `mean` and `summary`) each take a list of
+ * number or timestamp columns declared with `index` or `render`, and add one column per field
+ * named `<figure>_<field>`. They are computed over every visible item in the view, so they cannot
+ * be combined with `by`, `cells`, `filters` or `reference`, and their table has one row. All
+ * figures are exact; `min`, `max` and `mean` are null if the field has no values.
  *
  * @category Requests and responses
  */
 export type Grouping = {
-  /** The outer level: the groups. Unset counts the set as one group. */
+  /** Divide the items into groups. Unset treats them as one group. */
   by?: AggregateBy;
-  /** The inner level: the cells each group is divided into. Unset counts each group whole. */
+  /** Divide each group into map cells. Unset keeps each group whole. */
   cells?: AggregateCells;
-  /** The `count` column: the items of the set in each row. */
+  /** Add a `count` column: the items in each row. */
   count?: true;
-  /** The `values_<field>` column of each field: the items holding a finite value. */
+  /** Add `values_<field>`: how many items hold a finite value. */
   values?: string[];
-  /** The `missing_<field>` column of each field: the items holding no value. */
+  /** Add `missing_<field>`: how many items hold no value. */
   missing?: string[];
-  /** The `min_<field>` column of each field: the smallest finite value. */
+  /** Add `min_<field>`: the smallest finite value. */
   min?: string[];
-  /** The `max_<field>` column of each field: the largest finite value. */
+  /** Add `max_<field>`: the largest finite value. */
   max?: string[];
-  /** The `mean_<field>` column of each field: the mean of the finite values. */
+  /** Add `mean_<field>`: the mean of the finite values, rounded to the microsecond on a timestamp. */
   mean?: string[];
-  /** All five figures of each field. */
+  /** Add all five figures for each field. */
   summary?: string[];
 };
 
 /**
- * A grouping's outer level: the values of a category field or the artifacts of one level of a
- * layer, as the `top` groups by count or as the groups named; the values of a number or timestamp
- * field in `bins`, a histogram.
+ * How a grouping divides items into groups. There are three kinds:
  *
- * With `top` or `values`, a `field` is a category declared with `index` or `render`, or one with a
- * `derived` vocabulary; with `bins`, a number or timestamp field declared with `index` or
- * `render`.
- * A group-scoped field resolves under the request's view as a filter leaf on it does, or is pinned
- * as `<field>@<key>`. A `layer` is one `/v1/meta` publishes to this principal, and `level` is
- * required on a layer with several levels and refused on one with a single level. A named value or
- * artifact this principal would not be listed gets no row. With `layer`, `paletteSize` (2 to 32)
- * gives each listed artifact this viewer's slot, as {@link Artifact.slot} does.
+ * - A category column, as its `top` values by count or the `values` you name. The column needs
+ *   `index` or `render`, or a `derived` vocabulary.
+ * - An annotation layer, as its `top` artifacts by count or the `artifacts` you name. `level` is
+ *   required on a layer with several levels and refused on one with one level. `paletteSize` (2 to
+ *   32) gives each artifact its {@link Artifact.slot}. On a `nested` or `dag` layer, `top` requires
+ *   a `cut`, and lists the artifacts {@link MosaicaClient.viewportArtifacts} would draw for it.
+ * - A number or timestamp column in `bins`, as a histogram. The column needs `index` or `render`.
  *
- * On a `nested` or `dag` layer, `top` takes a `cut`, and is refused without one: the artifacts
- * listed are those the treed frame of {@link MosaicaClient.viewportArtifacts} serves for the same
- * view, zoom, bbox and budget, and on a layer declared with `prune_children: false` only those with
- * nothing drawn beneath them. A `cut` on any other layer is refused.
+ * Pin a group-scoped column outside its group as `<field>@<key>`. A named value or artifact the
+ * viewer cannot see gets no row.
  *
- * With `bins` and a `range`, `[lower, upper]` is cut into `bins` equal bins. On an integer field
- * with whole bounds the edges are whole numbers; where either bound is fractional the bins are cut
- * in float and the edges are numbers. On a timestamp field the bounds are whole microseconds since
- * the Unix epoch, or dates or date-times with an offset as strings, as in a filter. A `bigint`
- * bound is sent exactly. A histogram's table is always one page.
- * Without a `range`, the edges are readable values around the smallest and largest value of every
- * item this principal may see in the view, whatever the filters say, in at most `bins` bins, so
- * they stay put as the filters and the viewport change, and no visible value lies outside them.
- * Sending the first answer's first `lower` and last `upper` back as the `range`, with `bins` set to
- * the number of bins it returned, gives the same bins, except on a timestamp field binned by months
- * or years and where an edge was served as its column's smallest or largest value. At most
- * `meta.selection.maxAggregateBins`; a grouping by bins takes no `cells`.
- *
- * With `bins` and a `sample`, a set of more than `sample` items is counted over its items whose
- * `mosaica_id` is below one cut, `sample / total` of the identity range, about `sample` of them, and
- * each count is scaled to the set's `total`. Default edges are the exact ones, as without a
- * `sample`. A set of at most `sample` items is counted exactly, and so is one where `sample` is
- * more than about one item in 64 of the set. The table's {@link AggregateTable.sample} says how it
- * was counted.
+ * For a histogram, `range` cuts `[lower, upper]` into `bins` equal bins; bounds may be numbers,
+ * `bigint`s, or for a timestamp, dates or date-times as in a filter. Without a `range`, the server
+ * picks round edges that cover every visible item in the view, in at most `bins` bins, so they stay
+ * the same as the filters and the map change. With `sample`, a set larger than `sample` is counted
+ * from about `sample` of its items and the counts are scaled up; {@link AggregateTable.sample} says
+ * whether that happened. A histogram cannot have `cells`, and its table is always one page.
  *
  * @category Requests and responses
  */
@@ -1796,90 +1610,84 @@ export type AggregateBy =
   | {layer: string; level?: number; artifacts: bigint[]; paletteSize?: number};
 
 /**
- * Where and how finely a `nested` or `dag` layer is drawn, as {@link ViewportArtifactsRequest}
- * names it: the tile depth, the box in the view's coordinates, and the most artifacts the cut may
- * draw. The tiles may number at most `meta.maxTilesPerRequest`.
+ * The map position a `nested` or `dag` layer is drawn at, as in
+ * {@link ViewportArtifactsRequest}. It covers at most `meta.maxTilesPerRequest` tiles.
  *
  * @category Requests and responses
  */
 export type AggregateCut = {
-  /** From 0 to 16. */
+  /** The tile depth, `0` to `16`. */
   zoom: number;
-  /** `[x0, y0, x1, y1]` as the viewport's `bbox` takes it. */
+  /** The area, `[x0, y0, x1, y1]` in the view's data coordinates. */
   bbox: [number, number, number, number];
-  /** Unset is the finest cut. */
+  /** The most artifacts to draw. Unset means no limit. */
   budget?: number;
 };
 
 /**
- * A grouping's inner level: the cells of the view at `depth`, from 0 to 32. Depths 0 to 16 are the
- * map's tiles at that zoom; 17 to 32 divide them down to the stored position.
+ * Divides each group into map cells at `depth`. Depths 0 to 16 are the map's tiles at that zoom,
+ * and 17 to 32 are finer.
  *
  * @category Requests and responses
  */
 export type AggregateCells = {
-  /** From 0 to 32. */
+  /** The cell depth, `0` to `32`. */
   depth: number;
   /**
-   * `[x0, y0, x1, y1]` as the viewport's `bbox` takes it. Only the cells at `depth` that intersect
-   * it are listed, each with all of its items. Unset is the view's whole extent. The cells may
-   * number at most `meta.selection.maxAggregateCells`.
+   * The area, `[x0, y0, x1, y1]` in the view's data coordinates. Only the cells it touches are
+   * listed, each counted whole. Unset covers the whole view. At most
+   * `meta.selection.maxAggregateCells` cells.
    */
   area?: [number, number, number, number];
 };
 
 /**
- * One grouping's table, as {@link AggregateResult.tables} carries it: the figures of its head and
- * its rows.
+ * One table of {@link AggregateResult.tables}.
  *
- * The columns are, in this order and each only where stated: `group` (`listed`, `rest` or `none`,
- * with `by`); `key` (a vocabulary key, or an artifact's `mosaica_id` as a `bigint`, with `by`; null
- * on `rest` and `none`); `title` (a value's title, or an artifact's name as
- * {@link MosaicaClient.browse} gives it, with `by` on a layer, and with `by` on a field whose
- * vocabulary holds a title for any value; null where there is none); `slot` (a layer's
- * artifact's palette slot, as {@link Artifact.slot} is, with `by` on a `layer` and null without its
- * `paletteSize` and on `rest` and `none`); in place of `key` and
- * `title` with `bins`, `lower` and `upper` (a bin's edges: a `bigint` on an integer field, a number
- * on one whose range has a fractional bound, a number on a float field, and a timestamp in
- * milliseconds since the Unix epoch, as Arrow reads one, on a timestamp field; null on `rest` and
- * `none`); `cell` (a `bigint`, the first `2·depth` bits of the Morton position, with `cells`);
- * `count` (a `bigint`, with `count`); with `count` and a reference, `reference_count` (a `bigint`)
- * and `lift` (a number, null where either count it divides by is 0); then the field figures'
- * columns, as {@link Grouping} lists them. A bin holds the values from `lower` up to but not
- * including `upper`, and the last bin also holds its `upper`; `rest` holds the values in no bin and
- * `none` the items with no value.
+ * The rows are an Arrow table whose columns depend on the grouping, in this order:
+ *
+ * - `group`, with `by`: `listed` for a named or top group, `rest` for the items in no listed group,
+ *   and `none` for the items with no value.
+ * - `key` and `title`, with `by`: the value's key and title, or the artifact's `mosaica_id` and
+ *   name. `title` is present for a layer, or for a column whose vocabulary has titles. Both are
+ *   null for `rest` and `none`.
+ * - `slot`, with `by` on a layer: the artifact's colour index if `paletteSize` was given.
+ * - `lower` and `upper`, with `bins`, in place of `key` and `title`: the bin's edges. A bin holds
+ *   values from `lower` up to `upper`, and the last bin includes its `upper`. A timestamp edge is in
+ *   milliseconds, as Arrow reads it.
+ * - `cell`, with `cells`: the cell's Morton prefix, as a `bigint`.
+ * - `count`, with `count`. With a `reference` too, `reference_count` and `lift`, which is null if
+ *   either count it divides by is 0.
+ * - The field figures' columns, as {@link Grouping} describes.
  *
  * @category Requests and responses
  */
 export type AggregateTable = {
   /** The table's index in the request's `groupings`. */
   grouping: number;
-  /** Items in the set. */
+  /** How many items are in the set. */
   total: number;
-  /** Items in the reference set; `null` where the request carried no `reference`. */
+  /** How many items are in the reference set, or `null` without a `reference`. */
   referenceTotal: number | null;
-  /**
-   * The groups with an item in the set before the cut to `top` or the named list; `null` where the
-   * grouping has no `by`.
-   */
+  /** How many groups have an item in the set, before the cut to `top` or the named list; `null` without `by`. */
   groups: number | null;
-  /** How a histogram asked for with a `sample` was counted; `null` on any other grouping. */
+  /** How a histogram with a `sample` was counted; otherwise `null`. */
   sample: AggregateSample | null;
-  /** The rows of every page read, joined in order. */
+  /** The rows, from every page read. */
   rows: Table;
 };
 
 /**
- * How a histogram asked for with a `sample` was counted.
+ * How a histogram with a `sample` was counted.
  *
  * @category Requests and responses
  */
 export type AggregateSample = {
-  /** Whether any count is scaled from a sample; `false` where every item was counted. */
+  /** Whether the counts are scaled up from a sample. `false` if every item was counted. */
   sampled: boolean;
-  /** The items of the set counted: `total` where the set was not sampled. */
+  /** How many items of the set were counted. */
   items: number;
-  /** The items of the reference set counted; `null` where the request carried no `reference`. */
+  /** How many items of the reference set were counted, or `null` without a `reference`. */
   referenceItems: number | null;
 };
 
@@ -1889,21 +1697,17 @@ export type AggregateSample = {
  * @category Requests and responses
  */
 export type AggregateResult = {
-  /**
-   * One table per grouping read, in the order of `groupings`. The figures are those of the table's
-   * first head read; a table carried over several responses keeps the groups its first page
-   * listed.
-   */
+  /** One table per grouping, in the order of `groupings`. */
   tables: AggregateTable[];
-  /** The `x-mosaica-region` verdict, present where `filters` or `reference` carried a `region` leaf. */
+  /** Whether the `region` filters in `filters` or `reference` were answered exactly; `null` if there were none. */
   region: RegionVerdict | null;
   /**
-   * Whether a page counted a different state of the corpus from the page before it, in any
-   * response read. The tables then mix counts taken before and after a change.
+   * Whether the data changed between pages, so the tables mix counts from before and after the
+   * change.
    */
   recomposed: boolean;
-  /** The last response's identity key for this principal and view; empty where it carried none. */
+  /** The identity key for the viewer and view (see {@link ViewportResponse.identityKey}), or empty if the response had none. */
   identityKey: string;
-  /** Where the read continues: `null` once every table is whole. */
+  /** Where to continue the read, or `null` once every table is complete. */
   next: string | null;
 };
