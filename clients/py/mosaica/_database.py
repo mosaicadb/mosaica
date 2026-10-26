@@ -566,7 +566,9 @@ class Database:
 
         A label set gives annotations of the layer `of` text to show, such as a topic name for a
         cluster, and a label is drawn wherever its annotation is drawn. The text comes from
-        `insert(name, {key: text})` or `insert(name, table, key=, text=)`.
+        `insert(name, {key: text})` or `insert(name, table, key=, text=)`. On a layer with levels
+        each label also names the level of its annotation, so the text comes from
+        `insert(name, table, key=, text=, attached_level=)` and a mapping is refused.
 
         - `name`: the label set's name.
         - `of`: the declared layer it labels, which must not already carry a label set.
@@ -1069,14 +1071,23 @@ class Database:
         """A label set's text as the annotations table its layer reads, and the columns it names.
 
         Given a mapping from key to text, or a table with `text=`, the table is written here and
-        each label is attached to the annotation with its own key in the layer it labels. Given a
-        table with `contents=`, the table is read as it is and must name its attachment.
+        each label is attached to the annotation with its own key in the layer it labels, at the
+        level `attached_level=` names on a layer with levels. Given a table with `contents=`, the
+        table is read as it is and must name its attachment.
         """
-        of = next(
-            one["name"]
+        layer = next(
+            one
             for one in self.blocks.blocks["layer"]
             if isinstance(one.get("labels"), dict) and one["labels"]["name"] == target
         )
+        of = layer["name"]
+        if layer.get("levels") and "contents" not in named and "attached_level" not in named:
+            raise Refusal(
+                f"insert into labels {target!r}: layer {of!r} has levels, so each label names the "
+                f"level of the cluster it is attached to. Insert a table with text= and "
+                f"attached_level= naming the column that holds that level"
+            )
+        attached_levels = None
         if isinstance(data, dict):
             if named:
                 raise Refusal(
@@ -1121,7 +1132,9 @@ class Database:
                 if "attached_layer" in named
                 else [of] * len(keys)
             )
-            carried = {"key", "text", "level", "attached_key", "attached_layer"}
+            if "attached_level" in named:
+                attached_levels = table[named["attached_level"]].to_pylist()
+            carried = {"key", "text", "level", "attached_key", "attached_layer", "attached_level"}
             beyond = sorted(set(named) - carried)
             if beyond:
                 raise Refusal(
@@ -1152,13 +1165,19 @@ class Database:
                 "attached_key": pa.array(attached_keys, type=pa.string()),
             }
         )
-        return written, {
+        columns = {
             "key": "key",
             "contents": "contents",
             "level": "level",
             "attached_layer": "attached_layer",
             "attached_key": "attached_key",
         }
+        if attached_levels is not None:
+            written = written.append_column(
+                "attached_level", pa.array(attached_levels, type=pa.uint32())
+            )
+            columns["attached_level"] = "attached_level"
+        return written, columns
 
     # ------------------------------------------------------------------ the document
 

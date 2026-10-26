@@ -1577,3 +1577,56 @@ def test_a_tiered_layer_committed_from_its_artifacts_is_the_same_declaration_at_
         assert {"topics", "halves"} <= held
     finally:
         db.close()
+
+
+def tiered_topics(db) -> None:
+    """A broad topic over both items and a fine one over the first, with a label set over both."""
+    db.declare_layer("topics", kind="tiered", levels=[(0, "broad"), (1, "fine")])
+    db.declare_labels("names", of="topics")
+    db.insert(
+        "topics",
+        artifacts=pa.table({"key": ["b", "f"], "level": pa.array([0, 1], pa.uint32()),
+                            "parent": [None, "b"]}),
+        key="key", level="level", parent="parent",
+    )
+    db.insert(
+        "topics",
+        members=pa.table({"key": ["b", "b", "f"], "level": pa.array([0, 0, 1], pa.uint32()),
+                          "id": [1, 2, 1]}),
+        key="key", level="level",
+    )
+
+
+def test_labels_given_as_text_name_the_level_of_the_cluster_each_is_attached_to(tmp_path):
+    """Each name is served attached to its own cluster, on whichever level that cluster is."""
+    db, _ = two_items(tmp_path / "db")
+    try:
+        tiered_topics(db)
+        db.insert(
+            "names",
+            pa.table({"cluster": ["b", "f"], "level": [0, 1], "name": ["Broad", "Fine"]}),
+            key="cluster", text="name", attached_level="level",
+        )
+        assert db.commit().ok
+        clusters = db.artifacts("map", "topics", ["key"]).to_pylist()
+        names = db.artifacts("map", "names", ["content", "target"]).to_pylist()
+        named = {row["target"]: row["content"] for row in names}
+        assert {row["key"]: named[row["mosaica_id"]] for row in clusters} == {
+            "b": ["Broad"], "f": ["Fine"],
+        }
+    finally:
+        db.close()
+
+
+def test_labels_on_a_layer_with_levels_are_refused_without_the_level_they_attach_at(tmp_path):
+    db, _ = two_items(tmp_path / "db")
+    try:
+        tiered_topics(db)
+        with pytest.raises(Refusal):
+            db.insert("names", {"b": "Broad", "f": "Fine"})
+        with pytest.raises(Refusal):
+            db.insert("names", pa.table({"cluster": ["b"], "name": ["Broad"]}),
+                      key="cluster", text="name")
+        assert not [one for one in db.inserts if one.target == "names"]
+    finally:
+        db.close()
