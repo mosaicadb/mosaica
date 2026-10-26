@@ -26,17 +26,20 @@ const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
 };
 
 /**
- * Use `<mosaica-artifact-card>` to show an artifact the viewer opened, such as a cluster they
- * clicked on the map. An artifact is a named group of items in an annotation layer. The card shows
- * its name, how many of its items the viewer may see, its description, layer and key, and its
- * parents and its children in this view; pressing a parent or child opens it. Its buttons filter or
- * highlight the map by the artifact, filter to everything outside it, or fit the map to it.
+ * An artifact is a named group of items in an annotation layer, such as a cluster. Use this card to
+ * show the artifact the viewer opened on the map. It shows the artifact's name, description, layer
+ * and key. It also shows how many of its items the viewer may see. Below that are its parents and
+ * children in the current view. Pressing one opens it.
  *
- * The card shows the store's opened artifact (`Store.openArtifact`), or the `artifact` you set. The
- * filter buttons add a `member_of` clause, which selects the artifact's members wherever they are
- * on the map, unlike a drawn region, which selects by shape. The count covers every member the
- * viewer may see and does not change as the map moves. A filter layer draws nothing, so its
- * artifacts have no Fit button. The server refuses every artifact it withholds in the same way.
+ * The card shows the store's opened artifact (`Store.openArtifact`), or the `artifact` you set. Its
+ * count covers every member the viewer may see, so it does not change as the map moves. The server
+ * refuses every artifact it withholds in the same way.
+ *
+ * Its buttons filter or highlight the map by the artifact, or filter to everything outside it. Each
+ * adds a `member_of` clause. Such a clause selects the artifact's members wherever they are on the
+ * map, while a drawn region selects by shape. Fit to cluster fires `mosaica-artifactfit`.
+ * `<mosaica-explorer>` responds by fitting its map to the artifact. A filter layer draws nothing,
+ * so its artifacts have no Fit button.
  *
  * @summary A card showing an artifact's details, parents and children.
  * @tagname mosaica-artifact-card

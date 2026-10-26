@@ -21,20 +21,20 @@ const TYPING_DEBOUNCE_MS = 350;
 const BAR_FLOOR = 2;
 
 /**
- * Place `<mosaica-filter>` on its own when you want a search box for one column without a field
- * card; the field cards for text, keyword and category columns already have one. Set `column` to a
- * column `meta.filterOperands` lists, and the box takes the form that column's kind needs:
+ * Use `<mosaica-filter>` for a search box on one column without a field card around it. The field
+ * cards for text, keyword and category columns already include one. Set `column` to a column
+ * `meta.filterOperands` lists. The box then takes the form that column's kind needs:
  *
- * - A text column takes words, all of which must appear. Put words in double quotes for a phrase,
- *   if the column supports phrases, and `OR` between terms to match either. A text filter the box
- *   cannot express, set in code, shows read-only.
- * - A category column suggests values as the viewer types, each with how many items in view
- *   choosing it would add. The arrow keys move through the suggestions, and Enter chooses one, or
+ * - A text column takes words, and an item must contain all of them. If the column supports
+ *   phrases, words in double quotes match as a phrase. `OR` between terms matches either. A text
+ *   filter set in code that the box cannot express shows read-only.
+ * - A category column suggests values as the viewer types. Each suggestion shows how many items in
+ *   view choosing it would add. The arrow keys move through the suggestions. Enter chooses one, or
  *   removes it if it is already chosen.
  * - A keyword column has a menu of operators: `contains`, `prefix` or `eq`.
  *
  * The box sets the column's filter on the store (`Store.setFilters`) 350 ms after the last
- * keystroke, and at once when a suggestion is chosen.
+ * keystroke. Choosing a suggestion sets it at once.
  *
  * @summary A search box that filters the map by one column.
  * @tagname mosaica-filter

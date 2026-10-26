@@ -8,20 +8,24 @@ import {chrome, tokens} from './tokens.js';
 import './count.js';
 
 /**
- * Use `<mosaica-status>` to show on one line whether the map is up to date and how many items it
- * covers, such as `● | 16,822,190 of 21,406,522 match | 5,390 shown`. The counts cover the
- * camera's box, or the selected region while there is one. While a highlight is set, a cell reads
- * `N highlighted of M`.
+ * Use the status line with a map to tell viewers whether what they see is current. A typical line
+ * reads `● | 16,822,190 of 21,406,522 match | 5,390 shown`. The first figure counts the items the
+ * filters match, out of the items the viewer may see. The counts cover the camera's box, or the
+ * selected region while there is one. While a highlight is set, a cell reads `N highlighted of M`.
  *
- * While the view is up to date, the first cell is a dot alone. Otherwise it names the state in a few
- * words, such as Reconnecting, Server busy, View refused or Session expired, with a button if there
- * is something to do: Refresh when the data has changed, Retry after a refusal, no answer or a
- * busy server, and Sign in when the session expires and `reauthorise` is set. The counts grey out
- * while they are out of date.
+ * While the view is up to date, the first cell is a dot alone. Otherwise it names the state in a
+ * few words, such as Reconnecting, Server busy, View refused or Session expired. Some states add a
+ * button:
  *
- * `compact` shortens the figures and drops the shown count, and `expanded` adds a card of the
- * figures below the strip. The state cell is an `aria-live` region, so screen readers announce a
- * refusal, an expiry or a change of data, but not the counts as the map pans.
+ * - Refresh, when the data has changed.
+ * - Retry, after a refusal, no answer or a busy server.
+ * - Sign in, when the session expires and `reauthorise` is set.
+ *
+ * The counts grey out while they are out of date. `compact` shortens the figures and drops the
+ * shown count. `expanded` adds a card of the figures below the strip.
+ *
+ * The state cell is an `aria-live` region. Screen readers announce a refusal, an expiry or a change
+ * of data from it. They do not announce the counts as the map pans.
  *
  * @summary A status line showing whether the map is up to date and how many items it shows.
  * @tagname mosaica-status

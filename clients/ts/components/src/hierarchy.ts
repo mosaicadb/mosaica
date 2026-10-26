@@ -24,20 +24,21 @@ type Node = {
 const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
 
 /**
- * Use `<mosaica-hierarchy>` to let viewers browse a layer's tree of artifacts and filter by them.
- * It opens on the layer's top-level artifacts at any zoom and does not move with the map. A select
- * switches layer if the bundle has several.
+ * Use the hierarchy to let viewers browse a layer's artifacts from the top down and filter by them.
+ * It opens on the layer's top-level artifacts at any zoom, and it does not move with the map. If
+ * the bundle has several layers, a select switches between them.
  *
- * Each row shows an artifact's name and how many of its items the viewer may see, with an expander
- * if it has children. Children load a page at a time, with More for the next page. On a layer where
- * an artifact can have several parents, it appears under each and names the others. A parent the
- * viewer may not see is left out, so its children appear at the top level. The search box finds
- * artifacts by name.
+ * Each row shows an artifact's name and how many of its items the viewer may see. While filters are
+ * set, the row also shows how many of those items match them. A row with children has an expander.
+ * Children load a page at a time, with More for the next page. On a layer where an artifact can
+ * have several parents, it appears under each and names the others. A parent the viewer may not see
+ * is left out, so its children appear at the top level. The search box finds artifacts by name.
  *
- * While filters are set, each row also shows how many of its items match them. A row's buttons
- * highlight or filter the map by its artifact, and Fit fits the map to it; pressing the name
- * highlights it. A row with a filter or highlight on it is shaded, with a × to remove each. The
- * panel makes no requests while it is hidden.
+ * A row's buttons highlight or filter the map by its artifact. Pressing the name also highlights
+ * it. A row with a filter or highlight on it is shaded, with a × to remove each. The Fit button
+ * fires `mosaica-artifactfit`. `<mosaica-explorer>` responds by fitting its map to the artifact.
+ * Elsewhere, pass the event's id to the map's `fitTo`. The panel makes no requests while it is
+ * hidden.
  *
  * @summary A tree for browsing a layer's artifacts and filtering by them.
  * @tagname mosaica-hierarchy

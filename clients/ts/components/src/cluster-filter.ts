@@ -29,18 +29,17 @@ const PATH_DEPTH = 3;
 type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
 
 /**
- * Place `<mosaica-cluster-filter>` on its own when you want cluster search without a field card;
- * each layer's field card already has one. It filters the map by a layer's clusters. Set `layer`
- * to a layer `meta.layers` lists.
+ * Use `<mosaica-cluster-filter>` for cluster search without a field card around it. Each layer's
+ * field card already includes one. Set `layer` to a layer `meta.layers` lists.
  *
  * With the box empty, the list offers the layer's top-level clusters, largest first. Typing
- * searches the cluster names at every level, and each match shows the names of its nearest
- * parents. Each row has an exact count of the items the filters match in that cluster, leaving out
+ * searches the cluster names at every level. Each match shows the names of its nearest parents.
+ * Each row has an exact count of the items the filters match in that cluster. The count ignores
  * this layer's own filter, so a cluster that filter excludes keeps its count.
  *
  * Choosing a row filters the map to the cluster's members with a `member_of` clause
- * (`Store.setMembers`), and choosing it again removes the clause. The arrow keys move through the
- * list, Enter chooses a row and Escape closes the list.
+ * (`Store.setMembers`). Choosing it again removes the clause. In the list, the arrow keys move
+ * between rows, Enter chooses one and Escape closes the list.
  *
  * @summary A search box that filters the map by a layer's clusters.
  * @tagname mosaica-cluster-filter

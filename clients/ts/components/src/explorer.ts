@@ -116,38 +116,40 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 ];
 
 /**
- * Use `<mosaica-explorer>` to put a complete map application on a page with one element. It holds
- * a heading, a `<mosaica-map>`, the filter panel, a Layers popover, the status strip, and cards
- * for the picked item or cluster and the selected region. To change one region, put your own
- * element in its slot; for a different arrangement, lay out the separate elements yourself.
+ * Use the explorer for a working map page in one element. It holds a heading, a map, the filter
+ * panel, the status strip and a Layers popover. Cards open for the item or cluster the viewer picks
+ * and for the region they select. To replace one part, put your own element in its slot. For a
+ * different arrangement, lay out the separate elements yourself.
  *
- * The explorer builds its own store from `viewer-url` and `token` or `authorise`, or uses the one
- * in its `store` property. It provides that store to every element inside it, including the
- * elements you put in its slots.
+ * The explorer builds its own store from `viewer-url` and `token` or `authorise`. You can give it a
+ * store in its `store` property instead. Every element inside the explorer uses that store,
+ * including the elements you put in its slots.
  *
- * `layout="docked"` puts the heading and the filter panel in a sidebar to the left of the map, and
+ * `layout="docked"` puts the heading and the filter panel in a sidebar to the left of the map.
  * `layout="overlay"` puts them in a card over the map's top-left corner. The heading shows
- * `dataset-title` if you set one, with the view's name below it. With several views, the view's
- * name is a menu for switching between them.
+ * `dataset-title` if you set one, with the view's name below it. When there are several views, the
+ * view's name is a menu for switching between them.
  *
- * Picking a point opens its item card beside the point, joined to it by a short line on whichever
- * side has room, and the card follows the point as the map moves. Picking another point replaces
- * the card unless Pin was pressed. Close closes it, and so do Escape and a click on an empty part
- * of the map unless it is pinned.
- * A picked cluster's card works the same way. While a region is selected, its card sits in the
- * map's top-right corner.
+ * Picking a point opens its item card beside it. The card follows the point as the map moves.
+ * Picking another point replaces the card unless Pin was pressed. The Close button always closes
+ * it. Escape and a click on an empty part of the map close it only while it is not pinned. A picked
+ * cluster's card works the same way. While a region is selected, its card sits in the map's
+ * top-right corner.
  *
- * The Layers button opens a popover with four sections. Points sets whether points are drawn, how
- * many to draw (Most points), what sizes them and their opacity; while a `nested` or `dag` layer is
- * drawn it also has Most clusters. Colour sets what colours the points and the palette or ramp, and
- * its Edit colours button opens `<mosaica-colour-editor>` to colour individual values or clusters.
- * Density sets how density is drawn, and Layers holds the layer picker. Each of these settings is
- * also an attribute of the explorer, passed to its map.
+ * The Layers button opens a popover with four sections. Each of its settings is also an attribute
+ * of the explorer, which passes it to the map.
  *
- * The explorer adapts to the width of its container. Below 1000 px it takes the overlay layout with
- * a narrower card, folds each field card to one line until it is opened, and moves the map's tools
- * to the bottom-left. At 720 px or less, the heading moves to a bar above the map and the panels
- * open as sheets from a tab bar of Fields, Layers and Item.
+ * - Points sets whether points are drawn, how many to draw (Most points), what sizes them and their
+ *   opacity. While a `nested` or `dag` layer is drawn it also has Most clusters.
+ * - Colour sets what colours the points and the palette or ramp. Its Edit colours button opens
+ *   `<mosaica-colour-editor>` to colour single values or clusters.
+ * - Density sets how density is drawn.
+ * - Layers holds the layer picker.
+ *
+ * The explorer adapts to the width of its container. Below 1000 px it uses the overlay layout,
+ * folds each field card to one line until it is opened, and moves the map's tools to the
+ * bottom-left. At 720 px or less the panels open as sheets from a tab bar of Fields, Layers and
+ * Item, and the heading moves to a bar above the map.
  *
  * @summary A complete map application in a single element.
  * @tagname mosaica-explorer

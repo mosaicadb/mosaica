@@ -10,25 +10,27 @@ import {reasonOf, refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * Use `<mosaica-item-card>` to show the record of the item the viewer picked on the map. It shows
- * the store's selected item (`Store.pick`), or the `item` you set: the item's fields as labels and
- * values, the views it appears in and its group-scoped values, with Open and Copy id buttons.
+ * Use the item card to show the record of the item the viewer picked on the map. It shows the
+ * store's selected item (`Store.pick`), or the `item` you set. The card lists the item's fields as
+ * labels and values. It also shows the views the item appears in and its group-scoped values. Copy
+ * id copies the item's `mosaica_id`.
  *
- * The headline is the `title-field` field, or the `mosaica_id` if that is unset or empty. Fields
- * follow in the order the schema declares them, then any it does not declare, and fields with no
- * value are left out. A category value shows its title if its vocabulary has one, and a timestamp
- * shows in full, as `14 March 2024, 12:00 UTC`. To render a field your own way, such as a link, put
- * an element in its `field-<name>` slot.
+ * The headline is the `title-field` field. If that is unset or empty, the headline is the
+ * `mosaica_id`. The other fields follow in the order the schema declares them, then any it does not
+ * declare. Fields named in `card-fields` come first. A field with no value is left out. A category
+ * value shows its title if its vocabulary has one. A timestamp shows in full, as `14 March 2024,
+ * 12:00 UTC`. To render a field your own way, such as a link, put an element in its `field-<name>`
+ * slot.
  *
- * `compact` makes a shorter card: the headline, the `subtitle-field` field, the `card-fields`
- * fields (or the first three), and a "Show all N fields" button that expands it.
+ * `compact` makes a shorter card. It shows the headline, the `subtitle-field` field and the
+ * `card-fields` fields, or the first three. A "Show all N fields" button expands it.
  *
  * The Open button appears only if you set `open-url` or `open`. `open-url` is a link template such
- * as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for that
- * field, URL-encoded, and `{mosaica_id}` by its id. Open then links to that address in a new tab.
- * An item that has no value for a field the template names, or whose filled address is not
- * `http:` or `https:`, gets no Open button. `open` is a function called with the item's
- * `mosaica_id` and fields, and takes precedence over `open-url`.
+ * as `https://www.geonames.org/{geonameid}`. Each `{name}` in it is replaced by the item's value
+ * for that field, URL-encoded, and `{mosaica_id}` by its id. Open links to the filled address in a
+ * new tab. An item gets no Open button if it lacks a value the template names, or if the filled
+ * address is not `http:` or `https:`. `open` is a function called with the item's `mosaica_id` and
+ * fields. It takes precedence over `open-url`.
  *
  * @summary A card showing an item's fields, with an optional Open button.
  * @tagname mosaica-item-card

@@ -6,11 +6,13 @@ import {renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * Use `<mosaica-layer-picker>` to let viewers choose which annotation layers the map draws. It
- * shows a checkbox for each layer in `meta.layers`. A layer that others depend on, such as a
- * clustering and its labels, gets one checkbox that turns on the whole group, and its tooltip names
- * the layers in it. Filter layers draw nothing, so they get no checkbox; a note below the list names
- * them, and viewers filter by them with `<mosaica-hierarchy>`.
+ * Add the layer picker beside a map whose bundle has annotation layers. It has a checkbox for each
+ * layer in `meta.layers`. Some layers depend on others, as a clustering's labels depend on the
+ * clustering. Such a group gets one checkbox that turns on the whole group, and its tooltip names
+ * the layers in it.
+ *
+ * Filter layers draw nothing, so they get no checkbox. A note below the list names them instead.
+ * Viewers filter by them with `<mosaica-hierarchy>`.
  *
  * @summary A list of checkboxes for choosing which annotation layers the map draws.
  * @tagname mosaica-layer-picker

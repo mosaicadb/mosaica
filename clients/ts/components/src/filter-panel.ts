@@ -31,27 +31,32 @@ const VERBS: readonly ClauseVerb[] = ['filter', 'highlight'];
 const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : countText(n));
 
 /**
- * Use `<mosaica-filter-panel>` to give viewers a place to filter and highlight the map by any
- * field. It shows a `<mosaica-field-card>` per field, the filters in force as chips, and the counts
- * the cards compare. `<mosaica-explorer>` puts one in its sidebar.
+ * Put the filter panel beside a map, as `<mosaica-explorer>` does in its sidebar. It shows a
+ * `<mosaica-field-card>` for each field, the filters in force as chips, and the counts the cards
+ * compare.
  *
- * The subject row at the top says what the cards' solid bars count: In view, the items in the
- * camera's box that the filters match, or Highlighted while there is a highlight, with a × that
- * clears it. Beside it, All matching counts every item the filters match, which the pale bars
- * show.
+ * The subject row at the top says what the cards' solid bars count. It reads In view, meaning the
+ * items in the camera's box that the filters match. While there is a highlight it reads
+ * Highlighted, with a × that clears the highlight. Beside it, All matching counts every item the
+ * filters match. The pale bars show that count.
  *
- * Each filter or highlight in force shows as a chip. Pressing a chip opens its field's card, and
- * its × removes that clause. Clear all removes every filter and highlight, including `member_of`
+ * Each filter or highlight in force shows as a chip. Pressing a chip opens its field's card. The
+ * chip's × removes that clause. Clear all removes every filter and highlight, including `member_of`
  * clauses.
  *
- * The panel lists a card for each field in `pinned`, each field that holds a filter or highlight,
- * the field the map is coloured by, and each field the viewer added. Add field lists every
- * filterable column and layer, with a search box, to add a card or take one off. Taking a card off
- * clears its field's filters and highlights. A new card joins the end of the list, so the cards already shown do
- * not move.
+ * The panel shows a card for:
  *
- * `compact` keeps one card open at a time. `chips-only` shows only the chips, for placing them
- * apart from the cards, and `controls-only` shows the cards without the subject row and chips.
+ * - each field in `pinned`
+ * - each field that holds a filter or highlight
+ * - the field the map is coloured by
+ * - each field the viewer added
+ *
+ * Add field lists every filterable column and layer, with a search box. Viewers use it to add a
+ * card or take one off. Taking a card off clears its field's filters and highlights. A new card
+ * joins the end of the list, so the cards already shown do not move.
+ *
+ * `compact` keeps one card open at a time. `chips-only` shows only the chips, so you can place them
+ * apart from the cards. `controls-only` shows the cards without the subject row and the chips.
  *
  * @summary A panel of field cards for filtering and highlighting the map by any field.
  * @tagname mosaica-filter-panel
