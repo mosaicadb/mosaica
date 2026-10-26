@@ -105,35 +105,54 @@ it.skipIf(!binary)('draws every paper, lists the archives, and narrows the count
   await page.close();
 });
 
-it.skipIf(!binary)('filters to a topic opened on the map', async () => {
+it.skipIf(!binary)('filters to a topic whose name is clicked on the map, and searches within it', async () => {
   const errors: string[] = [];
   const page = await open(errors);
   const count = page.locator('#count');
   await expect.poll(() => count.textContent(), {timeout: 120_000}).toBe('50,000 of the 50,000 papers in view match');
   await page.check('#topics');
-  // Under headless Chromium's software renderer deck.gl's pick on a press takes about 300 ms, past
-  // the time a press may take to count as a click, so a named topic is opened through the store,
-  // which fires the same `mosaica-artifactopen` a click does.
-  const named = await page.waitForFunction(
-    () => {
-      const store = document.querySelector('mosaica-store')!.store!;
-      const first = [...store.get('artifacts').attached][0];
-      return first ? {id: String(first[0]), name: first[1]} : null;
-    },
-    undefined,
-    {timeout: 60_000, polling: 250}
-  );
-  const {id, name} = (await named.jsonValue())!;
-  const members = await page.evaluate(async (id) => {
-    const store = document.querySelector('mosaica-store')!.store!;
-    await store.openArtifact(BigInt(id));
-    return Number(store.get('selection').artifact!.detail.maskedCount);
-  }, id);
-  expect(members).toBeGreaterThan(0);
-  expect(members).toBeLessThan(50_000);
-  await expect.poll(() => page.locator('#topic strong').textContent(), {timeout: 60_000}).toBe(name);
-  await expect.poll(() => count.textContent(), {timeout: 60_000}).toBe(`${members.toLocaleString('en-GB')} of the 50,000 papers in view match`);
 
+  // Where "Nanodevices" is drawn, read from the deck's name layer, and pointed at until the map
+  // reports the pointer over that artifact. The deck and the hovered artifact are internal.
+  const map = page.locator('mosaica-map');
+  let nudge = 0;
+  await expect
+    .poll(
+      async () => {
+        const at = await map.evaluate((el, topic) => {
+          const deck = (el as unknown as {deck: {getViewports(): {project(p: number[]): number[]}[]; layerManager: {getLayers(): {id: string; props: {data: unknown}}[]}}}).deck;
+          const viewport = deck?.getViewports()[0];
+          for (const layer of deck?.layerManager.getLayers() ?? []) {
+            if (!layer.id.endsWith('-labels') || !Array.isArray(layer.props.data)) continue;
+            const row = (layer.props.data as {id: bigint; position: number[]; text: string; offset: number[]}[]).find((d) => d.text === topic);
+            if (!row || !viewport) continue;
+            const [x, y] = viewport.project(row.position);
+            const box = el.getBoundingClientRect();
+            return {id: String(row.id), x: box.left + x! + row.offset[0]!, y: box.top + y! + row.offset[1]!};
+          }
+          return null;
+        }, 'Nanodevices');
+        if (!at) return false;
+        // A hover is reported on a move, so each try moves the pointer.
+        nudge = 1 - nudge;
+        await page.mouse.move(at.x + nudge, at.y);
+        return map.evaluate((el, id) => String((el as unknown as {hoveredArtifact: bigint | null}).hoveredArtifact) === id, at.id);
+      },
+      {timeout: 60_000, intervals: [250]}
+    )
+    .toBe(true);
+  // A press and release where the pointer rests, as a reader clicks.
+  await page.mouse.down();
+  await page.mouse.up();
+
+  await expect.poll(() => page.locator('#topic strong').textContent(), {timeout: 60_000}).toBe('Nanodevices');
+  await expect.poll(() => count.textContent(), {timeout: 60_000}).toBe('1,242 of the 50,000 papers in view match');
+  await expect.poll(() => page.locator('#results li').count(), {timeout: 60_000}).toBe(20);
+  await page.fill('#title', 'graphene');
+  await expect.poll(() => count.textContent(), {timeout: 60_000}).toBe('71 of the 50,000 papers in view match');
+  await expect.poll(() => page.locator('#results li').first().textContent(), {timeout: 60_000}).toMatch(/graphene/i);
+
+  await page.fill('#title', '');
   await page.click('#topic button');
   await expect.poll(() => count.textContent(), {timeout: 60_000}).toBe('50,000 of the 50,000 papers in view match');
   expect(errors).toEqual([]);
