@@ -435,11 +435,13 @@ function splitTag(text) {
 
 /**
  * `markdown` without the signature sections that carry no description: a parameter table with only
- * names and types, a type parameter table, and a Returns section that is only the type.
+ * names and types, a type parameter table, and a Returns section that is only the type. A parameter
+ * table is kept when a parameter is an object type, because the signature shows that only as
+ * `object` and the table is then the one place its fields are listed.
  */
 function withoutRepeatedSignature(markdown) {
   return markdown
-    .replace(/^#{4,6} Parameters\n\n\| Parameter \| Type \|\n(?:\|.*\n)+\n/gm, '')
+    .replace(/^#{4,6} Parameters\n\n\| Parameter \| Type \|\n(?:\|(?![^\n]*\\\{).*\n)+\n/gm, '')
     .replace(/^#{4,6} Type Parameters\n\n\| Type Parameter \|\n(?:\|.*\n)+\n/gm, '')
     .replace(/^#{4,6} Returns\n\n[^\n]+\n\n(?=#|<a id=|$)/gm, '');
 }

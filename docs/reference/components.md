@@ -51,7 +51,7 @@ With none of these, the element shows its detached state.
 
 `viewer-url` is the base URL of the viewer server. Left unset, the element uses the page's own origin, which suits a page served by Mosaica or by a server that passes `/v1/` through to it. A server on another origin must list the page's origin in `serve.cors_origins`. Set `viewer-url` together with the token or `authorise`: an element given only one of them builds a store at once, and replaces it when the other arrives.
 
-An element replaces a store it built when `viewer-url`, `token`, `authorise` or `artifacts-per-tile` changes, and disposes of it in `dispose()`. Moving an element in the page keeps its store, and so does a `<mosaica-store>` appearing above it later. A store you pass in is yours to dispose of. A store serves one viewer, so to show the map to another viewer, give the element a new `token` or `authorise` function, or replace the element. If the same `authorise` function starts returning another viewer's token, the previous viewer's data stays until the next renewal, as `Store` describes.
+An element replaces a store it built when `viewer-url`, `token`, `authorise` or `artifacts-per-tile` changes, and disposes of it in `dispose()`. Moving an element in the page keeps its store, and so does a `<mosaica-store>` appearing above it later. A store you pass in is yours to dispose of. A store serves one viewer, so to show the map to another viewer, give the element a new `token` or `authorise` function, or replace the element. If the same `authorise` function starts returning another viewer's token, the previous viewer's data stays until the store has an answer under the renewed token, as `Store` describes.
 
 ## Events
 

@@ -139,16 +139,12 @@ export type StoreOptions = {
    * the cache took, for instrumentation.
    */
   replica?: Pick<ReplicaOptions, 'cacheBytes' | 'cache' | 'revalidateAfterMs' | 'onPhase'>;
-  /**
-   * How the drawn layers' artifacts are fetched. Artifacts come in tiles 128 to 256 pixels across,
-   * and `perTile` is the most one level shows in a tile, largest first. It defaults to 50, or to
-   * `meta.selection.maxArtifactsPerTile` if that is lower; a larger value is sent as given and the
-   * server refuses it. `budget` is the starting cluster budget ({@link Store.setClusterBudget});
-   * by default there is no limit. `heldTiles` is how many tiles of artifacts to keep per view; it
-   * defaults to `4096`.
-   */
+  /** How the drawn layers' artifacts are fetched, in tiles 128 to 256 pixels across. */
   artifacts?: {
-    /** The most artifacts one level shows in a tile, largest first. Defaults to 50, or to `meta.selection.maxArtifactsPerTile` if that is lower. */
+    /**
+     * The most artifacts one level shows in a tile, largest first. Defaults to 50, or to
+     * `meta.selection.maxArtifactsPerTile` if that is lower, and the server refuses a larger value.
+     */
     perTile?: number;
     /** The starting cluster budget ({@link Store.setClusterBudget}). By default there is no limit. */
     budget?: number;
@@ -433,11 +429,7 @@ export type ArtifactsProjection = {
    * palette's.
    */
   overrides: ChosenColours;
-  /**
-   * How many bands in view can colour every point by each layer in use (`current`), and how many
-   * cannot and are being fetched again (`stale`). Both are `0` unless `status` is `shown` and a
-   * layer is in use.
-   */
+  /** Whether the bands in view can colour their points by the layers in use. Both counts are `0` unless `status` is `shown` and a layer is in use. */
   coverage: {
     /** How many bands in view can colour every point by each layer in use. */
     current: number;
@@ -552,7 +544,7 @@ export type StoreItemsRequest = Omit<ItemsRequest, 'view' | 'filters'> & {
  * A store holds data for one viewer. To show the map to a different viewer, call
  * {@link Store.clear} or create a new store. The store calls `authorise` only to renew its token,
  * so if `authorise` starts returning another viewer's token without a `clear`, the previous
- * viewer's data stays on screen until the next renewal. The store also discards what it holds and
+ * viewer's data stays on screen until the store has an answer under the renewed token. The store also discards what it holds and
  * loads again when the server's data is compacted or rebuilt.
  *
  * @category Store
@@ -671,8 +663,8 @@ export interface Store {
    * exclude counts 0.
    *
    * Calls are debounced by 120 ms. The store fetches the suggestions again when the filters or the
-   * region change, until {@link Store.forgetSuggestions} is called. A busy server is asked up to
-   * five times before the error is `backpressure`.
+   * region change, until {@link Store.forgetSuggestions} is called. A request the server sheds is
+   * retried up to five times before the error is `backpressure`.
    */
   suggest(column: string, q: string, verb: ClauseVerb): void;
   /**
@@ -1091,7 +1083,7 @@ export function createStore(options: StoreOptions): Store {
     else refresh();
   }
 
-  /** The identity key of the answers held, by view; see {@link Store} for what it derives from. */
+  /** The identity key of the answers held, by view; see {@link ViewportResponse.identityKey} for what it derives from. */
   const identities = new Map<string, string>();
   /** A token a renewal brought, until an answer under it matches a key in {@link identities}. */
   let unconfirmed: string | null = null;

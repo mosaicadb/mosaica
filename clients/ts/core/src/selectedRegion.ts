@@ -62,10 +62,7 @@ export type RegionProjection = {
    * `null` until the server has said.
    */
   verdict: RegionVerdict | null;
-  /**
-   * The marks drawn inside the region: the `mosaica_id`s and world positions (interleaved `x` and
-   * `y`) of up to {@link REGION_HELD_LIMIT} of them, and the `count` of all of them.
-   */
+  /** The marks drawn inside the region. */
   held: {
     /** The `mosaica_id`s of up to {@link REGION_HELD_LIMIT} marks inside the region. */
     ids: BigUint64Array;

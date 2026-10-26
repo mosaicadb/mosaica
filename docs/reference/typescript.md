@@ -24,15 +24,7 @@ Pass `createStore` the viewer server's base URL as `viewerUrl`, and either a fix
 
 ## Reading the items behind the map
 
-`store.items` reads the items that match what the map shows, one page at a time, as Arrow tables. You choose the `fields`, the `order` and the page size. The store fills in its token, its current view and its filters, and `inView: true` limits the read to the selected region, or to the camera's box if no region is selected:
-
-```ts
-const read = await store.items({fields: ['name', 'country'], pageRows: 25, count: true, inView: true});
-const first = await read.next();   // read.head.matched counts every match
-const second = await read.next();  // the next 25
-```
-
-Pages are fetched only as you ask for them. A read keeps the filters it started with, so start a new one when the filters change. Pass `filters: null` to read every item the viewer may see. With `inView`, a call made before the map has a camera or a region waits for one, so a page can ask for its list as soon as it loads.
+`store.items` reads the items that match what the map shows, one page at a time as Arrow tables, so that a page can list them beside the map. The store fills in its token, view and filters, and `inView: true` limits the read to the selected region or the camera's box. [`Store.items`](typescript/client.md#items-1) gives the options and an example.
 
 ## When the server is busy
 
@@ -40,6 +32,6 @@ A server too busy to take a request answers `429 backpressure`, with a `Retry-Af
 
 | Part | On a `429` |
 |---|---|
-| `MosaicaClient` | Does not retry. The call rejects with a `MosaicaError` whose `retryAfterS` is the wait in seconds, at least 1; `suggest` returns `{status: 'shed', retryAfterS}` instead. Wait and call again with the same arguments. A paged read refused part-way can continue from its `cursor`, and an `aggregate` refused part-way rejects with a `PartialAggregate` that holds the pages read so far. The [`MosaicaClient`](typescript/client.md#mosaicaclient) entry has an example. |
-| `Control` | Waits the `Retry-After`, between 1 and 30 seconds, and sends the request again, for up to five minutes in total. After that the `429` is returned as the call's `Answer`. |
-| The store | Retries a map request or an aggregate twice, waiting 1 s and then 2 s, or the `Retry-After` if longer, up to 8 s. Meanwhile the view's `status`, or the aggregate's, is `retrying`; after the last attempt it is `refused`, and the components show Server busy. A typeahead request is retried up to five times; after that `filters.suggestErrors[column]` holds a `backpressure` refusal. An item's record is not retried, and the refusal lands in `selection.itemRefusal`. |
+| `MosaicaClient` | Does not retry, and rejects with a `MosaicaError` that says how long to wait. [`MosaicaClient`](typescript/client.md#mosaicaclient) describes how to retry and gives an example. |
+| `Control` | Retries for up to five minutes before returning the `429` as the call's `Answer`, as [`Control`](typescript/client.md#control) describes. |
+| The store | Retries a map request or an aggregate twice, waiting 1 s and then 2 s, or the `Retry-After` if longer, up to 8 s. Meanwhile the view's `status`, or the aggregate's, is `retrying`; after the last attempt it is `refused`, and the components show Server busy. A typeahead request is retried as [`Store.suggest`](typescript/client.md#suggest-1) describes. An item's record is not retried, and the refusal lands in `selection.itemRefusal`. |

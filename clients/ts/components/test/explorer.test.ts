@@ -817,7 +817,7 @@ describe('<mosaica-explorer> the point budget', () => {
   });
 
   it('passes the host’s budget to the map and the store, and a change of budget too', async () => {
-    const {host, el, store, shadow} = await explorer('<mosaica-explorer budget="40000" budget-min="500" budget-max="90000"></mosaica-explorer>');
+    const {host, el, store, shadow} = await explorer('<mosaica-explorer budget="40000"></mosaica-explorer>');
     expect(budgets(store)).toEqual([40_000]);
     expect(mapOf(shadow)).toMatchObject({budget: 40_000});
     (el as unknown as {budget: number}).budget = 60_000;

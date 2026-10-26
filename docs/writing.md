@@ -18,7 +18,7 @@ This guide governs everything in `docs/` and every code comment. Write for a com
 
 5. **Use emphasis rarely.** Bold is for a defined term where it is defined, or for the head of a list item. Do not call a design choice novel or key, and give a mechanism the space its consequences warrant rather than the space it took to get right.
 
-6. **Draw structures, flows and state machines.** Use Mermaid in a fenced block with a caption. A diagram that repeats a paragraph is padding, but one that replaces it is the right choice. A comparison of three or more things is clearer as a table.
+6. **Draw structures, flows and state machines.** Use Mermaid in a fenced block with a caption. A diagram that repeats a paragraph is padding, but one that replaces it is the right choice. A three-way comparison is clearer as a table.
 
 7. **Say what is true, precisely.** Distinguish what was measured from what was modelled and what was assumed, and say which applies. Record negative results ("F3: not confirmed by measurement"), and say what something does not do when its scope could be disputed. Argue rather than assert, so that a reader who disagrees can find the reason and test it.
 
@@ -26,9 +26,9 @@ This guide governs everything in `docs/` and every code comment. Write for a com
 
 ## Register
 
-Write plain technical English in complete sentences, each with a subject and a verb.
+Write plain technical English in short, complete sentences, each with a subject and a verb.
 
-**Connect ideas rather than listing them.** This matters more than any other rule in this section. Each sentence should make one point, and any other clause in it should serve that point by saying when, why, how or with what result. Say how ideas relate with words such as *because*, *when*, *so*, *which means* and *is used for*. Do not set facts side by side and leave the reader to connect them, whether they are separated by commas, semicolons or full stops, because splitting a list of facts into short sentences does not connect them. Do not add facts to the end of a sentence as trailing phrases (", with…", ", such as…", ", which…") when they are not part of its point. Keep the small words that make a sentence read as spoken, and make a text shorter by saying less, not by removing the words that hold it together.
+**Connect ideas rather than listing them.** Each sentence should make one point, and any other clause in it should serve that point by saying when, why, how or with what result. Say how ideas relate with words such as *because*, *when*, *so*, *which means* and *is used for*. Do not set facts side by side and leave the reader to connect them, whether they are separated by commas, semicolons or full stops, because splitting a list of facts into short sentences does not connect them. Do not add facts to the end of a sentence as trailing phrases (", with…", ", such as…", ", which…") when they are not part of its point. Keep the small words that make a sentence read as spoken, and make a text shorter by saying less, not by removing the words that hold it together. A connecting word belongs where two clauses make one thought; it is not a sentence pattern to repeat, and a page whose every sentence ends in ", so…" has the same fault in another form.
 
 > ✗ A card showing the picked item. Lists its fields, with Open and Copy id. Shows the views it appears in.
 >
@@ -37,15 +37,15 @@ Write plain technical English in complete sentences, each with a subject and a v
 The following habits also make text harder to read, so do not write them.
 
 - **Aphorisms or slogans in place of rules.** Write the rule itself, as in "The service does not refuse a deny because it is busy."
-- **Antithesis.** Phrases such as "not X, but Y", "X, not Y" and "this is not X; it is Y" make the reader hold a wrong idea before the right one, so say what the thing is.
-- **Metaphor as jargon.** Words such as load-bearing, discharges, obligation, owes, the lane, the seam, the frontier, the gate, the fold, the spine, rides and machinery hide the technical term, so use the technical term instead. "Fail-open" and "fail-closed" describe access decisions and nothing else.
+- **Antithesis.** Phrases such as "not X, but Y", "X, not Y" and "this is not X; it is Y" make the reader hold a wrong idea before the right one. Say what the thing is instead.
+- **Metaphor as jargon.** Use the technical term in place of words such as load-bearing, discharges, obligation, owes, the lane, the seam, the frontier, the gate, the fold, the spine, rides and machinery, which hide it. "Fail-open" and "fail-closed" describe access decisions and nothing else.
 - **Abstract nouns for actions.** Write "when the entry is removed" rather than "the retirement position of the entry".
-- **Em-dashes.** A well-built sentence does not need one, so rewrite a sentence that seems to.
+- **Em-dashes.** A well-built sentence does not need one, and a sentence that seems to need one should be rewritten.
 - **Justifying a rule by its importance or by the failure it prevents.** Phrases such as "which is the point", "by construction", "deliberately", "importantly", "note that" and "the failure this exists to prevent" add emphasis without information. Give the reason once, as part of the sentence that states the rule.
-- **Anecdotes as justification.** A story such as "caught in review twice" or "shipped three defects" is history, so keep the reason it illustrates and drop the story.
+- **Anecdotes as justification.** Keep the reason that a story such as "caught in review twice" or "shipped three defects" illustrates, and drop the story itself, which is history.
 - **Symmetry for effect.** Paired clauses, triads and mirrored sentences draw attention to their shape rather than their content.
 - **Absolutes and drama.** Do not write "silently", "quietly", "catastrophic", "never" or "always" unless the claim really is absolute.
-- **Hedging.** Words such as "arguably", "in practice", "generally" and "tends to" leave the reader unsure what is true, so say what is true or leave the point out.
+- **Hedging.** Say what is true, or leave the point out, rather than softening it with words such as "arguably", "in practice", "generally" and "tends to".
 - **Summaries that begin with a pronoun.** Name the subject, because "this" and "it" at the start of a summary often have no clear antecedent.
 - **Instructions disguised as observations about the reader.** If the reader should do something, tell them to do it.
 
@@ -91,7 +91,7 @@ A guide opens with the task and with when you would need to do it, in a few sent
 
 ### Reference
 
-A reference page is looked up rather than read, so it is complete and has no narrative. It covers every key, flag, route, type or method, with its type, its default, what it does and what it refuses. Each entry starts with what kind of thing the item is and what it is used for, so that a reader scanning the page can tell at once whether this is the entry they want. Detail that only some readers need comes after that, or on the member it belongs to.
+A reference page is looked up rather than read, so it is terse and complete and has no narrative. It covers every key, flag, route, type or method, with its type, its default, what it does and what it refuses. Each entry starts with what kind of thing the item is and what it is used for, so that a reader scanning the page can tell at once whether this is the entry they want. That opening summary may be a noun phrase, as in a table of elements. Detail that only some readers need comes after that, or on the member it belongs to.
 
 > ✗ `<mosaica-colour-editor>`: Every value or cluster's colour, to search, choose and reset.
 >
@@ -116,9 +116,9 @@ Most of the other signs are in the sentences, and the commonest is the one descr
 - **Symmetry.** Paragraphs of the same length, lists whose items all take the same shape and parallel clauses balanced against each other all make a page feel assembled. Mix sentence lengths and styles, so that a statement may be followed by the question a reader would ask, and let one paragraph run long while the next is a single line. A page with some unevenness reads as if someone wrote it.
 - **A colon followed by a list of three.** In "One program does all the work: it checks, builds and serves", the colon announces a list instead of saying anything. Say one thing, or show the three as they happen.
 - **Sentences about the text instead of the subject.** "There are six stages, and each one leaves something you can look at" and "This is the step that decides what a viewer sees" talk about the page. Cut them, or replace them with the fact they gesture at.
-- **Framing that nobody would say aloud.** Phrases such as "the pieces every deployment is made of" and "the whole path from a text file to a viewer's map" stand in for the things themselves, so name the actual things.
+- **Framing that nobody would say aloud.** Name the actual things instead of standing in for them with phrases such as "the pieces every deployment is made of" and "the whole path from a text file to a viewer's map".
 - **Metaphor for a technical part.** Calling parts doors, lanes or gates hides what they are, so use the real name and explain it in plain words.
-- **Claims no run could contradict.** "Mosaica handles large data efficiently" tells the reader nothing, so give the figure and the conditions it was measured under, or cut the claim.
+- **Claims no run could contradict.** A sentence such as "Mosaica handles large data efficiently" tells the reader nothing. Give the figure and the conditions it was measured under, or cut the claim.
 - **Enthusiasm, hype and reassurance in place of information.** "That's it!", "don't worry" and "seamlessly" take the place of something the reader could use.
 - **Explanations that restate the command.** Say what the command does and why, rather than repeating it in words.
 - **Three examples where one would do,** or options set side by side only for balance.
