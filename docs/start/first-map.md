@@ -4,48 +4,33 @@ This tutorial is for someone who has never used Mosaica. We'll take the 29,935 p
 for Ireland and put them on a map in your browser, where you can search them by name and filter them
 by kind of place and by population.
 
-This tutorial should take about 30 minutes to complete. You'll need Rust (installed with rustup), a
-C compiler and its build tools (`build-essential` on Debian and Ubuntu), `git`, `curl`, `unzip`,
-`openssl`, Python 3, Node.js 22.15 or later with npm, and a web browser. The C compiler builds the
-C libraries Mosaica links in, such as CRoaring, zstd and SQLite.
+This tutorial should take about 30 minutes to complete. You'll need `git`, `curl`, `unzip`,
+`openssl`, Python 3, Node.js 22.15 or later with npm, and a web browser, on Linux or macOS.
 
 ## What we'll do
 
-1. Build `mosaica` from its source code.
+1. Install `mosaica`.
 2. Download the GeoNames file for Ireland and convert it to Parquet.
 3. Write a declaration that describes the data, and validate it with `mosaica check`.
 4. Build the data into a deployment with `mosaica build`.
 5. Start the server with `mosaica serve`.
 6. Open the map in a browser and filter it.
 
-## Build Mosaica
+## Install Mosaica
 
-Clone the repository, then build and install the `mosaica` binary with cargo.
-
-```bash
-git clone https://github.com/mosaicadb/mosaica ~/mosaica
-cd ~/mosaica
-cargo install --locked --path crates/mosaica-cli
-```
-
-```
-...
-    Finished `release` profile [optimized] target(s) in 1m 56s
-...
-```
-
-Cargo puts the program in `~/.cargo/bin`, which rustup has already added to your `PATH`, so you can
-check straight away that it runs.
+Install `mosaica` from a release archive, as [Install Mosaica](install.md#install-mosaica) shows,
+then check that it runs.
 
 ```bash
 mosaica --version
 ```
 
 ```
-mosaica 310920847827ba735cd8e953c898784853e84291
+mosaica 0.1.0-rc.4 (135216816)
 ```
 
-The long number is the commit your copy was built from, so yours will be different.
+The first part is the release you installed, so yours may be newer. The number in brackets is the
+commit it was built from.
 
 ## Get the data
 
@@ -495,24 +480,33 @@ line is the one to look for. It means all three addresses are open.
 
 ## Open the map
 
-The map itself is drawn by Mosaica's browser components, which live in the repository's `clients/ts`
-directory. They aren't published as a package yet, so build them from the clone. Use a second
-terminal for this.
+The map itself is drawn by Mosaica's browser components, and the page that shows them is an example
+in the Mosaica repository. Use a second terminal to clone the repository.
 
 ```bash
-cd ~/mosaica/clients/ts
-npm ci
-npm run bundle -w @mosaicajs/components
+git clone https://github.com/mosaicadb/mosaica ~/mosaica
+```
+
+The example's server, in `clients/ts/examples/plain-html`, serves the components from one file,
+which it looks for in `clients/ts/components/dist`, where a build of the components would put it.
+Rather than build them, fetch the published package from npm and unpack its `dist` directory there.
+
+```bash
+cd ~/ireland
+npm pack @mosaicajs/components@next
+tar xzf mosaicajs-components-*.tgz -C ~/mosaica/clients/ts/components --strip-components=1 package/dist
+ls ~/mosaica/clients/ts/components/dist/mosaica-components.js*
 ```
 
 ```
-...
-dist/assets/decode.worker-RlGGQpYZ.js    191.89 kB
-dist/mosaica-components.js             1,699.17 kB │ gzip: 468.39 kB
-
-✓ built in 939ms
-...
+/home/you/mosaica/clients/ts/components/dist/mosaica-components.js
+/home/you/mosaica/clients/ts/components/dist/mosaica-components.js.LICENSE.txt
+/home/you/mosaica/clients/ts/components/dist/mosaica-components.js.sri
 ```
+
+`npm pack` downloads the package as a single file without installing it. `mosaica-components.js`
+holds every element in one file, and the `.sri` file beside it holds the hash the page checks the
+file against before running it.
 
 `examples/plain-html` holds a web page with the map on it, and a small Node server that signs you
 in. Mosaica needs to know who you are signed in as. It keeps its users in the catalogue, and the page's server asks the session address for a token on your behalf.

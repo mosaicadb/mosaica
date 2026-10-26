@@ -4,7 +4,7 @@ The [first TypeScript tutorial](typescript.md) put the whole explorer on a page 
 
 The data this time is 50,000 papers from arXiv, the preprint server, laid out so that papers on similar subjects sit near each other. By the end you'll have a page with a menu of arXiv's archives filled from the server, a title search, a date range, a live count and the titles of the matching papers in view, a panel that opens the paper you click, and the map coloured by topic with each topic named. Clicking a topic's name narrows everything to it. Along the way you'll meet the store, the object that every Mosaica element reads from, and learn how a page of your own talks to it.
 
-It takes about twenty minutes, and assumes you have done the first tutorial. You need the same things it did: `mosaica` installed, Node.js 22.15 or later with npm, and the Mosaica repository cloned to `~/mosaica`. The packages still come from the tarballs that tutorial's "Not published yet" note made in `~/mosaica-packs`.
+It takes about twenty minutes, and assumes you have done the first tutorial. You need the same things it did: `mosaica` installed, Node.js 22.15 or later with npm, and the Mosaica repository cloned to `~/mosaica`.
 
 Here is what we'll do.
 
@@ -68,17 +68,11 @@ The store is the part of Mosaica's client that has no pixels. It asks the server
 
 Make the web project as before, and install the elements and the client they are built on. `@mosaicajs/client` holds the store.
 
-While the packages are unpublished, the `npm install @mosaicajs/components @mosaicajs/client` line in the block below is replaced by this one, which installs the first tutorial's three tarballs. Run it at that point, in `web`, after `cd web`:
-
-```bash
-npm install ~/mosaica-packs/mosaicajs-*.tgz
-```
-
 ```bash
 cd ~/papers
 npm create vite@latest web -- --template vanilla-ts --no-interactive
 cd web
-npm install @mosaicajs/components @mosaicajs/client
+npm install @mosaicajs/components@next @mosaicajs/client@next
 rm -r src/counter.ts src/assets public/icons.svg
 ```
 

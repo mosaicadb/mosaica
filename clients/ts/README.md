@@ -20,7 +20,7 @@ The packages depend on each other in one line: `components` on `deck`, and both 
 
 `deck` and `components` also import `@mosaicajs/client/internal`, and `components` imports `@mosaicajs/deck/internal`. These entries hold what those packages share and a host does not use. They are not a public API and change without notice, so the packages that use them depend on an exact version of the package they import from.
 
-None of the packages is published to npm. The registry holds an empty placeholder, version 0.0.0, under each of the four `@mosaicajs` names. `npm install @mosaicajs/client` installs that placeholder and reports no error, and the project then has no Mosaica code. To use the packages in another project, pack them from this checkout as [Using the packages in another project](#using-the-packages-in-another-project) describes.
+The four `@mosaicajs` packages are published to npm. Until 0.1.0 a release goes out under the `next` dist-tag, and `latest` still points at an empty 0.0.0 placeholder, so `npm install @mosaicajs/client` installs no Mosaica code and `npm install @mosaicajs/client@next` installs the newest release candidate. [Install a client](../../docs/start/install.md#install-a-client) is the user's install, and the [TypeScript client reference](../../docs/reference/typescript.md) lists each package's peer dependencies.
 
 ## Building
 
@@ -45,32 +45,18 @@ builds `client`, `deck`, `components` and `react`, in that order, into each pack
 
 The elements use standard decorators with `accessor`. Vite 8 does not lower them, so `components/vite-plugin-decorators.ts` runs esbuild over the component sources wherever Vite serves or bundles them: the viewer, the React example and the single-file bundle. `dist/` is lowered by `tsc`, so a host that installs the package needs no plugin.
 
-### Using the packages in another project
+### Trying a local build in another project
 
-Build the four packages, then pack them into a directory of your choice. `npm pack` does not create the directory. Run these in `clients/ts`:
+To try changes that are not published in another project, build the four packages and pack them into a directory of your choice. `npm pack` does not create the directory. Run these in `clients/ts`:
 
 ```bash
 npm run build
 mkdir -p ~/mosaica-packs
 npm pack -w @mosaicajs/client -w @mosaicajs/deck -w @mosaicajs/components -w @mosaicajs/react --pack-destination ~/mosaica-packs
+npm --prefix ~/your-project install ~/mosaica-packs/mosaicajs-*.tgz
 ```
 
-That writes `mosaicajs-client-0.1.0-rc.4.tgz`, `mosaicajs-deck-0.1.0-rc.4.tgz`, `mosaicajs-components-0.1.0-rc.4.tgz` and `mosaicajs-react-0.1.0-rc.4.tgz`. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly version 0.1.0-rc.4 of the Mosaica packages they import, and `@mosaicajs/react` on 0.1.0-rc.4 or a later 0.1 release. Version 0.1.0-rc.4 exists only in these tarballs. Install the tarballs together, in one `npm install` in the other project:
-
-```bash
-npm install ~/mosaica-packs/mosaicajs-client-0.1.0-rc.4.tgz ~/mosaica-packs/mosaicajs-deck-0.1.0-rc.4.tgz ~/mosaica-packs/mosaicajs-components-0.1.0-rc.4.tgz ~/mosaica-packs/mosaicajs-react-0.1.0-rc.4.tgz
-```
-
-Installing `@mosaicajs/components` without the client and deck tarballs fails with `No matching version found for @mosaicajs/client@0.1.0-rc.4`, because npm looks for that version on the registry. The project's `package.json` records each tarball by its path, so leave the files where they are.
-
-The host provides these peer dependencies. npm 7 and later installs the required ones itself; the optional ones it leaves to the host.
-
-| Package | Peer dependencies |
-|---|---|
-| `@mosaicajs/client` | None. |
-| `@mosaicajs/deck` | `@deck.gl/core`, `@deck.gl/layers` and `@deck.gl/aggregation-layers` `^9.3.7`, and `@luma.gl/core` `^9.3.6`. |
-| `@mosaicajs/components` | The same four, and `lit` `^3.3.0`. |
-| `@mosaicajs/react` | `react` `^18.0.0` or `^19.0.0`. For the `/components` entry, also `@mosaicajs/components` `^0.1.0-rc.4` and `@lit/react` `^1.0.0`, both optional. |
+Install the tarballs together, in one `npm install`. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly the version of the Mosaica packages they import, so a tarball installed alone makes npm look for its siblings on the registry, where an unreleased version is missing. The project's `package.json` records each tarball by its path, so leave the files where they are.
 
 ## Testing
 

@@ -3,7 +3,7 @@
 The `mosaica-*` web components for [Mosaica](https://github.com/mosaicadb/mosaica), which serves an interactive map over billions of points from one machine, with every count, cluster and sample computed over what the signed-in viewer may see. The elements include a map, a filter panel, counts, item and field cards, layer and view pickers, and `<mosaica-explorer>`, which puts them together. They are built with Lit and draw through [`@mosaicajs/deck`](https://www.npmjs.com/package/@mosaicajs/deck).
 
 ```bash
-npm install @mosaicajs/components lit @deck.gl/core @deck.gl/layers @deck.gl/aggregation-layers @luma.gl/core
+npm install @mosaicajs/components@next lit @deck.gl/core @deck.gl/layers @deck.gl/aggregation-layers @luma.gl/core
 ```
 
 ```ts

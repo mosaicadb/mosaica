@@ -2,37 +2,50 @@
 
 This guide runs Mosaica in a container managed by Docker Compose, with the database kept in a Docker
 volume. It suits a host where you already run services this way. You'll need Docker with the Compose
-plugin, sudo on the host, and a clone of the Mosaica repository to build the image from. From the
-`~/ireland` directory of [the first tutorial](../start/first-map.md) you need `schema.toml` and
-`points.parquet`.
+plugin and sudo on the host. From the `~/ireland` directory of [the first
+tutorial](../start/first-map.md) you need `schema.toml` and `points.parquet`.
 
 Once the container is running, [Operate a deployment](operating.md) takes over. It applies to this
 install and to [the systemd one](systemd.md) alike.
 
-## Build the image
+## Get the image
 
-!!! note ""
-    Not built yet: a published image. Build it from the repository.
-
-The Dockerfile at the root of the repository compiles `mosaica` and copies it onto a distroless base
-image, which holds the C library and certificates and nothing else. With no shell in the image,
-every command you run in the container is a `mosaica` command.
+Mosaica's image is published to the GitHub Container Registry as `ghcr.io/mosaicadb/mosaica`, for
+`linux/amd64` and `linux/arm64`, with a tag for each release. Until the first full release there is
+no `latest` tag. Write the newest version on the [releases
+page](https://github.com/mosaicadb/mosaica/releases), without its leading `v`, in place of `VERSION`,
+here and in `compose.yaml` below.
 
 ```console
-$ cd ~/mosaica
-$ docker build --build-arg MOSAICA_BUILD_COMMIT=$(git rev-parse HEAD) -t mosaica .
+$ docker pull ghcr.io/mosaicadb/mosaica:VERSION
 ...
-#16 unpacking to docker.io/library/mosaica:latest
-#16 unpacking to docker.io/library/mosaica:latest 0.2s done
-#16 DONE 1.2s
-$ docker run --rm mosaica --version
-mosaica 101b9768ff3cda26f8e960572cd898c181fc9fd5
+$ docker run --rm ghcr.io/mosaicadb/mosaica:VERSION --version
+mosaica 0.1.0-rc.4 (135216816)
 ```
 
-The build argument puts the commit into `--version`, which is how you tell two images apart later.
-
-The image runs `mosaica serve` unless you give it another command. It runs as user 65532, not as
+The image holds `mosaica` on a distroless base image, which holds the C library and certificates
+and nothing else. With no shell in the image, every command you run in the container is a `mosaica`
+command. It runs `mosaica serve` unless you give it another command, runs as user 65532, not as
 root, and looks for `mosaica.toml` in `/etc/mosaica`.
+
+??? info "Building the image yourself"
+    The Dockerfile at the root of the repository compiles `mosaica` and copies it onto the same
+    base image. The build argument puts the commit into `--version`, which is how you tell two
+    images apart later.
+
+    ```console
+    $ git clone https://github.com/mosaicadb/mosaica ~/mosaica
+    $ cd ~/mosaica
+    $ docker build --build-arg MOSAICA_BUILD_COMMIT=$(git rev-parse HEAD) -t mosaica .
+    ...
+    #16 unpacking to docker.io/library/mosaica:latest
+    #16 unpacking to docker.io/library/mosaica:latest 0.2s done
+    #16 DONE 1.2s
+    $ docker run --rm mosaica --version
+    mosaica 101b9768ff3cda26f8e960572cd898c181fc9fd5
+    ```
+
+    Write `image: mosaica` in `compose.yaml` to use it.
 
 ## Make a deployment directory
 
@@ -95,7 +108,7 @@ Save this as `compose.yaml`:
 ```yaml
 services:
   mosaica:
-    image: mosaica
+    image: ghcr.io/mosaicadb/mosaica:VERSION
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -241,12 +254,10 @@ mosaica-1  | mosaica serve: stopped on SIGTERM
 in progress. `docker compose down` removes the container and keeps the volume. `docker compose down
 -v` deletes the volume too, and with it the database and every change made to it since the build.
 
-To upgrade, build a new image from the updated repository and start the service again. Compose sees
-that the image has changed, replaces the container and keeps the volume.
+To upgrade, change the tag in `compose.yaml` to the new version and start the service again.
+Compose pulls the new image, replaces the container and keeps the volume.
 
 ```bash
-cd ~/mosaica && git pull
-docker build --build-arg MOSAICA_BUILD_COMMIT=$(git rev-parse HEAD) -t mosaica .
 cd ~/mosaica-docker && docker compose up -d
 ```
 

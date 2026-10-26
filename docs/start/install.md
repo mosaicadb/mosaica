@@ -7,42 +7,92 @@ This page shows how to install Mosaica as a standalone database and configure it
 
 ## Install Mosaica
 
-Release binaries and a Docker image will come with the first release. Until then, build Mosaica from source. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu).
+Download the archive for your machine from the [releases page](https://github.com/mosaicadb/mosaica/releases). Each archive holds the `mosaica` program, which creates databases and runs them, beside its licence and changelog. Unpack it and copy `mosaica` onto your `PATH`. On Linux on x86_64, for instance:
 
 ```bash
-git clone https://github.com/mosaicadb/mosaica ~/mosaica
-cd ~/mosaica
-cargo install --locked --path crates/mosaica-cli
+tar xzf mosaica-*-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 0755 mosaica-*-x86_64-unknown-linux-gnu/mosaica /usr/local/bin/mosaica
+mosaica --version
 ```
 
-This installs the `mosaica` command, which creates databases and runs them. To run a database as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md).
+```
+mosaica 0.1.0-rc.4 (135216816)
+```
 
-Mosaica runs on Linux and macOS, but not yet on Windows.
+The version is the release you installed, and the number in brackets is the commit it was built from. The archive's name ends in the platform it is built for:
 
-??? info "Supported platforms"
-    Release builds are made for Linux on x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on Apple silicon, and macOS 10.12 or later on Intel. The tests run on Linux x86_64.
+| Platform | Archive name ends in |
+|---|---|
+| Linux on x86_64, glibc 2.28 or later | `x86_64-unknown-linux-gnu.tar.gz` |
+| Linux on x86_64, musl 1.2 or later, as on Alpine | `x86_64-unknown-linux-musl.tar.gz` |
+| Linux on aarch64, glibc 2.28 or later | `aarch64-unknown-linux-gnu.tar.gz` |
+| Linux on aarch64, musl 1.2 or later | `aarch64-unknown-linux-musl.tar.gz` |
+| macOS 11 or later on Apple silicon | `aarch64-apple-darwin.tar.gz` |
+| macOS 10.12 or later on Intel | `x86_64-apple-darwin.tar.gz` |
+
+??? info "Checking the download"
+    `SHA256SUMS`, on the same release, lists the SHA-256 digest of every archive. Download it beside the archive and check the archive against it:
+
+    ```bash
+    sha256sum -c SHA256SUMS --ignore-missing
+    ```
+
+    ```
+    ./mosaica-0.1.0-rc.4-x86_64-unknown-linux-gnu.tar.gz: OK
+    ```
+
+    On macOS, `shasum -a 256 mosaica-*.tar.gz` prints the digest to compare with the archive's line in `SHA256SUMS`.
+
+To run a database as a service, see [Run Mosaica under systemd](../guides/systemd.md) or [Run Mosaica with Docker](../guides/docker.md). The Docker guide uses Mosaica's published image, `ghcr.io/mosaicadb/mosaica`, in place of an archive.
+
+If you'll use Mosaica from Python, you can skip the archive: on Linux and macOS the Python client installs `mosaica` with it, as [Install a client](#install-a-client) shows.
+
+??? info "Building from source"
+    To work on Mosaica, or to run a build of your own, compile it with cargo. You'll need Rust and a C compiler (`build-essential` on Debian and Ubuntu), which builds the C libraries Mosaica links in.
+
+    ```bash
+    git clone https://github.com/mosaicadb/mosaica ~/mosaica
+    cd ~/mosaica
+    cargo install --locked --path crates/mosaica-cli
+    ```
+
+    Cargo puts `mosaica` in `~/.cargo/bin`. The crates are on crates.io too, and `cargo install --locked mosaica --version` followed by a version from the releases page builds that release.
+
+!!! note "Pre-releases"
+    Mosaica has published release candidates only, so each install names the pre-release explicitly. pip needs `--pre`, npm needs the `@next` tag, `cargo install` needs `--version`, and the Docker image has a tag for each version but no `latest`. From the first full release, the plain commands install it.
+
+## Platforms
+
+| Part | Runs on |
+|---|---|
+| `mosaica`, the database and command line | Linux on x86_64 and aarch64, with glibc 2.28 or later or musl 1.2 or later; macOS 11 or later on Apple silicon; macOS 10.12 or later on Intel. There is no Windows build. |
+| The Docker image | `linux/amd64` and `linux/arm64` |
+| The Python client | Python 3.12 or later. On the platforms above it includes `mosaica`, so it can make and serve a database. Elsewhere, Windows included, it installs without it and connects to a database running on another machine. |
+| The TypeScript client | Browsers, from an npm project |
+
+The tests run on Linux on x86_64.
 
 ## Install a client
 
-The clients aren't on PyPI or npm yet either, so install them from the same clone.
-
 === "Python"
 
-    You'll need Python 3.10 or later, Rust, a C compiler and Node.js 22.15 or later. The first package carries Mosaica itself, which the client uses when it runs a database of its own.
+    You'll need Python 3.12 or later.
 
     ```bash
-    cd ~/mosaica
-    pip install -e clients/py-native
-    pip install -e 'clients/py[widget]'
+    pip install --pre 'mosaica[widget]'
     ```
 
-    On Windows, the Python client installs without the database itself, and connects to a database running on another machine.
+    This installs two packages from PyPI: `mosaica`, the client, and `mosaica-native`, which carries the `mosaica` program and puts it on your `PATH`. The client uses it when it runs a database of its own. The `widget` extra adds the map for Jupyter and marimo notebooks; leave it out if you only read and write data. Every table the client returns is a pyarrow table.
 
 === "TypeScript"
 
-    You'll need Node.js 22.15 or later. Pack the packages from `clients/ts` and install the packed files in your project, as the [TypeScript client's README](https://github.com/mosaicadb/mosaica/blob/main/clients/ts/README.md#using-the-packages-in-another-project) describes.
+    You'll need Node.js 22.15 or later. In your project, install the elements:
 
-    The npm registry holds empty placeholders under the `@mosaicajs` names, so `npm install @mosaicajs/client` succeeds but installs no code.
+    ```bash
+    npm install @mosaicajs/components@next
+    ```
+
+    That brings `@mosaicajs/client` and `@mosaicajs/deck` with it, and the Lit and deck.gl packages they draw with. A page that draws the map itself needs only `@mosaicajs/client`, and a React app adds `@mosaicajs/react`. The [TypeScript client reference](../reference/typescript.md) says what each package holds.
 
 ## Configure
 
@@ -70,9 +120,10 @@ flowchart LR
 
 ## Try it
 
-The repository has 150,000 GeoNames places in `examples/data/geonames`. Make a directory beside the clone:
+The repository has 150,000 GeoNames places in `examples/data/geonames`. Clone it, and make a directory beside the clone:
 
 ```bash
+git clone https://github.com/mosaicadb/mosaica ~/mosaica
 mkdir ~/places && cd ~/places
 ```
 

@@ -2,7 +2,8 @@
 
 This guide turns the map you served from a terminal in [the first tutorial](../start/first-map.md)
 into a service on a Linux server, which starts at boot and comes back by itself if it crashes.
-You'll need sudo on the server and the `mosaica` binary you built with cargo. From the tutorial's
+You'll need sudo on the server and `mosaica` installed in `/usr/local/bin` from a release archive,
+as [Install Mosaica](../start/install.md#install-mosaica) shows. From the tutorial's
 `~/ireland` directory you need `schema.toml` and `points.parquet`.
 
 Once the service is running, [Operate a deployment](operating.md) covers what you do with it, from
@@ -10,17 +11,16 @@ who may reach each address to compaction. [Run Mosaica with Docker](docker.md) d
 this page in a container.
 
 !!! note ""
-    Not built yet: a package for any Linux distribution. Copy the binary into place by hand, as
-    the first step shows.
+    Not built yet: a package for any Linux distribution. The release archive is the way to install
+    on a server.
 
-## Install the binary and make a user
+## Make a user
 
 The service gets a user of its own. The bundle holds every item in the corpus, whatever its access
 label, so no other account on the machine should be able to read it.
 
 ```bash
 sudo useradd --system --home-dir /srv/mosaica --shell /usr/sbin/nologin mosaica
-sudo install -m 0755 ~/.cargo/bin/mosaica /usr/local/bin/mosaica
 ```
 
 ## Lay out /srv/mosaica

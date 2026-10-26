@@ -3,7 +3,7 @@
 `MosaicaLayer`, a [deck.gl](https://deck.gl) layer that draws a [Mosaica](https://github.com/mosaicadb/mosaica) store, for a page that builds its own `Deck`. Mosaica serves an interactive map over billions of points from one machine, computed over what each viewer may see. The store comes from [`@mosaicajs/client`](https://www.npmjs.com/package/@mosaicajs/client).
 
 ```bash
-npm install @mosaicajs/deck @mosaicajs/client @deck.gl/core @deck.gl/layers @deck.gl/aggregation-layers @luma.gl/core
+npm install @mosaicajs/deck@next @mosaicajs/client@next @deck.gl/core @deck.gl/layers @deck.gl/aggregation-layers @luma.gl/core
 ```
 
 ```ts

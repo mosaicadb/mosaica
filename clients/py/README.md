@@ -1,39 +1,44 @@
 # `mosaica`
 
 Mosaica's Python package: one package whether you want the widget, the SDK or
-both. It needs Python 3.10 or later.
+both. It needs Python 3.12 or later.
 
-Not published yet: neither `mosaica` nor `mosaica-native`, the companion wheel that carries the
-`mosaica` binary and the `_mosaica` extension module, is on PyPI, so `pip install mosaica` finds
-nothing. Install both from a checkout of the repository, `mosaica-native` first:
+```
+pip install --pre 'mosaica[widget]'
+```
+
+`--pre` is needed until 0.1.0, because only release candidates are published. On Linux or macOS on
+x86_64 or ARM64 (a `platform_machine` of `x86_64`, `aarch64` or `arm64`), `mosaica` depends on
+`mosaica-native` at exactly its own version. That companion wheel carries the `mosaica` binary,
+which pip puts on `PATH`, and the `_mosaica` extension module. Its wheels are built for Linux on
+x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and
+macOS 10.12 or later on x86_64. On a machine the marker leaves out, Windows included, `mosaica`
+installs without it. It still connects to a running server; making or serving a database needs a
+`mosaica` binary on `PATH` or named by `MOSAICA_BIN`. Leave out `[widget]` to install the package
+without anywidget and the map.
+
+Every table the package returns is a pyarrow table; `.to_pandas()` on it gives a DataFrame where
+pandas is installed. `pip install --pre --no-deps mosaica` installs neither pyarrow nor
+`mosaica-native`: install `pyarrow>=14.0.1` by hand, and put a `mosaica` binary on `PATH` or name
+it with `MOSAICA_BIN` to make or serve a database.
+
+## From a checkout
+
+To work on the package, install both from a checkout of the repository, `mosaica-native` first:
 
 ```
 pip install -e clients/py-native     # the mosaica binary and the extension module; runs cargo
 pip install -e 'clients/py[widget]'  # read, create, declare, insert, commit, and the notebook widget, Map
 ```
 
-The order matters. On Linux or macOS on x86_64 or ARM64 (a `platform_machine` of `x86_64`,
-`aarch64` or `arm64`), `mosaica` depends on `mosaica-native==0.1.0-rc.4`, and pip can satisfy that
-only from the copy already installed. `mosaica-native`'s build hook runs cargo, so it needs a
-Rust toolchain. `mosaica`'s build hook (`hatch_build.py`) runs `npm ci` (when the install is
-stale) and `npm run bundle -w @mosaicajs/components` in `clients/ts`, and copies the single-file
-bundle into `mosaica/static/`, so it needs Node 22.15 or later, with or without `[widget]`. Leave out
-`[widget]` to install the package without anywidget and the map. Nothing built is committed.
-`check.sh` is the package's half of the gate: the tests, and a wheel built and opened to prove
-the bundle is inside it.
-
-`.github/workflows/wheels.yml` builds `mosaica-native` wheels for Linux on x86_64 and aarch64
-(glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and macOS 10.12 or later on
-x86_64. There is no Windows build. Each serves every Python from 3.10 up, through the stable ABI.
-The workflow uploads them as build artifacts and publishes nothing. On a machine the dependency's
-marker leaves out, Windows included, `mosaica` installs without `mosaica-native`. It still
-connects to a running server; making or serving a database needs a `mosaica` binary on `PATH`
-or named by `MOSAICA_BIN`.
-
-Every table the package returns is a pyarrow table; `.to_pandas()` on it gives a DataFrame where
-pandas is installed. `pip install --no-deps -e clients/py` installs neither pyarrow nor
-`mosaica-native`: install `pyarrow>=14` by hand, and put a `mosaica` binary on `PATH` or name it
-with `MOSAICA_BIN` to make or serve a database.
+The order matters: pip can satisfy `mosaica`'s exact pin on `mosaica-native` only from the copy
+already installed. `mosaica-native`'s build hook runs cargo, so it needs a Rust toolchain.
+`mosaica`'s build hook (`hatch_build.py`) runs `npm ci` (when the install is stale) and
+`npm run bundle -w @mosaicajs/components` in `clients/ts`, and copies the single-file bundle into
+`mosaica/static/`, so it needs Node 22.15 or later, with or without `[widget]`. Nothing built is
+committed. `check.sh` is the package's half of the gate: the tests, and a wheel built and opened to
+prove the bundle is inside it. `.github/workflows/wheels.yml` builds the wheels; each
+`mosaica-native` wheel serves every Python from 3.12 up, through the stable ABI.
 
 ## Try it
 
@@ -50,7 +55,7 @@ narrower readers; filters and counts; one view per year with a clustering of eac
 new papers into the database while it serves, with a suppression; and the database saved and
 reopened.
 
-They need the two installs above and an arXiv corpus: `data/notebook-2m4-live/`, all 2.4
+They need the package with `[widget]` and an arXiv corpus: `data/notebook-2m4-live/`, all 2.4
 million papers, or `data/notebook-sample/`, 200,000 of them, with `SCALE = "sample"`. The notebook
 looks for `data/<corpus>/` in the working directory, in its own directory and in every directory
 above them, and `MOSAICA_NOTEBOOK_DATA` names one elsewhere. Neither directory is in git.

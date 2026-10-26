@@ -4,15 +4,14 @@ The Python tutorial is available as a Jupyter or marimo notebook in the reposito
 
 ## Run it
 
-You need Python 3.10 or later and a clone of the repository, which holds the notebook and the data. The client builds from source, so you also need Rust, a C compiler and Node.js 22.15 or later. [Install and configure](install.md) has the details.
+You need Python 3.12 or later on Linux or macOS, and a clone of the repository, which holds the notebook and the data. `pip install --pre` installs the newest release candidate of the client, with the `mosaica` program the notebook runs its database with.
 
 === "Jupyter"
 
     ```bash
     git clone https://github.com/mosaicadb/mosaica ~/mosaica
     cd ~/mosaica
-    pip install -e clients/py-native
-    pip install -e 'clients/py[widget]' pandas jupyterlab
+    pip install --pre 'mosaica[widget]' pandas jupyterlab
     jupyter lab clients/py/examples/01_getting_started.ipynb
     ```
 
@@ -21,10 +20,11 @@ You need Python 3.10 or later and a clone of the repository, which holds the not
     ```bash
     git clone https://github.com/mosaicadb/mosaica ~/mosaica
     cd ~/mosaica
-    pip install -e clients/py-native
-    pip install -e 'clients/py[widget]' pandas marimo
+    pip install --pre 'mosaica[widget]' pandas marimo
     marimo edit clients/py/examples/01_getting_started.py
     ```
+
+[Install a client](install.md#install-a-client) says what the packages hold.
 
 ## Next
 

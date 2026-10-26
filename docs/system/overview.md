@@ -103,6 +103,6 @@ The [queries](queries.md) and [serving](serving.md) chapters explain these in fu
 | Starting from an empty database, and declaring everything to it as it runs | Built |
 | Writing to a running database from the command line | Built |
 | Drawing a map from the command line | Not built yet |
-| Python and TypeScript packages | Built. Not yet published to PyPI or npm |
+| Release archives, the Docker image, and the Python and TypeScript packages | Built. Published as release candidates on GitHub, GHCR, PyPI, npm and crates.io |
 | A conformance suite that checks a running database's answers against an independent reference implementation | Built |
 | Running across several machines, and replicas | Not built |

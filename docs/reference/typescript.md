@@ -14,7 +14,14 @@ The TypeScript client puts a Mosaica map in a web page. It is four packages buil
 
 Each page lists what its package exports, and every name on it is imported from that package, as in `import {createStore} from '@mosaicajs/client'`. The `/internal` entries of `@mosaicajs/client` and `@mosaicajs/deck` are shared between the packages and are not a public API.
 
-Not built yet: the packages are not published to npm. The registry holds an empty placeholder, version 0.0.0, under each name, so `npm install @mosaicajs/client` succeeds and installs no Mosaica code. Build and pack the packages from `clients/ts` instead, and install the tarballs together in one `npm install`, since `@mosaicajs/deck` and `@mosaicajs/components` depend on the exact version of the Mosaica packages they import, which exists only in those tarballs. The README in `clients/ts` gives the commands and each package's peer dependencies.
+The packages are on npm. Until Mosaica's first full release, install them by the `next` tag, as in `npm install @mosaicajs/client@next`; [Install a client](../start/install.md#install-a-client) says which package to start from. Each package's peer dependencies are below. npm 7 and later installs the required ones itself and leaves the optional ones to the host.
+
+| Package | Peer dependencies |
+|---|---|
+| `@mosaicajs/client` | None. |
+| `@mosaicajs/deck` | `@deck.gl/core`, `@deck.gl/layers` and `@deck.gl/aggregation-layers` `^9.3.7`, and `@luma.gl/core` `^9.3.6`. |
+| `@mosaicajs/components` | The same four, and `lit` `^3.3.0`. |
+| `@mosaicajs/react` | `react` `^18.0.0` or `^19.0.0`. For the `/components` entry, also `@mosaicajs/components` and `@lit/react` `^1.0.0`, both optional. |
 
 ## Connecting
 
