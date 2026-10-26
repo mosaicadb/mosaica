@@ -179,11 +179,7 @@ class Insert(Summarised):
     """The record of one `insert` call, which says what table was handed to which target and
     which of its columns are read.
 
-    It shows as one line that names the target, the number of rows, and the columns read and
-    ignored.
-
-    - `target`: the name of the declared view, view group, attribute, layer, label set or
-      vocabulary.
+    - `target`: the name of the declared thing the table was handed to.
     - `kind`: what the target is, as `"view"`, `"view_group"`, `"attribute"`, `"layer"`,
       `"labels"` or `"vocabulary"`.
     - `role`: which of the target's tables this is, as `"rows"`, `"roster"`, `"values"`,
@@ -235,8 +231,8 @@ class Insert(Summarised):
         return pq.read_table(self.path)
 
     def summary(self) -> list[str]:
-        """The line `print()` shows, which names the target, the number of rows, and the columns
-        read and ignored."""
+        """The lines `print()` shows, which are one line naming the target, the number of rows,
+        and the columns read and ignored."""
         into = self.target if self.role in ("rows", "key", "values") else (
             f"{self.target} ({self.role})"
         )

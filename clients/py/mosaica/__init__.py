@@ -1,7 +1,6 @@
-"""`mosaica` is the Python client for Mosaica, a database that serves an interactive map of
-points to many viewers, each of whom sees only the items they may see. You use it to make a
-database from data frames and files, to read one from Python or a notebook, and to manage a
-running one.
+"""Use this package to make a Mosaica database from data frames and files, to read one from
+Python or a notebook, and to manage a running one. Mosaica serves an interactive map of points
+to many viewers, each of whom sees only the items they may see.
 
 `create` makes a database in a directory and `open` reopens one, and both give a `Database`.
 You declare on it what the database holds, insert tables into what you declared, and commit
@@ -10,15 +9,15 @@ sends that server what was inserted since. A `Database` reads with its operator'
 `Database.viewer` gives a reader that holds only the access terms you name.
 
 `connect` gives a `Viewer`, which reads a database someone else runs with a token that its
-operator issued, or that `login` or `authorise` made. Every count, record and map a reader is
-given is computed over the items it may see. `Control` is a client for a database's control
-plane, which writes to it and manages its principals, credentials, groups, grants, OIDC
-providers and sessions. `Map` shows a database as an interactive map in a notebook cell.
+operator issued, or that `login` or `authorise` made. `Control` is a client for a database's
+control plane, which writes to it and manages its principals, credentials, groups, grants, OIDC
+providers and sessions.
 
 Every table the package returns is a pyarrow table, whose `.to_pandas()` gives a pandas
-DataFrame when pandas is installed. `Map` needs the `widget` extra, which
-`pip install 'mosaica[widget]'` adds. `Map`, `create`, `open` and `Database` are loaded when
-first used, so `import mosaica` works without anywidget or pyarrow.
+DataFrame when pandas is installed. `Map` shows a database as an interactive map in a notebook
+cell, and needs the `widget` extra, which `pip install 'mosaica[widget]'` adds. `Map`, `create`,
+`open` and `Database` are loaded when first used, so `import mosaica` works without anywidget or
+pyarrow.
 """
 
 from __future__ import annotations

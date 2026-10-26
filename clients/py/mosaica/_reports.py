@@ -71,19 +71,18 @@ def _reasons_in_words(counts: dict) -> str:
 
 @dataclass(repr=False)
 class Declared(Summarised):
-    """What `declare_columns` declared, with one entry for each column it looked at.
+    """What `declare_columns` declared.
 
     - `columns`: a `DeclaredColumn` for each column of the frame that was neither skipped nor
-      already declared, including the columns that no type fits, which were left undeclared.
-    - `vocabularies`: the names of the vocabularies declared for category columns.
+      already declared, including those no type fits, which were left undeclared.
+    - `vocabularies`: the vocabularies declared for category columns.
     """
 
     columns: list[DeclaredColumn] = field(default_factory=list)
     vocabularies: list[str] = field(default_factory=list)
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows, which name each column with the type it was declared as,
-        and then the vocabularies declared."""
+        """The lines `print()` shows: each column with its type, then the vocabularies."""
 
         def flags(column: DeclaredColumn) -> str:
             named = [flag for flag in ("render", "index") if getattr(column, flag)]
@@ -103,22 +102,21 @@ class Declared(Summarised):
 
 @dataclass(repr=False)
 class Report(Summarised):
-    """The report of a `check()` before the first commit, which `CommitReport` extends for the
-    first `commit()`.
+    """The report of a `check()` before the first commit, which `CommitReport` extends.
 
     - `what`: `"check"` or `"commit"`.
     - `ok`: `True` when nothing was refused.
-    - `rows`: how many rows were inserted into each view or view group.
+    - `rows`: the rows inserted into each view or view group.
     - `frames`: each view's name, with its extent in words.
     - `render_columns`: the columns sent with every point the map draws.
     - `notes`: what each insert read and ignored, and each declared column that no insert
-      fills, with the reason no insert fills it.
-    - `findings`: the problems found before anything was built, as `Finding`s.
-    - `log`: the text the declaration check printed, followed on a commit by the build's log.
+      fills, with the reason. The first commit's build refuses such a column, although
+      `check()` accepts it, unless it is unique or scoped to a view group.
+    - `findings`: the `Finding`s found before anything was built.
+    - `log`: the declaration check's output, followed on a commit by the build's.
 
-    The summary lists every note and every finding, and the warnings in `log`. When the report
-    is not `ok` the summary carries the whole log, because a check or build that failed says why
-    somewhere in it.
+    The summary lists every note, finding and warning, and carries the whole log when the
+    report is not `ok`, because the log says why the check or build failed.
     """
 
     what: str
@@ -134,8 +132,8 @@ class Report(Summarised):
         return "; ".join(f"{target}: {_count(n, 'row')}" for target, n in self.rows.items())
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows, which give the rows inserted and then every note, finding
-        and warning, or the whole log when the check failed."""
+        """The lines `print()` shows: the rows inserted, then the notes, findings and warnings, or
+        the whole log when the check failed."""
         out = [
             f"check: {'ok' if self.ok else 'FAILED'}, inserted "
             f"{self._rows_in_words() or 'no rows'}"
@@ -163,24 +161,20 @@ class CommitReport(Report):
     """The report of the first `commit()`, which adds to a `Report` what the build made and
     where the database is served.
 
-    - `views`: how many views the database serves under each name, where the views of a view
-      group are counted under the group's name.
-    - `layers`: the annotation layers the database declares.
-    - `labels`: the label sets it declares, each over one of `layers`.
-    - `items`, `minted`, `unclustered`: the build's own counts, read from its log, of the items
-      it built, the annotations it made from key columns, and the member rows that fell in no
-      annotation because their key was null. Each is `None` when the log does not give it.
-    - `seconds`: how long the check, the build and the server's start took in all.
-    - `viewer`, `session`, `control`: the address of the viewer plane, where readers read, of
-      the session plane, where tokens are made, and of the control plane, where the operator
-      writes.
-    - `identity`: how the rows name their items, in words, which is either by the values of the
-      unique attributes or as one item for each row of the points.
-    - `refused`: the rows the build left out, as one dictionary for each file and reason. Its
-      `source` is the file and `object` the block that read it, `rows` is how many rows were
-      left out, and `values` holds up to ten of their values as the file wrote them. `reason` is
-      one of `names_no_item`, `names_two_items`, `one_item_twice`, `one_value_twice` and
-      `unknown_mosaica_id`. The summary lists each entry.
+    - `views`: how many views the database serves under each name, counting a view group's
+      views under the group.
+    - `layers`, `labels`: the annotation layers and the label sets the database declares.
+    - `items`, `minted`, `unclustered`: the build's counts of the items it built, the
+      annotations it made from key columns, and the member rows left in no annotation by a null
+      key. Each is `None` when the build's log does not give it.
+    - `seconds`: how long the check, the build and the server's start took.
+    - `viewer`, `session`, `control`: the addresses of the planes where readers read, where
+      tokens are made and where the operator writes.
+    - `identity`: in words, how the rows name their items.
+    - `refused`: the rows the build left out, as one dictionary for each file and reason, with
+      the file as `source`, the block that read it as `object`, the number of rows as `rows`,
+      up to ten of their values as `values`, and `reason`, one of `names_no_item`,
+      `names_two_items`, `one_item_twice`, `one_value_twice` and `unknown_mosaica_id`.
     """
 
     views: dict = field(default_factory=dict)
@@ -197,8 +191,8 @@ class CommitReport(Report):
     refused: list = field(default_factory=list)
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows, which give the items built, the views and layers and the
-        address the database is served at, and then every note, finding and warning."""
+        """The lines `print()` shows: the items built, the views and layers and the address served
+        at, then the notes, findings and warnings."""
         if not self.ok:
             return ["commit: FAILED"] + self._problems()
         views = [
@@ -233,56 +227,47 @@ class CommitReport(Report):
 class PagedReport(Summarised):
     """What a `check()` or `commit()` after the first one planned or did.
 
-    `check()` returns it with `sent` false, listing in `plan` the requests a commit would send,
-    in order, and in `findings` any problem found before sending. `commit()` returns the same
-    plan with `sent` true, and with what the requests did:
+    `check()` returns it with `sent` false, with the requests a commit would send in `plan` and
+    any problem found in `findings`. `commit()` returns the same plan with `sent` true, and
+    counts what the requests did:
 
-    - `rows_accepted`: how many rows were added to each view, where each row created an item or
-      added an item to the view. `rows` is their total.
-    - `artifacts_minted`, `memberships_joined`: how many annotations were added and how many
-      memberships were joined.
-    - `items_edited`: how many items the database already held had their value, label or
-      position changed by a row. An edited item keeps its `mosaica_id`. Placing an item in an
-      annotation changes the annotation, so it is counted in `memberships_joined` instead.
-    - `items_unchanged`: how many rows named an item and left it as it was, which includes a row
-      whose only change was to place its item in an annotation.
-    - `values_bound`, `titles_set`: how many vocabulary values were added and how many titles
-      were replaced. A writer without `write-all` is not told which values of a `derived`
-      vocabulary it added, so neither count includes them.
-    - `parts_filled`: how many absent parts of annotations already held, such as their content,
-      were filled.
-    - `already_present`: how many declarations and vocabulary keys the database already held,
-      which changed nothing.
-    - `without_content`: how many annotations were added without the content their layer
-      declares.
-    - `clipped`: how many rows lay outside the range the view's projection can place, and were
-      stored on the view's edge.
-    - `clamped`: how many rows lay outside a view's extent, and were moved onto its edge.
-    - `refusals`: each request the server refused, with its status and its answer.
-    - `refused`: each row or member that the server left out while it applied the rest of its
-      request. A row is `{"target", "view", "row", "reason"}`, where `row` is its position in
-      the table inserted into `target`. A member is `{"layer", "level", "view", "key", "list",
-      "member", "reason"}`, where `member` is the member's row as it was sent, and an annotation
-      refused whole, because the writer's terms do not satisfy its label, has `list` and
-      `member` set to `None`. `reason` is one of `names_no_item`, `names_two_items`,
-      `one_item_twice`, `one_value_twice`, `unknown_mosaica_id`, `value_held`, for a unique value
-      that an item outside the writer's terms holds, and `label_not_held`, for a label the
-      writer's terms do not satisfy. `refused_by_reason` counts them.
-    - `ignored_columns`: for each layer, the member columns that name no item because they are
-      neither `mosaica_id` nor a unique attribute's column. They come from the layer's member
-      structs or the memberships its declaration writes, and they were not sent, or the server
-      reported ignoring them.
-    - `mosaica_ids`: the id given to each row sent, in order, with `None` for a refused row.
+    - `rows_accepted`: the rows added to each view, each of which created an item or added one to
+      the view. `rows` is their total.
+    - `artifacts_minted`, `memberships_joined`: the annotations added and the memberships joined.
+    - `items_edited`: the items already held whose value, label or position a row changed. An
+      edited item keeps its `mosaica_id`, and placing an item in an annotation counts as a
+      membership instead.
+    - `items_unchanged`: the rows that named an item and left it as it was, apart from placing
+      it in an annotation.
+    - `values_bound`, `titles_set`: the vocabulary values added and the titles replaced, leaving
+      out the values of a `derived` vocabulary, which a writer without `write-all` is not told.
+    - `parts_filled`: the absent parts of held annotations, such as content, that were filled.
+    - `already_present`: the declarations and vocabulary keys already held, which changed
+      nothing.
+    - `without_content`: the annotations added without the content their layer declares.
+    - `clipped`: the rows the view's projection could not place, stored on the view's edge.
+    - `clamped`: the rows outside a view's extent, moved onto its edge.
+    - `refusals`: each request the server refused, with its status and answer.
+    - `refused`: each row or member the server left out while applying the rest of its request.
+      A row is `{"target", "view", "row", "reason"}`, where `row` is its position in the table
+      inserted into `target`, and a member is `{"layer", "level", "view", "key", "list",
+      "member", "reason"}`, where `member` is its row as sent. An annotation refused whole for
+      its label has `list` and `member` set to `None`. `reason` is one of `names_no_item`,
+      `names_two_items`, `one_item_twice`, `one_value_twice`, `unknown_mosaica_id`, `value_held`
+      (a unique value held by an item outside the writer's terms) and `label_not_held` (a label
+      the writer's terms do not satisfy), and `refused_by_reason` counts them.
+    - `ignored_columns`: for each layer, the member columns that were not sent, or that the
+      server ignored, because they are neither `mosaica_id` nor a unique attribute's column.
+    - `mosaica_ids`: the id given to each row sent, or `None` for a refused row.
     - `artifact_ids`: the id given to each added annotation, by layer and then by
-      `(level, view, key)`, with `None` for an annotation refused for its label.
-    - `replayed`: the requests the server had already carried out, which added nothing.
+      `(level, view, key)`, or `None` for one refused for its label.
+    - `replayed`: the requests the server had already carried out.
     - `publication`, `flush_wait`, `flush_reached`: the publication in which the changes can be
-      read, how many seconds the commit waited for it, and whether it arrived within the
-      server's wait.
+      read, how many seconds the commit waited for it, and whether the commit saw it arrive.
 
-    `ok` is `True` when no request was refused and nothing was found before sending. The rows
-    and members in `refused` leave `ok` as it is, and the summary counts them by reason. The
-    summary also lists every finding and every refused request.
+    `ok` is `True` when no request was refused and nothing was found before sending, so rows and
+    members in `refused` leave it `True`. The summary counts them by reason and lists every
+    finding and refused request.
     """
 
     sent: bool = False
@@ -327,8 +312,8 @@ class PagedReport(Summarised):
         return _by_reason(self.refused)
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows, which give the requests planned, or what was added and when
-        it could be read, and then every finding and refusal."""
+        """The lines `print()` shows: the requests planned, or what was added and when it could be
+        read, then the findings and refusals."""
         if not self.sent:
             out = [
                 f"check: {'ok' if self.ok else 'FAILED'}, "
@@ -411,23 +396,18 @@ class PagedReport(Summarised):
 class ChangeReport(Summarised):
     """What a call to `remove`, `suppress`, `unsuppress` or `leave` did.
 
-    - `op`: the change made, which is `"delete"`, `"suppress"` or `"unsuppress"`, or for
-      `leave` the label set, key and rank it named.
-    - `requested`: how many rows the call was given.
-    - `accepted`: how many of them were applied.
-    - `refused`: each row the server refused because of how it named its item, while it applied
-      the others. A row is `{"row", "item", "reason"}`, where `row` is its position in what the
-      call was given, `item` is the row as given, such as `{"mosaica_id": "17"}`, and `reason`
-      is one of `names_no_item`, `names_two_items` and `unknown_mosaica_id`.
-      `refused_by_reason` counts them.
-    - `ignored_columns`: the columns given that name no item, because they are neither
-      `mosaica_id` nor a unique attribute's column. They were not sent, or the server reported
-      ignoring them.
-    - `refusals`: each request the server refused, with its status and its answer. The summary
-      lists each one.
+    - `op`: the change, as `"delete"`, `"suppress"`, `"unsuppress"` or
+      `"leave <layer>/<key> rank <rank>"`.
+    - `requested`, `accepted`: how many rows the call was given, and how many were applied.
+    - `refused`: each row refused because of how it named its item, as `{"row", "item",
+      "reason"}`, where `row` is its position in what was given, `item` is the row as given,
+      such as `{"mosaica_id": "17"}`, and `reason` is `names_no_item`, `names_two_items` or
+      `unknown_mosaica_id`. The other rows were applied, and `refused_by_reason` counts these.
+    - `ignored_columns`: the columns given that were not sent, or that the server ignored,
+      because they are neither `mosaica_id` nor a unique attribute's column.
+    - `refusals`: each request the server refused, with its status and answer.
 
-    `ok` is `True` when every row given was applied, which means that no request and no row was
-    refused.
+    `ok` is `True` when every row given was applied.
     """
 
     op: str
@@ -448,9 +428,9 @@ class ChangeReport(Summarised):
         return _by_reason(self.refused)
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows, which give the rows given and applied, each refused row with
-        its reason, up to fifty of them, the columns ignored, and then every refused request. The
-        first line ends `ok` only when every row given was applied."""
+        """The lines `print()` shows: the rows given and applied, up to fifty refused rows with
+        their reasons, the columns ignored, then the refused requests. The first line ends `ok`
+        only when every row was applied."""
         if self.refusals:
             outcome = "FAILED"
         elif self.refused:

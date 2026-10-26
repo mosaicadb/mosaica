@@ -55,13 +55,11 @@ from ._refusal import Refusal
 class Finding:
     """A problem that a check or a commit found, with what to change.
 
-    Most findings come from the pre-flight, which runs before anything is sent. `check()` lists
-    them in its report's `findings`, and a `commit()` they stop sends nothing and raises
-    `Refusal`, whose text lists them and whose `report`, after the first commit, holds them too.
-    Nothing is dropped to make the rest sendable, so you correct the data or the declaration and
-    commit again. A later commit also adds a finding when its closing flush is refused or the
-    server's wait runs out, and what it sent is then durable and can be read after the server's
-    next publication.
+    Most findings come from the pre-flight, which runs before anything is sent. A `commit()`
+    that one stops sends nothing and raises `Refusal`, which lists the findings, so you correct
+    the data or the declaration and commit again. A later commit whose closing flush is refused,
+    or whose wait runs out, returns its report with a finding instead of raising, because what
+    it sent is durable and can be read after the server's next publication.
 
     - `what`: the problem, in a few words.
     - `detail`: what was found and what to change.
