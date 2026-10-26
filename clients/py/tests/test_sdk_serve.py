@@ -656,3 +656,15 @@ def test_a_directory_whose_state_is_not_the_sdks_is_refused_and_left_unheld(tmp_
     with pytest.raises(Refusal):
         reopen(tmp_path / "db")
 
+
+def test_a_copy_inside_the_database_it_copies_is_refused(tmp_path):
+    from mosaica import create
+
+    db = create(tmp_path / "db")
+    try:
+        db.declare_view("map")
+        with pytest.raises(Refusal):
+            db.save(tmp_path / "db" / "copies" / "one")
+        assert not (tmp_path / "db" / "copies").exists()
+    finally:
+        db.close()

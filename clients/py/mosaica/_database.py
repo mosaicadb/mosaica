@@ -2070,12 +2070,18 @@ class Database:
         `mosaica serve --deployment <path>/mosaica.toml` serves. A Parquet file inserted from
         outside the database's directory stays where it is, and the copy reads it from there.
 
-        - `path`: the directory to copy into, which must be empty or not yet exist.
+        - `path`: the directory to copy into, outside the database's own, which must be empty or
+          not yet exist.
         """
         self._refuse_when_closed()
         target = Path(path).expanduser()
         if target.exists() and any(target.iterdir()):
             raise Refusal(f"save: {target} is not empty")
+        if target.resolve().is_relative_to(self.path.resolve()):
+            raise Refusal(
+                f"save: {target} is inside the database's own directory; choose a path outside "
+                f"{self.path}"
+            )
         locks = shutil.ignore_patterns(_instance.LOCK, _instance.LOCK + ".new")
         shutil.copytree(self.path, target, dirs_exist_ok=True, ignore=locks)
         state = target / ".mosaica" / "declaration.json"
