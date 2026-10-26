@@ -436,6 +436,17 @@ def test_maps_side_by_side_in_jupyter_are_one_row_each_filling_its_share(make):
     assert left.layout.width == right.layout.width == "100%"
 
 
+def test_a_map_keeps_a_width_its_layout_states_and_fills_its_share_where_it_states_none(make):
+    import ipywidgets
+
+    import mosaica
+
+    stated = make(token="t", layout=ipywidgets.Layout(width="300px"))
+    unstated = make(token="t", layout=ipywidgets.Layout(height="200px"))
+    row = mosaica.side_by_side(stated, unstated)
+    assert [one.layout.width for one in row.children] == ["300px", "100%"]
+
+
 def test_maps_side_by_side_in_marimo_are_one_stack_of_both_widgets(make, monkeypatch):
     marimo = pytest.importorskip("marimo")
     import mosaica

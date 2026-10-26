@@ -240,7 +240,8 @@ class Map(anywidget.AnyWidget):
     - `bbox`: the box to frame the camera on, as `(min_x, min_y, max_x, max_y)`. Without it the
       map opens framed on the items that `filters` matches.
     - `height`: the widget's height in pixels in the notebook, 480 by default. The map fills the
-      screen instead while its output is shown full screen.
+      screen instead while its output is shown full screen. Its width is its container's, or the
+      one an ipywidgets `layout=` states.
     - `basemap`: what is drawn under the points, as one of the values described below, or as a
       dictionary from view id to value for the views the map can switch to. `None`, the default,
       draws the world outline on a view with a map projection and nothing on any other view.
@@ -449,8 +450,9 @@ class Map(anywidget.AnyWidget):
             _esm=bundle.read_text(encoding="utf-8"),
             **kwargs,
         )
-        # Inside an ipywidgets row the map's element would take no width, and draw nothing.
-        if "layout" not in kwargs:
+        # Inside an ipywidgets row the map's element would take no width, and draw nothing; a
+        # width the caller's layout states is kept.
+        if not self.layout.width:
             self.layout.width = "100%"
         self.on_msg(self._on_page_message)
 
