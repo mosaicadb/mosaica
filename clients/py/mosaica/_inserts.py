@@ -17,11 +17,10 @@ keyword the call left out, `key` among them, is read as that keyword, and a keyw
 gives names the column read for it. A label set's text given with `text=` is written into such a
 table by the package, so only its `key` is matched. A canonical column that the call reads
 another column in place of is refused, because the build and the routes would read it although
-the insert listed it as ignored. `level` and `attached_level` are
-read under their own names alone, because the build's `fields` map cannot move them, so those
-keywords take the canonical name and a column with any other name has to be renamed in the
-table. A membership shape is named by its kind, as in `shape="polygon"`, and its columns are
-read under their own names.
+the insert listed it as ignored. `level` and `attached_level` are read under their own names
+alone, because the build's `fields` map cannot move them, so those keywords take the canonical
+name and a column with any other name has to be renamed in the table. A membership shape is named
+by its kind, as in `shape="polygon"`, and its columns are read under their own names.
 
 Before the first commit an insert binds its table to its target for the build: a frame is
 written under `sources/`, a path is recorded, and the declaration names the file and the
@@ -543,8 +542,9 @@ def _remedy(column: str) -> str:
 def _lists(insert: Insert, contract: Contract) -> None:
     """The columns this insert read and the columns it ignored, in the table's own order.
 
-    What is read is what the call named, and nothing else: a canonical column it did not name is
-    refused above rather than read here, so the two lists say the same thing at both doors.
+    What is read is what the call named and what was matched by name, and nothing else: a
+    canonical column read neither way is refused above rather than read here, so the two lists say
+    the same thing at both doors.
     """
     read = set(insert.columns.values())
     read |= set(insert.metadata_columns.values())
