@@ -98,26 +98,27 @@ export async function readAggregate(
 }
 
 /**
- * An aggregate read that stopped part of the way: a response that ended or was cut before its
- * trailer, or a later request refused. {@link result} holds every whole page read before the stop,
- * and its `next` is the cursor to pass as `cursor` to read on without repeating a row; `null` there
- * means read again from the start.
+ * The error {@link MosaicaClient.aggregate} throws when a read stops part of the way, because a
+ * response was cut off or the server refused a later request. {@link result} holds every whole
+ * page read before the stop. Its `next` is the cursor to pass as `cursor` to continue without
+ * repeating a row, and `null` there means you must start again from the beginning.
  *
  * @category HTTP client
  */
 export class PartialAggregate extends Error {
-  /** The {@link MosaicaError} that refused a later request, or `null` where none did. */
+  /** The {@link MosaicaError} that refused a later request, or `null` if no refusal stopped the read. */
   readonly refusal: MosaicaError | null;
-  /** The refusal's HTTP status, or `null` where no refusal stopped the read. */
+  /** The refusal's HTTP status, or `null` if no refusal stopped the read. */
   readonly status: number | null;
-  /** The refusal's `retryAfterS`: on a `429`, the wait in seconds the server asked for. `null` otherwise. */
+  /** The refusal's `retryAfterS`, or `null` if no refusal stopped the read. */
   readonly retryAfterS: number | null;
 
   constructor(
+    /** What went wrong, which starts the error's `message`. */
     why: string,
     /** The tables as far as they were read. */
     readonly result: AggregateResult,
-    /** What stopped the read where it was not the body: the error a later request threw. */
+    /** The error a later request threw, if that is what stopped the read. */
     cause?: unknown
   ) {
     super(`${why}; the whole pages read before the stop are this error's result, and its next is the cursor to read on from`, cause === undefined ? undefined : {cause});

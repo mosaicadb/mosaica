@@ -18,12 +18,11 @@ import {openRecords, type RecordsRead} from './records.js';
 import type {AggregateRequest, AggregateResult, ArrowType, ArtifactDetail, ArtifactsHead, ArtifactsRequest, BrowsePage, BrowseRequest, BrowseRow, CategoryValue, CountsSink, FilterExpr, FilterOperandSet, Grouping, ItemDetail, ItemsHead, ItemsRequest, Layer, Login, LoginCredential, AuthoriseTarget, MapProjection, Meta, RegionVerdict, Session, Shape, ShapeKind, SuggestResult, TileCounts, TileScheme, ViewMetadataValue, ViewportArtifactsFrame, ViewportArtifactsRequest, ViewportArtifactsResponse, ViewportCounts, ViewportPart, ViewportRequest, ViewportResponse, ViewportResult} from './types.js';
 
 /**
- * Receives a streamed `/v1/viewport` response's points, one points frame at a time, as
- * {@link MosaicaClient.viewport} decodes them. Parts arrive in the order the server sent them, and
- * the next part is not handed over until a returned promise settles.
- *
- * Each part's `result` holds whole tiles: the counts of the tiles whose points it carries, and those
- * points. Its `subCells` is `null`.
+ * A callback that receives a `/v1/viewport` response's points as they arrive, so a wide view can
+ * be drawn before the whole body has loaded. Pass it as `onPart` to {@link MosaicaClient.viewport}.
+ * Parts arrive in the order the server sent them. Each holds whole tiles: their counts and their
+ * points, with `subCells` set to `null`. If the callback returns a promise, the next part waits
+ * until it settles.
  *
  * @category HTTP client
  */
@@ -33,10 +32,10 @@ export type PartSink = (part: ViewportPart) => void | Promise<void>;
 type Counts = Pick<ViewportCounts, 'tiles' | 'subCells'>;
 
 /**
- * Receives a `/v1/artifacts/viewport` response's frames, one at a time, as
- * {@link MosaicaClient.viewportArtifacts} decodes them, in wire order, with the response's keys, so
- * a frame can be held under the right principal before the response resolves. The next frame is
- * not handed over until a returned promise settles.
+ * A callback that receives a `/v1/artifacts/viewport` response's frames as they arrive, with the
+ * response's identity and content keys. Pass it as `onTile` to
+ * {@link MosaicaClient.viewportArtifacts}. Frames arrive in the order the server sent them. If the
+ * callback returns a promise, the next frame waits until it settles.
  *
  * @category HTTP client
  */
@@ -183,9 +182,10 @@ function tilesFor(tiles: readonly TileCounts[], from: number, rows: number): {ti
 }
 
 /**
- * A refusal from the server: the HTTP status and the `error` and `detail` of its JSON error body.
- * A request that reaches no server rejects with the `fetch` error instead, so a caller can tell a
- * refusal from a transport failure. The `message` is `"<status> <code>: <detail>"`.
+ * The error a request rejects with when the server refuses it. It carries the HTTP status and the
+ * `error` code and `detail` from the server's JSON error body, and its `message` is
+ * `"<status> <code>: <detail>"`. A request that reaches no server rejects with the `fetch` error
+ * instead.
  *
  * @category HTTP client
  */
@@ -194,17 +194,18 @@ export class MosaicaError extends Error {
     /** The HTTP status, such as `404` or `422`. */
     readonly status: number,
     /**
-     * The body's `error` code: `bad-credential`, `expired-token`, `unknown`, `conflict`,
-     * `contract`, `backpressure`, `fail-closed` or `not-ready`. `http-error` where the body is not
-     * JSON or names no code, such as a proxy's answer; then only `status` says what went wrong.
+     * The error code from the body: `bad-credential`, `expired-token`, `unknown`, `conflict`,
+     * `contract`, `backpressure`, `fail-closed` or `not-ready`. It is `http-error` if the body is
+     * not JSON or has no code, as with an error page from a proxy, and then only `status` says what
+     * went wrong.
      */
     readonly code: string,
-    /** The body's `detail`, saying what was wrong. The HTTP status text where the body has none. */
+    /** What was wrong, from the body's `detail`, or the HTTP status text if the body has none. */
     readonly detail: string,
     /**
-     * The wait the server asked for before the request is sent again, in seconds: its `Retry-After`
-     * header, else the body's `retry_after_s`, else 1, and never less than 1. `null` where the
-     * refusal is not a `429` and names no wait. To retry, wait this long and call the method again.
+     * How many seconds to wait before sending the request again. It is the `Retry-After` header,
+     * else the body's `retry_after_s`, else 1, and never less than 1. `null` if the refusal is not a
+     * `429` and names no wait.
      */
     readonly retryAfterS: number | null = null
   ) {
@@ -228,69 +229,67 @@ async function fail(response: Response): Promise<never> {
 }
 
 /**
- * Where a {@link MosaicaClient} sends its requests, and how.
+ * Options for a {@link MosaicaClient}.
  *
  * @category HTTP client
  */
 export type MosaicaClientOptions = {
   /**
-   * The viewer listener's base URL. Routes under `/v1/` are appended to it, after any trailing
-   * slash is dropped: `https://maps.example.org` and `/mosaica` work, and an empty string sends
-   * each request to `/v1/...` on the page's own origin.
+   * The viewer server's base URL, such as `https://maps.example.org` or `/mosaica`. A trailing
+   * slash is ignored. An empty string sends requests to the page's own origin.
    */
   viewerUrl: string;
   /**
-   * The session listener's base URL. Routes under `/session/` are appended to it, after any
-   * trailing slash is dropped. Only `authorise` and `revoke` use it, and each throws where it is
-   * unset; a page that holds a token already can leave it out.
+   * The session listener's base URL. Only `authorise` and `revoke` use it, and they throw if it is
+   * not set.
    */
   sessionUrl?: string;
   /**
-   * The bearer token `authorise` and `revoke` send; no other method uses it. It is an API key whose
-   * principal holds `authorise-as`, or the operator credential, which alone may name a session's
-   * terms. Either mints a session for any principal, so it belongs to an integrator's backend or an
-   * operator's script. A browser page can reach the session listener only from an origin the
-   * deployment lists in `serve.dev_cors_origins`, a development setting. Unset, they send no
-   * credential, which an open server (`serve.open`) serves.
+   * The credential `authorise` and `revoke` send: an API key whose principal holds `authorise-as`,
+   * or the operator credential. It can start a session for any principal, so it is meant for a
+   * back end or a script. A browser page can reach the session listener only from an origin listed
+   * in `serve.dev_cors_origins`, a development setting. If it is not set, no credential is sent,
+   * which only an open server (`serve.open`) accepts.
    */
   sessionCredential?: string;
   /**
-   * Called once per viewport response with its decode figures. `ms` runs from the response's
-   * headers to the last typed array, as this thread sees it, and includes reading the body.
-   * `bytes` is the body's size and `points` the points decoded. `workerMs` is the worker's own
-   * decode time, or `null` where the response decoded on this thread, so `ms - workerMs` is time
-   * spent reading and queued. On a streamed response `workerMs` is the sum over the frames.
+   * Called once per `viewport` and `viewportArtifacts` response with decode timings, for
+   * instrumentation. `ms` is the time from the response's headers to the decoded result, including
+   * reading the body. `bytes` is the body's size and `points` the number of points decoded.
+   * `workerMs` is the time a worker spent decoding, summed over the frames of a streamed response,
+   * or `null` if the response was decoded on this thread.
    */
   onDecode?: (ms: number, bytes: number, points: number, workerMs: number | null) => void;
   /**
-   * Where responses are decoded. Defaults to a worker where one can be made, and this thread
-   * otherwise, made at the first `viewport` call. A decoder passed here belongs to the host, which
-   * closes it; {@link MosaicaClient.close} closes only a decoder the client built.
+   * Where responses are decoded. By default the client creates a decoder that uses web workers if
+   * it can, and this thread otherwise. You close a decoder you pass in; {@link MosaicaClient.close}
+   * closes only one the client created.
    */
   decoder?: Decoder;
-  /** Used for every request in place of the global `fetch`. */
+  /** A `fetch` to use in place of the global one. */
   fetch?: typeof fetch;
   /**
-   * Headers sent on every request. A method's own `authorization` and `content-type` replace a
-   * header of the same name here.
+   * Headers to send on every request. A method's own `authorization` and `content-type` headers
+   * take precedence over these.
    */
   headers?: Record<string, string>;
 };
 
 /**
- * Calls the viewer and session routes, one method per route. It holds no cache or session state;
- * {@link createStore} holds those.
+ * A thin HTTP client for the viewer and session routes, with one method per route. It keeps no
+ * state between calls. The store that {@link createStore} makes is built on it and adds caching
+ * and composition. The viewer methods take a session token as their first argument, and every
+ * count and record they return covers only what that session may see.
  *
- * A method rejects with {@link MosaicaError} when the server refuses, and with the `fetch` error
- * when no server answers. On a viewer route, `401 bad-credential` for a token that worked before
- * and `403 expired-token` both mean the session has ended. Every count a viewer route returns is
- * over the items the token's session may see.
+ * A method rejects with a {@link MosaicaError} if the server refuses the request, and with the
+ * `fetch` error if no server answers. On a viewer route, `403 expired-token` means the session has
+ * ended, and so does `401 bad-credential` for a token that worked before.
  *
- * No method sends a request again by itself. A server too busy to take a request answers
- * `429 backpressure`, and the method rejects with a {@link MosaicaError} whose `retryAfterS` is
- * how many seconds the server asked the caller to wait; {@link MosaicaClient.suggest} returns the
- * same as `{status: 'shed', retryAfterS}`. To retry, wait that long and call the method again with
- * the same arguments. Here five attempts are made before the refusal is passed on:
+ * No method retries on its own. A server too busy to take a request answers `429 backpressure`,
+ * and the error's `retryAfterS` says how many seconds to wait before calling again with the same
+ * arguments. {@link MosaicaClient.suggest} returns this as `{status: 'shed', retryAfterS}` instead
+ * of rejecting. The store and {@link Control} retry for you. Here is a helper that makes five
+ * attempts:
  *
  * ```ts
  * async function retrying<T>(call: () => Promise<T>, attempts = 5): Promise<T> {
@@ -306,9 +305,6 @@ export type MosaicaClientOptions = {
  *
  * const read = await retrying(() => client.items(token, {view: 'papers', fields: ['title', 'year']}));
  * ```
- *
- * `Control` and the store that {@link createStore} makes send a shed request again themselves, as
- * each one's own documentation says.
  *
  * @category HTTP client
  */
@@ -345,8 +341,8 @@ export class MosaicaClient {
   }
 
   /**
-   * Closes the decoder the client built, terminating its workers if it has any. A decoder passed
-   * as `decoder` is left open for the host to close.
+   * Close the decoder the client created and stop its workers. A decoder passed in as `decoder` is
+   * left open.
    */
   close(): void {
     if (!this.opts.decoder) this.decoder?.close();
@@ -354,16 +350,15 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/login`: mints a session for the principal the credential authenticates, which must
-   * hold `read`. The credential travels in the body, and no bearer is sent.
+   * `POST /v1/login`: log in and start a session. The principal the credential identifies must hold
+   * `read`. The credential is sent in the body, with no bearer token.
    *
-   * @param credential - Exactly one credential: a local principal's name and password, an API key,
-   *   or an OIDC access token.
-   * @returns The session: `token` for the viewer methods and `logout`, and `expiresAt` in seconds
+   * @param credential - One credential: a local principal's name and password, an API key, or an
+   *   OIDC access token.
+   * @returns The session's `token`, for the viewer methods and `logout`, and `expiresAt`, in seconds
    *   since the Unix epoch.
-   * @throws {@link MosaicaError} when the server refuses: `401` for every credential it does not
-   *   accept, `403` where the principal does not hold `read`, `429` under load, with the wait in
-   *   `retryAfterS`.
+   * @throws {@link MosaicaError} if the server refuses: `401` for any credential it does not accept,
+   *   and `403` if the principal does not hold `read`.
    */
   async login(credential: LoginCredential, signal?: AbortSignal): Promise<Login> {
     const body =
@@ -384,10 +379,9 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/logout`: ends the session of `token`.
+   * `POST /v1/logout`: end the session of `token`.
    *
-   * @throws {@link MosaicaError} when the server refuses: `401` or `403` for a token whose session
-   *   has already ended.
+   * @throws {@link MosaicaError} with `401` or `403` if the session has already ended.
    */
   async logout(token: string, signal?: AbortSignal): Promise<void> {
     const response = await this.send(`${this.opts.viewerUrl}/v1/logout`, {
@@ -400,21 +394,21 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /session/authorise`: mints a session with the `sessionCredential` option. For a principal,
-   * the session carries the target's terms and its `read` and `write`, and the target must hold
-   * `read`. For `terms`, which only the operator credential may name, the session holds those terms
-   * and `read`. A term is trimmed, and one that is empty, holds a control character or is `public`
-   * is not held.
+   * `POST /session/authorise`: start a session on someone's behalf, sending the `sessionCredential`
+   * option. A session for a principal or an OIDC identity carries its terms and its `read` and
+   * `write` permissions, and the target must hold `read`. A session for `terms` holds those terms
+   * and `read`. A term is trimmed, and a term that is empty, holds a control character or is
+   * `public` is dropped. Only the operator credential may ask for `terms` or `readAll`.
    *
-   * @param target - The local principal to act as, by name, the OIDC identity whose access token is
-   *   passed on, or the terms the session holds.
-   * @returns The session: `token` for the viewer methods, `tokenId` for `revoke`, and `expiresAt`
-   *   in seconds since the Unix epoch.
-   * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
-   *   accept, `403` where the key's principal does not hold `authorise-as`, the target does not
-   *   hold `read`, or a key names `terms`, `404` where `principal` names no enabled principal,
-   *   `422` for an access token it does not accept, `429` under load, with the wait in `retryAfterS`;
-   *   `Error` where the client was built without `sessionUrl`.
+   * @param target - The local principal to act as, the access token of the OIDC identity to act as,
+   *   the terms the session holds, or `readAll` for a session that sees every item.
+   * @returns The session's `token`, for the viewer methods, its `tokenId`, for `revoke`, and
+   *   `expiresAt`, in seconds since the Unix epoch.
+   * @throws {@link MosaicaError} if the server refuses: `401` for a credential it does not accept;
+   *   `403` if the key's principal does not hold `authorise-as`, the target does not hold `read`, or
+   *   a key asks for `terms`; `404` if `principal` names no enabled principal; `422` for an access
+   *   token it does not accept.
+   * @throws `Error` if the client has no `sessionUrl`.
    */
   async authorise(target: AuthoriseTarget, signal?: AbortSignal): Promise<Session> {
     const credential = this.opts.sessionCredential;
@@ -438,13 +432,13 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /session/revoke`: ends the session `tokenId` names, so the token itself is not sent
-   * again. An API key ends a session a key of its own principal minted, and the operator credential
-   * ends any session. An id naming no such live session is not refused.
+   * `POST /session/revoke`: end the session `tokenId` names. An API key can end a session that a
+   * key of its own principal started, and the operator credential can end any session. An id that
+   * names no live session is not an error.
    *
-   * @throws {@link MosaicaError} when the server refuses: `401` for a credential it does not
-   *   accept, `403` where the key's principal does not hold `authorise-as`, `422` for a malformed
-   *   request; `Error` where the client was built without `sessionUrl`.
+   * @throws {@link MosaicaError} if the server refuses: `401` for a credential it does not accept,
+   *   `403` if the key's principal does not hold `authorise-as`, and `422` for a malformed request.
+   * @throws `Error` if the client has no `sessionUrl`.
    */
   async revoke(tokenId: number, signal?: AbortSignal): Promise<void> {
     const credential = this.opts.sessionCredential;
@@ -459,10 +453,10 @@ export class MosaicaClient {
 
 
   /**
-   * `GET /v1/basemaps/world`: the world outline a map draws under a geographic view, as the server
-   * encodes it (`MBW1`: land, coastlines and country borders).
+   * `GET /v1/basemaps/world`: the world outline drawn under a geographic view, with land,
+   * coastlines and country borders, in the server's `MBW1` encoding.
    *
-   * @throws {@link MosaicaError} when the server refuses.
+   * @throws {@link MosaicaError} if the server refuses.
    */
   async basemapWorld(token: string, signal?: AbortSignal): Promise<ArrayBuffer> {
     const response = await this.send(`${this.opts.viewerUrl}/v1/basemaps/world`, {headers: bearer(token), signal});
@@ -471,12 +465,12 @@ export class MosaicaClient {
   }
 
   /**
-   * `GET /v1/meta`: the deployment's views, groups, columns, filter operands and selection limits,
-   * and the layers this token's session may know of. The layers differ between principals, so a
-   * result is not shared across tokens.
+   * `GET /v1/meta`: the deployment's metadata. It lists the views, view groups, columns, filter
+   * operands and request limits, and the layers this session may know of. The layers depend on
+   * the viewer, so a result applies only to the token it was fetched with.
    *
-   * @throws {@link MosaicaError} when the server refuses.
-   * @throws `Error` when the body lacks a field this client requires, which means the server and
+   * @throws {@link MosaicaError} if the server refuses.
+   * @throws `Error` if the response lacks a field this client requires, which means the server and
    *   the client are from different versions.
    */
   async meta(token: string, signal?: AbortSignal): Promise<Meta> {
@@ -592,28 +586,27 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/viewport`: for one region at one depth, each tile's counts and a sample of up to `k`
-   * points per tile, each point tagged with the artifacts of the layers `layers` names. A field of `req` left unset is left out of the
-   * body, so the server's default applies: `k` defaults to `selection.kMaxMarks` from
-   * {@link MosaicaClient.meta}, and the server caps it at `selection.maxK`. `k = 0` asks for the
-   * counts alone, which decode on this thread.
+   * `POST /v1/viewport`: the points and counts for one area of a view at one zoom. It returns each
+   * tile's counts and a sample of up to `k` points per tile, each point tagged with the artifacts of
+   * the layers `layers` names. Fields of `req` you leave unset take the server's defaults: `k`
+   * defaults to `meta.selection.kMaxMarks`, and the server caps it at `selection.maxK`. Set `k` to
+   * `0` to fetch only the counts.
    *
-   * @param opts.signal - Aborts the request and the read of its body.
-   * @param opts.background - Decode on the decoder's background worker, so a response the user is
-   *   waiting for does not queue behind this one. Defaults to `false`.
-   * @param opts.onPart - Receives the points as each points frame is decoded, before the body has
-   *   finished. With a sink the returned `result` carries the counts and sub-cells and no points.
-   *   Not called for `k = 0`.
-   * @param opts.onCounts - Receives the tiles' counts, and the sub-cells where `underlayOffset` asked
-   *   for them, as soon as they land: before any point, and before the body has
-   *   finished, with or without `onPart` and at any `k`. Called at most once. The returned
+   * @param opts.signal - Aborts the request and the reading of its body.
+   * @param opts.background - Decode on a separate worker, so responses the user is waiting for do
+   *   not queue behind this one. Defaults to `false`.
+   * @param opts.onPart - Receives the points as they arrive, before the body has finished (see
+   *   {@link PartSink}). The returned `result` then carries the counts and no points. Not called
+   *   when `k` is `0`.
+   * @param opts.onCounts - Receives the tiles' counts, and the sub-cells if `underlayOffset` asked
+   *   for them, as soon as they arrive and before any points. Called at most once. The returned
    *   `result` carries the same counts.
    * @returns The decoded result, the server's timings, the response's keys (`identityKey`,
    *   `contentKey`, `pin`, `stale`, `region`) and the body's size in `bytes`.
-   * @throws {@link MosaicaError} when the server refuses: `404` for an unknown view, `422` for a
-   *   malformed request, `429` under load, with the wait in `retryAfterS`.
-   * @throws `Error` when the body is malformed or ends before its trailer. Parts already passed to
-   *   `onPart` hold whole tiles and stay correct.
+   * @throws {@link MosaicaError} if the server refuses: `404` for an unknown view, `422` for a
+   *   malformed request.
+   * @throws `Error` if the body is malformed or ends before its trailer. Parts already passed to
+   *   `onPart` hold whole tiles and remain valid.
    */
   async viewport(
     token: string,
@@ -835,24 +828,21 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/artifacts/viewport`: for one region at one depth, the artifacts of the named layers
-   * in each tile: those this principal is served that hold a member it can see inside the tile, at
-   * most `perTile` per level, largest first. An artifact in several tiles is in each tile's frame,
-   * with the same figures. A `nested` or `dag` layer is answered over every tile together, as one
-   * frame first. A field of `req` left unset is left out of the body, so the server's default
-   * applies; `perTile` has none and is always sent.
+   * `POST /v1/artifacts/viewport`: the artifacts of the named layers in each tile of one area of a
+   * view at one zoom. A tile lists the artifacts that have a member the viewer can see inside it, at
+   * most `perTile` per level, largest first. An artifact that spans several tiles appears in each,
+   * with the same figures. A `nested` or `dag` layer is answered for all the tiles together, in one
+   * frame that comes first. Fields of `req` you leave unset take the server's defaults.
    *
-   * @param opts.signal - Aborts the request and the read of its body.
-   * @param opts.background - Decode on the decoder's background worker, as for
-   *   {@link MosaicaClient.viewport}.
-   * @param opts.onTile - Receives each frame as it is decoded, in wire order, before the body has
-   *   finished. A frame handed over is whole and correct even where the body later fails.
+   * @param opts.signal - Aborts the request and the reading of its body.
+   * @param opts.background - Decode on a separate worker, as for {@link MosaicaClient.viewport}.
+   * @param opts.onTile - Receives each frame as it arrives, before the body has finished (see
+   *   {@link TileSink}). A frame already passed on remains valid if the body later fails.
    * @returns Every frame, the response's keys (`identityKey`, `contentKey`, `pin`, `stale`,
    *   `region`), the server's timings and the body's size in `bytes`.
-   * @throws {@link MosaicaError} when the server refuses: `404` for an unknown view, `422` for a
-   *   malformed request or a `perTile` over `selection.maxArtifactsPerTile`, `429` under
-   *   load, with the wait in `retryAfterS`.
-   * @throws `Error` when the body is malformed or ends before its trailer.
+   * @throws {@link MosaicaError} if the server refuses: `404` for an unknown view, `422` for a
+   *   malformed request or a `perTile` over `selection.maxArtifactsPerTile`.
+   * @throws `Error` if the body is malformed or ends before its trailer.
    */
   async viewportArtifacts(
     token: string,
@@ -953,22 +943,22 @@ export class MosaicaClient {
   }
 
   /**
-   * `GET /v1/categories/{column}`: what a category column's codes stand for, as `code`, `key` and
-   * `title`. With `codes`, resolves those codes alone, in the order given; an empty list returns
-   * `[]` without a request. Without `codes`, lists the whole value set in key order, requesting
-   * page after page until the server returns no cursor.
+   * `GET /v1/categories/{column}`: what a category column's codes stand for, each as a `code`,
+   * `key` and `title`. With `codes`, it looks up those codes, in the order given. Without, it lists
+   * every value in key order, fetching page after page until the last.
    *
-   * A code missing from the answer is unknown or is a value this principal may not see, and the
-   * server does not say which. A code on a point this session was served always resolves.
+   * A code missing from the answer is either unknown or a value the viewer may not see, and the
+   * server does not say which. Every code on a point this session was served resolves.
    *
    * @param column - The column's name, or `<column>@<key>` for a group-scoped category pinned to
    *   one view.
-   * @param opts.codes - The codes to resolve. Left out, the whole value set is listed.
-   * @param opts.limit - The page size when listing, capped at `selection.maxCategoryValues`, which
-   *   is also the default.
-   * @param opts.view - The view whose value set a group-scoped column answers from.
-   * @throws {@link MosaicaError} when the server refuses: `404` for a column that is not a category,
-   *   `422` for a malformed request such as `limit: 0` or a group-scoped column named with no view.
+   * @param opts.codes - The codes to look up. If omitted, every value is listed. An empty list
+   *   returns `[]` without a request.
+   * @param opts.limit - The page size when listing. Defaults to, and is capped at,
+   *   `selection.maxCategoryValues`.
+   * @param opts.view - The view whose values a group-scoped column lists.
+   * @throws {@link MosaicaError} if the server refuses: `404` for a column that is not a category,
+   *   `422` for a malformed request, such as `limit: 0` or a group-scoped column with no view.
    */
   async categories(
     token: string,
@@ -1017,25 +1007,23 @@ export class MosaicaClient {
   }
 
   /**
-   * `/v1/categories/{column}/suggest`: up to `limit` values of a category whose key, title or a
-   * word start of either begins with `q`, compared after case folding. Values are ordered by the
-   * matched text, and only values this principal may see are offered, as for
-   * {@link MosaicaClient.categories}. The page echoes `q` as sent, so a caller can match a page to
-   * its request. Without `filters` this is a `GET`; with it, a `POST` carrying the same fields.
+   * `GET /v1/categories/{column}/suggest`: typeahead for a category column. It returns up to
+   * `limit` values whose key or title, or a word in either, starts with `q`, ignoring case. Values
+   * are ordered by the matched text, and only values the viewer may see are offered. The page
+   * repeats `q`, so you can match a page to its request. With `filters` the request is a `POST`.
    *
-   * Every `429` the server answers is returned as `{status: 'shed', retryAfterS, detail}`
-   * rather than thrown; {@link SuggestResult} lists the causes.
+   * A `429` is returned as `{status: 'shed', retryAfterS, detail}` instead of thrown;
+   * {@link SuggestResult} lists the causes.
    *
    * @param column - As for {@link MosaicaClient.categories}.
-   * @param q - The text typed. Empty matches every value.
-   * @param opts.limit - The page size, capped at `selection.maxSuggestions`, which is also the
-   *   default.
-   * @param opts.counts - `true` adds each value's count of the items carrying it that this
-   *   principal may see, and the page's `total`, the number of items the counts are taken over.
-   * @param opts.view - As for `categories`, and the view `filters` is evaluated in.
-   * @param opts.filters - The filter expression the viewport takes. Each count is then of the items
-   *   in `view` that pass it. It changes nothing else: a value it excludes is offered with count
-   *   `0`. Needs `view`.
+   * @param q - The text typed. An empty string matches every value.
+   * @param opts.limit - The page size. Defaults to, and is capped at, `selection.maxSuggestions`.
+   * @param opts.counts - `true` adds each value's count of the visible items that carry it, and
+   *   the page's `total`, the number of items the counts cover.
+   * @param opts.view - As for `categories`. It is also the view `filters` applies in.
+   * @param opts.filters - A filter expression, as the viewport takes. The counts then cover only
+   *   the items in `view` that pass it. It changes nothing else, so a value it excludes is still
+   *   offered, with count `0`. Requires `view`.
    * @throws {@link MosaicaError} for any other refusal: `404` for a column that is not a category,
    *   `422` for a `q` over 256 bytes, `filters` without `view`, or a malformed request.
    */
@@ -1098,16 +1086,13 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/items/{mosaica_id}`: one item's whole record. `fields` is keyed by column name, with
-   * a category given as its vocabulary key and a column the item has no value for left out.
-   * `labels` is why this session sees the item: its labels read as one disjunction, each held term
-   * among its operands and one satisfied clause of each conjunction among them, as label text, and
-   * nothing else. A held term that appears only inside a conjunction is not listed. `views` and
-   * `scoped` cover only the views this principal may reach.
+   * `POST /v1/items/{mosaica_id}`: one item's full record, its position in each view the viewer
+   * may reach, and the labels that let this session see it. {@link ItemDetail} describes each
+   * field.
    *
-   * @param mosaicaId - The item's `mosaica_id`, as a viewport result's `ids` carries it.
-   * @throws {@link MosaicaError} when the server refuses: `404` both for an id that names nothing
-   *   and for an item this principal may not see.
+   * @param mosaicaId - The item's `mosaica_id`, as in a viewport result's `ids`.
+   * @throws {@link MosaicaError} with `404` for an id that names no item, and the same `404` for an
+   *   item the viewer may not see.
    */
   async item(token: string, mosaicaId: bigint, signal?: AbortSignal): Promise<ItemDetail> {
     const response = await this.send(`${this.opts.viewerUrl}/v1/items/${mosaicaId.toString()}`, {
@@ -1133,17 +1118,16 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/artifacts/{mosaica_id}`: one artifact's layer, key, masked count and geometry in a
-   * view. The count and the geometry are over the members this principal may see. Geometry is in
-   * 32-bit grid units (see {@link GRID32}), and a geometry field is `null` where the layer declares
-   * no such property.
+   * `POST /v1/artifacts/{mosaica_id}`: one artifact's layer, key, count and geometry in a view.
+   * The count and the geometry cover only the members the viewer may see. Geometry is in 32-bit
+   * grid units ({@link GRID32}), and a geometry field is `null` if the layer does not declare it.
    *
    * @param opts.view - The view to count and place the artifact in.
-   * @param opts.zoom - The depth to simplify the shape for, floored and clamped to 0 to 16. Left
-   *   out, the whole stored shape is served.
-   * @throws {@link MosaicaError} when the server refuses: one `404` alike for an id naming nothing,
-   *   a point, an artifact of a layer this principal cannot reach, a suppressed artifact and one
-   *   below its layer's existence criterion.
+   * @param opts.zoom - The zoom to simplify the shape for, rounded down and clamped to 0 to 16. If
+   *   omitted, the full stored shape is returned.
+   * @throws {@link MosaicaError} with the same `404` for an id that names nothing, a point, a
+   *   suppressed artifact, an artifact below its layer's existence criterion, and an artifact on a
+   *   layer the viewer cannot reach.
    */
   async artifact(
     token: string,
@@ -1184,17 +1168,17 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/artifacts/browse`: one page of a layer's hierarchy, read by parent and child links
-   * whatever the map shows: its roots, one artifact's children with that artifact's parents, or a
-   * search by name. Each row carries its masked count and, where `filters` is set, its matched
-   * count. Rows are ordered by count, highest first, then by `mosaica_id`; the count is the matched
-   * one under `filters` and the masked one otherwise. Pass `next` back as `cursor` for the
-   * following page; it is `null` on the last.
+   * `POST /v1/artifacts/browse`: one page of a layer's hierarchy, following parent and child links
+   * regardless of what the map shows. It reads the layer's roots, one artifact's children together
+   * with that artifact's parents, or the results of a name search. Each row carries its count of
+   * visible members and, if `filters` is set, its count of matching ones. Rows are ordered by
+   * count, highest first, then by `mosaica_id`, using the matching count if `filters` is set. To
+   * read the next page, pass `next` back as `cursor`. It is `null` on the last page.
    *
-   * A parent is listed only where this principal is served both ends of the link. A `parent` this
-   * principal is not served answers an empty page.
+   * A parent is listed only if the viewer is served both ends of the link. A `parent` the viewer is
+   * not served returns an empty page.
    *
-   * @throws {@link MosaicaError} when the server refuses: `404` for an unknown view, `422` for an
+   * @throws {@link MosaicaError} if the server refuses: `404` for an unknown view, `422` for an
    *   unknown layer, both `parent` and `q`, `limit: 0` or a malformed filter.
    */
   async browse(token: string, req: BrowseRequest, signal?: AbortSignal): Promise<BrowsePage> {
@@ -1223,18 +1207,14 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/items`: a bulk read of the items this principal may see in a view. Resolves when the
-   * first response's head arrives. Iterating the result yields each page as an Arrow table,
-   * following each response's cursor until the read ends; {@link RecordsRead} says what ends it
-   * early.
+   * `POST /v1/items`: read the items the viewer may see in a view, one page at a time. It resolves
+   * when the first response's head ({@link ItemsHead}) arrives. Iterate the result for each page as
+   * an Arrow table; further pages are fetched as you iterate. {@link RecordsRead} says how a read
+   * ends.
    *
-   * Each request after the first is the caller's request with `cursor` set to the one the response
-   * before it ended with, and without `count`, which the server takes only on a read's first
-   * request.
-   *
-   * @throws {@link MosaicaError} when the server refuses the first request: `404` for an unknown
-   *   view, `422` for a request {@link ItemsRequest} says is refused or a malformed filter, and
-   *   `429` past the bulk-read admission limit, with the wait in `retryAfterS`.
+   * @throws {@link MosaicaError} if the server refuses the first request: `404` for an unknown
+   *   view, `422` for a malformed filter or a request {@link ItemsRequest} says is refused, and
+   *   `429` if too many bulk reads are running.
    */
   items(token: string, req: ItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>> {
     return this.bulkRead('items', token, req, signal, (raw) => {
@@ -1245,12 +1225,12 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/artifacts`: a bulk read of the artifacts of one layer this principal is served, as
-   * {@link items} reads items.
+   * `POST /v1/artifacts`: read the artifacts of one layer that the viewer is served, one page at a
+   * time, in the same way as {@link MosaicaClient.items}.
    *
-   * @throws {@link MosaicaError} when the server refuses the first request: `404` for an unknown
-   *   view, `422` for a request {@link ArtifactsRequest} says is refused or a malformed filter, and
-   *   `429` past the bulk-read admission limit, with the wait in `retryAfterS`.
+   * @throws {@link MosaicaError} if the server refuses the first request: `404` for an unknown
+   *   view, `422` for a malformed filter or a request {@link ArtifactsRequest} says is refused, and
+   *   `429` if too many bulk reads are running.
    */
   artifacts(token: string, req: ArtifactsRequest, signal?: AbortSignal): Promise<RecordsRead<ArtifactsHead>> {
     return this.bulkRead('artifacts', token, req, signal, (raw) => {
@@ -1272,14 +1252,13 @@ export class MosaicaClient {
   }
 
   /**
-   * `POST /v1/aggregate`: how the items this principal may see in a view are distributed, as one
-   * table of exact counts per grouping. Every page of every table is read, response after response,
-   * each requested from the cursor the one before it ended with, and each table's pages are joined
-   * into one Arrow table. {@link AggregateTable} lists the columns.
+   * `POST /v1/aggregate`: exact counts of how the items the viewer may see in a view are
+   * distributed, as one table per grouping. It reads every page of every response and joins each
+   * table's pages into one Arrow table. {@link AggregateTable} lists the columns.
    *
-   * Each response composes the visible set again, so a deletion or suppression accepted during the
-   * read applies from the next response, and {@link AggregateResult.recomposed} says where a page
-   * counted a different state of the corpus.
+   * The server works out the viewer's visible set afresh for each response, so a deletion or
+   * suppression accepted during a long read applies from the next response.
+   * {@link AggregateResult.recomposed} says whether that happened.
    *
    * ```ts
    * const {tables} = await client.aggregate(token, {
@@ -1290,16 +1269,15 @@ export class MosaicaClient {
    * console.log(tables[0]!.total, tables[1]!.rows.toArray());
    * ```
    *
-   * @param options - `follow`: read the responses after the first. Defaults to `true`. With `false`
-   *   the result holds the first response's pages, and {@link AggregateResult.next} is where the
-   *   read continues, to be passed back as `cursor`.
-   * @throws {@link MosaicaError} when the server refuses the first request: `404` for an unknown
-   *   view, `422` for a request the contract refuses, naming the limit where one is exceeded, and
-   *   `429` under load, with the wait in `retryAfterS`.
-   * @throws {@link PartialAggregate} for a later request refused, or a body cut or ended without
-   *   its trailer, holding the pages read before it and the cursor to read on from, and for a
-   *   refusal its `refusal`, `status` and `retryAfterS`; `Error` for a trailer that miscounts the
-   *   body; and the signal's reason once it aborts.
+   * @param options - `follow`: whether to read the responses after the first. Defaults to `true`.
+   *   With `false` the result holds only the first response's pages, and
+   *   {@link AggregateResult.next} is the cursor to pass back as `cursor` to continue.
+   * @throws {@link MosaicaError} if the server refuses the first request: `404` for an unknown
+   *   view, `422` for an invalid request, naming the limit if one is exceeded.
+   * @throws {@link PartialAggregate} if a later request is refused or a body is cut off. It holds
+   *   the pages read so far and the cursor to continue from.
+   * @throws `Error` if a response's trailer does not match its body, and the signal's reason if it
+   *   aborts.
    */
   aggregate(token: string, req: AggregateRequest, signal?: AbortSignal, options: {follow?: boolean} = {}): Promise<AggregateResult> {
     const sent = {...req, groupings: req.groupings.map(wireGrouping)};

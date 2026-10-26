@@ -2,37 +2,37 @@ import {decodeArtifactsFrame, decodePoints, decodeViewport, type ArtifactsFrameP
 import type {ViewportResult} from './types.js';
 
 /**
- * Turns a `/v1/viewport` body into typed arrays, and a `/v1/artifacts/viewport` frame into
- * artifacts. The default decodes in web workers, off the thread
- * that draws; {@link inlineDecoder} decodes on the calling thread, for a test, a script or a
- * runtime without `Worker`. Pass one as a {@link MosaicaClient}'s `decoder` option.
+ * Decodes viewport responses into typed arrays and artifacts for a {@link MosaicaClient}. The
+ * client's default decoder uses web workers, so decoding does not hold up drawing.
+ * {@link inlineDecoder} decodes on the calling thread instead, for a test, a script or a runtime
+ * without `Worker`. Pass a decoder as the client's `decoder` option.
  *
  * @category HTTP client
  */
 export type Decoder = {
   /**
-   * Decodes a whole body. `background` sends the work to a separate worker where the decoder has
-   * one, so a response the user is waiting for does not queue behind speculative work. Rejects with
-   * `Error` for a malformed body.
+   * Decode a whole `/v1/viewport` body. `background` sends the work to a separate worker, if the
+   * decoder has one, so responses the user is waiting for do not queue behind it. Rejects with
+   * `Error` if the body is malformed.
    */
   decode(bytes: Uint8Array, background?: boolean): Promise<ViewportResult>;
   /** One kind-5 frame of a `/v1/artifacts/viewport` body, decoded alone. @internal */
   decodeArtifacts(frame: Uint8Array, background?: boolean): Promise<ArtifactsFramePart>;
   /** One kind-3 frame, decoded alone. Each frame is an independent Arrow stream. @internal */
   decodePoints(frame: Uint8Array, background?: boolean): Promise<PointsPart>;
-  /** Terminates the workers, if there are any, and rejects the decodes they hold. */
+  /** Stop the decoder's workers, if it has any, and reject the decodes still in progress. */
   close(): void;
   /**
-   * The last reply's decode time inside a worker, in milliseconds, excluding time queued. On a
-   * streamed response, the time of the last frame. `null` for the inline decoder and before the
-   * first reply.
+   * How long the last decode took inside a worker, in milliseconds, not counting time spent
+   * waiting. For a streamed response it is the time of the last frame. `null` for the inline
+   * decoder and before the first decode.
    */
   readonly lastWorkerMs: number | null;
 };
 
 /**
- * A decoder that runs on the calling thread. `background` has no effect and `lastWorkerMs` is
- * always `null`.
+ * Create a decoder that runs on the calling thread. `background` has no effect and `lastWorkerMs`
+ * is always `null`.
  *
  * @category HTTP client
  */
@@ -51,14 +51,13 @@ export function inlineDecoder(): Decoder {
 let workerFactory: (() => Worker) | null = null;
 
 /**
- * Sets how the default decoder makes a worker, for a host whose bundler cannot load the default.
- * The default loads `decode.worker.js` from beside this module, which Vite and webpack follow and
- * bundle. That file has Arrow bundled into it, since a page's import map does not apply inside a
- * worker, so it also loads unbundled. esbuild does not follow the URL: a host copies the file
- * beside its output or installs a factory here. The single-file bundle installs one that makes the
- * worker from a Blob or data URL.
+ * Set how the default decoder creates its web workers, for a bundler that cannot load the default
+ * worker. By default each worker loads `decode.worker.js` from beside this module. Vite and webpack
+ * bundle it automatically, and it also works unbundled. esbuild does not: either copy the file
+ * beside your output or install a factory here. The single-file bundle installs its own factory.
  *
- * @param factory - Makes one worker. Read each time a worker is made. `null` restores the default.
+ * @param factory - A function that creates one worker, called each time a worker is needed.
+ *   `null` restores the default.
  *
  * @category HTTP client
  */

@@ -11,22 +11,20 @@ import type {PageEnd, RecordsTrailer, RegionVerdict, Timings} from './types.js';
 export type RecordsRequest = (cursor?: string) => Promise<Response>;
 
 /**
- * A whole bulk read of `POST /v1/items` or `POST /v1/artifacts`, as {@link MosaicaClient.items}
- * and {@link MosaicaClient.artifacts} return it: each page as an Arrow table as it arrives,
- * response after response, each response requested from the cursor the one before it ended with,
- * until that cursor is null.
+ * A paged read of items or artifacts, as {@link MosaicaClient.items} and
+ * {@link MosaicaClient.artifacts} return it. Iterate it with `for await` to get each page as an
+ * Arrow table. Pages are fetched only as you iterate, and the read asks the server for more until
+ * no rows remain. A read that matches no rows yields one empty table that still has the read's
+ * columns.
  *
- * A page is yielded once its page end has arrived, so a records frame cut off before its page end
- * is never yielded. A response that found no row yields one table of no rows, which carries the
- * read's columns. A body that ends or is cut without its trailer throws after its last whole page,
- * and so does a follow-up request the server refuses. {@link cursor} is then where the read
- * resumes without repeating a row. A follow-up the server sheds throws a {@link MosaicaError} with
- * status `429` and the wait in `retryAfterS`. To read on, wait that long and call `items` or
- * `artifacts` again with the same request, `cursor` set to {@link cursor} and `count` left out.
+ * Breaking out of the loop, calling `return()` or aborting the request's signal stops the read and
+ * releases the connection. A `return()` while a page is awaited ends the read there.
  *
- * The bodies are read only as the caller iterates. Iterating to the end, breaking out of the loop,
- * calling `return()` or aborting the request's signal each release the connection and send no
- * further request. A `return()` while a page is awaited ends that wait as the end of the read.
+ * If a response is cut off or the server refuses a follow-up request, the read throws after the
+ * last whole page, and {@link cursor} is where to resume without repeating a row. To resume, call
+ * `items` or `artifacts` again with the same request, `cursor` set to {@link cursor} and `count`
+ * left out. A follow-up refused with `429` throws a {@link MosaicaError} whose `retryAfterS` is the
+ * wait.
  *
  * ```ts
  * const read = await client.items(token, {view: 'papers', fields: ['title', 'year']});
@@ -60,17 +58,20 @@ export class RecordsRead<Head> implements AsyncIterableIterator<Table> {
     this.pages = this.read();
   }
 
-  /** The latest response's identity coordinate for this principal and view; empty where it carried none. */
+  /** The latest response's identity key for this viewer and view, or an empty string if it had none. */
   get identityKey(): string {
     return this.headers.get('x-mosaica-identity-key') ?? '';
   }
 
-  /** The latest response's `x-mosaica-region` verdict, present where `filters` carried a `region` leaf. */
+  /** The latest response's verdict on a `region` filter, or `null` if `filters` has none. */
   get region(): RegionVerdict | null {
     return parseRegionVerdict(this.headers.get('x-mosaica-region'));
   }
 
-  /** The latest response's time from admission to its head, and the time admission took, in microseconds. */
+  /**
+   * The latest response's server timings, in microseconds: `serverUs` from admission to the
+   * response's head, and `admissionUs` for admission itself.
+   */
   get timings(): Pick<Timings, 'serverUs' | 'admissionUs'> {
     return {
       serverUs: Number(this.headers.get('x-mosaica-server-us') ?? 0),
@@ -78,20 +79,19 @@ export class RecordsRead<Head> implements AsyncIterableIterator<Table> {
     };
   }
 
-  /** The page end after the page last yielded; `null` before the first. */
+  /** The page end that followed the last page yielded, or `null` before the first page. */
   get pageEnd(): PageEnd | null {
     return this.lastEnd;
   }
 
-  /** The last response's trailer once the read has ended, and `null` until then. */
+  /** The last response's trailer once the read has ended, or `null` until then. */
   get trailer(): RecordsTrailer | null {
     return this.ended;
   }
 
   /**
-   * Where the read continues: after the last page yielded, and past any stretch the server scanned
-   * beyond it once that response was whole. Before any page it is the caller's own `cursor`, so
-   * `undefined` means from the beginning. `null` means no row remains.
+   * Where the read continues, after the last page yielded. Before the first page it is the
+   * request's own `cursor`, so `undefined` means from the beginning. `null` means no rows remain.
    */
   get cursor(): string | null | undefined {
     return this.at;
@@ -100,15 +100,15 @@ export class RecordsRead<Head> implements AsyncIterableIterator<Table> {
   /**
    * The next page, or `done` once the read has ended.
    *
-   * @throws `Error` for a response cut or ended without its trailer, or whose trailer counts other
-   *   pages or rows than it carried, after the pages before it; {@link MosaicaError} for a
-   *   follow-up request the server refuses; and the signal's reason once it aborts.
+   * @throws `Error` if a response is cut off or its trailer does not match its body.
+   * @throws {@link MosaicaError} if the server refuses a follow-up request.
+   * @throws The signal's reason if it aborts.
    */
   next(): Promise<IteratorResult<Table, undefined>> {
     return this.pages.next();
   }
 
-  /** Stop the read: the response being read is released and no other is requested. */
+  /** Stop the read, release the response being read and request no more. */
   return(): Promise<IteratorResult<Table, undefined>> {
     // A generator that never started skips its `finally`, so the body is released here too.
     this.stopped = true;
@@ -116,7 +116,7 @@ export class RecordsRead<Head> implements AsyncIterableIterator<Table> {
     return this.pages.return(undefined);
   }
 
-  /** This read, so that `for await` iterates it. */
+  /** Returns this read, so that `for await` can iterate it. */
   [Symbol.asyncIterator](): this {
     return this;
   }
