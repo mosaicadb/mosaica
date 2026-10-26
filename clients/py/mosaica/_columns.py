@@ -1,9 +1,10 @@
-"""`declare_columns`: every column of a frame declared from its data type.
+"""`declare_columns`, which declares every column of a frame from its Arrow type.
 
-Each column not in `skip` and not already declared is declared as a detail: stored and shown
-when an item is opened, neither rendered nor filterable unless named. `keyword` and `category`
-choose those types for string columns, which are `text` otherwise, and a categorical column is a
-category. Only the frame's schema is read, never its values.
+Each column that is neither in `skip` nor already declared is declared as a detail, which is
+stored and shown when an item is opened but is neither rendered nor filterable unless `render`
+or `index` names it. A string column is declared `text` unless `keyword` or `category` names it,
+and a categorical column is declared a category. Only the frame's schema is read, never its
+values.
 """
 
 from __future__ import annotations
@@ -18,15 +19,16 @@ VOCABULARY_WIDTH = "u16"
 
 @dataclass
 class DeclaredColumn:
-    """One column `declare_columns` looked at, and what it declared the column as.
+    """One column that `declare_columns` looked at, and the type it declared the column as.
 
     - `name`: the column's name.
-    - `dtype`: its Arrow type, as text.
-    - `declared_as`: the attribute type it was declared with, or `"not declared"` where no type
-      fits.
-    - `render`, `index`, `unique`: the flags it was declared with.
-    - `vocabulary`: for a category, the vocabulary its values come from, and `None` otherwise.
-    - `why`: why it was declared as it was, or why it was not.
+    - `dtype`: the column's Arrow type, as text.
+    - `declared_as`: the attribute type the column was declared with, or `"not declared"` when
+      no type fits it.
+    - `render`, `index`, `unique`: whether the column was declared rendered, indexed and unique.
+    - `vocabulary`: the vocabulary a category column's values come from, or `None` for any other
+      column.
+    - `why`: the reason the column was declared as it was, or was not declared.
     """
 
     name: str

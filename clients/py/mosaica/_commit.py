@@ -1,38 +1,38 @@
-"""A later commit: the plan, the pre-flight, and the pages that carry it.
+"""A commit after the first one: the plan, the pre-flight, and the requests that carry it.
 
-The first commit builds. Every commit after it pages what was inserted since the last one through
-the control plane, in a fixed order: declarations, points per view, values on existing
-entities, artifacts per layer, then a flush that waits for the publication it arms. A part supplied
-twice is accepted and a part supplied differently is a `409` on that part, so the
-order matters for existence and for nothing else.
+The first commit builds the database. Every commit after it sends what was inserted since the
+last one through the control plane, in a fixed order: declarations, then points for each view,
+then values on items the database holds, then annotations for each layer, and last a flush that
+waits for the publication it starts. A part sent twice is accepted, and a part sent differently
+is refused with `409`, so the order matters only because a request can name nothing that does
+not exist yet.
 
-`check()` runs the planner and the pre-flight and sends nothing; `commit()` runs the same plan. The
-two therefore cannot disagree about what would be sent.
+`check()` runs the planner and the pre-flight and sends nothing, and `commit()` sends the same
+plan, so the two cannot disagree about what would be sent.
 
-**The plan is built from what was inserted and what the database says it holds.** The SDK keeps no
-record of what it sent: a table goes as it was inserted. A row naming an item the database holds
-by its unique values, and carrying what the item stores, changes nothing and is counted
-unchanged; one that differs edits the item. What the database has already been told is read from
-`/v1/meta` rather than from a log: its views, its groups and its layers. A re-run of a cell is a
-re-run.
+**The plan is built from what was inserted and what the database says it holds,** because the
+package keeps no record of what it sent. A table goes as it was inserted. A row that names an
+item the database holds by its unique values, and carries what the item stores, changes nothing
+and is counted unchanged, and a row that differs edits the item. The views, groups and layers
+the database holds are read from `/v1/meta`, so running a cell again sends its table again and
+changes nothing that is already held.
 
-**The target decides the route.** An insert into a view is a page of points, one into an attribute
-or a layer by key fills cells on entities the database holds, and a layer's two tables are
-publications. Nothing is inferred from the columns a table carries: the target was declared and
-the call named its columns.
+**The target decides the route.** An insert into a view becomes pages of points, an insert into
+an attribute or a layer by key fills cells on items the database holds, and a layer's two tables
+become publications. Nothing is inferred from the columns a table carries, because the target
+was declared and the call named its columns.
 
 **Nothing is dropped or rewritten.** What the call named is what is sent, and a finding stops the
-plan rather than trimming it. The user corrects the data or the declaration and commits
-again.
+plan instead of trimming it, so the user corrects the data or the declaration and commits again.
 
-**The commit waits once, at the end.** Every acknowledgement names the publication its work
-becomes visible in, and `?wait=visible` holds a route's answer until the counter has reached that
-number. Every page of the plan goes unwaited and one `POST
-/control/flush?wait=visible` closes the commit: the flush arms a cycle and then waits on the
-number that cycle will carry, so it covers every page before it and the SDK reads no counter of
-its own. `visible: true` ends the commit. `visible: false` means the server's
-`serve.visible_wait_max_secs` ran out, and is a finding: the write happened and is durable, and
-what it wrote can be read after the next cycle.
+**The commit waits once, at the end.** Every acknowledgement names the publication in which its
+work becomes visible, and `?wait=visible` holds a route's answer until that publication is
+reached. Every page of the plan is sent without waiting, and one `POST
+/control/flush?wait=visible` closes the commit. The flush starts a publication and waits for it,
+which covers every page sent before it, so the package reads no counter of its own.
+`visible: true` ends the commit. `visible: false` means that the server's
+`serve.visible_wait_max_secs` ran out, which is reported as a finding: the write happened and is
+durable, and what it wrote can be read after the next publication.
 """
 
 from __future__ import annotations
@@ -53,16 +53,20 @@ from ._refusal import Refusal
 
 @dataclass
 class Finding:
-    """One pre-flight finding. `check()` lists them in its report's `findings`. A `commit()`
-    they stop raises `Refusal`, whose text lists them; after the first commit its `report`
-    lists them in `findings` too.
+    """A problem that a check or a commit found, with what to change.
+
+    Most findings come from the pre-flight, which runs before anything is sent. `check()` lists
+    them in its report's `findings`, and a `commit()` they stop sends nothing and raises
+    `Refusal`, whose text lists them and whose `report`, after the first commit, holds them too.
+    Nothing is dropped to make the rest sendable, so you correct the data or the declaration and
+    commit again. A later commit also adds a finding when its closing flush is refused or the
+    server's wait runs out, and what it sent is then durable and can be read after the server's
+    next publication.
 
     - `what`: the problem, in a few words.
     - `detail`: what was found and what to change.
 
-    A finding refuses the commit. The pre-flight reports and sends nothing while one stands, and
-    it never drops a row or a column to make the rest sendable: what the user inserted is what a
-    commit sends, or the commit does not happen. A finding's text starts `refused:`.
+    A finding shows as its text, which starts `refused:`.
     """
 
     what: str

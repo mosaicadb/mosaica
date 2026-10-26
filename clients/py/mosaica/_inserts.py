@@ -1,28 +1,29 @@
-"""An insert: a table handed to a declared thing, with the columns it reads named.
+"""`insert`, which hands a table to something declared and names the columns that thing reads.
 
-`declare_*` says what exists and takes no data; `insert(target, table, **columns)` hands a table
-to a declared thing and names every column that thing needs. The SDK guesses no column name and
-rewrites no data: a frame is written to `sources/` as it was given and the declaration names the
-columns; a path is read where it lies. Every insert prints two lists, the columns it read and the
-columns it ignored.
+A `declare_*` method says what exists and takes no data, and `insert(target, table, **columns)`
+hands a table to a declared target and names every column the target needs. The package guesses
+no column name and rewrites no data: a frame is written to disc as it was given, a path is read
+where it lies, and the declaration names the columns. Every insert reports the columns it read
+and the columns it ignored.
 
-**What is named and what is not.** The coordinates, the access labels, a layer's key and a
-group's view column are named on every call and never matched. A table names the item each row
-belongs to by the columns it carries of the attributes declared `unique`: each attribute's own
-column, or the one `columns=` names for it. An artifacts table, a members
-table, a roster and a value set are tables in Mosaica's own shape, so a column of theirs
-carrying its canonical name is named on the call like any other, and one the call passed over
-is refused rather than read silently: the build and the publication routes read such a column
-under its own name whatever this package prints. Two of them are read under their own names
-alone, `level` and `attached_level`, neither being in the build's `fields` map: those keywords
-take the canonical name and a column called anything else is renamed in the table. A membership
-shape is named by its kind, `shape="polygon"`, its columns being read under theirs.
+The coordinates, the access labels, a layer's key and a group's view column are named on every
+call and never matched by name. A table names the item each row belongs to by the columns it
+carries of the attributes declared `unique`, each under the attribute's own name or the one
+`columns=` names for it. An artifacts table, a members table, a roster and a value set are in
+Mosaica's own shape, and the build and the publication routes read their columns under the
+canonical names whatever the call says. A column with a canonical name is therefore named on
+the call like any other, and one the call passed over is refused, because the build and the
+routes would read it although the insert listed it as ignored. `level` and `attached_level` are
+read under their own names alone, because the build's `fields` map cannot move them, so those
+keywords take the canonical name and a column with any other name has to be renamed in the
+table. A membership shape is named by its kind, as in `shape="polygon"`, and its columns are
+read under their own names.
 
-**Where the table goes.** Before the first commit an insert binds the table to its target for the
-build: a frame is written under `sources/` and a path is recorded, and the declaration names the
-file and the columns. After the first commit the same insert is sent at the next `commit()` by the
-route its target owns, so its frame goes under `.mosaica/inserts/`, out of `[sources]`, which
-`mosaica check` reads as the whole corpus, and nothing is written under `sources/`.
+Before the first commit an insert binds its table to its target for the build: a frame is
+written under `sources/`, a path is recorded, and the declaration names the file and the
+columns. After the first commit the same insert is sent by its target's route at the next
+`commit()`, so its frame is written under `.mosaica/inserts/` and nothing is written under
+`sources/`, because `mosaica check` reads every file in `[sources]` as part of the corpus.
 """
 
 from __future__ import annotations
@@ -175,35 +176,39 @@ def axes(block: dict) -> tuple[str, str]:
 
 @dataclass(repr=False)
 class Insert(Summarised):
-    """What one `insert` call handed over: a table, its target, and the columns read.
+    """The record of one `insert` call, which says what table was handed to which target and
+    which of its columns are read.
 
-    It shows as one line: the target, the rows, the columns read and the columns ignored.
+    It shows as one line that names the target, the number of rows, and the columns read and
+    ignored.
 
-    - `target`: the name of the declared thing.
-    - `kind`: what the target is: `"view"`, `"view_group"`, `"attribute"`, `"layer"`,
+    - `target`: the name of the declared view, view group, attribute, layer, label set or
+      vocabulary.
+    - `kind`: what the target is, as `"view"`, `"view_group"`, `"attribute"`, `"layer"`,
       `"labels"` or `"vocabulary"`.
-    - `role`: which of the target's tables this is: `"rows"`, `"roster"`, `"values"`, `"key"`,
-      `"artifacts"`, `"members"` or `"text"`.
-    - `columns`: the columns the call named, by what each holds, such as
+    - `role`: which of the target's tables this is, as `"rows"`, `"roster"`, `"values"`,
+      `"key"`, `"artifacts"`, `"members"` or `"text"`.
+    - `columns`: the column the call named for each thing the target reads, such as
       `{"x": "x", "y": "y", "access": "labels"}`.
-    - `named_attributes`: on the anchor view's rows, the attributes the table fills, as
-      `{attribute: column}`.
-    - `items`: the attributes declared `unique` whose columns the table carries, as
-      `{attribute: column}`. A row names the item holding each of its values in them; a view's
-      row naming none is an item of its own, and a row of any other table naming none is
-      refused by the build.
+    - `named_attributes`: on a view's rows, the column each attribute is filled from, as
+      `{attribute: column}`. Before the first commit only the anchor view's rows fill
+      attributes.
+    - `items`: the column the table carries for each attribute declared `unique`, as
+      `{attribute: column}`, which is how each row names its item. A view's row that names no
+      item is an item of its own, and a row of any other table that names none is left out at
+      the commit and reported.
     - `metadata_columns`: on a view group's roster, the column each metadata value is read from.
-    - `shape`, `shape_columns`: on an annotations table, the kind of shape its rows carry and
-      the columns it is read from.
-    - `view_key`: the one view of a view group every row is in, where `view_key=` named it.
-    - `read`, `ignored`: the table's columns, in its own order, split into those read and those
-      ignored.
+    - `shape`, `shape_columns`: on an annotations table, the kind of shape its rows carry and the
+      columns the shape is read from.
+    - `view_key`: the one view of a view group that every row is in, when `view_key=` named it.
+    - `read`, `ignored`: the table's columns in its own order, split into those that are read
+      and those that are ignored.
     - `rows`: how many rows the table has.
     - `schema`: each column's Arrow type.
-    - `path`: the Parquet file the rows are in. `in_place` is `True` where that is the file the
-      call gave, and `False` where the package wrote the table into the database's directory.
-    - `source`, `declared_path`: the name and path the declaration file gives the table, before
-      the first commit.
+    - `path`: the Parquet file that holds the rows. `in_place` is `True` when that is the file
+      the call gave, and `False` when the package wrote the table into the database's directory.
+    - `source`, `declared_path`: the name and the path that the declaration file gives the
+      table before the first commit.
     """
 
     target: str
@@ -226,12 +231,12 @@ class Insert(Summarised):
     ignored: list[str] = field(default_factory=list)
 
     def table(self) -> pa.Table:
-        """The rows, read back from `path`."""
+        """The inserted rows, read back from `path` as a pyarrow table."""
         return pq.read_table(self.path)
 
     def summary(self) -> list[str]:
-        """The lines `print()` shows: one line naming the target, the rows, the columns read and
-        the columns ignored."""
+        """The line `print()` shows, which names the target, the number of rows, and the columns
+        read and ignored."""
         into = self.target if self.role in ("rows", "key", "values") else (
             f"{self.target} ({self.role})"
         )

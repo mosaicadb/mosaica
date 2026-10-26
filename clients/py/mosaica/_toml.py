@@ -1,17 +1,19 @@
-"""Writing a declaration as TOML.
+"""The writer of `schema.toml` and `mosaica.toml`, which turns a declaration into the TOML a
+person would have written by hand.
 
-The SDK writes `schema.toml` and `mosaica.toml` and the binary reads them, so the mapping from
-verb to block is checked by the binary rather than mirrored here. The output is
-the document the caller would have written by hand: block order preserved, one table per block,
-and every value spelled the way the declaration spells it.
+The package writes the files and the `mosaica` binary reads them, so the binary checks how each
+declaring method maps to a block and nothing here repeats that check. The output keeps the
+blocks in the order they were declared, writes one table per block and spells every value as
+the declaration spells it.
 
-A plain `dict` becomes a sub-table (`[layer.members]`), a list of dicts an array of tables
-(`[[layer.levels]]`), and an `Inline` a one-line table (`hierarchy = { kind = "flat" }`). The two
-dict forms are distinguished by type rather than by depth because the surface uses both at the
-same depth: `hierarchy` is inline and `members` is a block.
+A plain `dict` becomes a sub-table (`[layer.members]`), a list of dicts becomes an array of
+tables (`[[layer.levels]]`), and an `Inline` becomes a one-line table
+(`hierarchy = { kind = "flat" }`). The two kinds of dict are told apart by type, because the
+declaration uses both at the same depth: `hierarchy` is inline and `members` is a block.
 
-Scalar keys of a table are written before its sub-tables. TOML binds a bare key to the last table
-header seen, so a scalar written after one lands in the wrong block.
+A table's scalar keys are written before its sub-tables, because TOML binds a bare key to the
+last table header above it, which would put a scalar written after a sub-table in the wrong
+block.
 """
 
 from __future__ import annotations
@@ -21,7 +23,8 @@ from typing import Any
 
 
 class Inline(dict):
-    """A table written on one line: `artifact_visibility = { default = "inherited" }`."""
+    """A table that is written on one line, as in
+    `artifact_visibility = { default = "inherited" }`."""
 
 
 def dumps(document: dict[str, Any]) -> str:

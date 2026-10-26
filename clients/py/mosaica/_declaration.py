@@ -1,13 +1,13 @@
-"""The declaration: blocks, the typed verbs' compilation into them, and the TOML.
+"""The declaration: the blocks that the `declare_*` methods build, and how they become TOML.
 
-Each `declare_*` verb builds one block of the declaration and appends it here.
-The SDK writes the TOML and `mosaica check` reads that file, so the mapping from verb to block is
-checked by the binary rather than mirrored in Python.
+Each `declare_*` method builds one block of the declaration and adds it here. The package writes
+the TOML and `mosaica check` reads the file, so the binary checks how each method maps to a
+block and nothing in Python repeats that check.
 
-What the TOML always says: every source name on every block, the allocation view, the value set
-on every layer, and the disclosure controls on every layer and vocabulary, whether the user
-said them or a default did. A reader of `schema.toml` sees the whole declaration without knowing
-the SDK's defaults.
+The TOML always states every block's source name, the allocation view, every layer's value set,
+and the disclosure controls on every layer and vocabulary, whether the user chose them or a
+default did, so that a reader of `schema.toml` sees the whole declaration without knowing the
+package's defaults.
 """
 
 from __future__ import annotations
@@ -55,13 +55,14 @@ SPATIAL_DERIVED = ("centroid", "box")
 
 
 class Declaration:
-    """A database's declared blocks, held by `Database` and written out as `schema.toml`.
+    """The blocks a database has declared, which `Database` holds and writes out as
+    `schema.toml`.
 
     `blocks` maps each kind (`"view"`, `"view_group"`, `"vocabulary"`, `"attribute"` and
-    `"layer"`) to its blocks in the order they were declared. A label set is a `labels` entry on
-    the block of the layer it labels. Declare through `Database.declare` and the `declare_*`
-    methods, which check a block against the database and save it with the database; `add`
-    does neither.
+    `"layer"`) to its blocks in the order they were declared, and a label set is a `labels`
+    entry on the block of the layer it labels. Declare through `Database.declare` and the
+    `declare_*` methods, because they check a block against the database and save it with the
+    database, and `add` does neither.
     """
 
     def __init__(self) -> None:

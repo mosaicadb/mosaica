@@ -1,38 +1,29 @@
-"""The notebook widget, `Map`: the kernel half of the protocol in `components/src/widget.ts`.
+"""The notebook map, `Map`, which is the kernel's half of the widget in
+`clients/ts/components/src/widget.ts`.
 
-The page half is the components' single-file bundle, which anywidget runs as `_esm`. This half
-holds the token, answers the page's `ready` and `reauthorise` messages with it as a custom
-message, and mirrors the map's controls and selection as traitlets.
+The page's half is the components' single-file bundle, which anywidget runs as `_esm`. The
+kernel's half holds the token and sends it to the page as a custom message in answer to the
+page's `ready` and `reauthorise` messages. No traitlet carries the token, so nothing that saves
+widget state can save it, whether that is the front end's "save widget state", `nbconvert
+--execute`, papermill or a run in which no front end mounts.
 
-No traitlet carries the token, so nothing that saves widget state saves it: not the front end's
-"save widget state", `nbconvert --execute`, papermill, or a run in which no front end mounts. The
-token stays in the browser's memory while the page is open.
+Only controls and selections cross between the kernel and the page, because the page fetches
+the data itself. The page sends a control's value up when the map settles, once it has finished
+fetching for a view, so that the kernel is not asked on every frame. Ids cross as decimal
+strings, because a `mosaica_id` is a `u64`, which a JavaScript number cannot hold and a `BigInt`
+cannot be serialised as.
 
-The page calls `url`, the viewer plane, from the notebook page's origin, so the viewer plane must
-allow that origin. A database made with `create()` allows pages served from a loopback address,
-through `serve.cors_loopback`; another deployment names the notebook's origin in
-`serve.cors_origins`. A VS Code notebook and Colab render in origins no list can name, so the
-widget cannot reach a database from them. Not built yet: a Jupyter server extension that would
-forward the widget's requests from the notebook's own origin.
+Not built yet: a Jupyter server extension that would forward the page's requests from the
+notebook's own origin. Without it the viewer plane must admit that origin, which VS Code and
+Colab notebooks cannot meet.
 
-Only controls and selection cross the kernel boundary, never data. `url` goes down. `view`,
-`bbox`, `layers`, `colour_by`, the four size settings and `filters` go both ways, and up only
-when the map settles, once it has finished fetching for a view, so the kernel is never asked on
-every frame. `budget` goes both ways, and up when the map's Most points slider is let go;
-`palette` goes both ways, and up when one is chosen in the map's Colour section;
-`value_colours` and `cluster_colours` go both ways, and up as each colour is chosen in the map.
-`selected` and `selected_artifact` go up on a pick, and `region` when a region's
-counts arrive. Ids are decimal strings, because a `mosaica_id` is a `u64`, which is not a
-JavaScript number, and a `BigInt` does not serialise.
-
-`basemap` goes down as `_basemap`: the value, with each image it names by a local path given as
-`{"local": path}`, the path as the caller wrote it, and for each such path the number of the read
-whose bytes the page is to draw. So the page takes the value and its images together, and the
-saved state holds no more of a path than the caller wrote, and neither an image nor anything
-drawn from its content. The file is read here each time the value is set, and its
-read number moves on only where its bytes or type changed. The bytes go to the page as a
-`basemap-image` message with a binary buffer, in answer to `basemap-images`, which names the
-reads the page lacks.
+`basemap` goes down as `_basemap`, which holds the value with each local image written as
+`{"local": path}`, and for each such path the number of the read whose bytes the page is to
+draw. The page takes the value and its images in one update, and the saved state holds no more
+of a path than the caller wrote and none of an image's content. The kernel reads the file each
+time the value is set, and moves the read number on only when the bytes or the type change. It
+sends the bytes as a `basemap-image` message with a binary buffer in answer to
+`basemap-images`, which names the reads the page lacks.
 """
 
 from __future__ import annotations
@@ -62,11 +53,11 @@ _BUNDLE = "mosaica-components.js"
 
 
 def bundle_path() -> Optional[pathlib.Path]:
-    """The path of the components' single-file bundle that `Map` loads, or `None` where there
-    is none.
+    """The path of the components' JavaScript bundle that `Map` loads, or `None` when there is
+    none.
 
-    The bundle the wheel's build hook packaged under `mosaica/static/` comes first, then the
-    checkout's own build in `clients/ts/components/dist/`.
+    The copy packaged in the wheel under `mosaica/static/` is used when it is there, and a
+    checkout's own build in `clients/ts/components/dist/` otherwise.
     """
     packaged = _HERE / "static" / _BUNDLE
     if packaged.exists():
@@ -208,133 +199,144 @@ class _Basemap(traitlets.Any):
 
 
 class Map(anywidget.AnyWidget):
-    """The interactive map in a notebook cell, reading a Mosaica database with a token.
+    """An interactive map of a Mosaica database, shown in a notebook cell.
 
-    The page in the browser fetches its data from the database itself, as the token allows. The
-    token reaches the page as a message and is never widget state, so saving the notebook does
-    not save it.
-
-    - `url`: the address of the database's viewer plane.
-    - `token`: required, though the signature gives it a default of `None`. The token your
-      deployment issued you, as a string, a `Token` from `login` or `authorise`, which is renewed
-      before it expires, or a function returning either, which is called again then. A `Map`
-      without one raises `TypeError`.
-    - `view`: the view to open on. `None`, the default, opens the first one.
-    - `layers`: the annotation layers to draw, each with the layers it depends on. `None`, the
-      default, lets the map choose, and `[]` draws none. `"all"` is not a layer name and is
-      refused.
-    - `colour_by`: the column to colour points by, or `"cluster:<layer>"` to colour them by the
-      annotations of that layer.
-    - `palette`: the palette annotations are coloured from under `"cluster:<layer>"`:
-      `"okabe-ito"` (8 colours, colour-blind safe), `"tableau10"` (10), `"tableau20"` (20, in
-      light and dark pairs) or `"kelly"` (22, most distinct). The server gives each annotation a
-      slot below the palette's size, chosen so that annotations drawn beside each other differ,
-      and the map draws it in the palette's colour at that slot. `None`, the default, leaves the
-      map's choice, Tableau 10 until one is made.
-    - `value_colours`: colours for single values of category columns, as
-      `{column: {value: "#rrggbb"}}`, in place of their palette colours. `None`, the default,
-      leaves the colours chosen in the map; `{}` gives every value its palette colour.
-    - `cluster_colours`: colours for single annotations, per layer, as
-      `{layer: {mosaica_id: "#rrggbb"}}` with each `mosaica_id` a decimal string, in place of
-      their palette colours under `"cluster:<layer>"`. `None`, the default, leaves the colours
-      chosen in the map; `{}` gives every annotation its palette colour.
-    - `size_by`: a number column to size points by. `None`, the default, draws every point at
-      one size.
-    - `size_min`, `size_max`: the radius in pixels of the smallest and the largest value under
-      `size_by`. A point with no value draws as a ring. The page ignores a radius that is not a
-      number above zero. `None` leaves the map's choice, 2 and 9 until one is made.
-    - `size_scale`: how values are placed between the two radii: `"linear"`, `"log"`, or
-      `"rank"` among a sample of the values the map has drawn. `None` leaves the map's choice,
-      linear until one is made.
-    - `filters`: a filter expression, as `Selection.filter` takes one.
-    - `bbox`: the box to frame the camera on, as `(min_x, min_y, max_x, max_y)`. Without it the
-      map opens framed on where the items `filters` matches are.
-    - `height`: the widget's height in pixels in the notebook. The default is 480. While the
-      output holding the map is shown full screen, the map fills the screen instead.
-    - `basemap`: what is drawn under the points. `"world"` is land, coastlines and country
-      borders from the database's world outline, on a view with a map projection. `"none"` is
-      nothing. `{"tiles": url_template, "attribution": text}` is raster tiles from a server you
-      name, whose template holds `{z}`, `{x}` and `{y}`, on a view whose frame lines up with web
-      map tiles; the map shows `attribution` in its corner. `{"image": url_or_path, "bounds":
-      [x0, y0, x1, y1]}` is one image stretched over `bounds` in the view's coordinates (degrees
-      on a geographic view), or over the whole frame without them, and not reprojected. A
-      `pathlib.Path`, and a string that is not an `http(s):` or `data:` URL, is a path here,
-      not expanded for `~`; it is read each time the value is set and sent to the page as a
-      message, so its bytes are never saved with the notebook. A file that cannot be read
-      raises `traitlets.TraitError` and leaves `basemap` as it was; a `file:` URL is refused.
-      A key holding `None` is left out. A dictionary with a `tiles` or `image` key is one of
-      these, and any other maps view ids to values, for the views the map can switch to; so a mapping cannot name a view called `tiles` or `image`, and
-      `{"image": "world"}` is an image at the path `world`. `None`, the default, is `"world"`
-      on a view with a map projection and nothing on one without. A value of the wrong shape
-      raises `traitlets.TraitError`; one that does not fit the view is refused by the page, and
-      `last_error` and a warning say why.
-    - `explorer_layout`: `"docked"`, the default, puts the controls in a sidebar beside the map;
-      `"overlay"` draws the map across the whole widget with the controls floating over it.
-    - `title_field`: the field whose value titles a point in the hover and the item card.
-      `None`, the default, titles a point by its id.
-    - `artifacts_per_tile`: the most annotations each level of a layer shows in one tile of the
-      map, largest first, at most the server's `max_artifacts_per_tile`. `None`, the default,
-      asks for 50, or the server's `max_artifacts_per_tile` where that is smaller. The map asks
-      for annotations by tile at map zoom + 2, the map's own zoom rounded down, a tile of 128 to
-      256 pixels, and at most 558 tiles in one request, the most a 3840 by 2160 screen touches,
-      or the server's `max_tiles_per_request` where that is fewer; a larger screen is asked for
-      at zoom + 1, then coarser, until its tiles fit. So the tiles in view times
-      `artifacts_per_tile` bounds the annotations one level draws.
-    - `budget`: how many points the map aims to draw on screen. `0`, the default, leaves the
-      map's own, 250,000.
-    - `budget_min`, `budget_max`: the ends of the Most points slider in the map's Layers
-      popover. The defaults are 1,000 and 2,000,000. Neither changes `budget`.
-    - `cluster_budget`: the most clusters a `nested` or `dag` layer is drawn with, met by drawing
-      parents in place of their children, and the cut a cluster card ranks at. The default is
-      1,000; `0` draws every cluster, and setting it to `0` later goes back to every cluster.
-    - `cluster_budget_min`, `cluster_budget_max`: the ends of the Most clusters slider, shown in
-      the Layers popover while such a layer is drawn. The defaults are 10 and 10,000. Neither
-      changes `cluster_budget`.
-
-    Read the widget's attributes in a later cell:
-
-    - `selected`: the `mosaica_id` of the picked item, as a decimal string, or `None`. It
-      changes on a pick.
-    - `selected_artifact`: the `mosaica_id` of the opened annotation, likewise.
-    - `region`: the drawn box or lasso, as a dictionary: its `shape` and `status`, the counts
-      `visible`, `matched` and `served` inside it, `verdict`, which says whether the counts are
-      exact for the shape or over the grid cells covering it, and `refusal` where the server
-      refused it. It changes when the region's counts arrive, and is `None` when it is cleared.
-    - `view`, `bbox`: the view shown and where the camera settled.
-    - `filters`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`, `size_max`,
-      `size_scale`: as the map shows them. Setting one redraws the map.
-    - `last_error`: why the page last refused something set here, or `None`.
-    - `budget`: as the map draws it; it changes when the Most points slider is let go. Setting
-      it in a later cell applies it.
-    - `cluster_budget`: likewise, when the Most clusters slider is let go.
-    - `value_colours`, `cluster_colours`: every colour chosen, here or in the map, which the map
-      changes when a colour is chosen on a field card or in Edit colours, at once. Setting one
-      replaces every colour of its kind the map holds.
-    - `basemap`: as given, normalised: bounds as floats, and a key holding `None` left out; an
-      image's path stays the `str` or `pathlib.Path` it was given as. Setting it in a later
-      cell applies it and reads its local images again, so setting the same value after
-      editing an image shows the edit.
-    - `url`, `height`, `explorer_layout`, `title_field`, `artifacts_per_tile`, `budget_min`,
-      `budget_max`, `cluster_budget_min`, `cluster_budget_max`: as given. Setting one in a later
-      cell applies it.
-    - `tokens_sent`: how many tokens the kernel has sent the page.
-
-    `view`, `bbox`, `filters`, `layers`, `colour_by` and the size settings change when the map
-    settles, once it has finished fetching after a pan or zoom, and not during one. In marimo,
-    `mo.ui.anywidget(m)` puts every attribute in one `.value`, so a cell that reads it runs again
-    at every settle. To react to a pick alone, call `m.observe(fn, names="selected")` on the `Map`.
-
-    Setting `filters` applies the expression at once. Reading it after the filter panel changes
-    gives the expression the panel built. An expression the panel cannot show, such as
-    `any_of`, `none_of` or two tests on one column, is refused by the page: nothing is applied,
-    and `last_error` and a warning say why.
-
-    The map needs the components' bundle, which the package's build hook builds with Node into
-    every wheel and every install from a checkout, and `bundle_path()` finds; a `Map` made
-    without it raises `RuntimeError` naming what to install.
+    The map in the browser fetches its data from the database's viewer plane with the token you
+    give it, so it shows only the items that token may see. `Database.map`, `Viewer.map` and
+    `Selection.map` make one for you.
 
         m = mosaica.Map(viewer_url, token=token, colour_by="venue")
         m
+
+    The token reaches the page as a message and is never part of the widget's state, which means
+    that saving the notebook does not save it. The page calls `url` from the notebook's own origin,
+    so the server must admit that origin: a database made with `create()` admits pages served
+    from a loopback address, and another server needs the notebook's origin in
+    `serve.cors_origins`. VS Code and Colab show notebooks from origins that no list can name, so
+    the map cannot reach a database from them.
+
+    - `url`: the address of the database's viewer plane.
+    - `token`: the token the map reads with, which is required although the signature gives it a
+      default of `None`. It may be a string, such as a token your deployment issued you, a
+      `Token` from `login` or `authorise`, which is renewed before it expires, or a function
+      returning either, which is called again when the token is about to expire. A `Map` made
+      without one raises `TypeError`.
+    - `view`: the view to open on. `None`, the default, opens the first one.
+    - `layers`: the annotation layers to draw, each drawn with the layers it depends on. `None`,
+      the default, lets the map choose, and `[]` draws none. `"all"` is refused, because it is
+      not a layer name.
+    - `colour_by`: the column to colour points by, or `"cluster:<layer>"` to colour them by the
+      annotations of that layer.
+    - `palette`: the palette that annotations are coloured from under `"cluster:<layer>"`, which
+      is one of `"okabe-ito"` (8 colours that colour-blind readers can tell apart), `"tableau10"`
+      (10), `"tableau20"` (20, in light and dark pairs) and `"kelly"` (22, as distinct as
+      possible). The server gives each annotation a place in the palette, chosen so that
+      annotations drawn beside each other differ. `None`, the default, leaves the choice to the
+      map, which uses Tableau 10 until one is made.
+    - `value_colours`: colours that replace the palette colour of single values of category
+      columns, as `{column: {value: "#rrggbb"}}`. `None`, the default, keeps the colours chosen
+      in the map, and `{}` gives every value its palette colour.
+    - `cluster_colours`: colours that replace the palette colour of single annotations under
+      `"cluster:<layer>"`, as `{layer: {mosaica_id: "#rrggbb"}}` with each `mosaica_id` a decimal
+      string. `None`, the default, keeps the colours chosen in the map, and `{}` gives every
+      annotation its palette colour.
+    - `size_by`: a number column to size points by. `None`, the default, draws every point at
+      one size.
+    - `size_min`, `size_max`: the radius in pixels of the point with the smallest and the largest
+      value of `size_by`, where a point with no value is drawn as a ring. The page ignores a
+      radius that is not a number above zero. `None` leaves the choice to the map, which uses 2
+      and 9 until one is made.
+    - `size_scale`: how values are spread between the two radii, as `"linear"`, `"log"` or
+      `"rank"`, which ranks each value among a sample of those the map has drawn. `None` leaves
+      the choice to the map, which uses `"linear"` until one is made.
+    - `filters`: a filter expression, in the form `Selection.filter` takes.
+    - `bbox`: the box to frame the camera on, as `(min_x, min_y, max_x, max_y)`. Without it the
+      map opens framed on the items that `filters` matches.
+    - `height`: the widget's height in pixels in the notebook, 480 by default. The map fills the
+      screen instead while its output is shown full screen.
+    - `basemap`: what is drawn under the points, as one of the values described below, or as a
+      dictionary from view id to value for the views the map can switch to. `None`, the default,
+      draws the world outline on a view with a map projection and nothing on any other view.
+    - `explorer_layout`: where the controls go. `"docked"`, the default, puts them in a sidebar
+      beside the map, and `"overlay"` floats them over a map that fills the whole widget.
+    - `title_field`: the field whose value titles a point in the hover and the item card. `None`,
+      the default, titles a point by its id.
+    - `artifacts_per_tile`: the most annotations each level of a layer draws in one map tile,
+      largest first, which bounds how many annotations a level draws at once. `None`, the
+      default, asks for 50, or for the server's `max_artifacts_per_tile` when that is smaller,
+      and the server refuses a value above its maximum.
+    - `budget`: how many points the map aims to draw on screen. `0`, the default, uses the map's
+      own figure of 250,000.
+    - `budget_min`, `budget_max`: the ends of the Most points slider in the map's Layers popover,
+      1,000 and 2,000,000 by default. Neither changes `budget`.
+    - `cluster_budget`: the most clusters a `nested` or `dag` layer is drawn with, which the map
+      meets by drawing parents in place of their children. The default is 1,000, and `0` draws
+      every cluster.
+    - `cluster_budget_min`, `cluster_budget_max`: the ends of the Most clusters slider, which the
+      Layers popover shows while such a layer is drawn. They are 10 and 10,000 by default, and
+      neither changes `cluster_budget`.
+
+    A basemap is one of these values:
+
+    - `"world"`: land, coastlines and country borders from the database's world outline, for a
+      view with a map projection.
+    - `"none"`: nothing.
+    - `{"tiles": url_template, "attribution": text}`: raster tiles from a tile server, for a view
+      whose frame lines up with web map tiles. The template holds `{z}`, `{x}` and `{y}`, and
+      the map shows `attribution` in its corner.
+    - `{"image": url_or_path, "bounds": [x0, y0, x1, y1]}`: one image, stretched without
+      reprojection over `bounds` in the view's coordinates, or over the whole frame when `bounds`
+      is left out.
+
+    An image may be an `http(s):` or `data:` URL, or the path of a local file as a
+    `pathlib.Path` or any other string, which is not expanded for `~`. The file is read each time
+    `basemap` is set and sent to the page as a message, so its bytes are not saved with the
+    notebook, and setting the same value again after editing the file shows the edit. A file
+    that cannot be read raises `traitlets.TraitError` and leaves `basemap` as it was, and a
+    `file:` URL is refused. A key holding `None` is left out. Because a dictionary with a
+    `tiles` or `image` key is read as one basemap, a dictionary by view cannot name a view called
+    `tiles` or `image`. A value of the wrong shape raises `traitlets.TraitError`, and the page
+    refuses a value that does not fit the view and reports why in `last_error` and a warning.
+    Reading `basemap` gives the value as it was set, with its bounds as floats and its keys
+    holding `None` left out.
+
+    Every argument except `token` is also an attribute of the same name, and setting one in a
+    later cell applies it to the map. The map writes what the viewer changes back into these
+    attributes:
+
+    - `view`, `bbox`, `filters`, `layers`, `colour_by` and the four size settings, when the map
+      settles after a change, once it has finished fetching for the new view.
+    - `palette`, when one is chosen in the map's Colour section.
+    - `budget` and `cluster_budget`, when the Most points or Most clusters slider is let go.
+    - `value_colours` and `cluster_colours`, as each colour is chosen on a field card or in Edit
+      colours. Setting either replaces every colour of its kind that the map holds.
+
+    Setting `filters` applies the expression at once, and the page refuses an expression that
+    its filter panel cannot show, such as `any_of`, `none_of` or two tests on one column, which
+    it reports in `last_error` and a warning without applying anything. After the viewer changes
+    the panel, `filters` holds the expression the panel built.
+
+    The map also keeps these attributes, which you read and do not set:
+
+    - `selected`: the `mosaica_id` of the picked item, as a decimal string, or `None`. It
+      changes on each pick.
+    - `selected_artifact`: the `mosaica_id` of the opened annotation, as a decimal string, or
+      `None`.
+    - `region`: the box or lasso drawn on the map, as a dictionary, or `None` once it is
+      cleared. It holds the region's `shape` and `status`, the counts `visible`, `matched` and
+      `served` inside it, a `verdict` that says whether the counts are exact for the shape or
+      cover the grid cells around it, and a `refusal` when the server refused the region. It
+      changes when the region's counts arrive.
+    - `last_error`: why the page last refused something set from Python, or `None`.
+    - `tokens_sent`: how many tokens the kernel has sent the page.
+
+    To run code when the viewer picks an item, call `m.observe(fn, names="selected")`. In
+    marimo, `mo.ui.anywidget(m)` puts every attribute in one `.value`, so a cell that reads it
+    runs again each time the map settles, and `observe` is the way to react to a pick alone.
+
+    The map needs the components' JavaScript bundle, which every wheel and every install from a
+    checkout carries and `bundle_path()` finds. A `Map` made without it raises `RuntimeError`
+    naming what to install.
     """
 
     # The bundle's text, set per instance from `bundle_path()`; anywidget's frontend reads both.
