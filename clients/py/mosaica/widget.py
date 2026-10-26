@@ -210,15 +210,13 @@ class Map(anywidget.AnyWidget):
     can name, so the map cannot reach a database from them.
 
     - `url`: the address of the database's viewer plane.
-    - `token`: the token the map reads with. It is required, so a `Map` made without one raises
-      `TypeError` despite the default of `None`. Give it as a string, as a `Token` from `login`
-      or `authorise`, which the map renews before it expires, or as a function that returns
-      either and is called again before the token expires.
+    - `token`: the token the map reads with, in any of the forms `TokenSource` describes. It is
+      required, so a `Map` made without one raises `TypeError` despite the default of `None`.
     - `view`: the view to open on. `None`, the default, opens the first one.
     - `layers`: the annotation layers to draw, each drawn with the layers it depends on. `None`,
       the default, lets the map choose, `[]` draws none, and `"all"` is refused.
-    - `colour_by`: the column to colour points by, or `"cluster:<layer>"` to colour them by the
-      annotations of that layer.
+    - `colour_by`: a rendered column to colour points by, or `"cluster:<layer>"` to colour them
+      by the annotations of that layer.
     - `palette`: the palette that annotations are coloured from under `"cluster:<layer>"`, which
       is one of `"okabe-ito"` (8 colours that colour-blind readers can tell apart), `"tableau10"`
       (10), `"tableau20"` (20, in light and dark pairs) and `"kelly"` (22, as distinct as
@@ -255,7 +253,8 @@ class Map(anywidget.AnyWidget):
       largest first. `None`, the default, asks for 50, or for the server's
       `max_artifacts_per_tile` when that is smaller, and the server refuses a value above its
       maximum.
-    - `budget`: how many points the map aims to draw on screen. `0`, the default, means 250,000.
+    - `budget`: how many points the map aims to draw on screen. `0`, the default, keeps the map's
+      own budget, which starts at 250,000.
     - `budget_min`, `budget_max`: the ends of the Most points slider in the map's Layers popover,
       1,000 and 2,000,000 by default. Neither changes `budget`.
     - `cluster_budget`: the most clusters a `nested` or `dag` layer is drawn with, which the map
@@ -287,8 +286,8 @@ class Map(anywidget.AnyWidget):
     refuses a value that does not fit the view and reports why in `last_error` and a warning.
 
     Every argument except `token` is also an attribute of the same name, and setting one in a
-    later cell applies it to the map, apart from `explorer_layout`. The map writes what the
-    viewer changes back into these attributes:
+    later cell applies it to the map, apart from `explorer_layout`. The map writes the changes
+    made in it back into these attributes:
 
     - `view`, `bbox`, `filters`, `layers`, `colour_by` and the four size settings, when the map
       settles after a change, once it has finished fetching for the new view.
@@ -314,9 +313,10 @@ class Map(anywidget.AnyWidget):
     - `last_error`: why the page last refused something set from Python, or `None`.
     - `tokens_sent`: how many tokens the kernel has sent the page.
 
-    To run code when the viewer picks an item, call `m.observe(fn, names="selected")`. This
-    matters in marimo, where `mo.ui.anywidget(m)` puts every attribute in one `.value` and a
-    cell that reads it runs again each time the map settles.
+    To run code when someone picks an item on the map, call `m.observe(fn, names="selected")`.
+    In marimo, observe `selected` in place of reading `.value`, because `mo.ui.anywidget(m)`
+    holds every attribute in that one value and a cell that reads it runs again each time the
+    map settles.
 
     A `Map` made without the components' JavaScript bundle, which `bundle_path()` finds, raises
     `RuntimeError` naming what to install.

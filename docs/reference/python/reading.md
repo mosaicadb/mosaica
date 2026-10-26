@@ -1,8 +1,8 @@
 # Reading
 
-A reader holds a set of access terms and sees an item when those terms satisfy one of the item's labels, so every count, map, record and annotation it is given covers only the items it may see. Use `connect` for a reader whose terms come from its token, or `Database.viewer` to read your own database as someone holding the terms you name.
+Use `connect` for a reader whose access terms come from its token, or `Database.viewer` to read your own database as someone who holds the terms you name. Every read covers only the items the reader may see, by the rule that [`Viewer`](#mosaica._viewer.Viewer) states.
 
-A `Database` itself reads with its operator's token, which holds `read-all`. It therefore sees every item that is not deleted or suppressed, including items committed after the token was made, once their commit is flushed.
+The `Database` methods on this page read with the operator's own token, which [`authorise`](connecting.md#mosaica._auth.authorise) describes under `read_all`.
 
 ## Database
 

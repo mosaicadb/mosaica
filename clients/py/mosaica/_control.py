@@ -232,18 +232,18 @@ class Control:
         - `strict`: `True` refuses the whole batch with `409` at its first refused row, so that
           nothing is written.
 
-        A row names its item by its `mosaica_id` and its values of the unique columns. A row that
-        names no item creates one at the row's position. A row that names an item edits it, and the
-        item keeps its `mosaica_id`; when the item has no row in this view yet, the row adds it
-        there. A column left out keeps the value the item stores, and a null clears it.
+        Each row names its item by its `mosaica_id` and its values of the unique columns. A row
+        that names no item creates one at the row's position, while a row that names an item edits
+        it, so that the item keeps its `mosaica_id` and joins this view if it had no row
+        there. An edit changes only the columns the row carries, and a null clears a stored value.
 
         A row is refused when it names two items, when its `mosaica_id` names no item, when it names
         no item and carries no coordinates, or when it names an item or sets a unique value that an
-        earlier row of the batch did, and the other rows are applied. The answer counts the rows
-        `created`, `edited`, `added` and `unchanged`, gives each row's `mosaica_id` in `mosaica_ids`
-        with `None` for a refused row, and lists the refused rows in `refused` by position and
-        reason. A row whose one change places its item in an annotation changes only the annotation,
-        so it is counted unchanged and the membership it adds is counted in `joined`.
+        earlier row of the batch did. The answer counts the rows applied as `created`, `edited`,
+        `added` and `unchanged`, lists the refused rows in `refused` by position and reason, and
+        gives each row's `mosaica_id` in `mosaica_ids`, with `None` for a refused row. A row whose
+        only change places its item in an annotation is counted unchanged, and the membership it
+        adds is counted in `joined`.
         """
         headers = {"content-type": ARROW, "x-mosaica-batch-id": batch}
         if view is not None:
@@ -256,18 +256,16 @@ class Control:
         """Declare an annotation layer, a named set of annotations over items, such as clusters with
         their labels (`PUT /control/layers`).
 
-        The answer carries the layer's `mosaica_id`, with `201` for a new layer and `200` for a
-        layer of that name that already holds this declaration. Another declaration under a name in
-        use is refused with `422`. The name of a dropped layer may be declared again. When every
-        layer space is in use, or the layer declares more levels than one space holds, the
-        declaration is refused with `409`.
+        Declaring a new layer, whose name may be that of a dropped one, answers `201` with the
+        layer's `mosaica_id`. When every layer space is in use, or the layer declares more levels than one
+        space holds, the declaration is refused with `409`.
         """
         return self._send(
             "PUT", "/control/layers", json.dumps(payload).encode(), {"content-type": JSON}
         )
 
     def declare_view_group(self, name: str, body: dict) -> Answer:
-        """Declare a view group, a set of views that share one frame and projection
+        """Declare a view group, a set of views that share every setting and differ by a key
         (`PUT /control/view_groups/{name}`).
 
         The group starts with no views, and `create_view` adds them.
@@ -286,11 +284,11 @@ class Control:
         return self._send("PUT", "/control/attributes", _json(body), {"content-type": JSON})
 
     def declare_shards(self, body: dict) -> Answer:
-        """Declare the shard size, the number of ids a shard issues to new items before it is sealed
-        and the next shard takes them (`PUT /control/shards`).
+        """Declare the shard size, the number of row ids a shard hands out to new items before it is
+        sealed (`PUT /control/shards`).
 
-        `body` is `{"size": n}`. A new size replaces the old one, and a size at or below the open
-        shard's high water seals that shard.
+        `body` is `{"size": n}`. A new size replaces the old one, and a size no larger than the
+        number of row ids the open shard has handed out seals that shard at once.
         """
         return self._send("PUT", "/control/shards", _json(body), {"content-type": JSON})
 

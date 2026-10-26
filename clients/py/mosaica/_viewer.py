@@ -159,9 +159,9 @@ class Batches:
     each page as a `pyarrow.RecordBatch`.
 
     Use it for a read too large to hold as one table, or one you may stop early, because each
-    response is requested only when the pages before it have been taken. Each page's category
-    columns hold only the keys that page uses, and `read_all()` joins the pages with one
-    dictionary per category column.
+    response is requested only when the pages before it have been taken. Because each page's
+    category columns hold only the keys that page uses, `read_all()` gives each category column
+    one dictionary when it joins the pages.
 
     - `head`: the first response's head as a dictionary. It holds `page_rows`, the page size
       used, and on an items read `order`, the order used, along with the counts when `count` was
@@ -673,8 +673,7 @@ class Selection:
     ) -> Sample:
         """Sample the points a map of this selection draws at `zoom`, returning them as a `Sample`.
 
-        The server thins dense areas so that each map tile carries at most `k` points, and the
-        sample holds fewer rows than the selection has items as a result.
+        The server thins dense areas so that each map tile carries at most `k` points.
 
         - `zoom`: the map's zoom level from 0, the whole view as one tile, to 16.
         - `k`: the most points drawn in one tile. It defaults to the server's `k_max_marks` and
@@ -885,10 +884,9 @@ class Viewer:
     A read the server is too busy to take raises `Refusal` with `status` 429 and the wait in
     `retry_after_s`, and the reader does not retry it.
 
-    - `url`: the address of the database's viewer endpoint.
-    - `token`: a token as a string or a `Token`, or a function that returns either. The reader
-      calls the function again when the token is close to expiry or the server ends the session.
-      `None` sends no token, as a server started with `mosaica serve --open` allows.
+    - `url`: the address of the database's viewer plane.
+    - `token`: the token to read with, in any of the forms `TokenSource` describes, or `None` to
+      send none, as a server started with `mosaica serve --open` allows.
     - `terms`: the access terms the token was made for, kept for display, or `None` when they are
       not known.
     """
@@ -910,9 +908,7 @@ class Viewer:
     def token(self) -> Optional[Token]:
         """Return the token this reader sends, or `None` for a reader made without one.
 
-        When the token held is close to expiry, the reader gets a fresh one first: a `Token` from
-        `login` or `authorise` renews itself, and a function given as the token is called again.
-        A plain string is sent unchanged until the server refuses it.
+        A token close to expiry is renewed first, as `TokenSource` describes.
         """
         if self._source is None:
             return None
@@ -951,20 +947,9 @@ class Viewer:
         """Open the interactive map of this database as a notebook widget, showing what this reader
         may see.
 
-        The page fetches its own data with this reader's token, which is never saved with the
-        notebook.
-
-        - `view`: the view to open on, or `None` for the first one.
-        - `layers`: the annotation layers to draw, where `None` lets the map choose and `[]`
-          draws none.
-        - `colour_by`: a rendered column to colour points by, or `"cluster:<layer>"` to colour
-          them by the clusters of that layer.
-        - `filters`: a filter expression, as `Selection.filter` takes one.
-        - `height`, `size_by`, `basemap` and any other keyword: as [`Map`][mosaica.widget.Map]
-          takes them.
-
-        A view, layer or column that this reader's `meta()` does not list is refused, and the
-        refusal names those it does.
+        The parameters are those of [`Map`][mosaica.widget.Map], which fetches its data with this
+        reader's token. A view, layer or column that this reader's `meta()` does not list is
+        refused, and the refusal names those it does.
         """
         from .widget import Map
 
@@ -1131,37 +1116,37 @@ class Viewer:
         palette_size: Optional[int] = None,
         batches: bool = False,
     ):
-        """Read every artifact of `layer` that this reader may see, with the properties named, as
+        """Read every annotation of `layer` that this reader may see, with the properties named, as
         one pyarrow table.
 
-        An artifact is one member of an annotation layer, such as a cluster, a region or a node
+        An annotation is one member of an annotation layer, such as a cluster, a region or a node
         in a taxonomy. The read is paged and resumed as an `items` read is.
 
         - `view`: the view whose items the counts and geometry are computed over.
         - `layer`: the layer to read, as `meta()` lists it.
         - `fields`: the properties to return, in order, from `"key"`, `"level"`, `"parents"`,
-          `"target"` (the artifact it is attached to), `"masked_count"` (its items this reader
+          `"target"` (the annotation it is attached to), `"masked_count"` (its items this reader
           may see), `"content"`, `"centroid"`, `"box"`, `"shape"` and `"slot"`. `"centroid"`
           gives the columns `centroid_x` and `centroid_y`, and `"box"` gives `box_x_min`,
           `box_y_min`, `box_x_max` and `box_y_max`, all in the view's coordinates.
-        - `level`: return only the artifacts at this level.
-        - `parent`: return only the children of this artifact, given by its `mosaica_id`.
-        - `q`: return only the artifacts whose key or first text contains this, ignoring case. It
-          cannot be combined with `parent`.
-        - `ids`: return only the artifacts these `mosaica_id`s name, such as the values of a
-          sample's `membership:<layer>` column. An id that names nothing, or an artifact this
+        - `level`: return only the annotations at this level.
+        - `parent`: return only the children of this annotation, given by its `mosaica_id`.
+        - `q`: return only the annotations whose key or first text contains this, ignoring case.
+          It cannot be combined with `parent`.
+        - `ids`: return only the annotations these `mosaica_id`s name, such as the values of a
+          sample's `membership:<layer>` column. An id that names nothing, or an annotation this
           reader is not served, gets no row.
-        - `filters`: return only the artifacts holding a matching item, with their
+        - `filters`: return only the annotations holding a matching item, with their
           `matched_count`.
-        - `keep_unmatched`: with `filters`, return every artifact, with a `matched_count` of 0
+        - `keep_unmatched`: with `filters`, return every annotation, with a `matched_count` of 0
           where nothing matches.
-        - `count`: put in the head `served`, the artifacts the request selects before `filters`,
+        - `count`: put in the head `served`, the annotations the request selects before `filters`,
           and `matched`, those of them that match. It cannot be combined with `cursor`.
         - `page_rows`, `pages`, `cursor`, `compression`, `batches`: as for `items`.
         - `palette_size`: how many colours your palette holds, to fill `slot` as
           `viewport_artifacts` describes.
 
-        The rows come in order of level, and within a level in the order the artifacts were
+        The rows come in order of level, and within a level in the order the annotations were
         published.
 
             clusters = db.artifacts("papers", "clusters", ["key", "masked_count", "centroid"])
@@ -1220,8 +1205,8 @@ class Viewer:
           layer declares and cannot widen it.
         - `filters`, `highlight`: filter expressions that set only each row's `matched` and
           `highlighted`. They do not change which rows come back.
-        - `budget`: as `artifact_budget` on `Selection.sample`. That layer's rows cover all the
-          tiles and have a null `tile`.
+        - `budget`: as `artifact_budget` on `Selection.sample`. A `nested` or `dag` layer is cut
+          to it once for all the tiles read, so its rows have a null `tile`.
         - `palette_size`: how many colours your palette holds, from 2 to 32. Each row's `slot` is
           then the index of its colour, chosen for this reader so that neighbouring annotations
           differ, and an annotation keeps its slot at any zoom, box or filter.
@@ -1325,15 +1310,15 @@ class Viewer:
         - By a category field, as `{"field": name, "top": n}` for the `n` values with the most
           items, or `{"field": name, "values": [key, ...]}` for the values named. A `rest` row
           then counts the items with any other value and a `none` row those with no value.
-        - By the artifacts of a layer, as `{"layer": name, "top": n}` or `{"layer": name,
-          "artifacts": [mosaica_id, ...]}` with `rest` and `none` rows as for a field, adding
-          `"level": k` on a layer with several levels, where it is required; a layer with one
-          level refuses it. A listed id that names nothing, or an artifact this reader is not
-          served, gets no row. Artifacts can overlap, so the counts can sum to more than the set.
-          `"palette_size": n` adds each artifact's palette slot. On a `nested` or `dag` layer,
-          `top` needs `"cut": {"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}` to rank the
-          artifacts a map draws at that zoom, box and cluster budget; leaving out `budget` ranks
-          the finest cut.
+        - By the annotations of a layer, as `{"layer": name, "top": n}` or `{"layer": name,
+          "artifacts": [mosaica_id, ...]}`, with `rest` and `none` rows as for a field. A layer
+          with several levels requires `"level": k`, which a layer with one level refuses. A
+          listed id that names nothing, or an annotation this reader is not served, gets no row.
+          Because annotations can overlap, the counts can sum to more than the set.
+          `"palette_size": n` adds each annotation's palette slot. On a `nested` or `dag` layer,
+          `top` needs `"cut": {"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}`, so that it
+          ranks the annotations a map draws at that zoom, box and cluster budget, and without
+          `budget` it ranks the finest cut.
         - By bins of a number or timestamp field, as `{"field": name, "bins": n}`, a histogram of
           at most `n` bins in one page. With `"range": [lower, upper]` the bins divide that range
           into equal widths and `rest` counts the values outside it. Without a range the edges
@@ -1348,7 +1333,7 @@ class Viewer:
         y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells.
 
         A table's columns come in this order, each where it applies: `group` (`listed`, `rest` or
-        `none`), `key` (a category's key or an artifact's `mosaica_id`), `title`, `slot`, `lower`
+        `none`), `key` (a category's key or an annotation's `mosaica_id`), `title`, `slot`, `lower`
         and `upper` (a bin's edges, the last bin including its `upper`), `cell` (the cell's
         Morton prefix), `count`, `reference_count`, `lift` (`(count / total) / (reference_count /
         reference_total)`), and then the field figures. A category field has `title` only when
@@ -1744,11 +1729,9 @@ def connect(url: str, token: Optional[TokenSource] = None) -> Viewer:
     """Connect to a Mosaica database someone else runs, returning a `Viewer` that reads what the
     token's terms admit.
 
-    - `url`: the address of the database's viewer endpoint.
-    - `token`: the token the database's operator issued you, as a string or a `Token`, or a
-      function that returns either. The reader calls the function again when its token is close
-      to expiry or the server ends the session. Leave it out for a server started with `mosaica
-      serve --open`.
+    - `url`: the address of the database's viewer plane.
+    - `token`: the token the database's operator issued you, in any of the forms `TokenSource`
+      describes. Leave it out for a server started with `mosaica serve --open`.
 
         v = mosaica.connect("https://maps.example/viewer", token=my_token)
         v.view("papers").count()

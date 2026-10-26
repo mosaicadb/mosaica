@@ -187,12 +187,9 @@ class Insert(Summarised):
     - `columns`: the column the call named for each thing the target reads, such as
       `{"x": "x", "y": "y", "access": "labels"}`.
     - `named_attributes`: on a view's rows, the column each attribute is filled from, as
-      `{attribute: column}`. Before the first commit only the anchor view's rows fill
-      attributes.
+      `{attribute: column}`.
     - `items`: the column the table carries for each attribute declared `unique`, as
-      `{attribute: column}`, which is how each row names its item. A view's row that names no
-      item is an item of its own, and a row of any other table that names none is left out at
-      the commit and reported.
+      `{attribute: column}`, which is how each row names its item.
     - `metadata_columns`: on a view group's roster, the column each metadata value is read from.
     - `shape`, `shape_columns`: on an annotations table, the kind of shape its rows carry and the
       columns the shape is read from.

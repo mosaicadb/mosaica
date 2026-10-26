@@ -1,10 +1,8 @@
 """The writer of `schema.toml` and `mosaica.toml`, which turns a declaration into the TOML a
 person would have written by hand.
 
-The package writes the files and the `mosaica` binary reads them, so the binary checks how each
-declaring method maps to a block and nothing here repeats that check. The output keeps the
-blocks in the order they were declared, writes one table per block and spells every value as
-the declaration spells it.
+The output keeps the blocks in the order they were declared, writes one table per block and
+spells every value as the declaration spells it.
 
 A plain `dict` becomes a sub-table (`[layer.members]`), a list of dicts becomes an array of
 tables (`[[layer.levels]]`), and an `Inline` becomes a one-line table

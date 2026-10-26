@@ -1,10 +1,9 @@
-"""Tokens: what a reader presents to read, and how one is made and ended.
+"""Tokens: what a reader presents to read, and the functions that make and end one.
 
-A reader holds a token its deployment issued, or makes one with `login` from its own credential:
-a password, an API key or an OIDC access token. `authorise` makes one on the session plane: for
-another principal, with an API key whose principal holds `authorise-as`, as an integrator's backend
-does, or for a set of terms, with the operator credential. Either credential can make a token that
-reads as anyone, so it stays where it is kept. Only the token reaches a browser.
+A reader holds a token its deployment issued, or makes one with `login` from its own password, API
+key or OIDC access token. A back end that signs in its own users calls `authorise` instead, which
+makes a token for any local principal, OIDC identity or set of access terms, or the operator's own
+token.
 """
 
 from __future__ import annotations
@@ -33,9 +32,10 @@ class Token:
       not known. A catalogue change, such as a grant to its principal, can end it sooner.
     - `token_id`: the id `revoke` takes to end the token without sending the token again. Only a
       token `authorise` made has one, and it is `None` otherwise.
-    - `renew`: a function that makes a fresh token with the same credential, set when `login` or
-      `authorise` made this one and `None` otherwise. A reader from `connect` and a `Map` call it
-      when the token is about to expire.
+    - `renew`: a function that makes a fresh token from the credential that made this one, which
+      therefore stays in this process. It is set when `login` or `authorise` made the token and
+      is `None` otherwise. A reader from `connect` and a `Map` call it when the token is about to
+      expire, or when a `403 expired-token` answer says that its session has ended.
     - `principal`: the local principal the token reads as, when `authorise` made it for one or
       `login` was given a password, and `None` otherwise.
     - `terms`: the access terms the token holds, when `authorise` made it for a set of terms, and
@@ -63,10 +63,13 @@ class Token:
 
 
 TokenSource = Union[str, Token, Callable[[], Union[str, "Token"]]]
-"""The forms `connect` and `Map` take a token in: the token string, a `Token`, or a function that
-returns either. A function is how to hand a reader tokens your own code makes, because the reader
-calls it again for a fresh token when the one it holds is about to expire or its session has
-ended."""
+"""The forms in which `connect`, `Viewer` and `Map` take a token: the token string, a `Token`, or a
+function that returns either.
+
+A reader gets a fresh token when the one it holds is about to expire, or when a `403
+expired-token` answer says that its session has ended. It renews a `Token` with the token's own
+`renew` and calls a function again, while it sends a plain string unchanged until the server
+refuses it. A function is therefore the way to hand a reader tokens that your own code makes."""
 
 
 def minted(source: TokenSource) -> Token:
@@ -126,8 +129,7 @@ def login(
     Any combination but exactly one of the three credentials raises `ValueError`, as a missing
     `viewer_url` does. The principal must hold the `read` permission. The server answers
     every credential it does not accept with the same refusal, which raises `PermissionError`, so
-    the error does not reveal whether a principal exists. The token's `renew()` logs in again
-    with the same credential, which therefore stays in this process.
+    the error does not reveal whether a principal exists.
 
         token = mosaica.login(viewer_url, principal="ann", password=password)
         mosaica.connect(viewer_url, token).view("papers").count()
@@ -209,16 +211,16 @@ def authorise(
     - `terms`: the access terms the token holds, as a list or one term as a string, for a reader
       the catalogue does not name. The token holds them and `read`. Only the operator credential
       may send `terms`.
-    - `read_all`: `True` makes the operator's own token, which holds `read-all` and reads every
-      item that is not deleted or suppressed. Only the operator credential may send it.
+    - `read_all`: `True` makes the operator's own token, which holds `read-all` and so reads every
+      item that is not deleted or suppressed, including items committed after the token was made.
+      Only the operator credential may send it.
     - `timeout`: how long to wait for the server, in seconds. The default is 10.
 
     Name exactly one of `principal`, `access_token`, `terms` and `read_all`. Anything else, or an
     empty `session_url` or `credential`, raises `ValueError`, and a request the server refuses
-    raises `PermissionError`, whose message holds the server's status and answer. The token's
-    `renew()` makes a fresh one with the same credential, which therefore stays in this process.
-    A `Database` makes these tokens with its own operator credential through `db.token(terms)`
-    and `db.viewer(terms)`.
+    raises `PermissionError`, whose message holds the server's status and answer. A `Database`
+    makes these tokens with its own operator credential through `db.token(terms)` and
+    `db.viewer(terms)`.
 
         token = mosaica.authorise(session_url, api_key, principal="ann")
         token = mosaica.authorise(session_url, operator_credential, terms=["cs.LG"])

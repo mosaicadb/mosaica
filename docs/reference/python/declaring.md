@@ -1,6 +1,6 @@
 # Declaring
 
-Declaring says what a database will hold before any data arrives: its views, columns, vocabularies and annotation layers, and the size of the shards its items are stored in. Each `declare_*` method adds to the declaration file, `schema.toml`, and the next `check()` or `commit()` checks what you declared. The data itself comes later, through [`insert`](inserting.md).
+Declaring says what a database will hold before any data arrives: its views, columns, vocabularies and annotation layers, and the size of the shards its items are stored in. Each `declare_*` method adds a block to the declaration, which the next `check()` or `commit()` writes out as `schema.toml` and checks. The data itself comes later, through [`insert`](inserting.md).
 
 ## Database
 
