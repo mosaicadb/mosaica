@@ -1114,9 +1114,7 @@ export class MosaicaMap extends MosaicaElement {
       // The map takes the keys itself, on its canvas, so deck's keyboard is off.
       controller: {keyboard: false},
       pickingRadius: MosaicaMap.PICK_RADIUS_PX,
-      // deck picks on every press, inside the time its click recogniser allows a press. Where that
-      // pick is slow the press outlasts the limit and no click fires, so presses do not pick; the
-      // click is answered from the hover or by a pick of its own (`clickPick`).
+      // Presses draw no pick, which would count against the press's time to be a click (`clickPick`).
       layerFilter: ({isPicking, renderPass}) => !isPicking || renderPass.startsWith('picking:hover') || this.picking,
       layers: [],
       onDeviceInitialized: (device) => this.slab.attach(device),
@@ -1270,27 +1268,33 @@ export class MosaicaMap extends MosaicaElement {
     return hoverAt(this.contours(), world, this.hoveredArtifact, MosaicaMap.HOVER_MARGIN_PX / 2 ** this.viewState.zoom, prefer);
   }
 
-  /** What the pointer is over: the tooltip from the mark beneath, and the hovered artifact from {@link artifactAt}. */
   /** Whether a pointer is pressed on the map, during which no tooltip shows. */
   private pressed = false;
 
   /** How far from the pointer a pick reaches, in pixels. */
   private static readonly PICK_RADIUS_PX = 8;
 
-  /** The last hover's pick, with the camera it was made under, which a click at that pixel reuses. */
-  private hovered: {info: PickingInfo; viewState: object} | null = null;
+  /** The last hover's pick, with what was drawn when it was made ({@link drawnKey}), which a click at that pixel reuses. */
+  private hovered: {info: PickingInfo; drawn: unknown[]} | null = null;
+
+  /** What decides what is under a pixel: the camera, the map's size, and the marks and names drawn and their sizes. */
+  private drawnKey(): unknown[] {
+    const s = this.resolvedStore;
+    return [this.viewState, this.clientWidth, this.clientHeight, s?.get('marks'), s?.get('artifacts'), s?.get('legend'), s?.get('selection').artifact?.id, this.drawnLevel(), this.noPoints, this.radius];
+  }
 
   /** Whether the map is running a pick of its own, which the deck's `layerFilter` lets draw. */
   private picking = false;
 
   /**
    * What a click at `info`'s pixel is over. A press makes no pick of its own, so `info` names
-   * nothing: the hover's answer is used where the hover was at that pixel under this camera, and
-   * the click picks once where it was not, as after a touch.
+   * nothing: the hover's answer is used where the hover was at that pixel over what is drawn now,
+   * and the click picks once where it was not, as after a touch.
    */
   private clickPick(info: PickingInfo): PickingInfo {
     const h = this.hovered;
-    if (h && h.info.x === info.x && h.info.y === info.y && h.viewState === this.viewState) return h.info;
+    const drawn = this.drawnKey();
+    if (h && h.info.x === info.x && h.info.y === info.y && h.drawn.every((v, i) => v === drawn[i])) return h.info;
     this.picking = true;
     try {
       return this.deck?.pickObject({x: info.x, y: info.y, radius: MosaicaMap.PICK_RADIUS_PX}) ?? info;
@@ -1299,8 +1303,9 @@ export class MosaicaMap extends MosaicaElement {
     }
   }
 
+  /** What the pointer is over: the tooltip from the mark beneath, and the hovered artifact, a name's own or else from {@link artifactAt}. */
   private onHover(info: PickingInfo): void {
-    this.hovered = {info, viewState: this.viewState};
+    this.hovered = {info, drawn: this.drawnKey()};
     const picked = resolvePick(info as never);
     const layerId = (info.sourceLayer ?? info.layer)?.id ?? '';
     const slot = picked.kind === 'mark' ? /marks-p(\d+)(?:-(?:dull|lit))?$/.exec(layerId) : null;
@@ -1309,7 +1314,7 @@ export class MosaicaMap extends MosaicaElement {
     // The mark's own artifact, preferred where shapes interleave.
     const own = at && artifacts ? artifactOfMark(at.band, at.i, artifacts, this.drawnLevel()) : null;
     const world = this.worldAt(info.x, info.y);
-    this.hoveredArtifact = world ? this.artifactAt(world, own) : null;
+    this.hoveredArtifact = picked.kind === 'artifact' ? picked.id : world ? this.artifactAt(world, own) : null;
     // The viewport carries no shapes; fetch the hovered one. `needShape` asks once per artifact.
     if (this.hoveredArtifact !== null) this.resolvedStore?.needShape(this.hoveredArtifact);
     if (picked.kind !== 'mark' || this.pressed || picked.id === this.resolvedStore?.get('selection').item?.id) {

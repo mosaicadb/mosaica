@@ -27,6 +27,9 @@ export async function servePage(entry: string): Promise<{origin: string; browser
     },
     define: {'process.env.NODE_ENV': JSON.stringify('production')},
     build: {outDir: built, emptyOutDir: true, lib: {entry: join(here, entry), formats: ['es'], fileName: () => 'page.js'}, rolldownOptions: {output: {codeSplitting: false}}}
+  }).catch((e: unknown) => {
+    rmSync(built, {recursive: true, force: true});
+    throw e;
   });
   const server = createServer((request, response) => {
     const path = normalize(decodeURIComponent(new URL(request.url ?? '/', 'http://x').pathname));

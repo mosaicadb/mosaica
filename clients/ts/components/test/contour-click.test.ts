@@ -73,7 +73,7 @@ const SERVED = [
 ];
 
 /** A map with a store and no deck: `worldAt` is stubbed, so a click carries its world point. */
-async function map(): Promise<{el: {onClick(info: unknown): void}; store: ReturnType<typeof fakeStore>}> {
+async function map(): Promise<{el: {onClick(info: unknown): void; onHover(info: unknown): void; hoveredArtifact: bigint | null}; store: ReturnType<typeof fakeStore>}> {
   const host = await mount('<mosaica-map></mosaica-map>');
   const el = host.querySelector('mosaica-map') as unknown as {store: unknown; worldAt: unknown; onClick(info: unknown): void; lastPick: unknown};
   const store = fakeStore({status: status({}), artifacts: artifactsProjection(SERVED)});
@@ -120,5 +120,15 @@ describe('a click on a contour', () => {
     el.onClick({index: 0, x: 50, y: 50, sourceLayer: {id: 'marks-p0', props: {mosaicaIds: ids}}, coordinate: [50, 50]});
     expect(opened(store)).toEqual([]);
     expect(store.calls.filter((c) => c.name === 'pick').map((c) => String(c.args[0]))).toEqual(['7']);
+  });
+
+  it('hovers a name’s own artifact, the one its click opens, not the shape beneath the name', async () => {
+    const {el, store} = await map();
+    // A name placed off its cluster, over the deepest shape at (50, 50).
+    const name = {index: 0, x: 50, y: 50, sourceLayer: {id: 'mosaica-labels', props: {artifactIds: [4n]}}};
+    el.onHover(name);
+    expect(el.hoveredArtifact).toBe(4n);
+    el.onClick(name);
+    expect(opened(store)).toEqual(['4']);
   });
 });

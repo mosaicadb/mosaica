@@ -7,8 +7,8 @@ import {fakeStore, meta, settle, status} from '../fake-store.js';
 // Built by `label-click.browser.ts` with Vite from the packages' sources. A bare map with one named
 // cluster at the world's centre and a row of marks under its name. The GPU is made slow: work drawn
 // finishes 300 ms after it is sent, and reading pixels back waits for it, as a picking pass does on
-// a slow or software renderer; `?fast` leaves it as it is. The tests move and click the pointer
-// along the name and read `window.opened`, `window.picked` and `window.hovered`.
+// a slow or software renderer; `?fast` leaves it as it is. The tests move and click the pointer,
+// redraw the marks with `window.markAt`, and read what the map announced.
 const gl = WebGL2RenderingContext.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
 let busyUntil = 0;
 const slow = !location.search.includes('fast');
@@ -62,24 +62,30 @@ map.store = store;
 await settle(document.body);
 
 // A mark every two pixels along the name's line, so a pointer between its letters is over a mark.
+const box = map.getBoundingClientRect();
 const [cx, cy] = map.screenOf([256, 256]);
-const perPixel = 1 / (map.screenOf([257, 256])[0] - cx);
-const xs = Array.from({length: 241}, (_, i) => 256 + (i - 120) * 2 * perPixel);
-const band = {
-  depth: 2, prefix: 0n, x: 0, y: 0,
-  ids: BigUint64Array.from(xs.map((_, i) => BigInt(100 + i))),
-  positions: Float32Array.from(xs.flatMap((x) => [x, 256])),
-  scalars: {}, served: xs.length, capUsed: 500, visible: BigInt(xs.length), matched: BigInt(xs.length), highlighted: BigInt(xs.length),
-  highlightBits: null, membership: {}, heldBelow: 0n, identityKey: 'row', contentKey: 'row', bytes: 0, touchedAt: 0
-} as unknown as Band;
-store.set('marks', {bands: [band], standIn: [], count: {shown: xs.length, total: xs.length, exact: true}});
+const perPixel = [1 / (map.screenOf([257, 256])[0] - cx), 1 / (map.screenOf([256, 257])[1] - cy)] as const;
+/** Draw marks with ids from 100 at these points in the page, in place of those drawn. */
+const markAt = (points: [number, number][]) => {
+  const band = {
+    depth: 2, prefix: 0n, x: 0, y: 0,
+    ids: BigUint64Array.from(points.map((_, i) => BigInt(100 + i))),
+    positions: Float32Array.from(points.flatMap(([x, y]) => [256 + (x - box.left - cx) * perPixel[0], 256 + (y - box.top - cy) * perPixel[1]])),
+    scalars: {}, served: points.length, capUsed: 500, visible: BigInt(points.length), matched: BigInt(points.length), highlighted: BigInt(points.length),
+    highlightBits: null, membership: {}, heldBelow: 0n, identityKey: 'row', contentKey: `row-${points.length}`, bytes: 0, touchedAt: 0
+  } as unknown as Band;
+  store.set('marks', {bands: [band], standIn: [], count: {shown: points.length, total: points.length, exact: true}});
+};
+markAt(Array.from({length: 241}, (_, i) => [box.left + cx + (i - 120) * 2, box.top + cy]));
 
-const w = window as unknown as {opened: string[]; picked: string[]; hovered: string[]; centre: [number, number]};
+const w = window as unknown as {opened: string[]; picked: string[]; hovered: string[]; missed: number; centre: [number, number]; markAt: typeof markAt};
+w.markAt = markAt;
+w.missed = 0;
+map.addEventListener('mosaica-miss', () => w.missed++);
 w.opened = [];
 w.picked = [];
 w.hovered = [];
 map.addEventListener('mosaica-hover', (e) => w.hovered.push((e as CustomEvent<{id: string}>).detail.id));
 map.addEventListener('mosaica-artifactopen', (e) => w.opened.push((e as CustomEvent<{id: string}>).detail.id));
 map.addEventListener('mosaica-pick', (e) => w.picked.push((e as CustomEvent<{id: string}>).detail.id));
-const box = map.getBoundingClientRect();
 w.centre = [box.left + cx, box.top + cy];
