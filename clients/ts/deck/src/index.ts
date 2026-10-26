@@ -10,8 +10,8 @@
  * what the new view needs, and the layer redraws when the store's projections change.
  *
  * The rest of the package works alongside the layer. {@link resolvePick} turns a deck.gl pick into
- * the item or artifact under the pointer. {@link frameMatches} and {@link cameraFitting} move the
- * camera to where the filtered items are. {@link basemapLayers} draws a world outline, map tiles or
+ * the item or artifact under the pointer. {@link frameMatches} and {@link cameraFitting} find the
+ * camera that shows the filtered items. {@link basemapLayers} draws a world outline, map tiles or
  * an image under the points. {@link DensityCounter} fetches the counts that density is drawn from,
  * and the layer keeps one of its own unless you pass yours. {@link Colouring}, {@link Sizing} and
  * the named palettes and ramps are the choices for colouring and sizing points by a column.
@@ -22,8 +22,10 @@
  * import {createStore} from '@mosaicajs/client';
  * import {MosaicaLayer, viewInputOf} from '@mosaicajs/deck';
  *
+ * type Camera = {target: [number, number, number]; zoom: number};
+ *
  * const store = createStore({viewerUrl: 'http://localhost:8080', token});
- * let viewState = {target: [256, 256, 0], zoom: 0};
+ * let viewState: Camera = {target: [256, 256, 0], zoom: 0};
  *
  * // Tell the store where the camera is. viewInputOf returns null until /v1/meta has arrived.
  * function tell() {
@@ -31,14 +33,14 @@
  *   if (input) store.setView(input);
  * }
  *
- * const deck = new Deck({
- *   parent: document.getElementById('map'),
+ * const deck = new Deck<OrthographicView>({
+ *   parent: document.getElementById('map') as HTMLDivElement,
  *   views: new OrthographicView({flipY: true}),
  *   viewState,
  *   controller: true,
  *   layers: [new MosaicaLayer({id: 'mosaica', store})],
  *   onViewStateChange: ({viewState: next}) => {
- *     viewState = next;
+ *     viewState = next as Camera;
  *     deck.setProps({viewState});
  *     tell();
  *   }

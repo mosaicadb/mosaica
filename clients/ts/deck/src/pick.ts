@@ -4,7 +4,7 @@ import {NO_ORDINAL, type ArtifactsProjection, type Band} from '@mosaicajs/client
  * What {@link resolvePick} found under the pointer, by `kind`:
  *
  * - `mark`: an item. `id` is its `mosaicaId`, and `worldXY` the mark's position in world units, or
- *   the pointer's if the mark's position is not known.
+ *   the pointer's if the mark's position is not known, or `null` if neither is known.
  * - `artifact`: an artifact's name. `id` is the artifact's `mosaicaId`.
  * - `miss`: nothing.
  * - `broken`: a hit the layer cannot resolve to an id, which is a bug in the layer. It is kept

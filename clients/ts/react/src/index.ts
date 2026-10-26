@@ -34,8 +34,8 @@ import {createStore, type ProjectionName, type Projections, type Store, type Sto
 export type UseMosaicaStoreOptions = Omit<StoreOptions, 'authorise'> & {
   /**
    * A function that returns a viewer token, which the store calls at the start and before each
-   * token expires. An inline function is fine: the hook calls the latest one and does not create a
-   * new store when it changes. A store serves one viewer. To show the map to another, call the
+   * token expires. You can pass an inline function: the hook calls the latest one and does not
+   * create a new store when it changes. A store serves one viewer. To show the map to another, call the
    * store's `clear()` or give the component a new `key`.
    */
   authorise?: TokenSupplier;

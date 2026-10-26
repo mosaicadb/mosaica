@@ -8,8 +8,9 @@
  *
  * A component draws from the store you pass as `store`, such as one from `useMosaicaStore` in
  * `@mosaicajs/react`, or else from an enclosing `MosaicaStore` or `MosaicaExplorer`. Those two and
- * `MosaicaMap` can also make their own store from `viewerUrl` and `token` or `authorise`. An
- * inline `authorise` function is fine: a new function on each render does not create a new store.
+ * `MosaicaMap` can also make their own store from `viewerUrl` and `token` or `authorise`. You can
+ * pass an inline `authorise` function: the component calls the latest one and does not create a
+ * new store when it changes.
  * To show the map to another viewer, change `token` or `viewerUrl`, or give the component a new
  * `key`.
  *
@@ -59,7 +60,10 @@ import {
 import type {TokenSupplier} from '@mosaicajs/client';
 
 
-/** The events the elements fire, by name, each a `CustomEvent` with its `detail`. The same type as `MosaicaEventMap` in `@mosaicajs/components`. */
+/**
+ * The events the elements fire, by name, each a `CustomEvent` with its `detail`. The same type as
+ * `MosaicaEventMap` in `@mosaicajs/components`.
+ */
 export type MosaicaEvents = MosaicaEventMap;
 
 const ev = <K extends keyof MosaicaEvents>(name: K) => name as EventName<MosaicaEvents[K]>;
@@ -105,9 +109,9 @@ export const MosaicaStore = withStableAuthorise(wrap('mosaica-store', StoreEleme
 /**
  * `<mosaica-explorer>` as a React component. The events of the elements inside it bubble out, so
  * it has a handler prop for each of them: `onPick` for `mosaica-pick`, and so on for every event
- * in {@link MosaicaEvents} except `mosaica-chipopen` and `mosaica-basemapchange`. The `open` prop is the function the item
- * card's Open button calls, and `openUrl` the address it goes to. `onOpen` is called on every
- * press.
+ * in {@link MosaicaEvents} except `mosaica-chipopen` and `mosaica-basemapchange`. The `open` prop
+ * is the function the item card's Open button calls, and `openUrl` the address it goes to.
+ * `onOpen` is called on every press.
  */
 export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', ExplorerElement, {
   ...mapEvents,
@@ -139,7 +143,10 @@ export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', Expl
  * (`mosaica-artifactopen`) and `onLayerChange` (`mosaica-layerchange`).
  */
 export const MosaicaMap = withStableAuthorise(wrap('mosaica-map', MapElement, mapEvents));
-/** `<mosaica-status>` as a React component. Event props: `onStateChange` (`mosaica-statechange`) and `onExpired` (`mosaica-expired`). */
+/**
+ * `<mosaica-status>` as a React component. Event props: `onStateChange` (`mosaica-statechange`)
+ * and `onExpired` (`mosaica-expired`).
+ */
 export const MosaicaStatus = wrap('mosaica-status', StatusElement, {onStateChange: ev('mosaica-statechange'), onExpired: ev('mosaica-expired')});
 /** `<mosaica-count>` as a React component. It has no event props. */
 export const MosaicaCount = wrap('mosaica-count', CountElement, {});

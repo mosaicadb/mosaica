@@ -191,14 +191,16 @@ function levelsAt(camera: DensityCamera, depth: number, limit: number, groupings
 /**
  * Fetches the counts that density is drawn from, for the area around a camera. It registers an
  * aggregate with the store, so the counts cover only what the viewer may see under the store's
- * filters, and it fetches again when the filters, the highlight or the view change. While a
+ * filters, and it fetches again when the filters, the highlight or the store's view (coordinate
+ * system) change. While a
  * highlight is set, it counts the highlighted items.
  *
  * Tell it where the camera is with `look` and what to draw with `set`. Once the camera has rested
  * for {@link DENSITY_SETTLE_MS}, it fetches cells of about the chosen size on screen over the
- * viewport and a margin round it, so a short pan needs no new request. Until that answer arrives,
- * `counts` returns the coarser counts that come with the map's tiles. `onChange` is called
- * whenever the counts to draw change.
+ * viewport and a margin round it, so a short pan needs no new request. Until the first answer for
+ * the view arrives, or after the server refuses one, `counts` returns the coarser counts that come
+ * with the map's tiles. After that it returns the last answer until the next one arrives.
+ * `onChange` is called whenever the counts to draw change.
  *
  * A {@link MosaicaLayer} with a `store` keeps a counter of its own. Make one yourself and pass it
  * as the layer's `densityCounter` if your own code also needs the counts, as `<mosaica-map>` does

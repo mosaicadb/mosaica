@@ -18,13 +18,13 @@ let framings = 0;
  * so one item far from the rest widens it.
  *
  * The count goes through the store, so the box covers only items this viewer may see, under the
- * store's filters and selected region. If the filters change before the answer arrives, the count
- * is made again. The promise waits for the store's `/v1/meta`.
+ * store's filters and selected region. If the filters change before the answer arrives, the store
+ * asks again. The promise waits for the store's `/v1/meta`.
  *
  * @param store - The store whose filters are matched.
  * @param options.signal - Aborts the search, which then resolves to `null`.
- * @returns The box, or `null` if no item matches, if the server refuses the count, or once
- *   `signal` aborts.
+ * @returns The box, or `null` if no item matches, if the server refuses or does not allow the
+ *   count, or once `signal` aborts.
  *
  * @example
  * ```ts
@@ -32,6 +32,7 @@ let framings = 0;
  * if (box) {
  *   viewState = {...viewState, ...cameraFitting(box, deck.width, deck.height)};
  *   deck.setProps({viewState});
+ *   tell();
  * }
  * ```
  */

@@ -27,7 +27,10 @@ export type SizeScale = 'linear' | 'log' | 'rank';
  * @category Size
  */
 export type Sizing = {
-  /** The radius in pixels of the smallest value. A mark with no value is drawn as a ring, at this radius or 3 px, whichever is larger. */
+  /**
+   * The radius in pixels of the smallest value. A mark with no value, or a value that is not
+   * finite, is drawn as a ring, at this radius or 3 px, whichever is larger.
+   */
   min: number;
   /** The radius in pixels of the largest value. */
   max: number;

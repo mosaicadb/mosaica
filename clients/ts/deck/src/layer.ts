@@ -39,14 +39,14 @@ import {MarkSlab, type GpuSlab} from './slab.js';
  *
  * Usually you set `store` and the layer reads `marks`, `depth`, `artifacts`, `meta`, `legend` and
  * `status` from the store's projections. You can set any of those six yourself, and your value is
- * drawn in place of the store's. Without a `store`, set them all.
+ * drawn in place of the store's. Without a `store`, set the ones you need; the rest draw nothing.
  */
 export type MosaicaLayerProps = CompositeLayerProps & {
   /** The store to draw. The layer redraws whenever its projections change. Defaults to `null`. */
   store?: Store | null;
   /** The marks to draw. Defaults to the store's `marks`. */
   marks?: MarksProjection | null;
-  /** The tile depth of the frame drawn. Defaults to the store's `view.depth`, or 0 without a store. */
+  /** The tile depth of the frame drawn. Defaults to 0. With a store, 0 reads the store's `view.depth`. */
   depth?: number;
   /** The artifacts to name, outline and colour by. Defaults to the store's `artifacts`. */
   artifacts?: ArtifactsProjection | null;
@@ -62,11 +62,14 @@ export type MosaicaLayerProps = CompositeLayerProps & {
    * its `setColourBy`, `setSizeBy` or `setPointColumns`.
    */
   legend?: LegendProjection | null;
-  /** The map's status. Defaults to the store's `status`. No marks are drawn while it is `refused`. */
+  /**
+   * The map's status. Defaults to `idle`. With a store, `idle` reads the store's `status`. No marks
+   * are drawn while it is `refused`.
+   */
   status?: PresentedStatus;
   /**
    * The level of a `stacked` or `tiered` artifact layer to colour, name and outline artifacts at.
-   * Defaults to the coarsest level served. On a `nested` or `dag` layer, leave it unset, and each
+   * Defaults to the coarsest level served. On a `nested` or `dag` layer it has no default, and each
    * mark takes the nearest artifact served.
    */
   clusterLevel?: number;
@@ -756,7 +759,8 @@ export type MosaicaLayerInternalProps = MosaicaLayerProps & {
  * to {@link resolvePick} to find the item or artifact under the pointer, then set the props that
  * show it, such as `selectedWorldXY` and `hoveredArtifact`. If the artifact's layer declares
  * shapes, call the store's `needShape` with its id: the outline appears once the shape arrives.
- * Otherwise the outline is the artifact's bounding box.
+ * Otherwise the outline is the artifact's bounding box. Only an artifact drawn at `clusterLevel`
+ * is outlined.
  */
 export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
   /** @internal */

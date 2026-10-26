@@ -201,8 +201,8 @@ export function basemapMisfit(view: ViewInfo, value: BasemapValue): string | nul
  * @param view - The view drawn, from `meta.views`.
  * @param value - What to draw.
  * @param options - The background, colours and camera.
- * @throws `Error` if `value` is not a valid basemap or does not suit `view` (see
- *   {@link basemapMisfit}), or if the world outline fails to load.
+ * @returns The layers. Rejects with `Error` if `value` is not a valid basemap or does not suit
+ *   `view` (see {@link basemapMisfit}), or if the world outline fails to load.
  *
  * @category Basemaps
  */
