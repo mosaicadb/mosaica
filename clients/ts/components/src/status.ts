@@ -8,18 +8,18 @@ import {chrome, tokens} from './tokens.js';
 import './count.js';
 
 /**
- * The status line tells viewers whether the map is up to date and how much of the data they are
- * looking at, in a line such as `● | 16,822,190 of 21,406,522 match | 5,390 shown`. Its first
- * figure is how many items the filters match out of those the viewer may see, counted over the
- * camera's box, or over the selected region while there is one.
+ * Use the status line with a map so that viewers know whether what they see is current and how much
+ * of the data it covers. A typical line reads `● | 16,822,190 of 21,406,522 match | 5,390 shown`,
+ * where the first figure is the items the filters match out of those the viewer may see. The
+ * figures count the camera's box, or the selected region while there is one. While a highlight is
+ * set, the counts cell reads `N highlighted of M`.
  *
- * While the view is up to date the first cell is a dot alone. When something is wrong it names the
- * state, such as Server busy or Session expired, and offers a button where the viewer can act on
- * it, such as Retry after a busy server. It offers Sign in when the session expires only if you
- * have set `reauthorise`.
+ * While the view is up to date, the first cell is a dot alone. When something goes wrong, the cell
+ * names the state and offers a button if the viewer can act, such as Retry when the server is busy.
+ * Sign in appears when the session expires only if you have set `reauthorise`.
  *
- * The state cell is an `aria-live` region, so screen readers announce a refusal or an expiry when
- * it happens without reading out the counts every time the map pans.
+ * Screen readers announce a refusal or an expiry, because the state cell is an `aria-live` region.
+ * The counts sit outside it, so they are not read out every time the map pans.
  *
  * @summary A status line showing whether the map is up to date and how many items it shows.
  * @tagname mosaica-status

@@ -8,10 +8,9 @@ import {switchView} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * The key picker steps through the views of one group, for views that follow one another, such as
- * one view per year. The viewer moves with the previous and next buttons, or jumps to a view from
- * the menu, which lists the group's views in the order they were created. The picker shows nothing
- * while the current view is in no group.
+ * Use the key picker when the views of a group follow one another, such as one view per year, so
+ * that viewers can step through them in order. The menu lists the group's views in the order they
+ * were created. The picker shows nothing while the current view is in no group.
  *
  * @summary A drop-down with previous and next buttons for stepping through a group of views.
  * @tagname mosaica-key-picker

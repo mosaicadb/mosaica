@@ -31,18 +31,18 @@ type Row = {key: string; name: string; path: string; count: number | null; colou
 type Found = {key: string; name: string; path: string; rung: number};
 
 /**
- * The colour editor is a dialog where viewers choose the colour of each value of a category, or of
- * each cluster of a layer, while the map is coloured by it. The explorer's Edit colours button
- * opens one. In your own layout, set `field` to a rendered category column or to `cluster:<layer>`,
- * and call `show()` to open it.
+ * Use the colour editor when viewers should choose their own colours while the map is coloured by a
+ * category or a layer. The explorer's Edit colours button opens it. In your own layout, set `field`
+ * to a rendered category column or to `cluster:<layer>`, then call `show()` to open the dialog.
  *
- * Each row shows how many items the viewer may see with that value, counted without the filters or
- * the camera, so the rows keep their order as the viewer pans or filters. Viewers recolour one row
- * by clicking its colour, or several at once by ticking them and pressing Set colour.
+ * Each row counts the items the viewer may see with that value, ignoring the filters and the
+ * camera, so the rows keep their order as the viewer pans or filters. For a `nested` or `dag`
+ * layer, the rows are the clusters the map currently draws, and the search box reaches the rest. To
+ * recolour several rows at once, viewers tick them and press Set colour.
  *
- * The colours are kept in the store, so the map, the field cards and every other element on that
- * store show a change at once. Each change also fires one `mosaica-valuecolour` or
- * `mosaica-clustercolour` event naming every value or cluster it changed.
+ * The colours are kept in the store, so every element that uses the store shows a change at once.
+ * Each change also fires one `mosaica-valuecolour` or `mosaica-clustercolour` event naming every
+ * value or cluster it changed.
  *
  * @summary A dialog for choosing the colour of each category value or cluster.
  * @tagname mosaica-colour-editor

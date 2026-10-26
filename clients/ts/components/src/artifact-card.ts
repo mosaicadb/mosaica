@@ -26,17 +26,15 @@ const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
 };
 
 /**
- * An artifact is a named group of items in an annotation layer, such as a cluster. The artifact
- * card shows the one a viewer has opened on the map, so that they can see what it is, how many of
- * its items they may see, and where it sits among its parents and children. Pressing a parent or a
- * child opens that one instead.
+ * Use the artifact card to show an artifact the viewer has opened on the map, such as a cluster. An
+ * artifact is a named group of items in an annotation layer. The card's count covers every member
+ * the viewer may see, so it does not change as the map moves. Pressing one of the artifact's
+ * parents or children opens that one instead.
  *
- * The card reads the store's opened artifact, or the `artifact` you set. Its count covers every
- * member the viewer may see, so it stays the same as the map moves.
+ * The card reads the store's opened artifact, or the `artifact` you set.
  *
- * The card's buttons filter or highlight the map by the artifact, or filter to everything outside
- * it, by adding a `member_of` clause. Such a clause selects the artifact's members wherever they
- * are, whereas a drawn region selects by shape. Fit to cluster fires `mosaica-artifactfit`, and
+ * The card's buttons filter or highlight the map by the artifact's members wherever they are, or
+ * filter to everything outside it. Fit to cluster fires `mosaica-artifactfit`, and
  * `<mosaica-explorer>` responds by fitting its map to the artifact. A filter layer draws nothing,
  * so its artifacts have no Fit button.
  *

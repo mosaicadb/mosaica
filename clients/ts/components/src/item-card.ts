@@ -10,21 +10,20 @@ import {reasonOf, refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * The item card shows the record of the item a viewer has picked on the map, so that they can read
- * its fields and open it elsewhere. It reads the store's selected item, or the `item` you set when
- * you fetch records yourself.
+ * Use the item card to show the record of the item a viewer has picked on the map, so that they can
+ * read its fields and open it elsewhere. It reads the store's selected item, or the `item` you set
+ * when you fetch records yourself.
  *
  * The headline is the `title-field` field, or the item's `mosaica_id` when that field is unset or
- * empty. The other fields follow in the order the schema declares them. You can render any field
- * your own way, as a link for example, by putting an element in its `field-<name>` slot, and
- * `compact` shortens the card to a few fields with a button that shows the rest.
+ * empty. To render a field your own way, as a link for example, put an element in its
+ * `field-<name>` slot.
  *
  * The Open button appears only when you set `open-url` or `open`. `open-url` is a link template
  * such as `https://www.geonames.org/{geonameid}`, in which each `{name}` is replaced by the item's
- * value for that field, so that Open links to the item's page in a new tab. An item gets no Open
- * button when it has no value for a field the template names, or when the address is not `http:` or
- * `https:`. For anything other than a link, set `open` to a function, which is called with the
- * item's `mosaica_id` and fields and takes precedence over `open-url`.
+ * value for that field. Because the values are URL-encoded, a template cannot open an address that
+ * a field already holds, so set `open` to a function for that. An item gets no Open button when it
+ * has no value for a field the template names. A function in `open` is called with the item's
+ * `mosaica_id` and fields, and it takes precedence over `open-url`.
  *
  * @summary A card showing an item's fields, with an optional Open button.
  * @tagname mosaica-item-card

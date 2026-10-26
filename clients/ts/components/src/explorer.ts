@@ -116,30 +116,29 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 ];
 
 /**
- * The explorer is a complete map application in one element, for when you want a working page
- * without arranging the parts yourself. It puts a heading and the filter panel beside a map, draws
- * the status strip over it, and opens a card when the viewer picks an item or a cluster or selects
- * a region. You can replace any one of these parts by putting your own element in its slot, and
- * when you want a different arrangement altogether you lay out the separate elements yourself.
+ * Use the explorer when you want a working map page without arranging the elements yourself. It
+ * gives the viewer a map with the filter panel, the status strip and a Layers popover, and it opens
+ * a card when they pick an item or a cluster or select a region.
+ *
+ * Most of these parts have a slot, so you can put your own element in place of one of them. For a
+ * different arrangement, lay out the separate elements yourself.
  *
  * The explorer builds its store from `viewer-url` and `token` or `authorise`, unless you give it
  * one in its `store` property. Every element inside it uses that store, including the ones you put
- * in its slots, so they all show the same view and filters.
+ * in its slots.
  *
- * `layout="docked"` places the heading and the filter panel in a sidebar to the left of the map,
- * and `layout="overlay"` places them in a card over the map's top-left corner. When there are
- * several views, the view's name in the heading becomes a menu for switching between them.
+ * `layout="docked"` puts the heading and the filter panel in a sidebar beside the map, and
+ * `layout="overlay"` puts them in a card over it. When the bundle offers more than one view or
+ * group of views, the heading holds the view picker so that viewers can switch between them.
  *
  * A picked item's card opens beside its point and follows the point as the map moves. Picking
- * another point replaces the card unless the viewer has pressed Pin, and Escape or a click on an
- * empty part of the map closes the card only while it is unpinned.
+ * another point replaces the card unless the viewer has pinned it.
  *
- * The Layers button opens a popover of settings for how points, colour, density and layers are
- * drawn. Each of these settings is also an attribute of the explorer, so you can set it from HTML
- * as well.
+ * Each setting in the Layers popover is also an attribute of the explorer, so you can set it from
+ * HTML.
  *
- * Because the explorer lays itself out by the width of its container, it switches to the overlay
- * layout below 1000 px, and at 720 px or less it opens its panels as sheets from a tab bar.
+ * Below 1000 px the explorer uses the overlay layout whatever `layout` says. At 720 px or less it
+ * opens its panels as sheets from a tab bar.
  *
  * @summary A complete map application in a single element.
  * @tagname mosaica-explorer

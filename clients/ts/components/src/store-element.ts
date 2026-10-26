@@ -6,14 +6,13 @@ import {storeContext} from './context.js';
 import {attachContextRoot, defineOnce} from './define.js';
 
 /**
- * `<mosaica-store>` holds one store for the elements inside it, so that a map, a filter panel and
- * an item card you lay out yourself all show the same view and filters. The elements find the store
- * through context, which means you do not pass it to each one. You need one wrapper for each map of
- * a different view, and none inside `<mosaica-explorer>`, which provides its own store.
+ * Use `<mosaica-store>` when you lay out the elements yourself, so that the map, the filter panel
+ * and the cards all show the same view and filters. The elements inside it find its store through
+ * context, which means you do not pass the store to each one. Put each map of a different view in
+ * its own wrapper. `<mosaica-explorer>` provides its own store, so it needs no wrapper.
  *
- * The wrapper uses the store in its `store` property, or builds one from `viewer-url` and `token`
- * or `authorise` when that property is not set. It draws nothing itself, because its display is
- * `contents`.
+ * The wrapper uses the store in its `store` property. When that is not set, it builds one from
+ * `viewer-url` and `token` or `authorise`.
  *
  * @summary A wrapper that shares one store between the elements inside it.
  * @tagname mosaica-store

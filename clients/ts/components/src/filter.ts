@@ -21,19 +21,18 @@ const TYPING_DEBOUNCE_MS = 350;
 const BAR_FLOOR = 2;
 
 /**
- * `<mosaica-filter>` is a search box that filters the map by one column, for when you want the
- * search without the field card around it. Set `column` to a column `meta.filterOperands` lists,
- * and the box takes the form that column's kind needs:
+ * Use `<mosaica-filter>` when you want a search box for one column without the field card around
+ * it. Set `column` to a column `meta.filterOperands` lists. The box takes the form that the
+ * column's kind needs:
  *
  * - A text column takes words that an item must all contain. Double quotes match a phrase where the
  *   column supports phrases, and `OR` between terms matches either.
- * - A category column suggests values as the viewer types, showing how many items in view each one
- *   would add.
- * - A keyword column has a menu for choosing whether to match by `contains`, `prefix` or `eq`.
+ * - A category column suggests values as the viewer types. The arrow keys move through the
+ *   suggestions, Enter chooses or removes one, and Escape clears what was typed.
+ * - A keyword column has a menu for choosing how to match, by `contains`, `prefix` or `eq`.
  *
- * The box sets the filter on the store 350 ms after the last keystroke, so that the map does not
- * redraw for every letter, and at once when the viewer chooses a suggestion. If your code sets a
- * text filter the box cannot express, the box shows it read-only.
+ * The box sets the filter 350 ms after the last keystroke, so that the map does not redraw for
+ * every letter. If your code sets a text filter the box cannot express, the box shows it read-only.
  *
  * @summary A search box that filters the map by one column.
  * @tagname mosaica-filter

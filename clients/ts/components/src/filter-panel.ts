@@ -31,23 +31,20 @@ const VERBS: readonly ClauseVerb[] = ['filter', 'highlight'];
 const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : countText(n));
 
 /**
- * The filter panel is where viewers filter and highlight the map by any field, and
- * `<mosaica-explorer>` puts one in its sidebar. It holds a `<mosaica-field-card>` for each field it
- * shows, with the filters in force as chips above them.
+ * Use the filter panel as the place where viewers narrow the map down, as `<mosaica-explorer>` does
+ * in its sidebar. Each filter or highlight in force shows as a chip above the cards, and pressing a
+ * chip opens its field's card.
  *
- * The row at the top says what the cards' solid bars count, which is the items in view that the
+ * The row at the top says what the cards' solid bars count. That is the items in view that the
  * filters match, or the highlighted items while there is a highlight. The pale bars count
- * everything the filters match, anywhere, so that a viewer can compare what is in view with the
- * whole.
+ * everything the filters match, so that viewers can compare what is in view with the whole.
  *
  * The panel shows a card for each field in `pinned`, for each field that holds a filter or
- * highlight, and for the field the map is coloured by. Viewers add and remove other cards with Add
- * field, and taking a card off also clears that field's filters and highlights. Pressing a chip
- * opens its field's card, and Clear all removes every filter and highlight, including `member_of`
- * clauses.
+ * highlight, and for the field the map is coloured by. Viewers add other fields with Add field.
+ * Taking a card off clears that field's filters and highlights.
  *
- * `chips-only` and `controls-only` split the panel in two, so that you can place the chips apart
- * from the cards.
+ * Set `chips-only` on one panel and `controls-only` on another when you want the chips apart from
+ * the cards.
  *
  * @summary A panel of field cards for filtering and highlighting the map by any field.
  * @tagname mosaica-filter-panel

@@ -24,20 +24,23 @@ type Node = {
 const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
 
 /**
- * The hierarchy lets viewers browse a layer's artifacts as a tree and filter the map by them. It
- * opens on the top-level artifacts and stays put while the map moves, so viewers can reach an
- * artifact at any level wherever the camera is. It offers every layer whose artifacts form a
- * hierarchy, including filter layers, which the map does not draw, and a select switches between
- * them when there are several.
+ * Use the hierarchy when viewers should be able to reach a layer's artifacts at any level, wherever
+ * the camera is. It opens on the top-level artifacts and does not change as the map moves.
+ * Expanding a row loads its children a page at a time.
  *
- * Each row shows how many of the artifact's items the viewer may see, and how many of them match
- * while filters are set. Expanding a row loads its children a page at a time. A parent the viewer
- * may not see is left out, so its children appear at the top level.
+ * The hierarchy offers each layer that depends on no other layer and whose artifacts form a
+ * hierarchy, filter layers among them. When there are several, a select switches between them.
  *
- * A row's buttons highlight or filter the map by its artifact. Its Fit button fires
- * `mosaica-artifactfit`, which `<mosaica-explorer>` handles by fitting its map to the artifact.
- * Elsewhere, pass the event's id to the map's `fitTo`. The panel makes no requests while it is
- * hidden, so it costs nothing in a closed drawer.
+ * Each row shows how many of the artifact's items the viewer may see. While filters are set, it
+ * also shows how many of those items match. A parent the viewer may not see is left out, so its
+ * children appear at the top level.
+ *
+ * A row's buttons highlight or filter the map by its artifact. Its Fit button only fires
+ * `mosaica-artifactfit`, so you handle the event by passing its id to the map's `fitTo`. The
+ * explorer does this for a hierarchy you put in one of its slots. `fitTo` finds only the artifacts
+ * the map currently draws, so Fit does nothing for a row whose artifact is not drawn at this zoom.
+ *
+ * The panel makes no requests while it is hidden, so it costs nothing in a closed drawer.
  *
  * @summary A tree for browsing a layer's artifacts and filtering by them.
  * @tagname mosaica-hierarchy

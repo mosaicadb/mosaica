@@ -101,26 +101,25 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
 }
 
 /**
- * A field card charts how one field's values are spread across the items, so that viewers can see
- * which values are common and filter or highlight by them. `<mosaica-filter-panel>` shows one card
- * per field, and you use a card on its own to put one field's chart where you want it. Set `field`
- * to a column `meta.filterOperands` lists, or to `cluster:<layer>` for a layer's clusters.
+ * Use a field card on its own when you want one field's chart in a place of your choosing.
+ * `<mosaica-filter-panel>` shows one for each field. Set `field` to a column `meta.filterOperands`
+ * lists, or to `cluster:<layer>` for a layer's clusters.
  *
  * The solid bars count the items in view that the filters match, or the highlighted items while
- * there is a highlight, and the pale bars count every item the filters match. Neither applies the
+ * there is a highlight. The pale bars count every item the filters match. Neither count applies the
  * card's own filter, so a value the viewer has filtered out keeps its count.
  *
- * What the card draws depends on the kind of field:
+ * What the card shows depends on the kind of field:
  *
- * - A category or cluster card lists the values with most items in view, with Highlight and Filter
- *   buttons on each row and a search box for finding any other value.
+ * - A category or cluster card lists the values with most items in view, each with Highlight and
+ *   Filter buttons.
  * - A number or date card draws a histogram, and the viewer drags across it to pick a range to
- *   filter or highlight by. Counts over more than about 100,000 items come from a sample, so they
- *   are marked "≈".
+ *   filter or highlight by. From the keyboard, they press Shift and the arrow keys on the focused
+ *   plot, then Enter. Counts over about 100,000 items come from a sample, so they are marked "≈".
  * - A text or keyword field's card is a search box, `<mosaica-filter>`.
  *
- * The paint button colours the map by the field. While it does, clicking a value's colour opens a
- * picker that changes that colour on the map at once.
+ * While the paint button colours the map by the field, clicking a value's colour opens a picker
+ * that changes the colour on the map.
  *
  * @summary A card that charts one field's values and filters or highlights by them.
  * @tagname mosaica-field-card
