@@ -1,6 +1,6 @@
 # cargo-deny's configuration: which licences, sources and crates the Rust dependency graph may
-# contain. `cargo deny check licenses bans sources` runs in the gate; the release workflow also runs
-# `advisories`, which reads the RustSec database over the network.
+# contain, and the advisories it may carry. `cargo deny check` runs in the gate (ci.yml) and at
+# release (release.yml); advisories read the RustSec database over the network.
 
 [graph]
 # The shipped artifacts are built with default features.
@@ -60,11 +60,4 @@ ignore = [
   # signatures against public JWKs: every input is public. The fix is in crypto-bigint 0.7.6, which
   # elliptic-curve 0.13 does not accept.
   { id = "RUSTSEC-2026-0387", reason = "crypto-bigint is used only to verify signatures with public JWKs; no secret integer is involved" },
-  # The three below are fixed in zstd 0.14 and zstd-safe 8, which arrow-ipc and parquet take from
-  # arrow 60 on. Every zstd call in the graph, ours and arrow's and parquet's, is the bulk API or
-  # `stream::decode_all`: none reuses a context through a stream `with_context` constructor, none
-  # streams into a `write::Decoder`, and the `seekable` feature is off.
-  { id = "RUSTSEC-2026-0391", reason = "no stream encoder or decoder is built with_context; only the bulk API and decode_all are used" },
-  { id = "RUSTSEC-2026-0398", reason = "the zstd seekable feature is not enabled" },
-  { id = "RUSTSEC-2026-0403", reason = "nothing decompresses through DCtx::decompress_stream or write::Decoder; the bulk API and decode_all are not affected" },
 ]
