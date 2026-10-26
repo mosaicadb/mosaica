@@ -449,6 +449,9 @@ class Map(anywidget.AnyWidget):
             _esm=bundle.read_text(encoding="utf-8"),
             **kwargs,
         )
+        # Inside an ipywidgets row the map's element would take no width, and draw nothing.
+        if "layout" not in kwargs:
+            self.layout.width = "100%"
         self.on_msg(self._on_page_message)
 
     # ---- the token ---------------------------------------------------------------------------
@@ -559,3 +562,27 @@ class Map(anywidget.AnyWidget):
 
     def __repr__(self) -> str:
         return f"Map(url={self.url!r}, view={self.view!r}, layers={self.layers!r})"
+
+
+def side_by_side(*maps: Map) -> Any:
+    """Several maps in one row, sharing its width equally, in a notebook cell.
+
+    Each map keeps its own view, camera, filters and colours; moving one moves no other. In a
+    marimo notebook the row is `marimo.hstack` over the maps, and elsewhere, as in Jupyter, an
+    `ipywidgets.HBox`. Show it as a cell's last value, as a map is shown.
+
+        mosaica.side_by_side(db.map(view="topics"), db.map(view="topics-wide"))
+
+    A call with no map, or with something that is not a `Map`, raises `TypeError`.
+    """
+    if not maps or not all(isinstance(one, Map) for one in maps):
+        raise TypeError(
+            "side_by_side takes the maps to show as its arguments, such as "
+            "side_by_side(db.map(view='a'), db.map(view='b'))"
+        )
+    marimo = sys.modules.get("marimo")
+    if marimo is not None and marimo.running_in_notebook():
+        return marimo.hstack(list(maps), widths="equal")
+    import ipywidgets
+
+    return ipywidgets.HBox(list(maps))

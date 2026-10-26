@@ -422,3 +422,36 @@ def test_an_image_url_is_not_read_here(make):
     m = make(token="t", basemap={"image": "HTTPS://example.org/plan.png"})
     asks(m, {"HTTPS://example.org/plan.png": 1})
     assert m.sent == [] and synced_basemap(m)["images"] == {}
+
+
+def test_maps_side_by_side_in_jupyter_are_one_row_each_filling_its_share(make):
+    import ipywidgets
+
+    import mosaica
+
+    left, right = make(token="t", view="topics"), make(token="t", view="topics-wide")
+    row = mosaica.side_by_side(left, right)
+    assert isinstance(row, ipywidgets.HBox) and list(row.children) == [left, right]
+    # A map takes its container's width, which a row shares among its maps.
+    assert left.layout.width == right.layout.width == "100%"
+
+
+def test_maps_side_by_side_in_marimo_are_one_stack_of_both_widgets(make, monkeypatch):
+    marimo = pytest.importorskip("marimo")
+    import mosaica
+
+    monkeypatch.setattr(marimo, "running_in_notebook", lambda: True)
+    left, right = make(token="t"), make(token="t")
+    row = mosaica.side_by_side(left, right)
+    html = row.text
+    assert html.count("<marimo-anywidget") == 2
+    assert left.model_id in html and right.model_id in html
+
+
+def test_side_by_side_takes_maps_and_nothing_else(make):
+    import mosaica
+
+    with pytest.raises(TypeError):
+        mosaica.side_by_side()
+    with pytest.raises(TypeError):
+        mosaica.side_by_side(make(token="t"), "a map")

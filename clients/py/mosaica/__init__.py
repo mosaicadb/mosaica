@@ -15,9 +15,9 @@ providers and sessions.
 
 Every table the package returns is a pyarrow table, whose `.to_pandas()` gives a pandas
 DataFrame when pandas is installed. `Map` shows a database as an interactive map in a notebook
-cell, and needs the `widget` extra, which `pip install 'mosaica[widget]'` adds. `Map`, `create`,
-`open` and `Database` are loaded when first used, so `import mosaica` works without anywidget or
-pyarrow.
+cell, and `side_by_side` shows several maps in one row; both need the `widget` extra, which
+`pip install 'mosaica[widget]'` adds. `Map`, `side_by_side`, `create`, `open` and `Database` are
+loaded when first used, so `import mosaica` works without anywidget or pyarrow.
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ __all__ = [
     "logout",
     "open",
     "revoke",
+    "side_by_side",
     "__version__",
 ]
 __version__ = "0.1.0rc4"
@@ -54,14 +55,14 @@ _SDK = {"create": "create", "open": "open", "Database": "Database"}
 
 
 def __getattr__(name: str):
-    if name == "Map":
+    if name in ("Map", "side_by_side"):
         try:
-            from .widget import Map
+            from . import widget
         except ImportError as e:
             raise ImportError(
-                "mosaica.Map needs the widget extra: pip install 'mosaica[widget]'"
+                f"mosaica.{name} needs the widget extra: pip install 'mosaica[widget]'"
             ) from e
-        return Map
+        return getattr(widget, name)
     if name in _SDK:
         try:
             from . import _database

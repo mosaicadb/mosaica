@@ -6,4 +6,6 @@
     options:
       merge_init_into_class: true
 
+::: mosaica.widget.side_by_side
+
 ::: mosaica.widget.bundle_path
