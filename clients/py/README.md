@@ -8,7 +8,7 @@ pip install 'mosaica[widget]'
 ```
 
 On Linux or macOS on x86_64 or ARM64 (a `platform_machine` of `x86_64`, `aarch64` or `arm64`),
-`mosaica` depends on `mosaica-native` at exactly its own version. That companion wheel carries the `mosaica` binary,
+`mosaica` depends on `mosaica-native==0.1.0-rc.4`, its own version. That companion wheel carries the `mosaica` binary,
 which pip puts on `PATH`, and the `_mosaica` extension module. Its wheels are built for Linux on
 x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and
 macOS 10.12 or later on x86_64. On a machine the marker leaves out, Windows included, `mosaica`

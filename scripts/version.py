@@ -13,7 +13,7 @@
 The copies are the workspace crates' exact pins in Cargo.toml and their entries in Cargo.lock, both
 pyprojects and the `mosaica-native==` pin, `mosaica.__version__` (in its PEP 440 form, 0.2.0rc1
 for 0.2.0-rc.1), the four published npm packages, their dependencies on one another and their
-entries in package-lock.json, and the versions the client READMEs quote.
+entries in package-lock.json, and the pin the Python README quotes.
 
 A pre-release is `X.Y.Z-rc.N`, the only form the release workflow's tag pattern accepts.
 """
@@ -78,13 +78,6 @@ TEXT_COPIES = [
     ("clients/py-native/pyproject.toml", r'^version = "([^"]+)"$', 1, full),
     ("clients/py/mosaica/__init__.py", r'^__version__ = "([^"]+)"$', 1, pep440),
     ("clients/py/README.md", r"`mosaica-native==([^`]+)`", 1, full),
-    ("clients/ts/README.md", r"mosaicajs-(?:client|deck|components|react)-([^/\s`]+?)\.tgz", None, full),
-    ("clients/ts/README.md", r"exactly version (\S+?) of", 1, full),
-    ("clients/ts/README.md", r"on (\S+?) or a later", 1, full),
-    ("clients/ts/README.md", r"or a later (\S+?) release", 1, minor),
-    ("clients/ts/README.md", r"Version (\S+?) exists only", 1, full),
-    ("clients/ts/README.md", r"@mosaicajs/client@([^`]+)`", 1, full),
-    ("clients/ts/README.md", r"`@mosaicajs/components` `\^([^`]+)`", 1, full),
 ]
 
 
