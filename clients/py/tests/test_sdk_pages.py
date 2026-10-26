@@ -1669,3 +1669,28 @@ def test_a_clustering_and_its_names_in_mosaicas_own_shape_need_no_keyword(tmp_pa
         }
     finally:
         db.close()
+
+
+def test_labels_given_as_text_read_no_other_column_of_their_table_by_name(tmp_path):
+    """The SDK writes the label table from the key and the text, so a `parent`, `contents` or
+    `level` column the caller's table carries besides is not read, and the labels are served."""
+    db, rows = two_items(tmp_path / "db")
+    try:
+        db.declare_layer("halves", kind="flat")
+        db.declare_labels("names", of="halves")
+        db.insert("halves", rows.assign(half=["l", "r"]), key="half")
+        db.insert(
+            "names",
+            pa.table({"key": ["l", "r"], "name": ["Left", "Right"], "parent": ["x", "y"],
+                      "contents": ["long l", "long r"], "level": [3, 3]}),
+            key="key", text="name",
+        )
+        assert db.commit().ok
+        halves = db.artifacts("map", "halves", ["key"]).to_pylist()
+        names = db.artifacts("map", "names", ["content", "target"]).to_pylist()
+        named = {row["target"]: row["content"] for row in names}
+        assert {row["key"]: named[row["mosaica_id"]] for row in halves} == {
+            "l": ["Left"], "r": ["Right"],
+        }
+    finally:
+        db.close()

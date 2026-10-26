@@ -182,7 +182,10 @@ def by_name(names, schema, stated: dict, taken=()) -> dict:
 def with_columns_by_name(contract: Contract, schema, named: dict) -> dict:
     """The call's keywords, and for a table in Mosaica's own shape each keyword it left out whose
     column the table carries under the keyword's own name. A column the call names for another
-    keyword is not read twice."""
+    keyword is not read twice.
+
+    A label set's text given with `text=` is no such table: the SDK writes the table the layer
+    reads from the key, the text and the keywords the call states, so only `key` is matched."""
     if not contract.canonical:
         return named
     keywords = [
@@ -190,6 +193,8 @@ def with_columns_by_name(contract: Contract, schema, named: dict) -> dict:
         for one in contract.required + contract.optional + contract.either
         if one in contract.canonical and one not in named
     ]
+    if "text" in named:
+        keywords = [one for one in keywords if one == "key"]
     return {**by_name(keywords, schema, {}, taken=set(named.values())), **named}
 
 
