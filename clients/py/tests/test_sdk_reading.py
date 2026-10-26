@@ -417,3 +417,36 @@ def test_every_id_a_read_returns_is_one_decimal_string_that_joins_across_tables(
         assert list(listed.merge(clusters, left_on="key", right_on="mosaica_id")["key_y"]) == ["b"]
     finally:
         db.close()
+
+
+def test_an_attribute_named_like_an_annotations_id_column_reads_back_as_it_was_inserted(tmp_path):
+    """Items, a lookup and a sample give a reader's own `target` and `parents` columns as their
+    numbers; only the item's `mosaica_id` is a decimal string."""
+    import pyarrow as pa
+
+    from conftest import binary
+    from mosaica import create
+
+    binary()
+    db = create(tmp_path / "db")
+    try:
+        db.declare_view("map", extent={"min": 0.0, "max": 8.0})
+        db.declare_attribute("id", type="i64", unique=True)
+        db.declare_attribute("target", type="i64", render=True)
+        db.declare_attribute("parents", type="i64", render=True)
+        db.insert("map", pa.table({"id": [1, 2], "x": [0.0, 1.0], "y": [0.0, 1.0],
+                                   "access": ["public", "public"], "target": [7, 8],
+                                   "parents": [70, 80]}),
+                  x="x", y="y", access="access")
+        assert db.commit().ok
+        reads = (
+            db.items("map", ["target", "parents"]),
+            db.lookup("map", "id", [1, 2], ["target", "parents"]),
+            db.view("map").sample().points,
+        )
+        for table in reads:
+            rows = sorted(table.select(["target", "parents"]).to_pylist(), key=lambda r: r["target"])
+            assert rows == [{"target": 7, "parents": 70}, {"target": 8, "parents": 80}]
+            assert all(isinstance(one, str) for one in table.column("mosaica_id").to_pylist())
+    finally:
+        db.close()

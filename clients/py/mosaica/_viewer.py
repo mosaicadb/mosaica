@@ -181,7 +181,8 @@ class Batches:
             raise Refusal(f"POST /v1/{route}: the response did not begin with its head")
         self.head: dict = json.loads(first[1])
         # What each page goes through before it is given: its ids become decimal strings.
-        self._page = _ids_as_text
+        also = ANNOTATION_IDS if route == "artifacts" else ()
+        self._page = lambda page: _ids_as_text(page, also)
         # The server takes `count` on a read's first request only.
         rest = {key: value for key, value in request.items() if key != "count"}
         self._pages = self._read(reader, rest, frames)
@@ -269,12 +270,13 @@ class Batches:
         self._response.close()
 
 
-def _tables(payloads: Sequence[bytes]):
-    """The Arrow streams of one frame kind joined in arrival order, or `None` if there were none."""
+def _tables(payloads: Sequence[bytes], also: Sequence[str] = ()):
+    """The Arrow streams of one frame kind joined in arrival order, their ids as decimal strings
+    as `_ids_as_text` makes them, or `None` if there were none."""
     import pyarrow as pa
     from pyarrow import ipc
 
-    tables = [_ids_as_text(ipc.open_stream(payload).read_all()) for payload in payloads]
+    tables = [_ids_as_text(ipc.open_stream(payload).read_all(), also) for payload in payloads]
     return pa.concat_tables(tables) if tables else None
 
 
@@ -381,21 +383,22 @@ def decimal_id(value: Any) -> Optional[str]:
     return None
 
 
-#: The columns of a read that carry `mosaica_id`s, by name, beside a sample's
-#: `membership:<layer>` columns.
-ID_COLUMNS = ("mosaica_id", "target", "parents", "parent_ids")
+#: The columns of an annotation read that carry `mosaica_id`s besides its own. A read of items
+#: holds the reader's attributes, which may carry any of these names, so it converts none of them.
+ANNOTATION_IDS = ("target", "parents", "parent_ids")
 
 
 def _ids_as_text(data, also: Sequence[str] = ()):
     """A table or record batch read back from the server, with every column carrying
     `mosaica_id`s as their decimal strings: a `u64` past 2^53 is not exact as a float, which is
-    what pandas makes of an integer column holding a null. `also` names further columns that
-    carry them in this read, such as an aggregate's `key` grouped by a layer."""
+    what pandas makes of an integer column holding a null. Those are `mosaica_id`, a sample's
+    `membership:<layer>` columns, and the columns `also` names that carry them in this read, such
+    as an annotation's `target` or an aggregate's `key` grouped by a layer."""
     import pyarrow as pa
 
     fields, columns, changed = [], [], False
     for field, column in zip(data.schema, data.columns):
-        if field.name in ID_COLUMNS or field.name in also or field.name.startswith("membership:"):
+        if field.name == "mosaica_id" or field.name in also or field.name.startswith("membership:"):
             if pa.types.is_integer(field.type):
                 field, column = field.with_type(pa.string()), column.cast(pa.string())
                 changed = True
@@ -1281,7 +1284,7 @@ class Viewer:
                 if trailer is not None:
                     raise Refusal("artifacts viewport: a frame after the trailer")
                 if kind == FRAME_ARTIFACTS:
-                    table = _tables([payload])
+                    table = _tables([payload], ANNOTATION_IDS)
                     tables.append(table)
                     if on_tile is not None:
                         on_tile(table)
