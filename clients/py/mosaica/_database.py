@@ -1326,7 +1326,7 @@ class Database:
                 report,
             )
         self.built = True
-        self._record_label_columns(document.get("layer", []))
+        self._record_committed_layers(document.get("layer", []))
         self.serve()
         report.seconds = time.monotonic() - started
         if self.listening is not None:
@@ -1386,7 +1386,7 @@ class Database:
         if report.findings:
             raise Refusal(str(report), report)
         accepted = C.run(control, pages, report, strict)
-        self._record_label_columns(page.body for page in accepted if page.kind == "layer")
+        self._record_committed_layers(page.body for page in accepted if page.kind == "layer")
         self.pending.clear()
         self._save_state()
         if pages and not accepted:
@@ -1627,13 +1627,21 @@ class Database:
             f"and a row of the points naming none is an item of its own"
         )
 
-    def _record_label_columns(self, layers: Iterable[dict]) -> None:
-        """Write onto the SDK's own layer blocks the label column each layer was committed with,
-        so a later insert naming another column is refused."""
+    def _record_committed_layers(self, layers: Iterable[dict]) -> None:
+        """Write onto the SDK's own layer blocks what each layer was committed with: its label
+        column, so a later insert naming another column is refused, and its value set, so a later
+        commit sends the declaration the database holds whatever that commit inserts."""
+        declared = {block.get("name"): block for block in self.blocks.blocks["layer"]}
         for layer in layers:
+            held = declared.get(layer["name"])
+            if held is None:
+                continue
             field = dict(layer.get("artifact_visibility") or {}).get("field")
             if field:
-                D.carry_labels(layer["name"], self.blocks.layer(layer["name"]), field)
+                D.carry_labels(layer["name"], held, field)
+            if layer.get("value_set"):
+                held["value_set"] = layer["value_set"]
+                held[D.CHOSEN_VALUE_SET] = True
         self._save_state()
 
     # ------------------------------------------------------------------ verbs that are not inserts

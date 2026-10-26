@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from conftest import browse, item, viewport
+from conftest import small as two_items
 from mosaica import _commit as commit_module
 from mosaica._refusal import Refusal
 
@@ -1542,3 +1543,37 @@ def test_the_databases_own_viewer_satisfies_a_layers_named_default(served, corpu
     db = served(declare)
     assert "bare" in teams_seen(db, None)
     assert "bare" not in teams_seen(db, ["public"])
+
+
+def test_a_tiered_layer_committed_from_its_artifacts_is_the_same_declaration_at_the_next_commit(
+    tmp_path,
+):
+    """A layer declared after the first commit takes its value set from that commit's inserts, and
+    the next commit, which inserts nothing into it, sends the declaration the database holds."""
+    db, rows = two_items(tmp_path / "db")
+    try:
+        assert db.commit().ok
+        db.declare_layer("topics", kind="tiered", levels=[(0, "broad"), (1, "fine")])
+        db.insert(
+            "topics",
+            artifacts=pa.table({"key": ["b", "f"], "level": pa.array([0, 1], pa.uint32()),
+                                "parent": [None, "b"]}),
+            key="key", level="level", parent="parent",
+        )
+        db.insert(
+            "topics",
+            members=pa.table({"key": ["b", "b", "f"], "level": pa.array([0, 0, 1], pa.uint32()),
+                              "id": [1, 2, 1]}),
+            key="key", level="level",
+        )
+        assert db.commit().ok
+
+        db.declare_layer("halves", kind="flat")
+        db.insert("halves", rows.assign(half=["left", "right"]), key="half")
+        report = db.commit()
+        assert report.ok, report
+        assert not report.refusals
+        held = {layer["name"] for layer in db.meta()["layers"]}
+        assert {"topics", "halves"} <= held
+    finally:
+        db.close()
