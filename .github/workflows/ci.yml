@@ -310,6 +310,8 @@ jobs:
       - run: bash clients/py/check.sh
         env:
           PYTEST_ADDOPTS: --cov=mosaica --cov-report=xml:coverage.xml
+      # The extension module's own tests, in the venv and on the build the step above made.
+      - run: bash crates/mosaica-python/check.sh
       # coverage.py names files relative to the package; Codacy matches them from the repository root.
       - name: coverage report
         if: ${{ !cancelled() }}

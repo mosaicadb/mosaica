@@ -358,7 +358,6 @@ const DIGEST_CHUNK_BYTES: usize = 1 << 20;
 /// size of what was hashed even if the file changes underneath — a digest and a length describing
 /// different contents is worse than either being wrong.
 pub fn digest_of(path: &Path) -> Result<FileDigest> {
-    use std::fmt::Write as _;
     use std::io::Read as _;
 
     let io = |source| StoreError::Io {
@@ -377,11 +376,10 @@ pub fn digest_of(path: &Path) -> Result<FileDigest> {
         hasher.update(&buffer[..read]);
         size += read as u64;
     }
-    let mut hex = String::with_capacity(64);
-    for byte in hasher.finalize() {
-        let _ = write!(hex, "{byte:02x}");
-    }
-    Ok(FileDigest { size, sha256: hex })
+    Ok(FileDigest {
+        size,
+        sha256: crate::hex(&hasher.finalize()),
+    })
 }
 
 #[cfg(test)]

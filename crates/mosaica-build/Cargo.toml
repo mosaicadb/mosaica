@@ -41,7 +41,6 @@ mosaica-filter-write = { workspace = true }
 croaring = { workspace = true }
 arrow = { workspace = true }
 parquet = { workspace = true }
-sha2 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "0.8"
@@ -55,6 +54,7 @@ mosaica-engine = { path = "../mosaica-engine" }
 croaring = { workspace = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
+sha2 = { workspace = true }
 # docs/reference/schema-toml.md is rendered from this crate's source (`src/config/reference.rs`).
 mosaica-docgen = { path = "../mosaica-docgen" }
 

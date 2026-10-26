@@ -8,7 +8,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::Read;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -1934,11 +1933,15 @@ pub(crate) fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Verify every entry of `files` (path relative to `base`, forward slashes per R1) by exact
-/// size and SHA-256 hex digest. Any missing, mis-sized or mismatched file is a hard error.
-///
-/// **One exemption, and only one:** the key runs ([`is_deferred`]), whose pages are checked as
-/// they are read.
+/// `true` if `rel` names a key run (`*.keys`, [`crate::key_index`]), which the open does not
+/// digest: each of its pages carries its own checksum, checked the first time the page is read, so
+/// a unique index is not read whole before its first lookup. `mosaica verify --deep` digests it.
+fn is_deferred(rel: &str) -> bool {
+    rel.ends_with(".keys")
+}
+
+/// Verify one named file's size and digest. The per-file half of [`verify_files`], split out so
+/// the sweep can run them concurrently.
 ///
 /// **TOCTOU note:** this reads each file's bytes once, here, to check size+digest; the loader
 /// (`Permutation::load`, `MortonSlice::load`, `ColumnsRef::load`) then separately mmaps the
@@ -1951,20 +1954,6 @@ pub(crate) fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
 /// codebase (see `mosaica-authz`'s postings reader) — it is an operational/deployment concern
 /// (read-only bundle storage, no writer with access to a serving replica's files), not one this
 /// module's checks can close from inside a single process.
-/// How much of a file is held in memory at once while hashing it (see `verify_files`). Matches
-/// `mosaica-build`'s constant of the same name; the two crates share no dependency to share it
-/// through.
-const DIGEST_CHUNK_BYTES: usize = 1 << 20;
-
-/// `true` if `rel` names a key run (`*.keys`, [`crate::key_index`]), which the open does not
-/// digest: each of its pages carries its own checksum, checked the first time the page is read, so
-/// a unique index is not read whole before its first lookup. `mosaica verify --deep` digests it.
-fn is_deferred(rel: &str) -> bool {
-    rel.ends_with(".keys")
-}
-
-/// Verify one named file's size and digest. The per-file half of [`verify_files`], split out so
-/// the sweep can run them concurrently.
 fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
     let path = safe_join(base, rel_path)?;
     // The path is still validated (above) even when its bytes are not read here, so an
@@ -1972,28 +1961,7 @@ fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
     if is_deferred(rel_path) {
         return Ok(());
     }
-    // Read in fixed-size chunks, never whole: at 10^9 items `columns.arrow` alone is over 20 GB,
-    // and slurping every file to hash it would make opening a bundle cost more memory than
-    // serving it. One buffer per file rather than one per sweep, which is what lets the files run
-    // concurrently; at `DIGEST_CHUNK_BYTES` the transient is the buffer times the pool's width.
-    let mut buffer = vec![0u8; DIGEST_CHUNK_BYTES];
-    let mut file = File::open(&path).map_err(|source| StoreError::Io {
-        path: path.clone(),
-        source,
-    })?;
-    let mut hasher = Sha256::new();
-    let mut size = 0u64;
-    loop {
-        let read = file.read(&mut buffer).map_err(|source| StoreError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        size += read as u64;
-    }
+    let FileDigest { size, sha256: actual } = crate::flush::digest_of(&path)?;
     if size != digest.size {
         return Err(StoreError::FileVerificationFailed {
             path,
@@ -2003,7 +1971,6 @@ fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
             ),
         });
     }
-    let actual = hex_digest(&hasher.finalize());
     if actual != digest.sha256 {
         return Err(StoreError::FileVerificationFailed {
             path,
@@ -2054,14 +2021,14 @@ fn verify_files(base: &Path, files: &BTreeMap<String, FileDigest>) -> Result<()>
 }
 
 pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
-    hex_digest(&Sha256::digest(bytes))
+    hex(&Sha256::digest(bytes))
 }
 
-/// `digest` as lowercase hexadecimal, two characters a byte.
-pub fn hex_digest(digest: &[u8]) -> String {
+/// `bytes` as lowercase hexadecimal, two characters a byte.
+pub fn hex(bytes: &[u8]) -> String {
     use std::fmt::Write;
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
         let _ = write!(out, "{byte:02x}");
     }
     out

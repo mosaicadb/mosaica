@@ -9,6 +9,8 @@ corpus to read.
 """
 
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,6 +63,17 @@ def project(declaration: str, deployment: str = DEPLOYMENT) -> str:
     return str(directory / "mosaica.toml")
 
 
+def printed_by_the_binary(deployment: str) -> str:
+    """What `mosaica check` writes to stderr for `deployment`, from the binary MOSAICA_BIN names."""
+    binary = os.environ.get("MOSAICA_BIN")
+    if not binary:
+        raise unittest.SkipTest("MOSAICA_BIN is not set; check.sh sets it to the binary it builds")
+    run = subprocess.run(
+        [binary, "check", "--deployment", deployment], capture_output=True, text=True, check=False
+    )
+    return run.stderr
+
+
 class ACleanDeclaration(unittest.TestCase):
     def test_checks(self):
         result = _mosaica.check(project(DECLARED_AND_EMPTY))
@@ -80,12 +93,8 @@ class ACleanDeclaration(unittest.TestCase):
         self.assertEqual([body["name"] for body in payloads["attributes"]], ["score"])
 
     def test_carries_the_whole_page_the_binary_prints(self):
-        page = _mosaica.check(project(DECLARED_AND_EMPTY)).page
-        self.assertIn("declared and empty", page)
-        # The disclosure table, which a caller rendering from the findings alone cannot write.
-        self.assertIn("\nviews\n", page)
-        self.assertIn("attributes (in declaration order", page)
-        self.assertIn("check OK:", page)
+        deployment = project(DECLARED_AND_EMPTY)
+        self.assertEqual(_mosaica.check(deployment).page, printed_by_the_binary(deployment))
 
     def test_payloads_are_text_a_second_call_repeats(self):
         deployment = project(DECLARED_AND_EMPTY)
@@ -104,6 +113,10 @@ class ADeclarationThatDoesNotCheck(unittest.TestCase):
             self.assertIn(finding.object.block, ("view", "source", "attribute", "layer"))
             self.assertTrue(finding.object.name)
             self.assertTrue(finding.detail)
+
+    def test_its_page_is_the_one_the_binary_prints(self):
+        deployment = project(NAMES_A_FILE_THAT_IS_NOT_THERE)
+        self.assertEqual(_mosaica.check(deployment).page, printed_by_the_binary(deployment))
 
     def test_its_page_states_the_verdict_and_discloses_nothing(self):
         page = _mosaica.check(project(NAMES_A_FILE_THAT_IS_NOT_THERE)).page

@@ -572,7 +572,7 @@ fn check_unique_indexes(
                     BuildError::Invalid(format!("{rel}: a unique index run no files map digests"))
                 })?;
             let path = join_rel(prefix_dir, rel)?;
-            let actual = crate::digest_file(&path)?;
+            let actual = mosaica_store::digest_of(&path)?;
             if actual.size != digest.size || actual.sha256 != digest.sha256 {
                 return Err(BuildError::Invalid(format!(
                     "{rel}: bytes do not match the manifest digest"

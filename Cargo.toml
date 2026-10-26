@@ -70,8 +70,11 @@ proptest = "1"
 # writer handing each buffer to the sink separately. A 60.x that encoded a batch contiguously
 # before writing it would materialise the whole body — ~70 GB at rung 6 — inside the layout pass.
 # The `Recorder`'s refusal above `MAX_FRAMING_WRITE` is what catches it; the pin is what stops a
-# `cargo update` from reaching it in the first place.
+# `cargo update` from reaching it in the first place. The writer is in arrow-ipc, and arrow takes
+# its sub-crates by caret, so the arrow-ipc pin is the one that holds the writer; arrow is pinned
+# to the same version so the two move together.
 arrow = { version = "=60.0.0", default-features = false, features = ["ipc"] }
+arrow-ipc = { version = "=60.0.0", default-features = false }
 tempfile = "3"
 # Test-only, and dev-only everywhere it is used: compile-fail harness for the invariants that
 # are upheld by the type system (I4). See crates/mosaica-types/tests/compile_fail.rs.

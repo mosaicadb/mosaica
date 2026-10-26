@@ -15,28 +15,12 @@
 # the walk a reader is pointed at cannot drift from the package. It skips, naming what is
 # missing, where `data/notebook-sample/` or the `mosaica` binary is absent.
 #
-# The venv is `clients/py/.venv` (gitignored); it is made on the first run and reused after. Set
-# MOSAICA_CHECK_FRESH=1 to rebuild it.
+# The venv is `clients/py/.venv` (gitignored), made and checked by `venv.sh`.
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-if [ -n "${MOSAICA_CHECK_FRESH:-}" ]; then rm -rf .venv; fi
-
-py=.venv/bin/python
-if [ ! -x "$py" ]; then
-  echo "check-python: making clients/py/.venv"
-  if command -v uv >/dev/null 2>&1; then
-    uv venv -q --python '>=3.12' .venv
-  else
-    python3 -m venv .venv
-  fi
-fi
-if ! "$py" -c 'import sys; sys.exit(sys.version_info < (3, 12))'; then
-  echo "check-python: clients/py/.venv is $("$py" -V), and mosaica needs Python 3.12 or later." >&2
-  echo "  Remove clients/py/.venv and re-run with a Python 3.12 or later as python3, or with uv." >&2
-  exit 1
-fi
+source ./venv.sh
 
 install() {
   if command -v uv >/dev/null 2>&1; then

@@ -341,11 +341,7 @@ pub fn identity_key_fingerprint(key_hex: &str) -> String {
     hasher.update(b"mosaica-identity-key-fingerprint-v1\0");
     hasher.update(key_hex.as_bytes());
     let digest = hasher.finalize();
-    let mut out = String::from("fp:");
-    for byte in &digest[..4] {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
+    format!("fp:{}", crate::hex(&digest[..4]))
 }
 
 /// `MANIFEST.json`'s `identity` object: the `mosaica_id` permutation's construction, round count
@@ -2705,7 +2701,7 @@ pub mod hex_32 {
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(bytes: &[u8; 32], s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&crate::read::hex_digest(bytes))
+        s.serialize_str(&crate::hex(bytes))
     }
 
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 32], D::Error> {
@@ -3132,7 +3128,7 @@ mod tests {
         let mut value = serde_json::to_value(&record).unwrap();
         assert_eq!(
             value["identity"],
-            serde_json::json!(crate::read::hex_digest(&record.identity))
+            serde_json::json!(crate::hex(&record.identity))
         );
         let back: ShardRecord = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(back.identity, record.identity);

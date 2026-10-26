@@ -6,6 +6,21 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
+## [Unreleased]
+
+### Changed
+
+- **Python.** The `mosaica` and `mosaica-native` packages need Python 3.12 or later, the
+  mosaica-native wheels are tagged `cp312-abi3`, and `mosaica` needs pyarrow 14.0.1 or later.
+- **Dependencies.** arrow and parquet 60 with zstd 0.14, which fixes the three zstd advisories the
+  earlier candidates ignored; rusqlite 0.41, with SQLite 3.54.1. The CI gate checks security
+  advisories on every pull request.
+
+### Fixed
+
+- A bundle file whose Arrow schema is malformed is refused when the bundle opens, rather than
+  panicking.
+
 ## [0.1.0-rc.4] - 2026-10-26
 
 The fourth release candidate for 0.1.0. 0.1.0-rc.1 reached PyPI and the container registry but
@@ -118,6 +133,7 @@ any later release, and a bundle built by one version may be refused by the next.
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
+[Unreleased]: https://github.com/mosaicadb/mosaica/compare/v0.1.0-rc.4...HEAD
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
 [0.1.0-rc.1]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.1
 [0.1.0-rc.4]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.4

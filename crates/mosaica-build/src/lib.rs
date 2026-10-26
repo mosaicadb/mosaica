@@ -66,8 +66,6 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
-
 use mosaica_authz::{write_postings, DictWriter};
 use mosaica_spatial::tiler::{sort_batch, ScalarValue, TilerItem};
 use mosaica_spatial::{split32, Bounds};
@@ -2501,7 +2499,7 @@ fn write_manifests(
         .collect();
     let manifest_files: BTreeMap<String, FileDigest> = all_paths
         .into_par_iter()
-        .map(|path| Ok((relative_to(&prefix_dir, path)?, digest_file(path)?)))
+        .map(|path| Ok((relative_to(&prefix_dir, path)?, mosaica_store::digest_of(path)?)))
         .collect::<Result<_>>()?;
 
     let bundle_bytes: u64 = manifest_files.values().map(|f| f.size).sum();
@@ -3386,36 +3384,6 @@ fn fsync_file(path: &Path) -> Result<()> {
 fn fsync_dir(path: &Path) -> Result<()> {
     let dir = File::open(path).map_err(|e| BuildError::io(path, e))?;
     dir.sync_all().map_err(|e| BuildError::io(path, e))
-}
-
-/// How much of a file is held in memory at once while hashing it. One mebibyte is large enough
-/// that the syscall cost is noise against the hashing and small enough to be irrelevant to the
-/// build's peak.
-const DIGEST_CHUNK_BYTES: usize = 1 << 20;
-
-/// SHA-256 and size of `path`, read in fixed-size chunks. Never `fs::read` here: at 10⁹ items
-/// `columns.arrow` alone is over 20 GB, and slurping it to hash it would reintroduce the very
-/// ceiling this build was rewritten to remove.
-fn digest_file(path: &Path) -> Result<FileDigest> {
-    use std::io::Read;
-    let mut file = File::open(path).map_err(|e| BuildError::io(path, e))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; DIGEST_CHUNK_BYTES];
-    let mut size = 0u64;
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|e| BuildError::io(path, e))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        size += read as u64;
-    }
-    Ok(FileDigest {
-        size,
-        sha256: mosaica_store::hex_digest(&hasher.finalize()),
-    })
 }
 
 /// Manifest keys are prefix-relative with forward slashes (R1), on every platform.

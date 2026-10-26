@@ -80,7 +80,7 @@ pub use manifest_write::{
 pub use pairs::PairsParquetWriter;
 pub use permutation::{EntityBuckets, Permutation, RowEntities, RowSpace, SegmentExtent};
 pub use read::{
-    first_code_at_or_past, hex_digest, highest_published_n, highest_side_manifest_n,
+    first_code_at_or_past, hex, highest_published_n, highest_side_manifest_n,
     newest_publication, open_bundle, open_written_prefix, open_written_prefix_carrying,
     read_publication, tile_ranges, tile_ranges_all, tile_ranges_within, Bundle, ColumnsRef,
     CutIndex, MortonSlice, PartitionData, ScalarSlice, SegmentData, ShardData, TileOrder, ViewData,

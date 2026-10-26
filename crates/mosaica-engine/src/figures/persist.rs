@@ -18,7 +18,7 @@ use mosaica_types::LayerSpace;
 use rustc_hash::FxHashMap;
 use sha2::{Digest, Sha256};
 
-use mosaica_store::hex_digest as hex;
+use mosaica_store::hex;
 use crate::row_column::RESERVE;
 
 use super::counts::{CountsAt, Dense, Grown, Part, Reserves, SideAt, SideGrown, Wide};
