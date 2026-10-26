@@ -199,6 +199,13 @@ def test_browse_and_artifact_agree_on_one_annotation(db):
     assert viewer.browse_artifacts("map", "clusters", parent=one["mosaica_id"])["artifacts"] == []
 
 
+def test_a_database_browses_and_reads_an_annotation_as_its_own_reader(db):
+    page = db.browse_artifacts("map", "clusters")
+    assert page == db.viewer().browse_artifacts("map", "clusters")
+    one = page["artifacts"][0]["mosaica_id"]
+    assert db.artifact(one, "map", zoom=0) == db.viewer().artifact(one, "map", zoom=0)
+
+
 def test_an_artifact_a_principal_may_not_see_is_not_found(db):
     """`404` is the only failure shape here, and it distinguishes nothing."""
     with pytest.raises(Refusal):

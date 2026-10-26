@@ -38,6 +38,14 @@ The `Database` methods on this page read with the operator's own token, which [`
     options:
       heading_level: 3
 
+::: mosaica._database.Database.browse_artifacts
+    options:
+      heading_level: 3
+
+::: mosaica._database.Database.artifact
+    options:
+      heading_level: 3
+
 ::: mosaica._database.Database.viewport_artifacts
     options:
       heading_level: 3

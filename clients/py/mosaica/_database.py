@@ -1580,6 +1580,29 @@ class Database:
         self._refuse_before_the_first_commit("artifacts")
         return self.viewer().artifacts(view, layer, fields, **options)
 
+    def browse_artifacts(self, view: str, layer: str, **options) -> dict:
+        """One page of a layer's annotations, each with its `mosaica_id`, key, name and count.
+
+        This is `Viewer.browse_artifacts` as this database's own reader; `options` are its
+        keywords.
+
+            ids = {one["name"]: one["mosaica_id"] for one in
+                   db.browse_artifacts("papers", "topics", level=0)["artifacts"]}
+        """
+        self._refuse_before_the_first_commit("browse_artifacts")
+        return self.viewer().browse_artifacts(view, layer, **options)
+
+    def artifact(self, mosaica_id: Any, view: str, **options) -> dict:
+        """One annotation's record in `view`.
+
+        This is `Viewer.artifact` as this database's own reader; `options` are its keywords.
+
+            db.artifact(db.browse_artifacts("papers", "topics")["artifacts"][0]["mosaica_id"],
+                        "papers")
+        """
+        self._refuse_before_the_first_commit("artifact")
+        return self.viewer().artifact(mosaica_id, view, **options)
+
     def viewport_artifacts(self, view: str, zoom: int, per_tile: int, **options):
         """The annotations in each map tile at one zoom level, as one pyarrow table.
 
