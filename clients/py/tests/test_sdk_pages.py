@@ -1714,3 +1714,23 @@ def test_a_layer_on_every_view_is_the_same_declaration_after_a_view_is_added(tmp
         assert {"halves", "thirds"} <= {layer["name"] for layer in db.meta()["layers"]}
     finally:
         db.close()
+
+
+@pytest.mark.parametrize(
+    "levels", [["broad", "fine"], [0.5, 1], [None, 1], [float("nan"), 1.0], [-1, 1]]
+)
+def test_a_label_level_that_is_not_a_whole_number_is_refused(tmp_path, levels):
+    db, _ = two_items(tmp_path / "db")
+    try:
+        tiered_topics(db)
+        with pytest.raises(Refusal):
+            db.insert("names", pd_frame({"cluster": ["b", "f"], "level": levels,
+                                         "name": ["Broad", "Fine"]}),
+                      key="cluster", text="name", attached_level="level")
+    finally:
+        db.close()
+
+
+def pd_frame(columns: dict):
+    pd = pytest.importorskip("pandas")
+    return pd.DataFrame(columns)
