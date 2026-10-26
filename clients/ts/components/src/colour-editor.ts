@@ -31,24 +31,18 @@ type Row = {key: string; name: string; path: string; count: number | null; colou
 type Found = {key: string; name: string; path: string; rung: number};
 
 /**
- * The explorer's Edit colours button opens this dialog. Use it in your own layout to let viewers
- * recolour the map while it is coloured by a category or a layer. Set `field` to a rendered
- * category column, or to `cluster:<layer>` for a layer the points can be coloured by. `show()`
- * opens the dialog as a modal. Close, Done or Escape closes it.
+ * The colour editor is a dialog where viewers choose the colour of each value of a category, or of
+ * each cluster of a layer, while the map is coloured by it. The explorer's Edit colours button
+ * opens one. In your own layout, set `field` to a rendered category column or to `cluster:<layer>`,
+ * and call `show()` to open it.
  *
- * Each row shows a value or cluster with its colour, its name and how many items the viewer may see
- * in it, largest first. The counts ignore the filters and the camera, so the rows keep their order
- * as the viewer pans or filters. A layer with levels lists its clusters at `cluster-level`. A
- * `nested` or `dag` layer lists the clusters the map currently draws. A category value the map has
- * not drawn yet has no colour, and its swatch is an outline until it does.
+ * Each row shows how many items the viewer may see with that value, counted without the filters or
+ * the camera, so the rows keep their order as the viewer pans or filters. Viewers recolour one row
+ * by clicking its colour, or several at once by ticking them and pressing Set colour.
  *
- * Clicking a row's colour opens a colour picker for it. To colour several rows at once, tick them
- * and press Set colour. Reset to palette restores every palette colour. The search box finds any
- * value or cluster by name, including one not in the list.
- *
- * Each change fires one `mosaica-valuecolour` or `mosaica-clustercolour` event naming every value
- * or cluster it changed. The colours are kept in the store, and the dialog keeps none itself. Every
- * element on the same store shows them, such as the map and the field cards.
+ * The colours are kept in the store, so the map, the field cards and every other element on that
+ * store show a change at once. Each change also fires one `mosaica-valuecolour` or
+ * `mosaica-clustercolour` event naming every value or cluster it changed.
  *
  * @summary A dialog for choosing the colour of each category value or cluster.
  * @tagname mosaica-colour-editor

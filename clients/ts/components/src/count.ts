@@ -5,13 +5,14 @@ import {attachContextRoot, defineOnce} from './define.js';
 import {tokens} from './tokens.js';
 
 /**
- * Use `<mosaica-count>` to show one of the store's counts formatted as the other elements format
- * them. It has no store. You, or another element, set its properties.
+ * `<mosaica-count>` shows one count formatted the way the other elements format theirs, for when
+ * you build your own panel from the store's projections. It has no store, so you set its properties
+ * yourself.
  *
- * Set `count` to a sample `Count` to show the marks shown of those served, as `4,812 of 12,465`.
- * Set `masked` to a `Masked` count to show one figure, marked `≈` if it is an estimate. If both are
- * set, `count` is shown. An inexact sample shows nothing. Any count shows nothing while `stale` is
- * set.
+ * A sample `Count` in `count` shows as `4,812 of 12,465`, the marks shown out of those served, and
+ * a `Masked` count in `masked` shows as one figure, marked `≈` when it is an estimate. If both are
+ * set, `count` is the one shown. An inexact sample shows nothing, and so does any count while
+ * `stale` is set.
  *
  * @summary A single formatted count.
  * @tagname mosaica-count

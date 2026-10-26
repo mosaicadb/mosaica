@@ -8,15 +8,14 @@ import {switchView} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * Add the view picker when the bundle has several views and viewers should switch between them. It
- * shows the current view's title, or its group's title. The menu lists each view that is in no
- * group, then each view group, in the order `/v1/meta` lists them. With only one entry, the picker
- * shows nothing.
+ * The view picker is a menu for switching between the views a viewer may see, for a bundle that
+ * lays its items out in more than one way. It lists each view that belongs to no group, then each
+ * group as a single entry, and shows nothing when there is only one entry to choose.
  *
- * A group is one entry. Choosing it opens the view the viewer last left that group on, or the
- * group's first view. If the current view's group shares keys with the chosen group, the view under
- * the current key opens instead. To step between the views inside a group, use
- * `<mosaica-key-picker>`.
+ * Choosing a group opens the view the viewer last left that group on, or the group's first view if
+ * they have not been in it. When the current view's group shares keys with the chosen group, the
+ * picker opens the view under the current key instead, so the viewer stays on the same year or
+ * quarter. To step between the views inside a group, use `<mosaica-key-picker>`.
  *
  * @summary A drop-down menu for switching views.
  * @tagname mosaica-view-picker

@@ -8,24 +8,18 @@ import {chrome, tokens} from './tokens.js';
 import './count.js';
 
 /**
- * Use the status line with a map to tell viewers whether what they see is current. A typical line
- * reads `● | 16,822,190 of 21,406,522 match | 5,390 shown`. The first figure counts the items the
- * filters match, out of the items the viewer may see. The counts cover the camera's box, or the
- * selected region while there is one. While a highlight is set, a cell reads `N highlighted of M`.
+ * The status line tells viewers whether the map is up to date and how much of the data they are
+ * looking at, in a line such as `● | 16,822,190 of 21,406,522 match | 5,390 shown`. Its first
+ * figure is how many items the filters match out of those the viewer may see, counted over the
+ * camera's box, or over the selected region while there is one.
  *
- * While the view is up to date, the first cell is a dot alone. Otherwise it names the state in a
- * few words, such as Reconnecting, Server busy, View refused or Session expired. Some states add a
- * button:
+ * While the view is up to date the first cell is a dot alone. When something is wrong it names the
+ * state, such as Server busy or Session expired, and offers a button where the viewer can act on
+ * it, such as Retry after a busy server. It offers Sign in when the session expires only if you
+ * have set `reauthorise`.
  *
- * - Refresh, when the data has changed.
- * - Retry, after a refusal, no answer or a busy server.
- * - Sign in, when the session expires and `reauthorise` is set.
- *
- * The counts grey out while they are out of date. `compact` shortens the figures and drops the
- * shown count. `expanded` adds a card of the figures below the strip.
- *
- * The state cell is an `aria-live` region. Screen readers announce a refusal, an expiry or a change
- * of data from it. They do not announce the counts as the map pans.
+ * The state cell is an `aria-live` region, so screen readers announce a refusal or an expiry when
+ * it happens without reading out the counts every time the map pans.
  *
  * @summary A status line showing whether the map is up to date and how many items it shows.
  * @tagname mosaica-status

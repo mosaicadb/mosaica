@@ -26,18 +26,17 @@ const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
 };
 
 /**
- * An artifact is a named group of items in an annotation layer, such as a cluster. Use this card to
- * show the artifact the viewer opened on the map. It shows the artifact's name, description, layer
- * and key. It also shows how many of its items the viewer may see. Below that are its parents and
- * children in the current view. Pressing one opens it.
+ * An artifact is a named group of items in an annotation layer, such as a cluster. The artifact
+ * card shows the one a viewer has opened on the map, so that they can see what it is, how many of
+ * its items they may see, and where it sits among its parents and children. Pressing a parent or a
+ * child opens that one instead.
  *
- * The card shows the store's opened artifact (`Store.openArtifact`), or the `artifact` you set. Its
- * count covers every member the viewer may see, so it does not change as the map moves. The server
- * refuses every artifact it withholds in the same way.
+ * The card reads the store's opened artifact, or the `artifact` you set. Its count covers every
+ * member the viewer may see, so it stays the same as the map moves.
  *
- * Its buttons filter or highlight the map by the artifact, or filter to everything outside it. Each
- * adds a `member_of` clause. Such a clause selects the artifact's members wherever they are on the
- * map, while a drawn region selects by shape. Fit to cluster fires `mosaica-artifactfit`.
+ * The card's buttons filter or highlight the map by the artifact, or filter to everything outside
+ * it, by adding a `member_of` clause. Such a clause selects the artifact's members wherever they
+ * are, whereas a drawn region selects by shape. Fit to cluster fires `mosaica-artifactfit`, and
  * `<mosaica-explorer>` responds by fitting its map to the artifact. A filter layer draws nothing,
  * so its artifacts have no Fit button.
  *

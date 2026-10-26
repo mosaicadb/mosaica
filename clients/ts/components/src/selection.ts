@@ -10,17 +10,15 @@ import {chrome, tokens} from './tokens.js';
 import './count.js';
 
 /**
- * Use the selection card beside a map to show what is inside the region the viewer drew. It shows
- * the store's selected region, or the `region` you set. Inside the region it counts the items the
- * filters match, the items the viewer may see and the marks drawn. Below the counts it lists the
- * drawn marks. Clicking one picks it.
+ * The selection card shows what is inside the region a viewer has drawn on the map, so that they
+ * can see how many items it holds. It reads the store's selected region, or the `region` you set,
+ * and counts the items inside that the filters match and that the viewer may see. It then lists the
+ * marks drawn there, so that the viewer can pick one.
  *
- * Outside flips the selection to everything outside the region, and Inside flips it back. Clear
- * removes the region.
- *
- * A selected region acts as a filter. Once it settles, the map and every count narrow to it. The
- * counts are exact unless the server counted an area covering the shape. The state line's tooltip
- * says which. Export and Save as artifact are shown disabled, as they are not available yet.
+ * The region acts as a filter, which means the map and every other count narrow to it once it
+ * settles. Outside flips it to everything outside the shape, and Clear removes it. The counts are
+ * exact unless the server had to count an area around the shape, and the state line's tooltip says
+ * which. Export and Save as artifact are shown disabled because they are not available yet.
  *
  * @summary A card showing the counts and marks inside the selected region.
  * @tagname mosaica-selection

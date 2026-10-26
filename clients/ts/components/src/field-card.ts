@@ -101,36 +101,26 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
 }
 
 /**
- * A field card shows how one field's values are spread across the items. Viewers filter or
- * highlight by those values from the card. `<mosaica-filter-panel>` shows one card per field. Use a
- * card on its own to put one field's chart where you want it. Set `field` to a column
- * `meta.filterOperands` lists, or to `cluster:<layer>` for a layer's clusters.
+ * A field card charts how one field's values are spread across the items, so that viewers can see
+ * which values are common and filter or highlight by them. `<mosaica-filter-panel>` shows one card
+ * per field, and you use a card on its own to put one field's chart where you want it. Set `field`
+ * to a column `meta.filterOperands` lists, or to `cluster:<layer>` for a layer's clusters.
  *
- * Each card compares two sets of items. The subject is the items in the camera's box that the
- * filters match. While there is a highlight, the subject is the highlighted items instead. The
- * whole match is every item the filters match, anywhere. Neither applies the card's own filter, so
- * a value you have filtered out keeps its count.
+ * The solid bars count the items in view that the filters match, or the highlighted items while
+ * there is a highlight, and the pale bars count every item the filters match. Neither applies the
+ * card's own filter, so a value the viewer has filtered out keeps its count.
  *
- * What the card draws depends on the field:
+ * What the card draws depends on the kind of field:
  *
- * - A category or cluster card lists the five values with most items in view, and any value the
- *   card filters or highlights. "N more" shows up to twenty. Each row has a solid bar for its share
- *   of the subject and a pale bar for its share of the whole match, with both counts. Values the
- *   field's filter leaves out are greyed, and show how many items they would add. Hovering or
- *   focusing a row shows its Highlight and Filter buttons. Clicking the row filters by it. A search
- *   box above the rows finds any value. On a layer with levels, the heading has a Level choice.
- * - A number or date card draws a histogram of about twenty bins, with the same two bars. Its
- *   heading gives the count and mean. To pick a range to filter or highlight by, drag across the
- *   bins. From the keyboard, press Shift and the arrow keys on the focused plot, then Enter. Counts
- *   over more than about 100,000 items come from a sample and are marked "≈".
- * - A text or keyword field's card is its search box, `<mosaica-filter>`.
+ * - A category or cluster card lists the values with most items in view, with Highlight and Filter
+ *   buttons on each row and a search box for finding any other value.
+ * - A number or date card draws a histogram, and the viewer drags across it to pick a range to
+ *   filter or highlight by. Counts over more than about 100,000 items come from a sample, so they
+ *   are marked "≈".
+ * - A text or keyword field's card is a search box, `<mosaica-filter>`.
  *
- * The paint button colours the map by the field. While it does, each value's colour shows beside
- * it, or the ramp shows under the histogram. Clicking a colour opens a colour picker for that value
- * or cluster. A chosen colour applies at once and fires `mosaica-valuecolour` or
- * `mosaica-clustercolour`.
- *
- * `folded` shows the heading alone, with a small chart of the counts in view.
+ * The paint button colours the map by the field. While it does, clicking a value's colour opens a
+ * picker that changes that colour on the map at once.
  *
  * @summary A card that charts one field's values and filters or highlights by them.
  * @tagname mosaica-field-card

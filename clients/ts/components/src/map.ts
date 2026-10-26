@@ -106,35 +106,29 @@ const VIEW = new OrthographicView({id: 'ortho', flipY: true});
 let mapsMade = 0;
 
 /**
- * Use the map on its own when you lay out your own panels around it. It draws the points of a view
- * with deck.gl, along with density, annotation layers and their labels. Viewers can hover, pick
- * points and select regions. `<mosaica-explorer>` is this map with a default set of panels around
- * it.
+ * The map draws one view's points, density and annotation layers, and is the element to use when
+ * you lay out your own panels around it instead of taking the explorer's. Picking a point or
+ * drawing a region on it changes the store, so the other elements on the page follow what the
+ * viewer does.
  *
- * The map uses the store in its `store` property or the one from an enclosing `<mosaica-store>`. It
- * can also build its own from `viewer-url` and `token` or `authorise`.
+ * The map takes its store from its `store` property or from an enclosing `<mosaica-store>`, or
+ * builds one from `viewer-url` and `token` or `authorise`.
  *
- * The map owns the camera and tells its store where it is looking. When the map first gets a store,
- * it frames the items the filters match, as `fit()` does. It skips this if the user or your code
- * has already moved the camera. It frames the matches again when the view switches to one with a
- * different extent. A change of filter never moves the camera.
+ * When the map first gets a store it frames the items the filters match, as `fit()` does, unless
+ * the user or your code has already moved the camera. It frames them again when the view switches
+ * to one with a different extent, but a change of filter leaves the camera where it is.
  *
- * The toolbar switches between pan, box select and lasso select. Its last button fits the camera to
- * the matching items. Shift-drag in pan mode also draws a box. A finished box or lasso becomes the
- * store's selected region, and every count narrows to it. A tag on the region's corner shows how
- * many items match inside it.
+ * The toolbar switches between panning and drawing a box or a lasso. A finished shape becomes the
+ * store's selected region, which narrows the map and every count to the items inside it until the
+ * viewer clears it.
  *
- * With the map focused, the arrow keys pan and `+` and `-` zoom. Escape cancels a shape being
- * drawn. If there is none, it clears the region, and if there is no region it drops the picked
- * item. A click on an empty part of the map also drops the picked item.
+ * When the map cannot draw the view, because the server refused it, cannot be reached or the
+ * session has expired, it says so over the canvas.
  *
- * When the map cannot draw the view, it says why over the canvas. For a refusal, that includes the
- * server's reason.
- *
- * The canvas is a single tab stop with `role="application"`. A `tabindex` or `aria-label` you set
- * on the map is applied to the canvas, and `focus()` focuses it. The map's height comes from
- * `--mosaica-map-height`. A map removed from the page releases its GPU resources a quarter of a
- * second later, unless it is put back first.
+ * The canvas is a single tab stop, and a `tabindex` or `aria-label` you set on the map is passed to
+ * it. Without an `aria-label`, the canvas is labelled with its keys, "map: arrow keys pan, + and -
+ * zoom", so that someone using a screen reader knows how to move it. The map's height comes from
+ * `--mosaica-map-height`.
  *
  * @summary An interactive map with no panels around it.
  * @tagname mosaica-map

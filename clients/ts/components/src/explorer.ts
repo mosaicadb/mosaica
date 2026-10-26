@@ -116,40 +116,30 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 ];
 
 /**
- * Use the explorer for a working map page in one element. It holds a heading, a map, the filter
- * panel, the status strip and a Layers popover. Cards open for the item or cluster the viewer picks
- * and for the region they select. To replace one part, put your own element in its slot. For a
- * different arrangement, lay out the separate elements yourself.
+ * The explorer is a complete map application in one element, for when you want a working page
+ * without arranging the parts yourself. It puts a heading and the filter panel beside a map, draws
+ * the status strip over it, and opens a card when the viewer picks an item or a cluster or selects
+ * a region. You can replace any one of these parts by putting your own element in its slot, and
+ * when you want a different arrangement altogether you lay out the separate elements yourself.
  *
- * The explorer builds its own store from `viewer-url` and `token` or `authorise`. You can give it a
- * store in its `store` property instead. Every element inside the explorer uses that store,
- * including the elements you put in its slots.
+ * The explorer builds its store from `viewer-url` and `token` or `authorise`, unless you give it
+ * one in its `store` property. Every element inside it uses that store, including the ones you put
+ * in its slots, so they all show the same view and filters.
  *
- * `layout="docked"` puts the heading and the filter panel in a sidebar to the left of the map.
- * `layout="overlay"` puts them in a card over the map's top-left corner. The heading shows
- * `dataset-title` if you set one, with the view's name below it. When there are several views, the
- * view's name is a menu for switching between them.
+ * `layout="docked"` places the heading and the filter panel in a sidebar to the left of the map,
+ * and `layout="overlay"` places them in a card over the map's top-left corner. When there are
+ * several views, the view's name in the heading becomes a menu for switching between them.
  *
- * Picking a point opens its item card beside it. The card follows the point as the map moves.
- * Picking another point replaces the card unless Pin was pressed. The Close button always closes
- * it. Escape and a click on an empty part of the map close it only while it is not pinned. A picked
- * cluster's card works the same way. While a region is selected, its card sits in the map's
- * top-right corner.
+ * A picked item's card opens beside its point and follows the point as the map moves. Picking
+ * another point replaces the card unless the viewer has pressed Pin, and Escape or a click on an
+ * empty part of the map closes the card only while it is unpinned.
  *
- * The Layers button opens a popover with four sections. Each of its settings is also an attribute
- * of the explorer, which passes it to the map.
+ * The Layers button opens a popover of settings for how points, colour, density and layers are
+ * drawn. Each of these settings is also an attribute of the explorer, so you can set it from HTML
+ * as well.
  *
- * - Points sets whether points are drawn, how many to draw (Most points), what sizes them and their
- *   opacity. While a `nested` or `dag` layer is drawn it also has Most clusters.
- * - Colour sets what colours the points and the palette or ramp. Its Edit colours button opens
- *   `<mosaica-colour-editor>` to colour single values or clusters.
- * - Density sets how density is drawn.
- * - Layers holds the layer picker.
- *
- * The explorer adapts to the width of its container. Below 1000 px it uses the overlay layout,
- * folds each field card to one line until it is opened, and moves the map's tools to the
- * bottom-left. At 720 px or less the panels open as sheets from a tab bar of Fields, Layers and
- * Item, and the heading moves to a bar above the map.
+ * Because the explorer lays itself out by the width of its container, it switches to the overlay
+ * layout below 1000 px, and at 720 px or less it opens its panels as sheets from a tab bar.
  *
  * @summary A complete map application in a single element.
  * @tagname mosaica-explorer

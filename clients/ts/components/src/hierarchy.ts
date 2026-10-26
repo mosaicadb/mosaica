@@ -24,21 +24,20 @@ type Node = {
 const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
 
 /**
- * Use the hierarchy to let viewers browse a layer's artifacts from the top down and filter by them.
- * It opens on the layer's top-level artifacts at any zoom, and it does not move with the map. If
- * the bundle has several layers, a select switches between them.
+ * The hierarchy lets viewers browse a layer's artifacts as a tree and filter the map by them. It
+ * opens on the top-level artifacts and stays put while the map moves, so viewers can reach an
+ * artifact at any level wherever the camera is. It offers every layer whose artifacts form a
+ * hierarchy, including filter layers, which the map does not draw, and a select switches between
+ * them when there are several.
  *
- * Each row shows an artifact's name and how many of its items the viewer may see. While filters are
- * set, the row also shows how many of those items match them. A row with children has an expander.
- * Children load a page at a time, with More for the next page. On a layer where an artifact can
- * have several parents, it appears under each and names the others. A parent the viewer may not see
- * is left out, so its children appear at the top level. The search box finds artifacts by name.
+ * Each row shows how many of the artifact's items the viewer may see, and how many of them match
+ * while filters are set. Expanding a row loads its children a page at a time. A parent the viewer
+ * may not see is left out, so its children appear at the top level.
  *
- * A row's buttons highlight or filter the map by its artifact. Pressing the name also highlights
- * it. A row with a filter or highlight on it is shaded, with a × to remove each. The Fit button
- * fires `mosaica-artifactfit`. `<mosaica-explorer>` responds by fitting its map to the artifact.
+ * A row's buttons highlight or filter the map by its artifact. Its Fit button fires
+ * `mosaica-artifactfit`, which `<mosaica-explorer>` handles by fitting its map to the artifact.
  * Elsewhere, pass the event's id to the map's `fitTo`. The panel makes no requests while it is
- * hidden.
+ * hidden, so it costs nothing in a closed drawer.
  *
  * @summary A tree for browsing a layer's artifacts and filtering by them.
  * @tagname mosaica-hierarchy
