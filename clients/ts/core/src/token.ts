@@ -3,16 +3,13 @@ import type {Refusal} from './presented.js';
 import type {Store} from './store.js';
 
 /**
- * A function the store calls for a viewer token, and calls again to renew it. It resolves to the
- * token and `expiresAt`, in seconds since the Unix epoch, as {@link MosaicaClient.login} and
- * {@link MosaicaClient.authorise} report it; `Infinity` is a token that does not expire.
+ * A function that returns a viewer token and its expiry, `expiresAt` in seconds since the Unix
+ * epoch, as {@link MosaicaClient.login} and {@link MosaicaClient.authorise} return them. Return
+ * `Infinity` as `expiresAt` for a token that does not expire.
  *
- * The store renews 30 seconds before expiry, or halfway through a lifetime shorter than a minute,
- * and calls again before a request where the token has 5 seconds or less left. Concurrent requests
- * share one call. A rejection refuses the request that was waiting for the token.
- *
- * A store serves one viewer: to show another, call {@link Store.clear} or create a new store.
- * {@link Store} says how long a previous viewer's data stays without that.
+ * The store renews the token 30 seconds before it expires, or halfway through a lifetime shorter
+ * than a minute. Concurrent requests share one call. If the function rejects, the request waiting
+ * for the token fails. To change viewer, call {@link Store.clear}.
  *
  * @category Store
  */

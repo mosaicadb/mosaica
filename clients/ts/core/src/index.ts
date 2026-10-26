@@ -1,8 +1,31 @@
 /**
- * The headless client. `createStore` returns the store a host draws from and steers.
- * `MosaicaClient` calls the viewer and session routes, `Control` the operator's control plane, and
- * `RecordsRead` is a bulk read of items or artifacts. The helpers build the filter drafts and
- * member clauses the store takes, say which layers it draws and colours by, and format its counts.
+ * `@mosaicajs/client` is the headless part of the TypeScript client. It talks to a Mosaica server
+ * and holds the state of a map, and leaves the drawing to other code. It has two layers.
+ * {@link MosaicaClient} is a thin HTTP client with one method per viewer and session route, and it
+ * keeps no state between calls. The store, which {@link createStore} makes, is built on it: you
+ * tell the store where the camera is, what to filter and which layers to draw, and it fetches,
+ * caches and composes the data. It publishes the result as projections: read-only snapshots of
+ * one part of the map's state each, such as `marks`, the points to draw, or `view`, the counts for
+ * the current view. `MosaicaLayer` in
+ * `@mosaicajs/deck`, the elements in `@mosaicajs/components` and the hooks in `@mosaicajs/react`
+ * all draw from a store, and your own code can read its projections too.
+ *
+ * ```mermaid
+ * flowchart LR
+ *   server["Mosaica server"] <--> client["MosaicaClient"]
+ *   client <--> store["Store"]
+ *   app["Your app"] -- "camera, filters, layers" --> store
+ *   store -- "projections" --> draw["MosaicaLayer, components, your code"]
+ * ```
+ *
+ * {@link Control} is a separate client for the server's control plane, which declares, ingests,
+ * deletes and publishes data. It sends an operator credential or an API key, so it belongs in a
+ * back end or a script. {@link RecordsRead} is the paged read of items or artifacts that both
+ * `MosaicaClient` and the store return.
+ *
+ * The rest of the package is helpers for the store: building the filter drafts and `member_of`
+ * clauses it takes, listing which layers it can draw and colour by, converting coordinates,
+ * choosing palettes and formatting counts.
  *
  * @module @mosaicajs/client
  */

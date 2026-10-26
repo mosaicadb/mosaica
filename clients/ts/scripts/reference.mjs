@@ -67,9 +67,10 @@ if (app.logger.hasErrors()) process.exit(1);
 const outTypescript = app.options.getValue('out');
 rmSync(join(outTypescript, 'index.md'), {force: true});
 // TypeDoc writes an array type's `[]` bare, and `[][]` reads to Python-Markdown as a reference link.
+// A Parameters, Type Parameters or Returns section that only repeats the signature is dropped.
 for (const file of markdownFiles(outTypescript)) {
   const text = readFileSync(file, 'utf8');
-  const escaped = text
+  const escaped = withoutRepeatedSignature(text)
     .split('\n')
     .map((line) => line.split(/(`+[^`]*`+)/).map((part, i) => (i % 2 ? part : part.replace(/(?<!\\)\[\]/g, '\\[\\]'))).join(''))
     .join('\n');
@@ -430,4 +431,15 @@ function splitTag(text) {
     return {name: text.trim(), description: ''};
   }
   return {name: match[1], description: oneLine(match[2])};
+}
+
+/**
+ * `markdown` without the signature sections that carry no description: a parameter table with only
+ * names and types, a type parameter table, and a Returns section that is only the type.
+ */
+function withoutRepeatedSignature(markdown) {
+  return markdown
+    .replace(/^#{4,6} Parameters\n\n\| Parameter \| Type \|\n(?:\|.*\n)+\n/gm, '')
+    .replace(/^#{4,6} Type Parameters\n\n\| Type Parameter \|\n(?:\|.*\n)+\n/gm, '')
+    .replace(/^#{4,6} Returns\n\n[^\n]+\n\n(?=#|<a id=|$)/gm, '');
 }

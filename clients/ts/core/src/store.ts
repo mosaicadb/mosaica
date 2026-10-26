@@ -71,23 +71,20 @@ export {REGION_HELD_LIMIT, type RegionProjection, type SelectionShape} from './s
 export type {AggregateEntry, AggregateSpec, AggregateSpecGrouping, AggregatesProjection, DrawnLayerBy, FieldSummary} from './aggregates.js';
 
 /**
- * Where the host's camera looks: a box in the current view's data coordinates, the camera's zoom,
- * and the pixel size it is drawn at.
+ * The camera position, as {@link Store.setView} takes it.
  *
  * @category Store
  */
 export type ViewInput = {
   /**
-   * `[x0, y0, x1, y1]` in the current view's data coordinates: what the canvas shows, which may be
+   * The area the canvas shows, `[x0, y0, x1, y1]` in the current view's data coordinates. It may be
    * clamped to the view's extent, as `viewInputOf` in `@mosaicajs/deck` clamps it.
    */
   bbox: [number, number, number, number];
   /**
-   * The camera's zoom over the 512-unit world, as deck.gl's `OrthographicView` counts it: the canvas
-   * shows `2 ** zoom` pixels per world unit, so at 0 the world is 512 pixels wide. The levels a
-   * layer shows and the depth its artifacts are asked at follow this zoom. It is not read from
-   * `bbox`, which, clamped where the world is smaller than the canvas, would give the zoom at which
-   * the world fills the canvas.
+   * The camera's zoom, as deck.gl's `OrthographicView` counts it: `2 ** zoom` pixels per world unit,
+   * so at 0 the 512-unit world is 512 pixels wide. It is passed separately because a clamped `bbox`
+   * does not give the true zoom.
    */
   zoom: number;
   /** The canvas width in pixels. */
@@ -97,45 +94,34 @@ export type ViewInput = {
 };
 
 /**
- * Options for {@link createStore}. A store given neither `token` nor `authorise` sends no
- * `authorization` header, which an open server (`serve.open`) serves and any other refuses as
- * `bad-credential`.
+ * Options for {@link createStore}. Pass `viewerUrl` or `client`, and `token` or `authorise`. A
+ * store with neither `token` nor `authorise` sends no credentials, which only an open server
+ * (`serve.open`) accepts.
  *
  * @category Store
  */
 export type StoreOptions = {
   /**
-   * The viewer server's base URL, joined to each route as {@link MosaicaClientOptions.viewerUrl}
-   * says: an empty string is the page's own origin. Required unless `client` is given, whose own
-   * URL is used in its place.
+   * The viewer server's base URL, as for {@link MosaicaClientOptions.viewerUrl}. An empty string
+   * means the page's own origin. Required unless `client` is given.
    */
   viewerUrl?: string;
-  /**
-   * A viewer token used for every request and never renewed. Where `token` and `authorise` are both
-   * given, `token` is used and `authorise` is never called.
-   */
+  /** A viewer token, used for every request and never renewed. Takes precedence over `authorise`. */
   token?: string;
   /**
-   * A function the store calls for a viewer token, and again to renew it before it expires (see
-   * {@link TokenSupplier}). A store serves one viewer: to show another, call {@link Store.clear} or
-   * create a new store. {@link Store} says how long a previous viewer's data stays without that.
+   * A function that returns a viewer token. The store calls it at the start and again before the
+   * token expires; see {@link TokenSupplier}.
    */
   authorise?: TokenSupplier;
-  /**
-   * The id of the view to open with. Defaults to the first view `meta.views` lists. A
-   * `setCurrentView` call made before `/v1/meta` arrives takes its place.
-   */
+  /** The view to open with. Defaults to the first view in `meta.views`. */
   view?: string;
-  /** How many marks the store aims to draw on screen. Defaults to `250000`; `setBudget` changes it. */
+  /** How many marks the store aims to draw on screen. Defaults to {@link DEFAULT_BUDGET}. */
   budget?: number;
-  /**
-   * The palette clusters are coloured from (see {@link PaletteName}). Defaults to `tableau10`;
-   * `setPalette` changes it.
-   */
+  /** The palette clusters are coloured from (see {@link PaletteName}). Defaults to `tableau10`. */
   palette?: PaletteName;
   /**
-   * Whether the store fetches ahead while the camera is still: the tiles around the view and one
-   * zoom level deeper. Defaults to `true`.
+   * Whether to fetch ahead while the camera is still: the tiles around the view and one zoom level
+   * deeper. Defaults to `true`.
    */
   prefetch?: boolean;
   /** Injected for tests; browser defaults otherwise. @internal */
@@ -145,50 +131,36 @@ export type StoreOptions = {
   /** @internal */
   driver?: DriverOptions;
   /**
-   * The store's cache of fetched tiles, which every view shares. Each of its four fields is
-   * optional. `cacheBytes` is the byte budget for tiles held across every view, the tiles drawn
-   * least recently being evicted first; it defaults to 512 MiB (`536870912`). `cache: false` holds
-   * nothing, so every camera move becomes a request, for measuring what the cache saves; it defaults
-   * to `true`. `revalidateAfterMs` is how long, in milliseconds since the last response, the store
-   * may answer the camera wholly from held tiles before it sends a counts-only request (`k = 0`)
-   * that refreshes the counts and shows whether the data has changed; it defaults to `60000`.
-   * `onPhase(kind, ms, n)` is called with how long a named step inside the cache took, in
-   * milliseconds, and over how many items, where `kind` is one of `plan`, `walk`, `revalidate`,
-   * `remap`, `piece`, `split`, `store` and `slice`; it is for instrumentation and changes no
-   * behaviour.
+   * The tile cache, which every view shares. `cacheBytes` is the most it holds, evicting the tiles
+   * drawn least recently; it defaults to 512 MiB. `cache: false` holds nothing, so every camera move
+   * makes a request, which is useful for measuring the cache. `revalidateAfterMs` is how long the
+   * store may answer the camera from the cache alone before it asks the server whether the counts
+   * have changed; it defaults to `60000`. `onPhase(kind, ms, n)` reports how long each step inside
+   * the cache took, for instrumentation.
    */
   replica?: Pick<ReplicaOptions, 'cacheBytes' | 'cache' | 'revalidateAfterMs' | 'onPhase'>;
   /**
-   * How the drawn layers' artifacts are asked for. `perTile` is the most artifacts one level shows
-   * in one tile, largest first. Omitted, it is 50, or `meta.selection.maxArtifactsPerTile` where
-   * that is smaller. A number over that maximum is sent as given, and the server's refusal is the
-   * `artifacts` projection's. `budget` is the most artifacts a `nested` or `dag` layer is cut
-   * to, met by drawing ancestors in place of their descendants, and the most it tags the points
-   * with; omitted, the cut is unbounded. {@link Store.setClusterBudget} changes it. `heldTiles` is how many tiles of artifacts the store keeps
-   * per view, the least recently drawn leaving first; it defaults to `4096`.
-   *
-   * Artifacts are asked for by tile at a fixed depth, map zoom + 2, the zoom being the camera's as
-   * {@link ViewInput} gives it, rounded down; a tile is 128 to 256 pixels. One request names at most
-   * 558 tiles, the most a 3840 by 2160 screen touches at that depth, or the deployment's
-   * `max_tiles_per_request` where that is fewer; a larger screen is asked for at zoom + 1, then
-   * coarser, until its tiles fit. So the tiles in view times `perTile` bounds the artifacts one
-   * level draws. The depth does not follow the points'.
+   * How the drawn layers' artifacts are fetched. Artifacts come in tiles 128 to 256 pixels across,
+   * and `perTile` is the most one level shows in a tile, largest first. It defaults to 50, or to
+   * `meta.selection.maxArtifactsPerTile` if that is lower; a larger value is sent as given and the
+   * server refuses it. `budget` is the starting cluster budget ({@link Store.setClusterBudget});
+   * by default there is no limit. `heldTiles` is how many tiles of artifacts to keep per view; it
+   * defaults to `4096`.
    */
   artifacts?: {perTile?: number; budget?: number; heldTiles?: number};
   /**
-   * A `/v1/meta` response the host has already read, so the store does not fetch it again. It must
-   * have been read with this viewer's token: another viewer's meta lists layers and views this one
-   * may not be served. {@link Store.clear} reads meta again under the next token.
+   * A `/v1/meta` response you have already fetched, so the store need not fetch it again. It must
+   * have been fetched with this viewer's token.
    */
   meta?: Meta;
   /**
-   * A {@link MosaicaClient} to send requests through, such as one the host shares across stores.
-   * Defaults to one built from `viewerUrl` and `clientOptions`. A client passed here belongs to the
-   * host, which closes it; {@link Store.dispose} closes only a client the store built.
+   * A {@link MosaicaClient} to send requests through, such as one shared between stores. By default
+   * the store creates one from `viewerUrl` and `clientOptions`. You close a client you pass in;
+   * {@link Store.dispose} closes only one the store created.
    */
   client?: MosaicaClient;
   /**
-   * Options for the client the store builds, such as `headers`, `fetch` or `decoder`. Ignored where
+   * Options for the client the store creates, such as `headers`, `fetch` or `decoder`. Ignored if
    * `client` is given.
    */
   clientOptions?: Omit<MosaicaClientOptions, 'viewerUrl'>;
@@ -200,8 +172,10 @@ export type StoreOptions = {
 };
 
 /**
- * Everything the store publishes, by name. Each projection is immutable and replaced whole when it
- * changes, so a reader can compare by identity. {@link Store.subscribe} reports each replacement.
+ * The store's projections, by name. A projection is a read-only snapshot of one part of the map's
+ * state, such as the points to draw (`marks`) or the filters in force (`filters`). When one changes
+ * the store replaces it with a new object, so comparing by identity tells you whether it changed.
+ * {@link Store.subscribe} reports each replacement.
  *
  * @category Store
  */
@@ -537,8 +511,8 @@ export type ReplicaProjection = {
 type Listener = () => void;
 
 /**
- * What {@link Store.items} reads: an {@link ItemsRequest} whose `view` and `filters` default to the
- * store's, with `inView` to read only the area in view.
+ * The request {@link Store.items} takes: an {@link ItemsRequest} whose `view` and `filters` default
+ * to the store's, with `inView` to read only the area in view.
  *
  * @category Store
  */
@@ -546,177 +520,127 @@ export type StoreItemsRequest = Omit<ItemsRequest, 'view' | 'filters'> & {
   /** The view to read. Defaults to the current view. */
   view?: string;
   /**
-   * Unset or `undefined`, {@link Store.requestFilters}, so the read returns the items the map
-   * counts as matching. `null` reads every item this viewer may see.
+   * Defaults to {@link Store.requestFilters}, so the read returns the items the map counts as
+   * matching. `null` reads every item the viewer may see.
    */
   filters?: FilterExpr | null;
   /**
-   * Read only the area the counts in view cover: the selected region where one is selected, and
-   * the camera's box where none is, as the store's `inView` counts take it. Only for the current
-   * view, once the camera has been set.
+   * Read only the area the in-view counts cover: the selected region if there is one, otherwise the
+   * camera's box. Current view only.
    */
   inView?: boolean;
 };
 
 /**
- * The headless store {@link createStore} returns. The host tells it where the camera looks, what to
- * filter and which layers to draw. The store fetches, caches and composes frames on its own
- * schedule and publishes what to draw as {@link Projections}. It holds no camera and draws nothing.
- * Every count and artifact it publishes is computed over this viewer's visible set.
+ * The store is the client-side state of a map. You give it the camera position, filters and layer
+ * settings, and it fetches, caches and composes the data. It publishes the result as
+ * {@link Projections}, read-only snapshots of one part of the map's state each. Read a projection
+ * with `get` or `projections`, and hear of changes with `subscribe`.
  *
- * A store serves one viewer. To show the map to another viewer, call {@link Store.clear} or create
- * a new store.
+ * Every count, artifact and record the store publishes covers only what the viewer may see.
+ * Methods that need the server's metadata (`/v1/meta`) wait for it to load.
  *
- * Besides its projections, the store reads on request through its own token, view and filters:
- * {@link Store.browse} a layer's hierarchy and {@link Store.items} the matching items. Each reads
- * only what this viewer may see.
- *
- * Behind that rule the store checks each viewport answer's identity key, as far as answers allow.
- * The server derives the key from the terms the session's principal held when it was minted, the
- * identity of the viewer's visible-set fragment, and the view. An ingest or a suppression does not
- * change it. A compaction or a rebuilt bundle gives the fragment a new identity, and so a new key,
- * for every viewer. A renewal whose principal now holds different terms also gives a new key, so
- * the store treats it as another viewer even for the same person.
- *
- * The store forgets what the server answered where an answer's key differs from the one held for
- * its view; where, after a renewal, an answer arrives on a view that holds no key before any answer
- * under the new token has matched a held key; where the server refuses the renewed token the
- * current view; and at a renewal while it holds `meta` and no key. What it drops: points, frames,
- * counts, artifacts, shapes, item records, legend values, category titles, typeahead pages, the
- * picked item and opened artifact, the `member_of` clauses, a region selected from an artifact, the region's
- * counts, and `meta`. What it keeps: a drawn region's shape, the filter controls, the layers, the
- * colouring, the current view and the camera. It then reads `meta` again under the token it holds,
- * drops a kept input that names a view, layer or column the new `meta` does not list, and asks
- * again. A token renewal whose key matches keeps what is drawn.
- *
- * Some refusals of the renewed token say nothing about whose it is, and the store does not forget
- * on them: an expired token, a shed request (`429`), a server still starting (`503`), a `5xx`
- * whose body names no Mosaica code, such as a gateway's `504`, and a fetch that reached no server.
- * For all but the expired token it asks for the key again after 1 s, then twice as long each time
- * up to 30 s, or after the server's `Retry-After` where that is longer, until an answer confirms
- * the key or shows another viewer.
- *
- * The check runs on answers. The store calls `authorise` only when the token it holds is due for
- * renewal, and then asks for the current view's key at once. So without {@link Store.clear}, the
- * previous viewer's data stays published until that renewal and the answer or refusal to that ask.
- * Where the ask is shed or fails, it stays until an answer under the new token, which the store
- * goes on asking for; where the ask finds the token expired, until an answer under a token a later
- * renewal brings.
+ * A store holds data for one viewer. To show the map to a different viewer, call
+ * {@link Store.clear} or create a new store. The store calls `authorise` only to renew its token,
+ * so if `authorise` starts returning another viewer's token without a `clear`, the previous
+ * viewer's data stays on screen until the next renewal. The store also discards what it holds and
+ * loads again when the server's data is compacted or rebuilt.
  *
  * @category Store
  */
 export interface Store {
   /**
-   * The current projections. The object is the store's own and its fields are replaced as
-   * projections change, so read a field when it is needed.
+   * The current value of every projection. The store replaces this object's fields as they change,
+   * so read a field each time you need it instead of keeping it.
    */
   readonly projections: Projections;
-  /** The current value of projection `name`. */
+  /** The current value of one projection. */
   get<K extends ProjectionName>(name: K): Projections[K];
   /**
-   * Call `fn` after any projection is replaced. A subscriber that throws is reported to the console
-   * and the others are still called.
+   * Call `fn` whenever any projection changes. An error thrown by `fn` is logged to the console and
+   * does not stop the other subscribers.
    *
    * @returns A function that unsubscribes `fn`.
    */
   subscribe(fn: Listener): () => void;
   /**
-   * Call `fn` with the new value each time projection `name` is replaced. `fn` is not called with the
-   * current value; read that with `get`. A subscriber that throws is reported to the console and the
-   * others are still called.
+   * Call `fn` with the new value whenever projection `name` changes. It is not called with the
+   * current value; use `get` for that. An error thrown by `fn` is logged to the console and does not
+   * stop the other subscribers.
    *
    * @returns A function that unsubscribes `fn`.
    */
   subscribe<K extends ProjectionName>(name: K, fn: (value: Projections[K]) => void): () => void;
 
   /**
-   * Point the store at a camera. The store fetches what the view needs after a short debounce and
-   * publishes each frame as it is composed. Called before `/v1/meta` arrives, the last call is
-   * applied when it does.
+   * Tell the store where the camera is. Call it whenever the camera moves. The store waits briefly
+   * for the camera to settle, then fetches what the view needs and publishes each frame as it is
+   * composed.
    */
   setView(input: ViewInput): void;
-  /**
-   * Replace the filter controls. Publishes `filters` with the draft and its composed expressions,
-   * drops every view's held tiles, which answer the old filters, and asks again for the current
-   * camera. A selected region shows `loading` until the new frame lands.
-   */
+  /** Replace the filter controls with `draft`. Publishes `filters` and fetches the map again. */
   setFilters(draft: FilterDraft): void;
   /**
-   * Replace the `member_of` clauses: a card's "filter to this" and "outside this", and a hierarchy
-   * panel's nodes. It takes the whole list; build it with {@link withMember} and
-   * {@link withoutMember}. Publishes `filters.members`, then drops held tiles and asks again as
-   * `setFilters` does.
+   * Replace the `member_of` clauses, which keep the map to items inside or outside given
+   * artifacts: a card's "filter to this" and "outside this", or the nodes ticked in a hierarchy
+   * panel. Pass the whole list; {@link withMember} and {@link withoutMember} build it. Publishes
+   * `filters.members` and fetches the map again.
    */
   setMembers(clauses: readonly MemberClause[]): void;
   /**
-   * One page of a layer's hierarchy (`POST /v1/artifacts/browse`): its roots, an artifact's children
-   * and parents, or a name search, each row with its masked count. An artifact this viewer was
-   * never served answers an empty page. Waits for `/v1/meta`.
+   * Read one page of a layer's hierarchy: its roots, an artifact's children and parents, or the
+   * results of a name search. Each row carries its count of visible items. An artifact the store
+   * has not been served returns an empty page.
    *
-   * @param req - The page to ask for. `filters` unset or `undefined` is {@link Store.requestFilters},
-   *   so the tree counts what the map counts; pass `null` for unfiltered counts. `view` defaults to the
-   *   current view.
-   * @throws {@link MosaicaError} where the server refuses the request, such as `422` for an unknown
-   *   layer, or where the store's read of `/v1/meta` was refused.
+   * @param req - The page to read. `filters` defaults to {@link Store.requestFilters}, so the counts
+   *   match the map's; pass `null` to count without filters. `view` defaults to the current view.
+   * @throws {@link MosaicaError} if the server refuses the request, for example with `422` for an
+   *   unknown layer.
    */
   browse(req: Omit<BrowseRequest, 'filters' | 'view'> & {filters?: FilterExpr | null; view?: string}): Promise<BrowsePage>;
   /**
-   * The items this viewer may see that match the store's filters (`POST /v1/items`), with the
-   * caller's `fields`, `order` and page size. It is {@link MosaicaClient.items} sent with the
-   * store's token, and resolves when the first response's head arrives. Iterate the result for each
-   * page as an Arrow table; the read follows the server's cursor page after page, and stops when
-   * the caller does. To show the first 50 and page on:
+   * Read the items that match the map's filters, one page at a time. This is
+   * {@link MosaicaClient.items} with the store's token, view and filters filled in. It resolves when
+   * the first page's header arrives; call `next()` on the result for each page, as an Arrow table.
+   * Pages are fetched only as you ask for them.
    *
    * ```ts
    * const read = await store.items({fields: ['title'], pageRows: 50, count: true, inView: true});
-   * const first = await read.next(); // read.head.matched counts them all
-   * const second = await read.next(); // when the reader asks for more
+   * const first = await read.next(); // read.head.matched counts every match
+   * const second = await read.next(); // the next 50
    * ```
    *
-   * The filters are taken when the request goes out; a later `setFilters` does not change a read
-   * already open. Waits for `/v1/meta`, and with `inView` for the camera: a call made before the map
-   * has called `setView` or a region is selected sends nothing until one of them arrives, then reads
-   * that area. Disposing the store, or aborting `signal`, while it waits rejects it.
+   * A read keeps the filters it started with, so start a new one after the filters change. With
+   * `inView`, a call made before the map has set the camera or a region has been selected waits for
+   * one, then reads that area.
    *
-   * @param req - The read. `view` defaults to the current view and `filters` to
-   *   {@link Store.requestFilters}; see {@link StoreItemsRequest}.
+   * @param req - The read. `view` and `filters` default to the store's; see {@link StoreItemsRequest}.
    * @param signal - Aborts the read.
-   * @throws {@link MosaicaError} where the server refuses the first request, as
-   *   {@link MosaicaClient.items} says, or where the store's read of `/v1/meta` was refused;
-   *   `Error` at once for `inView` with another view than the current one; a `DOMException` named
-   *   `AbortError` where the store is disposed before the camera is set, and `signal`'s reason where
-   *   it aborts first.
+   * @throws {@link MosaicaError} if the server refuses the first request. `Error` if `inView` is set
+   *   with a view other than the current one. A `DOMException` named `AbortError` if the store is
+   *   disposed while the call waits for the camera, or `signal`'s reason if it is aborted.
    */
   items(req: StoreItemsRequest, signal?: AbortSignal): Promise<RecordsRead<ItemsHead>>;
   /**
-   * The `filters` expression every request carries: the filter-position controls, the `member_of`
-   * clauses in that position and the selected region's leaf, joined by `all_of`. `null` where none
-   * is set. The expression is JSON-safe: an artifact in a `member_of` or `region` leaf is a decimal
-   * string.
+   * The filter expression the store sends with every request: the filter controls, the
+   * `member_of` clauses and the selected region, combined with `all_of`. Controls and clauses set
+   * to highlight are not included. `null` when nothing is set. Artifact ids in the expression are
+   * decimal strings, so it can be serialised as JSON.
    */
   requestFilters(): FilterExpr | null;
   /**
-   * Keep an aggregate of the current view under `id` (`POST /v1/aggregate`), published in the
-   * `aggregates` projection; `null` drops it. The request carries `spec`'s groupings and reference as
-   * given, and {@link Store.requestFilters} as its `filters`, so the counts are over what the map
-   * counts. With `spec.without` naming a column, its control in the filter position is left out of
-   * `filters`, as {@link withoutClause} empties it, so a filter control's own counts keep showing
-   * the values its clause would exclude while every other clause still narrows them. With
-   * `spec.withoutMembersOf` naming a layer, that layer's `member_of` clauses in the filter position
-   * are left out in the same way. `spec.subject` `view` adds the area the counts in view cover, and
-   * `visible` sends no filters at all. A `429` or `503` is sent again as the map's requests are,
-   * with the same backoff, and published as `retrying` meanwhile.
+   * Keep a live aggregate of the current view under `id`, published in the `aggregates`
+   * projection. Pass `null` to drop it.
    *
-   * The store asks again, aborting the request it replaces, when `setAggregate` is called for the
-   * id again; when the filters, the highlight, the `member_of` clauses or the selected region
-   * change and the request they compose differs from the one last sent; for a `view` aggregate,
-   * once the camera has rested 250 ms somewhere new; at a view switch; at {@link Store.refresh};
-   * when a frame observes a new content key; and once it has read `/v1/meta` again after
-   * forgetting what the server answered, composing its request under that meta. A `view`
-   * aggregate registered while the camera moves is sent once it rests. Aggregates asked for
-   * together whose requests differ only in their groupings go as one request, up to
-   * `meta.selection.maxAggregateGroupings` groupings each. Waits for `/v1/meta`. Each call sends a
-   * new request, so call it when the component's spec changes, not on every render.
+   * The aggregate counts what the map counts ({@link Store.requestFilters}). `spec.without` leaves
+   * one column's filter out, so a filter control can still show the values its own clause
+   * excludes; `spec.withoutMembersOf` does the same for a layer's `member_of` clauses.
+   * `spec.subject: 'view'` limits the counts to the area in view, and `'visible'` ignores the
+   * filters and counts everything the viewer may see.
+   *
+   * The store asks again whenever the filters, highlight, selected region or view change, and for
+   * a `view` aggregate once the camera comes to rest. Each call sends a new request, so call it
+   * when the spec changes, not on every render.
    *
    * @example A field card's histogram of `year`, in view and over everything the filters match,
    * each leaving out the card's own clause, and the field's figures:
@@ -729,134 +653,116 @@ export interface Store {
    */
   setAggregate(id: string, spec: AggregateSpec | null): void;
   /**
-   * Ask a category column's typeahead for `q`, from a control in position `verb`, 120 ms after the
-   * last call for that column. The page lands in `filters.suggestions[column]`, each value with its
-   * count in the current view among the items passing a filter, and the `total` those counts are
-   * taken over. In `filter` the filter is {@link Store.requestFilters} without the column's own
-   * filter clause, so each value counts what choosing it as well would add; in `highlight` it is the
-   * whole of it, so a value the filter excludes counts 0. A refusal lands in
-   * `filters.suggestErrors[column]`. A call repeating the `q` and `verb` last asked for does nothing;
-   * any other call asks again and cancels the column's request before. A change of filter or region
-   * asks again for each column whose request would carry another filter, keeping its page until the
-   * new one lands. Requests are sent one at a time, since the server runs one suggestion per
-   * session. An ask the server sheds (`429`) is retried after the wait it gives, at least 0.25 s, up
-   * to five times; an ask from the box then reports `backpressure`, and one from a change of filter
-   * keeps the page it had. Waits for `/v1/meta`.
+   * Fetch typeahead suggestions for the category column `column` that match `q`, for a control set
+   * to `verb`. The page lands in `filters.suggestions[column]`, each value with its count in the
+   * current view, and an error lands in `filters.suggestErrors[column]`.
+   *
+   * Under `filter`, the counts leave out the column's own clause, so each shows what choosing that
+   * value as well would add. Under `highlight` they use every filter, so a value the filters
+   * exclude counts 0.
+   *
+   * Calls are debounced by 120 ms. The store fetches the suggestions again when the filters or the
+   * region change, until {@link Store.forgetSuggestions} is called. A busy server is asked up to
+   * five times before the error is `backpressure`.
    */
   suggest(column: string, q: string, verb: ClauseVerb): void;
   /**
-   * Stop asking for `column`'s suggestions and drop its page and refusal, so a change of filter no
-   * longer asks for it. A control calls this when its box is emptied and when it goes away.
+   * Stop fetching suggestions for `column` and drop its page and error. Call it when a search box is
+   * emptied or removed.
    */
   forgetSuggestions(column: string): void;
   /**
-   * Draw these layers, each with its closure ({@link layerClosure}); `[]` draws none. Filter layers
-   * are dropped from the list. A layer newly named is fetched at once. Publishes `artifacts`. Called
-   * before `/v1/meta` arrives, the names are published as given and resolved when it does.
+   * Draw the artifacts of these layers, each together with the layers it is linked to by
+   * `depends_on` ({@link layerClosure}). Pass `[]` to draw none. Filter layers are ignored.
+   * Publishes `artifacts`.
    */
   setLayers(names: string[]): void;
   /**
-   * Colour points by a declared column, by `cluster:<layer>` for a layer {@link colourLayers} lists,
-   * or `null` for uniform. Publishes `legend`. Colouring by a layer fetches its artifacts into
-   * `artifacts.colourServed`, and its labels into `artifacts.attached`, without drawing them. A
-   * `cluster:` layer that `meta` does not list as one that can colour is named in no request, and
-   * the points draw uniform. A `render` column is carried by the points from then on, and the held
-   * bands without it are fetched again (see {@link Store.setPointColumns}).
+   * Colour points by a declared column, by a layer's clusters with `cluster:<layer>` for a layer
+   * {@link colourLayers} lists, or all alike with `null`. Publishes `legend`. Colouring by a layer
+   * fetches its artifacts and labels without drawing them. A layer that cannot colour leaves the
+   * points uniform. Points already held are fetched again with the new column.
    */
   setColourBy(column: string | null): void;
   /**
-   * Size points by a declared number column, or `null` for one size. Publishes `legend`, whose
-   * `domains` and `missing` then accumulate the column from the marks drawn, and with `rank` set
-   * `samples` too, for sizing by rank. The column is carried by the points as the colour column is.
-   * A column that is a category, not a number or not rendered sizes nothing.
+   * Size points by a declared number column, or give every point the same size with `null`. With
+   * `rank: true` points are sized by rank instead of value. Publishes `legend`, whose `domains` and
+   * `missing` fill in from the points drawn. A column that is not a rendered number column sizes
+   * nothing.
    */
   setSizeBy(column: string | null, options?: {rank?: boolean}): void;
   /**
-   * Have each point carry the render columns `columns` names, on behalf of `id`, beside the colour
-   * and size columns; `[]` withdraws `id`'s ask. A point request names the union of every ask with
-   * the colour and size columns, and the server reads no other render column, so a column read
-   * from {@link Band.scalars} (a hover's fields, say) must be asked for here. A name that is not a
-   * render column of the current view is left out of the request. Each held band without a column
-   * newly asked for is fetched again, in view or not, and stays drawn until its replacement
-   * arrives; dropping a column sends no request. The asks hold for every view.
+   * Ask for extra render columns on every point on behalf of `id`, such as the fields a hover reads
+   * from {@link Band.scalars}. The server sends only the render columns that have been asked for
+   * here or by `setColourBy` and `setSizeBy`. Pass `[]` to withdraw `id`'s request. Names that are
+   * not render columns of the current view are ignored. Adding a column fetches the held points
+   * again, and they stay drawn until the new ones arrive. The request applies to every view.
    */
   setPointColumns(id: string, columns: readonly string[]): void;
   /**
-   * Colour clusters from `palette`. Publishes `artifacts.colours` and `artifacts.palette`; the
-   * palette in use and a name {@link PALETTES} does not list do nothing. A cluster's slot is
-   * served for one palette size, so a palette of another size drops every view's held artifacts
-   * and asks again for the current camera's.
+   * Colour clusters from `palette`. Publishes `artifacts.colours` and `artifacts.palette`. A name
+   * {@link PALETTES} does not list is ignored. Changing to a palette of a different size fetches the
+   * artifacts again.
    */
   setPalette(palette: PaletteName): void;
   /**
-   * Colour the artifacts `colours` names, by layer and then by `mosaica_id`, with its colours in
-   * place of their palette colours, and every other artifact from the palette. Each call replaces
-   * the last; an empty map colours every artifact from the palette. Publishes `artifacts.colours`
-   * and `artifacts.overrides`.
+   * Give particular artifacts their own colours, keyed by layer and then by `mosaica_id`. Every
+   * other artifact keeps its palette colour. Each call replaces the last, and an empty map clears
+   * them. Publishes `artifacts.colours` and `artifacts.overrides`.
    */
   setArtifactColours(colours: ChosenColours): void;
   /**
-   * Set how many marks the store aims to draw on screen, for every view, and ask again for the
-   * current camera. A value that is not a finite number above zero is ignored.
+   * Set how many marks the store aims to draw on screen in every view, and fetch the map again.
+   * Anything but a positive finite number is ignored.
    */
   setBudget(budget: number): void;
-  /** The marks the store aims to draw: `budget` as created, else 250000, until `setBudget` changes it. */
+  /** How many marks the store aims to draw. Set by `budget` in the options or by `setBudget`. */
   readonly budget: number;
   /**
-   * Cut every `nested` and `dag` layer to at most `budget` artifacts, met by drawing ancestors in
-   * place of their descendants, and ask again for the treed layers drawn and for each registered
-   * aggregate ranking a layer at `cut: 'drawn'`. `null` asks for the finest cut. Points fetched
-   * from then on are tagged under the new cut. A value that is not a whole number above zero, or
-   * `null`, is ignored.
+   * Limit every `nested` and `dag` layer to at most `budget` artifacts by drawing ancestors in place
+   * of their descendants. `null` removes the limit. The store fetches the affected layers again,
+   * and any aggregate that ranks a layer at `cut: 'drawn'`. Anything but a positive whole number or
+   * `null` is ignored.
    */
   setClusterBudget(budget: number | null): void;
-  /** The most artifacts a treed layer is cut to: `artifacts.budget` as created, else `null`, until `setClusterBudget` changes it. */
+  /**
+   * The most artifacts a `nested` or `dag` layer is drawn with, or `null` for no limit. Set by
+   * `artifacts.budget` in the options or by `setClusterBudget`.
+   */
   readonly clusterBudget: number | null;
   /**
-   * Make `id` the view the store answers from. An id `meta.views` does not list is ignored, as is
-   * the current id. Called before `/v1/meta` arrives, it names the view to open with, in place of
-   * `options.view`.
+   * Switch to view `id`. An id `meta.views` does not list is ignored. Called before `/v1/meta` has
+   * loaded, it sets the view to open with.
    *
-   * Between views quantised against the same extent, the camera and the selected region carry
-   * over: the incoming view draws what it holds at once and fetches 140 ms after the last switch.
-   * Across extents both are dropped, and the host's next `setView` supplies the camera. A switch
-   * publishes `view` with no frame and `status` as `loading`, empties `marks` and `tiles`, drops
-   * the typeahead's pages and the fetched shapes, and publishes the incoming view's artifacts.
+   * Between views that share an extent, the camera and the selected region carry over and the new
+   * view draws what it already holds at once. A view with another extent drops both, and the next
+   * `setView` sets the camera. A switch clears the marks, the tiles, the typeahead pages and the
+   * fetched shapes, and publishes `status` as `loading`.
    */
   setCurrentView(id: string): void;
   /**
-   * The extent the current view's positions are quantised against, in data coordinates, or `null`
-   * before `/v1/meta` has arrived.
+   * The extent the current view's positions are quantised against, in data coordinates. `null`
+   * until `/v1/meta` has loaded.
    */
   frame(): Quantisation | null;
   /**
-   * Fetch one item's record (`POST /v1/items/{mosaica_id}`) and publish it as `selection.item`,
-   * keeping any opened artifact. A refusal is published as `selection.itemRefusal` and the promise
-   * still resolves. An id this viewer cannot see is refused as `unknown`, as an id that does not
-   * exist is. An answer that lands after `clear` or `dispose` is dropped.
+   * Fetch one item's record and publish it as `selection.item`. An opened artifact stays open. If
+   * the request is refused, the refusal is published as `selection.itemRefusal` and the promise
+   * still resolves. An item the viewer cannot see is refused as `unknown`, the same as one that
+   * does not exist.
    */
   pick(id: bigint): Promise<void>;
   /**
-   * One item's fields for a hover, fetched once per id and held. Resolves to `null` where the
-   * request was refused, and holds that too. It publishes nothing; {@link Store.pick} opens a card.
-   * When the store forgets what the server answered (see {@link Store}) it drops what is held, and
-   * an answer asked for before then resolves to `null`.
+   * Fetch one item's fields for a hover. Each id is fetched once and the answer kept. Resolves to
+   * `null` if the request was refused. Publishes nothing; {@link Store.pick} opens a card.
    */
   describe(id: bigint): Promise<Record<string, unknown> | null>;
   /**
-   * The title the vocabulary gives `key`, a value of the category column `column`. Resolves to
-   * `null` where the value has no title, where `column` is not a category column a filter can
-   * name, where the request was refused, and once the store is disposed. The title is asked for
-   * over everything this viewer may see (`POST /v1/aggregate` with `subject: 'visible'`, naming
-   * the value), and the server gives it as `/v1/categories` would list it: every value of a
-   * `public` vocabulary has its title, whether or not the viewer may see an item that carries it,
-   * and a value of a `derived` vocabulary has its title only where the viewer may see an item that
-   * carries it. Asks made in one task go as one request, up to
-   * `meta.selection.maxAggregateGroupings` values each, and are sent and retried as
-   * {@link Store.setAggregate}'s are. An answer is held with `meta`, so asking again for a value
-   * resolves without a request; it is held only where `meta` is the one it was asked under. When
-   * the store forgets what the server answered (see {@link Store}) it drops what is held, and an
-   * answer asked for before then resolves to `null`. Waits for `/v1/meta`.
+   * The display title of `key`, a value of the category column `column`. Resolves to `null` if the
+   * value has no title, if `column` is not a category column a filter can name, or if the request
+   * was refused. Every value of a `public` vocabulary has its title. A value of a `derived`
+   * vocabulary has one only if the viewer may see an item that carries it. Titles are kept once
+   * fetched, and lookups made together go as one request.
    *
    * @example The title of an opened item's archive
    * ```ts
@@ -867,79 +773,71 @@ export interface Store {
    */
   titleOf(column: string, key: string): Promise<string | null>;
   /**
-   * The title {@link Store.titleOf} was answered for `key` of `column` and the store holds:
-   * `null` where the value has no title, `undefined` where none is held, as before an ask, while
-   * one is in flight, after a refusal and once the store forgets what the server answered.
+   * The title {@link Store.titleOf} has already fetched, without a request. `null` if the value has
+   * no title. `undefined` if none is held, including while a lookup is in flight and after a
+   * refusal.
    */
   heldTitle(column: string, key: string): string | null | undefined;
   /**
-   * Fetch one artifact's detail under the current view (`POST /v1/artifacts/{mosaica_id}`) and
-   * publish it as `selection.artifact`, clearing `selection.item`. Its shape is held in
-   * `artifacts.shapes` at full detail. A refusal is published as `selection.artifactRefusal` and the
-   * promise still resolves. An artifact this viewer cannot reach is refused as one that does not
-   * exist is. Waits for `/v1/meta`; an answer that lands after `clear` or `dispose` is dropped.
+   * Fetch one artifact's details and publish them as `selection.artifact`, clearing
+   * `selection.item`. Its full-detail shape goes into `artifacts.shapes`. If the request is refused,
+   * the refusal is published as `selection.artifactRefusal` and the promise still resolves. An
+   * artifact the viewer cannot reach is refused the same as one that does not exist.
    */
   openArtifact(id: bigint): Promise<void>;
   /**
-   * Ask for one artifact's shape, which lands in `artifacts.shapes` simplified for the current
-   * view's zoom. The viewport serves only centroids and boxes. A shape held, in flight or refused is
-   * not asked for again, so this may be called on every pointer move. Waits for `/v1/meta`.
+   * Fetch one artifact's outline into `artifacts.shapes`, simplified for the current zoom. Map tiles
+   * carry only each artifact's centre and box. A shape is fetched at most once, so this can be
+   * called on every pointer move.
    */
   needShape(id: bigint): void;
-  /** Clear the picked item, the opened artifact and their refusals; one asked for and not yet answered is not shown. Publishes `selection`. */
+  /**
+   * Clear the picked item, the opened artifact and their refusals. A pick or open still in flight is
+   * not shown. Publishes `selection`.
+   */
   clearSelection(): void;
   /**
-   * Select a region, or clear the selection with `null` or a lasso of fewer than three points.
-   * Publishes `region`. The selection goes on every request as a `region` filter leaf, so selecting
-   * drops every view's held tiles and asks again for the current camera.
+   * Select a region, or clear the selection with `null` or a lasso of fewer than three points. The
+   * region becomes part of every request's filters, so the map is fetched again. Publishes `region`.
    */
   select(shape: SelectionShape | null): void;
   /**
-   * A served artifact's box in the current view's data coordinates, `[x0, y0, x1, y1]`, or `null`
-   * where the artifact is not in `artifacts.served` or has no box.
+   * A served artifact's box in the current view's data coordinates, `[x0, y0, x1, y1]`. `null` if
+   * the artifact is not in `artifacts.served` or has no box.
    */
   extentOf(artifactId: bigint): [number, number, number, number] | null;
   /**
-   * The data coordinates of a world position in the current view. World space runs from `0` to
+   * Convert a world position to the current view's data coordinates. World space runs from `0` to
    * {@link WORLD_SIZE} on each axis across the view's extent.
    *
-   * @throws `Error` before `/v1/meta` has arrived.
+   * @throws `Error` if `/v1/meta` has not loaded.
    */
   dataXY(worldX: number, worldY: number): [number, number];
   /**
-   * Forget the viewer, to show the map to another one. {@link Store} says how long a previous
-   * viewer's data stays without this call.
-   * Drops the token, `meta`, every view's held tiles and artifacts, the session artifact table, the
-   * shapes, item records, legend, typeahead pages, `member_of` clauses, region and selection, and
-   * abandons every request in flight. Publishes the emptied projections, with `meta` as `null` and
-   * `status` as `idle`, before it returns. It then asks `authorise` for a token, reads `/v1/meta`
-   * with it and asks again for the camera. A store given a fixed `token` keeps it.
+   * Forget the current viewer, so the map can be shown to another. The store drops its token, its
+   * metadata, everything it has fetched, the `member_of` clauses, the region and the selection, and
+   * abandons every request in flight. It publishes empty projections with `status` as `idle`, then
+   * asks `authorise` for a new token and loads again. A store created with a fixed `token` keeps it.
    *
-   * The filters set with `setFilters`, the layers, the colouring, the columns asked for with
-   * `setPointColumns`, the current view and the camera are kept. A filter draft the store seeded from `meta` is seeded again from the next. A filter
-   * control, layer or colouring naming a column or layer the next `meta` does not list is dropped.
-   * Where the next `meta` does not list the current view, the store opens on its first view and
-   * drops the camera.
+   * The filters, layers, colouring, point columns, current view and camera are kept. Any that name
+   * a view, layer or column the new metadata does not list are dropped, and if the current view is
+   * not listed the store opens on the first one.
    */
   clear(): void;
   /**
-   * The world outline from `GET /v1/basemaps/world` ({@link MosaicaClient.basemapWorld}), asked
-   * for under the store's token as every other request is. The body is the same for every viewer,
-   * so one answer is shared by every store on the page that reaches the same server; a store
-   * waiting on another's request that fails asks under its own token. Where the server answers
-   * `401` to a token that had worked, the store renews it as for any request and asks once more
-   * under the new one. A refused or failed fetch is not kept, so the next call asks again.
+   * Fetch the world outline for a basemap ({@link MosaicaClient.basemapWorld}). The outline is the
+   * same for every viewer, so the stores on a page that use one server share one download. A failed
+   * fetch is not kept, so the next call tries again.
    */
   basemapWorld(): Promise<ArrayBuffer>;
   /**
-   * Ask again for the current camera, as after a refusal. The current view's artifacts are dropped
-   * and fetched afresh, and the marks are fetched where the held tiles do not answer the view. A
-   * selected region shows `loading` until the new frame lands.
+   * Fetch the current view again, as after a refusal. The artifacts are fetched afresh, and the
+   * points wherever the held tiles do not cover the view.
    */
   refresh(): void;
   /**
-   * Stop every timer and request, and close the client if the store built it. A client passed as
-   * `client` is left open for the host to close. An answer that lands afterwards publishes nothing.
+   * Stop every timer and request. Closes the client if the store created it; a client passed as
+   * `client` is left for you to close.
    */
   dispose(): void;
 }
@@ -979,7 +877,7 @@ const IN_VIEW_REST_MS = 250;
 const RANKED_VALUES = 32;
 
 /**
- * How many marks a store aims to draw on screen where {@link StoreOptions.budget} names no number.
+ * How many marks a store aims to draw on screen when {@link StoreOptions.budget} is not given.
  *
  * @category Store
  */
@@ -1035,11 +933,11 @@ const NO_STATUS: StatusProjection = {
 };
 
 /**
- * Create a store and start reading `/v1/meta`, unless `options.meta` is given. A refused read
- * publishes `status` as `refused`, and is tried again by the next call that waits for `/v1/meta`
- * and whenever `authorise` supplies a token.
+ * Create a store and start loading the server's metadata (`/v1/meta`), unless `options.meta`
+ * provides it. If the server refuses, `status` is published as `refused`, and the store tries again
+ * on the next call that needs the metadata or when `authorise` supplies a new token.
  *
- * @throws `Error` where `options` gives neither `viewerUrl` nor `client`.
+ * @throws `Error` if `options` has neither `viewerUrl` nor `client`.
  * @category Store
  */
 export function createStore(options: StoreOptions): Store {
