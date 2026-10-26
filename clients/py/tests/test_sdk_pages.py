@@ -1716,9 +1716,7 @@ def test_a_layer_on_every_view_is_the_same_declaration_after_a_view_is_added(tmp
         db.close()
 
 
-@pytest.mark.parametrize(
-    "levels", [["broad", "fine"], [0.5, 1], [None, 1], [float("nan"), 1.0], [-1, 1]]
-)
+@pytest.mark.parametrize("levels", [["broad", "fine"], [0.5, 1], [float("inf"), 1.0], [-1, 1]])
 def test_a_label_level_that_is_not_a_whole_number_is_refused(tmp_path, levels):
     db, _ = two_items(tmp_path / "db")
     try:
@@ -1734,3 +1732,30 @@ def test_a_label_level_that_is_not_a_whole_number_is_refused(tmp_path, levels):
 def pd_frame(columns: dict):
     pd = pytest.importorskip("pandas")
     return pd.DataFrame(columns)
+
+
+def test_a_null_label_level_given_as_text_is_read_as_a_table_read_with_contents_reads_it(tmp_path):
+    """Both doors read a null level as the coarsest, so a name with none is served on the broad
+    cluster either way."""
+    served = {}
+    for door in ("text", "contents"):
+        db, _ = two_items(tmp_path / door)
+        try:
+            tiered_topics(db)
+            if door == "text":
+                db.insert("names", pa.table({"cluster": ["b"], "name": ["Broad"],
+                                             "level": pa.array([None], pa.uint32())}),
+                          key="cluster", text="name", attached_level="level")
+            else:
+                db.insert("names", pa.table({
+                    "level": pa.array([0], pa.uint32()), "key": ["nb"], "contents": [[["Broad"]]],
+                    "attached_layer": ["topics"], "attached_level": pa.array([None], pa.uint32()),
+                    "attached_key": ["b"],
+                }))
+            assert db.commit().ok
+            clusters = dict(zip(*db.artifacts("map", "topics", ["key"]).to_pydict().values()))
+            names = db.artifacts("map", "names", ["content", "target"]).to_pylist()
+            served[door] = {clusters[row["target"]]: row["content"] for row in names}
+        finally:
+            db.close()
+    assert served["text"] == served["contents"] == {"b": ["Broad"]}

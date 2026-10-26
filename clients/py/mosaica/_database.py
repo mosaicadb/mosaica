@@ -1143,18 +1143,24 @@ class Database:
                 else [of] * len(keys)
             )
             if "attached_level" in named:
-                attached_levels = table[named["attached_level"]].to_pylist()
+                # A null names no level, as it does in a table read with contents=.
+                attached_levels = [
+                    None if one is None or one != one else one
+                    for one in table[named["attached_level"]].to_pylist()
+                ]
                 wrong = [
                     one for one in attached_levels
-                    if isinstance(one, bool) or not isinstance(one, (int, float))
-                    or not math.isfinite(one) or one != int(one) or one < 0
+                    if one is not None and (
+                        isinstance(one, bool) or not isinstance(one, (int, float))
+                        or not math.isfinite(one) or one != int(one) or one < 0
+                    )
                 ]
                 if wrong:
                     raise Refusal(
                         f"insert into labels {target!r}: attached_level={named['attached_level']!r}"
                         f" holds {wrong[0]!r}; write each cluster's level as a whole number from 0"
                     )
-                attached_levels = [int(one) for one in attached_levels]
+                attached_levels = [None if one is None else int(one) for one in attached_levels]
             carried = {"key", "text", "level", "attached_key", "attached_layer", "attached_level"}
             beyond = sorted(set(named) - carried)
             if beyond:
