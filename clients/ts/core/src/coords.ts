@@ -14,8 +14,8 @@ import type {Quantisation} from './types.js';
  */
 export const CELL_GRID = 65536;
 /**
- * The deepest tile depth, 16. A tile at depth `z` is one of `2^z` by `2^z` over the view, and a
- * depth-16 tile is one cell of the 65,536 by 65,536 cell grid.
+ * The deepest tile depth, 16. At depth `z` the view is divided into `2^z` by `2^z` tiles, so a
+ * depth-16 tile is one cell of the 65,536 by 65,536 grid that positions are stored on.
  *
  * @category Coordinates and colour
  */
@@ -23,8 +23,8 @@ export const MAX_DEPTH = 16;
 /** @internal */
 export const TILE_SIZE = 512;
 /**
- * The width and height of the world, in deck.gl world units: 512. World space runs from `0` to
- * `WORLD_SIZE` on each axis, and the depth-0 tile covers it.
+ * The width and height of the map in deck.gl world units: 512. World space runs from `0` to
+ * `WORLD_SIZE` on each axis.
  *
  * @category Coordinates and colour
  */
@@ -32,8 +32,8 @@ export const WORLD_SIZE = 512;
 /** @internal */
 export const CELLS_PER_WORLD_UNIT = CELL_GRID / WORLD_SIZE; // 128
 /**
- * The size of the 32-bit grid, 2^32 units per axis, that artifact geometry (`centroid`, `box` and
- * shapes) is served in. It is the grid a point's `code` interleaves, 2^16 units per cell.
+ * The size of the grid that artifact geometry (`centroid`, `box` and shapes) is served in: 2^32
+ * units on each axis. {@link gridToWorld} converts it to world units.
  *
  * @category Coordinates and colour
  */
@@ -46,7 +46,8 @@ export const GRID32 = 2 ** 32;
 export const GRID32_PER_WORLD_UNIT = GRID32 / WORLD_SIZE;
 
 /**
- * Converts one coordinate of artifact geometry from 32-bit grid units to deck.gl world units.
+ * Convert one coordinate of artifact geometry from 32-bit grid units ({@link GRID32}) to deck.gl
+ * world units.
  *
  * @category Coordinates and colour
  */
@@ -55,7 +56,8 @@ export function gridToWorld(v: number): number {
 }
 
 /**
- * Converts an `[x, y]` point of artifact geometry from 32-bit grid units to deck.gl world units.
+ * Convert an `[x, y]` point of artifact geometry from 32-bit grid units ({@link GRID32}) to
+ * deck.gl world units.
  *
  * @category Coordinates and colour
  */
@@ -157,12 +159,11 @@ export function rectToRequestBbox(
 }
 
 /**
- * Converts a point from data space, the view's own coordinates, to deck.gl world space. Each axis
- * is scaled separately, so a tile is square in world space whatever the data extent.
+ * Convert a point from the view's data coordinates to deck.gl world units. Each axis is scaled
+ * separately, so the view's extent becomes a square.
  *
- * @param q - The view's quantisation extent, from the view's `quantisation` in
- *   {@link MosaicaClient.meta}.
- * @returns `[x, y]` in world units: `0` to {@link WORLD_SIZE} for a point inside the extent.
+ * @param q - The view's `quantisation`, from `/v1/meta`.
+ * @returns `[x, y]` in world units, from `0` to {@link WORLD_SIZE} for a point inside the extent.
  *
  * @category Coordinates and colour
  */

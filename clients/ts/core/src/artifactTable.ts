@@ -13,7 +13,7 @@
  */
 
 /**
- * What an {@link ArtifactTable} holds for one ordinal.
+ * One artifact in an {@link ArtifactTable}.
  *
  * @category Projections
  */
@@ -23,30 +23,24 @@ export type ArtifactEntry = {
   /** The artifact's layer. */
   layer: string;
   /**
-   * The ordinals of the artifact's parents that the table holds, ascending by `mosaica_id` as the
-   * server orders them, and empty where none is held. A parent is known only where it arrived in
-   * the same response as the child, so a walk that meets an empty list stops there. A tree has at
-   * most one parent; a `dag` layer may have several, and {@link ArtifactTable.resolve} takes
-   * the first.
+   * The ordinals of the artifact's parents, in ascending `mosaica_id` order. Only parents that
+   * arrived in the same response as the artifact are listed, so the list may be empty even if the
+   * artifact has parents. A tree has at most one parent; a `dag` layer may have several.
    */
   parentOrdinals: readonly number[];
   /**
-   * The level the artifact is drawn at, from the server's `rung`: the declared level on a levelled
-   * layer, the depth of its parent chain in the response on a treed one, `0` on a flat one.
+   * The artifact's level: the declared level on a layer with levels, the depth of its parent chain
+   * on a tree, and `0` on a flat layer.
    */
   rung: number;
-  /**
-   * The artifact's centroid in 32-bit grid units, as the first response that carried one gave it,
-   * or `null`.
-   */
+  /** The artifact's centroid in 32-bit grid units ({@link GRID32}), or `null` if not known. */
   centroid: readonly [number, number] | null;
   /**
-   * The artifact's palette slot, as the latest response that carried one gave it, or `null`. Its
-   * colour depends on this and {@link paletteSize} alone, so an entry can be coloured whether or
-   * not the current view served it.
+   * The artifact's slot in the palette, or `null` if not known. Its colour depends only on this and
+   * `paletteSize`, so it can be coloured even when the current view has not served it.
    */
   slot: number | null;
-  /** The `palette_size` {@link slot} was served under, or `null` where no response carried a slot. */
+  /** The palette size `slot` refers to, or `null` if `slot` is not known. */
   paletteSize: number | null;
 };
 
@@ -70,23 +64,21 @@ export type ArtifactRef = {
 };
 
 /**
- * The ordinal `0`, which stands for no artifact.
+ * The ordinal `0`, which means no artifact.
  *
  * @category Projections
  */
 export const NO_ORDINAL = 0;
 
 /**
- * What changed for one ordinal, as {@link ArtifactTable.changesSince} reports it. Each kind
- * asks a reader to recompute something different:
+ * A change to one ordinal, as {@link ArtifactTable.changesSince} reports it.
  *
- * - `named`: the ordinal was assigned. It is on no other ordinal's parent chain yet, so only its
- *   own derived value moved; a link that puts it on one is reported as the child's `linked`.
- * - `placed`: a centroid or a slot arrived for an ordinal already named, or its slot changed, so its
- *   colour moved, and every value resolved through it.
- * - `linked`: a parent link was set on an entry that existed before the batch, so its descendants
- *   resolve differently.
- * - `freed`: the last reference went and the slot returned to the free list.
+ * - `named`: the ordinal was assigned to an artifact. Only that ordinal's own derived values change.
+ * - `placed`: the artifact's centroid or palette slot arrived or changed, so its colour and those of
+ *   every ordinal that resolves through it may change.
+ * - `linked`: a parent was set on an existing artifact, so its descendants may resolve
+ *   differently.
+ * - `freed`: the ordinal was released and may be reused.
  *
  * @category Projections
  */
@@ -110,54 +102,49 @@ function keyOf(layer: string, mosaicaId: bigint): string {
 }
 
 /**
- * The session's table of annotation artifacts, one ordinal per artifact, as the store's
- * `artifacts` projection holds it. A point's membership column carries ordinals from this table
- * (see {@link BandMembership}), and a renderer resolves an ordinal to an artifact and a colour
- * through it. The store alone writes to it.
+ * A table of the artifacts the store holds, each numbered with a small integer called an ordinal.
+ * Points refer to artifacts by ordinal ({@link BandMembership}), and a renderer looks ordinals up
+ * here to find the artifact and its colour. Read it from {@link ArtifactsProjection.table}; only
+ * the store writes to it.
  *
- * An ordinal is a `u32`, with {@link NO_ORDINAL} for none. Ordinals are reference-counted by the
- * store's bands and held artifacts, and an ordinal none of them holds is freed and may be given to
- * another artifact.
+ * An ordinal is an unsigned 32-bit integer, with {@link NO_ORDINAL} for none. Once the store no
+ * longer holds an artifact, its ordinal is freed and may be given to another artifact.
  *
  * @category Projections
  */
 export interface ArtifactTable {
   /**
-   * How many times the table has changed: when an ordinal is named or freed, a centroid or a slot
-   * arrives, a parent link changes, or the table is cleared. A value derived from the table is current while
-   * this has not moved. Compare for equality only.
+   * A number that changes whenever the table does. A value derived from the table is up to date
+   * while this is unchanged. Compare it for equality only.
    */
   readonly version: number;
   /**
-   * Every change since `version`, oldest first, so a colour map or lookup texture derived from the
-   * table can be patched instead of rebuilt. `[]` where `version` is current.
+   * Every change since `version`, oldest first, so you can update a colour map or lookup texture
+   * instead of rebuilding it.
    *
-   * @returns The changes, or `null` where the table cannot answer: `version` is from before the
-   *   last `clear`, is ahead of the table, or is further behind than the latest 32,768 to 65,536
-   *   changes the table keeps. A reader given `null` rebuilds from `liveEntries()`.
+   * @returns The changes, `[]` if `version` is current, or `null` if the table no longer has them
+   *   (for example if `version` is from before the table was last cleared). On `null`, rebuild from `liveEntries()`.
    */
   changesSince(version: number): ArtifactTableChange[] | null;
   /** How many ordinals are in use. */
   readonly live: number;
-  /** One past the highest ordinal assigned since the last `clear`: the size a lookup texture indexed by ordinal needs. */
+  /** One more than the highest ordinal assigned: the size a lookup texture indexed by ordinal needs. */
   readonly range: number;
-  /** The ordinal of an artifact, or {@link NO_ORDINAL} where the table does not hold it. */
+  /** The ordinal of an artifact, or {@link NO_ORDINAL} if the table does not hold it. */
   ordinalOf(layer: string, mosaicaId: bigint): number;
-  /** The entry an ordinal names, or `null` for `0`, a freed ordinal or one never assigned. */
+  /** The artifact with this ordinal, or `null` if the ordinal is `0`, freed or never assigned. */
   entry(ordinal: number): ArtifactEntry | null;
-  /** Every ordinal in use, with its entry, for building a colour per ordinal. */
+  /** Every ordinal in use, with its artifact. */
   liveEntries(): {ordinal: number; entry: ArtifactEntry}[];
   /**
-   * The ordinal itself or its nearest ancestor that `served` holds, found by walking parent links.
-   * On a `dag` layer the walk takes the first parent at each step, and parents are ordered by
-   * `mosaica_id`, so it gives the same answer on every rebuild.
+   * Find the ordinal itself or its nearest ancestor that is in `served`, by following parent
+   * links. Use it to colour a point by the artifact drawn at the current cut. On a `dag` layer it
+   * follows the first parent at each step.
    *
    * @param served - Anything with `has`, such as a set of ordinals or a colour map.
-   * @param maxLevel - The level to colour at. The walk passes a served ancestor whose `rung` is
-   *   deeper and stops at the first at or above it, so moving to a coarser level needs no new
-   *   request. Left out, the walk stops at the first served ordinal.
-   * @returns The ordinal found, or {@link NO_ORDINAL} where the walk ends without one: at a link
-   *   never seen, or below a cut finer than anything held.
+   * @param maxLevel - The level to colour at: the walk skips ancestors in `served` whose `rung` is
+   *   deeper than this. By default it stops at the first one in `served`.
+   * @returns The ordinal found, or {@link NO_ORDINAL} if the walk runs out of known parents.
    */
   resolve(ordinal: number, served: {has(ordinal: number): boolean}, maxLevel?: number): number;
 }

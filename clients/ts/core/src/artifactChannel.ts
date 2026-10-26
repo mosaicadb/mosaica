@@ -889,25 +889,21 @@ function merged(a: Artifact, b: Artifact): Artifact {
 }
 
 /**
- * The hierarchy among the artifacts a view is served, built from their `parentIds`, as the store's
- * `artifacts` projection holds it in `lineage`. A parent is named only where it was served beside
- * the child, so an artifact whose parent was withheld has no parent here and is a root. On a `dag`
- * layer a child is listed under every served parent. The lineage changes as the map moves and as
- * the artifact budget cuts the hierarchy.
+ * The parent-child links among the artifacts in {@link ArtifactsProjection.served}, built from
+ * their `parentIds`. Only links between served artifacts are included, so an artifact whose parent
+ * was not served is a root here. On a `dag` layer a child is listed under each served parent. The
+ * links change as the camera moves and as the cluster budget changes.
  *
  * @category Projections
  */
 export type ServedLineage = {
   /** Every served artifact, by `mosaicaId`. */
   byId: Map<bigint, Artifact>;
-  /**
-   * A parent's served children, by the parent's `mosaicaId`; on a `dag` layer one child may be
-   * under several. Absent where none was served.
-   */
+  /** Each parent's served children, by the parent's `mosaicaId`. A parent with none has no entry. */
   childrenOf: Map<bigint, Artifact[]>;
-  /** The served artifacts with no served parent, where a walk of the hierarchy starts. */
+  /** The served artifacts that have no served parent. */
   roots: Artifact[];
-  /** Whether any parent link resolved. `false` both for a flat layer and for a tree cut to one level. */
+  /** Whether there are any links. `false` for a flat layer, and for a tree drawn at a single level. */
   linked: boolean;
 };
 
@@ -932,9 +928,8 @@ export function servedLineage(artifacts: readonly Artifact[]): ServedLineage {
 }
 
 /**
- * The `mosaicaId`s of `root` and of every artifact served beneath it, following the parent links
- * in `lineage`. `root` is included even where `lineage` does not hold it. A `dag` layer's cycles
- * end the walk.
+ * The `mosaicaId`s of `root` and every served artifact below it in `lineage`. `root` is included
+ * even if `lineage` does not hold it.
  *
  * @category Layers and views
  */

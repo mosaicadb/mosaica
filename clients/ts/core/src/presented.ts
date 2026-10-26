@@ -35,16 +35,14 @@ export function defaultFrameScheduler(): FrameScheduler {
 }
 
 /**
- * What the map is showing, as the store's `status` projection reports it:
+ * What the map is showing, as {@link StatusProjection.status} reports it.
  *
- * - `idle`: no view has been asked for yet.
+ * - `idle`: nothing has been requested yet.
  * - `loading`: a request for the view is in flight.
- * - `retrying`: the server answered `429` or `503`, and the request will be sent again.
- * - `shown`: a frame is on screen. Counts may be displayed in this state only.
- * - `empty`: the answer holds no point this principal may see in view.
- * - `refused`: the request failed, so what is here is not known.
- *
- * A host shows `empty` and `refused` differently, since only `empty` is an answer.
+ * - `retrying`: the server answered `429` or `503`, and the store will ask again.
+ * - `shown`: a frame is on screen, and its counts are meaningful.
+ * - `empty`: the viewer can see no points in view.
+ * - `refused`: the request failed, so nothing is known about what is in view.
  *
  * @category Projections
  */
@@ -56,14 +54,11 @@ export type PresentedStatus = 'idle' | 'loading' | 'retrying' | 'shown' | 'empty
  * @category Projections
  */
 export type Refusal = {
-  /** A {@link MosaicaError}'s `code`, or `fetch-failed` for any other error. */
+  /** The {@link MosaicaError}'s `code`, or `fetch-failed` for any other error. */
   code: string;
-  /** A {@link MosaicaError}'s `detail`, or the other error's message. */
+  /** The {@link MosaicaError}'s `detail`, or the error's message for any other error. */
   detail: string;
-  /**
-   * The HTTP status: a {@link MosaicaError}'s, or that of any other error carrying a numeric
-   * `status`; `null` where the error carries none.
-   */
+  /** The HTTP status, or `null` if the error has none. */
   status: number | null;
 };
 

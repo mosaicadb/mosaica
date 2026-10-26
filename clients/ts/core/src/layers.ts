@@ -1,27 +1,26 @@
 import type {Layer} from './types.js';
 
 /**
- * One entry of a layer picker: a root layer and its closure, which is what the store names in a
- * request. A clustering's labels are a second layer that `depends_on` it; named alone, one would
- * serve labels with no clusters, or clusters without their labels.
+ * One entry in a layer picker: a layer and the layers linked to it by `depends_on`, which are
+ * drawn together. For example, a clustering's labels are a separate layer that depends on the
+ * clustering, and one entry covers both.
  *
  * @category Layers and views
  */
 export type LayerEntry = {
   /**
-   * A layer that depends on no layer `meta` lists. A layer whose dependency this viewer cannot
-   * reach is therefore a root.
+   * The entry's main layer: one that depends on no other layer in `meta`. A layer whose
+   * dependencies the viewer cannot see counts as a root.
    */
   root: Layer;
-  /** The closure of `root`, as {@link layerClosure} gives it. Two roots with a common dependent both carry it. */
+  /** `root` and every layer linked to it, as {@link layerClosure} gives them. A layer that depends on two roots is in both entries. */
   closure: string[];
 };
 
 /**
- * The names in the closures of `names`, in `layers` order, each once. A layer's closure is the
- * layer and every layer linked to it through `depends_on`, in either direction and transitively. A
- * name `layers` does not list is kept, after the others, since the server intersects a request
- * with what the viewer reaches.
+ * The layers in `names` together with every layer linked to them by `depends_on`, in either
+ * direction and at any distance, each listed once in `layers` order. Names `layers` does not list
+ * are kept, at the end.
  *
  * @category Layers and views
  */
@@ -45,8 +44,8 @@ export function layerClosure(layers: readonly Layer[], names: readonly string[])
 }
 
 /**
- * The entries a layer picker offers: one per root (a layer that depends on no layer in `layers`),
- * with its closure, in `layers` order.
+ * The entries for a layer picker: one per layer that depends on no other layer in `layers`, with
+ * the layers linked to it, in `layers` order.
  *
  * @category Layers and views
  */
@@ -58,10 +57,9 @@ export function layerEntries(layers: readonly Layer[]): LayerEntry[] {
 }
 
 /**
- * Whether a layer is a filter layer: one that declares no computed geometry (`computedContent` is
- * empty) and depends on no layer. Its artifacts have counts and no geometry. The store does not
- * draw a filter layer or name it in a viewport request's `layers`; it is applied as a `member_of`
- * clause, from a hierarchy panel. The server treats it as any other layer.
+ * Whether a layer is a filter layer: one with no computed geometry (`computedContent` is empty)
+ * that depends on no other layer. Its artifacts have counts but nothing to draw, so the store does
+ * not draw it. Use its artifacts in `member_of` clauses, for example from a hierarchy panel.
  *
  * @category Layers and views
  */
@@ -71,7 +69,7 @@ export function isFilterLayer(layer: Layer): boolean {
 }
 
 /**
- * The layers a client may draw: every layer that is not a filter layer.
+ * The layers that can be drawn: every layer except filter layers ({@link isFilterLayer}).
  *
  * @category Layers and views
  */
@@ -80,9 +78,9 @@ export function drawableLayers(layers: readonly Layer[]): Layer[] {
 }
 
 /**
- * The layers points may be coloured by, with `setColourBy('cluster:<layer>')`: every layer that is
- * not a filter layer and depends on no layer. A labels layer depends on the layer it labels and is
- * left out, since its artifacts have no members of their own.
+ * The layers points can be coloured by with `setColourBy('cluster:<layer>')`: every layer that is
+ * not a filter layer and depends on no other layer. A labels layer depends on the layer it labels,
+ * so it is left out.
  *
  * @category Layers and views
  */
@@ -91,9 +89,8 @@ export function colourLayers(layers: readonly Layer[]): Layer[] {
 }
 
 /**
- * The layers a hierarchy panel offers: every layer with a lineage (a `hierarchy.kind` other than
- * `flat`) that depends on no layer. A layer that depends on another is left out, since its text is
- * the name of the artifact it is attached to.
+ * The layers a hierarchy panel can show: every layer with a hierarchy (a `hierarchy.kind` other
+ * than `flat`) that depends on no other layer.
  *
  * @category Layers and views
  */

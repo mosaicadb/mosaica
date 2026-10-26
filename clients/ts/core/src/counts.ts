@@ -5,27 +5,28 @@
  */
 
 /**
- * A sample of a set: how many marks were drawn out of how many items the set holds. The store
- * publishes one as `view.served`, `marks.count` and a region's `served`. Show `shown` and `total`
- * together or not at all, since a sample shown alone reads as the whole set.
+ * How many marks are drawn out of how many items there are, such as `1,204 of 29,935`. The map
+ * draws a sample of the items, so the two usually differ. The store publishes one as
+ * `view.served`, `marks.count` and `region.served`. Show `shown` with `total`, since `shown` alone
+ * reads as the size of the set.
  *
  * @category Counts
  */
 export type Count = {
   /** How many marks were drawn. */
   shown: number;
-  /** How many items the sampled set holds, counted over the viewer's visible set. */
+  /** How many items the marks were drawn from, counting only items the viewer may see. */
   total: number;
   /**
-   * Whether the pair is exact. `false` before anything is served and while a region waits for its
-   * numbers; {@link formatCount} then renders nothing.
+   * Whether the figures are exact. `false` before anything has arrived and while a region waits
+   * for its counts, and {@link formatCount} then returns an empty string.
    */
   exact: boolean;
 };
 
 /**
- * A count with no sample behind it, over the viewer's visible set: `visible`, `matched` and
- * `highlighted` in the `view` projection, a region's counts, or an artifact's masked count.
+ * A count of items the viewer may see, such as `visible`, `matched` and `highlighted` in the
+ * `view` projection, or a region's counts.
  *
  * @category Counts
  */
@@ -33,9 +34,9 @@ export type Masked = {
   /** The count. */
   value: number;
   /**
-   * Whether `value` is exact. A region's count is inexact where the server answered for a cover of
-   * the shape at some depth, which is a superset of the shape. {@link formatMasked} prefixes an
-   * inexact figure with `≈`.
+   * Whether `value` is exact. A region's count is an estimate if the server counted the tiles
+   * covering the region instead of the region itself. {@link formatMasked} shows an estimate with
+   * `≈`.
    */
   exact: boolean;
 };
@@ -47,15 +48,15 @@ export type Masked = {
  */
 export type FormatOptions = {
   /**
-   * Whether the figure's view is stale (`status.stale` in the store). A stale figure renders as the
+   * Whether the figure is out of date (`status.stale` in the store). A stale figure formats as an
    * empty string. Defaults to `false`.
    */
   stale?: boolean;
   /** The locale for thousands separators, as `Number.prototype.toLocaleString` takes it. Defaults to `en-GB`. */
   locale?: string;
   /**
-   * Whether figures of a thousand or more are shortened to one decimal, as `16.8M` for 16,822,190,
-   * where there is no room for every digit. Defaults to `false`.
+   * Whether to shorten figures of a thousand or more to one decimal place, such as `16.8M` for
+   * 16,822,190. Defaults to `false`.
    */
   compact?: boolean;
 };
@@ -67,21 +68,21 @@ const fmt = (n: number, opts: FormatOptions) =>
     : n.toLocaleString(opts.locale ?? 'en-GB');
 
 /**
- * The count before anything is served: zero of zero, not exact.
+ * The {@link Count} before anything has arrived: zero of zero, not exact.
  *
  * @category Counts
  */
 export const NO_COUNT: Count = {shown: 0, total: 0, exact: false};
 /**
- * The masked count before anything is served: zero, not exact.
+ * The {@link Masked} count before anything has arrived: zero, not exact.
  *
  * @category Counts
  */
 export const NO_MASKED: Masked = {value: 0, exact: false};
 
 /**
- * Formats a count as `<shown> of <total>`, such as `1,204 of 29,935`. Returns the empty string
- * where the count is not exact or `opts.stale` is set.
+ * Format a count as `<shown> of <total>`, such as `1,204 of 29,935`. Returns an empty string if
+ * the count is not exact or `opts.stale` is set.
  *
  * @category Counts
  */
@@ -91,8 +92,8 @@ export function formatCount(count: Count, opts: FormatOptions = {}): string {
 }
 
 /**
- * Formats a masked count as one figure, such as `29,935`, prefixed `≈ ` where it is not exact.
- * Returns the empty string where `opts.stale` is set.
+ * Format a masked count as one figure, such as `29,935`, or `≈ 29,935` if it is not exact. Returns
+ * an empty string if `opts.stale` is set.
  *
  * @category Counts
  */

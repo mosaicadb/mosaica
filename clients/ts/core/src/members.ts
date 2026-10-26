@@ -13,8 +13,8 @@ import type {FilterExpr, MemberOfOperand} from './types.js';
  */
 
 /**
- * The `member_of` operand for an artifact held as a `bigint`: the layer name, and the artifact's
- * `mosaica_id` as a decimal string.
+ * Build the operand of a `member_of` filter for one artifact. The `mosaica_id` becomes a decimal
+ * string, as the server expects.
  *
  * @category Filters
  */
@@ -23,9 +23,9 @@ export function memberOf(layer: string, artifact: bigint): MemberOfOperand {
 }
 
 /**
- * One `member_of` clause as the interface holds it: an artifact, whether the clause selects its
- * members or everything outside them, and which expression it joins. {@link withMember} keeps one
- * clause per artifact in each position, so an artifact can be filtered to and highlighted at once.
+ * A filter on membership of one artifact, such as a cluster: keep or highlight the items inside
+ * it, or those outside it. Pass the list of clauses to {@link Store.setMembers}. An artifact can
+ * have one filter clause and one highlight clause at the same time.
  *
  * @category Filters
  */
@@ -34,21 +34,21 @@ export type MemberClause = {
   layer: string;
   /** The artifact's `mosaica_id`. */
   artifact: bigint;
-  /** Whether the clause selects everything outside the artifact (`none_of` over the leaf) in place of its members. */
+  /** Whether the clause selects the items outside the artifact instead of its members. */
   outside: boolean;
-  /** The expression the clause joins. */
+  /** Whether the clause filters or highlights. */
   verb: ClauseVerb;
   /**
-   * What the interface called the artifact when the clause was made. It is for display and is not
-   * sent. A clause on a filter layer names an artifact the viewport does not serve, so only the
-   * panel or card that made the clause knew a name. Absent where the caller had none.
+   * A name to show for the artifact, such as the one the card or panel that made the clause
+   * displayed. It is not sent to the server. The map does not draw a filter layer's artifacts, so
+   * this may be the only name available for them.
    */
   label?: string;
 };
 
 /**
- * A string naming one artifact of one layer, `<layer> <artifact>`, for keying a `Map` or `Set`.
- * Two clauses on one artifact have the same key, whatever their positions.
+ * A string key for one artifact, `<layer> <artifact>`, for a `Map` or `Set`. A filter clause and a
+ * highlight clause on the same artifact have the same key.
  *
  * @category Filters
  */
@@ -57,7 +57,8 @@ export function memberKey(layer: string, artifact: bigint): string {
 }
 
 /**
- * One clause as a filter leaf: `member_of`, inside `none_of` where the clause is `outside`.
+ * Turn a clause into a filter expression: `member_of`, wrapped in `none_of` if the clause is
+ * `outside`.
  *
  * @category Filters
  */
@@ -67,9 +68,9 @@ export function memberLeaf(clause: MemberClause): FilterExpr {
 }
 
 /**
- * Joins the clauses in position `verb` to `expr` with `all_of`. Two artifacts named together narrow
- * to their intersection; to show the members of either, name their parent. Returns `expr` where no
- * clause is in that position, and the bare leaf where `expr` is `null` and one clause is.
+ * Combine `expr` with the clauses set to `verb`, using `all_of`. Two artifacts combine to the items
+ * in both; to show the members of either, use their parent. Returns `expr` unchanged if no clause
+ * is set to `verb`.
  *
  * @category Filters
  */
@@ -81,8 +82,8 @@ export function withMembers(expr: FilterExpr | null, clauses: readonly MemberCla
 }
 
 /**
- * Returns `clauses` with `clause` added last, in place of any clause that names the same artifact
- * in the same position. A clause on the artifact in the other position is kept.
+ * Return `clauses` with `clause` added at the end. It replaces any clause on the same artifact with
+ * the same `verb`, and leaves one with the other `verb`.
  *
  * @category Filters
  */
@@ -91,7 +92,7 @@ export function withMember(clauses: readonly MemberClause[], clause: MemberClaus
 }
 
 /**
- * Returns `clauses` without the clause naming this artifact in position `verb`, if there is one.
+ * Return `clauses` without the clause on this artifact with this `verb`, if there is one.
  *
  * @category Filters
  */

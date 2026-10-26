@@ -6,23 +6,22 @@ import {paletteOfSize, type PaletteName} from './palette.js';
 import type {AggregateBy, AggregateCut, AggregateRequest, AggregateResult, AggregateTable, FilterExpr, Grouping} from './types.js';
 
 /**
- * A grouping as an {@link AggregateSpec} names it: a {@link Grouping}, in which a layer's grouping
- * may take two values from the store's map. `cut: 'drawn'` ranks a `nested` or `dag` layer's top
- * artifacts at the cut the map draws that layer at: the artifact channel's tile depth and box for
- * the camera, under {@link Store.setClusterBudget}'s budget. `paletteSize: 'drawn'` asks for each
- * artifact's slot in the palette the map colours clusters from ({@link Store.setPalette}). Each
- * request takes both as they stand when it is sent.
+ * One grouping in an {@link AggregateSpec}. It is a {@link Grouping} whose layer grouping can take
+ * two values from the map. `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut
+ * the map currently draws, under the cluster budget ({@link Store.setClusterBudget}).
+ * `paletteSize: 'drawn'` returns each artifact's slot in the palette the map colours clusters from
+ * ({@link Store.setPalette}). Both are read when each request is sent.
  *
  * @category Store
  */
 export type AggregateSpecGrouping = Omit<Grouping, 'by'> & {
-  /** As {@link Grouping.by}, where a layer's `cut` and `paletteSize` may be `'drawn'`. */
+  /** As {@link Grouping.by}, except that a layer's `cut` and `paletteSize` may be `'drawn'`. */
   by?: Exclude<AggregateBy, {layer: string}> | DrawnLayerBy;
 };
 
 /**
- * A layer's grouping as an {@link AggregateSpecGrouping} names it, whose `cut` and `paletteSize`
- * may be `'drawn'`: the cut and palette size the store's map draws that layer with.
+ * A layer grouping in an {@link AggregateSpecGrouping}. `cut` and `paletteSize` may be `'drawn'`,
+ * meaning the cut and palette size the map draws that layer with.
  *
  * @category Store
  */
@@ -52,116 +51,110 @@ function paletteOf(body: AggregateBody): PaletteName | null {
 }
 
 /**
- * What a component registers with {@link Store.setAggregate}: the groupings to count, the set they
- * are counted over, and the comparison set where it wants one. The store sends its own filters and
- * selected region as the request's `filters`.
+ * A live aggregate for {@link Store.setAggregate}: the groupings to count, which items to count,
+ * and optionally a set to compare with. The store fills in the request's filters from its own
+ * filters and selected region.
  *
  * @category Store
  */
 export type AggregateSpec = {
-  /** One table each, in this order. */
+  /** The groupings. The result has one table for each, in the same order. */
   groupings: AggregateSpecGrouping[];
   /**
-   * The set the counts are taken over.
-   *
-   * - `match`, the default: what the store's filters admit, under the selected region.
-   * - `view`: the same, within the area the counts in view cover: the camera's box, or the
-   *   selected region while one is selected. A pan asks again only once the camera has rested for
-   *   250 ms; a change of filter, highlight or selection, or a view switch, asks at once over the
-   *   area as it stands. A `reference` is limited to the same area, so a lift compares with what
-   *   is in it.
-   * - `visible`: every item this viewer may see in the view. No filters are sent, so `without`,
-   *   `withoutMembersOf` and `highlighted` change nothing.
+   * Which items to count. `match`, the default, counts the items that match the store's filters and
+   * selected region. `view` counts the same items within the area in view: the selected region if
+   * there is one, otherwise the camera's box; it is fetched again once the camera has rested for
+   * 250 ms, and `reference` is limited to the same area. `visible` counts every item the viewer may
+   * see in the view and sends no filters, so `without`, `withoutMembersOf` and `highlighted` have
+   * no effect.
    */
   subject?: 'match' | 'view' | 'visible';
   /**
-   * The set each count is compared with: `'visible'` for everything this viewer may see in the view,
-   * or a filter expression for another set drawn from it. Unset asks for no comparison.
+   * A set to compare each count with: `'visible'` for every item the viewer may see in the view, or
+   * a filter expression. With it, each table also has `reference_count` and `lift` columns. Unset
+   * means no comparison.
    */
   reference?: FilterExpr | 'visible';
   /**
-   * A column whose control in the store's filter position is left out of the request's `filters`,
-   * named as the filter draft keys it. The `member_of` clauses, unless `withoutMembersOf` names
-   * their layer, and the selected region are always sent. Unset leaves nothing out.
+   * A column whose filter control to leave out, named as in the {@link FilterDraft}. A filter
+   * control uses this to keep counting the values its own clause excludes. The other controls, the
+   * `member_of` clauses and the selected region still apply.
    */
   without?: string;
   /**
-   * A layer whose `member_of` clauses in the store's filter position are left out of the request's
-   * `filters`, so a control listing that layer's artifacts keeps counting the ones its clauses
-   * exclude. The other layers' clauses and the selected region are still sent. Unset leaves
-   * nothing out.
+   * A layer whose `member_of` clauses to leave out, so a control that lists the layer's artifacts
+   * keeps counting the ones its clauses exclude. Other layers' clauses and the selected region
+   * still apply.
    */
   withoutMembersOf?: string;
   /**
-   * Whether the counts are taken over the items that also satisfy the store's highlight: the
-   * controls and `member_of` clauses in the highlight position are joined to `filters` by `all_of`,
-   * so each count is the viewport's `highlighted` count over the same items. Unset, or with no
-   * highlight set, `filters` is sent as it stands.
+   * Whether to count only the items that also match the store's highlight, so each count matches
+   * the viewport's `highlighted` count. Defaults to `false`. Has no effect when nothing is
+   * highlighted.
    */
   highlighted?: boolean;
 };
 
 /**
- * One registered aggregate, as the `aggregates` projection holds it.
+ * The state of one aggregate registered with {@link Store.setAggregate}.
  *
  * @category Projections
  */
 export type AggregateEntry = {
   /**
-   * `loading` from the moment the store asks until the answer lands, and for a `view` aggregate
-   * from its registration until the camera has rested; `retrying` while a `429` or `503` waits to
-   * be sent again; `shown` once the answer has landed; and `refused` where the request failed.
+   * `loading` while a request is in flight, or while a `view` aggregate waits for the camera to
+   * rest. `retrying` while the server is busy (`429` or `503`) and the store waits to ask again.
+   * `shown` once the answer has arrived, and `refused` if the request failed.
    */
   status: 'loading' | 'retrying' | 'shown' | 'refused';
   /**
-   * The last answer. While the next request is loading, the answer to the previous one stays here.
-   * It is `null` before the first answer, after a refusal, after a view switch and once the store
-   * forgets what the server answered. A histogram asked for with a `sample` says in its table's
-   * `sample` whether its counts were scaled and how many items were counted, and its `total` is
-   * the size of the set.
+   * The latest answer, kept while the next request loads. `null` before the first answer, after a
+   * refusal and after a view switch. For a histogram with a `sample`, the table's `sample` says
+   * whether the counts were scaled up from a sample.
    */
   result: AggregateResult | null;
-  /** The view `result` was counted in; `null` where `result` is. */
+  /** The view `result` was counted in, or `null` if there is no result. */
   view: string | null;
   /**
-   * The palette the slots in `result` are for: the one whose size the request named. `null` where
-   * `result` is, or where no grouping asked for slots.
+   * The palette the slots in `result` refer to. `null` if there is no result or no grouping asked
+   * for palette slots.
    */
   palette: PaletteName | null;
-  /** The refusal of the last request, else `null`. */
+  /** Why the last request failed, or `null`. */
   refusal: Refusal | null;
   /**
-   * One per grouping `result` answers, in order: the figures of each field the grouping lists
-   * under `summary`, by the field as written, else `null`. Empty where `result` is `null`.
+   * One entry per grouping, in order: the figures for each field the grouping lists under
+   * `summary`, keyed by field name, or `null` for a grouping without `summary`. Empty if there is
+   * no result.
    */
   summaries: readonly (ReadonlyMap<string, FieldSummary> | null)[];
 };
 
 /**
- * The figures a grouping's `summary` names for one number or timestamp field, over every item this
- * viewer may see in the view.
+ * Summary figures for one number or timestamp field, over every item the viewer may see in the
+ * view.
  *
  * @category Projections
  */
 export type FieldSummary = {
-  /** How many items hold a finite value: the `values_<field>` column. */
+  /** How many items have a finite value. */
   values: bigint;
-  /** How many hold no value: the `missing_<field>` column. */
+  /** How many items have no value. */
   missing: bigint;
   /**
-   * The smallest finite value, typed as a histogram's edge: a `bigint` on an integer field, a
-   * number on a float field, and milliseconds since the Unix epoch on a timestamp field. `null`
-   * where `values` is 0.
+   * The smallest finite value: a `bigint` for an integer field, a number for a float field, and
+   * milliseconds since the Unix epoch for a timestamp field. `null` if `values` is 0.
    */
   min: number | bigint | null;
-  /** The largest finite value, typed as `min`. */
+  /** The largest finite value, typed as `min` is. */
   max: number | bigint | null;
-  /** The mean of the finite values, in milliseconds since the Unix epoch on a timestamp field. `null` where `values` is 0. */
+  /** The mean of the finite values, in milliseconds since the Unix epoch for a timestamp field. `null` if `values` is 0. */
   mean: number | null;
 };
 
 /**
- * The `aggregates` projection: each registered aggregate by the id it was registered under.
+ * The `aggregates` projection: each aggregate registered with {@link Store.setAggregate}, by its
+ * id.
  *
  * @category Projections
  */

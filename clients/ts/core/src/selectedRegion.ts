@@ -7,14 +7,14 @@ import {insideBox, insidePolygon, type WorldPolygon} from './region.js';
 import type {Quantisation, RegionVerdict} from './types.js';
 
 /**
- * A selection for {@link Store.select}: a box or a lasso in the current view's data coordinates, or
- * a published artifact's shape. The store sends it on every viewport request as a `region` leaf
- * beside the other filters, so the region's counts are read off the same frame as the rest.
+ * A region to select with {@link Store.select}: a box or a lasso in the current view's data
+ * coordinates, or an artifact's shape. While it is selected, the map and its counts are limited to
+ * the region.
  *
- * - `box`: `bbox` is `[x0, y0, x1, y1]`, with either corner first.
- * - `lasso`: `points` are the drawn polygon's vertices, closed implicitly. A lasso needs at least
- *   three points; one with fewer clears the selection.
- * - `artifact`: `id` is the artifact's `mosaica_id`, and the selection is its published shape.
+ * - `box`: `bbox` is `[x0, y0, x1, y1]`, with the corners in either order.
+ * - `lasso`: `points` are the polygon's vertices; the last joins back to the first. A lasso with
+ *   fewer than three points clears the selection.
+ * - `artifact`: `id` is the artifact's `mosaica_id`, and the region is its published shape.
  *
  * @category Projections
  */
@@ -23,60 +23,55 @@ export type SelectionShape = (
   | {kind: 'lasso'; points: [number, number][]}
   | {kind: 'artifact'; id: bigint}
 ) & {
-  /** Whether to select everything outside the shape that this viewer can see. Defaults to `false`. */
+  /** Whether to select everything outside the shape instead. Defaults to `false`. */
   outside?: boolean;
 };
 
 /**
- * The selected region and what it holds, read off the presented frame. The store publishes `null`
- * in its place while nothing is selected.
+ * The `region` projection: the selected region and its counts. It is `null` while nothing is
+ * selected.
  *
  * @category Projections
  */
 export type RegionProjection = {
-  /** The selection, as passed to {@link Store.select}. */
+  /** The region as passed to {@link Store.select}. */
   shape: SelectionShape;
   /**
-   * `loading` after a selection, a change of filters or `member_of` clauses, or a refresh, until a
-   * frame fetched after it lands; then `shown`. `refused` where the request carrying the region was
-   * refused.
+   * `loading` after the selection or the filters change, until new counts arrive; then `shown`.
+   * `refused` if the request was refused.
    */
   status: 'loading' | 'shown' | 'refused';
-  /** The refusal while `status` is `refused`, else `null`. */
+  /** Why the request was refused while `status` is `refused`, otherwise `null`. */
   refusal: Refusal | null;
   /**
-   * The items inside the shape that this viewer can see, from the store's counts in view (see
-   * `ViewProjection.inView`). Before those land, the frame's count where no other filter narrows
-   * it, else `null`. `null` while the region is not `shown`.
+   * How many items inside the region the viewer can see, from {@link ViewProjection.inView}. Until
+   * those counts arrive it is estimated from the frame, or `null` if other filters are set. `null`
+   * while `status` is not `shown`.
    */
   visible: Masked | null;
   /**
-   * The items inside the shape that the other filters admit, from the store's counts in view.
-   * Before those land, the sum of the frame's `matched` counts, exact where the server counted the
-   * shape exactly and the frame's tiles cover the shape's extent. A complement (`outside`) is never
-   * exact. Zero while the region is not `shown`.
+   * How many items inside the region match the filters, from {@link ViewProjection.inView}. Until
+   * those counts arrive, it is estimated from the frame and may not be exact. Zero while `status`
+   * is not `shown`.
    */
   matched: Masked;
-  /**
-   * The held marks inside the shape (`shown`) against `matched` (`total`). Not exact, with a
-   * `total` of zero, while the region is not `shown`.
-   */
+  /** How many marks are drawn inside the region (`shown`) out of `matched` (`total`). */
   served: Count;
   /**
-   * How the server counted the shape, from the `x-mosaica-region` header: exactly, or over a cover
-   * of the shape at a stated depth. `null` until a response has carried it.
+   * How the server counted the region: exactly, or over the tiles covering it at a stated depth.
+   * `null` until the server has said.
    */
   verdict: RegionVerdict | null;
   /**
-   * The held marks inside the shape: the `mosaica_id`s and world positions (`x, y` pairs) of the
-   * first {@link REGION_HELD_LIMIT}, and the `count` of every one.
+   * The marks drawn inside the region: the `mosaica_id`s and world positions (interleaved `x` and
+   * `y`) of up to {@link REGION_HELD_LIMIT} of them, and the `count` of all of them.
    */
   held: {ids: BigUint64Array; positions: Float32Array; count: number};
 };
 
 /**
- * How many held marks a region lists in `held.ids` and `held.positions`. `held.count` counts them
- * all.
+ * The most marks {@link RegionProjection.held} lists in `ids` and `positions`. Its `count` counts
+ * them all.
  *
  * @category Projections
  */

@@ -8,14 +8,14 @@ import type {MapProjection, Quantisation, ViewInfo} from './types.js';
  */
 
 /**
- * A stored position as `[longitude, latitude]` in degrees, or `null` for a view whose projection is
- * `none`. A point clipped at the build (beyond Web Mercator's ±85.0511°) returns the frame's edge,
- * where it is stored and drawn.
+ * Convert a stored position to `[longitude, latitude]` in degrees. Returns `null` for a view whose
+ * projection is `none`. A point beyond Web Mercator's limit of ±85.0511° latitude was clipped when
+ * it was stored, and returns the latitude it was clipped to.
  *
- * @param cx - The x position in cell space, `[0, 65536)` across the frame: a
- *   {@link ViewportResult}'s `positions`, or a {@link Band}'s world-space `positions` times
+ * @param cx - The x position in cells, from 0 to 65,536 across the view: a
+ *   {@link ViewportResult}'s `positions`, or a {@link Band}'s `positions` times
  *   `65536 / WORLD_SIZE`.
- * @param cy - The y position in cell space.
+ * @param cy - The y position in cells.
  * @param q - The view's `quantisation`.
  *
  * @category Coordinates and colour

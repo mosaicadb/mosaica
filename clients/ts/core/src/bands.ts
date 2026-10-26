@@ -87,9 +87,9 @@ export function bandKey(depth: number, prefix: bigint): BandKey {
 }
 
 /**
- * One tile's held points, ascending by `mosaica_id` as the server sent them. A {@link Composition}
- * and the store's `marks` projection hold bands by reference. Every array is the band's own copy. A
- * tile in which nothing matches is a band of none, which carries the tile's counts and draws nothing.
+ * The points the store holds for one tile, in ascending `mosaica_id` order as the server sent
+ * them, with the tile's counts. Each array has one entry per point. A tile with no matching points
+ * has a band with no points, which carries the counts and draws nothing.
  *
  * @category Projections
  */
@@ -108,83 +108,67 @@ export type Band = {
   y: number;
   /** Each point's `mosaica_id`, ascending. */
   ids: BigUint64Array;
-  /**
-   * Each point's position in deck.gl world space: `x` and `y` interleaved, two `f32` entries a
-   * point.
-   */
+  /** Each point's position in deck.gl world space, as interleaved `x` and `y`. */
   positions: Float32Array;
   /**
-   * The rendered columns the band's points carry, by name, one value per point: those its request
-   * named, and those an earlier fetch of the same points carried.
+   * The render columns fetched for these points, by name. See {@link Store.setPointColumns} for
+   * how to ask for more.
    */
   scalars: Record<string, ScalarColumn>;
   /**
-   * For each layer the request named, each point's artifact ordinal on the session's
-   * {@link SessionArtifactTable}, `0` for a point under no served artifact of that layer. A layer
-   * missing here was not named when the band was fetched, so the band has no colour for it yet. A
-   * layer turned off keeps its column until the band is evicted.
+   * For each layer in use when the band was fetched, the artifact each point belongs to. A layer
+   * missing here was not in use then, so the band cannot yet be coloured by it.
    */
   membership: Record<string, BandMembership>;
   /**
-   * One byte a point: `1` where the point satisfies the request's `highlight`, `0` where it does
-   * not. `null` where the request carried no highlight, and then nothing is dulled. A change of
-   * highlight fetches the band again, so the bits answer the highlight being drawn.
+   * One byte per point: `1` if the point matches the highlight, `0` if not. `null` if no highlight
+   * was set, in which case every point is drawn at full strength.
    */
   highlightBits: Uint8Array | null;
   /**
-   * The tile's `served` count: how many points the server serves for this tile at this depth.
-   * Equal to `ids.length` unless eviction has cut the band short.
+   * How many points the server sent for this tile at this depth. Equal to `ids.length` unless the
+   * cache has since dropped some of them to save memory.
    */
   served: number;
-  /** The `k` the band was fetched with, which decides whether a request at a larger `k` could serve more. */
+  /** The most points per tile (`k`) the band was fetched with. */
   capUsed: number;
-  /** How many items this principal may see in the tile. */
+  /** How many items the viewer may see in the tile. */
   visible: bigint;
-  /** How many of `visible` match the request's filter. */
+  /** How many of `visible` match the filters. */
   matched: bigint;
-  /** How many of `matched` also match the request's highlight; equal to `matched` where none is set. */
+  /** How many of `matched` also match the highlight. Equal to `matched` when none is set. */
   highlighted: bigint;
-  /** One past the highest `mosaica_id` held, so every id in `ids` is below it. `0n` for an empty band. */
+  /** One more than the highest `mosaica_id` in `ids`, or `0n` for a band with no points. */
   heldBelow: bigint;
   /** The identity key of the response the band came from. */
   identityKey: string;
   /** The content key of the response the band came from. */
   contentKey: string;
-  /**
-   * Bytes the band's arrays occupy, the figure the replica's byte budget counts. Text and boolean
-   * columns are estimated high.
-   */
+  /** An estimate of the bytes the band occupies, counted against the cache's `cacheBytes`. */
   bytes: number;
-  /**
-   * When the request that fetched the band started, in milliseconds on the store's clock
-   * (`performance.now()` unless the store was given a `clock`). Eviction takes the least recently
-   * touched first within a depth.
-   */
+  /** When the request that fetched the band started, in milliseconds from `performance.now()`. */
   touchedAt: number;
-  /**
-   * The render columns the band's request named in `pointRows`; absent or `null` where it asked
-   * for every one.
-   */
+  /** The render columns the band's request asked for, or absent or `null` if it asked for all of them. */
   columnsAsked?: readonly string[] | null;
   /**
-   * The layers the band's request named; a named layer with no membership column on the band
-   * tagged none of its points. Absent where that is not known.
+   * The layers the band's request asked for. A layer listed here with no entry in `membership` has
+   * none of the band's points. Absent if not known.
    */
   layersAsked?: readonly string[] | 'all';
 };
 
 /**
- * One layer's membership column on a {@link Band}.
+ * Which artifact of one layer each point in a {@link Band} belongs to.
  *
  * @category Projections
  */
 export type BandMembership = {
-  /** Each point's artifact ordinal on the session's {@link SessionArtifactTable}, `0` for none. */
-  ordinals: Uint32Array;
   /**
-   * The distinct non-zero ordinals in `ordinals`, ascending. The band holds one reference on the
-   * table for each, released when the band is evicted or cut short.
+   * Each point's artifact, as an ordinal in the {@link ArtifactTable}, or `0` if the point belongs
+   * to no artifact of the layer.
    */
+  ordinals: Uint32Array;
+  /** The distinct non-zero ordinals in `ordinals`, in ascending order. */
   distinct: Uint32Array;
 };
 

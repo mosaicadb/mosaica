@@ -27,11 +27,10 @@ export function sizesPoints(column: DeclaredScalar): boolean {
 }
 
 /**
- * The range of one numeric column's values among the marks drawn, for a colour ramp. The store's
- * `legend` projection holds one per column in `domains`. It widens as marks arrive and does not
- * narrow until the store is cleared, so a pan does not recolour the map. It is taken from the marks
- * alone, since a range over the whole corpus would be an aggregate over items the viewer may not
- * see.
+ * The range of a number column's values among the marks drawn, for a colour ramp. It is taken
+ * from the drawn marks only, so it reflects only what the viewer can see. It widens as marks
+ * arrive and does not narrow until the store is cleared, so panning does not recolour the map.
+ * {@link LegendProjection.domains} holds one per column.
  *
  * @category Projections
  */
@@ -43,9 +42,9 @@ export type Domain = {
 };
 
 /**
- * A palette rank per category code. The store's `legend` projection holds one per column in
- * `ranks`. Codes are ranked by how often they appear among the marks drawn when first seen, and a
- * code keeps its rank until the store is cleared, so a pan does not recolour the map.
+ * A category column's palette rank for each category code. A code keeps its rank until the store
+ * is cleared, so panning does not recolour the map. {@link LegendProjection.ranks} holds one per
+ * column and says how codes are ranked.
  *
  * @category Projections
  */
@@ -147,19 +146,18 @@ export function lacksValues(column: ScalarColumn): boolean {
 }
 
 /**
- * A uniform sample of one numeric column's values among the marks drawn, for sizing points by
- * rank. The store's `legend` projection holds one per column sized by, in `samples`. A value's rank
- * is where it falls among `values`; the marks are themselves a sample of the viewer's visible set,
- * so a rank is an estimate and is never shown as a statistic.
+ * A uniform sample of a number column's values among the marks drawn, for sizing points by rank.
+ * A value's rank is where it falls among `values`. The marks are themselves a sample, so a rank is
+ * an estimate. {@link LegendProjection.samples} holds one per column sized by.
  *
  * @category Projections
  */
 export type ValueSample = {
-  /** Up to {@link SAMPLE_SIZE} finite values, drawn uniformly from the marks seen, in ascending order. */
+  /** Up to 1024 finite values drawn uniformly from the marks seen, in ascending order. */
   values: readonly number[];
   /**
-   * How many marks with a finite value the sample was drawn from. It grows with each sample
-   * published, so it tells one sample from the next.
+   * How many marks with a finite value the sample was drawn from. It grows with each new sample,
+   * so it tells one sample from the next.
    */
   seen: number;
 };

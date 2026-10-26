@@ -16,44 +16,43 @@ const SUGGEST_MIN_RETRY_S = 0.25;
 const SUGGEST_MAX_RETRIES = 5;
 
 /**
- * One column's last landed suggestion page.
+ * A page of typeahead suggestions for one category column, from {@link Store.suggest}.
  *
  * @category Projections
  */
 export type SuggestionPage = {
-  /** The `q` the page answers. */
+  /** The text the suggestions match. */
   q: string;
   /**
-   * The position of the control that asked, which decides the filter the counts are taken under:
-   * in `filter`, the filter without the column's own clause; in `highlight`, the whole filter.
+   * Whether the control that asked is set to filter or highlight. Under `filter` the counts leave
+   * out the column's own clause; under `highlight` they use every filter.
    */
   verb: ClauseVerb;
-  /** The values this viewer can see, each with its count. */
+  /** The matching values, each with its count of items the viewer can see. */
   values: SuggestValue[];
-  /** True where the server stopped before running out of matches. */
+  /** Whether there are more matches than the page holds. */
   more: boolean;
-  /** The number of items the counts are taken over, which a value's share is out of; `null` where the server sent none. */
+  /** How many items the counts are out of, for showing a value's share, or `null` if the server did not say. */
   total: number | null;
 };
 
 /**
- * The category typeahead's state, which the store publishes as part of the `filters` projection.
+ * The typeahead suggestions for category columns, part of the `filters` projection.
  * {@link Store.suggest} fills it.
  *
  * @category Projections
  */
 export type SuggestState = {
-  /** The last page that landed per column. */
+  /** The latest page of suggestions for each column. */
   suggestions: Record<string, SuggestionPage>;
   /**
-   * The refusal per column for its last ask, which replaces the column's page. An ask typed into
-   * the box that the server still sheds after five retries is published here as `backpressure`,
-   * with the server's detail.
+   * Why the latest request for a column failed, in place of its page. If the server is still busy
+   * after five retries, the code is `backpressure`.
    */
   suggestErrors: Record<string, Refusal>;
   /**
-   * Moves each time every page, refusal and pending ask is dropped (at a view switch and at
-   * {@link Store.clear}), so a control can tell that its page was dropped.
+   * A number that changes when every page and error is dropped, at a view switch and at
+   * {@link Store.clear}. A control can compare it to tell that its page was dropped.
    */
   suggestEpoch: number;
 };

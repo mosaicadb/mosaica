@@ -4,42 +4,42 @@ import {refusalOf, type Refusal} from './presented.js';
 import type {CategoryValue, DeclaredScalar} from './types.js';
 
 /**
- * The prefix of a `colourBy` value that names a layer's cluster colours in place of a column, as in
- * `cluster:<layer>`.
+ * The prefix that makes a colour setting name a layer instead of a column, as in
+ * `setColourBy('cluster:topics')`, which colours points by the `topics` layer's clusters.
  *
  * @category Layers and views
  */
 export const CLUSTER_PREFIX = 'cluster:';
 
 /**
- * The legend of the colour and size columns, accumulated from the marks drawn, which are drawn from
- * this viewer's visible set. A category column gets ranks and names, a numeric column a domain, the
- * column sized by whether any point lacks a value and, sized by rank, a sample of its values, and
- * colouring by `cluster:<layer>` accumulates nothing. {@link Store.clear} empties it and keeps `colourBy` and `sizeBy`.
+ * The `legend` projection: what the points are coloured and sized by, and what a legend needs to
+ * explain it. It builds up from the marks drawn: names and palette ranks for a category column, a
+ * range for a number column, and for the size column whether any point has no value. Colouring by
+ * a layer (`cluster:<layer>`) adds nothing here. {@link Store.clear} empties it but keeps
+ * `colourBy` and `sizeBy`.
  *
  * @category Projections
  */
 export type LegendProjection = {
   /**
-   * Palette rank per category code, per column. Values are ranked by how many items carrying them
-   * this viewer may see in the view, most first and ties by key, as the server counts them once
-   * for the column, so a value takes the same colour on every load of the same data. Where that
-   * count is refused, codes are ranked by how often they appear among the marks drawn. A rank once
-   * given does not change, so panning does not recolour the map. A code waits for its name before
-   * it is ranked by the count, and draws in the unmapped colour until then.
+   * Palette ranks for each category column, by code. Values are ranked by how many items with that
+   * value the viewer may see in the view, most first, so a value gets the same colour each time
+   * the same data is loaded. If the server refuses that count, codes are ranked by how often they
+   * appear among the marks drawn. A rank does not change once given. A code is drawn in the
+   * unmapped colour until its rank arrives.
    */
   ranks: Record<string, Ranks>;
-  /** The numeric range per column, widened as marks arrive and never narrowed. */
+  /** The range of values drawn for each number column. It widens as marks arrive and does not narrow. */
   domains: Record<string, Domain>;
-  /** A sample of the values drawn per column sized by rank. */
+  /** A sample of the values drawn, for a column sized by rank. */
   samples: Record<string, ValueSample>;
-  /** Per column sized by, whether a point drawn had no finite value, and so drew as a ring. */
+  /** For the column sized by, whether any point drawn had no finite value. Such points are drawn as rings. */
   missing: Record<string, boolean>;
-  /** The codes drawn, per category column, with their names as `/v1/categories` resolves them. */
+  /** The codes drawn for each category column, with their names. */
   categories: Record<string, CategoryValue[]>;
-  /** The refusal per category column whose names could not be fetched. A refused column is not asked again. */
+  /** Why the names could not be fetched, for each category column where they could not. The store does not ask again. */
   categoryErrors: Record<string, Refusal>;
-  /** What the points are coloured by, as `setColourBy` last set it: a column, `cluster:<layer>`, or `null` for uniform. */
+  /** What the points are coloured by, as `setColourBy` last set it: a column, `cluster:<layer>`, or `null` for one colour. */
   colourBy: string | null;
   /** The number column the points are sized by, as `setSizeBy` last set it, or `null` for one size. */
   sizeBy: string | null;

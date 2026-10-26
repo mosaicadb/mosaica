@@ -10,27 +10,25 @@ import type {FilterExpr, FilterOperandSet, FilterOperator} from './types.js';
  */
 
 /**
- * One alternative of a text query: the words that must all appear, in any order and position, and
- * the phrases that must each appear with their words adjacent and in order.
+ * One alternative of a text query, as {@link textTerms} returns it.
  *
  * @category Filters
  */
 export type TextTerms = {
-  /** The plain words, every one of which must appear. */
+  /** Words that must all appear, in any order. */
   words: string[];
-  /** The phrases, each of which must appear with its words adjacent and in order. */
+  /** Phrases that must each appear, with their words together and in order. */
   phrases: string[];
 };
 
 /**
- * A text control's query as the alternatives it asks for. Plain words must all appear. Text in
- * straight or curly double quotes that starts a word is a phrase, and a quote left open runs to
- * the end; where `phrase` is false, as on a column that takes no phrase, its words are plain words
- * instead. `OR`, in capitals and standing alone, separates alternatives, any one of which is
- * enough, and binds loosest: every word on one side of it applies together, so `a b OR c` asks for
- * a and b, or for c. Nothing else is syntax: parentheses and quotes inside a word are part of the
- * word. An alternative with no words and no phrases is dropped, so a query of nothing but `OR` or
- * empty quotes asks nothing.
+ * Parse a text control's query into the alternatives it asks for. Plain words must all appear.
+ * Text in double quotes (straight or curly) at the start of a word is a phrase, and an unclosed
+ * quote runs to the end. With `phrase` set to `false`, for a column without phrase search, quoted
+ * words are read as plain words. `OR` in capitals separates alternatives, any one of which is
+ * enough, so `a b OR c` matches items with both a and b, or with c. Nothing else is syntax:
+ * parentheses, and quotes inside a word, are part of the word. Alternatives with no words or
+ * phrases are dropped.
  *
  * @category Filters
  */
@@ -55,59 +53,57 @@ export function textTerms(query: string, phrase = true): TextTerms[] {
 }
 
 /**
- * Which of a request's two expressions a clause joins.
+ * What a filter control does with the items it matches.
  *
- * - `filter`: the clause joins `filters`, and the map and its counts narrow to the matches.
- * - `highlight`: the clause joins `highlight`, and the matches are lit and the rest dulled.
+ * - `filter`: the map and its counts are limited to the matching items.
+ * - `highlight`: the matching items are drawn at full strength and the rest dimmed.
  *
  * @category Filters
  */
 export type ClauseVerb = 'filter' | 'highlight';
 
 /**
- * One filter control: what it asks, one variant per column family. A control whose predicate is
- * empty asks nothing (see {@link isPopulated}).
+ * The state of one filter control, with one variant per kind of column. An empty control, such as
+ * a blank query or no selected keys, does not filter ({@link isPopulated}).
  *
  * @category Filters
  */
 export type ColumnDraft =
   /**
-   * A search of `query` by analysed words, as {@link textTerms} reads it, with `phrase` saying
-   * whether the column takes a phrase. `expr`, where set, is an expression on the column given
-   * from outside, such as by the notebook widget, that no query writes; it is sent as it is, in
-   * place of the query, until the control is cleared.
+   * A text search for `query`, parsed by {@link textTerms}. `phrase` says whether the column
+   * supports phrases. If `expr` is set, it is sent in place of the query until the control is
+   * cleared; use it for an expression no query can express.
    */
   | {family: 'text'; query: string; phrase: boolean; expr?: FilterExpr}
-  /** `needle` compared with the whole value (`eq`), its start (`prefix`) or any part (`contains`). */
+  /** Match `needle` against the whole value (`eq`), its start (`prefix`) or any part (`contains`). */
   | {family: 'keyword'; needle: string; op: 'eq' | 'prefix' | 'contains'}
   /**
-   * The selected category keys, sent as `in`. The server resolves keys to codes. A key this viewer
-   * cannot see matches nothing, as a key that does not exist does, and neither is refused.
+   * Match any of the selected category keys. A key the viewer may not see matches nothing, the same
+   * as a key that does not exist.
    */
   | {family: 'category'; keys: string[]}
-  /** Inclusive bounds in the column's own units, sent as `range`; `null` for an open side. */
+  /** Match values between inclusive bounds in the column's own units. `null` leaves a side open. */
   | {family: 'numeric'; gte: number | null; lte: number | null};
 
 /**
- * A filter panel's controls in each of the request's two expressions, keyed by the column name the
- * leaf is sent under. A column may have a control in both, so one field can narrow the map to some
- * values and light a few of them. The two are independent: each composes its own expression, and
- * the server computes the highlight within what the filter keeps. Either record may hold empty controls, which constrain nothing.
- * {@link emptyDraft} seeds one; {@link composeFilters} turns it into the expressions a request
- * carries.
+ * The state of a filter panel: its filter controls and its highlight controls, each keyed by
+ * column name. Pass it to {@link Store.setFilters}. A column may have a control in both, so you
+ * can limit the map to some values and highlight a few of those. The highlight applies within what
+ * the filters keep. {@link emptyDraft} creates one, and {@link composeFilters} turns it into
+ * filter expressions.
  *
  * @category Filters
  */
 export type FilterDraft = {
-  /** The controls whose clauses join `filters`: once seeded, one per filterable column. */
+  /** The filter controls. {@link emptyDraft} creates one per filterable column. */
   filter: Record<string, ColumnDraft>;
-  /** The controls whose clauses join `highlight`. */
+  /** The highlight controls. */
   highlight: Record<string, ColumnDraft>;
 };
 
 /**
- * Whether a control carries a predicate: a text query that is not blank, a keyword needle that is
- * not empty, at least one category key, or at least one numeric bound.
+ * Whether a control filters anything: a text query that is not blank, a keyword that is not empty,
+ * at least one category key, or at least one numeric bound.
  *
  * @category Filters
  */
@@ -139,10 +135,9 @@ function expressionOf(column: string, draft: ColumnDraft): FilterExpr {
 }
 
 /**
- * The query a text control on `column` would write to send `expr`, or `null` where no query writes
- * exactly that expression: the words of each alternative as one `match`, its phrases each as a
- * `phrase`, joined by `all_of`, and the alternatives by `any_of`. A `match` whose words the query
- * would read otherwise, such as one holding `OR` or a quote, has no query.
+ * The text query that produces `expr` on `column`: the reverse of what a text control sends.
+ * Returns `null` if no query produces exactly that expression, for example if a `match` contains
+ * `OR` or a quote. Use it to show an expression set from elsewhere in a search box.
  *
  * @category Filters
  */
@@ -191,11 +186,10 @@ function operatorOf(draft: Exclude<ColumnDraft, {family: 'text'}>): FilterOperat
 }
 
 /**
- * Composes the populated controls in one position into a filter expression: `null` for none, the
- * bare leaf for one, and `all_of` over the leaves for several, in the draft's column order. A draft
- * that constrains nothing therefore sends the same request as no filter.
+ * Build the filter expression for one side of a draft: `null` if no control is populated, the
+ * single clause if one is, and `all_of` over the clauses if several are.
  *
- * @param verb - The position to compose. Defaults to `filter`.
+ * @param verb - Which controls to use. Defaults to `filter`.
  *
  * @category Filters
  */
@@ -216,8 +210,8 @@ export function composeFilters(draft: FilterDraft, verb: ClauseVerb = 'filter'):
 }
 
 /**
- * How many controls carry a predicate, for a panel heading. A column with a clause in both
- * positions counts twice. With `verb`, only those in that position are counted.
+ * How many controls are populated, for a panel heading. A column populated as both filter and
+ * highlight counts twice. Pass `verb` to count only one side.
  *
  * @category Filters
  */
@@ -227,9 +221,9 @@ export function activeCount(draft: FilterDraft, verb?: ClauseVerb): number {
 }
 
 /**
- * Returns a draft with `column`'s control in position `verb` emptied, keeping its family and
- * keyword operator. The control in the other position is kept. Returns `draft` itself
- * where the column has no control there.
+ * Return a copy of `draft` with `column`'s `verb` control emptied. The control keeps its kind and
+ * keyword operator, and the column's control on the other side is unchanged. Returns `draft`
+ * itself if there is no such control.
  *
  * @category Filters
  */
@@ -248,15 +242,15 @@ export function withoutClause(draft: FilterDraft, column: string, verb: ClauseVe
 }
 
 /**
- * A draft with one empty control per filterable column in `operands` (`Meta.filterOperands`), each
- * in the `filter` position, and none in the `highlight` position. A column gets a control only
- * where it publishes the operator the control sends: `match` for text, `in` for category and
- * `range` for numeric. A text control takes a phrase where the column publishes `phrase`. A keyword control starts on whichever of `eq`,
- * `prefix` and `contains` the column publishes first.
+ * Create a draft with one empty filter control per filterable column, and no highlight controls.
+ * Pass `meta.filterOperands`. A column gets a control only if it supports the operator the control
+ * needs: `match` for text, `in` for category and `range` for numeric. A keyword control starts with
+ * the first of `eq`, `prefix` and `contains` that the column supports.
  *
- * A group-scoped column is keyed by its bare name, which the server answers only under a view of
- * its group or a group sharing its views. To filter it under another view, re-key the control as
- * `column@key`, naming one view of the group by its key; the bare name there is refused with `422`.
+ * A group-scoped column is keyed by its bare name, which works only under a view of its own group
+ * or of a group that shares its views. To filter it under another view, key the control as
+ * `column@key`, where `key` names one of the group's views; the server refuses the bare name there
+ * with `422`.
  *
  * @category Filters
  */

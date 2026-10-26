@@ -14,24 +14,25 @@
 export type Rgba = readonly [number, number, number, number];
 
 /**
- * A cluster palette, by name: `okabe-ito` (Okabe-Ito, 8 colours, distinguishable under the common
- * colour-vision deficiencies), `tableau10` (Tableau 10, 10 colours), `tableau20` (Tableau 20, 20
- * colours in light and dark pairs) or `kelly` (Kelly's 22 colours of maximum contrast).
+ * The name of a palette for colouring clusters: `okabe-ito` (8 colours that stay distinct under
+ * the common forms of colour blindness), `tableau10` (10 colours), `tableau20` (20 colours in light
+ * and dark pairs) or `kelly` (Kelly's 22 colours of maximum contrast).
  *
  * @category Coordinates and colour
  */
 export type PaletteName = 'okabe-ito' | 'tableau10' | 'tableau20' | 'kelly';
 
 /**
- * A cluster palette: its title and a line describing it, as a menu shows them, and its colours,
- * whose number is the `palette_size` a request sends.
+ * A palette for colouring clusters, with a title and description for a menu. The server gives
+ * each cluster a slot in the palette, chosen so that neighbouring clusters differ, and the cluster
+ * takes the colour at that slot.
  *
  * @category Coordinates and colour
  */
 export type Palette = {
-  /** The palette's name as a menu shows it. */
+  /** The palette's name for a menu. */
   title: string;
-  /** One line on the palette for a menu: how many colours it has, and what they are chosen for. */
+  /** A short description for a menu, such as `8 colours · colour-blind safe`. */
   description: string;
   /** The colours, in slot order. */
   colours: readonly Rgba[];
@@ -78,14 +79,14 @@ export const PALETTES: Readonly<Record<PaletteName, Palette>> = {
 };
 
 /**
- * The palette a store colours clusters with until another is chosen.
+ * The palette a store colours clusters with unless you choose another: `tableau10`.
  *
  * @category Coordinates and colour
  */
 export const DEFAULT_PALETTE: PaletteName = 'tableau10';
 
 /**
- * How many colours `palette` has: the `palette_size` a request for its slots sends.
+ * How many colours `palette` has. Requests for palette slots send it as `palette_size`.
  *
  * @category Coordinates and colour
  */
@@ -94,16 +95,16 @@ export function paletteSize(palette: PaletteName): number {
 }
 
 /**
- * The colour of a point whose artifact has no colour: one the session does not know yet, or one
- * served with no slot.
+ * The grey used for an artifact with no colour of its own, such as one whose palette slot is not
+ * known yet.
  *
  * @category Coordinates and colour
  */
 export const NEUTRAL: Rgba = [118, 126, 140, 200];
 
 /**
- * A cluster's colour: `chosen` where the host set one for it, else its slot's colour in `palette`,
- * else {@link NEUTRAL} for a null slot or one past the palette's end.
+ * A cluster's colour: `chosen` if given, otherwise the colour at `slot` in `palette`. Returns
+ * {@link NEUTRAL} if `slot` is `null` or past the end of the palette.
  *
  * @category Coordinates and colour
  */
@@ -133,8 +134,8 @@ export function paletteOfSize(size: number | null): PaletteName | null {
 }
 
 /**
- * Colours chosen for single artifacts in place of their palette colours, by layer and then by
- * `mosaica_id`.
+ * Colours for particular artifacts, to use in place of their palette colours, keyed by layer and
+ * then by `mosaica_id`. Pass it to {@link Store.setArtifactColours}.
  *
  * @category Coordinates and colour
  */

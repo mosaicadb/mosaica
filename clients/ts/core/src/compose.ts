@@ -21,53 +21,51 @@ import type {TileRect} from './rects.js';
  */
 
 /**
- * One entry of a {@link Composition}'s `tiles`: one band's contribution to the frame, and whether
- * it is the server's exact answer for its tile.
+ * One tile in a {@link Composition}: what one band contributes to the frame.
  *
  * @category Projections
  */
 export type ComposedTile = {
-  /** The tile's Morton prefix at `depth`. */
+  /** The tile's address: its Morton prefix at `depth`. */
   prefix: bigint;
-  /** The depth `prefix` is addressed at: the band's own, which may differ from the frame's. */
+  /** The band's depth, which may differ from the frame's. */
   depth: number;
   /**
-   * True where the marks are the server's served points for this tile at the frame's depth. False
-   * for a stand-in, whose marks may be a superset of what the server would serve here, and for a
-   * tile counted before its points, which draws nothing.
+   * `true` if the marks are the points the server sent for this tile at the frame's depth. `false`
+   * for a stand-in, and for a tile whose counts have arrived before its points, which draws
+   * nothing.
    */
   exact: boolean;
-  /** Marks this entry puts on screen; the tile's `served` count for an exact tile. */
+  /** How many marks the tile draws. For an exact tile this is its `served` count. */
   drawn: number;
   /**
-   * The server's counts for the tile, or `null` for a stand-in. A tile counted before its points
-   * carries them with `drawn` 0. `visible` is how many items this principal may see in the tile,
-   * `matched` how many of those match the filter, `highlighted` how many of those match the
-   * highlight, and `served` how many points were sent.
+   * The server's counts for the tile, or `null` for a stand-in. `visible` is how many items the
+   * viewer may see in the tile, `matched` how many of those match the filters, `highlighted` how
+   * many of those match the highlight, and `served` how many points were sent.
    */
   counts: {visible: bigint; matched: bigint; highlighted: bigint; served: number} | null;
 };
 
 /**
- * One entry of a {@link Composition}'s `standIn`: a band drawn over ground that no exact band
- * answers yet. It is a band held from another depth, or one that eviction cut short.
+ * A stand-in in a {@link Composition}: points from a band at another depth, drawn where the
+ * frame's own tiles have not arrived yet.
  *
  * @category Projections
  */
 export type StandInPiece = {
-  /** The band, by reference. */
+  /** The band to draw from. */
   band: Band;
   /** Indices into the band's points to draw, in order, or `null` to draw its first points. */
   indices: number[] | null;
-  /** How many points to draw: the first `limit` of `indices`, or of the band where it is `null`. */
+  /** How many points to draw: the first `limit` of `indices`, or of the band if `indices` is `null`. */
   limit: number;
 };
 
 /**
- * The frame on screen, as the store's `view` projection holds it: which bands are drawn and on
- * what authority. Exact bands are the server's answer for their tiles at the frame's depth. A
- * stand-in holds points from elsewhere, drawn until the exact answer arrives, and carries no count.
- * Bands are held by reference; building draw buffers from them is the renderer's work.
+ * The frame on screen, as {@link ViewProjection.composition} holds it: which bands to draw. Exact
+ * bands are the server's answer for the frame's tiles at its depth. Stand-ins are points from other
+ * depths, drawn until the exact bands arrive, and carry no counts. A renderer builds its draw
+ * buffers from these bands.
  *
  * @category Projections
  */
@@ -76,28 +74,28 @@ export type Composition = {
   depth: number;
   /** @internal */
   want: TileRect;
-  /** The replica's version when the frame was composed or last refreshed. Compare for equality only. */
+  /** The tile cache's version when the frame was composed or last refreshed. Compare it for equality only. */
   version: number;
-  /** The exact bands, by reference. */
+  /** The exact bands. */
   exact: Band[];
   /**
-   * The stand-in pieces, coarsest first. Pieces from deeper bands are thinned to the density of
-   * the frame's depth, and no piece covers ground an exact band answers.
+   * The stand-ins, coarsest first. Stand-ins from deeper bands are thinned to the density of the
+   * frame's depth, and none covers a tile an exact band covers.
    */
   standIn: StandInPiece[];
-  /** One entry per exact band and per stand-in piece. */
+  /** One entry per exact band and per stand-in. */
   tiles: ComposedTile[];
-  /** Marks drawn from exact bands. */
+  /** How many marks the exact bands draw. */
   exactDrawn: number;
-  /** The sum of the exact bands' `served` counts. Equal to `exactDrawn` in every frame presented. */
+  /** The sum of the exact bands' `served` counts. Equal to `exactDrawn` in every published frame. */
   exactServed: number;
-  /** The sum of the exact bands' `visible` counts: items this principal may see in those tiles. */
+  /** The sum of the exact bands' `visible` counts: how many items the viewer may see in those tiles. */
   visibleInView: number;
-  /** Stand-in marks in total. It counts marks on screen and says nothing of how many items exist. */
+  /** How many stand-in marks are on screen. It does not count items. */
   provisional: number;
   /**
-   * True where the stand-ins were carried from an older frame when fresh exact bands were added.
-   * The next full composition replaces them.
+   * `true` if the stand-ins were kept from an earlier frame when new exact bands arrived. The next
+   * full composition replaces them.
    */
   standInStale: boolean;
 };
