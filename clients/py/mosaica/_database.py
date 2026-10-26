@@ -2064,12 +2064,17 @@ class Database:
         shutil.copytree(self.path, target, dirs_exist_ok=True, ignore=locks)
         state = target / ".mosaica" / "declaration.json"
         if state.exists():
-            # A file inserted where it lies stays there, so the copy names it from its own place.
+            # A file under the database's directory moves with it, and one inserted from
+            # elsewhere stays where it lies, so the copy names each from its own place.
+            original, moved = self.path.resolve(), target.resolve()
             copy = Database(target)
             _load(copy, json.loads(state.read_text(encoding="utf-8")))
             for insert in copy.inserts + copy.pending:
+                path = insert.path.resolve()
+                if path.is_relative_to(original):
+                    insert.path = moved / path.relative_to(original)
                 if insert.in_place:
-                    insert.declared_path = os.path.relpath(insert.path, target.resolve())
+                    insert.declared_path = os.path.relpath(insert.path, moved)
             copy._save_state()
             (target / "schema.toml").write_text(dumps(copy._document()), encoding="utf-8")
         return target

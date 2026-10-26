@@ -578,3 +578,45 @@ def test_a_saved_copy_of_a_database_that_read_a_file_where_it_lies_commits_again
         assert "halves" in {layer["name"] for layer in copy.meta()["layers"]}
     finally:
         copy.close()
+
+
+def test_a_saved_copy_reads_its_own_files_and_commits_its_inserts_once_the_original_is_gone(
+    tmp_path,
+):
+    """A Parquet file inside the database's directory moves with the copy, and so does a frame
+    inserted after the first commit and not yet committed: removing the original leaves the copy
+    whole."""
+    import shutil
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from conftest import binary
+    from mosaica import create, open as reopen
+
+    binary()
+    original = tmp_path / "original"
+    db = create(original)
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.declare_attribute("id", type="i64", unique=True)
+    inside = original / "data" / "rows.parquet"
+    inside.parent.mkdir()
+    pq.write_table(pa.table({"id": [1, 2], "x": [1.0, 2.0], "y": [1.0, 2.0]}), inside)
+    db.insert("map", str(inside), x="x", y="y")
+    assert db.commit().ok
+    db.declare_layer("halves", kind="flat")
+    db.insert("halves", pa.table({"id": [1, 2], "half": ["left", "right"]}), key="half")
+    saved = db.save(tmp_path / "kept" / "copy")
+    db.close()
+    shutil.rmtree(original)
+
+    copy = reopen(saved)
+    try:
+        report = copy.commit()
+        assert report.ok, report
+        assert "halves" in {layer["name"] for layer in copy.meta()["layers"]}
+        copy.declare_layer("thirds", kind="flat")
+        copy.insert("thirds", pa.table({"id": [1, 2], "third": ["a", "b"]}), key="third")
+        assert copy.commit().ok
+    finally:
+        copy.close()
