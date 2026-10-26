@@ -37,15 +37,19 @@ def retry_after(status: int, headers, body: Any) -> Optional[float]:
 
 
 class Refusal(ValueError):
-    """A request that was refused, with a message saying what was wrong and what to do instead.
+    """The exception the package raises when it will not make a call, or when the server refuses
+    a request, with a message that says what was wrong and what to write instead.
 
-    The package raises it for a call it will not make, and for a request the server refused, in
-    which case the message carries what the server said and `status` its HTTP status, which is
-    `None` otherwise. `retry_after_s` is the wait in seconds the server asked for before the
-    request is sent again, read by `retry_after`: on a `429`, and on any refusal that names a wait.
-    It is `None` otherwise. A `commit()` that did nothing carries its report as `report`, which is
-    `None` otherwise. `authorise` and `revoke` raise `PermissionError` for a refused request
-    instead.
+    Catching `Refusal` handles every refusal from a `Database` or a reader in one place, and since
+    it is a `ValueError`, code that catches `ValueError` catches it too. The token functions
+    `login`, `logout`, `authorise` and `revoke` raise `PermissionError` for a request the server
+    refuses, and `Control` returns each refusal in its `Answer` without raising.
+
+    - `status`: the HTTP status of a read the server refused, and `None` for every other refusal.
+    - `retry_after_s`: the wait in seconds the server asked for before the request is sent again,
+      which it names when it answers `429` because it is busy, and `None` when it named none.
+    - `report`: the report of a `commit`, `remove`, `suppress`, `unsuppress` or `leave` that
+      applied nothing, which says what was refused and why, and `None` otherwise.
 
         try:
             db.commit()

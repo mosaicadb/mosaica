@@ -229,25 +229,27 @@ def remove(directory: Path) -> None:
 
 
 class ServeRefused(Refusal):
-    """The `mosaica serve` process a database started did not report its three addresses.
+    """The `Refusal` raised when the server a database starts does not report the addresses it
+    listens on.
 
-    `Database.serve()` raises it, and so does every call that starts the server, such as the
-    first `commit()`, when the process prints no line naming its viewer, session and control
-    addresses within `MOSAICA_SERVE_TIMEOUT` seconds (30 by default), or prints one that leaves
-    an address out. The process is stopped. On a timeout the message holds the last lines it
-    wrote to its output and its error stream; otherwise it holds the line that left an address
-    out. It is a kind of `Refusal`.
+    `Database.serve()` raises it, as does any call that starts the server, such as the first
+    `commit()`. A server that prints no line naming its viewer, session and control addresses
+    within the wait is stopped, and the message holds the last lines it wrote to its output and
+    error streams. A server whose line leaves an address out is stopped too, and the message
+    quotes the line. The wait is 30 seconds unless the `MOSAICA_SERVE_TIMEOUT` environment
+    variable names another, so raise it on a machine where the server takes longer to start.
     """
 
 
 @dataclass
 class Listening:
-    """The addresses a database's server listens on, each as `host:port`.
+    """The addresses a database's server listens on, each as `host:port`, which
+    `Database.serve()` returns.
 
-    - `viewer`: the viewer plane, where readers read.
-    - `session`: the session plane, where the operator credential, or an API key holding
-      `authorise-as`, makes and revokes tokens.
-    - `control`: the control plane, where the operator writes.
+    - `viewer`: the viewer plane, which readers read from with a token.
+    - `session`: the session plane, where the operator credential or an API key holding
+      `authorise-as` makes and revokes tokens.
+    - `control`: the control plane, where the operator declares and writes.
     """
 
     viewer: str

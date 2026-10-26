@@ -21,21 +21,28 @@ from ._refusal import Refusal, listed
 
 @dataclass
 class Token:
-    """A token for reading a Mosaica database, and when it expires.
+    """A token that lets its holder read a Mosaica database, with when it expires and how to get
+    a fresh one.
 
-    - `token`: the token itself, a string to keep secret.
-    - `expires_at`: when its session ends, in seconds since 1970, or `None` if not known. A
-      catalogue change, such as a grant to its principal, can end it sooner.
-    - `token_id`: a handle that `revoke` takes to end it without sending the token again. It is
-      set where `authorise` made the token, and `None` otherwise.
-    - `renew`: a function that makes a fresh token with the same credential, set where `login`
-      or `authorise` made this one.
-    - `principal`: the local principal it reads as, where `authorise` made it for one or `login`
-      was given a password, and `None` otherwise.
-    - `terms`: the access terms it holds, where `authorise` made it for them, and `None`
+    `login` and `authorise` return one, and `connect`, `Map` and `logout` take one or its `token`
+    string. Printing a token shows its expiry, its principal and how many terms it holds, and
+    leaves the token string out, so that the secret does not end up in a saved notebook or a log.
+
+    - `token`: the string a reader sends with each request, which reads as the token's principal
+      for anyone who holds it, so keep it secret.
+    - `expires_at`: when the token's session ends, in seconds since 1970, or `None` when that is
+      not known. A session ends sooner when the catalogue changes something it depends on, such
+      as a grant to its principal.
+    - `token_id`: the id `revoke` takes to end the token without sending the token again. Only a
+      token `authorise` made has one, and it is `None` otherwise.
+    - `renew`: a function that makes a fresh token with the credential this one was made with,
+      which a reader from `connect` and a `Map` call when the token is about to expire or its
+      session has ended. It is set when `login` or `authorise` made the token, and `None`
       otherwise.
-
-    Printing a token shows its expiry, its principal and how many terms it holds, never the token.
+    - `principal`: the local principal the token reads as, when `authorise` made it for one or
+      `login` was given a password, and `None` otherwise.
+    - `terms`: the access terms the token holds, when `authorise` made it for a set of terms, and
+      `None` otherwise.
     """
 
     token: str
@@ -59,8 +66,10 @@ class Token:
 
 
 TokenSource = Union[str, Token, Callable[[], Union[str, "Token"]]]
-"""What a token may be given as: the token itself as a string, a `Token`, or a function that
-returns either, which is called again when the token it gave is close to expiry."""
+"""The forms `connect` and `Map` take a token in: the token string, a `Token`, or a function that
+returns either. A function is how to hand a reader tokens your own code makes, because the reader
+calls it again for a fresh token when the one it holds is about to expire or its session has
+ended."""
 
 
 def minted(source: TokenSource) -> Token:
@@ -108,19 +117,20 @@ def login(
     access_token: Optional[str] = None,
     timeout: float = 10.0,
 ) -> Token:
-    """Make a token that reads as the principal a credential authenticates.
+    """Log in to a Mosaica database with a password, an API key or an OIDC access token, and
+    return a token that reads as the principal the credential belongs to.
 
     - `viewer_url`: the address of the database's viewer plane, where readers read.
-    - Exactly one credential: `principal` and `password` together, `api_key`, or
-      `access_token`, an OIDC access token from a provider the database accepts.
-    - `timeout`: how long to wait for the server, in seconds.
+    - `principal`, `password`: a local principal's name and password, given together.
+    - `api_key`: an API key the database's operator issued.
+    - `access_token`: an OIDC access token from a provider the database accepts.
+    - `timeout`: how long to wait for the server, in seconds. The default is 10.
 
-    The principal must hold `read`. The token's `renew()` logs in again with the same
-    credential, which stays in this process.
-
-    A missing `viewer_url`, or anything but exactly one credential, raises `ValueError`. A
-    credential the server does not accept raises `PermissionError`; the answer is the same
-    whatever the reason, so it does not say whether a principal exists.
+    Any combination but exactly one of the three credentials raises `ValueError`, as a missing
+    `viewer_url` does. The principal must hold the `read` permission. The server answers
+    every credential it does not accept with the same refusal, which raises `PermissionError`, so
+    the error does not reveal whether a principal exists. The token's `renew()` logs in again
+    with the same credential, which therefore stays in this process for as long as the token does.
 
         token = mosaica.login(viewer_url, principal="ann", password=password)
         mosaica.connect(viewer_url, token).view("papers").count()
@@ -160,12 +170,14 @@ def login(
 
 
 def logout(viewer_url: str, token: Union[str, Token], *, timeout: float = 10.0) -> None:
-    """End the session of a token, so it can no longer read.
+    """End a token's session, so that the token can no longer read.
 
     - `viewer_url`: the address of the database's viewer plane.
-    - `token`: the token, as a string or a `Token`.
+    - `token`: the token to end, as a string or a `Token`.
+    - `timeout`: how long to wait for the server, in seconds. The default is 10.
 
-    A token whose session has already ended raises `PermissionError`.
+    A token the server does not recognise, or whose session has already ended, raises
+    `PermissionError`.
     """
     if not viewer_url:
         raise ValueError("logout needs the viewer plane's URL")
@@ -183,28 +195,33 @@ def authorise(
     read_all: bool = False,
     timeout: float = 10.0,
 ) -> Token:
-    """Make a token on the session plane, for another principal, for a set of terms, or for the
-    operator.
+    """Make a token for someone else to read with, as a local principal, an OIDC identity, a set
+    of access terms or the operator.
+
+    An application that signs its own users in calls this from its back end, with an API key, to
+    give each user a token that reads as them.
 
     - `session_url`: the address of the database's session plane, where tokens are made.
     - `credential`: an API key whose principal holds `authorise-as`, or the operator credential.
-      Either can make a token that reads as anyone. Give other people a token, never the
-      credential.
-    - Exactly one target: `principal`, a local principal's name; `access_token`, the OIDC access
-      token of the identity to act as; `terms`, the access terms the token holds; or
-      `read_all=True`, the operator's own token. Only the operator credential may send the last
-      two.
-    - `timeout`: how long to wait for the server, in seconds.
+      Either one can make a token that reads as anyone, so keep it in the back end and give
+      readers only the tokens it makes.
+    - `principal`: the name of a local principal to read as. The token carries the principal's
+      terms and its `read` and `write` permissions, and none of its others, such as `read-all`.
+      The principal must hold `read`.
+    - `access_token`: the OIDC access token of an identity to read as, which the server checks
+      as `login` does. The token carries the identity's terms and permissions as for `principal`.
+    - `terms`: the access terms the token holds, as a list or one term as a string, for a reader
+      the catalogue does not name. The token holds them and `read`. Only the operator credential
+      may send `terms`.
+    - `read_all`: `True` makes the operator's own token, which holds `read-all` and reads every
+      item that is not deleted or suppressed. Only the operator credential may send it.
+    - `timeout`: how long to wait for the server, in seconds. The default is 10.
 
-    A token for a principal carries its terms and its `read` and `write`, never its `read-all`,
-    and the principal must hold `read`. A token for `terms` holds those terms and `read`. The
-    operator's token holds `read-all`: it reads every item that is not deleted or suppressed. The
-    token's `renew()` makes a fresh one with the same credential, which stays in this process. A
-    `Database` does this for you: `db.token(terms)` and `db.viewer(terms)`.
-
-    An empty `session_url` or `credential`, or anything but exactly one target, raises
-    `ValueError`, and a request the server refuses raises `PermissionError` with its status and
-    answer.
+    Name exactly one of `principal`, `access_token`, `terms` and `read_all`. Anything else, or an
+    empty `session_url` or `credential`, raises `ValueError`, and a request the server refuses
+    raises `PermissionError` with its status and answer. The token's `renew()` makes a fresh one
+    with the same credential, which therefore stays in this process. A `Database` makes these
+    tokens with its own operator credential through `db.token(terms)` and `db.viewer(terms)`.
 
         token = mosaica.authorise(session_url, api_key, principal="ann")
         token = mosaica.authorise(session_url, operator_credential, terms=["cs.LG"])
@@ -260,19 +277,21 @@ def revoke(
     *,
     timeout: float = 10.0,
 ) -> None:
-    """End a token `authorise` made, so it can no longer read.
+    """End a token that `authorise` made, so that it can no longer read.
 
-    - `session_url`, `credential`: as for `authorise`. An API key ends only a token minted with a
-      key of the same principal, and the operator credential ends any.
-    - `token_id`: the token's `token_id`, or the `Token` itself. Only the id is sent.
-    - `timeout`: how long to wait for the server, in seconds.
+    - `session_url`: the address of the database's session plane.
+    - `credential`: the operator credential, which ends any token, or an API key, which ends only
+      the tokens made with a key of its own principal.
+    - `token_id`: the `Token`, or its `token_id`. Only the id is sent, so the token itself never
+      travels again.
+    - `timeout`: how long to wait for the server, in seconds. The default is 10.
 
-    An id that names no such live token is accepted without comment, so the answer says nothing
-    about which tokens exist. An empty `session_url` or `credential`, or a `Token` with no
-    `token_id`, raises `ValueError`, and a request the server refuses raises `PermissionError`.
-
-    The token ends, not the credential that made it: a reader holding the `Token` gets another
-    with its `renew()`. A reader given the token as a string has none to get.
+    The server accepts an id that names no live token without saying so, because any other
+    answer would tell a caller which tokens exist. An empty `session_url` or `credential`, or a
+    `Token` without a `token_id`, raises `ValueError`, and a request the server refuses raises
+    `PermissionError`. The credential that made the token keeps working, so a reader holding the
+    `Token` can make another with its `renew()`, while a reader given only the token string has
+    no way to.
 
         mosaica.revoke(session_url, credential, token)
     """
