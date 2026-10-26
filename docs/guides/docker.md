@@ -11,12 +11,12 @@ install and to [the systemd one](systemd.md) alike.
 ## Get the image
 
 Mosaica's image is published to the GitHub Container Registry as `ghcr.io/mosaicadb/mosaica`, for
-`linux/amd64` and `linux/arm64`. Each release is tagged with its version, and the `next` tag
+`linux/amd64` and `linux/arm64`. Each release is tagged with its version, and the `latest` tag
 follows the newest release. Pull it and check the version:
 
 ```bash
-docker pull ghcr.io/mosaicadb/mosaica:next
-docker run --rm ghcr.io/mosaicadb/mosaica:next --version
+docker pull ghcr.io/mosaicadb/mosaica:latest
+docker run --rm ghcr.io/mosaicadb/mosaica:latest --version
 ```
 
 The image puts `mosaica` on a distroless base, which has the C library and certificates and no
@@ -103,7 +103,7 @@ Save this as `compose.yaml`:
 ```yaml
 services:
   mosaica:
-    image: ghcr.io/mosaicadb/mosaica:next
+    image: ghcr.io/mosaicadb/mosaica:latest
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
@@ -258,7 +258,7 @@ docker compose pull
 docker compose up -d
 ```
 
-To stay on one release, write its version, without the leading `v`, in place of `next` in
+To stay on one release, write its version, without the leading `v`, in place of `latest` in
 `compose.yaml`.
 
 A new version may not read a bundle an older one built. When the bundle's format differs, the server

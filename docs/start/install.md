@@ -69,7 +69,7 @@ To run the database as a service, follow [Run Mosaica under systemd](../guides/s
     ```
 
 !!! note "Release candidates"
-    Every release so far is a release candidate. cargo builds one only when `--version` names it, so the crates.io install above names the version. The Docker guide uses the image's `next` tag, which follows every release. Once there is a full release, `cargo install --locked mosaica` builds the newest one without `--version`, and the image's `latest` tag follows full releases.
+    Every release so far is a release candidate, and cargo builds one only when `--version` names it. Once there is a full release, `cargo install --locked mosaica` builds the newest without it.
 
 ## Platforms
 
