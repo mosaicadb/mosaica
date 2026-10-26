@@ -440,12 +440,12 @@ class Database:
             set(listed(unique)),
         )
         held = self.blocks.vocabulary_names()
-        for block in vocabularies:
-            if block["name"] not in held:
-                self.declare("vocabulary", block)
+        new = [block for block in vocabularies if block["name"] not in held]
+        for block in new:
+            self.declare("vocabulary", block)
         for block in attributes:
             self.declare("attribute", block)
-        return Declared(columns=rows, vocabularies=[block["name"] for block in vocabularies])
+        return Declared(columns=rows, vocabularies=[block["name"] for block in new])
 
     def declare_layer(
         self,

@@ -75,7 +75,8 @@ class Declared(Summarised):
 
     - `columns`: a `DeclaredColumn` for each column of the frame that was neither skipped nor
       already declared, including those no type fits, which were left undeclared.
-    - `vocabularies`: the vocabularies declared for category columns.
+    - `vocabularies`: the vocabularies this call declared for category columns, leaving out one
+      declared before.
     """
 
     columns: list[DeclaredColumn] = field(default_factory=list)

@@ -76,6 +76,17 @@ def test_a_string_is_text_unless_the_call_names_it_keyword_or_category(db):
     assert 'vocabulary = "archive"' in text
 
 
+def test_a_category_reading_a_vocabulary_declared_before_leaves_it_as_declared(db):
+    """The closed vocabulary stays closed, and the report lists no vocabulary as declared."""
+    db.declare_vocabulary("archive", closed=True, width="u8", values=["cs", "math"])
+    report = db.declare_columns(frame(), skip=["paper", "x", "y", "terms"], category=["archive"])
+    assert report.vocabularies == []
+    assert {row.name: row.vocabulary for row in report.columns}["archive"] == "archive"
+    text = db.declaration
+    assert '[[vocabulary]]\nname = "archive"\nwidth = "u8"\nvalue_set = "closed"' in text
+    assert text.count("[[vocabulary]]") == 1
+
+
 def test_a_list_and_a_type_with_no_mapping_are_not_declared_and_are_listed(db):
     report = db.declare_columns(frame(), skip=["paper", "x", "y"])
     declared = {row.name: row for row in report.columns}
