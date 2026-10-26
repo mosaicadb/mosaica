@@ -1333,7 +1333,8 @@ class Viewer:
         y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells.
 
         A table's columns come in this order, each where it applies: `group` (`listed`, `rest` or
-        `none`), `key` (a category's key or an annotation's `mosaica_id`), `title`, `slot`, `lower`
+        `none`), `key` (a category's key, or an annotation's `mosaica_id` as its decimal string,
+        which a `member_of` filter takes as it is), `title`, `slot`, `lower`
         and `upper` (a bin's edges, the last bin including its `upper`), `cell` (the cell's
         Morton prefix), `count`, `reference_count`, `lift` (`(count / total) / (reference_count /
         reference_total)`), and then the field figures. A category field has `title` only when
@@ -1360,9 +1361,11 @@ class Viewer:
             [topics] = v.aggregate("papers", [topics])
         """
         import pyarrow as pa
+        import pyarrow.compute as pc
         from pyarrow import ipc
 
-        request: dict = {"view": view, "groupings": list(groupings)}
+        groupings = list(groupings)
+        request: dict = {"view": view, "groupings": groupings}
         if filters is not None:
             request["filters"] = filters
         if reference is not None:
@@ -1380,6 +1383,9 @@ class Viewer:
                 if region is not None:
                     metadata["mosaica.region"] = region
                 table = pa.Table.from_batches(pages[grouping]).unify_dictionaries()
+                if "layer" in (groupings[grouping].get("by") or {}) and "key" in table.column_names:
+                    at = table.column_names.index("key")
+                    table = table.set_column(at, "key", pc.cast(table["key"], pa.string()))
                 tables.append(table.replace_schema_metadata(metadata))
             return tables
 

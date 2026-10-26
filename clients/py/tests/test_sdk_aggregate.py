@@ -80,7 +80,20 @@ def test_the_artifacts_of_a_layer(db):
     (clusters,) = db.aggregate("map", [{"count": True, "by": {"layer": "clusters", "top": 5}}])
     assert [r["count"] for r in rows(clusters)] == [4] * 5
     ids = db.artifacts("map", "clusters", []).column("mosaica_id").to_pylist()
-    assert sorted(clusters.column("key").to_pylist()) == sorted(ids)
+    assert sorted(clusters.column("key").to_pylist()) == sorted(str(one) for one in ids)
+
+
+def test_a_layer_rows_key_read_into_a_data_frame_is_the_id_a_member_of_filter_takes(db):
+    """Beside the null key of the rest, each cluster's key survives pandas whole, and filtering to
+    it counts the papers its row counts."""
+    pytest.importorskip("pandas")
+    (clusters,) = db.aggregate("map", [{"count": True, "by": {"layer": "clusters", "top": 2}}])
+    frame = clusters.to_pandas()
+    listed = frame[frame["group"] == "listed"]
+    assert len(listed) == 2 and frame["group"].tolist()[-1] == "rest"
+    for key, count in zip(listed["key"], listed["count"]):
+        within = db.view("map").filter({"member_of": {"layer": "clusters", "artifact": key}})
+        assert within.count() == count
 
 
 def named_papers(db) -> None:
@@ -103,7 +116,7 @@ def test_a_layer_row_is_titled_with_the_name_browse_gives(served, corpus):
     listed = [r for r in rows(named) if r["group"] == "listed"]
     assert [(r["title"], r["count"]) for r in listed] == [("Alpha", 6), ("Beta", 4)]
     browsed = db.viewer().browse_artifacts("map", "named")["artifacts"]
-    assert {r["key"]: r["title"] for r in listed} == {int(r["mosaica_id"]): r["name"] for r in browsed}
+    assert {r["key"]: r["title"] for r in listed} == {r["mosaica_id"]: r["name"] for r in browsed}
 
 
 def titled_papers(db) -> None:
