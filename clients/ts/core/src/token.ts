@@ -8,8 +8,9 @@ import type {Store} from './store.js';
  * `Infinity` as `expiresAt` for a token that does not expire.
  *
  * The store renews the token 30 seconds before it expires, or halfway through a lifetime shorter
- * than a minute. Concurrent requests share one call. If the function rejects, the request waiting
- * for the token fails. To change viewer, call {@link Store.clear}.
+ * than a minute. It is also called if the server rejects a token that had worked with `401`, as
+ * after a restart. Concurrent requests share one call. If the function rejects, the request
+ * waiting for the token fails. To change viewer, call {@link Store.clear}.
  *
  * @category Store
  */

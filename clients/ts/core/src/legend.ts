@@ -23,7 +23,7 @@ export const CLUSTER_PREFIX = 'cluster:';
 export type LegendProjection = {
   /**
    * Palette ranks for each category column, by code. Values are ranked by how many items with that
-   * value the viewer may see in the view, most first, so a value gets the same colour each time
+   * value the viewer may see across the whole view, most first, so a value gets the same colour each time
    * the same data is loaded. If the server refuses that count, codes are ranked by how often they
    * appear among the marks drawn. A rank does not change once given. A code is drawn in the
    * unmapped colour until its rank arrives.
@@ -37,7 +37,7 @@ export type LegendProjection = {
   missing: Record<string, boolean>;
   /** The codes drawn for each category column, with their names. */
   categories: Record<string, CategoryValue[]>;
-  /** Why the names could not be fetched, for each category column where they could not. The store does not ask again. */
+  /** For each category column whose names could not be fetched, why. The store does not ask again until it is cleared. */
   categoryErrors: Record<string, Refusal>;
   /** What the points are coloured by, as `setColourBy` last set it: a column, `cluster:<layer>`, or `null` for one colour. */
   colourBy: string | null;

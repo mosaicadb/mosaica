@@ -147,7 +147,14 @@ export type StoreOptions = {
    * by default there is no limit. `heldTiles` is how many tiles of artifacts to keep per view; it
    * defaults to `4096`.
    */
-  artifacts?: {perTile?: number; budget?: number; heldTiles?: number};
+  artifacts?: {
+    /** The most artifacts one level shows in a tile, largest first. Defaults to 50, or to `meta.selection.maxArtifactsPerTile` if that is lower. */
+    perTile?: number;
+    /** The starting cluster budget ({@link Store.setClusterBudget}). By default there is no limit. */
+    budget?: number;
+    /** How many tiles of artifacts to keep per view. Defaults to `4096`. */
+    heldTiles?: number;
+  };
   /**
    * A `/v1/meta` response you have already fetched, so the store need not fetch it again. It must
    * have been fetched with this viewer's token.
@@ -181,8 +188,8 @@ export type StoreOptions = {
  */
 export type Projections = {
   /**
-   * The `/v1/meta` the store read or was given, or `null` before it has arrived, and after
-   * {@link Store.clear} or an answer under another identity key until it is read again.
+   * The `/v1/meta` the store read or was given. `null` until it has loaded, and again after
+   * {@link Store.clear} or a change of the viewer's identity, until the store has read it again.
    */
   meta: Meta | null;
   /** Whether the current view's map is loading, shown, empty or refused. */
@@ -228,7 +235,7 @@ export type StatusProjection = {
    * `idle` before the first request and after {@link Store.clear}. `loading` while a request is in
    * flight, or after a view switch until the new view draws. `retrying` while the server is busy
    * (`429`) or starting (`503`) and the store waits to ask again. `shown` when a frame has arrived.
-   * `empty` when the viewer can see no items in the answer. `refused` when the request or the read
+   * `empty` when no items the viewer may see in view match the filters. `refused` when the request or the read
    * of `/v1/meta` was refused; it says nothing about whether any items exist. The counts are
    * meaningful only while the status is `shown`.
    */
@@ -415,7 +422,11 @@ export type ArtifactsProjection = {
    * colours.
    */
   colours: ReadonlyMap<number, Rgba>;
-  /** The palette `colours` comes from. */
+  /**
+   * The palette set with {@link Store.setPalette}. Each colour in `colours` comes from the palette
+   * its slot was served under, so after a change of palette the colours follow as the artifacts
+   * are fetched again.
+   */
   palette: PaletteName;
   /**
    * The colours set with {@link Store.setArtifactColours}, which `colours` uses in place of the
@@ -427,7 +438,12 @@ export type ArtifactsProjection = {
    * cannot and are being fetched again (`stale`). Both are `0` unless `status` is `shown` and a
    * layer is in use.
    */
-  coverage: {current: number; stale: number};
+  coverage: {
+    /** How many bands in view can colour every point by each layer in use. */
+    current: number;
+    /** How many bands in view cannot, and are being fetched again. */
+    stale: number;
+  };
 };
 
 /**
@@ -815,6 +831,9 @@ export interface Store {
    * The filters, layers, colouring, point columns, current view and camera are kept. Any that name
    * a view, layer or column the new metadata does not list are dropped, and if the current view is
    * not listed the store opens on the first one.
+   *
+   * The store does the same by itself, keeping its token, when the server reports that the
+   * viewer's identity has changed.
    */
   clear(): void;
   /**

@@ -1102,15 +1102,17 @@ export type ViewportResponse = {
   /** The server's timings. */
   timings: Timings;
   /**
-   * The key to keep cached data under (`x-mosaica-identity-key`). It is derived from the viewer's
-   * access terms, the view and the data, and changes when the data is compacted or rebuilt. When
-   * it changes, discard what you cached under the old key.
+   * Identifies the set of items the viewer may see in this view (`x-mosaica-identity-key`). It is
+   * derived from the viewer's access terms, the view and the dataset, so it changes when the
+   * session belongs to a viewer with different access and when the dataset is rebuilt or
+   * compacted. When it changes, discard what you cached under the old key.
    */
   identityKey: string;
   /**
-   * The response's entity tag (`etag`), without quotes. It changes when the visible set may have
-   * gained items. You may still draw a tile cached under an older content key; to refresh it, list
-   * it in {@link ViewportRequest.tiles}.
+   * Identifies the version of the data the response was answered from: its entity tag (`etag`),
+   * without quotes. It changes when items may have been added, when a deletion, suppression or
+   * lift applies, and when the server restarts. You may still draw a tile cached under an older
+   * content key; to refresh it, list it in {@link ViewportRequest.tiles}.
    */
   contentKey: string;
   /**

@@ -141,7 +141,10 @@ export interface ArtifactTable {
    * links. Use it to colour a point by the artifact drawn at the current cut. On a `dag` layer it
    * follows the first parent at each step.
    *
+   * @param ordinal - The ordinal to start from, such as a point's entry in
+   *   {@link BandMembership.ordinals}.
    * @param served - Anything with `has`, such as a set of ordinals or a colour map.
+   * @param served.has - Whether an ordinal is drawn at the current cut.
    * @param maxLevel - The level to colour at: the walk skips ancestors in `served` whose `rung` is
    *   deeper than this. By default it stops at the first one in `served`.
    * @returns The ordinal found, or {@link NO_ORDINAL} if the walk runs out of known parents.

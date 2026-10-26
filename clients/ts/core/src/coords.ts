@@ -33,7 +33,9 @@ export const WORLD_SIZE = 512;
 export const CELLS_PER_WORLD_UNIT = CELL_GRID / WORLD_SIZE; // 128
 /**
  * The size of the grid that artifact geometry (`centroid`, `box` and shapes) is served in: 2^32
- * units on each axis. {@link gridToWorld} converts it to world units.
+ * units on each axis. Item positions in another view ({@link ItemViewPosition}) use the same units,
+ * and a point's `code` interleaves its two 32-bit coordinates, so one cell is 2^16 units.
+ * {@link gridToWorld} converts to world units.
  *
  * @category Coordinates and colour
  */
@@ -162,6 +164,8 @@ export function rectToRequestBbox(
  * Convert a point from the view's data coordinates to deck.gl world units. Each axis is scaled
  * separately, so the view's extent becomes a square.
  *
+ * @param x - The x coordinate, in the view's data coordinates.
+ * @param y - The y coordinate, in the view's data coordinates.
  * @param q - The view's `quantisation`, from `/v1/meta`.
  * @returns `[x, y]` in world units, from `0` to {@link WORLD_SIZE} for a point inside the extent.
  *

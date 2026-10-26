@@ -24,11 +24,14 @@ export type TextTerms = {
 /**
  * Parse a text control's query into the alternatives it asks for. Plain words must all appear.
  * Text in double quotes (straight or curly) at the start of a word is a phrase, and an unclosed
- * quote runs to the end. With `phrase` set to `false`, for a column without phrase search, quoted
- * words are read as plain words. `OR` in capitals separates alternatives, any one of which is
- * enough, so `a b OR c` matches items with both a and b, or with c. Nothing else is syntax:
- * parentheses, and quotes inside a word, are part of the word. Alternatives with no words or
- * phrases are dropped.
+ * quote runs to the end. `OR` in capitals, as a word on its own, separates alternatives, any one
+ * of which is enough, so `a b OR c` matches items with both a and b, or with c. Nothing else is
+ * syntax: parentheses, and quotes inside a word, are part of the word. Alternatives with no words
+ * or phrases are dropped.
+ *
+ * @param query - The text typed into the control.
+ * @param phrase - Whether the column supports phrase search. With `false`, quoted words are read as
+ *   plain words. Defaults to `true`.
  *
  * @category Filters
  */
@@ -72,7 +75,7 @@ export type ColumnDraft =
   /**
    * A text search for `query`, parsed by {@link textTerms}. `phrase` says whether the column
    * supports phrases. If `expr` is set, it is sent in place of the query until the control is
-   * cleared; use it for an expression no query can express.
+   * cleared; use it to filter by an expression a query cannot produce.
    */
   | {family: 'text'; query: string; phrase: boolean; expr?: FilterExpr}
   /** Match `needle` against the whole value (`eq`), its start (`prefix`) or any part (`contains`). */
@@ -189,6 +192,7 @@ function operatorOf(draft: Exclude<ColumnDraft, {family: 'text'}>): FilterOperat
  * Build the filter expression for one side of a draft: `null` if no control is populated, the
  * single clause if one is, and `all_of` over the clauses if several are.
  *
+ * @param draft - The filter panel's state.
  * @param verb - Which controls to use. Defaults to `filter`.
  *
  * @category Filters
@@ -244,8 +248,9 @@ export function withoutClause(draft: FilterDraft, column: string, verb: ClauseVe
 /**
  * Create a draft with one empty filter control per filterable column, and no highlight controls.
  * Pass `meta.filterOperands`. A column gets a control only if it supports the operator the control
- * needs: `match` for text, `in` for category and `range` for numeric. A keyword control starts with
- * the first of `eq`, `prefix` and `contains` that the column supports.
+ * needs: `match` for text, `in` for category and `range` for numeric. A text control's `phrase` is
+ * set if the column supports `phrase`. A keyword control starts with whichever of `eq`, `prefix` and
+ * `contains` comes first in the column's operands.
  *
  * A group-scoped column is keyed by its bare name, which works only under a view of its own group
  * or of a group that shares its views. To filter it under another view, key the control as

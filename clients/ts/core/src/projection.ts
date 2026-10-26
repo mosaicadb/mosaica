@@ -16,6 +16,7 @@ import type {MapProjection, Quantisation, ViewInfo} from './types.js';
  *   {@link ViewportResult}'s `positions`, or a {@link Band}'s `positions` times
  *   `65536 / WORLD_SIZE`.
  * @param cy - The y position in cells.
+ * @param view - The view, from `meta.views`. Its projection decides how cells convert to degrees.
  * @param q - The view's `quantisation`.
  *
  * @category Coordinates and colour

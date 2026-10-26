@@ -35,8 +35,8 @@ export type Masked = {
   value: number;
   /**
    * Whether `value` is exact. A region's count is an estimate if the server counted the tiles
-   * covering the region instead of the region itself. {@link formatMasked} shows an estimate with
-   * `≈`.
+   * covering the region instead of the region itself. Counts for a region selected with `outside`
+   * are always estimates. {@link formatMasked} shows an estimate with `≈`.
    */
   exact: boolean;
 };

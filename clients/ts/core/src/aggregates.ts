@@ -6,11 +6,12 @@ import {paletteOfSize, type PaletteName} from './palette.js';
 import type {AggregateBy, AggregateCut, AggregateRequest, AggregateResult, AggregateTable, FilterExpr, Grouping} from './types.js';
 
 /**
- * One grouping in an {@link AggregateSpec}. It is a {@link Grouping} whose layer grouping can take
- * two values from the map. `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut
- * the map currently draws, under the cluster budget ({@link Store.setClusterBudget}).
- * `paletteSize: 'drawn'` returns each artifact's slot in the palette the map colours clusters from
- * ({@link Store.setPalette}). Both are read when each request is sent.
+ * One grouping in an {@link AggregateSpec}. The same as a {@link Grouping}, except that a layer
+ * grouping's `cut` and `paletteSize` can be `'drawn'` to use the map's current values.
+ * `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut the map currently draws,
+ * under the cluster budget ({@link Store.setClusterBudget}). `paletteSize: 'drawn'` returns each
+ * artifact's slot in the palette the map colours clusters from ({@link Store.setPalette}). Both
+ * are read when each request is sent.
  *
  * @category Store
  */
@@ -65,8 +66,8 @@ export type AggregateSpec = {
    * selected region. `view` counts the same items within the area in view: the selected region if
    * there is one, otherwise the camera's box; it is fetched again once the camera has rested for
    * 250 ms, and `reference` is limited to the same area. `visible` counts every item the viewer may
-   * see in the view and sends no filters, so `without`, `withoutMembersOf` and `highlighted` have
-   * no effect.
+   * see in the view, wherever the camera is, and sends no filters, so `without`, `withoutMembersOf`
+   * and `highlighted` have no effect.
    */
   subject?: 'match' | 'view' | 'visible';
   /**
@@ -76,15 +77,15 @@ export type AggregateSpec = {
    */
   reference?: FilterExpr | 'visible';
   /**
-   * A column whose filter control to leave out, named as in the {@link FilterDraft}. A filter
-   * control uses this to keep counting the values its own clause excludes. The other controls, the
-   * `member_of` clauses and the selected region still apply.
+   * A column whose filter control is left out of the counts, keyed as in the {@link FilterDraft}. A
+   * filter control uses this to keep counting the values its own clause excludes. The other
+   * controls, the `member_of` clauses and the selected region still apply.
    */
   without?: string;
   /**
-   * A layer whose `member_of` clauses to leave out, so a control that lists the layer's artifacts
-   * keeps counting the ones its clauses exclude. Other layers' clauses and the selected region
-   * still apply.
+   * A layer whose `member_of` clauses are left out of the counts, so a control that lists the
+   * layer's artifacts keeps counting the ones its clauses exclude. Other layers' clauses and the
+   * selected region still apply.
    */
   withoutMembersOf?: string;
   /**
@@ -109,7 +110,8 @@ export type AggregateEntry = {
   status: 'loading' | 'retrying' | 'shown' | 'refused';
   /**
    * The latest answer, kept while the next request loads. `null` before the first answer, after a
-   * refusal and after a view switch. For a histogram with a `sample`, the table's `sample` says
+   * refusal, after a view switch, and after {@link Store.clear} or a change of the viewer's
+   * identity. For a histogram with a `sample`, the table's `sample` says
    * whether the counts were scaled up from a sample.
    */
   result: AggregateResult | null;

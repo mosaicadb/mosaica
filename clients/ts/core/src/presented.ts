@@ -41,7 +41,7 @@ export function defaultFrameScheduler(): FrameScheduler {
  * - `loading`: a request for the view is in flight.
  * - `retrying`: the server answered `429` or `503`, and the store will ask again.
  * - `shown`: a frame is on screen, and its counts are meaningful.
- * - `empty`: the viewer can see no points in view.
+ * - `empty`: no points in view match the filters (or the viewer may see none).
  * - `refused`: the request failed, so nothing is known about what is in view.
  *
  * @category Projections

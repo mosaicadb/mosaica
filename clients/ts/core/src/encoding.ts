@@ -28,7 +28,7 @@ export function sizesPoints(column: DeclaredScalar): boolean {
 
 /**
  * The range of a number column's values among the marks drawn, for a colour ramp. It is taken
- * from the drawn marks only, so it reflects only what the viewer can see. It widens as marks
+ * from the drawn marks, so it covers only what the viewer can see. It widens as marks
  * arrive and does not narrow until the store is cleared, so panning does not recolour the map.
  * {@link LegendProjection.domains} holds one per column.
  *

@@ -66,7 +66,14 @@ export type RegionProjection = {
    * The marks drawn inside the region: the `mosaica_id`s and world positions (interleaved `x` and
    * `y`) of up to {@link REGION_HELD_LIMIT} of them, and the `count` of all of them.
    */
-  held: {ids: BigUint64Array; positions: Float32Array; count: number};
+  held: {
+    /** The `mosaica_id`s of up to {@link REGION_HELD_LIMIT} marks inside the region. */
+    ids: BigUint64Array;
+    /** Their world positions, as interleaved `x` and `y`. */
+    positions: Float32Array;
+    /** How many marks are drawn inside the region in all. */
+    count: number;
+  };
 };
 
 /**

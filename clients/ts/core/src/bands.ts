@@ -88,8 +88,8 @@ export function bandKey(depth: number, prefix: bigint): BandKey {
 
 /**
  * The points the store holds for one tile, in ascending `mosaica_id` order as the server sent
- * them, with the tile's counts. Each array has one entry per point. A tile with no matching points
- * has a band with no points, which carries the counts and draws nothing.
+ * them, with the tile's counts. Per-point arrays are in the same order as `ids`. A tile with no
+ * matching points has a band with no points, which carries the counts and draws nothing.
  *
  * @category Projections
  */
@@ -117,7 +117,8 @@ export type Band = {
   scalars: Record<string, ScalarColumn>;
   /**
    * For each layer in use when the band was fetched, the artifact each point belongs to. A layer
-   * missing here was not in use then, so the band cannot yet be coloured by it.
+   * missing here was either not in use when the band was fetched (see `layersAsked`), or none of
+   * the band's points belong to it.
    */
   membership: Record<string, BandMembership>;
   /**
@@ -140,9 +141,19 @@ export type Band = {
   highlighted: bigint;
   /** One more than the highest `mosaica_id` in `ids`, or `0n` for a band with no points. */
   heldBelow: bigint;
-  /** The identity key of the response the band came from. */
+  /**
+   * Identifies the set of items the viewer may see in this view when the band was fetched
+   * ({@link ViewportResponse.identityKey}). It changes when the session belongs to a different
+   * viewer and when the dataset is rebuilt or compacted; the store then drops every band and
+   * fetches again.
+   */
   identityKey: string;
-  /** The content key of the response the band came from. */
+  /**
+   * Identifies the version of the data the band was answered from
+   * ({@link ViewportResponse.contentKey}). It changes when items may have been added, when a
+   * deletion, suppression or lift applies, and when the server restarts. A band with an older
+   * content key may still be drawn until the store has fetched the tile again.
+   */
   contentKey: string;
   /** An estimate of the bytes the band occupies, counted against the cache's `cacheBytes`. */
   bytes: number;

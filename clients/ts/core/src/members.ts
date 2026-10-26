@@ -39,8 +39,8 @@ export type MemberClause = {
   /** Whether the clause filters or highlights. */
   verb: ClauseVerb;
   /**
-   * A name to show for the artifact, such as the one the card or panel that made the clause
-   * displayed. It is not sent to the server. The map does not draw a filter layer's artifacts, so
+   * A name to show for the artifact, such as the one shown by the card or panel that created the
+   * clause. It is not sent to the server. The map does not draw a filter layer's artifacts, so
    * this may be the only name available for them.
    */
   label?: string;
