@@ -6,12 +6,13 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
-## [0.1.0-rc.2] - 2026-10-25
+## [0.1.0-rc.3] - 2026-10-26
 
-The second release candidate for 0.1.0. 0.1.0-rc.1 reached PyPI and the container registry but
-not npm or crates.io, so this is the first candidate published to every registry. Install it with
+The third release candidate for 0.1.0. 0.1.0-rc.1 reached PyPI and the container registry but
+not npm or crates.io, and 0.1.0-rc.2 was tagged but stopped before publishing, so this is the
+first candidate published to every registry. Install it with
 `pip install --pre mosaica`, `npm install @mosaicajs/client@next`,
-`cargo install mosaica --version 0.1.0-rc.2` or `docker pull ghcr.io/mosaicadb/mosaica:0.1.0-rc.2`.
+`cargo install mosaica --version 0.1.0-rc.3` or `docker pull ghcr.io/mosaicadb/mosaica:0.1.0-rc.3`.
 Binary archives for Linux and macOS are attached to the GitHub release.
 
 ### Changed
@@ -37,6 +38,9 @@ Binary archives for Linux and macOS are attached to the GitHub release.
 
 - The release workflow publishes the npm packages and the crates; for 0.1.0-rc.1 both failed
   before publishing any.
+- zstd-sys 2.1.2, for RUSTSEC-2026-0410. The zstd 0.13 advisories published on 2026-10-25
+  (RUSTSEC-2026-0391, -0398 and -0403) concern APIs and features nothing in Mosaica uses; arrow 60
+  moves to the fixed zstd.
 
 ## [0.1.0-rc.1] - 2026-10-25
 
@@ -114,4 +118,4 @@ any later release, and a bundle built by one version may be refused by the next.
 
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
 [0.1.0-rc.1]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.1
-[0.1.0-rc.2]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.2
+[0.1.0-rc.3]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.3

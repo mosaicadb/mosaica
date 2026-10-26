@@ -1,6 +1,6 @@
 {
   "name": "@mosaicajs/deck",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "A deck.gl layer that draws a Mosaica store, for a host with its own Deck.",
   "keywords": [
     "mosaica",
@@ -47,7 +47,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@mosaicajs/client": "0.1.0-rc.2"
+    "@mosaicajs/client": "0.1.0-rc.3"
   },
   "peerDependencies": {
     "@deck.gl/aggregation-layers": "^9.3.7",

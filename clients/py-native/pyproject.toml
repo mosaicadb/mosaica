@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mosaica-native"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 description = "Mosaica's platform wheel: the `mosaica` executable and the `_mosaica` extension module."
 readme = "README.md"
 license = "Apache-2.0"
