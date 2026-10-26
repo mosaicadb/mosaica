@@ -79,9 +79,9 @@ class Database:
     Make one with `create()`, or reopen one with `open()`. Writing to a database takes three
     steps. The `declare_*` methods describe what it holds, such as its views, columns and
     annotation layers, and take no data. `insert` hands a table to something declared and names
-    the columns to read from it. `commit` then makes what was inserted part of the database: the
-    first commit builds the database and starts a server over it, and each later commit sends
-    that server what was inserted since the one before.
+    the columns to read from it. `commit` makes what was inserted part of the database, building
+    it and starting its server the first time. A name can be declared once for each kind of
+    thing, and views and view groups share one set of names.
 
     Reads go through that server with the operator's own token, which holds `read-all` and so
     sees every item that is not deleted or suppressed. To read as someone who holds only some
@@ -99,7 +99,8 @@ class Database:
     - `temporary`: `True` when `create()` made the database in a temporary directory, which
       `close()` deletes.
     - `built`: `True` once the first commit has built the database.
-    - `inserts`: the `Insert` records made before the first commit, which that commit builds from.
+    - `inserts`: the `Insert` records made before the first commit, which that commit builds
+      from.
     - `pending`: the `Insert` records made since the last commit, which the next commit sends.
     - `listening`: the addresses the server listens on, as `serve()` returns them, or `None`
       while the server is not running.
@@ -130,9 +131,9 @@ class Database:
     def binary(self) -> str:
         """The path of the `mosaica` program that checks, builds and serves this database.
 
-        The program is the one `MOSAICA_BIN` names, or else the first found of a `mosaica` on
-        `PATH`, the one the `mosaica-native` wheel installed and a build in a Mosaica checkout.
-        When there is none, reading this raises `Refusal`.
+        The program is the one `MOSAICA_BIN` names, then the first `mosaica` on `PATH`, then the one
+        the `mosaica-native` wheel installed, then a build in a Mosaica checkout, whichever is found
+        first. Reading this raises `Refusal` when none is found.
         """
         return _instance.find_binary()[0]
 
@@ -146,14 +147,11 @@ class Database:
     def declare(self, kind: str, block: dict) -> dict:
         """Declare one block written in the keys of the declaration file, and return it.
 
-        The `declare_*` methods build these blocks for you, so use this for a key that none of
-        them takes. The keys are those of `schema.toml`, and the block's contents are checked at
-        the next `check()` or `commit()`.
+        The `declare_*` methods build these blocks for you, so use this for a key that none of them
+        takes. The block's contents are checked at the next `check()` or `commit()`.
 
-        - `kind`: the kind of block, which is `"view"`, `"view_group"`, `"vocabulary"`,
-          `"attribute"` or `"layer"`.
-        - `block`: the block as a dictionary, which must not reuse a name already declared for
-          its kind.
+        - `kind`: `"view"`, `"view_group"`, `"vocabulary"`, `"attribute"` or `"layer"`.
+        - `block`: the block as a dictionary, with the keys `schema.toml` uses.
 
             db.declare("attribute", {"name": "score", "type": "f64", "index": True})
         """
@@ -174,27 +172,26 @@ class Database:
     ) -> dict:
         """Declare a view, and return its block.
 
-        A view is one layout of the items, which a map draws from each item's x and y coordinates
-        in that view. One set of items can have several views, such as two projections of the same
+        A view is one layout of the items, which a map draws from each item's x and y coordinates in
+        that view. One set of items can have several views, such as two projections of the same
         embedding. The rows of a view come from `insert(name, table, x=, y=, access=)`.
 
-        - `name`: the view's name, which no view or view group already declared may have.
-        - `extent`: the range of coordinates the view covers, as
-          `{"x": [min, max], "y": [min, max]}`, or as `{"lon": [...], "lat": [...]}` under a
-          projection. Without it the first commit fits the extent to its rows with a margin
-          around them. Because an extent cannot change after the first commit, a view declared
-          after it must give one.
-        - `projection`: `"none"`, the default, for plain x and y coordinates, or a map projection
-          such as `"web_mercator"` for longitude and latitude, in which case the view's inserts
-          name their coordinate columns with `lon=` and `lat=`.
-        - `default_label`: the access label a row takes when its access column is empty, which
-          is `"public"` unless you give another. With `None` there is no default, and a row with
-          no label of its own is refused.
-        - `visibility`: who may see the view at all, which is `"public"` by default, or else an
-          access label or a list of them.
-        - `anchor`: `True` makes this the view whose layout decides the order the items are stored
-          in on disk. Without it the first view declared is the anchor.
-        - `title`: the name shown for the view. By default it has none.
+        - `name`: the view's name.
+        - `extent`: the range of coordinates the view covers, as `{"x": [min, max], "y": [min,
+          max]}`, or as `{"lon": [...], "lat": [...]}` under a projection. By default the first
+          commit fits it to its rows with a margin. An extent cannot change once built, so a view
+          declared after the first commit must give one.
+        - `projection`: `"none"` (the default) for plain x and y coordinates, or a map projection
+          such as `"web_mercator"` for longitude and latitude, in which case the view's inserts name
+          their coordinate columns with `lon=` and `lat=`.
+        - `default_label`: the access label a row takes when its access column is empty, `"public"`
+          by default. With `None` there is no default, and a build or request that carries a row
+          without a label is refused.
+        - `visibility`: who may see the view at all, `"public"` by default, or an access label or a
+          list of them.
+        - `anchor`: `True` makes this view's layout decide the order the items are stored in. The
+          first view declared is the anchor by default.
+        - `title`: the name shown for the view.
 
             db.declare_view("papers", extent={"x": [0, 100], "y": [0, 100]})
         """
@@ -224,19 +221,19 @@ class Database:
         """Declare a view group, and return its block.
 
         A view group is a set of views that share every setting and differ by a key, such as one
-        view per year, and each view in it is named `"<group>:<key>"`. The views and their
-        metadata come from a roster table inserted with `insert(name, roster=table, key=)`, and
-        their rows from `insert(name, table, view=)`, where `view=` names the column that says
-        which view each row is in.
+        view per year, and each view in it is named `"<group>:<key>"`. The views and their metadata
+        come from a roster table inserted with `insert(name, roster=table, key=)`, and their rows
+        from `insert(name, table, view=)`, where `view=` names the column that says which view each
+        row is in.
 
-        - `name`: the group's name, which no view or view group already declared may have.
+        - `name`: the group's name.
         - `metadata`: the metadata each view carries, as `{name: type}`, whose values the roster
-          supplies. A category is written `{"type": "category", "vocabulary": vocabulary}`, and
-          the roster then holds the value's key. By default the views carry none.
+          supplies. A category is written `{"type": "category", "vocabulary": vocabulary}`, and the
+          roster then holds the value's key. The views carry none by default.
         - `members`: the name of another group whose views this group shares, in which case this
           group takes no roster and no `metadata` of its own.
-        - `extent`, `projection`, `default_label`, `visibility`, `title`: as for `declare_view`,
-          and each applies to every view in the group.
+        - `extent`, `projection`, `default_label`, `visibility`, `title`: as for `declare_view`, and
+          each applies to every view in the group.
 
             db.declare_view_group("years", metadata={"year": "i32"})
         """
@@ -266,18 +263,18 @@ class Database:
         """Declare a vocabulary, the set of values a category column may take, and return its block.
 
         Each value in a vocabulary has a key, a small integer code that the items store, and an
-        optional title. The values come from `values=`, or from
-        `insert(name, table, key=, title=, code=)`.
+        optional title. The values come from `values=`, or from `insert(name, table, key=, title=,
+        code=)`.
 
-        - `name`: the vocabulary's name, which no vocabulary already declared may have.
-        - `closed`: `True` allows only the values given. An open vocabulary, the default, adds each
+        - `name`: the vocabulary's name.
+        - `closed`: `True` allows only the values given. An open vocabulary (the default) adds each
           new value it meets in the inserted rows.
-        - `width`: the size of a code, which is `"u8"`, `"u16"` (the default) or `"u32"` and so
-          limits how many values the vocabulary can hold.
+        - `width`: the size of a code, `"u8"`, `"u16"` (the default) or `"u32"`, which limits how
+          many values the vocabulary can hold.
         - `values`: the values, as a list of keys, or as `{key: code}` to fix the code of each.
         - `reserved`: codes that are never handed out.
-        - `visibility`: `"public"`, the default, lists every value to every reader, and
-          `"derived"` lists a value only to a reader who may see at least one item carrying it.
+        - `visibility`: `"public"` (the default) lists every value to every reader, and `"derived"`
+          lists a value only to a reader who may see at least one item carrying it.
         - `title`: the name shown for the vocabulary.
 
             db.declare_vocabulary("venue", closed=True, values=["neurips", "icml", "iclr"])
@@ -312,28 +309,27 @@ class Database:
         anchor view, or after the first commit in any view's table. They can also be inserted on
         their own with `insert(name, table, value=)`.
 
-        - `name`: the column's name, which no attribute already declared may have.
-        - `type`: `"bool"`, `"u8"`, `"u16"`, `"u32"`, `"u64"`, `"i8"`, `"i16"`, `"i32"`,
-          `"i64"`, `"f32"`, `"f64"`, `"timestamp_us"`, `"keyword"` (a string matched exactly),
-          `"text"` (a string searched by word) or `"category"` (a value from a vocabulary).
+        - `name`: the column's name.
+        - `type`: `"bool"`, `"u8"`, `"u16"`, `"u32"`, `"u64"`, `"i8"`, `"i16"`, `"i32"`, `"i64"`,
+          `"f32"`, `"f64"`, `"timestamp_us"`, `"keyword"` (a string matched exactly), `"text"` (a
+          string searched by word) or `"category"` (a value from a vocabulary).
         - `render`: `True` sends the value with every point drawn, so that a map can colour points
-          by it. The default is `False`, and a keyword or text column cannot be rendered. The
-          choice is fixed once the column is declared, and when a later commit declares a
-          rendered column, the points already stored draw no value for it until an insert gives
-          them one.
-        - `index`: `True` makes the column filterable. The default is `False`.
+          by it. It is `False` by default, and a keyword or text column cannot be rendered. The
+          choice is fixed once the column is declared, and when a later commit declares a rendered
+          column, the points already stored draw no value for it until an insert gives them one.
+        - `index`: `True` makes the column filterable. It is `False` by default.
         - `vocabulary`: for a category, the vocabulary its values come from.
-        - `analyser`: for text, how the text is split into words. `"unicode"`, the default, is the
-          only analyser there is.
+        - `analyser`: for text, how the text is split into words. `"unicode"` is the default and
+          only analyser.
         - `scope`: `{"group": name}` gives the column a separate value in each view of that view
           group, which must already be declared. By default an item has one value in every view.
         - `title`: the name shown for the column.
         - `unique`: `True` lets each value be held by one item at most, so that a value names an
           item and a table can address its rows' items by this column, as `insert` describes. An
-          insert giving an item a value that another item holds is refused, and a filter
-          `{name: {"in": values}}` finds the items holding those values whether or not the
-          column is indexed. Only a `"keyword"`, integer or `"timestamp_us"` column that is not
-          scoped to a group can be unique. The default is `False`.
+          insert giving an item a value that another item holds is refused, and a filter `{name:
+          {"in": values}}` finds the items holding those values whether or not the column is
+          indexed. Only a `"keyword"`, integer or `"timestamp_us"` column that is not scoped to a
+          group can be unique. It is `False` by default.
 
             db.declare_attribute("year", type="i32", render=True, index=True)
             db.declare_attribute("doi", type="keyword", unique=True)
@@ -361,10 +357,9 @@ class Database:
 
         - `size`: the number of row ids per shard, as a positive integer.
 
-        Before the first commit the size is written into `schema.toml`, and a first commit whose
-        tables hold more items than that builds several shards. After the first commit, the next
-        `commit()` sends the new size to the server, and a size no larger than the open shard
-        already holds seals that shard at once.
+        A first commit whose tables hold more items than the size builds several shards. After the
+        first commit, the next `commit()` sends the new size to the server, and a size no larger
+        than the open shard already holds seals that shard at once.
 
             db.declare_shards(50_000_000)
         """
@@ -374,9 +369,8 @@ class Database:
     def declare_unique(self, name: str, unique: bool = True) -> dict:
         """Make a declared attribute unique, or stop it being unique, and return its block.
 
-        - `name`: the attribute, which must already be declared.
-        - `unique`: `True`, the default, makes it unique, and `False` stops it being unique while
-          keeping its values.
+        - `name`: the attribute.
+        - `unique`: `False` stops the attribute being unique and keeps its values.
 
         After the first commit the change reaches the database at the next `commit()`. Making a
         column unique there builds its index over the values the items hold, and the change is
@@ -402,12 +396,11 @@ class Database:
     ) -> Declared:
         """Declare every column of a data frame as an attribute, and return what was declared.
 
-        Each column is declared with the attribute type that fits its data type, as a detail
-        that is stored and shown when an item is opened, and it is drawn or filterable only when
-        you name it in `render` or `index`. Only the frame's column types are read, and a column
-        already declared is left as it is. The `Declared` report returned says what each
-        column it looked at was declared as and why, or why it was not declared when no attribute
-        type fits it.
+        Each column is declared with the attribute type that fits its data type, and it is drawn or
+        filterable only when `render` or `index` names it. The `Declared` report returned says what
+        each column it looked at was declared as and why, or why it was not declared when no
+        attribute type fits it. Only the frame's column types are read, and a column already
+        declared is left as it is.
 
         - `frame`: a pandas or polars data frame or a pyarrow table.
         - `skip`: columns to leave out, such as the id and the coordinates.
@@ -419,10 +412,10 @@ class Database:
 
         Every name in these lists must be a column of the frame. A categorical column, which is a
         pandas `Categorical` or an Arrow dictionary column of strings, is declared as a category
-        unless `keyword` names it. Each category declared here reads a new open vocabulary of the
-        same name, whose `u16` codes limit it to 65,535 values. Because the width cannot change
-        after the first commit, declare a category that needs another width with
-        `declare_vocabulary` and `declare_attribute` instead.
+        unless `keyword` names it. Each category reads the vocabulary of its own name, and when no
+        such vocabulary is declared yet, it is declared open with `u16` codes, which limit it to
+        65,535 values. Because the width cannot change after the first commit, declare a category
+        that needs another width with `declare_vocabulary` before calling this.
 
             db.declare_columns(frame, skip=["paper_id", "x", "y"], category=["venue"])
         """
@@ -481,63 +474,54 @@ class Database:
     ) -> dict:
         """Declare an annotation layer, and return its block.
 
-        An annotation layer is a set of annotations drawn over the items, such as one clustering,
-        a set of regions or a taxonomy. Each annotation, which Mosaica calls an artifact, has a
-        key and a set of member items. The annotations and their members come from
-        `insert(name, table, key=)`, which names each item's annotation, or from separate
+        An annotation layer is a set of annotations drawn over the items, such as a clustering, a
+        set of regions or a taxonomy. Each annotation, which Mosaica calls an artifact, has a key
+        and a set of member items, and both come from `insert(name, table, key=)` or from separate
         `insert(name, artifacts=...)` and `insert(name, members=...)` calls.
 
-        - `name`: the layer's name, which no layer already declared may have.
-        - `kind`: how the annotations relate to each other. A `"flat"` layer has no parents, a
-          `"nested"` one is a tree and a `"dag"` allows several parents. A `"stacked"` layer
-          holds independent levels, and in a `"tiered"` one each coarser annotation contains
-          finer ones.
-        - `views`: the views the layer is drawn on, which are all of them by default.
-        - `membership`: how an annotation's members are decided. With `"enumerated"`, the
-          default, they are read from a table. With `"spatial"` each annotation is a shape whose
-          members are the items inside it, and `{"attribute": column}` makes one annotation for
-          each value of a category column.
-        - `shape`: for a spatial layer, the kind of shape, which is `"bbox"`, `"circle"`,
-          `"ellipse"` or `"polygon"`.
-        - `default_space`: for a spatial layer, the coordinates its shapes are given in, which
-          are the view's own (`"view"`, the default) or longitude and latitude (`"wgs84"`).
-        - `levels`: the levels of a stacked or tiered layer, each as `(level, title)` or as
-          `(level, title, (min_zoom, max_zoom))`.
-        - `require_member_visibility`: how many of an annotation's members a reader must be able
-          to see before the annotation is shown to them. `"none"`, the default, shows it to every
-          reader the access labels admit, and `"any"`, `"all"`, `{"fraction": 0.1}` and
-          `{"count": 50}` require that much.
-        - `visibility`: who may see the layer at all, which is `"public"` by default or else an
-          access label.
-        - `artifact_visibility`: the access label an annotation takes when it carries none of
-          its own. The default, `"inherited"`, gives it none, so that `visibility` and
+        - `name`: the layer's name.
+        - `kind`: how the annotations relate: `"flat"` (no parents), `"nested"` (a tree), `"dag"`
+          (several parents), `"stacked"` (independent levels) or `"tiered"` (levels in which each
+          coarser annotation contains finer ones).
+        - `views`: the views the layer is drawn on, all of them by default.
+        - `membership`: how members are decided. `"enumerated"` (the default) reads them from a
+          table, `"spatial"` makes each annotation a shape holding the items inside it, and
+          `{"attribute": column}` makes one annotation for each value of a category column.
+        - `shape`: for a spatial layer, `"bbox"`, `"circle"`, `"ellipse"` or `"polygon"`.
+        - `default_space`: for a spatial layer, whether shapes are given in the view's coordinates
+          (`"view"`, the default) or in longitude and latitude (`"wgs84"`).
+        - `levels`: the levels of a stacked or tiered layer, each as `(level, title)` or `(level,
+          title, (min_zoom, max_zoom))`.
+        - `require_member_visibility`: how many of an annotation's members a reader must see before
+          it is shown to them: `"none"` (the default), `"any"`, `"all"`, `{"fraction": 0.1}` or
+          `{"count": 50}`.
+        - `visibility`: who may see the layer at all, `"public"` by default or an access label.
+        - `artifact_visibility`: the access label of an annotation that carries none of its own. The
+          default, `"inherited"`, gives it none, so that `visibility` and
           `require_member_visibility` alone decide who sees it. `{"field": column, "default":
           label}` reads each annotation's own labels from `column`, which every artifacts insert
           must then name with `access=`. Without a field, the first artifacts insert that names
-          `access=` sets the column.
-        - `computed`: the properties the server computes for each reader from the members that
-          reader may see, chosen from `"centroid"`, `"box"` and `"hull"`. All three are computed
-          by default, except that a spatial layer draws its shape and so computes no hull, and a
-          layer with attribute membership computes none.
-        - `supplied`: content you provide for each annotation, such as text, as
-          `(name, type, requires)` entries. `requires` is `"inherited"` to show the content
-          wherever its annotation is shown, or `"all"` to show it only to a reader who may see
-          every item it was written from.
+          `access=` sets it.
+        - `computed`: which of `"centroid"`, `"box"` and `"hull"` the server computes for each
+          reader from the members it may see. All three are computed by default, except that a
+          spatial layer draws its shape in place of a hull and a layer with attribute membership
+          computes none.
+        - `supplied`: content you provide for each annotation, as `(name, type, requires)` entries,
+          where `requires` takes the values `declare_labels` takes for `content_requires`.
         - `depends_on`: the layers this one attaches to, such as the clustering a set of labels
           names.
-        - `prune_children`: `True` shows only the finest qualifying annotation on each branch of
-          the hierarchy. The default, `False`, shows its qualifying ancestors too.
-        - `withdraw_on_member_deletion`: Not built yet: `True` is refused at `check()`, and the
-          default, `False`, keeps an annotation when one of its members is deleted.
-        - `value_set`: `"closed"` when no annotation keys may appear beyond those inserted, and
-          `"open"` when they may. The default is closed when an artifacts table, `artifacts` or
-          an attribute membership says which annotations there are, and open otherwise.
-        - `scope`: `{"group": name}` keeps a separate set of annotations for each view of that
-          view group, which must already be declared.
-        - `layout`: how the server stores memberships for serving, which is `"rows"`, `"column"`
-          or `"list"` and affects only speed. By default the server chooses.
-        - `artifacts`: annotations written into the declaration itself, as a list of dictionaries
-          or a table.
+        - `prune_children`: `True` shows only the finest qualifying annotation on each branch of the
+          hierarchy, without its qualifying ancestors.
+        - `withdraw_on_member_deletion`: Not built yet: `True` is refused at `check()`.
+        - `value_set`: `"closed"` when no annotation keys may appear beyond those inserted. The
+          default is closed when an artifacts table, `artifacts` or an attribute membership says
+          which annotations there are, and `"open"` otherwise.
+        - `scope`: `{"group": name}` keeps a separate set of annotations for each view of that view
+          group, which must already be declared.
+        - `layout`: how the server stores memberships, `"rows"`, `"column"` or `"list"`. It affects
+          only speed, and the server chooses by default.
+        - `artifacts`: annotations written into the declaration itself, as a list of dictionaries or
+          a table.
         - `title`: the name shown for the layer.
 
             db.declare_layer("clusters", kind="flat", require_member_visibility={"count": 20})
@@ -586,15 +570,14 @@ class Database:
 
         - `name`: the label set's name.
         - `of`: the declared layer it labels, which must not already carry a label set.
-        - `content_requires`: `"inherited"`, the default, shows a label wherever its annotation is
-          shown, and `"all"` shows it only to a reader who may see every item the text was
-          written from. Those items come from `insert(name, members=table, key=)`.
+        - `content_requires`: `"inherited"` (the default) shows a label wherever its annotation is
+          shown, and `"all"` shows it only to a reader who may see every item the text was written
+          from. Those items come from `insert(name, members=table, key=)`.
         - `require_member_visibility`, `title`: as for `declare_layer`.
-        - `artifact_visibility`: the access label that every label in the set carries. The
-          default, `"inherited"`, gives the labels none of their own, so that the layer they
-          label and `require_member_visibility` alone decide who sees them. A `field` is refused,
-          since a label set has no column of labels to read.
-        - `type`: the type of each label's text, which is `"text"` by default.
+        - `artifact_visibility`: the access label that every label in the set carries. The default,
+          `"inherited"`, gives the labels none of their own, so that the layer they label and
+          `require_member_visibility` alone decide who sees them. A `field` is refused.
+        - `type`: the type of each label's text, `"text"` by default.
 
             db.declare_labels("topics", of="clusters")
             db.insert("topics", {"c0": "graph neural networks", "c1": "diffusion models"})
@@ -654,35 +637,35 @@ class Database:
     ) -> Insert:
         """Hand a table to something declared, naming the columns to read, and return a record.
 
-        Nothing is sent until the next `commit()`, and several inserts into one target add up. A
-        data frame is copied into the database's directory when you call `insert`, while a
-        Parquet file is read where it lies.
+        Nothing is sent until the next `commit()`, and a second insert into the same target adds to
+        the first.
+
+        A data frame is copied into the database's directory when you call `insert`, while a Parquet
+        file is read where it lies.
 
         - `target`: the name of a declared view, view group, attribute, layer, label set or
           vocabulary.
         - `table`: a pandas or polars data frame, a pyarrow table, or the path of a Parquet file.
         - `roster`, `artifacts`, `members`: in place of `table`, a view group's table of views, a
-          layer's table of annotations or a layer's table of memberships. Each goes in an insert
-          of its own, because their columns share names.
-        - `columns`: `{attribute: column}` to read an attribute from a column with another name.
-          It can map a unique attribute on any insert that names items, and any attribute on the
-          rows of a view that fill attributes, which before the first commit are the anchor
-          view's alone.
-        - the other keywords: the column that holds each thing the target reads, such as `x=`,
-          `y=` and `access=` for a view. The call is refused when it names a column the table
-          lacks, gives a keyword the target does not read or leaves out one the target needs.
+          layer's table of annotations or a layer's table of memberships, each in an insert of its
+          own.
+        - `columns`: `{attribute: column}` to read an attribute from a column with another name,
+          either a unique attribute that names the rows' items or an attribute that a view's rows
+          fill.
+        - the other keywords: the column that holds each thing the target reads, such as `x=`, `y=`
+          and `access=` for a view. The call is refused when it names a column the table lacks,
+          gives a keyword the target does not read or leaves out one the target needs.
 
-        A table of view rows, attribute values or memberships names the item each row belongs to
-        by its `mosaica_id` column, or by its values of the attributes declared `unique`, which
-        it carries in the column of the attribute's name or in the one `columns=` gives. A row of
-        a view that names no item makes a new item. A row of any other table must name exactly
-        one, and a row that names none, or two, is left out at the commit and reported.
+        Each row of a view, attribute or membership table names its item by its `mosaica_id` column
+        or by its values of the unique attributes, read from each attribute's own column or the one
+        `columns=` gives. A view's row that names no item makes a new item. A row of any other table
+        must name exactly one item, and the commit leaves out and reports a row that names none, or
+        two.
 
-        On the rows of a view, a column named like a declared attribute fills that attribute,
-        from the anchor view's rows at the first commit and from any view's rows after it. A
-        categorical column, such as a pandas `Categorical`, is read as the values it holds. The
-        `Insert` returned lists the columns that were read and those that were ignored, because
-        the call did not name them and no attribute matched them.
+        A view's rows also fill each declared attribute whose name a column carries, from the anchor
+        view's rows at the first commit and from any view's rows after it. The `Insert` returned
+        lists the columns read and the columns ignored, which are those neither named nor matching
+        an attribute.
 
             db.insert("papers", frame, x="x", y="y", access="labels")
             db.insert("clusters", frame, key="cluster", columns={"paper": "paper_id"})
@@ -1219,11 +1202,10 @@ class Database:
             document.pop("defaults")
 
     def write(self) -> dict:
-        """Write the declaration and deployment files, and return the declaration as a dictionary.
+        """Write `schema.toml` and `mosaica.toml`, and return the declaration as a dictionary.
 
-        The files are `schema.toml` and `mosaica.toml`, in the database's directory. Because
-        `check()` and `commit()` write them themselves, call this only to look at the files
-        before then.
+        Because `check()` and `commit()` write the files themselves, call this only to look at them
+        first.
         """
         self._refuse_when_closed()
         document = self._document()
@@ -1294,26 +1276,21 @@ class Database:
         """Make what was inserted part of the database, and return a report of what happened.
 
         The first commit checks the declaration, builds the database from the inserted tables and
-        starts a server over it. That build fixes each view's extent, the column types and which
-        columns are rendered, and none of them can change afterwards. Each later commit sends what
-        was inserted since the last one to the running server, waits until readers can see it and
-        then forgets those inserts.
+        starts a server over it. After it, no view's extent, column type or choice of rendered
+        columns can change. Each later commit sends what was inserted since the last one to the
+        running server, waits until readers can see it and then forgets those inserts.
 
-        The commit leaves out a row that names two items, or that names an item or a unique value
-        an earlier row of its table names, and also a member or a value that names no item. The
-        rest is applied, and the report counts the rows left out by reason.
+        The commit leaves out a row that names two items, or that names an item or a unique value an
+        earlier row of its table names, and also a member or a value that names no item. The rest is
+        applied, and the report counts the rows left out by reason.
 
         - `strict`: `True` refuses the whole build, or the whole request, that carries such a row.
 
-        A commit that did nothing raises `Refusal`, with the report as its `report`, which
-        happens when a problem is found before anything is sent, when the build fails or when the
-        server refuses every request. A commit in which some requests succeeded returns its
-        report with the refusals listed.
-
-        When the server is busy and answers a request with `429`, the commit sends the request
-        again after the wait the server names, kept between 1 and 30 seconds, for as long as the
-        waits add up to no more than five minutes. A request that would wait longer is listed in
-        the report's `refusals`.
+        A commit that did nothing raises `Refusal`, with the report as its `report`, which happens
+        when a problem is found before anything is sent, when the build fails or when the server
+        refuses every request. A commit in which some requests succeeded returns its report with the
+        refusals listed. A request the server answers `429` is sent again as `Control` describes,
+        and one it gives up on is listed in the report's `refusals`.
 
             db.commit()
         """
@@ -1465,14 +1442,13 @@ class Database:
     def viewer(self, terms: Sequence[str] | None = None) -> Viewer:
         """A reader of this database that holds only the access terms given.
 
-        Use it to read the database as someone holding those terms would. The reader sees an
-        item when its terms satisfy one of the item's labels, and every count, map and record it
-        is given covers only those items.
+        The reader sees an item when its terms satisfy one of the item's labels, and every count,
+        map and record it is given covers only those items.
 
         - `terms`: the access terms, as a list or as one term in a string. Without them the reader
           is the operator, which holds `read-all` and so sees every item that is not deleted or
-          suppressed. An empty list is refused because such a reader would see nothing, while a
-          term that no item carries is accepted.
+          suppressed. An empty list is refused because such a reader would see nothing, while a term
+          that no item carries is accepted.
 
             db.viewer(["cs.LG"]).view("papers").count()
             db.viewer(["cs.LG"]).map()
@@ -1505,11 +1481,10 @@ class Database:
     ) -> Map:
         """An interactive map of this database for a notebook, showing every item.
 
-        The map is a `Map` widget that reads as the operator. To map part of a view, call
-        `db.view(name).map()`, and to see what a reader holding some terms sees, call
-        `db.viewer(terms).map()`.
+        To map part of a view, call `db.view(name).map()`, and to see what a reader holding some
+        terms sees, call `db.viewer(terms).map()`.
 
-        - `view`: the view to open on, which is the first one when `None`.
+        - `view`: the view to open on, the first one when `None`.
         - `layers`: the annotation layers to draw. `None` lets the map choose, and `[]` draws none.
         - `colour_by`: the column to colour points by, or `"cluster:<layer>"` to colour them by
           their annotation in that layer.
@@ -1519,9 +1494,8 @@ class Database:
           size.
         - `basemap`: what is drawn under the points, in the form `Map` takes.
 
-        Other keywords, such as `size_scale`, are passed to `Map` unchanged. A view, layer or
-        column that the database does not hold is refused, and the refusal names those it does
-        hold.
+        Other keywords, such as `size_scale`, are passed to `Map` unchanged. A view, layer or column
+        that the database does not hold is refused, and the refusal names those it does hold.
 
             db.map(colour_by="cluster:clusters")
         """
@@ -1562,9 +1536,8 @@ class Database:
     def items(self, view: str, fields: Sequence[str], **options):
         """Every item in a view, with the fields named, as one pyarrow table.
 
-        This is `Viewer.items` read as the operator, who sees every item, and `options` are the
-        keywords that method takes. With `batches=True` it returns the pages one at a time
-        instead.
+        This is `Viewer.items` read as the operator, who sees every item, with its keywords. With
+        `batches=True` it returns the pages one at a time instead.
 
             db.items("papers", ["title", "year"]).to_pandas()
             db.items("papers", ["title"], filters={"year": {"eq": 2023}}, order="stored")
@@ -1575,9 +1548,8 @@ class Database:
     def lookup(self, view: str, field: str, values: Iterable[Any], fields: Sequence[str] = ()):
         """Find the items in a view by their values of a unique column, as a pyarrow table.
 
-        This is `Viewer.lookup` read as the operator, who sees every item. The table has a row for
-        each item whose value of `field` is one of `values`, with its `mosaica_id`, `field` and
-        the `fields` named.
+        This is `Viewer.lookup` read as the operator, with a row for each item whose value of
+        `field` is one of `values`.
 
             db.lookup("papers", "doi", ["10.1/a", "10.2/b"], fields=["title"])
         """
@@ -1587,8 +1559,8 @@ class Database:
     def artifacts(self, view: str, layer: str, fields: Sequence[str], **options):
         """Every annotation of a layer in a view, with the properties named, as one pyarrow table.
 
-        This is `Viewer.artifacts` read as the operator, and `options` are the keywords that
-        method takes. With `batches=True` it returns the pages one at a time instead.
+        This is `Viewer.artifacts` read as the operator, with its keywords. With `batches=True` it
+        returns the pages one at a time instead.
 
             db.artifacts("papers", "clusters", ["key", "masked_count"])
         """
@@ -1598,9 +1570,8 @@ class Database:
     def viewport_artifacts(self, view: str, zoom: int, per_tile: int, **options):
         """The annotations in each map tile at one zoom level, as one pyarrow table.
 
-        This is `Viewer.viewport_artifacts` read as the operator, and `options` are the keywords
-        that method takes. The table's `tile` column says which tile each row is in, and
-        `per_tile` limits how many annotations each level of a layer gives one tile.
+        This is `Viewer.viewport_artifacts` read as the operator, with its keywords, and `per_tile`
+        limits how many annotations each level of a layer gives one tile.
 
             db.viewport_artifacts("papers", 2, per_tile=20, layers=["clusters"])
         """
@@ -1616,8 +1587,7 @@ class Database:
     ) -> list:
         """Count the items in a view, overall or by group, as one pyarrow table per grouping.
 
-        This is `Viewer.aggregate` read as the operator, who sees every item, and its arguments
-        are those that method takes.
+        This is `Viewer.aggregate` read as the operator, who sees every item, with its arguments.
 
             venue = {"count": True, "by": {"field": "venue", "top": 10}}
             [size, venues] = db.aggregate("papers", [{"count": True}, venue])
@@ -1696,21 +1666,22 @@ class Database:
         The items stop being served as soon as the call returns, and their rows are removed from
         disk at the next compaction, which `compact()` asks for.
 
-        - `items`: the items to delete, as one `mosaica_id`, a list of them or a table. A table
-          is a pandas or polars data frame, a pyarrow table or a dict of columns, and each of its
-          rows names one item by its `mosaica_id` column or by its values of the unique
-          attributes, which it carries in the columns an insert reads them from.
-        - `strict`: `True` refuses the whole request when a row names no item, or names two.
+        - `items`: the items to delete, as one `mosaica_id`, a list of them or a table. A table is a
+          pandas or polars data frame, a pyarrow table or a dict of columns, and each of its rows
+          names one item by its `mosaica_id` column or by its values of the unique attributes, which
+          it carries in the columns an insert reads them from.
+        - `strict`: `True` refuses the whole request when a row names no item, or names two, and the
+          call then raises `Refusal`.
 
-        Without `strict`, a row that names no item or two is listed in the report as refused and
-        the other rows are applied. A `None` in the list, or a row whose cells are all null,
-        names no item. A table's columns that name no item are not sent, and the report lists
-        them in `ignored_columns`, but a table with no column that names items is refused before
-        anything is sent. A `mosaica_id` may also name an annotation, while a layer's own is
-        refused, because `drop_layer` is how a layer is removed.
+        Without `strict`, a row that names no item or two is listed in the report as refused and the
+        other rows are applied. A `None` in the list, or a row whose cells are all null, names no
+        item. A table's columns that name no item are not sent, and the report lists them in
+        `ignored_columns`, but a table with no column that names items is refused before anything is
+        sent. A `mosaica_id` may also name an annotation, while a layer's own is refused, because
+        `drop_layer` is how a layer is removed.
 
         A call in which the server refused every request raises `Refusal`, with the report as its
-        `report`, which is what a strict call does when it refuses a row.
+        `report`.
 
             db.remove([mosaica_id])
             db.remove({"paper": ["paper-17", "paper-23"]})
@@ -1738,13 +1709,11 @@ class Database:
     def addresses(self, items: Any) -> list[dict]:
         """The rows that name the items given in a change request, as a list of dictionaries.
 
-        Use it to see how `remove`, `suppress` and `leave` will address the items you pass them,
-        which you give as for `remove`. Each `mosaica_id` in a list becomes
-        `{"mosaica_id": ...}`. Each row of a table becomes a dictionary of its `mosaica_id` value
-        and its values of the unique attributes, under the attributes' names, and the table's
-        other columns are left out. A `None` or a null cell stays `None`, and every other value is
-        written as text: an integer in decimal digits, a timestamp as the decimal digits of its
-        microseconds since the epoch, and a string as itself.
+        Each `mosaica_id` in a list becomes `{"mosaica_id": ...}`, and each row of a table becomes
+        its `mosaica_id` value and its values of the unique attributes, under the attributes' names.
+        A `None` or a null cell stays `None`, and every other value is written as text: an integer
+        in decimal digits, a timestamp as the decimal digits of its microseconds since the epoch,
+        and a string as itself.
         """
         return _rows_of(self._addressed(items, "addresses")[0])
 
@@ -1845,12 +1814,11 @@ class Database:
     def status(self) -> dict:
         """The server's report on the state of this database, as a dictionary.
 
-        The report is the operator's view of the server, which says how far writes have got, how
-        deep its queues are and how large a page each write request accepts. Its `overlay` counts
-        the items deleted or suppressed that no compaction has removed yet. Its `layer_spaces`
-        counts the layers in `count`, the deleted or suppressed layers and annotations in
-        `depth` and the deleted ones alone in `retirable`. Its `shards.records` holds one record
-        for each shard.
+        The report says how far writes have got, how deep the server's queues are and how large a
+        page each write request accepts. In it, `overlay` counts the items deleted or suppressed
+        that no compaction has removed yet, and `layer_spaces` counts the layers in `count`, the
+        deleted or suppressed layers and annotations in `depth` and the deleted ones alone in
+        `retirable`. `shards.records` holds one record per shard.
         """
         self._refuse_before_the_first_commit("status")
         return _accepted(self.control.status_answer(), "status")
@@ -1858,19 +1826,18 @@ class Database:
     def compact(self) -> dict:
         """Ask the server to remove the rows of deleted items from disk now.
 
-        The call returns `{"request": n}` once the server has accepted the request, before the
-        work is done. The server then compacts each shard that has something to reclaim, one
-        after another, and a request made while a compaction runs waits until that compaction
-        has finished. When no compaction can start until the server is restarted, the call
-        raises `Refusal` with the reason and requests nothing.
+        The call returns `{"request": n}` once the server has accepted the request, before the work
+        is done. The server then compacts each shard that has something to reclaim, and a request
+        made while a compaction runs waits until that compaction has finished. When no compaction
+        can start until the server is restarted, the call raises `Refusal` with the reason and
+        requests nothing.
 
-        Follow the request in `status()`, whose `compaction.requests.answered` reaches `n` once
-        the request is answered. The deleted rows are gone when `compaction.folds` has risen and
-        `overlay.retirable` has fallen, and `compaction.fold_failures` counts the compactions
-        that failed or were discarded. A shard can still be refused when its turn comes, for
-        example for want of disc, and `compaction.requests.last_refusal` holds the latest such
-        refusal. Once your request is answered, a `request` of `n` in that record means a shard
-        was refused while answering yours, and its `detail` says why and what to do.
+        Follow the request in `status()`, as `POST /control/compact` in the HTTP reference
+        describes: `compaction.requests.answered` reaches `n` once it is answered, and
+        `compaction.requests.last_refusal` holds the latest refusal of a shard. A `request` of `n`
+        there means a shard was refused while answering yours, with its `detail` saying why, while
+        one above `n` means a later refusal has replaced the record, so it no longer says whether
+        yours was refused.
         """
         self._refuse_before_the_first_commit("compact")
         return _accepted(self.control.compact(), "compact")
@@ -1878,18 +1845,15 @@ class Database:
     def drop_layer(self, name: str, wait: bool = False) -> dict:
         """Remove an annotation layer or a label set, and return the server's answer.
 
-        The layer also leaves this database's declaration, together with any inserts into it not
-        yet committed, so that a later commit does not declare it again. A new layer can then be
-        declared under the same name, and none of the dropped layer's `mosaica_id`s names
-        anything in the new one.
+        The layer also leaves this database's declaration with its uncommitted inserts, so that a
+        new layer can be declared under the name, and none of the dropped layer's `mosaica_id`s
+        names anything in it.
 
         - `name`: the name of the layer or label set.
         - `wait`: `True` returns only once readers no longer see the layer, or once the server's
-          `serve.visible_wait_max_secs` has passed, in which case the answer's `visible` is
-          `false`.
+          `serve.visible_wait_max_secs` has passed, when the answer's `visible` is `false`.
 
-        The answer's `publication` names the publication from which readers no longer see the
-        layer.
+        The answer's `publication` names the publication from which readers no longer see the layer.
         """
         self._refuse_before_the_first_commit("drop_layer")
         answer = _accepted(self.control.drop_layer(name, wait), f"drop_layer {name}")
@@ -1917,7 +1881,7 @@ class Database:
     def revoke(self, token) -> None:
         """End a token this database made, so that it can no longer read.
 
-        - `token`: the `Token`, or its `token_id`, which is all that is sent.
+        - `token`: the `Token`, or its `token_id`.
 
         An id that names no live token is accepted. A reader holding the `Token` can still get
         another with its `renew()`, as `mosaica.revoke` describes.
@@ -2071,16 +2035,14 @@ class Database:
         """Stop the database's server, and delete its directory if the database is temporary.
 
         After `close()` a temporary database refuses every call, because its directory is gone,
-        while any other database starts its server again when a call needs it. A directory you
-        named is never deleted.
+        while any other database starts its server again when a call needs it.
 
-        The server also stops when nothing refers to the database any more, and when Python
-        exits, however it exits, so that a restarted kernel or a killed process leaves no server
-        running. A temporary database's directory is deleted then too, except after a process
-        that ended without running its exit handlers, such as a killed one, when a later
-        `create()` removes it. A `Map` or a `Selection` refers to the database it reads, which
-        keeps the server running while you hold one. Tokens the database made stay valid until
-        they expire, within the hour, unless `revoke` ends them sooner.
+        The server also stops when nothing refers to the database any more, and when Python exits,
+        however it exits. A temporary database's directory is deleted then too, except after a
+        process that ended without running its exit handlers, such as a killed one, when a later
+        `create()` removes it. A `Map` or a `Selection` refers to the database it reads, which keeps
+        the server running while you hold one. Tokens the database made stay valid until they
+        expire, within the hour, unless `revoke` ends them sooner.
         """
         _instance.release(self._held)
         self.listening = None
@@ -2186,14 +2148,11 @@ _BUILT = re.compile(
 def create(path: str | os.PathLike | None = None, replace: bool = False) -> Database:
     """Make a new, empty database in a directory, and return it as a `Database`.
 
-    - `path`: the directory, which must be empty or not yet exist. Without it the database goes
-      in a temporary directory, in memory where the system offers one (`/dev/shm` on Linux),
-      which is deleted when the database is closed, when nothing refers to it any more or when
-      Python exits. A temporary directory left behind by a process that ended without running
-      its exit handlers, as a killed kernel does, is deleted by the next `create()` without a
-      path in any process.
-    - `replace`: `True` deletes a Mosaica database already at `path` first. A non-empty
-      directory that is not a Mosaica database is refused either way.
+    - `path`: the directory, which must be empty or not yet exist. Without it the database goes in a
+      temporary directory, in memory where the system offers one (`/dev/shm` on Linux), which is
+      deleted as `close()` describes.
+    - `replace`: `True` deletes a Mosaica database already at `path` first. A non-empty directory
+      that is not a Mosaica database is refused either way.
 
         db = mosaica.create()
         db = mosaica.create("~/maps/papers", replace=True)
