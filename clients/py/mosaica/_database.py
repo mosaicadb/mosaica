@@ -2019,7 +2019,8 @@ class Database:
 
         Because a temporary database is deleted when it is closed, saving it is how you keep one.
         The copy is an ordinary database, which `open(path)` reopens and
-        `mosaica serve --deployment <path>/mosaica.toml` serves.
+        `mosaica serve --deployment <path>/mosaica.toml` serves. A Parquet file inserted from
+        outside the database's directory stays where it is, and the copy reads it from there.
 
         - `path`: the directory to copy into, which must be empty or not yet exist.
         """
@@ -2029,6 +2030,16 @@ class Database:
             raise Refusal(f"save: {target} is not empty")
         locks = shutil.ignore_patterns(_instance.LOCK, _instance.LOCK + ".new")
         shutil.copytree(self.path, target, dirs_exist_ok=True, ignore=locks)
+        state = target / ".mosaica" / "declaration.json"
+        if state.exists():
+            # A file inserted where it lies stays there, so the copy names it from its own place.
+            copy = Database(target)
+            _load(copy, json.loads(state.read_text(encoding="utf-8")))
+            for insert in copy.inserts + copy.pending:
+                if insert.in_place:
+                    insert.declared_path = os.path.relpath(insert.path, target.resolve())
+            copy._save_state()
+            (target / "schema.toml").write_text(dumps(copy._document()), encoding="utf-8")
         return target
 
     def close(self) -> None:

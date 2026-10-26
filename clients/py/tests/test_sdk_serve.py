@@ -545,3 +545,36 @@ def test_a_temporary_database_is_removed_when_a_jupyter_kernel_shuts_down(tmp_pa
         client.stop_channels()
         manager.shutdown_kernel()
     assert stopped(left["pid"]) and not os.path.exists(left["path"])
+
+
+def test_a_saved_copy_of_a_database_that_read_a_file_where_it_lies_commits_again(tmp_path):
+    """The rows came from a Parquet file outside the database; the copy, saved at another depth,
+    still finds it when its next commit checks the declaration."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from conftest import binary
+    from mosaica import create, open as reopen
+
+    binary()
+    data = tmp_path / "data" / "rows.parquet"
+    data.parent.mkdir()
+    pq.write_table(pa.table({"id": [1, 2], "x": [1.0, 2.0], "y": [1.0, 2.0]}), data)
+    db = create(tmp_path / "work" / "db")
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    db.declare_attribute("id", type="i64", unique=True)
+    db.insert("map", str(data), x="x", y="y")
+    assert db.commit().ok
+    saved = db.save(tmp_path / "kept" / "for" / "later" / "copy")
+    db.close()
+
+    copy = reopen(saved)
+    try:
+        copy.declare_layer("halves", kind="flat")
+        copy.insert("halves", pa.table({"id": [1, 2], "half": ["left", "right"]}), key="half")
+        report = copy.commit()
+        assert report.ok, report
+        assert copy.view("map").count() == 2
+        assert "halves" in {layer["name"] for layer in copy.meta()["layers"]}
+    finally:
+        copy.close()
