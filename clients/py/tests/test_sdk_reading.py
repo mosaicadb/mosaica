@@ -369,3 +369,51 @@ def test_the_widget_answers_reauthorise_with_a_token_the_plane_accepts(db, stub_
     assert [message["type"] for message in sent] == ["token", "token"]
     assert m.tokens_sent == 2
     assert connect(db.viewer_url, sent[-1]["token"]).meta()["views"][0]["id"] == "s0"
+
+
+def test_every_id_a_read_returns_is_one_decimal_string_that_joins_across_tables(tmp_path):
+    """Items, a sample and its tags, a layer's artifacts, their parents and the clusters names
+    attach to, the annotations of each tile, a lookup and an aggregate by the layer: read into
+    pandas, every id is the same string wherever it appears, so the tables join on it."""
+    pytest.importorskip("pandas")
+    import pyarrow as pa
+
+    from conftest import small
+    from test_sdk_pages import tiered_topics
+
+    db, _ = small(tmp_path / "db")
+    try:
+        tiered_topics(db)
+        db.insert("names", pa.table({"cluster": ["b", "f"], "level": [0, 1], "name": ["B", "F"]}),
+                  key="cluster", text="name", attached_level="level")
+        assert db.commit().ok
+
+        items = db.items("map", ["id"]).to_pandas()
+        lookup = db.lookup("map", "id", [1]).to_pandas()
+        sample = db.view("map").sample(layers=["topics"], levels=[1]).to_pandas()
+        clusters = db.artifacts("map", "topics", ["key", "parents"]).to_pandas()
+        names = db.artifacts("map", "names", ["content", "target"]).to_pandas()
+        per_tile = db.meta()["selection"]["max_artifacts_per_tile"]
+        tiles = db.viewport_artifacts("map", 0, per_tile, layers=["topics"]).to_pandas()
+        (broad,) = db.aggregate("map", [{"count": True, "by": {"layer": "topics", "level": 0, "top": 5}}])
+        broad = broad.to_pandas()
+
+        for frame, column in ((items, "mosaica_id"), (sample, "membership:topics"),
+                              (names, "target"), (tiles, "mosaica_id"), (broad, "key")):
+            assert all(isinstance(one, str) for one in frame[column].dropna()), column
+
+        # A lookup and a sample name the items the whole read holds.
+        assert set(lookup.merge(items, on="mosaica_id")["id_x"]) == {1}
+        assert set(sample["mosaica_id"]) <= set(items["mosaica_id"])
+        # The fine cluster's tag on its point, its own id, its parent's, a name's target, a
+        # tile's annotation and the aggregate's row are all the one id of their cluster.
+        ids = dict(zip(clusters["key"], clusters["mosaica_id"]))
+        assert set(sample["membership:topics"].dropna()) == {ids["f"]}
+        fine = clusters.set_index("key").loc["f"]
+        assert list(fine["parents"]) == [ids["b"]]
+        assert set(names["target"]) == {ids["b"], ids["f"]}
+        assert set(tiles["mosaica_id"]) == {ids["b"], ids["f"]}
+        listed = broad[broad["group"] == "listed"]
+        assert list(listed.merge(clusters, left_on="key", right_on="mosaica_id")["key_y"]) == ["b"]
+    finally:
+        db.close()

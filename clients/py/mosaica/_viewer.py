@@ -150,10 +150,6 @@ class PartialRead(Refusal):
         return f"{self.why}. {kept} {rest}"
 
 
-def _as_sent(page):
-    return page
-
-
 class Batches:
     """The pages of a read from `items` or `artifacts` with `batches=True`, which you iterate to get
     each page as a `pyarrow.RecordBatch`.
@@ -184,8 +180,8 @@ class Batches:
             self._response.close()
             raise Refusal(f"POST /v1/{route}: the response did not begin with its head")
         self.head: dict = json.loads(first[1])
-        # What each page goes through before it is given: a database reads its ids back here.
-        self._page = _as_sent
+        # What each page goes through before it is given: its ids become decimal strings.
+        self._page = _ids_as_text
         # The server takes `count` on a read's first request only.
         rest = {key: value for key, value in request.items() if key != "count"}
         self._pages = self._read(reader, rest, frames)
@@ -278,7 +274,7 @@ def _tables(payloads: Sequence[bytes]):
     import pyarrow as pa
     from pyarrow import ipc
 
-    tables = [ipc.open_stream(payload).read_all() for payload in payloads]
+    tables = [_ids_as_text(ipc.open_stream(payload).read_all()) for payload in payloads]
     return pa.concat_tables(tables) if tables else None
 
 
@@ -286,19 +282,19 @@ def _no_points():
     """The points table of an answer that served none: the two columns every answer has."""
     import pyarrow as pa
 
-    return pa.table({"mosaica_id": pa.array([], pa.uint64()), "code": pa.array([], pa.uint64())})
+    return pa.table({"mosaica_id": pa.array([], pa.string()), "code": pa.array([], pa.uint64())})
 
 
 def _no_artifacts():
     """The table of an artifacts answer that served no frame: its eighteen columns, no rows."""
     import pyarrow as pa
 
-    flags = pa.list_(pa.field("item", pa.uint64(), nullable=False))
+    ids = pa.list_(pa.field("item", pa.string(), nullable=False))
     texts = pa.list_(pa.field("item", pa.string()))
     return pa.schema(
         [
             pa.field("layer", pa.dictionary(pa.uint16(), pa.string()), nullable=False),
-            pa.field("mosaica_id", pa.uint64(), nullable=False),
+            pa.field("mosaica_id", pa.string(), nullable=False),
             ("key", pa.string()),
             pa.field("masked_count", pa.uint64(), nullable=False),
             ("centroid_x", pa.float64()),
@@ -308,11 +304,11 @@ def _no_artifacts():
             ("box_max_x", pa.uint32()),
             ("box_max_y", pa.uint32()),
             pa.field("content", texts, nullable=False),
-            pa.field("parent_ids", flags, nullable=False),
+            pa.field("parent_ids", ids, nullable=False),
             pa.field("rung", pa.uint32(), nullable=False),
             ("matched", pa.bool_()),
             ("highlighted", pa.bool_()),
-            ("target", pa.uint64()),
+            ("target", pa.string()),
             ("tile", pa.uint32()),
             ("slot", pa.uint8()),
         ]
@@ -383,6 +379,38 @@ def decimal_id(value: Any) -> Optional[str]:
     if isinstance(value, str) and value.isascii() and value.isdigit() and int(value) <= U64_MAX:
         return value
     return None
+
+
+#: The columns of a read that carry `mosaica_id`s, by name, beside a sample's
+#: `membership:<layer>` columns.
+ID_COLUMNS = ("mosaica_id", "target", "parents", "parent_ids")
+
+
+def _ids_as_text(data, also: Sequence[str] = ()):
+    """A table or record batch read back from the server, with every column carrying
+    `mosaica_id`s as their decimal strings: a `u64` past 2^53 is not exact as a float, which is
+    what pandas makes of an integer column holding a null. `also` names further columns that
+    carry them in this read, such as an aggregate's `key` grouped by a layer."""
+    import pyarrow as pa
+
+    fields, columns, changed = [], [], False
+    for field, column in zip(data.schema, data.columns):
+        if field.name in ID_COLUMNS or field.name in also or field.name.startswith("membership:"):
+            if pa.types.is_integer(field.type):
+                field, column = field.with_type(pa.string()), column.cast(pa.string())
+                changed = True
+            elif pa.types.is_list(field.type) and pa.types.is_integer(field.type.value_type):
+                text = pa.list_(field.type.value_field.with_type(pa.string()))
+                field, column = field.with_type(text), column.cast(text)
+                changed = True
+        fields.append(field)
+        columns.append(column)
+    if not changed:
+        return data
+    schema = pa.schema(fields, metadata=data.schema.metadata)
+    if isinstance(data, pa.RecordBatch):
+        return pa.RecordBatch.from_arrays(columns, schema=schema)
+    return pa.Table.from_arrays(columns, schema=schema)
 
 
 def _an_id(value: Any, what: str) -> str:
@@ -495,14 +523,14 @@ class Sample:
 
     A `Sample` behaves as its table, `points`, and has these columns.
 
-    - `mosaica_id`: the item's id.
+    - `mosaica_id`: the item's id, as its decimal string.
     - `code`: the point's position as a 64-bit Morton code over a grid of 2^32 steps per axis
       across the view. It is absent under `point_rows="highlight"`.
     - Each rendered column that `point_rows` asks for. A category column holds each value's key,
       or null for a value this reader may not see.
     - `highlighted`: whether the point matches the `highlight`, when one was given.
     - `membership:<layer>`: for each layer named in `layers` that tags a point, the `mosaica_id`
-      of the finest annotation of that layer holding the point, or null.
+      of the finest annotation of that layer holding the point, as its decimal string, or null.
 
     The schema metadata `mosaica.counts` holds the counts the sample was drawn from: `visible`,
     the items this reader may see in the tiles touched, and of those `matched`, `highlighted` and
@@ -1061,8 +1089,8 @@ class Viewer:
           rows after it.
         - `compression`: `"zstd"` compresses the pages on their way from the server.
 
-        The table holds `mosaica_id` and then the columns asked for, with each category column
-        holding its values' keys. A read that finds no item returns a table of no rows with those
+        The table holds `mosaica_id`, as its decimal string, and then the columns asked for, with
+        each category column holding its values' keys. A read that finds no item returns a table of no rows with those
         columns. Its schema metadata `mosaica.head` is the head that `Batches.head` describes.
 
         A response cut short, or a later request refused, raises a `PartialRead`.
@@ -1120,7 +1148,8 @@ class Viewer:
         one pyarrow table.
 
         An annotation is one member of an annotation layer, such as a cluster, a region or a node
-        in a taxonomy. The read is paged and resumed as an `items` read is.
+        in a taxonomy. The read is paged and resumed as an `items` read is. Its `mosaica_id`,
+        `parents` and `target` columns hold decimal strings.
 
         - `view`: the view whose items the counts and geometry are computed over.
         - `layer`: the layer to read, as `meta()` lists it.
@@ -1219,7 +1248,8 @@ class Viewer:
         The columns are `layer`, `mosaica_id`, `key`, `masked_count`, `centroid_x`, `centroid_y`,
         `box_min_x`, `box_min_y`, `box_max_x`, `box_max_y`, `content`, `parent_ids`, `rung` (the
         level), `matched`, `highlighted`, `target`, `tile` and `slot`. The centroid and box are
-        on the grid of 2^32 steps per axis that a sample's `code` uses.
+        on the grid of 2^32 steps per axis that a sample's `code` uses, and `mosaica_id`,
+        `parent_ids` and `target` hold decimal strings.
 
             v.viewport_artifacts("papers", 2, per_tile=20, layers=["topics"]).to_pandas()
         """
@@ -1361,7 +1391,6 @@ class Viewer:
             [topics] = v.aggregate("papers", [topics])
         """
         import pyarrow as pa
-        import pyarrow.compute as pc
         from pyarrow import ipc
 
         groupings = list(groupings)
@@ -1383,9 +1412,8 @@ class Viewer:
                 if region is not None:
                     metadata["mosaica.region"] = region
                 table = pa.Table.from_batches(pages[grouping]).unify_dictionaries()
-                if "layer" in (groupings[grouping].get("by") or {}) and "key" in table.column_names:
-                    at = table.column_names.index("key")
-                    table = table.set_column(at, "key", pc.cast(table["key"], pa.string()))
+                by_layer = "layer" in (groupings[grouping].get("by") or {})
+                table = _ids_as_text(table, also=("key",) if by_layer else ())
                 tables.append(table.replace_schema_metadata(metadata))
             return tables
 

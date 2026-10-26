@@ -248,6 +248,14 @@ def end_of(body: bytes, kind: int, n: int) -> int:
     raise AssertionError(f"no frame {n} of kind {kind}")
 
 
+def as_read(table) -> list:
+    """A raw page's rows as the client reads them back: each `mosaica_id` as its decimal string."""
+    return [
+        {**row, "mosaica_id": str(row["mosaica_id"])} if "mosaica_id" in row else row
+        for row in table.to_pylist()
+    ]
+
+
 def http_pages(db, route: str, body: dict) -> list:
     """Every page of a read made over raw HTTP, following each response's cursor."""
     token = db.token().token
@@ -311,10 +319,10 @@ def test_a_whole_read_is_every_page_of_the_read_in_order(db, sent):
 
     by_page = http_pages(db, "items", PAGED)
     assert len(by_page) >= 7
-    assert table.to_pylist() == pa.concat_tables(by_page).to_pylist()
+    assert table.to_pylist() == as_read(pa.concat_tables(by_page))
     whole = {key: value for key, value in PAGED.items() if key not in ("page_rows", "pages")}
     one = pa.concat_tables(http_pages(db, "items", whole))
-    assert table.to_pylist() == one.to_pylist()
+    assert table.to_pylist() == as_read(one)
 
 
 def test_every_request_is_the_arguments_given(db, sent):
@@ -651,7 +659,7 @@ def test_artifacts_are_read_whole_across_responses(db, sent):
     assert len(sent.bodies) >= 5
     assert sorted(table.column("key").to_pylist()) == [f"c{k}" for k in range(5)]
     assert table.column("masked_count").to_pylist() == [4] * 5
-    assert table.to_pylist() == pa.concat_tables(http_pages(db, "artifacts", body)).to_pylist()
+    assert table.to_pylist() == as_read(pa.concat_tables(http_pages(db, "artifacts", body)))
 
 
 def test_artifacts_under_a_filter_carry_their_matched_count(db):

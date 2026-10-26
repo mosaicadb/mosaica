@@ -14,7 +14,9 @@ control plane, which writes to it and manages its principals, credentials, group
 providers and sessions.
 
 Every table the package returns is a pyarrow table, whose `.to_pandas()` gives a pandas
-DataFrame when pandas is installed. `Map` shows a database as an interactive map in a notebook
+DataFrame when pandas is installed. Every `mosaica_id` in it, an item's or an annotation's, is
+the id's decimal string, so one id is equal wherever it appears, and every call that takes an id
+takes that string or the whole number. `Map` shows a database as an interactive map in a notebook
 cell, and `side_by_side` shows several maps in one row; both need the `widget` extra, which
 `pip install 'mosaica[widget]'` adds. `Map`, `side_by_side`, `create`, `open` and `Database` are
 loaded when first used, so `import mosaica` works without anywidget or pyarrow.

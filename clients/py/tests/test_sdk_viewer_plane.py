@@ -73,7 +73,7 @@ def test_every_route_gives_a_cluster_the_one_slot_below_the_palette_size_asked_f
     assert len(set(slots.values())) > 1
 
     browsed = viewer.browse_artifacts("map", "clusters", palette_size=8)["artifacts"]
-    assert {int(row["mosaica_id"]): row["slot"] for row in browsed} == slots
+    assert {row["mosaica_id"]: row["slot"] for row in browsed} == slots
     assert {row.get("slot") for row in viewer.browse_artifacts("map", "clusters")["artifacts"]} == {None}
 
     read = db.artifacts("map", "clusters", ["slot"], palette_size=8)
@@ -81,7 +81,7 @@ def test_every_route_gives_a_cluster_the_one_slot_below_the_palette_size_asked_f
     assert read.schema.field("slot").type == pa.uint8()
 
     (top,) = db.aggregate("map", [{"count": True, "by": {"layer": "clusters", "top": 5, "palette_size": 8}}])
-    assert {int(row["key"]): row["slot"] for row in top.to_pylist() if row["group"] == "listed"} == slots
+    assert {row["key"]: row["slot"] for row in top.to_pylist() if row["group"] == "listed"} == slots
 
     with pytest.raises(Refusal, match="422"):
         db.viewport_artifacts("map", 1, per_tile=5, layers=["clusters"], palette_size=33)
