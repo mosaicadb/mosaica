@@ -2,46 +2,44 @@
 
 # TypeScript client
 
-The TypeScript client is four packages in `clients/ts`. Each page below lists what a package exports for a host to use, generated from the doc comments in its source. Every name on a page is imported from that package, as in `import {createStore} from '@mosaicajs/client'`.
+The TypeScript client puts a Mosaica map in a web page. It is four packages built around one object, the store. The store holds the state of a map for one viewer: you tell it where the camera is, what to filter and which layers to draw, and it fetches, caches and composes the data from the server and publishes the result as projections, read-only snapshots such as the points to draw or the counts in view. The other packages draw from a store: a deck.gl layer for an app that builds its own scene, web components for one that wants a ready-made map, filters and cards, and React bindings for both.
 
 | Package | What it holds |
 |---|---|
-| [`@mosaicajs/client`](typescript/client.md) | The headless store that `createStore` returns, the viewer and session client `MosaicaClient`, the operator's control-plane client `Control`, the bulk read `RecordsRead`, the helpers that build the filter drafts and member clauses the store takes and say which layers it draws and colours by, and the count formatters. |
-| [`@mosaicajs/deck`](typescript/deck.md) | `MosaicaLayer`, a deck.gl layer that draws the store, for a host that builds its own `Deck`. deck.gl and luma.gl are peer dependencies. |
-| [`@mosaicajs/components`](typescript/components.md) | The types of the `mosaica-*` elements' events, parts, context and theme. The elements are on the [Components](components.md) pages. |
-| [`@mosaicajs/react`](typescript/react.md) | `useMosaicaStore` and `useProjection`, the store as React hooks. |
-| [`@mosaicajs/react/components`](typescript/react/components.md) | Every element as a React component with typed props and event handlers. |
+| [`@mosaicajs/client`](typescript/client.md) | The store (`createStore`), the HTTP client `MosaicaClient` it is built on, the control-plane client `Control`, and helpers for filters, layers, coordinates, colours and counts. It has no DOM dependency. |
+| [`@mosaicajs/deck`](typescript/deck.md) | `MosaicaLayer`, a deck.gl layer that draws a store, for an app that builds its own `Deck`. deck.gl and luma.gl are peer dependencies. |
+| [`@mosaicajs/components`](typescript/components.md) | The types of the `mosaica-*` elements' events, parts, context and theme. The elements themselves are on the [Components](components.md) pages. |
+| [`@mosaicajs/react`](typescript/react.md) | `useMosaicaStore` and `useProjection`, which make and read a store from React. |
+| [`@mosaicajs/react/components`](typescript/react/components.md) | Every element as a React component, with typed props and event handlers. |
 
-`@mosaicajs/client/internal` and `@mosaicajs/deck/internal` hold what the other packages use beyond these entries. They are not a public API and are not listed here.
+Each page lists what its package exports, and every name on it is imported from that package, as in `import {createStore} from '@mosaicajs/client'`. The `/internal` entries of `@mosaicajs/client` and `@mosaicajs/deck` are shared between the packages and are not a public API.
 
-Not built yet: the packages are not published to npm. The registry holds an empty placeholder, version 0.0.0, under each of the four names, so `npm install @mosaicajs/client` succeeds and installs no Mosaica code. `npm run build` in `clients/ts` builds each package into its `dist/` directory, and `npm pack` in a package's directory makes a tarball of it. `@mosaicajs/deck` and `@mosaicajs/components` depend on exactly version 0.1.0 of the Mosaica packages they import, which exists only in those tarballs, so install the tarballs together in one `npm install`. The client README in `clients/ts` gives the commands and each package's peer dependencies.
+Not built yet: the packages are not published to npm. The registry holds an empty placeholder, version 0.0.0, under each name, so `npm install @mosaicajs/client` succeeds and installs no Mosaica code. Build and pack the packages from `clients/ts` instead, and install the tarballs together in one `npm install`, since each depends on the exact version of the others. The README in `clients/ts` gives the commands and each package's peer dependencies.
 
 ## Connecting
 
-`createStore` takes the viewer server's base URL as `viewerUrl`, or a `MosaicaClient` as `client`, whose URL it then uses. `MosaicaClient` takes `viewerUrl` for the viewer routes and `sessionUrl` for the session routes. A page that is handed a token uses only the viewer routes and can leave `sessionUrl` out; `authorise` and `revoke` reject without it.
+Pass `createStore` the viewer server's base URL as `viewerUrl`, and either a fixed `token` or an `authorise` function that returns one. To share one HTTP client between stores, create a `MosaicaClient` and pass it as `client` instead of `viewerUrl`.
 
-## Reading the items the map shows
+`MosaicaClient` takes two URLs: `viewerUrl` for the routes that read the map, and `sessionUrl` for the routes that create and end sessions (`login`, `authorise`, `revoke`). A page that is given a token only needs `viewerUrl`.
 
-`store.items` reads the items this viewer may see that match what the map shows, through `POST /v1/items`. It sends the store's token, its current view and the filters the map's own requests carry: the filter controls, the `member_of` clauses, inside or outside an artifact, and the selected region. `inView: true` narrows the read to the area the counts in view cover, which is the selected region where one is selected and the camera's box where none is. The caller names the `fields`, the `order` and the rows per page. `filters` and `view` may be given to read something else, and `filters: null` reads every item the viewer may see.
+## Reading the items behind the map
 
-It returns the client's `RecordsRead`. Each `next()` gives one page as an Arrow table, and the read takes from the server only as pages are asked for, so a page can show the first rows and read on when the reader asks:
+`store.items` reads the items that match what the map shows, one page at a time, as Arrow tables. You choose the `fields`, the `order` and the page size. The store fills in its token, its current view and its filters, and `inView: true` limits the read to the selected region, or to the camera's box if no region is selected:
 
 ```ts
 const read = await store.items({fields: ['name', 'country'], pageRows: 25, count: true, inView: true});
 const first = await read.next();   // read.head.matched counts every match
-const second = await read.next();  // the next 25, read from the cursor
+const second = await read.next();  // the next 25
 ```
 
-The filters are those in force when the request goes out. A read already open does not follow a later change of filters, so a page that lists matches reads again after one.
-
-With `inView: true`, `items` waits until there is an area to read. Called before the map has reported its camera and with no region selected, it sends nothing until the first `setView` or selected region, then reads that area, so a page can ask for its list as soon as it loads. Disposing the store while it waits rejects the call with an `AbortError`, as aborting its `signal` does. Naming another `view` than the current one with `inView` is refused at once.
+Pages are fetched only as you ask for them. A read keeps the filters it started with, so start a new one when the filters change. Pass `filters: null` to read every item the viewer may see.
 
 ## When the server is busy
 
-A Mosaica server too busy to take a request answers `429 backpressure` with a `Retry-After` header, the number of seconds to wait before sending the same request again. What each part of `@mosaicajs/client` does with it:
+A server too busy to take a request answers `429 backpressure`, with a `Retry-After` header giving the seconds to wait. Each part of the client handles it differently:
 
 | Part | On a `429` |
 |---|---|
-| `MosaicaClient` | Sends nothing again. The method rejects with a `MosaicaError` whose `status` is `429`, `code` is `backpressure` and `retryAfterS` is the wait in seconds: the `Retry-After` header, else the body's `retry_after_s`, else 1, and never less than 1. `suggest` returns `{status: 'shed', retryAfterS, detail}` instead. To retry, wait `retryAfterS` seconds and call the method again with the same arguments. The [`MosaicaClient`](typescript/client.md) entry has an example. An `items` or `artifacts` read refused part-way reads on from its `cursor`. An `aggregate` refused part-way rejects with a `PartialAggregate` holding the pages it has read, the refusal's `status` and `retryAfterS`, and the cursor to read on from in `result.next`. |
-| `Control` | Waits the `Retry-After`, at least 1 s and at most 30 s, and sends the request again while the waits total at most five minutes. The `429` whose wait would take them past it is returned as the call's `Answer`, whose `attempts` counts the requests sent. |
-| The store from `createStore` | Sends a map request or an aggregate again up to twice, after 1 s doubled each attempt or the `Retry-After` where that is longer, and at most 8 s; `driver.maxRetries` and `driver.retryBackoffMaxMs` in its options change both. The view's `status`, or the aggregate's, is `retrying` meanwhile, then `refused` with the `429` as its `refusal`, which the components show as Server busy. A typeahead ask is sent again up to five times; after that, one typed in a search box lands in `filters.suggestErrors` as `backpressure`. An item's record is asked for once, and a `429` lands in `selection.itemRefusal`. |
+| `MosaicaClient` | Does not retry. The call rejects with a `MosaicaError` whose `retryAfterS` is the wait in seconds, at least 1; `suggest` returns `{status: 'shed', retryAfterS}` instead. Wait and call again with the same arguments. A paged read refused part-way can continue from its `cursor`, and an `aggregate` refused part-way rejects with a `PartialAggregate` that holds the pages read so far. The [`MosaicaClient`](typescript/client.md#mosaicaclient) entry has an example. |
+| `Control` | Waits the `Retry-After`, between 1 and 30 seconds, and sends the request again, for up to five minutes in total. After that the `429` is returned as the call's `Answer`. |
+| The store | Retries a map request or an aggregate twice, waiting 1 s and then 2 s, or the `Retry-After` if longer, up to 8 s. Meanwhile the `status` is `retrying`; after the last attempt it is `refused`, and the components show Server busy. A typeahead request is retried up to five times before its error is `backpressure`. An item's record is not retried, and the refusal lands in `selection.itemRefusal`. |
