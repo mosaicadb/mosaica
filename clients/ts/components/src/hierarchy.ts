@@ -24,58 +24,54 @@ type Node = {
 const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
 
 /**
- * A layer's hierarchy, browsed through `POST /v1/artifacts/browse` independently of the viewport:
- * it opens on the roots at any zoom and does not move with the map. A select chooses among the
- * bundle's hierarchical layers where there are several. Each row is a name, a masked count and,
- * where the server counts children under it, an expander; expanding fetches the children, a page
- * at a time under More. On a layer where a child
- * may have several parents, a row appears under each parent it is served under and names the
- * others. A parent the viewer may not see is absent, so its child reads as a root. The search box
- * lists matching names.
+ * Use `<mosaica-hierarchy>` to let viewers browse a layer's tree of artifacts and filter by them.
+ * It opens on the layer's top-level artifacts at any zoom and does not move with the map. A select
+ * switches layer if the bundle has several.
  *
- * The panel sends the map's filters and, while any is set, shows each row's matched count beside
- * its masked count. A row's presence and its masked count do not change with the filters. A row's
- * buttons put a `member_of` clause on its artifact as a highlight or a filter, and Fit fits the map
- * to it on a layer that draws. Pressing the name highlights it. A row holding a clause is filled,
- * grey for a filter and in the highlight colour for a highlight, and carries a × per clause that
- * takes it off.
+ * Each row shows an artifact's name and how many of its items the viewer may see, with an expander
+ * if it has children. Children load a page at a time, with More for the next page. On a layer where
+ * an artifact can have several parents, it appears under each and names the others. A parent the
+ * viewer may not see is left out, so its children appear at the top level. The search box finds
+ * artifacts by name.
  *
- * The panel asks for nothing while it is hidden. The element keeps which rows are expanded and
- * paged.
+ * While filters are set, each row also shows how many of its items match them. A row's buttons
+ * highlight or filter the map by its artifact, and Fit fits the map to it; pressing the name
+ * highlights it. A row with a filter or highlight on it is shaded, with a × to remove each. The
+ * panel makes no requests while it is hidden.
  *
- * @summary A layer's hierarchy, browsed apart from the viewport.
+ * @summary A layer's tree of artifacts, browsed apart from the map.
  * @tagname mosaica-hierarchy
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A row's
- *   name, highlight or filter button put a `member_of` clause on or took it off.
+ *   name, highlight or filter button added or removed a `member_of` clause.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactfit']>} mosaica-artifactfit - A row's Fit
  *   button was pressed.
  * @csspart title - The heading.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "Layer unavailable", with `data-code` set to the refusal's code.
- * @csspart reason - The server's reason for a refusal, on a line under "View refused".
- * @csspart layer - The layer select, shown where there are several layers.
+ * @csspart reason - The server's reason for a refusal, under "View refused".
+ * @csspart layer - The layer select, shown if there are several layers.
  * @csspart search - The search box.
  * @csspart tree - The tree of rows.
- * @csspart row - One row, with `data-id`, and `data-clause` while a clause is on its artifact:
- *   `filter`, `highlight`, or both separated by a space.
- * @csspart expander - A row's expand button, with `data-leaf` and hidden where the row has no
- *   children, so every row's name starts at the same place.
- * @csspart name - A row's name, with `data-unnamed` where it has none, which highlights the artifact
- *   when pressed.
+ * @csspart row - One row, with `data-id`, and `data-clause` (`filter`, `highlight` or both,
+ *   separated by a space) while its artifact is filtered or highlighted.
+ * @csspart expander - A row's expand button. On a row with no children it has `data-leaf` and is
+ *   hidden, keeping the names aligned.
+ * @csspart name - A row's name, with `data-unnamed` if it has none. Pressing it highlights the
+ *   artifact.
  * @csspart counts - A row's counts.
- * @csspart count-matched - A row's matched `<mosaica-count>`, while a filter is set.
- * @csspart count-masked - A row's masked `<mosaica-count>`.
+ * @csspart count-matched - The `<mosaica-count>` of a row's items that match the filters, while a
+ *   filter is set.
+ * @csspart count-masked - The `<mosaica-count>` of a row's items the viewer may see.
  * @csspart actions - A row's buttons.
  * @csspart highlight - A row's highlight button, with `aria-pressed`.
  * @csspart filter - A row's filter button, with `aria-pressed`.
  * @csspart fit - A row's Fit button, on a layer that draws.
- * @csspart dismiss - A × on a row holding a clause, one per clause, with `data-verb`; it takes that
- *   clause off.
- * @csspart also - The other parents a row is served under, or "Children unavailable" with
- *   `data-code` where its children were refused.
+ * @csspart dismiss - A × that removes a row's filter or highlight, one for each, with `data-verb`.
+ * @csspart also - The row's other parents, or "Children unavailable" with `data-code` if its
+ *   children were refused.
  * @csspart children - An expanded row's children.
- * @csspart more - The More button that fetches the next page.
+ * @csspart more - The More button, which loads the next page.
  */
 export class MosaicaHierarchy extends MosaicaElement {
   static override styles = [
@@ -202,9 +198,9 @@ export class MosaicaHierarchy extends MosaicaElement {
     `
   ];
 
-  /** The layer whose hierarchy is shown. Unset or unknown, the first the bundle offers. */
+  /** The layer to browse. Unset or unknown, the first layer the bundle offers. */
   @property() accessor layer = '';
-  /** Rows per page, at least 1 and at most the server's `maxBrowseRows`. */
+  /** Rows per page, from 1 up to the server's `maxBrowseRows`. */
   @property({type: Number}) accessor limit = 50;
 
   @state() private accessor roots: Node[] | null = null;

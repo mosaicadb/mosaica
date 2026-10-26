@@ -26,48 +26,45 @@ const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
 };
 
 /**
- * The opened artifact: its name, its masked count, its description, layer and key, the kind of
- * shape its layer draws, its parents and its children in this view, Fit to cluster, and buttons
- * that put a `member_of` clause on it as a filter, as a highlight, or as a filter to what is
- * outside it. A `member_of` clause selects by membership, where a drawn region selects by shape;
- * they differ for an artifact whose members are spread across the map. Fit is absent on a filter
- * layer, which draws nothing. Pressing a parent or child opens it.
+ * Use `<mosaica-artifact-card>` to show an artifact the viewer opened, such as a cluster they
+ * clicked on the map. An artifact is a named group of items in an annotation layer. The card shows
+ * its name, how many of its items the viewer may see, its description, layer and key, and its
+ * parents and its children in this view; pressing a parent or child opens it. Its buttons filter or
+ * highlight the map by the artifact, filter to everything outside it, or fit the map to it.
  *
- * A host's buttons in the `actions` slot sit beside the close button.
+ * The card shows the store's opened artifact (`Store.openArtifact`), or the `artifact` you set. The
+ * filter buttons add a `member_of` clause, which selects the artifact's members wherever they are
+ * on the map, unlike a drawn region, which selects by shape. The count covers every member the
+ * viewer may see and does not change as the map moves. A filter layer draws nothing, so its
+ * artifacts have no Fit button. The server refuses every artifact it withholds in the same way.
  *
- * The count is over the artifact's whole membership as the viewer sees it and does not change with
- * the view. An artifact with no name shows a dash in the headline and its key in its own field.
- * The server gives the same refusal for every artifact it withholds. The artifact is the store's
- * (`Store.openArtifact`), or the `artifact` property.
- *
- * @summary The opened artifact, with its lineage and its filter buttons.
+ * @summary An opened artifact, such as a cluster, with its parents, children and filters.
  * @tagname mosaica-artifact-card
  * @category Elements
  * @slot actions - Buttons beside the close button, such as the explorer's Pin.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactfit']>} mosaica-artifactfit - Fit to
  *   cluster was pressed. `<mosaica-explorer>` fits its map to the artifact.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A clause
- *   button put a `member_of` clause on or took it off.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A filter
+ *   or highlight button added or removed a `member_of` clause.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-close']>} mosaica-close - The close button was
  *   pressed, with `what` set to `artifact`.
- * @csspart title - The heading: the level's or the layer's title, holding the close button while
- *   the card shows an artifact or a refusal.
+ * @csspart title - The heading, with the level's or layer's title and the close button.
  * @csspart close - The close button.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "Not available", with `data-code` set to the refusal's code.
- * @csspart reason - The server's reason for the refusal, on a line under "Not available".
- * @csspart headline - The artifact's name, with `data-unnamed` where it has none.
- * @csspart count - The masked count.
+ * @csspart reason - The server's reason for the refusal, under "Not available".
+ * @csspart headline - The artifact's name, with `data-unnamed` if it has none.
+ * @csspart count - The count of items the viewer may see.
  * @csspart content - The artifact's description, or its attached topic.
  * @csspart value - The layer and the key.
- * @csspart shape - What the layer's shape is, with `data-kind` (`derived`, `predicate` or
+ * @csspart shape - How the layer's shapes are made, with `data-kind` (`derived`, `predicate` or
  *   `authored`).
  * @csspart label - The headings above the parents and the children.
  * @csspart parents - The list of parents.
  * @csspart parent - One parent, with `data-id`.
  * @csspart children - The list of children in this view.
  * @csspart child - One child, with `data-id`.
- * @csspart name - A parent's or a child's name, with `data-unnamed` where it has none.
+ * @csspart name - A parent's or child's name, with `data-unnamed` if it has none.
  * @csspart fit - The Fit to cluster button.
  * @csspart verbs - The clause buttons.
  * @csspart filter - The Filter to this button, with `aria-pressed` while its clause is on.
@@ -167,12 +164,9 @@ export class MosaicaArtifactCard extends MosaicaElement {
     `
   ];
 
-  /**
-   * The artifact to show, for a host that fetches the drill-down itself. Set with `refusal` or
-   * alone, it replaces the store's opened artifact.
-   */
+  /** The artifact to show, if you fetch its details yourself. It replaces the store's opened artifact. */
   @property({attribute: false}) accessor artifact: {id: bigint; detail: ArtifactDetail} | null = null;
-  /** A refusal to show in place of an artifact, for a host that fetches the drill-down itself. */
+  /** A refusal to show instead of an artifact, if you fetch its details yourself. */
   @property({attribute: false}) accessor refusal: Refusal | null = null;
 
   private get shown(): {artifact: {id: bigint; detail: ArtifactDetail} | null; refusal: Refusal | null} {

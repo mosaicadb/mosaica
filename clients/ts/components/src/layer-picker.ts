@@ -6,23 +6,23 @@ import {renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * A checkbox per annotation layer in `meta.layers`, choosing which layers the map draws. A layer
- * that others depend on (a clustering and its labels) is one entry that turns on the whole group;
- * the entry's tooltip names the layers in it. A filter layer has nothing to draw and gets no
- * checkbox: a quiet note beneath the list names the filter layers, which are applied as clauses
- * through `<mosaica-hierarchy>`.
+ * Use `<mosaica-layer-picker>` to let viewers choose which annotation layers the map draws. It
+ * shows a checkbox for each layer in `meta.layers`. A layer that others depend on, such as a
+ * clustering and its labels, gets one checkbox that turns on the whole group, and its tooltip names
+ * the layers in it. Filter layers draw nothing, so they get no checkbox; a note below the list names
+ * them, and viewers filter by them with `<mosaica-hierarchy>`.
  *
- * @summary Which annotation layers the map draws.
+ * @summary Checkboxes for the annotation layers the map draws.
  * @tagname mosaica-layer-picker
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - A checkbox
- *   changed, with the layers now drawn.
+ *   changed which layers are drawn.
  * @csspart title - The heading.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "View refused", with `data-code`, in the refused state.
- * @csspart reason - The server's reason for a refusal, on a line under "View refused".
+ * @csspart reason - The server's reason for a refusal, under "View refused".
  * @csspart entry - One layer that draws, with `data-layer`.
- * @csspart name - A layer's title, or its name where it declares none.
+ * @csspart name - A layer's title, or its name if it has no title.
  * @csspart note - The note naming the filter layers, such as "Venues can be used as a filter
  *   only.", with `data-layers` listing their names.
  */

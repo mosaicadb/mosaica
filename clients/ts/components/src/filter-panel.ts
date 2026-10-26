@@ -31,59 +31,50 @@ const VERBS: readonly ClauseVerb[] = ['filter', 'highlight'];
 const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : countText(n));
 
 /**
- * The filter panel: what the cards count, the clauses applied, and one `<mosaica-field-card>` per
- * field.
+ * Use `<mosaica-filter-panel>` to give viewers a place to filter and highlight the map by any
+ * field. It shows a `<mosaica-field-card>` per field, the filters in force as chips, and the counts
+ * the cards compare. `<mosaica-explorer>` puts one in its sidebar.
  *
- * The subject row names what the cards' solid bars count, In view and the number of matching items
- * in the camera's box (the store's counts in view), or Highlighted and the number highlighted there
- * while a highlight is set, with a × that clears the highlight. Beside it, All matching names what
- * the pale bars count: every item the filters admit, from an aggregate the panel keeps registered.
+ * The subject row at the top says what the cards' solid bars count: In view, the items in the
+ * camera's box that the filters match, or Highlighted while there is a highlight, with a × that
+ * clears it. Beside it, All matching counts every item the filters match, which the pale bars
+ * show.
  *
- * While any clause is applied, a line lists each as a chip: a filter clause plain, a highlight
- * clause in the highlight colour, and a `member_of` clause by its cluster's name. Pressing a
- * column's chip opens and focuses its card, or under `chips-only` fires `mosaica-chipopen`; its ×
- * empties that clause, leaving the other position's alone. Clear all empties every clause in both
- * positions and drops every `member_of` clause.
+ * Each filter or highlight in force shows as a chip. Pressing a chip opens its field's card, and
+ * its × removes that clause. Clear all removes every filter and highlight, including `member_of`
+ * clauses.
  *
- * The fields are the filterable columns and the layers whose clusters can be filtered by: every
- * layer `meta` lists for the current view that attaches to no other. The cards listed are the
- * fields in `pinned` (a layer's as `cluster:<layer>`), the fields holding a clause in either
- * position, the field the map is coloured by, and any field added, in `meta`'s order, the columns
- * then the layers; a field joins the end of the list, so the cards shown do not move. Add field lists every field, the columns then the layers, with a search box,
- * and the listed ones are checked and say Shown; its list opens under the column, as wide as it.
- * Choosing an unchecked field adds its card. Choosing a checked one takes the card off and empties
- * the field's clauses in both positions; a column in `pinned` stays, since the host lists it. Enter
- * in the search box adds the first match not yet listed and never takes one off. Beside Add field,
- * how many fields are not listed.
+ * The panel lists a card for each field in `pinned`, each field that holds a filter or highlight,
+ * the field the map is coloured by, and each field the viewer added. Add field lists every
+ * filterable column and layer, with a search box, to add a card or take one off. Taking a card off
+ * clears its field's filters. A new card joins the end of the list, so the cards already shown do
+ * not move.
  *
- * A card folds to one line from its own button. Under `compact` every card is folded but one, and
- * opening one folds the one open before. `chips-only` renders the line of clauses alone, and
- * nothing while none is applied; `controls-only` leaves the subject row and the clauses out.
+ * `compact` keeps one card open at a time. `chips-only` shows only the chips, for placing them
+ * apart from the cards, and `controls-only` shows the cards without the subject row and chips.
  *
- * @summary The field cards, what they count, and the clauses applied.
+ * @summary A field card per field, with the filters in force as chips.
  * @tagname mosaica-filter-panel
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A
- *   column's chip was removed (with `verb`, the position it was in, and `expr` null), Clear all was
- *   pressed (with `column` and `expr` null), or the highlight was cleared from the subject row (with
- *   `column` and `expr` null and `verb` `highlight`). Removing a `member_of` chip fires nothing. Each
- *   card fires its own as well.
+ *   column's chip was removed, Clear all was pressed, or the highlight was cleared from the subject
+ *   row. Removing a `member_of` chip fires nothing. Each card fires its own as well.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-chipopen']>} mosaica-chipopen - A column's chip
- *   was pressed under `chips-only`, naming the column and the position of its clause.
+ *   was pressed while `chips-only` is set, so you can show its card.
  * @csspart state - The state line, with `data-state`.
  * @csspart refusal - The words "View refused", with `data-code`, in the refused state.
- * @csspart reason - The server's reason for a refusal, on a line under "View refused".
+ * @csspart reason - The server's reason for a refusal, under "View refused".
  * @csspart subject - The subject row.
- * @csspart subject-key - The subject's colour, as its bars are drawn.
+ * @csspart subject-key - The colour of the subject's bars.
  * @csspart subject-name - In view, or Highlighted while a highlight is set.
  * @csspart subject-count - The number in view, or highlighted.
  * @csspart clear-highlight - The × beside Highlighted, which clears the highlight.
  * @csspart all - All matching and its number.
  * @csspart all-count - The number matching.
- * @csspart chips - The line of clauses applied, while there are any.
- * @csspart chip - One clause, with `data-verb` (`filter` or `highlight`) and `data-column` or
+ * @csspart chips - The line of chips, while any filter or highlight is in force.
+ * @csspart chip - One chip, with `data-verb` (`filter` or `highlight`) and `data-column` or
  *   `data-artifact`.
- * @csspart edit - The button that is a column chip's text, which opens its card.
+ * @csspart edit - A column chip's text, a button that opens its card.
  * @csspart clear - The Clear all button.
  * @csspart card - One `<mosaica-field-card>`, with `data-field`.
  * @csspart add - The Add field button, with `aria-expanded`.
@@ -91,24 +82,25 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * @csspart add-list - The list of fields to add, while it is open.
  * @csspart add-search - The search box over that list.
  * @csspart add-option - One field in that list, with `data-column` or `data-layer`, `aria-checked`
- *   while it is listed, and `aria-disabled` where it is pinned and so cannot be taken off.
- * @csspart field-card-<part> - A part of a card, forwarded under a `field-card-` prefix.
+ *   while its card is shown, and `aria-disabled` if it is pinned and cannot be taken off.
+ * @csspart field-card-<part> - A part of a card.
  * @csspart filter-<part> - A part of a card's `<mosaica-filter>` search box.
  * @csspart cluster-filter-<part> - A part of a card's `<mosaica-cluster-filter>` search box.
  */
 export class MosaicaFilterPanel extends MosaicaElement {
-  /** Renders the line of clauses alone, and nothing while none is applied. */
+  /** Shows only the chips, and nothing while no filter or highlight is in force. */
   @property({type: Boolean, attribute: 'chips-only'}) accessor chipsOnly = false;
-  /** Renders the cards and Add field without the subject row and the clauses. */
+  /** Shows the cards and Add field without the subject row and the chips. */
   @property({type: Boolean, attribute: 'controls-only'}) accessor controlsOnly = false;
   /**
-   * The columns whose cards are listed whether or not they hold a clause, space- or
-   * comma-separated. Unset, only the fields holding a clause are listed until the user adds one.
+   * The columns whose cards always show, even when they hold no filter, separated by spaces or
+   * commas. Write a layer as `cluster:<layer>`. Unset, a card shows only once its field is filtered
+   * or the viewer adds it.
    */
   @property() accessor pinned = '';
-  /** Folds every card but one, and shortens the subject row's figures. */
+  /** Keeps one card open at a time, and shortens the subject row's figures. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level the cards of levelled layers count at, passed to each; `null` is their top level. */
+  /** The level that cards for layers with levels count at. `null` is the coarsest level. */
   @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
 
   /** The fields the user added, which stay listed. @internal */
@@ -337,7 +329,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     super.disconnectedCallback();
   }
 
-  /** List `field`'s card, open it, and scroll to and focus it once drawn. A host showing the cards after `mosaica-chipopen` calls this. */
+  /** Show `field`'s card, open it, and scroll to and focus it. Call it after `mosaica-chipopen` to show the chip's card. */
   show(field: string): void {
     this.opened = new Set([...this.opened, field]);
     this.unfold(field);

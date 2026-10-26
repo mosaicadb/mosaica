@@ -4,29 +4,24 @@ import {isBusy, isUnanswered} from '@mosaicajs/client/internal';
 import {HeldAggregate} from './aggregate.js';
 
 /**
- * The ten panel states. Every panel shows its state in one `part="state"` region, with
- * `data-state` set to it, so one rule restyles every panel. Each follows from the store's `status`
- * projection:
+ * The state of a panel. Every element shows its state in its `part="state"` element, with
+ * `data-state` set to one of these, so one CSS rule can style the same state across every panel.
  *
- * | state | from `status` |
+ * | State | Meaning |
  * |---|---|
- * | detached | no store |
- * | loading | `idle` or `loading` |
- * | retrying | `retrying`, or `unreachable` |
- * | shown | `shown` |
- * | empty | `empty` |
- * | refused | `refused` |
- * | unanswered | `refused` with a `5xx` whose body is not a Mosaica error, such as a gateway's `504` |
- * | busy | `refused` with a `429` still answered after the store's retries, whatever its code |
- * | expired | the `expired` flag: `expired-token`, a `bad-credential` on a token this store used, or `expiresAt` passed |
- * | stale | `shown` with `stale` |
+ * | `detached` | The element has no store. |
+ * | `loading` | The store is connecting or fetching. |
+ * | `retrying` | The server cannot be reached, or the store is asking again. What is drawn stays. |
+ * | `shown` | The panel shows the server's answer. |
+ * | `empty` | The server answered, with nothing to show. |
+ * | `refused` | The server refused the request. |
+ * | `unanswered` | The server failed with a `5xx` that is not a Mosaica error, such as a gateway's `504`. |
+ * | `busy` | The server is too busy (`429`), even after the store's retries. |
+ * | `expired` | The session expired: the token is past its expiry, or the server no longer accepts it. |
+ * | `stale` | The panel shows an answer, but the picture is older than the numbers. |
  *
- * `expired` is a named refusal and wins over `refused`. While the server cannot be reached the state
- * is `retrying` whatever the last answer was, since the store is asking again; what is drawn stays.
- * `unanswered` is a server error that says nothing about this viewer, so it is not shown as a
- * refusal; the store does not ask again until Retry. `busy` is the server shedding load, which says
- * nothing about this viewer either, and the store does not ask again until Retry.
- * `stale` is `shown` with the picture older than the numbers.
+ * In the `unanswered` and `busy` states the store does not ask again until the viewer presses
+ * Retry.
  */
 export type PanelState = 'detached' | 'loading' | 'retrying' | 'shown' | 'empty' | 'refused' | 'unanswered' | 'busy' | 'expired' | 'stale';
 

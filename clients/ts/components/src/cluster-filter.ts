@@ -29,37 +29,33 @@ const PATH_DEPTH = 3;
 type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
 
 /**
- * The search box of a layer's field card: its list offers the layer's artifacts, and choosing one
- * puts its `member_of` clause on in the filter position (`Store.setMembers`).
+ * Use `<mosaica-cluster-filter>` for a search box that filters the map by a layer's clusters. A
+ * layer's field card uses it, and you can place one on its own. Set `layer` to a layer
+ * `meta.layers` lists.
  *
- * With the box empty, the list offers the layer's top-level clusters (its roots, or its first level
- * on a levelled layer), largest first. Typing searches the layer's names through
- * `POST /v1/artifacts/browse`, every level on a levelled layer, and each match shows its path, the
- * names of its nearest parents in grey, cut from the left so the nearest stay. On a levelled layer
- * the path names only parents the list has already met. Each row's count is exact, from the
- * aggregate route (`Store.setAggregate`) over the rows listed, one grouping per level on a layer
- * with several, under the store's filters without this layer's own filter clauses, so a cluster
- * its clauses exclude is still counted. A row shows no count until the answer lands. The list opens
- * over what sits below the box, in the top layer.
+ * With the box empty, the list offers the layer's top-level clusters, largest first. Typing
+ * searches the cluster names at every level, and each match shows the names of its nearest
+ * parents. Each row has an exact count of the items the filters match in that cluster, leaving out
+ * this layer's own filter, so a cluster that filter excludes keeps its count.
  *
- * Choosing a row puts its clause on, with the row's name as the clause's label, and pressing a
- * chosen row takes it off. The arrow keys move through the list, Enter chooses the row reached, the
- * first by default, and Escape closes the list.
+ * Choosing a row filters the map to the cluster's members with a `member_of` clause
+ * (`Store.setMembers`), and choosing it again removes the clause. The arrow keys move through the
+ * list, Enter chooses a row and Escape closes the list.
  *
- * @summary A layer's field card's search box.
+ * @summary A search box that filters by a layer's clusters.
  * @tagname mosaica-cluster-filter
  * @category Elements
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A row put
- *   a `member_of` clause on or took it off.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - Choosing a
+ *   row added or removed a `member_of` clause.
  * @csspart entry - The search box.
  * @csspart values - The list, while it is open.
  * @csspart option - One cluster in the list, with `data-id` and `aria-selected` while its clause is
  *   on.
- * @csspart name - A row's name, with `data-unnamed` where it has none.
+ * @csspart name - A row's name, with `data-unnamed` if the cluster has none.
  * @csspart path - A row's path of parents' names.
  * @csspart value-count - A row's exact count.
- * @csspart more - The note under the box: no match, or that more match than the list holds.
- * @csspart refusal - The words "Clusters unavailable", with `data-code`, where the list was refused.
+ * @csspart more - The note under the box when nothing matches, or when more match than are listed.
+ * @csspart refusal - The words "Clusters unavailable", with `data-code`, if the list was refused.
  */
 export class MosaicaClusterFilter extends MosaicaElement {
   static override styles = [
@@ -146,14 +142,14 @@ export class MosaicaClusterFilter extends MosaicaElement {
     `
   ];
 
-  /** The layer whose clusters are offered, a name `meta.layers` lists. Unset or unknown, the field renders nothing. */
+  /** The layer whose clusters are offered, a name `meta.layers` lists. Unset or unknown, the box shows nothing. */
   @property() accessor layer = '';
-  /** The search box's placeholder, in place of the field's own. */
+  /** Placeholder text for the box, in place of the default. */
   @property() accessor placeholder = '';
   /**
-   * Where set, the box picks a cluster rather than filtering by it: choosing a row calls this with
-   * its `mosaica_id` as a decimal string, its name, its path of parents' names as the list shows
-   * it and its `rung`, changes no clause and empties the box, and no row shows as chosen.
+   * Turns the box into a cluster picker. Choosing a row calls this with the cluster's `mosaica_id`
+   * (as a decimal string), its name, its parents' names as the list shows them, and its level
+   * (`rung`), then empties the box. No filter changes.
    */
   @property({attribute: false}) accessor choose: ((cluster: {id: string; name: string | null; path: string; rung: number}) => void) | null = null;
 

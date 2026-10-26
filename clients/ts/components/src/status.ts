@@ -8,53 +8,43 @@ import {chrome, tokens} from './tokens.js';
 import './count.js';
 
 /**
- * The view's state and counts on one line: `● | 16,822,190 of 21,406,522 match | 5,390 shown`.
- * The counts are the store's counts in view (`ViewProjection.inView`): over the camera's box, or
- * over the selected region while one is selected, as the selection card counts it. While a
- * highlight is set, a cell reads `N highlighted of M`, M being the matched count, and the
- * match cell is left out unless a filter or selection narrows what matches. While the view is up to
- * date the first cell is a dot alone, titled "Up to date", and while it updates a grey dot alone,
- * titled "Updating", so the strip keeps its width through a pan. Where the viewer can see no item in
- * the view at all, it is a grey dot alone titled "Nothing visible to you", which the map says in
- * words. Otherwise it names the state in two or three words beside its dot (Connecting,
- * Reconnecting, Server unreachable, Server did not answer, Server busy, Nothing in view, Data
- * updated, View refused, Session expired) with the action the state offers: Refresh when the data
- * changed, Retry when the view was refused, the server did not answer or is too busy, and Sign in
- * on expiry where `reauthorise` is set. View refused has the server's reason on a line under it.
- * The counts grey out while they are not current. The strip sizes to its content and does not
- * wrap. `compact` shortens the figures (`16.8M of 21.4M match`) and drops the shown count.
- * `expanded` renders the figures again as a card below the strip.
+ * Use `<mosaica-status>` to show on one line whether the map is up to date and how many items it
+ * covers, such as `● | 16,822,190 of 21,406,522 match | 5,390 shown`. The counts cover the
+ * camera's box, or the selected region while there is one. While a highlight is set, a cell reads
+ * `N highlighted of M`.
  *
- * The state cell is an `aria-live` region, so a refusal, an expiry or a change of data is announced;
- * the counts are not, so a pan does not read them out. The
- * state is one of the ten panel states (see `PanelState`); the refusal behind it stays in the
- * store's `status.refusal`, which `mosaica-statechange` carries, and the refusal's code is on the
- * refusal part's `data-code`.
+ * While the view is up to date, the first cell is a dot alone. Otherwise it names the state in a few
+ * words, such as Reconnecting, Server busy, View refused or Session expired, with a button if there
+ * is something to do: Refresh when the data has changed, Retry after a refusal, no answer or a
+ * busy server, and Sign in when the session expires and `reauthorise` is set. The counts grey out while they
+ * are out of date.
  *
- * @summary The state and the counts of the view, on one line.
+ * `compact` shortens the figures and drops the shown count, and `expanded` adds a card of the
+ * figures below the strip. The state cell is an `aria-live` region, so screen readers announce a
+ * refusal, an expiry or a change of data, but not the counts as the map pans.
+ *
+ * @summary One line with the view's state and counts.
  * @tagname mosaica-status
  * @category Elements
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-statechange']>} mosaica-statechange - On every
- *   change of panel state, including the first render, with the refusal behind it.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-expired']>} mosaica-expired - Once each time the
- *   session expires.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-statechange']>} mosaica-statechange - The panel
+ *   state changed, including on the first render.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-expired']>} mosaica-expired - The session expired.
+ *   Fires once each time.
  * @csspart strip - The one-line strip.
  * @csspart state - The state's dot and words, with `data-state` set to the panel state.
  * @csspart refusal - The words "View refused", or "Server busy", with `data-code` set to the
  *   refusal's code.
- * @csspart reason - The server's reason for a refusal, as it sent it, on a line under "View
- *   refused".
- * @csspart refresh - The Refresh button, when the data changed under the view.
- * @csspart retry - The Retry button, when the view was refused or the server did not answer or is
- *   too busy.
- * @csspart reauthorise - The Sign in button, on expiry where `reauthorise` is set.
+ * @csspart reason - The server's reason for a refusal, under "View refused".
+ * @csspart refresh - The Refresh button, shown when the data has changed.
+ * @csspart retry - The Retry button, after a refusal, no answer or a busy server.
+ * @csspart reauthorise - The Sign in button, shown on expiry if `reauthorise` is set.
  * @csspart count-shown - The `<mosaica-count>` of marks shown.
- * @csspart count-matched - The `<mosaica-count>` matched by the filters.
- * @csspart count-highlighted - The `<mosaica-count>` the highlight matched, while a highlight is set.
+ * @csspart count-matched - The `<mosaica-count>` of items the filters match.
+ * @csspart count-highlighted - The `<mosaica-count>` of highlighted items, while a highlight is set.
  * @csspart count-of - The matched count the highlighted count is out of, while a highlight is set.
  * @csspart count-visible - The `<mosaica-count>` of items the viewer may see here, which the matched
  *   count is out of.
- * @csspart card - The card of figures, under `expanded`.
+ * @csspart card - The card of figures, when `expanded` is set.
  */
 export class MosaicaStatus extends MosaicaElement {
   static override styles = [
@@ -159,11 +149,11 @@ export class MosaicaStatus extends MosaicaElement {
     `
   ];
 
-  /** Renders the figures again as a card below the strip. */
+  /** Adds a card of the figures below the strip. */
   @property({type: Boolean}) accessor expanded = false;
-  /** Shortens the figures to one decimal (`16.8M`) and drops the shown count, where room is short. */
+  /** Shortens the figures to one decimal (`16.8M`) and drops the shown count. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** Called by the Sign in button that the expired state shows; without it, no button. */
+  /** A function the Sign in button calls when the session has expired. Without it there is no Sign in button. */
   @property({attribute: false}) accessor reauthorise: (() => void) | null = null;
 
   private lastState: PanelState | null = null;

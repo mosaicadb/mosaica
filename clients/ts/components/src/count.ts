@@ -5,20 +5,20 @@ import {attachContextRoot, defineOnce} from './define.js';
 import {tokens} from './tokens.js';
 
 /**
- * Renders a `Count` or a `Masked` through the client's `formatCount` and `formatMasked`, in the text
- * face with tabular figures. A sample (`count`) shows both figures, as `4,812 of 12,465`, or neither
- * when the count is inexact; a scalar (`masked`) shows one figure, marked `≈` when inexact. Nothing
- * is rendered while `stale` is set. With both properties set, `count` is rendered.
+ * Use `<mosaica-count>` to show a count from the store's projections, formatted as the other
+ * elements format it. Set `count` to a sample `Count`, shown as `4,812 of 12,465` (the marks shown
+ * of those served), or `masked` to a `Masked` count, shown as one figure marked `≈` if it is an
+ * estimate. If both are set, `count` is shown. An inexact sample shows nothing, and so does any
+ * count while `stale` is set.
  *
- * This element takes no store; the host or another element sets its properties.
+ * The element has no store: you, or another element, set its properties.
  *
- * @summary A sample count or a masked count, formatted.
+ * @summary A count, formatted as the other elements show it.
  * @tagname mosaica-count
  * @category Elements
- * @csspart count - The figure. Carries `data-kind` (`sample`, `scalar` or `none`), `data-exact`
- *   (`true` or `false`), `data-empty` (`true` when nothing was rendered) and, under
- *   `figure="shown"`, `data-total` with the total.
- * @csspart label - The `label` text after the figure, rendered only when the figure is.
+ * @csspart count - The figure, with `data-kind` (`sample`, `scalar` or `none`), `data-exact` (`true`
+ *   or `false`), `data-empty` (`true` if nothing is shown) and, with `figure="shown"`, `data-total`.
+ * @csspart label - The `label` text after the figure, shown only with the figure.
  */
 export class MosaicaCount extends LitElement {
   static override styles = [
@@ -41,18 +41,18 @@ export class MosaicaCount extends LitElement {
 
   /** A sample count: how many marks are shown of how many are served. */
   @property({attribute: false}) accessor count: Count | null = null;
-  /** A masked count over the viewer's visible set, rendered where `count` is not set. */
+  /** A masked count over the items the viewer may see. Shown if `count` is not set. */
   @property({attribute: false}) accessor masked: Masked | null = null;
-  /** Renders nothing, since the figures predate a change to the corpus. */
+  /** Shows nothing, for a count that is out of date because the data changed. */
   @property({type: Boolean}) accessor stale = false;
   /** Text rendered after the figure, such as `matched`. */
   @property() accessor label = '';
   /**
-   * `both` renders a sample as `shown of total`; `shown` renders the shown figure alone and puts
-   * the total on the part's `data-total`. The figure is empty exactly when the pair would be.
+   * `both` shows a sample as `shown of total`. `shown` shows the shown figure alone and puts the
+   * total in the `count` part's `data-total`.
    */
   @property() accessor figure: 'both' | 'shown' = 'both';
-  /** Shortens figures of a thousand or more to one decimal, as `16.8M`, where room is short. */
+  /** Shortens figures of a thousand or more to one decimal, as `16.8M`. */
   @property({type: Boolean}) accessor compact = false;
 
   override render(): TemplateResult | typeof nothing {

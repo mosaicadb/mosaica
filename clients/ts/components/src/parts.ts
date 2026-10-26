@@ -9,10 +9,9 @@
 const STATE = ['state', 'refusal', 'reason', 'refresh', 'retry', 'reauthorise'];
 
 /**
- * The parts each element may render, by element name without `mosaica-`, as the lists an element
- * forwards with `exportparts`. A host that renders an element inside its own shadow root forwards
- * `PARTS[name]` to style them from outside. Each element's reference page says when each part is
- * rendered.
+ * The parts each element may render, by element name without `mosaica-`. If you render an element
+ * inside your own shadow root, forward `PARTS[name]` with `exportparts` so the page can style those
+ * parts from outside.
  */
 export const PARTS = {
   map: ['attribution', 'canvas', 'controls', 'density-key', 'note', 'overlay', 'region-tag', 'tooltip', ...STATE],

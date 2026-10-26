@@ -10,42 +10,34 @@ import {chrome, tokens} from './tokens.js';
 import './count.js';
 
 /**
- * The selected region: its counts, the held marks inside it as a list, and its actions. *Shown
- * inside* counts the held marks against the matched count. *Matched inside* and *Visible inside*
- * are the store's counts in view over the shape, the figures the status strip shows, exact unless
- * the server answered for a cover of it; before those land, *Visible inside* appears only while no
- * other filter narrows the view. Clicking a listed mark picks it. *Outside* flips the selection to its
- * complement, and *Clear* drops it.
+ * Use `<mosaica-selection>` to show what is inside the region the viewer selected on the map. It
+ * shows how many items the filters match inside the region, how many the viewer may see there and
+ * how many marks are drawn, and lists the drawn marks. Clicking a listed mark picks it. Outside
+ * flips the selection to everything outside the region, and Clear removes it.
  *
- * While its counts are not shown and the server cannot be reached or did not answer, the state line
- * says so in the status strip's words, Server unreachable or Server did not answer, in place of
- * Counting or Selection refused. Where the server was too busy to count the selection, it says
- * Server busy, with Retry.
+ * A selected region acts as a filter: once it settles, the map and every count narrow to it. The
+ * counts are exact unless the server counted an area covering the shape, which the state line's
+ * tooltip says. Export and Save as artifact are shown disabled, as they are not available yet.
  *
- * A selection is a filter: the map and every count narrow to it once it settles. Not built yet:
- * *Export* and *Save as artifact*, which need server routes; their buttons are disabled with the
- * reason on hover.
- *
- * @summary The selected region's counts, marks and actions.
+ * @summary The counts and marks inside the selected region.
  * @tagname mosaica-selection
  * @category Elements
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - Clear
- *   (with `shape` null) or Outside and Inside (with the new shape and `status` `loading`) was
- *   pressed.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - Clear,
+ *   Outside or Inside was pressed.
  * @csspart title - The heading, with the shape's kind.
- * @csspart state - The state line, with `data-state`; its tooltip says whether the counts are
- *   exact for the shape or for a cover.
+ * @csspart state - The state line, with `data-state`. Its tooltip says whether the counts are exact
+ *   for the shape.
  * @csspart refusal - The words "Selection refused", or "Server busy", with `data-code` set to the
  *   refusal's code.
- * @csspart reason - The server's reason for the refusal, on a line under "Selection refused".
- * @csspart retry - The Retry button, when the selection's count was refused by a server too busy.
+ * @csspart reason - The server's reason for the refusal, under "Selection refused".
+ * @csspart retry - The Retry button, shown if the server was too busy to count the selection.
  * @csspart counts - The counts.
  * @csspart count-served - The `<mosaica-count>` of marks shown inside.
- * @csspart count-matched - The `<mosaica-count>` matched inside (or outside).
- * @csspart count-visible - The `<mosaica-count>` visible inside (or outside).
+ * @csspart count-matched - The `<mosaica-count>` of items the filters match inside (or outside).
+ * @csspart count-visible - The `<mosaica-count>` of items the viewer may see inside (or outside).
  * @csspart label - The heading above the list.
- * @csspart items - The list of held marks inside.
- * @csspart item - One held mark, by `mosaica_id`.
+ * @csspart items - The list of drawn marks inside.
+ * @csspart item - One drawn mark, by `mosaica_id`.
  * @csspart actions - The action buttons.
  * @csspart action - One action button.
  */
@@ -90,7 +82,7 @@ export class MosaicaSelection extends MosaicaElement {
     `
   ];
 
-  /** The region to show in place of the store's `region` projection. */
+  /** A region to show instead of the store's `region` projection. */
   @property({attribute: false}) accessor region: RegionProjection | null = null;
 
   private get shown(): RegionProjection | null {

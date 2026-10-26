@@ -8,17 +8,18 @@ import {switchView} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * A select over the views the viewer may reach, one entry per plain view and one per view group,
- * in `/v1/meta`'s order, drawn as the current view's title with a chevron. Choosing a group enters
- * it under the current view's key where the two groups share keys, else at the key this element
- * last left it on, else at its first view. Renders nothing where the bundle offers one entry.
+ * Use `<mosaica-view-picker>` to let viewers switch between the views they may see. It is a select
+ * showing the current view's title, with an entry for each view and each view group, in the order
+ * `/v1/meta` lists them. Choosing a group opens the view in it with the current view's key, if it
+ * has one, else the view last chosen in that group, else its first view. It shows nothing if there
+ * is only one entry.
  *
- * @summary Chooses the view.
+ * @summary A menu for switching views.
  * @tagname mosaica-view-picker
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewswitch']>} mosaica-viewswitch - The view
  *   changed.
- * @csspart field - The select and its chevron, drawn as the view's title in bold.
+ * @csspart field - The select and its chevron, shown as the view's title in bold.
  * @csspart select - The select.
  */
 export class MosaicaViewPicker extends MosaicaElement {

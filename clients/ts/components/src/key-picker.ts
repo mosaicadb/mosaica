@@ -8,17 +8,17 @@ import {switchView} from './view-switch.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * Which view of the current view's group: a select over the group's views in creation order, with
- * previous and next buttons that stop at the ends. Each entry shows the view's label and its key.
- * Renders nothing when the current view is in no group.
+ * Use `<mosaica-key-picker>` to step through the views in the current view's group. It shows a
+ * select over the group's views in the order they were created, each with its label and key, and
+ * previous and next buttons. It shows nothing if the current view is in no group.
  *
- * @summary Chooses the view within the current group.
+ * @summary Steps through the views in the current view's group.
  * @tagname mosaica-key-picker
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewswitch']>} mosaica-viewswitch - The view
  *   changed.
  * @csspart field - The caption and the row.
- * @csspart label - The caption, which is the group's name.
+ * @csspart label - The caption, the group's name.
  * @csspart entry - The row of buttons and select.
  * @csspart select - The select.
  * @csspart step - A previous or next button, with `data-direction` set to `prev` or `next`.

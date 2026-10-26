@@ -6,23 +6,23 @@ The `mosaica-*` custom elements, in the `@mosaicajs/components` package, built w
 
 | Element | What it is |
 |---|---|
-| [`<mosaica-explorer>`](components/mosaica-explorer.md) | The map and every panel, in a default layout. |
-| [`<mosaica-map>`](components/mosaica-map.md) | The map canvas. |
-| [`<mosaica-store>`](components/mosaica-store.md) | Provides one store to the elements inside it. |
-| [`<mosaica-status>`](components/mosaica-status.md) | The state and the counts of the view, on one line. |
-| [`<mosaica-count>`](components/mosaica-count.md) | A sample count or a masked count, formatted. |
-| [`<mosaica-layer-picker>`](components/mosaica-layer-picker.md) | Which annotation layers the map draws. |
-| [`<mosaica-view-picker>`](components/mosaica-view-picker.md) | Chooses the view. |
-| [`<mosaica-key-picker>`](components/mosaica-key-picker.md) | Chooses the view within the current group. |
-| [`<mosaica-filter-panel>`](components/mosaica-filter-panel.md) | The field cards, what they count, and the clauses applied. |
-| [`<mosaica-field-card>`](components/mosaica-field-card.md) | One field's counts in view and overall, with its filter and highlight. |
-| [`<mosaica-filter>`](components/mosaica-filter.md) | A field card's search box. |
-| [`<mosaica-cluster-filter>`](components/mosaica-cluster-filter.md) | A layer's field card's search box. |
-| [`<mosaica-selection>`](components/mosaica-selection.md) | The selected region's counts, marks and actions. |
-| [`<mosaica-item-card>`](components/mosaica-item-card.md) | The selected item's fields, with Open and Copy id. |
-| [`<mosaica-artifact-card>`](components/mosaica-artifact-card.md) | The opened artifact, with its lineage and its filter buttons. |
-| [`<mosaica-hierarchy>`](components/mosaica-hierarchy.md) | A layer's hierarchy, browsed apart from the viewport. |
-| [`<mosaica-colour-editor>`](components/mosaica-colour-editor.md) | Every value or cluster's colour, to search, choose and reset. |
+| [`<mosaica-explorer>`](components/mosaica-explorer.md) | The map and all its panels, in a ready-made layout. |
+| [`<mosaica-map>`](components/mosaica-map.md) | The interactive map on its own, without panels. |
+| [`<mosaica-store>`](components/mosaica-store.md) | Shares one store with the elements inside it. |
+| [`<mosaica-status>`](components/mosaica-status.md) | One line with the view's state and counts. |
+| [`<mosaica-count>`](components/mosaica-count.md) | A count, formatted as the other elements show it. |
+| [`<mosaica-layer-picker>`](components/mosaica-layer-picker.md) | Checkboxes for the annotation layers the map draws. |
+| [`<mosaica-view-picker>`](components/mosaica-view-picker.md) | A menu for switching views. |
+| [`<mosaica-key-picker>`](components/mosaica-key-picker.md) | Steps through the views in the current view's group. |
+| [`<mosaica-filter-panel>`](components/mosaica-filter-panel.md) | A field card per field, with the filters in force as chips. |
+| [`<mosaica-field-card>`](components/mosaica-field-card.md) | A chart of one field's values, for filtering and highlighting by them. |
+| [`<mosaica-filter>`](components/mosaica-filter.md) | A search box that filters by one column. |
+| [`<mosaica-cluster-filter>`](components/mosaica-cluster-filter.md) | A search box that filters by a layer's clusters. |
+| [`<mosaica-selection>`](components/mosaica-selection.md) | The counts and marks inside the selected region. |
+| [`<mosaica-item-card>`](components/mosaica-item-card.md) | The picked item's record, with Open and Copy id. |
+| [`<mosaica-artifact-card>`](components/mosaica-artifact-card.md) | An opened artifact, such as a cluster, with its parents, children and filters. |
+| [`<mosaica-hierarchy>`](components/mosaica-hierarchy.md) | A layer's tree of artifacts, browsed apart from the map. |
+| [`<mosaica-colour-editor>`](components/mosaica-colour-editor.md) | A dialog for choosing the colour of each value or cluster. |
 
 [Events](components/events.md) lists every event with its `detail`, and [Theme tokens](components/tokens.md) every CSS custom property with its defaults.
 

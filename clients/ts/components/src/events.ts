@@ -6,31 +6,31 @@ import type {PanelState} from './states.js';
 export type SelectionShapeDetail = Exclude<SelectionShape, {kind: 'artifact'}> | {kind: 'artifact'; id: string; outside?: boolean};
 
 /**
- * Every event the elements fire, by name, with its `detail`. Each bubbles and is composed, so a
- * host listens on any ancestor, including one outside `<mosaica-explorer>`. A `mosaica_id` crosses
- * as a decimal string, since it is a 64-bit integer.
+ * Every event the elements fire, by name, with the type of its `detail`. Each event bubbles and is
+ * composed, so you can listen on any ancestor, including one outside `<mosaica-explorer>`. A
+ * `mosaica_id` is sent as a decimal string, since it is a 64-bit integer.
  */
 export type MosaicaEventDetails = {
   /**
-   * The panel state moved from `from` to `to`; `from` is null on the first render. `refusal` is
-   * the store's `status.refusal`, whose `code`, `detail` and HTTP `status` say what went wrong
-   * where `to` is `refused`, `unanswered`, `busy` or `expired`, and is null otherwise.
+   * The panel state changed from `from` to `to`; `from` is null on the first render. If `to` is
+   * `refused`, `unanswered`, `busy` or `expired`, `refusal` says what went wrong; otherwise it is
+   * null.
    */
   'mosaica-statechange': {from: PanelState | null; to: PanelState; refusal: Refusal | null};
-  /** The session expired; `refusal` is the refusal that ended it, where one did. */
+  /** The session expired. `refusal` is the server's refusal that ended it, if there was one. */
   'mosaica-expired': {refusal: Refusal | null};
   /**
-   * The camera moved. `bbox` is `[x0, y0, x1, y1]` in the view's data coordinates, `zoom` the
-   * map's zoom (0 when the 512-unit world fills 512 pixels, one more per doubling), and `width` and
-   * `height` the canvas in CSS pixels.
+   * The camera moved. `bbox` is the area shown, `[x0, y0, x1, y1]` in the view's data coordinates.
+   * `zoom` is 0 when the 512-unit world is 512 pixels wide, and 1 more per doubling. `width` and
+   * `height` are the canvas size in CSS pixels.
    */
   'mosaica-viewchange': {bbox: [number, number, number, number]; zoom: number; width: number; height: number};
-  /** A point was clicked: `id` is its `mosaica_id`. The record follows in `mosaica-itemopen`. */
+  /** A point was clicked. `id` is its `mosaica_id`. Its record follows in `mosaica-itemopen`. */
   'mosaica-pick': {id: string};
   /**
-   * The selected item's record arrived, as `record`, for the item `id`, whether it was selected by
-   * a click or by `Store.pick`. Where the server refuses the record, this does not fire; the
-   * refusal is the store's `selection.itemRefusal`.
+   * The record of the selected item `id` arrived, whether it was selected by a click or by
+   * `Store.pick`. If the server refuses the record, this does not fire, and the refusal is in the
+   * store's `selection.itemRefusal`.
    */
   'mosaica-itemopen': {id: string; record: ItemDetail};
   /** A click on the map found no point and no artifact. */
@@ -38,18 +38,17 @@ export type MosaicaEventDetails = {
   /** The pointer is over the point `id`, at `x`, `y` in canvas pixels. */
   'mosaica-hover': {id: string; x: number; y: number};
   /**
-   * The artifact `id` was opened and its drill-down arrived, as `detail`, with `maskedCount` as a
+   * The artifact `id` was opened and its details arrived in `detail`, with `maskedCount` as a
    * decimal string.
    */
   'mosaica-artifactopen': {id: string; detail: Omit<ArtifactDetail, 'maskedCount'> & {maskedCount: string}};
-  /** Fit was asked for the artifact `id`. `<mosaica-explorer>` fits its map to it. */
+  /** Fit was pressed for the artifact `id`. `<mosaica-explorer>` fits its map to it. */
   'mosaica-artifactfit': {id: string};
   /**
-   * The selection changed. `shape` is the new shape in data coordinates, or null where the
-   * selection was cleared. `status` is `loading` as the shape is sent and `cleared` as it is
-   * dropped; once the server answers, it is the region's `shown` or `refused`, and `visible`,
-   * `matched`, `served` and `verdict` carry the region's counts and whether they are exact for the
-   * shape.
+   * The selected region changed. `shape` is the new shape in data coordinates, or null if the
+   * selection was cleared. It fires with `status` `loading` when a shape is selected, or `cleared`,
+   * and again with `shown` or `refused` when the server answers. Then `visible`, `matched` and
+   * `served` carry the region's counts, and `verdict` says whether they are exact for the shape.
    */
   'mosaica-selectchange': {
     shape: SelectionShapeDetail | null;
@@ -59,54 +58,47 @@ export type MosaicaEventDetails = {
     served?: Count;
     verdict?: RegionProjection['verdict'];
   };
-  /** The layers chosen are now `layers`; the store also draws the layers each depends on, which the list leaves out. */
+  /** The chosen layers are now `layers`. The map also draws the layers each depends on, which the list leaves out. */
   'mosaica-layerchange': {layers: string[]};
-  /** The points are now coloured by `colourBy`: a column, `cluster:<layer>`, or null for one colour. */
+  /** The points are now coloured by `colourBy`: a column, `cluster:<layer>`, or null for a single colour. */
   'mosaica-colourchange': {colourBy: string | null};
   /**
-   * The size choices changed in the explorer's Layers popover; the detail is all four as they now
-   * stand. `sizeBy` is the number column the points are sized by, or null for one size; `min` and
-   * `max` are the radii in pixels of its smallest and largest value, and `scale` how values are
-   * placed between them.
+   * A size setting changed in the explorer's Layers popover. The detail holds all four as they now
+   * stand: `sizeBy` is the number column that sizes the points, or null for a single size, `min`
+   * and `max` are the radii in pixels of its smallest and largest value, and `scale` is how values
+   * are placed between them.
    */
   'mosaica-sizechange': {sizeBy: string | null; min: number; max: number; scale: SizeScale};
   /** A field card's fold button folded it to one line (`folded` true) or opened it. */
   'mosaica-fold': {field: string; folded: boolean};
-  /** Most points was let go: the store now aims to draw `budget` marks on screen. */
+  /** The Most points slider was released. The store now aims to draw `budget` marks on screen. */
   'mosaica-budgetchange': {budget: number};
-  /** Most clusters was let go: a `nested` or `dag` layer is now cut to at most `budget` clusters. */
+  /** The Most clusters slider was released. A `nested` or `dag` layer is now cut to at most `budget` clusters. */
   'mosaica-clusterbudgetchange': {budget: number};
-  /** The level to colour and label at is now `level`; null is the level drawn by default. */
+  /** The level that clusters are coloured and labelled at is now `level`. Null is the default level. */
   'mosaica-levelchange': {level: number | null};
   /**
-   * Colours were chosen for values of the column `column`, in one action: one value's in a colour
-   * picker, the selected values' in Edit colours, or every value's by Reset to palette there. Each
-   * change names a value (a category key) and its colour as `#rrggbb`, or `null` where its chosen
-   * colour was reset so it takes its palette colour again. The map already draws them; a host that
-   * keeps the choices sets them back through the map's or the explorer's `valueColours`.
+   * The viewer chose or reset colours for values of the category column `column`, in a colour
+   * picker or in Edit colours. Each change names a category key and its new colour as `#rrggbb`, or
+   * `null` if it was reset to its palette colour. The map already draws the new colours. To restore
+   * them in a later session, save them and set the map's or explorer's `valueColours`.
    */
   'mosaica-valuecolour': {column: string; changes: {value: string; colour: string | null}[]};
   /**
-   * Colours were chosen for clusters of the layer `layer`, in one action, as for
-   * `mosaica-valuecolour`. Each change names a cluster by its `mosaica_id` and its colour as
-   * `#rrggbb`, or `null` where its chosen colour was reset so it takes its palette colour again.
-   * The map already draws them; a host that keeps the choices sets them back through the map's or
-   * the explorer's `clusterColours`.
+   * The viewer chose or reset colours for clusters of the layer `layer`. Each change names a cluster
+   * by its `mosaica_id` and its new colour as `#rrggbb`, or `null` if it was reset to its palette
+   * colour. The map already draws the new colours. To restore them in a later session, save them
+   * and set the map's or explorer's `clusterColours`.
    */
   'mosaica-clustercolour': {layer: string; changes: {mosaicaId: string; colour: string | null}[]};
-  /** The palette, the ramp, the ramp's scale or its direction was chosen in the explorer's Colour section; the detail is all four as they now stand. */
+  /** The palette, ramp, ramp scale or ramp direction was changed in the explorer's Colour section. The detail holds all four as they now stand. */
   'mosaica-palettechange': {palette: CategoryPaletteName; ramp: RampName; scale: RampScale; reverse: boolean};
-  /**
-   * A palette was chosen for a layer's clusters in the explorer's Colour section, and set on the
-   * store (`Store.setPalette`).
-   */
+  /** A palette was chosen for a layer's clusters in the explorer's Colour section and set on the store (`Store.setPalette`). */
   'mosaica-clusterpalettechange': {palette: PaletteName};
   /**
-   * A display setting was changed in the explorer's Layers popover; the detail is every setting as
-   * it now stands. `radius` and `pointOpacity` are null where the map sizes and fades the points by
-   * how many are drawn, and `densityColours` is null where the map chooses. `densityResolution` is
-   * the cell size chosen on the Resolution slider, in CSS pixels, and `densityScale` the scale
-   * density's colours follow, `linear` or `log`.
+   * A display setting changed in the explorer's Layers popover. The detail holds every setting as it
+   * now stands, named as the map's attributes are. `radius`, `pointOpacity` and `densityColours`
+   * are null while the map chooses them itself.
    */
   'mosaica-displaychange': {
     points: boolean;
@@ -119,41 +111,42 @@ export type MosaicaEventDetails = {
     densityScale: DensityScale;
   };
   /**
-   * A filter changed. `column` is the column whose control changed, or null for Clear all and for
-   * clearing the highlight. After an edit in a control or on a field card, `expr` is the expression
-   * the edited position now composes, null for none, and `verb` names that position (`filter` where
-   * absent). Where a chip was removed, `verb` is the position it was in and `expr` is null; after
-   * Clear all, `expr` is null, and after clearing the highlight `verb` is `highlight`.
+   * A filter or highlight changed. `column` is the column whose control changed, or null for Clear
+   * all and for clearing the highlight. `verb` is `filter` or `highlight` (`filter` if absent).
+   * After an edit, `expr` is the combined expression of every control's clause for that `verb`, or
+   * null if there are none. When a chip is removed, or Clear all is pressed, `expr` is null.
    */
   'mosaica-filterchange': {column: string | null; expr?: FilterExpr | null; verb?: ClauseVerb};
-  /** A column's chip was pressed under `chips-only`: its card is to be shown; `verb` is the chip's position. */
+  /** A column's chip was pressed in a filter panel with `chips-only`, so you can show its card. `verb` is `filter` or `highlight`. */
   'mosaica-chipopen': {column: string; verb: ClauseVerb};
   /**
-   * Open was pressed on the item `id`: `fields` is its record's fields. It fires whether Open calls
-   * the card's `open` or follows its `open-url`.
+   * Open was pressed on the item `id`, whose record's fields are `fields`. It fires both when Open
+   * calls the card's `open` and when it follows `open-url`.
    */
   'mosaica-open': {id: string; fields: Record<string, unknown>};
   /**
-   * The view changed from `from` to `to`. `sameFrame` is true where both views are quantised
-   * against one extent, so the camera keeps its place; otherwise the map refits.
+   * The view changed from `from` to `to`. `sameFrame` is true if both views share one extent, in
+   * which case the camera stays where it is; otherwise the map refits.
    */
   'mosaica-viewswitch': {from: string; to: string; sameFrame: boolean};
   /**
-   * Follow an item into the view `view`, where it sits at `x`, `y` in that view's data coordinates.
-   * `<mosaica-explorer>` switches to the view and centres the map there.
+   * A view chip on the item card asked to show the item in the view `view`, where it sits at `x`,
+   * `y` in that view's data coordinates. `<mosaica-explorer>` switches to the view and centres the
+   * map there.
    */
   'mosaica-viewfollow': {view: string; x: number; y: number};
   /**
-   * What the map says about its basemap changed. `refusal` is why the value given cannot be drawn
-   * under the view it was given for, shown over the map; `note` is why nothing is drawn under this
-   * view, shown in its corner. Each is `null` where there is none.
+   * The map's message about its basemap changed. `refusal` says why the `basemap` value cannot be
+   * drawn under its view, and is shown over the map. `note` says why nothing is drawn under the
+   * current view, and is shown in a corner. Each is null if there is none.
    */
   'mosaica-basemapchange': {refusal: string | null; note: string | null};
-  /** A card's close button was pressed: `what` says which card. */
+  /** A card's close button was pressed. `what` says which card. */
   'mosaica-close': {what: 'item' | 'artifact'};
   /**
-   * A `member_of` clause on the artifact `id` of layer `layer` was put on (`on` true) or taken off,
-   * in the position `verb`, selecting its members or, where `outside` is true, everything else.
+   * A `member_of` clause, which keeps the map to the members of the artifact `id` in layer `layer`,
+   * was added (`on` true) or removed. `verb` is `filter` or `highlight`, and `outside` is true if the
+   * clause keeps everything outside the artifact instead.
    */
   'mosaica-clausechange': {id: string; layer: string; outside: boolean; verb: ClauseVerb; on: boolean};
 };

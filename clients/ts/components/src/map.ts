@@ -106,37 +106,31 @@ const VIEW = new OrthographicView({id: 'ortho', flipY: true});
 let mapsMade = 0;
 
 /**
- * The map: the points, the density wash, the artifacts' outlines and labels, hover, pick and the
- * selection, drawn with deck.gl in an orthographic view. The refused, expired and empty states, and
- * a server that cannot be reached, did not answer or is too busy, are drawn over the canvas, so
- * none of them reads as an empty corpus. A refusal shows the server's reason under its words. The
- * toolbar switches between pan, box select and lasso select, and fits the camera to the items the
- * filters match; shift-drag in pan mode draws a box. A settled box or lasso becomes the store's
- * selection, a filter every count narrows to; a tag on its top-left corner gives the count matched
- * inside it and a button that clears it.
+ * Use `<mosaica-map>` when you lay out your own panels around the map. It draws the points of a
+ * view with deck.gl, with density, annotation layers and their labels, and handles hover, picking
+ * and region selection. `<mosaica-explorer>` wraps it in a default set of panels.
  *
- * The map owns the camera and tells the store where it is looking on every move. When it is given
- * a store, and when the store switches to a view with another extent, it opens framed on the items
- * the store's filters match, as the Fit button frames them ({@link MosaicaMap.fit}). It sends the
- * store no camera until then, so no points are fetched for a camera it is about to leave. A camera
- * the user or the host moves first is kept, and a later change of filter leaves the camera where
- * it is. Density is asked for once the camera has rested for 200 ms, as counts by cell over the
- * view and a margin round it, with coarser counts reaching further for a zoom out, and the last
- * counts are drawn at their own positions until the next land. Keys, with the map focused: the
- * arrow keys pan, `+` and `-` zoom, and Escape cancels a shape being drawn, else
- * clears the selected region, else drops the picked point or artifact and its ring. A click on
- * empty map drops them too; a selected region stays. A press hides
- * the hover tooltip until the pointer is released, and the point whose record is selected, which
- * its item card shows, has no tooltip. The canvas is one tab stop, after the toolbar
- * and before the content of the other corners: it carries `role="application"`, the `tabindex`
- * the host set on the map, else 0, and the host's `aria-label` where the host set one, else one
- * naming the keys. A `tabindex` the host sets moves to the canvas, leaving -1 on the map, so the
- * map is never a second stop. `focus()` focuses the canvas.
+ * The map owns the camera and tells its store where it is looking as the camera moves. When the
+ * map first gets a store, and when the view switches to one with a different extent, it frames the
+ * items the filters match, as {@link MosaicaMap.fit} does. It does not move a camera that the user
+ * or your code has already moved, and a change of filter never moves the camera.
  *
- * The host element is `display: block`; its height comes from `--mosaica-map-height`. A map that
- * is disconnected and not reconnected releases its GPU resources a quarter of a second later.
+ * The toolbar switches between pan, box select and lasso select, and has a button that fits the
+ * camera to the matching items. Shift-drag in pan mode also draws a box. A finished box or lasso
+ * becomes the store's selected region, which every count then narrows to, and a tag on its corner
+ * shows how many items match inside it. With the map focused, the arrow keys pan, `+` and `-` zoom,
+ * and Escape cancels a shape being drawn, else clears the region, else drops the picked item. A
+ * click on an empty part of the map also drops the picked item.
  *
- * @summary The map canvas.
+ * If the server refuses the view, the session expires, the view is empty, or the server cannot be
+ * reached or is too busy, the map says so over the canvas, with the server's reason for a refusal.
+ *
+ * The canvas is a single tab stop with `role="application"`. A `tabindex` or `aria-label` you set
+ * on the map is applied to the canvas, and `focus()` focuses it. The map's height comes from
+ * `--mosaica-map-height`. A map removed from the page releases its GPU resources a quarter of a
+ * second later unless it is put back.
+ *
+ * @summary The interactive map on its own, without panels.
  * @tagname mosaica-map
  * @category Elements
  * @slot top-left - Content in the top-left corner, below the toolbar when it is there.
@@ -152,7 +146,7 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-itemopen']>} mosaica-itemopen - The selected
  *   item's record arrived, however the item was selected.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click found no point
- *   and no artifact. The map has dropped the selection, as {@link MosaicaMap.clearPick} does.
+ *   and no artifact. The map has already dropped the picked item.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved onto
  *   or over a point.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An
@@ -163,31 +157,28 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - The
  *   `layers` attribute changed.
  * @csspart canvas - The deck.gl canvas's container.
- * @csspart overlay - The state drawn over the canvas when refused, expired or empty, when the
- *   server cannot be reached, when it did not answer, and when it is too busy. Where the
- *   viewer can see no item in the view at all, it says so in place of Nothing in view.
+ * @csspart overlay - The message over the canvas when the view is refused, expired or empty, or the
+ *   server cannot be reached, did not answer or is too busy. If the viewer may see no item in the
+ *   view at all, it says so instead of "Nothing in view".
  * @csspart state - The state line inside the overlay, with `data-state`, and `data-visible="none"`
- *   where the viewer can see no item in the view.
- * @csspart retry - The Retry button in the overlay, when the view was refused or the server did
- *   not answer or is too busy.
+ *   if the viewer may see no item in the view.
+ * @csspart retry - The Retry button in the overlay, after a refusal, no answer or a busy server.
  * @csspart refusal - The words "View refused", or "Server busy", inside the overlay, with
  *   `data-code` set to the refusal's code.
  * @csspart reason - The server's reason for a refusal, as it sent it, on a line under "View
  *   refused".
  * @csspart controls - The toolbar.
- * @csspart region-tag - The drawn region's tag on its top-left corner: how many items match inside
- *   it, or outside it for its complement, and a button that clears the selection.
+ * @csspart region-tag - The tag on the selected region's top-left corner, with how many items
+ *   match inside it (or outside it, for its complement) and a button that clears it.
  * @csspart tooltip - The hover tooltip.
- * @csspart density-key - The key to density's colours, items per cell from 0 to the largest count
- *   drawn with the count at the scale's midpoint, in the bottom-left corner while density is drawn
- *   in a ramp or without the points.
- * @csspart note - Why no basemap is drawn under this view, in the bottom-right corner: the value
- *   given does not fit it, or the basemap did not load.
+ * @csspart density-key - The key to density's colours in items per cell, in the bottom-left corner.
+ *   Shown while density is drawn in a colour ramp or without the points.
+ * @csspart note - Why no basemap is drawn under this view, in the bottom-right corner.
  * @csspart attribution - The tile server's credit, in the bottom-right corner while tiles are drawn.
  * @cssprop --mosaica-map-height - The map's height.
  * @cssprop --mosaica-map-bg - The canvas's background, behind the points and any basemap.
- * @cssprop --mosaica-map-inset-left - Extra space between the top-left corner's content and the
- *   map's left edge, for a panel floated over the map's left side. Defaults to 0.
+ * @cssprop --mosaica-map-inset-left - Extra space to the left of the top-left corner's content, to
+ *   clear a panel you float over the map's left side. Defaults to 0.
  */
 export class MosaicaMap extends MosaicaElement {
   static override styles = [
@@ -402,12 +393,12 @@ export class MosaicaMap extends MosaicaElement {
   protected override canBuildOwn = true;
 
   /**
-   * What the points are coloured by: a declared column that is rendered, `cluster:<layer>` for a
-   * layer that can colour, or `none` for one colour. Unset, the store's choice stands.
+   * What colours the points: a rendered column (one sent with the points), `cluster:<layer>` for a
+   * layer that can colour, or `none` for a single colour. Unset, the store's choice stands.
    */
   @property({attribute: 'colour-by'}) accessor colourBy = '';
   /**
-   * The annotation layers to draw, space- or comma-separated; each is drawn with the layers it
+   * The annotation layers to draw, separated by spaces or commas. Each also draws the layers it
    * depends on. Unset, the store's choice stands.
    */
   @property({
@@ -415,143 +406,121 @@ export class MosaicaMap extends MosaicaElement {
     converter: {fromAttribute: (v: string | null) => (v ? v.split(/[\s,]+/).filter(Boolean) : []), toAttribute: (v: string[]) => v.join(' ')}
   })
   accessor layers: string[] | null = null;
-  /** How many marks to aim for on screen. `0` leaves the store's budget, which starts at 250000. */
+  /** How many marks to aim for on screen. `0` keeps the store's budget, which starts at 250000. */
   @property({type: Number}) accessor budget = 0;
-  /** The fewest marks a control for `budget` offers. The map sets no budget from it. */
+  /** The lowest value a control for `budget` offers. The map itself does not use it. */
   @property({type: Number, attribute: 'budget-min'}) accessor budgetMin = 1_000;
-  /** The most marks a control for `budget` offers. The map sets no budget from it. */
+  /** The highest value a control for `budget` offers. The map itself does not use it. */
   @property({type: Number, attribute: 'budget-max'}) accessor budgetMax = 2_000_000;
   /**
-   * The most clusters a `nested` or `dag` layer is cut to (`Store.setClusterBudget`). `0` at first
-   * leaves the store's; `0` after a budget was set clears it, to the finest cut.
+   * The most clusters a `nested` or `dag` layer is cut to (`Store.setClusterBudget`). `0` keeps the
+   * store's setting; setting `0` after another value removes the limit, giving the finest cut.
    */
   @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 0;
   /**
-   * Columns shown beneath a hovered point's title, space- or comma-separated. The map asks the
-   * store for them with `setPointColumns`. Only a rendered column's value is in the marks; another
-   * shows nothing.
+   * The columns the hover tooltip shows under the point's title, separated by spaces or commas.
+   * Only rendered columns arrive with the points, so another column shows nothing.
    */
   @property({attribute: 'tooltip-fields'}) accessor tooltipFields = '';
   /**
-   * The field a hovered point is titled by, read from the marks where they carry it (the map asks
-   * the store for a rendered one with `setPointColumns`), else from the item's record once the
-   * pointer has rested on it for 140 ms. Unset, the title is the point's
-   * `mosaica_id`.
+   * The field that titles a point in the hover tooltip. A rendered column shows at once; any other
+   * field is read from the item's record once the pointer rests on the point. Unset, the title is
+   * the point's `mosaica_id`.
    */
   @property({attribute: 'title-field'}) accessor titleField = '';
   /** What a drag does: `pan` moves the camera, `box` draws a box selection and `lasso` a freehand one. */
   @property({reflect: true}) accessor mode: 'pan' | 'box' | 'lasso' = 'pan';
   /**
-   * The palette clusters are coloured from under colour by cluster: `okabe-ito`, `tableau10`,
-   * `tableau20` or `kelly`, set on the store (`Store.setPalette`). Each cluster's colour is the
-   * palette's colour at the slot the server gives it. Unset, the store's palette stands, which is
-   * Tableau 10 until one is chosen.
+   * The palette clusters are coloured from when the points are coloured by a layer: `okabe-ito`,
+   * `tableau10`, `tableau20` or `kelly`. It is set on the store (`Store.setPalette`). Unset, the
+   * store's palette stands, which starts as `tableau10`.
    */
   @property() accessor palette: PaletteName | '' = '';
   /**
-   * The level of a `stacked` or `tiered` layer to colour, name and outline clusters at. Unset, the
-   * layer's top (coarsest) level. A `nested` or `dag` layer draws the cut served.
+   * The level of a `stacked` or `tiered` layer at which clusters are coloured, labelled and
+   * outlined. Unset, the coarsest level. A `nested` or `dag` layer ignores it.
    */
   @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
   /**
-   * What is drawn under the points: `world` (the server's world outline: land, coastlines and
-   * country borders), `none`, `{tiles, attribution}` (a tile server's URL template, with `{z}`,
-   * `{x}` and `{y}`, and its credit, shown in the bottom-right corner), `{image, bounds}` (one
-   * image over `[x0, y0, x1, y1]` in the view's coordinates, degrees on a geographic view, or over
-   * the whole frame), a mapping from view id to one of those, or a deck.gl layer the host built in
-   * the map's 512-unit world. The attribute takes `world` and `none`. Unset, or for a view a
-   * mapping leaves out, `world` on a view with a map projection and nothing on one without.
-   *
-   * An object with a `tiles` or `image` key is one value, and takes only the keys its form names;
-   * any other object is a mapping. A mapping's keys are view ids as `meta.views` lists them, so a
-   * view named `tiles` or `image` cannot be named in one; a key that names no view this viewer may
-   * reach is ignored, and every value must be one of the forms.
-   *
-   * The world outline needs a projection and tiles need the view's `tileScheme`. A value that does
-   * not fit the view it was given on, or that a mapping names for a view, is refused over the map
-   * with what to write instead; one value that does not fit a view switched to later draws nothing
-   * there, and a note in the bottom-right corner says why. The points are drawn either way. The
-   * code that draws a basemap is loaded the first time one is drawn.
+   * What is drawn under the points. `world` is the server's outline of land, coastlines and country
+   * borders, and needs a view with a map projection. `{tiles, attribution}` is a tile server's URL
+   * template with `{z}`, `{x}` and `{y}` and the credit to show, and needs a view with a
+   * `tileScheme`. `{image, bounds}` is one image over `[x0, y0, x1, y1]` in the view's coordinates
+   * (degrees on a geographic view), or over the whole frame without `bounds`. You can also pass
+   * `none`, a deck.gl layer you built in the map's 512-unit world, or an object mapping view ids to
+   * any of these for a different basemap per view. The attribute takes only `world` and `none`.
+   * Unset, a view with a map projection gets `world` and any other view gets nothing. A value that
+   * does not fit the view is shown as an error over the map; one that stops fitting after a switch
+   * of view draws nothing, and a note says why. The points are drawn either way.
    */
   @property({hasChanged: basemapChanged}) accessor basemap: BasemapChoice | null = null;
   /**
-   * The ground the map draws on, `light` or `dark`, where it differs from the page's, such as a
-   * light basemap under a dark page. The labels and the density colours follow it, and the
-   * toolbar and panels follow the page. Unset, the scheme the elements render in: the one the
-   * host's `color-scheme` names, the system preference where it names both, and light where it
-   * names neither.
+   * Whether the map's background is `light` or `dark`, for when it differs from the page's, such as
+   * a light basemap on a dark page. Labels and density colours follow it; the toolbar and panels
+   * follow the page. Unset, it follows the page's `color-scheme`.
    */
   @property({reflect: true}) accessor ground: 'light' | 'dark' | '' = '';
   /** Hides the points. Density, outlines, labels and the selection are still drawn. */
   @property({type: Boolean, attribute: 'no-points', reflect: true}) accessor noPoints = false;
   /**
-   * A fixed point alpha from 0.1 to 1. Unset, points are more transparent the more of them are
-   * drawn, so a dense region reads as a density.
+   * A fixed point opacity from 0.1 to 1. Unset, points get more transparent the more of them are
+   * drawn.
    */
   @property({type: Number, attribute: 'point-opacity'}) accessor pointOpacity: number | null = null;
   /**
-   * How density is drawn under the points, from exact counts by cell (`POST /v1/aggregate`) and
-   * never from the points, which are a sample: `none`, `smooth` (a soft wash), `hex` (hexagons),
-   * `grid` (square cells) or `contours` (lines of equal density). It counts the highlighted items
-   * under a highlight, the matched items under a filter or selection, else the visible items.
+   * How density is drawn under the points: `none`, `smooth` (a soft wash), `hex` (hexagons),
+   * `grid` (square cells) or `contours` (lines of equal density). Density comes from exact counts
+   * by the server, not from the points drawn, which are a sample. It counts the highlighted items
+   * if there is a highlight, otherwise the items the filters and selection match.
    */
   @property({reflect: true}) accessor density: DensityMode = 'none';
   /**
-   * How large density's cells are on screen, in CSS pixels: 32, 24, 16, 12, 8, 6 or 4, and any
-   * other size is taken as the nearest of them. The cells asked for are those of the depth nearest
-   * that size at the current zoom. Where that depth's cells over the area asked for are more than
-   * the server's `selection.maxAggregateCells`, the finest size that fits is drawn instead;
-   * {@link MosaicaMap.densityStops} says which sizes fit.
+   * The size of density's cells on screen, in CSS pixels: 32, 24, 16, 12, 8, 6 or 4. Other values
+   * are rounded to the nearest of these. If the server's `selection.maxAggregateCells` does not
+   * allow that many cells, the finest size that fits is drawn; {@link MosaicaMap.densityStops} says
+   * which sizes fit.
    */
   @property({type: Number, attribute: 'density-resolution'}) accessor densityResolution = DEFAULT_DENSITY_CELL_PX;
   /**
    * The colours density is drawn in: `warm-grey`, `viridis`, `cividis`, `magma` or `greys`. Unset,
-   * the smooth wash under the points is warm grey and every other density is Viridis. While density
-   * is drawn in a ramp, or without the points, a key to the colours sits in the bottom-left corner.
+   * a `smooth` wash under the points is warm grey and anything else is `viridis`.
    */
   @property({attribute: 'density-colours'}) accessor densityColours: DensityColours | '' = '';
   /** How strongly density is drawn, from 0.1 to 1. */
   @property({type: Number, attribute: 'density-strength'}) accessor densityStrength = 1;
   /**
-   * How a cell's count is placed between no items and the largest count drawn, which picks its
-   * colour: `linear`, in proportion to the count, or `log`, in proportion to `log(1 + count)`,
-   * which spreads counts that span several orders of magnitude. Log is the default because counts
-   * are skewed on most maps, and under linear only the densest few cells stand out from the rest.
-   * The largest count is that of the densest cell in the area counted, which is the view and a
-   * margin around it; the contours take it among the cells they merge to, and a hexagon is
-   * coloured by the densest cell under it. Any other value is taken as `log`.
+   * How a cell's count maps to a colour, from zero to the densest cell in and around the view:
+   * `linear`, or `log` on `log(1 + count)`. `log` is the default because counts are skewed on most
+   * maps, and on a linear scale only the densest few cells stand out. Any other value is taken as
+   * `log`.
    */
   @property({attribute: 'density-scale'}) accessor densityScale: DensityScale = DEFAULT_DENSITY_SCALE;
   /**
-   * The palette a category column's values are coloured from: `tableau10`, `okabe-ito`, `set2` or
-   * `dark2`. Unset, the choice made in the explorer's Colour section stands, Tableau 10 until one
-   * is made.
+   * The palette for colouring by a category column: `tableau10`, `okabe-ito`, `set2` or `dark2`.
+   * Unset, the current choice stands, which starts as `tableau10`.
    */
   @property({attribute: 'category-palette'}) accessor categoryPalette: CategoryPaletteName | '' = '';
   /**
-   * The ramp a number column's values are coloured on: `viridis`, `cividis`, `magma`, `greys` or
-   * `red-blue`. Unset, the choice made in the explorer's Colour section stands, Viridis until one
-   * is made.
+   * The colour ramp for colouring by a number column: `viridis`, `cividis`, `magma`, `greys` or
+   * `red-blue`. Unset, the current choice stands, which starts as `viridis`.
    */
   @property() accessor ramp: RampName | '' = '';
-  /** How numbers are placed on the ramp, `linear` or `log`. Unset, the Colour section's choice stands. */
+  /** How numbers are placed on the ramp, `linear` or `log`. Unset, the current choice stands. */
   @property({attribute: 'ramp-scale'}) accessor rampScale: RampScale | '' = '';
   /** Runs the ramp from its high end to its low end. */
   @property({type: Boolean, attribute: 'ramp-reverse'}) accessor rampReverse = false;
   /**
-   * Colours for single category values, per column, per category key, as `#rrggbb`, such as
-   * `{field: {'cs.CV': '#f28e2b'}}`. Setting it replaces every value colour chosen before,
-   * including those chosen on a field card; a host restores a viewer's saved choices this way,
-   * having kept them from `mosaica-valuecolour`. Unset, the choices made on the cards stand.
+   * Colours for individual category values, by column and category key, as `#rrggbb`, such as
+   * `{field: {'cs.CV': '#f28e2b'}}`. Setting it replaces every value colour chosen before, including
+   * those chosen on a field card. Use it to restore choices you saved from `mosaica-valuecolour`.
    */
   @property({attribute: false}) accessor valueColours: Colouring['values'] | null = null;
   /**
-   * Colours for single clusters, per layer, per `mosaica_id` as a decimal string, as `#rrggbb`, such
-   * as `{topics: {'4021': '#f28e2b'}}`, set on the store in place of their palette colours
+   * Colours for individual clusters, by layer and `mosaica_id` (as a decimal string), as `#rrggbb`,
+   * such as `{topics: {'4021': '#f28e2b'}}`. They replace the palette colours
    * (`Store.setArtifactColours`). Setting it replaces every cluster colour chosen before, including
-   * those chosen on a field card or in Edit colours; a host restores a viewer's saved choices this
-   * way, having kept them from `mosaica-clustercolour`. An entry that is not a `mosaica_id` and a
-   * `#rrggbb` colour is skipped. Unset, the choices made on the cards stand.
+   * those chosen on a field card or in Edit colours. Use it to restore choices you saved from
+   * `mosaica-clustercolour`. Invalid entries are skipped.
    */
   @property({attribute: false}) accessor clusterColours: Record<string, Record<string, string>> | null = null;
   /**
@@ -563,38 +532,38 @@ export class MosaicaMap extends MosaicaElement {
    */
   @property({type: Boolean}) accessor measure = false;
   /**
-   * A fixed point radius in pixels. Unset, points are sized by how many are drawn and by the zoom.
-   * Under `size-by`, the size column sizes the points in its place.
+   * A fixed point radius in pixels. Unset, the radius depends on how many points are drawn and on
+   * the zoom. Ignored while `size-by` names a column.
    */
   @property({type: Number}) accessor radius: number | null = null;
   /**
-   * What the points are sized by: a declared number column that is rendered, or `none` for one
-   * size. Each point's value is placed between `size-min` and `size-max` on `size-scale`, against
-   * the range of the values drawn, or under rank a sample of them; a point with no value, NaN or an
-   * infinity draws as a ring, at `size-min` or 3 px, whichever is larger. The column arrives with
-   * the points, so choosing one sends no request. Unset, the store's choice stands.
+   * The rendered number column that sizes the points, or `none` for a single size. Each value is
+   * placed between `size-min` and `size-max` on `size-scale`, against the range of the values
+   * drawn. A point with no value, NaN or an infinity is drawn as a ring. Unset, the store's choice
+   * stands.
    */
   @property({attribute: 'size-by'}) accessor sizeBy = '';
   /**
-   * The radius in pixels of the smallest value under `size-by`. A value that is not a finite number
-   * above zero is ignored. Unset, the choice made in the explorer stands, 2 until one is made.
+   * The radius in pixels of the smallest value under `size-by`. It must be above zero. Unset, the
+   * current choice stands, which starts at 2.
    */
   @property({type: Number, attribute: 'size-min'}) accessor sizeMin: number | null = null;
   /**
-   * The radius in pixels of the largest value under `size-by`. A value that is not a finite number
-   * above zero is ignored. Unset, the choice made in the explorer stands, 9 until one is made.
+   * The radius in pixels of the largest value under `size-by`. It must be above zero. Unset, the
+   * current choice stands, which starts at 9.
    */
   @property({type: Number, attribute: 'size-max'}) accessor sizeMax: number | null = null;
   /**
    * How values are placed between the two sizes: `linear`, `log`, or `rank` among a sample of the
-   * values drawn. Unset, the choice made in the explorer stands, linear until one is made.
+   * values drawn. Unset, the current choice stands, which starts as `linear`.
    */
   @property({attribute: 'size-scale'}) accessor sizeScale: SizeScale | '' = '';
   /** Hides the toolbar. */
   @property({type: Boolean, attribute: 'no-controls'}) accessor noControls = false;
   /**
-   * Which corner the toolbar sits in: `top-left`, `top-right`, `bottom-left` or `bottom-right`. In
-   * a top corner the corner's slotted content is below the toolbar; in a bottom corner, above it.
+   * The corner the toolbar sits in: `top-left`, `top-right`, `bottom-left` or `bottom-right`.
+   * Content in the same corner's slot sits below the toolbar in a top corner, and above it in a
+   * bottom corner.
    */
   @property({attribute: 'controls-corner'}) accessor controlsCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' = 'top-left';
 
@@ -608,15 +577,15 @@ export class MosaicaMap extends MosaicaElement {
   @state() accessor dragPolygon: [number, number][] | null = null;
 
   /**
-   * What the last click found where it found no item: `{kind: 'miss'}`, or a broken pick, a fault
-   * in the layer, with its details. `null` after a hit. `<mosaica-item-card>`'s `pick` takes it.
+   * What the last click found if it found no item: `{kind: 'miss'}`, or `{kind: 'broken', ...}`
+   * with details of a fault in the layer. `null` after a hit. Pass it to `<mosaica-item-card>`'s
+   * `pick`.
    */
   lastPick: PickOutcome = null;
   /**
-   * What the last click picked and where: an item or an artifact, by `mosaicaId`, and the world
-   * position the card for it points at, the picked point's own or, for an artifact, where the click
-   * landed. `null` before a pick, after a miss and after a switch of view. `<mosaica-explorer>`
-   * places its callout from it through {@link MosaicaMap.screenOf}.
+   * What the last click picked, an item or an artifact, and where in world coordinates: the point's
+   * position, or where the click landed on an artifact. `null` before a pick, after a miss and after
+   * a switch of view. Pass `world` to {@link MosaicaMap.screenOf} to place a card beside it.
    */
   pickedAt: {kind: 'item' | 'artifact'; id: bigint; world: [number, number]} | null = null;
   /** The map's probe, one object mutated in place, for instruments and tests. @internal */
@@ -855,9 +824,8 @@ export class MosaicaMap extends MosaicaElement {
   }
 
   /**
-   * The resolution stops at the camera as it stands: each cell size, the depth it asks for, and
-   * whether that depth's cells over the area asked for fit the server's
-   * `selection.maxAggregateCells`. Every stop is enabled before `meta` has arrived.
+   * The density cell sizes `density-resolution` offers at the current camera, each with whether the
+   * server's `selection.maxAggregateCells` allows it. Every size is allowed before `meta` has loaded.
    */
   densityStops(): ResolutionStop[] {
     return this.densityCounter?.stops() ?? [];
@@ -1093,7 +1061,7 @@ export class MosaicaMap extends MosaicaElement {
     return {layer, layersOn: a.layers, coverage: a.coverage, servedIds: rows.map((x) => idString(x.mosaicaId)), sample, coloured};
   }
 
-  /** Dispose of the store this map built, as on every element, and release its GPU resources now. */
+  /** Dispose of the store this map built and release its GPU resources now. */
   override dispose(): void {
     this.densityCounter?.dispose();
     this.densityCounter = null;
@@ -1375,9 +1343,8 @@ export class MosaicaMap extends MosaicaElement {
   }
 
   /**
-   * Drop the selection: forget the last pick and the ring drawn round the picked point, and clear
-   * the store's selection, which closes the card it opened. A click on empty map and Escape call
-   * it. A selected region stays.
+   * Drop the picked item or artifact and the ring around it, and clear the store's selection, which
+   * closes its card. A click on an empty part of the map does the same. A selected region stays.
    */
   clearPick(): void {
     this.lastPick = null;
@@ -1575,14 +1542,14 @@ export class MosaicaMap extends MosaicaElement {
     return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, s?.get('legend').colourBy, this.clusterLevel ?? undefined);
   }
 
-  /** The ground the map draws on now: `ground` where it is set, else the page's colour scheme. */
+  /** Whether the map is drawn on a light or dark background now: `ground` if set, else the page's scheme. */
   get drawnGround(): 'light' | 'dark' {
     return this.scheme();
   }
 
   /**
-   * A world position in the map's pixels, from its top-left corner, under the camera as it stands.
-   * A position off the map falls outside `[0, width] × [0, height]`.
+   * Convert a world position to pixels from the map's top-left corner, under the current camera. A
+   * position off the map falls outside `[0, width] × [0, height]`.
    */
   screenOf(world: readonly [number, number]): [number, number] {
     // The orthographic camera, y down: world units scale by 2^zoom about the target at the centre.
@@ -1592,7 +1559,7 @@ export class MosaicaMap extends MosaicaElement {
     return [(world[0] - tx!) * scale + width / 2, (world[1] - ty!) * scale + height / 2];
   }
 
-  /** The camera's zoom: 0 when the 512-unit world fills 512 px, +1 per doubling. */
+  /** The camera's zoom: 0 when the 512-unit world is 512 pixels wide, and 1 more per doubling. */
   get zoom(): number {
     return this.viewState.zoom;
   }
@@ -1603,11 +1570,10 @@ export class MosaicaMap extends MosaicaElement {
   private frameOnConnect = false;
 
   /**
-   * Frame the items the store's filters and selected region match: the box {@link frameMatches}
-   * gives, which holds every one of them, fitted to 92% of the map along the side that limits it.
-   * Where nothing matches, or the server refuses the count, the whole extent is fitted instead.
-   * The camera moves once the count lands, unless it is moved before then. A map off the page
-   * frames once it is back on it. Resolves when the camera has moved or the framing was cancelled.
+   * Move the camera to frame every item the filters and selected region match, filling 92% of the
+   * map. If nothing matches, or the server refuses, it frames the whole extent. The camera moves
+   * when the server answers, unless it is moved first. Resolves when the camera has moved or
+   * the move was cancelled.
    */
   async fit(): Promise<void> {
     const s = this.resolvedStore;
@@ -1632,10 +1598,7 @@ export class MosaicaMap extends MosaicaElement {
     this.frameOnConnect = false;
   }
 
-  /**
-   * Centre the camera on a data coordinate at the current zoom. Returns false before `meta`, when
-   * there is no frame to convert against.
-   */
+  /** Centre the camera on a point in data coordinates, keeping the zoom. Returns false before `meta` has loaded. */
   lookAt(x: number, y: number): boolean {
     const q = this.resolvedStore?.frame();
     if (!q) return false;
@@ -1644,7 +1607,7 @@ export class MosaicaMap extends MosaicaElement {
     return true;
   }
 
-  /** Fit a served artifact's box into the map. Returns false where the store holds no box for it. */
+  /** Fit the camera to an artifact's bounding box. Returns false if the store has not been served that artifact. */
   fitTo(artifactId: bigint): boolean {
     const extent = this.resolvedStore?.extentOf(artifactId);
     if (!extent) return false;
@@ -1652,11 +1615,11 @@ export class MosaicaMap extends MosaicaElement {
   }
 
   /**
-   * Fit a box `[x0, y0, x1, y1]` in data coordinates, the space `mosaica-viewchange` reports, into
-   * the map. The camera keeps the canvas's aspect, so the box shown contains the one asked for,
-   * and the next `mosaica-viewchange` reports the box shown. `fill` is the share of the map the
-   * box takes along the side that limits it, 2^-0.3 (about 81%) unless given; at 1 a box
-   * `mosaica-viewchange` reported is fitted back to the same camera. Returns false before `meta`.
+   * Fit the camera to a box `[x0, y0, x1, y1]` in data coordinates, as `mosaica-viewchange`
+   * reports them. The canvas keeps its aspect ratio, so the area shown contains the box. `fill` is
+   * the share of the map the box fills along its tighter side, about 81% by default; pass `1` to
+   * restore a camera from a box `mosaica-viewchange` reported. Returns false before `meta` has
+   * loaded.
    */
   fitBbox(extent: [number, number, number, number], fill = 2 ** -0.3): boolean {
     const q = this.resolvedStore?.frame();

@@ -6,17 +6,18 @@ import {storeContext} from './context.js';
 import {attachContextRoot, defineOnce} from './define.js';
 
 /**
- * Provides one store, and so one view, to the panels and maps inside it, which find it by context.
- * An overview beside a detail is two of these. `<mosaica-explorer>` is its own provider and needs
- * none.
+ * Use `<mosaica-store>` to share one store among elements you lay out yourself, such as a map, a
+ * filter panel and an item card. The elements inside it find the store through context. For two
+ * maps of different views side by side, use two `<mosaica-store>` elements. `<mosaica-explorer>`
+ * provides its own store and does not need one.
  *
- * Takes a `store` property, or builds a store from `token` or an `authorise` property and
- * `viewer-url`, the page's own origin where unset, or from `viewer-url` alone for an open server. It renders its children and nothing else (`display: contents`).
+ * It uses the store in its `store` property, or builds one from `viewer-url` and `token` or
+ * `authorise`. It renders only its children (`display: contents`).
  *
- * @summary Provides one store to the elements inside it.
+ * @summary Shares one store with the elements inside it.
  * @tagname mosaica-store
  * @category Elements
- * @slot - The panels and maps that read the store.
+ * @slot - The elements that use the store.
  */
 export class MosaicaStore extends MosaicaElement {
   static override styles = css`

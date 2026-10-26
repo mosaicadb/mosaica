@@ -6,9 +6,9 @@ import type {SelectionShapeDetail, MosaicaEventDetails} from './events.js';
 import {storeContext} from './context.js';
 
 /**
- * Where an element's store came from: its `store` property, a `<mosaica-store>` or
- * `<mosaica-explorer>` above it (`context`), one it built itself from `viewer-url`, `token` or
- * `authorise` (`own`), or none (`detached`), in which case it renders its detached state.
+ * Where an element's store came from: `property` is its `store` property, `context` a
+ * `<mosaica-store>` or `<mosaica-explorer>` above it, and `own` a store it built from `viewer-url`,
+ * `token` or `authorise`. `detached` means it has none and shows its detached state.
  */
 export type StoreSource = 'property' | 'context' | 'own' | 'detached';
 
@@ -31,39 +31,29 @@ type OwnConfig = {viewerUrl: string; token: string; authorise: TokenSupplier | n
  * refetch the view. An own store lives until `dispose()` or until its attributes change.
  */
 export abstract class MosaicaElement extends LitElement {
-  /**
-   * The store to read, which outranks a store from context and the element's own. The element does
-   * not dispose a store it was given.
-   */
+  /** The store to use, ahead of one from context or one the element would build. The element never disposes it. */
   @property({attribute: false}) accessor store: Store | null = null;
   /**
-   * The viewer plane's base URL. Only `<mosaica-map>`, `<mosaica-explorer>` and `<mosaica-store>`
-   * read it, to build their own store where no `store` property or context supplies one. Each route
-   * is appended to it after any trailing slash is dropped, so a full URL such as
-   * `https://maps.example.org` and a path on the page's own server such as `/mosaica` both work.
-   * Unset, requests go to `/v1/...` on the page's own origin. Changing it builds a new store. With
-   * no `token`, a store built before `authorise` is set asks once with no token, and is replaced
-   * when `authorise` arrives.
+   * The base URL of the Mosaica viewer server, for the store the element builds: a full URL such as
+   * `https://maps.example.org`, or a path such as `/mosaica`. Unset, the page's own origin. Read only
+   * by the map, the explorer and `<mosaica-store>`. Changing it builds a new store.
    */
   @property({attribute: 'viewer-url'}) accessor viewerUrl = '';
   /**
-   * A viewer token for the store the element builds from `viewer-url`. Only the map, the explorer
-   * and `<mosaica-store>` read it. Without it or `authorise`, the store sends no token, which an
-   * open server (`serve.open`) serves. Changing it builds a new store.
+   * A viewer token for the store the element builds. Without `token` or `authorise`, only an open
+   * server (`serve.open`) answers. Read only by the map, the explorer and `<mosaica-store>`.
+   * Changing it builds a new store.
    */
   @property() accessor token = '';
   /**
-   * A token supplier, used in place of `token`, which the store calls to renew the token before it
-   * expires. Setting another function builds a new store, since a store serves one viewer (see
-   * `Store` in `@mosaicajs/client`), so a framework keeps the function stable across renders.
+   * A function that returns a viewer token, used instead of `token` and called again before the
+   * token expires. A different function builds a new store, so keep it stable across renders.
    */
   @property({attribute: false}) accessor authorise: TokenSupplier | null = null;
   /**
-   * The most artifacts one level of a drawn layer shows in one tile, for the store the element
-   * builds; at most `/v1/meta`'s `selection.max_artifacts_per_tile`. Only the map, the explorer
-   * and `<mosaica-store>` read it. Unset, the store asks for 50, or the server's maximum where
-   * that is smaller.
-   * Changing it builds a new store.
+   * The most artifacts one level of a layer shows per map tile, for the store the element builds.
+   * Unset, 50, or the server's `selection.max_artifacts_per_tile` if lower. Read only by the map,
+   * the explorer and `<mosaica-store>`. Changing it builds a new store.
    */
   @property({type: Number, attribute: 'artifacts-per-tile'}) accessor artifactsPerTile: number | null = null;
 
@@ -80,7 +70,7 @@ export abstract class MosaicaElement extends LitElement {
   private consumer: ContextConsumer<typeof storeContext, this> | null = null;
   private unsubscribe: (() => void) | null = null;
 
-  /** The store this element reads, from whichever source won; `null` while detached. */
+  /** The store this element is using, or `null` if it has none. */
   get activeStore(): Store | null {
     return this.resolvedStore;
   }
@@ -226,9 +216,8 @@ export abstract class MosaicaElement extends LitElement {
   }
 
   /**
-   * Dispose of the store this element built and detach from it. Disconnecting does not do this, so
-   * a host that removes an element for good calls it. A store handed in by property or context is
-   * left for its owner to dispose.
+   * Dispose of the store this element built. Removing the element from the page does not, so call
+   * this when you are done with the element. A store you passed in is left to you.
    */
   dispose(): void {
     const own = this.ownStore;

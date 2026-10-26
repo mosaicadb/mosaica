@@ -4,8 +4,8 @@ import {basemapLayers, basemapMisfit, type BasemapValue, type DensityCamera} fro
 import {basemapValueError, frameKey, isSingle, tileCover, withoutUndefined} from '@mosaicajs/deck/internal';
 
 /**
- * What `<mosaica-map>`'s `basemap` takes: one {@link BasemapValue} for every view, a mapping from
- * view id to one, or a deck.gl layer the host built, drawn as it is.
+ * The value of `<mosaica-map>`'s `basemap`: one {@link BasemapValue} for every view, an object
+ * mapping view ids to one each, or a deck.gl layer you built, which is drawn as it is.
  */
 export type BasemapChoice = BasemapValue | Readonly<Record<string, BasemapValue>> | Layer;
 

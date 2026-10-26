@@ -1,8 +1,9 @@
 /**
- * The `mosaica-*` custom elements. Importing the root entry defines every element. A host that
- * wants one element imports its subpath, such as `@mosaicajs/components/count`. The map, the
- * explorer, the field card, the filter panel and the colour editor import `@mosaicajs/deck`, which
- * depends on deck.gl; the other elements do not.
+ * The `mosaica-*` custom elements: the map, the panels that go around it, and `<mosaica-explorer>`,
+ * which lays them all out together. Import the package root to define every element, or a subpath
+ * such as `@mosaicajs/components/count` to define one. The map, the explorer, the field card, the
+ * filter panel and the colour editor import `@mosaicajs/deck`, which depends on deck.gl; the other
+ * elements do not.
  *
  * @module @mosaicajs/components
  */

@@ -1,19 +1,18 @@
 import {css} from 'lit';
 
 /**
- * The theme every element shares, as a Lit `CSSResult` a host element can add to its own `styles`.
- * Every colour and font, the corner radii and the shadow are `--mosaica-*` custom properties, as
- * are the map's height and the spacing of the map's corners; other spacing is fixed. The elements
- * do not declare those names: each reads a private twin that falls back to the default, so a value
- * set on the element or on any ancestor, including an enclosing `<mosaica-explorer>`, wins, and the
- * default applies where nothing is set. Each colour's default is a light and a dark value, chosen
- * by the `color-scheme` the element inherits from the page.
+ * The theme every element shares, as a Lit `CSSResult`. Add it to your own Lit element's `styles`
+ * to use the same tokens. The elements take every colour and font, the corner radii, the shadow,
+ * the map's height and the spacing of the map's corners from these `--mosaica-*` custom
+ * properties; other spacing is fixed. Set a token on an element or any ancestor, including an
+ * enclosing `<mosaica-explorer>`, to override its default. Each colour has a light and a dark
+ * default, chosen by the page's `color-scheme`.
  *
- * The interface is neutral so that colour on screen belongs to the data. The map's data palette is
- * not a token: it encodes data, and it is the map's `palette` property.
+ * The colours the map uses for data are not tokens. Set them with the map's `palette`,
+ * `category-palette` and `ramp`.
  *
- * The default font is Instrument Sans where the page has loaded it; the elements fetch no font
- * themselves, so a page that wants it links it.
+ * The default font is Instrument Sans if the page has loaded it. The elements fetch no fonts, so
+ * link it from your page if you want it.
  *
  * @cssprop --mosaica-surface - The background of panels, cards, inputs and buttons.
  * @cssprop --mosaica-surface-2 - The background of a chip, a hovered row and a chosen row.
@@ -50,8 +49,8 @@ import {css} from 'lit';
  * @cssprop --mosaica-font-mono - The font family of identifiers.
  * @cssprop --mosaica-shadow - The shadow under anything that floats over the map: the status
  *   strip, the map toolbar, the map tooltip, cards and popovers.
- * @cssprop --mosaica-space - The gap between the map's corner content and the map's edges; half of
- *   it separates items in one corner.
+ * @cssprop --mosaica-space - The gap between the content in the map's corners and the map's edges.
+ *   Half of it separates items in one corner.
  * @cssprop --mosaica-density - A multiplier on `--mosaica-space`'s default.
  * @cssprop --mosaica-map-height - The map's height.
  */

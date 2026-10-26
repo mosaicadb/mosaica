@@ -116,70 +116,40 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
 ];
 
 /**
- * The map with its status strip, toolbar, field cards, display settings, layers, selection and item
- * card, laid out together. It builds its own store from `token` or an `authorise` property and
- * `viewer-url`, the page's own origin where unset, or from `viewer-url` alone for an open server,
- * or takes a `store` property, and provides it by
- * context to everything inside it, including elements a host puts in its slots.
+ * Use `<mosaica-explorer>` to put a complete map application on a page with one element. It holds
+ * a `<mosaica-map>` with a heading, the filter panel, a Layers popover, the status strip, and cards
+ * for the picked item or cluster and the selected region. To change one region, put your own
+ * element in its slot; for a different arrangement, lay out the separate elements yourself.
  *
- * The heading names what is shown: `dataset-title` where the host sets one, with the view's name
- * under it, else the view's name alone. A view's name that is only its id is left out. With
- * several views the view's name is the view choice.
+ * The explorer builds its own store from `viewer-url` and `token` or `authorise`, or uses the one
+ * in its `store` property. It provides that store to every element inside it, including the
+ * elements you put in its slots.
  *
- * The left holds the heading and the filter panel (`<mosaica-filter-panel>`): what the cards count,
- * In view or Highlighted beside All matching, the clauses applied as chips with Clear all, one
- * `<mosaica-field-card>` per field, and Add field. `layout="docked"` puts them in a sidebar left of
- * the map; `layout="overlay"` puts them in a card over the map's top-left, which scrolls inside
- * itself when tall. The map's tools sit at the top-left of the map, right of the card in the
- * overlay layout, with a Layers button beneath them. The status strip sits in the map's
- * bottom-right.
+ * `layout="docked"` puts the heading and the filter panel in a sidebar to the left of the map, and
+ * `layout="overlay"` puts them in a card over the map's top-left corner. The heading shows
+ * `dataset-title` if you set one, with the view's name below it. With several views, the view's
+ * name is a menu for switching between them.
  *
- * Picking a point opens its item card beside the point, joined to it by a short leader: on the side
- * with most room, clear of the cards over the map, the map's tools and the Layers button, following
- * the point as the map pans and zooms, hidden while the point is off the map, and clear of the
- * other cards beside points. Where no side beside the point is clear, the card goes to the clear
- * place nearest it. The card shows the headline, the `subtitle-field` field, the `card-fields`
- * fields (else the first three), "Show all N fields", and Open where `open-url` or `open` says what
- * it does. Show all grows the card as far as the map's height and the same things allow; past that
- * the card scrolls. Picking another point replaces it unless Pin was pressed, which keeps it open;
- * Close or Escape closes it and drops the selection, and a click on the map that finds nothing does
- * the same for the card that is not pinned. Tab from the map goes to the card, which is named by
- * its item's title and gives focus back to the map as it closes. A picked cluster's card behaves
- * the same way. While a region is selected its card stands in the map's top-right corner, and where
- * the map holds no position for the selection, as after following an item into another view, the
- * item's card goes there too.
+ * Picking a point opens its item card beside the point, joined to it by a short line on whichever
+ * side has room, and the card follows the point as the map moves. Picking another point replaces
+ * the card unless Pin was pressed. Close closes it, and so do Escape and a click on an empty part
+ * of the map unless it is pinned.
+ * A picked cluster's card works the same way. While a region is selected, its card sits in the
+ * map's top-right corner.
  *
- * The Layers button opens a popover in four sections. Points: whether the points are drawn; Most
- * points, a slider from `budget-min` to `budget-max` on a log scale that sets the store's budget
- * when it is let go (`Store.setBudget`); while a `nested` or `dag` layer is drawn, Most clusters,
- * a slider from `cluster-budget-min` to `cluster-budget-max` on a log scale that sets the most
- * clusters such a layer is cut to when it is let go (`Store.setClusterBudget`); what sizes the
- * points; and their opacity. Size by lists
- * None and the number columns the points arrive with. Under None one Size slider sets every
- * point's radius, which `hide-size` leaves out; under a column two sliders set the radii of its
- * smallest and largest value, and a Linear, Log or Rank choice places values between them. Colour:
- * Colour by, which lists None, every layer that can colour (a levelled layer once per level) and
- * the rendered category and number columns; then for a layer or a category the palette, and for a
- * number the ramp, Linear or Log and Reverse, unless `hide-palettes` is set. A layer's palette is
- * the store's (`Store.setPalette`), whose size the clusters' slots are served for. While the
- * points are coloured by a category or a layer, Edit colours opens `<mosaica-colour-editor>` over
- * the page, listing the values or the clusters drawn (at the level coloured, on a levelled layer)
- * with their colours to choose and reset, in an order that holds through a pan or a filter. A field card's paint button chooses Colour by too. Density: how density is drawn, at what resolution, in which
- * colours and how strongly. Layers: the layer picker. The display settings are the explorer's properties of
- * the same names, passed to its map. `pinned-filters` names the columns whose cards are listed
- * before they hold a clause.
+ * The Layers button opens a popover with four sections. Points sets whether points are drawn, how
+ * many to draw (Most points), what sizes them and their opacity; while a `nested` or `dag` layer is
+ * drawn it also has Most clusters. Colour sets what colours the points and the palette or ramp, and
+ * its Edit colours button opens `<mosaica-colour-editor>` to colour individual values or clusters.
+ * Density sets how density is drawn, and Layers holds the layer picker. Each of these settings is
+ * also an attribute of the explorer, passed to its map.
  *
- * In a container narrower than 1000 px, either layout takes the overlay's form with a narrower card
- * of 264 px, every field card folded to one line until one is opened, and opening one folds the
- * one open before; the tools move to the bottom-left and the strip shortens its figures. In a
- * container 720 px wide or narrower, the heading sits in a bar above the map, the status strip
- * runs full width above a tab bar (Fields, Layers, Item), and each tab opens its panel as a sheet:
- * the filter panel, folded as in the compact form; the Layers popover's sections; and the item
- * card. The cards over the map are not drawn there.
+ * The explorer adapts to the width of its container. Below 1000 px it takes the overlay layout with
+ * a narrower card, folds each field card to one line until it is opened, and moves the map's tools
+ * to the bottom-left. At 720 px or less, the heading moves to a bar above the map and the panels
+ * open as sheets from a tab bar of Fields, Layers and Item.
  *
- * Every event its elements fire bubbles out of it, since each is composed.
- *
- * @summary The map and every panel, in a default layout.
+ * @summary The map and all its panels, in a ready-made layout.
  * @tagname mosaica-explorer
  * @category Elements
  * @slot toolbar - Replaces the view picker and the key picker.
@@ -194,7 +164,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-pick']>} mosaica-pick - A point was clicked.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-itemopen']>} mosaica-itemopen - The selected item's record arrived.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-basemapchange']>} mosaica-basemapchange - The map's basemap refusal or note changed.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click on the map found nothing; the explorer closes the card that is not pinned and drops the selection.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-miss']>} mosaica-miss - A click on the map found nothing. The explorer closes the unpinned card.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-hover']>} mosaica-hover - The pointer moved over a point.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactopen']>} mosaica-artifactopen - An artifact was opened and its drill-down arrived.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - A selection was drawn, changed or cleared, or its counts arrived.
@@ -216,7 +186,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A `member_of` clause was put on or taken off.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactfit']>} mosaica-artifactfit - Fit was pressed on the artifact card; the explorer fits its map to the artifact.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-open']>} mosaica-open - Open was pressed on the item card.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-close']>} mosaica-close - A card's close button was pressed; the explorer closes the card and drops the selection it shows.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-close']>} mosaica-close - A card's close button was pressed. The explorer closes the card and clears its selection.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewswitch']>} mosaica-viewswitch - The view changed through the view or key picker.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewfollow']>} mosaica-viewfollow - A view chip on the item card was pressed; the explorer switches to that view and centres on the item.
  * @csspart frame - The explorer's grid.
@@ -261,8 +231,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart colour-option - An entry in the Colour by menu, with `data-value` (empty for None,
  *   `cluster:<layer>@<level>` for one level of a levelled layer) and `aria-checked`.
  * @csspart palette - The Palette button, while the points are coloured by a layer or a category.
- * @csspart palette-menu - The Palette menu, while it is open: a row per palette, each a strip of its
- *   colours, its name and a line saying how many it has.
+ * @csspart palette-menu - The Palette menu, while it is open.
  * @csspart palette-option - A palette in that menu, with `data-value` and `aria-checked`.
  * @csspart edit-colours - The Edit colours button, enabled while the points are coloured by a
  *   category or a layer.
@@ -274,16 +243,15 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart ramp-reverse - The Reverse button, with `aria-pressed`.
  * @csspart density-mode - The Density choice: None, Smooth, Hex, Grid and Lines, each with
  *   `data-mode` and `aria-checked`.
- * @csspart density-resolution - The Resolution slider, while density is drawn: the cell size on
- *   screen, coarse to fine. Its stops past the finest the server will count for the view are shown
- *   struck through, and the slider stops at the last one it can count.
+ * @csspart density-resolution - The Resolution slider for density's cell size, while density is
+ *   drawn. Sizes finer than the server allows for the view are struck through.
  * @csspart density-scale - The Linear and Log choice of density's colour scale, while density is
  *   drawn, each with `data-scale` and `aria-checked`.
  * @csspart density-colours - The button that opens the list of density colours, while density is
  *   drawn in colours.
  * @csspart density-strength - The Strength slider, while density is drawn.
- * @csspart detail - The item or artifact card in the map's top-right corner, where the map holds no
- *   position for the selection.
+ * @csspart detail - The item or artifact card in the map's top-right corner, used when the picked
+ *   item has no position on the map, such as after switching views.
  * @csspart sheet - The open sheet, in the narrow layout.
  * @csspart strip-row - The full-width status strip, in the narrow layout.
  * @csspart tabs - The tab bar, in the narrow layout.
@@ -760,110 +728,107 @@ export class MosaicaExplorer extends MosaicaElement {
 
   protected override canBuildOwn = true;
   /**
-   * `docked`, the map beside a sidebar, or `overlay`, the map full-bleed under a card holding the
-   * same panels.
+   * `docked` puts the panels in a sidebar beside the map. `overlay` makes the map fill the element
+   * and puts the panels in a card over it.
    */
   @property({reflect: true}) accessor layout: 'docked' | 'overlay' = 'docked';
   /**
-   * Which regions appear, space- or comma-separated, from `toolbar` (the heading), `legend` (the
-   * Layers button and its popover), `filters` (the filter panel), `selection` and `detail` (the
-   * item and artifact cards). Defaults to all five. Any other name, such as `hierarchy`, shows
-   * nothing.
+   * The regions to show, separated by spaces or commas: `toolbar` (the heading), `legend` (the
+   * Layers button and popover), `filters` (the filter panel), `selection` (the selected region's
+   * card) and `detail` (the item and artifact cards). Defaults to all five. Other names are ignored.
    */
   @property() accessor panels: string = ALL_PANELS.join(' ');
-  /** Passed to the map's `colour-by`. */
+  /** What colours the points, as for `<mosaica-map>`'s `colour-by`. */
   @property({attribute: 'colour-by'}) accessor colourBy = '';
-  /** Passed to the map's `layers`. */
+  /** The annotation layers to draw, as for `<mosaica-map>`'s `layers`. */
   @property() accessor layers = '';
-  /** Passed to the map's `tooltip-fields`. */
+  /** The columns the hover tooltip shows, as for `<mosaica-map>`'s `tooltip-fields`. */
   @property({attribute: 'tooltip-fields'}) accessor tooltipFields = '';
-  /** The field that titles a point, in the map's tooltip and the item card's headline. Unset, the title is the `mosaica_id`. */
+  /** The field that titles a point in the hover tooltip and the item card. Unset, the title is the `mosaica_id`. */
   @property({attribute: 'title-field'}) accessor titleField = '';
-  /** The field the item card shows under its headline. Unset, it shows none. */
+  /** The field the item card shows under its title. Unset, there is no subtitle. */
   @property({attribute: 'subtitle-field'}) accessor subtitleField = '';
-  /** Passed to the item card's `card-fields`: the fields it shows before "Show all", in this order. Unset, the first three. */
+  /** The fields the item card shows before "Show all", in order, as for `<mosaica-item-card>`. Unset, the first three. */
   @property({attribute: 'card-fields'}) accessor cardFields = '';
-  /** Passed to the item card's `open-url`: the address Open goes to, filled from the item's fields. Unset, and without `open`, there is no Open. */
+  /** The link template for the item card's Open button, as for `<mosaica-item-card>`. Without it or `open`, there is no Open button. */
   @property({attribute: 'open-url'}) accessor openUrl = '';
-  /** Passed to the item card's `open`: called when Open is pressed. Set, it wins over `open-url`. */
+  /** A function the item card calls when Open is pressed, as for `<mosaica-item-card>`. Takes precedence over `open-url`. */
   @property({attribute: false}) accessor open: MosaicaItemCard['open'] = null;
   /**
-   * How many marks to aim for on screen, passed to the map's `budget`. `0`, the default, leaves the
-   * store's own, which starts at 250000. Most points in the Layers popover sets the store's budget
-   * itself.
+   * How many marks to aim for on screen. `0` keeps the store's budget, which starts at 250000. Most
+   * points in the Layers popover changes the store's budget directly.
    */
   @property({type: Number}) accessor budget = 0;
-  /** The fewest marks Most points offers, passed to the map's `budget-min`. */
+  /** The lowest value of the Most points slider. */
   @property({type: Number, attribute: 'budget-min'}) accessor budgetMin = 1_000;
-  /** The most marks Most points offers, passed to the map's `budget-max`. */
+  /** The highest value of the Most points slider. */
   @property({type: Number, attribute: 'budget-max'}) accessor budgetMax = 2_000_000;
   /**
-   * The most clusters a `nested` or `dag` layer is cut to, passed to the map's `cluster-budget`;
-   * `0` is the finest cut. Most clusters in the Layers popover sets the store's itself.
+   * The most clusters a `nested` or `dag` layer is cut to; `0` removes the limit. Most clusters in
+   * the Layers popover changes it.
    */
   @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 1_000;
-  /** The fewest clusters Most clusters offers. */
+  /** The lowest value of the Most clusters slider. */
   @property({type: Number, attribute: 'cluster-budget-min'}) accessor clusterBudgetMin = 10;
-  /** The most clusters Most clusters offers. */
+  /** The highest value of the Most clusters slider. */
   @property({type: Number, attribute: 'cluster-budget-max'}) accessor clusterBudgetMax = 10_000;
   /**
-   * Passed to the map's `basemap`: `world`, `none`, `{tiles, attribution}`, `{image, bounds}`, a
-   * mapping from view id (as `meta.views` lists it, and not `tiles` or `image`) to one of those, or
-   * a deck.gl layer. The attribute takes `world` and `none`. Unset, the world outline under a view
-   * with a map projection and nothing under one without.
+   * What is drawn under the points, as for `<mosaica-map>`'s `basemap`. The attribute takes `world`
+   * and `none`. Unset, a view with a map projection gets the world outline and any other view gets
+   * nothing.
    */
   @property({hasChanged: basemapChanged}) accessor basemap: BasemapChoice | null = null;
-  /** Passed to the map's `no-points`; the Points switch in the Layers popover changes it. */
+  /** Hides the points. The Points switch in the Layers popover changes it. */
   @property({type: Boolean, attribute: 'no-points'}) accessor noPoints = false;
-  /** Passed to the map's `radius`; the Size slider in the Layers popover changes it. */
+  /** A fixed point radius in pixels, as for `<mosaica-map>`. The Size slider in the Layers popover changes it. */
   @property({type: Number}) accessor radius: number | null = null;
-  /** Passed to the map's `size-by`; the Size by choice in the Layers popover changes it. */
+  /** The number column that sizes the points, as for `<mosaica-map>`. Size by in the Layers popover changes it. */
   @property({attribute: 'size-by'}) accessor sizeBy = '';
-  /** Passed to the map's `size-min`; the smallest-size slider in the Layers popover changes it. */
+  /** The radius of the smallest value under `size-by`. A slider in the Layers popover changes it. */
   @property({type: Number, attribute: 'size-min'}) accessor sizeMin: number | null = null;
-  /** Passed to the map's `size-max`; the largest-size slider in the Layers popover changes it. */
+  /** The radius of the largest value under `size-by`. A slider in the Layers popover changes it. */
   @property({type: Number, attribute: 'size-max'}) accessor sizeMax: number | null = null;
-  /** Passed to the map's `size-scale`; the Scale choice in the Layers popover changes it. */
+  /** How values are placed between the two sizes, as for `<mosaica-map>`. The Scale choice in the Layers popover changes it. */
   @property({attribute: 'size-scale'}) accessor sizeScale: SizeScale | '' = '';
-  /** Leaves the Size slider out of the Layers popover, for a host that sets `radius` itself. */
+  /** Leaves the Size slider out of the Layers popover, for when you set `radius` yourself. */
   @property({type: Boolean, attribute: 'hide-size'}) accessor hideSize = false;
-  /** Passed to the map's `point-opacity`; the Opacity slider in the Layers popover changes it. */
+  /** A fixed point opacity from 0.1 to 1. The Opacity slider in the Layers popover changes it. */
   @property({type: Number, attribute: 'point-opacity'}) accessor pointOpacity: number | null = null;
-  /** Passed to the map's `density`; the Density choice in the Layers popover changes it. */
+  /** How density is drawn, as for `<mosaica-map>`. The Density choice in the Layers popover changes it. */
   @property() accessor density: DensityMode = 'none';
-  /** Passed to the map's `density-colours`; the Colours choice in the Layers popover changes it. */
+  /** The colours density is drawn in, as for `<mosaica-map>`. The Colours choice in the Layers popover changes it. */
   @property({attribute: 'density-colours'}) accessor densityColours: DensityColours | '' = '';
-  /** Passed to the map's `density-strength`; the Strength slider in the Layers popover changes it. */
+  /** How strongly density is drawn, from 0.1 to 1. The Strength slider in the Layers popover changes it. */
   @property({type: Number, attribute: 'density-strength'}) accessor densityStrength = 1;
   /**
-   * Passed to the map's `density-resolution`, the cell size on screen in CSS pixels; the Resolution
+   * The size of density's cells on screen, in CSS pixels, as for `<mosaica-map>`. The Resolution
    * slider in the Layers popover changes it.
    */
   @property({type: Number, attribute: 'density-resolution'}) accessor densityResolution = DEFAULT_DENSITY_CELL_PX;
-  /** Passed to the map's `density-scale`; the Scale choice under Resolution in the Layers popover changes it. */
+  /** `linear` or `log` colouring of density counts. The Scale choice under Resolution in the Layers popover changes it. */
   @property({attribute: 'density-scale'}) accessor densityScale: DensityScale = DEFAULT_DENSITY_SCALE;
   /**
-   * Passed to the map's `palette`, the palette a layer's clusters are coloured from; the Palette
-   * choice in the Colour section changes it while the points are coloured by a layer.
+   * The palette clusters are coloured from, as for `<mosaica-map>`. The Palette choice in the Colour
+   * section changes it while the points are coloured by a layer.
    */
   @property() accessor palette: PaletteName | '' = '';
-  /** Passed to the map's `category-palette`. */
+  /** The palette for colouring by a category column, as for `<mosaica-map>`. */
   @property({attribute: 'category-palette'}) accessor categoryPalette: CategoryPaletteName | '' = '';
-  /** Passed to the map's `ramp`. */
+  /** The colour ramp for colouring by a number column, as for `<mosaica-map>`. */
   @property() accessor ramp: RampName | '' = '';
-  /** Passed to the map's `ramp-scale`. */
+  /** How numbers are placed on the ramp, `linear` or `log`. */
   @property({attribute: 'ramp-scale'}) accessor rampScale: RampScale | '' = '';
-  /** Passed to the map's `ramp-reverse`. */
+  /** Runs the ramp from its high end to its low end. */
   @property({type: Boolean, attribute: 'ramp-reverse'}) accessor rampReverse = false;
-  /** Passed to the map's `valueColours`. */
+  /** Colours for individual category values, as for `<mosaica-map>`'s `valueColours`. */
   @property({attribute: false}) accessor valueColours: Colouring['values'] | null = null;
-  /** Passed to the map's `clusterColours`. */
+  /** Colours for individual clusters, as for `<mosaica-map>`'s `clusterColours`. */
   @property({attribute: false}) accessor clusterColours: Record<string, Record<string, string>> | null = null;
-  /** The dataset's title, which heads the explorer above the view's name. Unset, the view's name is the heading. */
+  /** The dataset's title, shown as the heading above the view's name. Unset, the view's name is the heading. */
   @property({attribute: 'dataset-title'}) accessor datasetTitle = '';
-  /** Passed to the filter panel's `pinned`: the columns whose cards are listed before they hold a clause. */
+  /** Columns whose field cards always show, even when they hold no filter, as for `<mosaica-filter-panel>`'s `pinned`. */
   @property({attribute: 'pinned-filters'}) accessor pinnedFilters = '';
-  /** Leaves the palette and ramp choices out of the Colour section, for a host that sets them. */
+  /** Leaves the palette and ramp choices out of the Colour section, for when you set them yourself. */
   @property({type: Boolean, attribute: 'hide-palettes'}) accessor hidePalettes = false;
   /** The menu open beside the Layers popover. @internal */
   @state() accessor menu: Menu | null = null;
@@ -990,7 +955,7 @@ export class MosaicaExplorer extends MosaicaElement {
     super.dispose();
   }
 
-  /** The `<mosaica-map>` the explorer renders, for a host that calls `fit`, `fitTo` or `select`. */
+  /** The explorer's `<mosaica-map>`, for calling its methods such as `fit`, `fitTo` or `select`. */
   get map(): MosaicaMap | null {
     return this.renderRoot?.querySelector<MosaicaMap>('mosaica-map') ?? null;
   }

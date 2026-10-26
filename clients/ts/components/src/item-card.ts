@@ -10,37 +10,27 @@ import {reasonOf, refusedState, renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /**
- * The selected item's record: a headline, the views it is in, its fields as a label and value
- * grid, its group-scoped values, then Open and Copy id. Fields are listed by name in
- * declaration order, then any the schema does not declare; a field the record has no value for is
- * left out. A declared field is captioned in words (`published_at` as "Published at"). A category
- * field shows its value's title where the vocabulary has one, else its key; the titles are asked
- * of the store (`Store.titleOf`), and an answer is shown only while the store's `meta` is the one
- * it was asked under. A timestamp shows in full, as `14 March 2024, 12:00 UTC`.
- * The close button appears only while the card shows something: an item, a refusal or a click's
- * result.
+ * Use `<mosaica-item-card>` to show the record of the item the viewer picked on the map. It shows
+ * the store's selected item (`Store.pick`), or the `item` you set: the item's fields as labels and
+ * values, the views it appears in and its group-scoped values, with Open and Copy id buttons.
  *
- * The headline is the field `title-field` names, else the item's `mosaica_id`. Each field has a
- * slot, `field-<name>`, so a host can render one as a link. The item is the store's selection
- * (`Store.pick`), or the `item` property.
+ * The headline is the `title-field` field, or the `mosaica_id` if that is unset or empty. Fields
+ * follow in the order the schema declares them, then any it does not declare, and fields with no
+ * value are left out. A category value shows its title if its vocabulary has one, and a timestamp
+ * shows in full, as `14 March 2024, 12:00 UTC`. To render a field your own way, such as a link, put
+ * an element in its `field-<name>` slot.
  *
- * `compact` shows less: the headline, cut at three lines, the field `subtitle-field` names under
- * it, cut at two, the fields `card-fields` names (else the first three others), then "Show all N
- * fields" beside Open. Show all lists every field, the views and the group-scoped values, and the
- * card grows to hold them; a container that sets the card a height, such as the explorer's card
- * beside a point, scrolls past it. A host's buttons in the `actions` slot sit beside the close
- * button.
+ * `compact` makes a shorter card: the headline, the `subtitle-field` field, the `card-fields`
+ * fields (or the first three), and a "Show all N fields" button that expands it.
  *
- * What Open does is the host's to say, and Open is shown only where it says. The `open` property is
- * called with the item's `mosaica_id` and fields. Otherwise `open-url` is a link template, such as
- * `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for the
- * field `name`, URL-encoded, and `{mosaica_id}` by its id where the record has no field of that
- * name. Open is then a link to that address, opening in a new tab. An item with no value, or an
- * empty one, for a field the template names, or whose address is not `http:` or `https:` once
- * filled and resolved against the page, has no Open. Where both are set, `open` is called and
- * `open-url` is unused.
+ * The Open button appears only if you set `open-url` or `open`. `open-url` is a link template such
+ * as `https://www.geonames.org/{geonameid}`: each `{name}` is replaced by the item's value for that
+ * field, URL-encoded, and `{mosaica_id}` by its id. Open then links to that address in a new tab.
+ * An item that has no value for a field the template names, or whose filled address is not
+ * `http:` or `https:`, gets no Open button. `open` is a function called with the item's
+ * `mosaica_id` and fields, and takes precedence over `open-url`.
  *
- * @summary The selected item's fields, with Open and Copy id.
+ * @summary The picked item's record, with Open and Copy id.
  * @tagname mosaica-item-card
  * @category Elements
  * @slot field-<name> - Replaces the value of the field `<name>`, in the grid or the headline.
@@ -49,18 +39,17 @@ import {chrome, tokens} from './tokens.js';
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-close']>} mosaica-close - The close button was
  *   pressed, with `what` set to `item`.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewfollow']>} mosaica-viewfollow - A view chip
- *   was pressed: follow the item into that view, at its position there.
+ *   was pressed, asking to show the item in that view.
  * @csspart title - The header row: the headline or the state, and the close button.
  * @csspart close - The close button.
- * @csspart state - The state line, with `data-state`: `shown`, `empty` (no item, or nothing under
- *   the cursor), `refused` or `detached`.
- * @csspart refusal - The words "Item unavailable", with `data-code` set to the refusal's code where
- *   the server refused the record. A broken pick's details are on the map's `lastPick`.
- * @csspart reason - The server's reason for refusing the record, as it sent it, on a line under
- *   "Item unavailable".
+ * @csspart state - The state line, with `data-state`: `shown`, `empty` (no item, or a click that
+ *   found nothing), `refused` or `detached`.
+ * @csspart refusal - The words "Item unavailable", with `data-code` set to the refusal's code if
+ *   the server refused the record. For a broken pick, the details are in the map's `lastPick`.
+ * @csspart reason - The server's reason for refusing the record, under "Item unavailable".
  * @csspart headline - The headline, with `data-name` set to the field it shows.
- * @csspart subtitle - The value of the `subtitle-field` field under the headline, under `compact`.
- * @csspart show-all - The "Show all N fields" button, under `compact`, with `aria-expanded`.
+ * @csspart subtitle - The `subtitle-field` value under the headline, when `compact` is set.
+ * @csspart show-all - The "Show all N fields" button, when `compact` is set, with `aria-expanded`.
  * @csspart view-chip - One view the item is in, with `data-view` and `aria-current` on the current
  *   view.
  * @csspart field - One field, with `data-name`, and `data-prose` on a value over 60 characters.
@@ -204,39 +193,34 @@ export class MosaicaItemCard extends MosaicaElement {
     `
   ];
 
-  /**
-   * The item to show, for a host that fetches the record itself. Set with `refusal` or alone, it
-   * replaces the store's selection.
-   */
+  /** The item to show, if you fetch the record yourself. It replaces the store's selection. */
   @property({attribute: false}) accessor item: {id: bigint; detail: ItemDetail} | null = null;
-  /** A refusal to show in place of an item, for a host that fetches the record itself. */
+  /** A refusal to show instead of an item, if you fetch the record yourself. */
   @property({attribute: false}) accessor refusal: Refusal | null = null;
   /**
-   * What the map's last click resolved to (`<mosaica-map>`'s `lastPick`), shown while no item is
-   * selected: `{kind: 'miss'}` shows "No item here", and a broken pick shows "Item unavailable".
+   * What the map's last click found (`<mosaica-map>`'s `lastPick`), shown while no item is
+   * selected. A miss shows "No item here" and a broken pick shows "Item unavailable".
    */
   @property({attribute: false}) accessor pick: PickOutcome = null;
-  /** The schema for field order and view names, where the card has no store to read it from. */
+  /** The server's `/v1/meta`, for the field order and view names, if the card has no store. */
   @property({attribute: false}) accessor meta: Meta | null = null;
-  /** The field the headline shows. Unset, or where the item has no value for it, the headline is the `mosaica_id`. */
+  /** The field the headline shows. Unset, or if the item has no value for it, the headline is the `mosaica_id`. */
   @property({attribute: 'title-field'}) accessor titleField = '';
-  /** Shows the headline, the subtitle and three fields, with the rest under "Show all N fields". */
+  /** Shows a shorter card: the headline, the subtitle and three fields, with the rest under "Show all N fields". */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The field shown under the headline under `compact`. Unset, there is no subtitle. */
+  /** The field shown under the headline when `compact` is set. Unset, there is no subtitle. */
   @property({attribute: 'subtitle-field'}) accessor subtitleField = '';
   /**
-   * The fields shown under `compact` before "Show all", space- or comma-separated, in this order.
-   * Unset, the first three in declaration order. A name the record has no value for, and the
-   * `title-field` and `subtitle-field` fields, show nothing here. Show all, and the card without
-   * `compact`, list these fields first and then the rest.
+   * The fields a `compact` card shows before "Show all", separated by spaces or commas, in order.
+   * Unset, the first three. The full list shows these fields first, then the rest.
    */
   @property({attribute: 'card-fields'}) accessor cardFields = '';
   /**
-   * The address Open goes to, with `{name}` for the value of the field `name` and `{mosaica_id}`
-   * for the item's id. Unset, and without `open`, there is no Open.
+   * The link template for Open, with `{name}` for the value of the field `name` and `{mosaica_id}`
+   * for the item's id. Without it or `open`, there is no Open button.
    */
   @property({attribute: 'open-url'}) accessor openUrl = '';
-  /** Called when Open is pressed, with the item's `mosaica_id` and fields. Set, it wins over `open-url`. */
+  /** A function called with the item's `mosaica_id` and fields when Open is pressed. Takes precedence over `open-url`. */
   @property({attribute: false}) accessor open: ((item: MosaicaEventDetails['mosaica-open']) => void) | null = null;
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;

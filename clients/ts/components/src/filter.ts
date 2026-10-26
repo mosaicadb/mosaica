@@ -21,42 +21,37 @@ const TYPING_DEBOUNCE_MS = 350;
 const BAR_FLOOR = 2;
 
 /**
- * The search box of a field card for the column `column`, drawn by the family `/v1/meta` gives the
- * column. It edits the column's clause in the filter position (`Store.setFilters`).
+ * Use `<mosaica-filter>` for a search box that filters the map by one column. Field cards use it,
+ * and you can place one on its own. Set `column` to a column `meta.filterOperands` lists, and the
+ * box takes the form that column's kind needs:
  *
- * A text column is one box. Its words must all appear; words in double quotes are a phrase, or
- * plain words where the column takes no phrase; `OR` between terms asks for either. A text clause
- * set from outside that no query writes shows read-only.
+ * - A text column takes words, all of which must appear. Put words in double quotes for a phrase,
+ *   if the column supports phrases, and `OR` between terms to match either. A text filter the box
+ *   cannot express, set in code, shows read-only.
+ * - A category column suggests values as the viewer types, each with how many items in view
+ *   choosing it would add. The arrow keys move through the suggestions, and Enter chooses one, or
+ *   removes it if it is already chosen.
+ * - A keyword column has a menu of operators: `contains`, `prefix` or `eq`.
  *
- * A category is a box over `/v1/categories/{column}/suggest`. Its suggestions open over what sits
- * below the box while the box has focus and holds text. Each value suggested shows its count in
- * the current view among the items passing the filter without the column's own clause, so a value
- * counts what choosing it as well would add, and a bar, its share of the total the server counted
- * over. The arrow keys move through the suggestions, and Enter chooses the one reached, the first
- * by default, or takes it out where it is chosen; text that suggests nothing chooses nothing.
- * Emptying the box, or removing the control, has the store stop asking for the column.
+ * The box sets the column's filter on the store (`Store.setFilters`) 350 ms after the last
+ * keystroke, and at once when a suggestion is chosen.
  *
- * A keyword column is a box with its operator (`contains`, `prefix` or `eq`) in a menu.
- *
- * Typing is sent 350 ms after the last keystroke; a choice is sent at once. Each change replaces
- * the column's control in the filter position of the store's draft.
- *
- * @summary A field card's search box.
+ * @summary A search box that filters by one column.
  * @tagname mosaica-filter
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - The box
- *   changed the column's filter, with the expression the filter position composes.
+ *   changed the column's filter.
  * @csspart entry - The box.
  * @csspart mode - The keyword column's operator button, which opens its menu.
  * @csspart operators - The menu of a keyword column's operators.
  * @csspart operator - One operator in the menu, with `aria-checked`.
  * @csspart values - The typeahead's suggestions.
  * @csspart tick - One suggested value, with `aria-selected`.
- * @csspart bar - A suggested value's share of the items its count is taken over.
+ * @csspart bar - A bar for a suggested value's share of the items counted.
  * @csspart value-count - A suggested value's count.
- * @csspart more - The note under the box: nothing starts with the text, or more values match than
- *   one page holds.
- * @csspart refusal - The words "Values unavailable" where the values could not be listed, with
+ * @csspart more - The note under the box when nothing matches, or when more values match than are
+ *   listed.
+ * @csspart refusal - The words "Values unavailable" if the values could not be listed, with
  *   `data-code` set to the refusal's code.
  */
 export class MosaicaFilter extends MosaicaElement {
@@ -233,14 +228,13 @@ export class MosaicaFilter extends MosaicaElement {
     `
   ];
 
-  /** The column this box filters, a name `meta.filterOperands` lists. Unset or unknown, it renders nothing. */
+  /** The column this box filters, a name `meta.filterOperands` lists. Unset or unknown, the box shows nothing. */
   @property() accessor column = '';
-  /** The box's placeholder, in place of its own. */
+  /** Placeholder text for the box, in place of the default. */
   @property() accessor placeholder = '';
   /**
-   * Where set, a category's box picks a value rather than filtering by it: choosing a suggestion
-   * calls this with its key and its title, changes no filter and empties the box, and no
-   * suggestion shows as chosen.
+   * Turns a category box into a value picker. Choosing a suggestion calls this with its key and
+   * title and empties the box, and no filter changes.
    */
   @property({attribute: false}) accessor choose: ((value: {key: string; title: string | null}) => void) | null = null;
 

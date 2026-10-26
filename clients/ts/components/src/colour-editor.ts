@@ -31,40 +31,26 @@ type Row = {key: string; name: string; path: string; count: number | null; colou
 type Found = {key: string; name: string; path: string; rung: number};
 
 /**
- * Edit colours: every value of a category field, or every cluster of a layer, with its colour, to
- * search, choose colours for and reset. `field` is a column `meta.declaredScalars` lists as a
- * rendered category, or `cluster:<layer>` for a layer the points can be coloured by. `show()` opens
- * it as a modal dialog, and Close, Done or Escape closes it and gives focus back to what had it.
+ * Use `<mosaica-colour-editor>` to let viewers choose the colour of each value of a category, or
+ * each cluster of a layer, when the map is coloured by it. It is a modal dialog: `show()` opens it,
+ * and Close, Done or Escape closes it. The explorer's Edit colours button opens one. `field` is a
+ * rendered category column, or `cluster:<layer>` for a layer the points can be coloured by.
  *
- * The rows are a category's values, a flat layer's clusters, a `stacked` or `tiered` layer's
- * clusters at `cluster-level` (its top level where unset), or on a `nested` or `dag` layer the
- * clusters of the cut the map draws (`cut: 'drawn'`), which the layer's field card ranks too, and
- * which changes as the camera does. Each row has a checkbox, its colour, its name (a cluster's two
- * nearest parents in grey under it) and its count over everything the viewer may see, with no
- * filter and no area, so the rows hold their order, largest first, through a pan or a change of
- * filter. The counts come from one aggregate (`Store.setAggregate`, `subject: 'visible'`) of up to
- * `meta.selection.max_aggregate_top` rows, registered while the dialog is open. A category value
- * the map has not drawn yet has no palette colour, and its swatch is an outline until it has one.
- * Changing `field` or `cluster-level` while the dialog is open lists the new field's rows, and
- * closes the dialog where the field is neither a category nor a layer that colours.
+ * Each row shows a value or cluster with its colour, its name and how many items the viewer may see
+ * in it, largest first. The counts ignore the filters and the camera, so the rows keep their order
+ * as the viewer pans or filters. A layer with levels lists its clusters at `cluster-level`, and a
+ * `nested` or `dag` layer lists the clusters the map currently draws. A category value the map has
+ * not drawn yet has no colour, and its swatch is an outline until it does.
  *
- * The search box is the field card's: `<mosaica-filter>`'s typeahead over a category's values, or
- * `<mosaica-cluster-filter>`'s over every name in the layer, at any depth of a tree. Choosing a
- * match that the list holds moves focus to its row; any other goes at the top of the list, with
- * its count, until the dialog closes.
+ * Clicking a row's colour opens a colour picker for it. Ticking several rows and pressing Set colour
+ * colours them all at once, and Reset to palette restores every palette colour. The search box finds
+ * any value or cluster by name, including one not in the list.
  *
- * A row's colour is a button that opens the colour picker the field cards use. Ticking rows shows
- * how many are ticked, Set colour, which opens the picker and gives the colour chosen to every row
- * ticked, and Deselect. Reset to palette gives every value of the field, or every cluster of the
- * layer, its palette colour back. Under the list is how many colours are chosen for the field or
- * the layer.
+ * Each change fires one `mosaica-valuecolour` or `mosaica-clustercolour` event naming every value or
+ * cluster it changed. The colours apply to every element that uses the same store, such as the
+ * map and the field cards; the dialog keeps none itself.
  *
- * Each action fires one event: `mosaica-valuecolour` for a category, or `mosaica-clustercolour`
- * for a layer, naming every value or cluster it changed. A category's colours are written to the
- * colour choices every element over the store shares, and a layer's are set on the store with the
- * colours chosen for every layer (`Store.setArtifactColours`); the dialog keeps no colour itself.
- *
- * @summary Every value or cluster's colour, to search, choose and reset.
+ * @summary A dialog for choosing the colour of each value or cluster.
  * @tagname mosaica-colour-editor
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-valuecolour']>} mosaica-valuecolour - Colours
@@ -77,11 +63,11 @@ type Found = {key: string; name: string; path: string; rung: number};
  * @csspart close - The close button.
  * @csspart columns - The headings over the rows.
  * @csspart rows - The list of rows.
- * @csspart row - One row, with `data-key`, `data-found` where the search box found it, and
+ * @csspart row - One row, with `data-key`, `data-found` if the search box found it, and
  *   `data-ticked` while it is ticked.
  * @csspart check - A row's checkbox.
- * @csspart swatch - A row's colour, a button that opens the colour picker, with `data-unmet` and
- *   drawn as an outline for a category value the map has given no colour yet.
+ * @csspart swatch - A row's colour button, which opens the colour picker. It carries `data-unmet`,
+ *   and is drawn as an outline, for a value the map has not given a colour yet.
  * @csspart name - A row's name, with `data-unnamed` for a cluster that has none.
  * @csspart path - A cluster row's parents.
  * @csspart count - A row's count over everything the viewer may see.
@@ -308,7 +294,7 @@ export class MosaicaColourEditor extends MosaicaElement {
 
   /** What the dialog colours: a rendered category column, or `cluster:<layer>`. */
   @property() accessor field = '';
-  /** The level of a `stacked` or `tiered` layer whose clusters are listed; `null` is its top level. */
+  /** The level of a `stacked` or `tiered` layer whose clusters are listed. `null` is the coarsest level. */
   @property({type: Number, attribute: 'cluster-level'}) accessor level: number | null = null;
 
   /** Whether the dialog is open. @internal */
@@ -344,7 +330,7 @@ export class MosaicaColourEditor extends MosaicaElement {
     dialog.focus();
   }
 
-  /** Close the dialog, giving focus back to what had it as it opened. */
+  /** Close the dialog and return focus to the element that had it before. */
   close(): void {
     if (!this.isOpen) return;
     this.picker.close(false);

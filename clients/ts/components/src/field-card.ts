@@ -101,59 +101,38 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
 }
 
 /**
- * One field as a card in the filter panel: a category's commonest values, a layer's largest
- * clusters, a number's or a date's histogram, or a text field's search box, under the field's name.
- * `field` is a column `meta.filterOperands` lists, or `cluster:<layer>` for a layer whose clusters
- * can be filtered by.
+ * Use `<mosaica-field-card>` to show how one field's values are spread across the items, and to
+ * filter or highlight by them. `<mosaica-filter-panel>` shows a card per field; use a card on its
+ * own to put one field's chart where you want it. `field` is a column `meta.filterOperands` lists,
+ * or `cluster:<layer>` for a layer's clusters.
  *
- * The counts are taken over two sets. The subject is what is in view: the items in the camera's box
- * that the filters admit, or the highlighted ones while a highlight is set. The whole match is every
- * item the filters admit. Both leave out the card's own clause in the filter position, so a value
- * its clause excludes keeps its count. The card keeps three aggregates registered with the store
- * while it is drawn (`Store.setAggregate`): the subject's counts (`subject: 'view'` with
- * `highlighted`), the whole match's, and for a number or a date its figures over everything the
- * viewer may see (`subject: 'visible'`). A folded card asks for the subject's alone.
+ * Each card compares two sets of items. The subject is what is in view: the items in the camera's
+ * box that the filters match, or the highlighted items while there is a highlight. The whole match
+ * is every item the filters match, anywhere. Both ignore the card's own filter, so a value you have
+ * filtered out keeps its count.
  *
- * A category or cluster card lists five values, those with most items in the subject first and any
- * its own clauses name, with "N more" opening it to twenty. Each row has its name (a cluster's
- * parents in grey after it), a solid bar for its share of the subject and a pale bar for its share
- * of the whole match, each a share of its own total, and the two counts. Under a filter on the
- * field, the values it leaves out are greyed and show only how many items they would add, and the
- * shares are of what the filter keeps. Hovering or focusing a row shows Highlight and Filter, which
- * put the value in or out of the field's clause in that position. A click or tap on the row does
- * what its Filter button does and shows its buttons; the row takes no focus, and the keyboard
- * reaches the buttons. Over the rows is the field's search box, the typeahead of
- * `<mosaica-filter>` or `<mosaica-cluster-filter>`, whose choice joins the filter. A levelled
- * layer's card has a Level choice in its heading, the top (coarsest) level by default, which fires
- * `mosaica-levelchange`. A cluster card ranks a `nested` or `dag` layer's clusters at the cut the
- * map draws (`cut: 'drawn'`), and a flat or levelled layer's at its level.
- * A cluster is named as the aggregate's table names it, which is the name the layer's browse pages
- * give the same viewer. On a `nested` or `dag` layer its path is named from a browse page of its
- * parents and one of its first parent's.
+ * What the card draws depends on the field:
  *
- * A number or date card draws about twenty bins over the values the viewer may see, the pale bar
- * the whole match and the solid one the subject, each bin's height its share of its own set, scaled
- * so the tallest share fills the plot. The counts are taken from a sample of about 100,000 items
- * where a set is larger, and an estimate is marked "≈". Dragging across the bins, or the arrow keys
- * with Shift on the focused plot and then Enter, opens a box naming the range and how many items
- * match in it, with Filter and Highlight, which set the field's range in that position. A range set
- * on the field is outlined on the plot. The heading gives the field's figures: how many items hold
- * a value and their mean, or their range while folded.
+ * - A category or cluster card lists the five values with most items in view, and any value the
+ *   card filters or highlights; "N more" shows up to twenty. Each row has a solid bar for its share
+ *   of the subject, a pale bar for its share of the whole match, and both counts. Values the field's
+ *   filter leaves out are greyed and show how many items they would add. Hovering or focusing a row
+ *   shows its Highlight and Filter buttons, and clicking the row filters by it. A search box above
+ *   the rows finds any value. The card for a layer with levels has a Level choice in its heading.
+ * - A number or date card draws a histogram of about twenty bins, with the same two bars, and gives
+ *   the count and mean in its heading. Drag across the bins, or press Shift and the arrow keys on
+ *   the focused plot and then Enter, to pick a range to filter or highlight by. Counts over more than
+ *   about 100,000 items come from a sample and are marked "≈".
+ * - A text or keyword field's card is its search box, `<mosaica-filter>`.
  *
- * A text or keyword field is its `<mosaica-filter>` search box.
+ * The paint button colours the map by the field. While it does, each value's colour shows beside
+ * it, or the ramp under the histogram, and clicking a colour opens a colour picker for that value
+ * or cluster. A chosen colour applies at once and fires `mosaica-valuecolour` or
+ * `mosaica-clustercolour`.
  *
- * The paint button colours the map by the field, or by nothing where it already does
- * (`Store.setColourBy`), and is pressed while it does. Then a category or cluster card shows each
- * value's colour beside it, and a number or date card the ramp under its plot. Each colour is a
- * button that opens a colour picker: the palette's colours and a lighter row, a custom area with a
- * hue bar and a hex field, and Reset, which gives the value or the cluster its palette colour back.
- * A choice applies at once and fires `mosaica-valuecolour` for a category value, written to the
- * colour choices every element over the store shares, or `mosaica-clustercolour` for a cluster,
- * set on the store with its other chosen colours (`Store.setArtifactColours`).
+ * `folded` shows the heading alone, with a small chart of the counts in view.
  *
- * `folded` draws the heading alone, with a small chart of the subject's counts.
- *
- * @summary One field's counts in view and overall, with its filter and highlight.
+ * @summary A chart of one field's values, for filtering and highlighting by them.
  * @tagname mosaica-field-card
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A row's
@@ -178,11 +157,11 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @csspart paint - The paint button, with `aria-pressed`.
  * @csspart fold - The fold button, with `aria-expanded`.
  * @csspart rows - A category or cluster card's rows.
- * @csspart row - One row, with `data-key` and `data-state`: `in` for a value the field's filter
- *   keeps, `out` for one it leaves out, `lit` for one its highlight lights, else empty.
- * @csspart swatch - A row's colour, while the map is coloured by the field, a button that opens the
- *   colour picker, with `data-unmet` and drawn as an outline for a category value the map has not
- *   drawn yet and so has given no colour.
+ * @csspart row - One row, with `data-key` and `data-state`: `in` if the field's filter keeps the
+ *   value, `out` if it leaves it out, `lit` if it is highlighted, otherwise empty.
+ * @csspart swatch - A row's colour button, while the map is coloured by the field. It opens the
+ *   colour picker. It carries `data-unmet`, and is drawn as an outline, for a value the map has not
+ *   drawn yet and so has not given a colour.
  * @csspart name - A row's name, with `data-unnamed` for a cluster that has none.
  * @csspart path - A cluster row's parents.
  * @csspart bar-match - A row's or a bin's pale bar, its share of the whole match.
@@ -622,11 +601,11 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   /** The field: a column `meta.filterOperands` lists, or `cluster:<layer>` for a layer's clusters. */
   @property() accessor field = '';
-  /** Draws the heading alone, with a small chart of the subject's counts. */
+  /** Shows the heading alone, with a small chart of the counts in view. */
   @property({type: Boolean, reflect: true}) accessor folded = false;
-  /** Draws the small chart for the compact layout. */
+  /** Draws a folded card in the compact style the explorer uses in narrow containers. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level a levelled layer's card counts at; `null` is its top level. */
+  /** The level a card for a layer with levels counts at. `null` is the coarsest level. */
   @property({type: Number, attribute: 'cluster-level'}) accessor level: number | null = null;
 
   /** Whether "N more" was pressed. @internal */
