@@ -32,10 +32,10 @@ requires-python = ">=3.10"
 # serving a database needs a `mosaica` binary on `PATH` or named by `MOSAICA_BIN`. The wheel itself
 # is pure Python, `py3-none-any`.
 #
-# `pip install mosaica --no-deps` skips both. Install `pyarrow>=14` by hand after it, and point
-# `MOSAICA_BIN` at a `mosaica` binary, or put one on `PATH`, to make or serve a database.
+# `pip install mosaica --no-deps` skips both. Install `pyarrow>=14.0.1` by hand after it, and
+# point `MOSAICA_BIN` at a `mosaica` binary, or put one on `PATH`, to make or serve a database.
 dependencies = [
-  "pyarrow>=14",
+  "pyarrow>=14.0.1",
   "mosaica-native==0.1.0-rc.4; sys_platform != 'win32' and platform_machine in 'x86_64 aarch64 arm64'",
 ]
 

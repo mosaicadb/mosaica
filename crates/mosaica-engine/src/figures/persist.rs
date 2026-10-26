@@ -200,7 +200,7 @@ fn read(dir: &Path, stem: &str, at: u64, extension: &str, magic: &[u8; 8]) -> Op
     }
     let length = u64::from_le_bytes(bytes[8..16].try_into().ok()?) as usize;
     let payload = &bytes[HEADER..];
-    if payload.len() != length || Sha256::digest(payload).as_slice() != &bytes[16..48] {
+    if payload.len() != length || Sha256::digest(payload)[..] != bytes[16..48] {
         return None;
     }
     Some(payload.to_vec())

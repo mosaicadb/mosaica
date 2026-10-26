@@ -234,7 +234,7 @@ jobs:
           version=$(python3 scripts/version.py)
           pep440=$(python3 scripts/version.py pep440)
           python3 -m venv /tmp/smoke
-          /tmp/smoke/bin/pip install "pyarrow>=14"
+          /tmp/smoke/bin/pip install "pyarrow>=14.0.1"
           /tmp/smoke/bin/pip install --no-index --find-links dist "mosaica==$version"
           cd /tmp
           /tmp/smoke/bin/python - "$version" "$pep440" <<'PY'

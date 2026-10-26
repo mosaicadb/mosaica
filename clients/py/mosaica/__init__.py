@@ -69,7 +69,7 @@ def __getattr__(name: str):
         try:
             from . import _database
         except ImportError as e:
-            raise ImportError("making a database needs pyarrow: pip install 'pyarrow>=14'") from e
+            raise ImportError("making a database needs pyarrow: pip install 'pyarrow>=14.0.1'") from e
         return getattr(_database, _SDK[name])
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

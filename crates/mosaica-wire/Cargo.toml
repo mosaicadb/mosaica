@@ -15,4 +15,4 @@ description = "The framed Arrow payloads Mosaica sends to viewers. Internal crat
 arrow = { workspace = true }
 # zstd for a records frame's buffers, and only zstd: the reader a client registers is that one
 # codec.
-arrow-ipc = { version = "=59.1.0", default-features = false, features = ["zstd"] }
+arrow-ipc = { version = "=60.0.0", default-features = false, features = ["zstd"] }

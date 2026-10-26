@@ -3414,7 +3414,7 @@ fn digest_file(path: &Path) -> Result<FileDigest> {
     }
     Ok(FileDigest {
         size,
-        sha256: hex_digest(hasher.finalize().as_slice()),
+        sha256: hex_digest(&hasher.finalize()),
     })
 }
 

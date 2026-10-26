@@ -3,8 +3,8 @@ import type {Plugin} from 'vite';
 
 /**
  * Lower the standard decorators (`@property() accessor x`) the elements are written with, where
- * Vite serves or bundles the component sources: the viewer, the examples and the single-file
- * bundle. The npm build lowers them with `tsc`, so a host consuming `dist/` needs no transform.
+ * Vite serves or bundles the component sources: the viewer, the examples, the single-file
+ * bundle and the unit tests under Vitest. The npm build lowers them with `tsc`, so a host consuming `dist/` needs no transform.
  *
  * The elements use stage-3 decorators with `accessor`, since under the ES2022 target a legacy
  * `@property` on a plain field is shadowed by the class field and has no effect. Vite 8's oxc

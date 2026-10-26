@@ -20,7 +20,7 @@ use arrow::array::{
 };
 use arrow::buffer::Buffer;
 use arrow::datatypes::{DataType, SchemaRef, TimeUnit};
-use arrow::ipc::convert::fb_to_schema;
+use arrow::ipc::convert::try_fb_to_schema;
 use arrow::ipc::reader::{read_footer_length, FileDecoder};
 use arrow::ipc::{root_as_footer, root_as_message, Block, MetadataVersion};
 use arrow::record_batch::RecordBatch;
@@ -2003,7 +2003,7 @@ fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
             ),
         });
     }
-    let actual = hex_digest(hasher.finalize().as_slice());
+    let actual = hex_digest(&hasher.finalize());
     if actual != digest.sha256 {
         return Err(StoreError::FileVerificationFailed {
             path,
@@ -2054,7 +2054,7 @@ fn verify_files(base: &Path, files: &BTreeMap<String, FileDigest>) -> Result<()>
 }
 
 pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
-    hex_digest(Sha256::digest(bytes).as_slice())
+    hex_digest(&Sha256::digest(bytes))
 }
 
 pub(crate) fn hex_digest(digest: &[u8]) -> String {
@@ -2749,7 +2749,10 @@ pub(crate) fn decode_single_batch(buffer: &Buffer, path: &Path) -> Result<Record
     let schema_fb = footer
         .schema()
         .ok_or_else(|| invalid_columns(path, "footer has no schema"))?;
-    let schema: SchemaRef = Arc::new(fb_to_schema(schema_fb));
+    let schema: SchemaRef = Arc::new(
+        try_fb_to_schema(schema_fb)
+            .map_err(|e| invalid_columns(path, &format!("invalid schema: {e}")))?,
+    );
 
     let version: MetadataVersion = footer.version();
     let decoder = FileDecoder::new(schema, version).with_require_alignment(true);

@@ -519,7 +519,10 @@ pub fn decode_single_batch(buffer: &Buffer, what: &str) -> io::Result<RecordBatc
     let schema_fb = footer
         .schema()
         .ok_or_else(|| invalid_data(format!("{what}: footer has no schema")))?;
-    let schema: SchemaRef = Arc::new(arrow::ipc::convert::fb_to_schema(schema_fb));
+    let schema: SchemaRef = Arc::new(
+        arrow::ipc::convert::try_fb_to_schema(schema_fb)
+            .map_err(|e| invalid_data(format!("{what}: invalid schema: {e}")))?,
+    );
 
     let version: MetadataVersion = footer.version();
     let mut decoder = FileDecoder::new(schema, version);

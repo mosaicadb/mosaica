@@ -61,7 +61,7 @@
   "devDependencies": {
     "rolldown": "^1.2.1",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.12"
   },
   "publishConfig": {
     "access": "public"

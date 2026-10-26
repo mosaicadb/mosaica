@@ -985,7 +985,7 @@ async fn a_growth_page_as_arrow_lands_what_the_json_page_lands() {
                 metadata
                     .iter()
                     .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect(),
+                    .collect::<std::collections::HashMap<_, _>>(),
             ),
         );
         let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
