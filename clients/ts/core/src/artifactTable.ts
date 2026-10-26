@@ -143,13 +143,13 @@ export interface ArtifactTable {
    *
    * @param ordinal - The ordinal to start from, such as a point's entry in
    *   {@link BandMembership.ordinals}.
-   * @param served - Anything with `has`, such as a set of ordinals or a colour map.
+   * @param served - The ordinals drawn at the current cut, such as a set of ordinals or a colour map.
    * @param served.has - Whether an ordinal is drawn at the current cut.
    * @param maxLevel - The level to colour at: the walk skips ancestors in `served` whose `rung` is
    *   deeper than this. By default it stops at the first one in `served`.
    * @returns The ordinal found, or {@link NO_ORDINAL} if the walk runs out of known parents.
    */
-  resolve(ordinal: number, served: {has(ordinal: number): boolean}, maxLevel?: number): number;
+  resolve(ordinal: number, served: {has: (ordinal: number) => boolean}, maxLevel?: number): number;
 }
 
 /**
@@ -354,7 +354,7 @@ export class SessionArtifactTable implements ArtifactTable {
     }
   }
 
-  resolve(ordinal: number, served: {has(ordinal: number): boolean}, maxLevel?: number): number {
+  resolve(ordinal: number, served: {has: (ordinal: number) => boolean}, maxLevel?: number): number {
     let at = ordinal;
     // Bounded by the table's size, so a link cycle cannot hang the caller.
     for (let steps = 0; at !== NO_ORDINAL && steps <= this.entries.length; steps++) {
