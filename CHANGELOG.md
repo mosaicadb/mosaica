@@ -6,13 +6,13 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
-## [0.1.0-rc.3] - 2026-10-26
+## [0.1.0-rc.4] - 2026-10-26
 
-The third release candidate for 0.1.0. 0.1.0-rc.1 reached PyPI and the container registry but
-not npm or crates.io, and 0.1.0-rc.2 was tagged but stopped before publishing, so this is the
-first candidate published to every registry. Install it with
+The fourth release candidate for 0.1.0. 0.1.0-rc.1 reached PyPI and the container registry but
+not npm or crates.io, and 0.1.0-rc.2 and 0.1.0-rc.3 were tagged but stopped before publishing, so
+this is the first candidate published to every registry. Install it with
 `pip install --pre mosaica`, `npm install @mosaicajs/client@next`,
-`cargo install mosaica --version 0.1.0-rc.3` or `docker pull ghcr.io/mosaicadb/mosaica:0.1.0-rc.3`.
+`cargo install mosaica --version 0.1.0-rc.4` or `docker pull ghcr.io/mosaicadb/mosaica:0.1.0-rc.4`.
 Binary archives for Linux and macOS are attached to the GitHub release.
 
 ### Changed
@@ -23,14 +23,16 @@ Binary archives for Linux and macOS are attached to the GitHub release.
   Escape does. `store.items` reads the items the map shows, with the store's view and filters, and
   `inView` narrows it to the area in view; a `filters` left undefined means the map's filters.
   `createStore` no longer needs a `viewerUrl`, and `MosaicaClient` needs no `sessionUrl` where only
-  the viewer routes are used.
+  the viewer routes are used. A click on a name on the map opens it on a slow GPU too, and
+  anywhere along the name.
 - **View group metadata.** A view group's per-view metadata is typed by one rule at a build and at a
   running service: a float written as an integer is that float on both paths, and a NaN or
   infinite float is refused on both. A refusal names the view by its group view id. The command
   line and the Python client send a view group that shares another's views after that group.
 - **arXiv example.** Archives and subject classes carry arXiv's own names, including the eighteen
   retired archives, and the sample's notice credits arxiv-base.
-- **Documentation.** The operating guide is split into operating, sizing and tuning, and scheduling
+- **Documentation.** A second TypeScript tutorial, "Your own interface around the map", with its
+  example. The operating guide is split into operating, sizing and tuning, and scheduling
   compactions; the TLS proxy passes `/readyz` through for an outside health check; the install
   page inserts with `mosaica insert`; the schema reference is `schema-toml.md`.
 
@@ -118,4 +120,4 @@ any later release, and a bundle built by one version may be refused by the next.
 
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
 [0.1.0-rc.1]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.1
-[0.1.0-rc.3]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.3
+[0.1.0-rc.4]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0-rc.4

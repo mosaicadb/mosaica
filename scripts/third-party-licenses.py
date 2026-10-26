@@ -6,9 +6,10 @@ carry. Run it after a change to Cargo.lock.
     python3 scripts/third-party-licenses.py           write the file
     python3 scripts/third-party-licenses.py --check   fail when the committed file is stale
 
-Needs cargo-about 0.9 (`cargo install --locked --features cli cargo-about`), configured by
-`about.toml`. cargo-about reads each crate's own licence files (`--frozen` keeps it offline), so the
-output depends on Cargo.lock alone. The workspace's own crates are left out: LICENSE covers them,
+Needs cargo-about 0.9.2 exactly, the version release.yml installs, since another version can render
+the file differently (`cargo install --locked --features cli cargo-about --version =0.9.2`). It is
+configured by `about.toml`. cargo-about reads each crate's own licence files (`--frozen` keeps it
+offline), so the output depends on Cargo.lock alone. The workspace's own crates are left out: LICENSE covers them,
 and listing them would put the release version into this file.
 """
 

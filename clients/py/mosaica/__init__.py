@@ -39,7 +39,7 @@ __all__ = [
     "revoke",
     "__version__",
 ]
-__version__ = "0.1.0rc3"
+__version__ = "0.1.0rc4"
 
 _SDK = {"create": "create", "open": "open", "Database": "Database"}
 

@@ -1,6 +1,6 @@
 {
   "name": "@mosaicajs/components",
-  "version": "0.1.0-rc.3",
+  "version": "0.1.0-rc.4",
   "description": "The mosaica-* web components: a map, filters, counts, item cards and an explorer over a Mosaica server, plus a single-file bundle.",
   "keywords": [
     "mosaica",
@@ -130,8 +130,8 @@
   },
   "dependencies": {
     "@lit/context": "^1.1.0",
-    "@mosaicajs/client": "0.1.0-rc.3",
-    "@mosaicajs/deck": "0.1.0-rc.3"
+    "@mosaicajs/client": "0.1.0-rc.4",
+    "@mosaicajs/deck": "0.1.0-rc.4"
   },
   "peerDependencies": {
     "@deck.gl/aggregation-layers": "^9.3.7",
