@@ -2266,10 +2266,19 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
     state = directory / ".mosaica" / "declaration.json"
     if not (directory / "mosaica.toml").exists() and not state.exists():
         raise Refusal(f"open: {directory} holds no mosaica.toml. create() makes a new database")
+    held = None
+    if state.exists():
+        try:
+            held = json.loads(state.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise Refusal(
+                f"open: {state} is not the state the SDK writes, so {directory} is not a Mosaica "
+                f"database. create() makes a new one"
+            ) from None
     _instance.hold(directory)
     database = Database(directory)
-    if state.exists():
-        _load(database, json.loads(state.read_text(encoding="utf-8")))
+    if held is not None:
+        _load(database, held)
     elif (directory / "schema.toml").exists():
         database._loaded_text = (directory / "schema.toml").read_text(encoding="utf-8")
     return database

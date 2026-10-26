@@ -642,3 +642,17 @@ def test_a_database_saved_before_its_first_commit_reopens_and_builds(tmp_path):
         assert copy.view("map").count() == 2
     finally:
         copy.close()
+
+
+def test_a_directory_whose_state_is_not_the_sdks_is_refused_and_left_unheld(tmp_path):
+    from mosaica import create, open as reopen
+
+    db = create(tmp_path / "db")
+    db.declare_view("map")
+    db.close()
+    (tmp_path / "db" / ".mosaica" / "declaration.json").write_text("{ not json", encoding="utf-8")
+    with pytest.raises(Refusal):
+        reopen(tmp_path / "db")
+    with pytest.raises(Refusal):
+        reopen(tmp_path / "db")
+
