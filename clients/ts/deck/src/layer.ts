@@ -1592,7 +1592,10 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const rowsOf = (kind: LabelDatum['kind']) => data.filter((d) => d.kind === kind && (kind === 'name' || d.id === hovered));
     if (plated) for (const k of kinds) layers.push(text(`${k.id}-plates`, k.kind, rowsOf(k.kind), {...k.style, ...plateProps}));
     else layers.push(this.backingLayer(kinds.flatMap((k) => rowsOf(k.kind)), scheme, key));
-    for (const k of kinds) layers.push(text(k.id, k.kind, rowsOf(k.kind), {...k.style, ...own}));
+    // A name picks across its whole box, not only on its glyphs' pixels, so a click between two
+    // letters or words opens the name rather than a mark beneath it.
+    const nameBox = {background: true, getBackgroundColor: [0, 0, 0, 0], backgroundPadding: [4, 2]};
+    for (const k of kinds) layers.push(text(k.id, k.kind, rowsOf(k.kind), {...k.style, ...own, ...(k.kind === 'name' ? nameBox : {})}));
     return layers;
   }
 

@@ -1113,7 +1113,11 @@ export class MosaicaMap extends MosaicaElement {
       viewState: this.viewState,
       // The map takes the keys itself, on its canvas, so deck's keyboard is off.
       controller: {keyboard: false},
-      pickingRadius: 8,
+      pickingRadius: MosaicaMap.PICK_RADIUS_PX,
+      // deck picks on every press, inside the time its click recogniser allows a press. Where that
+      // pick is slow the press outlasts the limit and no click fires, so presses do not pick; the
+      // click is answered from the hover or by a pick of its own (`clickPick`).
+      layerFilter: ({isPicking, renderPass}) => !isPicking || renderPass.startsWith('picking:hover') || this.picking,
       layers: [],
       onDeviceInitialized: (device) => this.slab.attach(device),
       // The canvas's container is the map's one tab stop and takes its keys; deck's input handling
@@ -1132,7 +1136,7 @@ export class MosaicaMap extends MosaicaElement {
         if (this.regionWorld || this.regionPolygon) this.requestUpdate();
         return viewState;
       },
-      onClick: (info) => this.onClick(info),
+      onClick: (info) => this.onClick(this.clickPick(info)),
       onHover: (info) => this.onHover(info)
     });
     this.paint();
@@ -1270,7 +1274,33 @@ export class MosaicaMap extends MosaicaElement {
   /** Whether a pointer is pressed on the map, during which no tooltip shows. */
   private pressed = false;
 
+  /** How far from the pointer a pick reaches, in pixels. */
+  private static readonly PICK_RADIUS_PX = 8;
+
+  /** The last hover's pick, with the camera it was made under, which a click at that pixel reuses. */
+  private hovered: {info: PickingInfo; viewState: object} | null = null;
+
+  /** Whether the map is running a pick of its own, which the deck's `layerFilter` lets draw. */
+  private picking = false;
+
+  /**
+   * What a click at `info`'s pixel is over. A press makes no pick of its own, so `info` names
+   * nothing: the hover's answer is used where the hover was at that pixel under this camera, and
+   * the click picks once where it was not, as after a touch.
+   */
+  private clickPick(info: PickingInfo): PickingInfo {
+    const h = this.hovered;
+    if (h && h.info.x === info.x && h.info.y === info.y && h.viewState === this.viewState) return h.info;
+    this.picking = true;
+    try {
+      return this.deck?.pickObject({x: info.x, y: info.y, radius: MosaicaMap.PICK_RADIUS_PX}) ?? info;
+    } finally {
+      this.picking = false;
+    }
+  }
+
   private onHover(info: PickingInfo): void {
+    this.hovered = {info, viewState: this.viewState};
     const picked = resolvePick(info as never);
     const layerId = (info.sourceLayer ?? info.layer)?.id ?? '';
     const slot = picked.kind === 'mark' ? /marks-p(\d+)(?:-(?:dull|lit))?$/.exec(layerId) : null;
