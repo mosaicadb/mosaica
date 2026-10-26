@@ -1633,15 +1633,6 @@ pub(crate) fn authorisation_rule_hash() -> [u8; 32] {
     sha2::Sha256::digest(b"mosaica access expressions:1").into()
 }
 
-pub(crate) fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
-}
-
 #[cfg(test)]
 mod tests {
     /// Pins that a panic inside `install`/`par_iter` propagates to the caller rather than being

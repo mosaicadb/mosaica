@@ -13,12 +13,13 @@ use rand::RngCore;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sha2::{Digest, Sha256};
 use mosaica_authz::{FragmentCacheError, FrozenFragment, Grant};
+use mosaica_store::hex_digest;
 use mosaica_types::TermId;
 
 #[cfg(doc)]
 use mosaica_authz::FragmentCache;
 
-use crate::engine::{hex_encode, Engine};
+use crate::engine::Engine;
 use crate::error::{EngineError, Result};
 use crate::Generation;
 
@@ -418,7 +419,7 @@ impl Engine {
 
         let mut token_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut token_bytes);
-        let token = hex_encode(&token_bytes);
+        let token = hex_digest(&token_bytes);
 
         let token_id = self.next_token_id.fetch_add(1, Ordering::Relaxed);
 

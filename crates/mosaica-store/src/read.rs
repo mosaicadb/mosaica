@@ -2057,7 +2057,8 @@ pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
     hex_digest(&Sha256::digest(bytes))
 }
 
-pub(crate) fn hex_digest(digest: &[u8]) -> String {
+/// `digest` as lowercase hexadecimal, two characters a byte.
+pub fn hex_digest(digest: &[u8]) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {

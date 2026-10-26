@@ -3414,17 +3414,8 @@ fn digest_file(path: &Path) -> Result<FileDigest> {
     }
     Ok(FileDigest {
         size,
-        sha256: hex_digest(&hasher.finalize()),
+        sha256: mosaica_store::hex_digest(&hasher.finalize()),
     })
-}
-
-pub(crate) fn hex_digest(digest: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 /// Manifest keys are prefix-relative with forward slashes (R1), on every platform.
