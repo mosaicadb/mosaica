@@ -40,14 +40,14 @@ class Refusal(ValueError):
     """The exception the package raises when it will not make a call, or when the server refuses
     a request, with a message that says what was wrong and what to write instead.
 
-    Catching `Refusal` handles every refusal from a `Database` or a reader in one place, and since
-    it is a `ValueError`, code that catches `ValueError` catches it too. The token functions
+    Catching `Refusal` handles every refusal from a `Database` or a reader in one place. Code that
+    catches `ValueError` catches it too, because `Refusal` is a `ValueError`. The token functions
     `login`, `logout`, `authorise` and `revoke` raise `PermissionError` for a request the server
     refuses, and `Control` returns each refusal in its `Answer` without raising.
 
     - `status`: the HTTP status of a read the server refused, and `None` for every other refusal.
-    - `retry_after_s`: the wait in seconds the server asked for before the request is sent again,
-      which it names when it answers `429` because it is busy, and `None` when it named none.
+    - `retry_after_s`: how many seconds to wait before sending the request again, set when the
+      server answers `429` or names a wait, and `None` otherwise.
     - `report`: the report of a `commit`, `remove`, `suppress`, `unsuppress` or `leave` that
       applied nothing, which says what was refused and why, and `None` otherwise.
 

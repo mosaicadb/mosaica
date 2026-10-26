@@ -89,7 +89,7 @@ class Answer:
 
     @property
     def ok(self) -> bool:
-        """`True` when the server accepted the request, with a status in the 200s."""
+        """`True` when the status is in the 200s, which means the server accepted the request."""
         return 200 <= self.status < 300
 
 
@@ -99,27 +99,26 @@ class Control:
 
     `Database.control` returns one for a database you made, and `Control(base, credential)` makes
     one for a database someone else runs. Each route method sends one HTTP request and returns its
-    `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. When the
-    server is busy it answers `429` with a wait, and the method waits that long, at most 30 seconds
-    at a time, and sends the request again until the waits would pass five minutes in all, when it
-    returns the `429`.
+    `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. When a
+    busy server answers `429`, the method waits as long as the server asks, up to 30 seconds, and
+    sends the request again. It returns the `429` once the waits would pass five minutes in all.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token, or `None` for a
-      server started with `mosaica serve --open`, which needs none. Writing, flushing and compacting
-      need the `write` permission, declaring and dropping need `write-all` as well, and `status` and
-      the catalogue methods need `admin`. A credential that holds `write` without `write-all` can
-      name only what its terms let it see.
+      server started with `mosaica serve --open`, which needs none. A method that writes, flushes or
+      compacts needs the `write` permission, one that declares or drops needs `write-all` as well,
+      and `status` and the catalogue methods need `admin`. A credential that holds `write` without
+      `write-all` can name only what its terms let it see.
     - `timeout`: how long to wait for one answer, in seconds. The default is 300.
 
     The declaring methods take a block of a declaration in JSON, as `mosaica check --payloads`
     prints it. Declaring a thing again exactly as it stands answers `200` and changes nothing, so a
-    declaration is safe to send twice, and declaring it differently is refused.
+    declaration is safe to send twice. A different declaration under a name in use is refused,
+    except where a method says otherwise.
 
-    The catalogue methods, from `list_principals` to `end_sessions`, manage principals, their
-    passwords and API keys, groups, grants, OIDC providers and sessions. A session is what a token
-    reads with, and a change that could alter what a session may see or do ends it, so every change
-    answers `{"sessions_ended": n}` with the number it ended.
+    The catalogue methods manage who may read and write. A catalogue change ends every session whose
+    access it could alter, and its answer counts them in `sessions_ended`; `create_key` answers with
+    the new key instead.
     """
 
     def __init__(self, base: str, credential: str | None = None, timeout: float = 300.0) -> None:
@@ -193,22 +192,23 @@ class Control:
     def status(self) -> dict:
         """Return the server's status report as a dictionary (`GET /control/status`).
 
-        The report says what the database holds and how the server is running. `overlay` counts the
-        deletions and suppressions of items that no compaction has yet removed, `limits` is what
-        `limits()` returns, and `compaction` reports the requests `compact` makes. When the server
-        refuses the request, the dictionary is its error body, `{"error": ..., "detail": ...}`, and
-        it is `{}` only when no server answered. Call `status_answer()` to read a refusal's status.
+        `overlay` counts the deletions and suppressions of items that no compaction has yet removed,
+        and `compaction` reports the requests `compact` makes. When the server refuses the request,
+        the dictionary is its error body, `{"error": ..., "detail": ...}`, and it is `{}` only when
+        no server answered. Call `status_answer()` to read a refusal's status.
         """
         return self.status_answer().body
 
     def status_answer(self) -> Answer:
-        """Return the server's status report as an `Answer`, so that a refusal's status and detail
-        can be read (`GET /control/status`)."""
+        """Return the server's status report as an `Answer` (`GET /control/status`).
+
+        Use it to read the status and detail of a refusal, which `status()` does not give.
+        """
         return self._send("GET", "/control/status")
 
     def limits(self) -> dict:
-        """Return the limits on what one request to each write route may carry, which a client reads
-        to size its requests.
+        """Return the limits on what one request to each write route may carry, so that a client can
+        size its requests.
 
         The limits are the `limits` block of `status()`, read once and kept for the life of this
         `Control`. A request over a limit is refused with `422`.
@@ -224,26 +224,26 @@ class Control:
         (`POST /control/ingest`).
 
         - `body`: the rows, as the bytes of an Arrow IPC stream.
-        - `batch`: an id for this batch, made fresh for each new one. Sending the same id with the
-          same bytes again is answered as a replay that writes nothing twice, which makes a retry
-          safe, and the same id with other bytes is refused. The method sends a batch once more
-          under its id when no server answered.
+        - `batch`: an id for this batch, made fresh for each new one. The server answers the same id
+          with the same bytes as a replay that writes nothing twice, which makes a retry safe, and
+          refuses the same id with other bytes. When no server answers, the method sends the batch
+          once more under its id.
         - `view`: the view the rows are for, which may be left out when the database has one view.
         - `strict`: `True` refuses the whole batch with `409` at its first refused row, so that
           nothing is written.
 
         A row names its item by its `mosaica_id` and its values of the unique columns. A row that
-        names no item creates one at the row's position, and a row that names an item edits it,
-        keeping its `mosaica_id`, or adds it to this view when it has no row there yet. A column
-        left out keeps the value the item stores, and a null clears it.
+        names no item creates one at the row's position. A row that names an item edits it, and the
+        item keeps its `mosaica_id`; when the item has no row in this view yet, the row adds it
+        there. A column left out keeps the value the item stores, and a null clears it.
 
-        A row is refused when it names two items, when its `mosaica_id` names no item, or when it
-        names an item or sets a unique value that an earlier row of the batch did, and the other
-        rows are applied. The answer counts the rows `created`, `edited`, `added` and `unchanged`,
-        gives each row's `mosaica_id` in `mosaica_ids` with `None` for a refused row, and lists the
-        refused rows in `refused` by position and reason. A row whose one change places its item in
-        an annotation changes only the annotation, so it is counted unchanged and the membership it
-        adds is counted in `joined`.
+        A row is refused when it names two items, when its `mosaica_id` names no item, when it names
+        no item and carries no coordinates, or when it names an item or sets a unique value that an
+        earlier row of the batch did, and the other rows are applied. The answer counts the rows
+        `created`, `edited`, `added` and `unchanged`, gives each row's `mosaica_id` in `mosaica_ids`
+        with `None` for a refused row, and lists the refused rows in `refused` by position and
+        reason. A row whose one change places its item in an annotation changes only the annotation,
+        so it is counted unchanged and the membership it adds is counted in `joined`.
         """
         headers = {"content-type": ARROW, "x-mosaica-batch-id": batch}
         if view is not None:
@@ -256,19 +256,19 @@ class Control:
         """Declare an annotation layer, a named set of annotations over items, such as clusters with
         their labels (`PUT /control/layers`).
 
-        `payload` is the layer's block in JSON. The answer carries the layer's `mosaica_id`, with
-        `201` for a new layer and `200` for a layer of that name that already holds this
-        declaration. Another declaration under a name in use is refused with `422`, while the name
-        of a dropped layer may be declared again. When every layer space is in use, or the layer
-        declares more levels than one space holds, the declaration is refused with `409`.
+        The answer carries the layer's `mosaica_id`, with `201` for a new layer and `200` for a
+        layer of that name that already holds this declaration. Another declaration under a name in
+        use is refused with `422`. The name of a dropped layer may be declared again. When every
+        layer space is in use, or the layer declares more levels than one space holds, the
+        declaration is refused with `409`.
         """
         return self._send(
             "PUT", "/control/layers", json.dumps(payload).encode(), {"content-type": JSON}
         )
 
     def declare_view_group(self, name: str, body: dict) -> Answer:
-        """Declare a view group, a set of views that share one frame and projection and are added
-        and dropped one at a time (`PUT /control/view_groups/{name}`).
+        """Declare a view group, a set of views that share one frame and projection
+        (`PUT /control/view_groups/{name}`).
 
         The group starts with no views, and `create_view` adds them.
         """
@@ -276,13 +276,12 @@ class Control:
                           {"content-type": JSON})
 
     def declare_attribute(self, body: dict) -> Answer:
-        """Declare an attribute, a column of values that items carry, which `body` names
-        (`PUT /control/attributes`).
+        """Declare an attribute, a column of values that items carry (`PUT /control/attributes`).
 
-        A new column holds no value for any item until a write gives it one. `unique` is the one
-        field a declared column may change, and declaring it `True` builds the column's index over
-        every stored value, so the answer waits for the build and is refused with `409` when two
-        items hold the same value.
+        `body` names the column, and a new column holds no value for any item until a write gives it
+        one. `unique` is the one field a declared column may change. Declaring it `True` builds the
+        column's index over every stored value, and the answer waits for the build. When two items
+        hold the same value, the declaration is refused with `409`.
         """
         return self._send("PUT", "/control/attributes", _json(body), {"content-type": JSON})
 
@@ -290,7 +289,8 @@ class Control:
         """Declare the shard size, the number of ids a shard issues to new items before it is sealed
         and the next shard takes them (`PUT /control/shards`).
 
-        `body` is `{"size": n}`.
+        `body` is `{"size": n}`. A new size replaces the old one, and a size at or below the open
+        shard's high water seals that shard.
         """
         return self._send("PUT", "/control/shards", _json(body), {"content-type": JSON})
 
@@ -319,11 +319,10 @@ class Control:
         )
 
     def declare_view(self, name: str, body: dict) -> Answer:
-        """Declare a view, a coordinate system that items are placed in, that belongs to no view
-        group (`PUT /control/views/{name}`).
+        """Declare a view that belongs to no view group (`PUT /control/views/{name}`).
 
-        The view starts with no rows and takes them at its first flush. A view that belongs to no
-        group cannot be dropped.
+        A view is a coordinate system that items are placed in. This one starts with no rows and
+        takes them at its first flush, and it cannot be dropped.
         """
         return self._send("PUT", f"/control/views/{_segment(name)}", _json(body),
                           {"content-type": JSON})
@@ -336,9 +335,9 @@ class Control:
         - `body`: the view's roster record, which holds its metadata and, where it has one, its
           `visibility`.
 
-        The record cannot change once the view exists. Sending the record a live view holds answers
-        `200` with that view, and another record for its key is refused with `409`. A dropped key
-        may be used again for a new view, which starts empty.
+        Because the record cannot change once the view exists, sending the record a live view holds
+        answers `200` with that view, and another record for its key is refused with `409`. A
+        dropped key may be used again.
         """
         return self._send(
             "PUT",
@@ -350,7 +349,6 @@ class Control:
     def publish(self, layer: str, body: bytes, strict: bool = False) -> Answer:
         """Publish annotations into one level of a layer (`PUT /control/layers/{layer}/artifacts`).
 
-        - `layer`: the layer's name.
         - `body`: the request's JSON, as bytes, in which each annotation names its members in a
           member table.
         - `strict`: `True` refuses the whole request at its first refused member, with `404` or
@@ -367,14 +365,13 @@ class Control:
         )
 
     def grow(self, layer: str, body: bytes, strict: bool = False) -> Answer:
-        """Change annotations a level already holds, by adding members, filling parts an annotation
-        lacks and taking items out of the set a label's text was written from
-        (`PATCH /control/layers/{layer}/artifacts`).
+        """Change the annotations a level already holds (`PATCH /control/layers/{layer}/artifacts`).
 
-        `body` is the request's JSON, as bytes. Members are refused as for `publish`, and `strict`
-        works as it does there. A part that differs from the one the annotation holds is refused
-        with `409`, and a key no annotation holds is refused with `422`, because this method creates
-        nothing.
+        `body` is the request's JSON, as bytes. It can add members, fill parts an annotation lacks,
+        and take items out of the set a label's text was written from. Members are refused as for
+        `publish`, and `strict` works as it does there. A part that differs from the one the
+        annotation holds is refused with `409`, and a key no annotation holds is refused with `422`,
+        because this method creates nothing.
         """
         return self._send(
             "PATCH", _artifacts(layer) + _query(strict=strict), body, {"content-type": JSON}
@@ -392,9 +389,9 @@ class Control:
 
         A change that names no item, or two, is listed in the answer's `refused`, and the others are
         applied. A deletion or suppression applies to every request that starts after the server
-        accepts it, and the server never answers this route `429`, so a busy server does not hold
-        one back. A request that deletes a layer is refused with `422`, because `drop_layer` removes
-        a layer.
+        accepts it. The server never answers this route `429`, so a busy server does not hold a
+        deletion back. A request that deletes a layer is refused with `422`, because `drop_layer`
+        removes a layer.
         """
         return self._send(
             "POST",
@@ -407,7 +404,8 @@ class Control:
         """Remove an annotation layer with all its annotations (`DELETE /control/layers/{name}`).
 
         Readers stop being served the layer at once. Its name may be declared again afterwards, as a
-        new layer that none of the dropped layer's `mosaica_id`s names. `wait` is as for `flush`.
+        new layer that none of the dropped layer's `mosaica_id`s names. `wait` holds the answer
+        until the publication carrying the drop is visible, as on `flush`.
         """
         return self._send("DELETE", f"/control/layers/{_segment(name)}" + _wait(wait))
 
@@ -427,13 +425,15 @@ class Control:
         (`POST /control/compact`).
 
         The server answers `202` at once with the request's number in `body["request"]`, and then
-        compacts every shard with something to reclaim, one after another. The outcome is read from
-        `status()`. The request has been answered once `compaction.requests.answered` reaches its
-        number, and a `compaction.requests.last_refusal` whose `request` is that number means a
-        shard was refused while answering it, with `detail` saying why and what to do. A request
+        compacts every shard with something to reclaim. The outcome is read from `status()`. The
+        request has been answered once `compaction.requests.answered` reaches its number. A
+        `compaction.requests.last_refusal` whose `request` is that number means a shard was refused
+        while answering it, with `detail` saying why and what to do. A higher number means a later
+        refusal has replaced the record, and that refusal may or may not concern yours. A request
         answered without a refusal can still have failed, so to confirm that the rows are gone,
-        check that `compaction.folds` rose and `overlay.retirable` fell. When no compaction can
-        start until the server restarts, the answer is `503` and nothing is requested.
+        check that `compaction.folds` rose and `overlay.retirable` fell; `compaction.fold_failures`
+        counts the compactions that failed or were discarded. When no compaction can start until the
+        server restarts, the answer is `503` and nothing is requested.
         """
         return self._send("POST", "/control/compact", b"")
 
@@ -459,8 +459,7 @@ class Control:
         return self._send(method, path, _json(body), {"content-type": JSON})
 
     def list_principals(self) -> Answer:
-        """List every local principal, the people and services the database knows by name
-        (`GET /control/principals`).
+        """List every local principal (`GET /control/principals`).
 
         The answer's `principals` holds one record per principal, with its `name`, `kind`,
         `disabled`, `has_password`, and the `terms`, `permissions` and `groups` granted to it
@@ -469,19 +468,21 @@ class Control:
         return self._send("GET", "/control/principals")
 
     def show_principal(self, name: str) -> Answer:
-        """Return one principal's record, as `list_principals` describes it, or `404` when no
-        principal has the name (`GET /control/principals/{name}`)."""
+        """Return one principal's record, as `list_principals` describes it
+        (`GET /control/principals/{name}`).
+
+        The answer's status is `404` when no principal has the name.
+        """
         return self._send("GET", f"/control/principals/{_segment(name)}")
 
     def create_principal(self, name: str, kind: str) -> Answer:
-        """Create a local principal, a person or a service that can be granted terms and permissions
-        and given a password or API keys (`POST /control/principals`).
+        """Create a local principal, a named person or service that can be granted access
+        (`POST /control/principals`).
 
         - `name`: the principal's name. A name already in use is refused with `409`.
         - `kind`: `"person"` or `"service"`.
 
-        The principal starts with no password, key, term or permission. A server started with
-        `mosaica serve --open` holds no principals, so it refuses with `403`.
+        The principal starts with no password, key, term or permission.
         """
         return self._json_send("POST", "/control/principals", {"name": name, "kind": kind})
 
@@ -490,8 +491,8 @@ class Control:
 
         - `disabled`: `True` disables the principal, and `False` enables it again.
 
-        Disabling a principal ends its sessions, including those made with its keys, and the server
-        accepts none of its credentials until it is enabled.
+        Disabling a principal ends its sessions and the tokens it made for others with `authorise`,
+        and the server accepts none of its credentials until it is enabled.
         """
         return self._json_send(
             "PATCH", f"/control/principals/{_segment(name)}", {"disabled": disabled}
@@ -513,13 +514,17 @@ class Control:
         )
 
     def clear_password(self, name: str) -> Answer:
-        """Remove a principal's password, so that no password logs it in
-        (`DELETE /control/principals/{name}/password`)."""
+        """Remove a principal's password (`DELETE /control/principals/{name}/password`).
+
+        No password logs the principal in afterwards.
+        """
         return self._send("DELETE", f"/control/principals/{_segment(name)}/password")
 
     def list_keys(self, principal: str) -> Answer:
-        """List a principal's API keys, without their secrets, under `keys` in the answer
-        (`GET /control/principals/{name}/keys`)."""
+        """List a principal's API keys (`GET /control/principals/{name}/keys`).
+
+        The answer holds them under `keys`, without their secrets.
+        """
         return self._send("GET", f"/control/principals/{_segment(principal)}/keys")
 
     def create_key(
@@ -528,14 +533,13 @@ class Control:
         expires_at: int | None = None,
         permissions: Sequence[str] | None = None,
     ) -> Answer:
-        """Issue an API key for a principal, which a script or a service uses as its credential
-        (`POST /control/principals/{name}/keys`).
+        """Issue an API key for a principal (`POST /control/principals/{name}/keys`).
 
         - `principal`: the principal the key authenticates.
         - `expires_at`: when the key expires, in seconds since 1970, which also ends every session
           made with it. Left out, the key does not expire.
-        - `permissions`: the permissions a credential made from the key holds at most, which are
-          never more than its principal holds. Left out, the key holds its principal's.
+        - `permissions`: the permissions the key is limited to, which never exceed its principal's.
+          Left out, the key holds its principal's.
 
         The answer's `key` is the whole key, which no later answer shows again, so keep it when you
         make it. `prefix` names the key to `list_keys` and `revoke_key`.
@@ -548,8 +552,11 @@ class Control:
         return self._json_send("POST", f"/control/principals/{_segment(principal)}/keys", body)
 
     def revoke_key(self, prefix: str) -> Answer:
-        """Revoke an API key by its prefix, which ends every session made with it, including the
-        tokens `authorise` made with it (`DELETE /control/keys/{prefix}`)."""
+        """Revoke an API key by its prefix (`DELETE /control/keys/{prefix}`).
+
+        Revoking a key ends every session made with it, including the tokens `authorise` made with
+        it.
+        """
         return self._send("DELETE", f"/control/keys/{_segment(prefix)}")
 
     def list_groups(self) -> Answer:
@@ -558,8 +565,10 @@ class Control:
         return self._send("GET", "/control/groups")
 
     def show_group(self, name: str) -> Answer:
-        """Return one group's record, or `404` when no group has the name
-        (`GET /control/groups/{name}`)."""
+        """Return one group's record (`GET /control/groups/{name}`).
+
+        The answer's status is `404` when no group has the name.
+        """
         return self._send("GET", f"/control/groups/{_segment(name)}")
 
     def create_group(self, name: str) -> Answer:
@@ -594,14 +603,14 @@ class Control:
     ) -> Answer:
         """Grant access terms or a permission to a principal or a group (`POST /control/grants`).
 
-        - `principal`, `group`: the grantee. Name exactly one.
+        - `principal`, `group`: the grantee.
         - `term`, `terms`: an access term, which says what the grantee may see, or several, which
           are granted as one change and refused together if one is refused.
         - `permission`: what the grantee may do, one of `"read"`, `"write"`, `"authorise-as"`,
           `"admin"`, `"read-all"` and `"write-all"`.
 
-        Name exactly one of `term`, `terms` and `permission`, since the server refuses anything else
-        with `422`. A grant already held changes nothing.
+        Name exactly one grantee and exactly one of `term`, `terms` and `permission`. The server
+        refuses any other combination with `422`. A grant already held changes nothing.
         """
         return self._json_send("POST", "/control/grants", _grant(principal, group, term, terms, permission))
 
@@ -628,8 +637,10 @@ class Control:
         return self._send("GET", "/control/providers")
 
     def show_provider(self, name: str) -> Answer:
-        """Return one OIDC provider's record, or `404` when no provider has the name
-        (`GET /control/providers/{name}`)."""
+        """Return one OIDC provider's record (`GET /control/providers/{name}`).
+
+        The answer's status is `404` when no provider has the name.
+        """
         return self._send("GET", f"/control/providers/{_segment(name)}")
 
     def put_provider(
@@ -693,11 +704,12 @@ class Control:
         principal: str | None = None,
         provider: str | None = None,
     ) -> Answer:
-        """End one session by its `token_id`, or every session of a local principal or an OIDC
-        provider, so that their tokens stop working (`POST /control/sessions/end`).
+        """End one session, or every session of a local principal or an OIDC provider
+        (`POST /control/sessions/end`).
 
         Name exactly one of `token_id`, `principal` and `provider`. A session's `token_id` is in
-        `list_sessions` and on the `Token` that `authorise` made.
+        `list_sessions` and on the `Token` that `authorise` made, and an ended session's token stops
+        working.
         """
         body = {
             k: v
