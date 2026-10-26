@@ -1680,8 +1680,9 @@ class Database:
 
     def _record_committed_layers(self, layers: Iterable[dict]) -> None:
         """Write onto the SDK's own layer blocks what each layer was committed with: its label
-        column, so a later insert naming another column is refused, and its value set, so a later
-        commit sends the declaration the database holds whatever that commit inserts."""
+        column, so a later insert naming another column is refused, and its value set and views,
+        so a later commit sends the declaration the database holds whatever that commit inserts
+        or declares."""
         declared = {block.get("name"): block for block in self.blocks.blocks["layer"]}
         for layer in layers:
             held = declared.get(layer["name"])
@@ -1693,6 +1694,9 @@ class Database:
             if layer.get("value_set"):
                 held["value_set"] = layer["value_set"]
                 held[D.CHOSEN_VALUE_SET] = True
+            # A layer declared on every view is on the views there were when it was committed.
+            if held.get("views") == D.VIEWS_ALL and layer.get("views"):
+                held["views"] = list(layer["views"])
         self._save_state()
 
     # ------------------------------------------------------------------ verbs that are not inserts

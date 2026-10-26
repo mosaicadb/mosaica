@@ -1694,3 +1694,23 @@ def test_labels_given_as_text_read_no_other_column_of_their_table_by_name(tmp_pa
         }
     finally:
         db.close()
+
+
+def test_a_layer_on_every_view_is_the_same_declaration_after_a_view_is_added(tmp_path):
+    """A layer declared without views is on the views there were at its commit, so declaring
+    another view leaves the later commits sending the declaration the database holds."""
+    db, rows = two_items(tmp_path / "db")
+    try:
+        assert db.commit().ok
+        db.declare_layer("halves", kind="flat")
+        db.insert("halves", rows.assign(half=["left", "right"]), key="half")
+        assert db.commit().ok
+        db.declare_view("other", extent={"min": 0.0, "max": 8.0})
+        assert db.commit().ok
+        db.declare_layer("thirds", kind="flat")
+        db.insert("thirds", rows.assign(third=["a", "b"]), key="third")
+        report = db.commit()
+        assert report.ok, report
+        assert {"halves", "thirds"} <= {layer["name"] for layer in db.meta()["layers"]}
+    finally:
+        db.close()
