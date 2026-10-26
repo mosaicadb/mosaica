@@ -62,3 +62,7 @@ clients/ts/components/custom-elements.json
 .claude/perf-campaign/
 .impeccable/
 clients/ts/.shot2-tmp.mjs
+
+# Local only: personal agent instructions and measurement logs.
+/CLAUDE.local.md
+/probes/

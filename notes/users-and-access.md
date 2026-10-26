@@ -274,10 +274,9 @@ and normalised.
 
 A probe of the two layouts measured authorise on a corpus of 9.3 million per-document labels at
 100 to 800 ms through the DAG and 1.4 to 95 ms through term postings, and on 500,000 compartmented
-labels at 20 to 95 ms through the DAG, which term postings cannot express
-([probe](../probes/2026-09-30-label-dag-authorise/results.md)). Indexing terms in postings and
-only conjunctions through the DAG takes the faster figure for each. The probe indexed whole labels,
-and the per-operand rule has not been measured separately.
+labels at 20 to 95 ms through the DAG, which term postings cannot express. Indexing terms in
+postings and only conjunctions through the DAG takes the faster figure for each. The probe indexed
+whole labels, and the per-operand rule has not been measured separately.
 
 Normalisation flattens nested conjunctions and disjunctions, sorts and removes duplicate operands,
 and applies absorption, so that `a|(a&b)` becomes `a`. Two equivalent labels that normalise

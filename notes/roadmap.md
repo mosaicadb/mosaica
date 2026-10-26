@@ -187,7 +187,7 @@ in both halves publication owes — the files and the manifest's `attr_extents` 
 entity-space pass (§5.2), so growth no longer waits for a fold. **Numeric ranges are built** — a
 scan at the column's own precision, all four bounds. All three write paths are verified on real data
 at 2.4×10⁶ and 2.5×10⁷ against an independently decoded oracle
-([`probes/2026-08-10-filter-lifecycle/`](../probes/2026-08-10-filter-lifecycle/)).
+(`probes/2026-08-10-filter-lifecycle/`).
 
 **What remains of [#43] is one operand and one family** — `match` and multi-valued attributes, each
 refusing by name; `none_of` landed with decision 0066. They are not equal in cost: lists need their
@@ -420,7 +420,7 @@ the provider's login page and collects the token afterwards, so the embedding ap
 The components and the Python client would run the authorization code flow with PKCE and hand the
 token to `/v1/login`. No issue or design exists.
 
-**Maps that wrap at the date line.** Parked by Joe until after the first release. A map opens
+**Maps that wrap at the date line.** Parked until after the first release. A map opens
 framed on every match, and the map does not wrap, so anything that crosses ±180 opens at the
 world's full width: the United States with the Aleutians, Russia with Chukotka, Fiji, New Zealand
 with the Chatham Islands. A wrapping map would draw points on both sides of ±180 and let the
@@ -440,7 +440,7 @@ exists.
 **A per-view field declared at a running server, on every view of its group at once.** A field
 scoped to a view group and declared at a running server reaches each view of the group at that
 view's next flush; until then the view's points frame carries no such column, which readers take
-as no value. A build serves the column, as nulls, on every view from the start. Deferred by Joe:
+as no value. A build serves the column, as nulls, on every view from the start. Deferred:
 the declaration would have to write an empty column for every shard and view and make that
 durable before answering, or the rule that reads a listed view as built in every shard would
 have to tell a live declaration apart (`PartitionData::scoped_base_in`). No issue exists.
@@ -471,33 +471,33 @@ attribute, a vocabulary, a plain view, a view group and the shard settings canno
 surface, so a declaration made by mistake stays until a rebuild from a schema that leaves it out.
 No issue exists.
 
-[#3]: https://github.com/jennis0/tessera-index/issues/3
-[#4]: https://github.com/jennis0/tessera-index/issues/4
-[#73]: https://github.com/jennis0/tessera-index/issues/73
-[#5]: https://github.com/jennis0/tessera-index/issues/5
-[#6]: https://github.com/jennis0/tessera-index/issues/6
-[#7]: https://github.com/jennis0/tessera-index/issues/7
-[#8]: https://github.com/jennis0/tessera-index/issues/8
-[#9]: https://github.com/jennis0/tessera-index/issues/9
-[#10]: https://github.com/jennis0/tessera-index/issues/10
-[#11]: https://github.com/jennis0/tessera-index/issues/11
-[#12]: https://github.com/jennis0/tessera-index/issues/12
-[#13]: https://github.com/jennis0/tessera-index/issues/13
-[#14]: https://github.com/jennis0/tessera-index/issues/14
-[#41]: https://github.com/jennis0/tessera-index/issues/41
-[#42]: https://github.com/jennis0/tessera-index/issues/42
-[#43]: https://github.com/jennis0/tessera-index/issues/43
-[#44]: https://github.com/jennis0/tessera-index/issues/44
-[#45]: https://github.com/jennis0/tessera-index/issues/45
-[#46]: https://github.com/jennis0/tessera-index/issues/46
-[#47]: https://github.com/jennis0/tessera-index/issues/47
-[#48]: https://github.com/jennis0/tessera-index/issues/48
-[#49]: https://github.com/jennis0/tessera-index/issues/49
-[#50]: https://github.com/jennis0/tessera-index/issues/50
-[#51]: https://github.com/jennis0/tessera-index/issues/51
-[#52]: https://github.com/jennis0/tessera-index/issues/52
-[#53]: https://github.com/jennis0/tessera-index/issues/53
-[#54]: https://github.com/jennis0/tessera-index/issues/54
-[#56]: https://github.com/jennis0/tessera-index/issues/56
-[#82]: https://github.com/jennis0/tessera-index/issues/82
-[#83]: https://github.com/jennis0/tessera-index/issues/83
+[#3]: https://github.com/mosaicadb/mosaica/issues/3
+[#4]: https://github.com/mosaicadb/mosaica/issues/4
+[#73]: https://github.com/mosaicadb/mosaica/issues/73
+[#5]: https://github.com/mosaicadb/mosaica/issues/5
+[#6]: https://github.com/mosaicadb/mosaica/issues/6
+[#7]: https://github.com/mosaicadb/mosaica/issues/7
+[#8]: https://github.com/mosaicadb/mosaica/issues/8
+[#9]: https://github.com/mosaicadb/mosaica/issues/9
+[#10]: https://github.com/mosaicadb/mosaica/issues/10
+[#11]: https://github.com/mosaicadb/mosaica/issues/11
+[#12]: https://github.com/mosaicadb/mosaica/issues/12
+[#13]: https://github.com/mosaicadb/mosaica/issues/13
+[#14]: https://github.com/mosaicadb/mosaica/issues/14
+[#41]: https://github.com/mosaicadb/mosaica/issues/41
+[#42]: https://github.com/mosaicadb/mosaica/issues/42
+[#43]: https://github.com/mosaicadb/mosaica/issues/43
+[#44]: https://github.com/mosaicadb/mosaica/issues/44
+[#45]: https://github.com/mosaicadb/mosaica/issues/45
+[#46]: https://github.com/mosaicadb/mosaica/issues/46
+[#47]: https://github.com/mosaicadb/mosaica/issues/47
+[#48]: https://github.com/mosaicadb/mosaica/issues/48
+[#49]: https://github.com/mosaicadb/mosaica/issues/49
+[#50]: https://github.com/mosaicadb/mosaica/issues/50
+[#51]: https://github.com/mosaicadb/mosaica/issues/51
+[#52]: https://github.com/mosaicadb/mosaica/issues/52
+[#53]: https://github.com/mosaicadb/mosaica/issues/53
+[#54]: https://github.com/mosaicadb/mosaica/issues/54
+[#56]: https://github.com/mosaicadb/mosaica/issues/56
+[#82]: https://github.com/mosaicadb/mosaica/issues/82
+[#83]: https://github.com/mosaicadb/mosaica/issues/83

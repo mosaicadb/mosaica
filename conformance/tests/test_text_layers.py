@@ -38,7 +38,7 @@ The catalogue entries records §10 gives this family, and what layering adds to 
 
 **One state this suite cannot reach, and it is not faked.** There is no `contains ""` counterpart
 here: a text column publishes `match` and `phrase` and nothing that asks whether an item carries
-prose at all ([#123](https://github.com/jennis0/tessera-index/issues/123)), so the keyword module's
+prose at all ([#123](https://github.com/mosaicadb/mosaica/issues/123)), so the keyword module's
 presence probe has no form to take — what stands in its place is an ingested row whose prose
 analyses to *no terms*, which must match no predicate while still being served.
 
@@ -716,7 +716,7 @@ def test_an_ingested_row_with_no_terms_is_served_and_matches_nothing(layers):
     postings: an engine deriving coverage from its postings reports that row absent.
 
     What cannot be asserted from here is the *difference* between the two, because no operand asks
-    whether an item carries prose ([#123](https://github.com/jennis0/tessera-index/issues/123)).
+    whether an item carries prose ([#123](https://github.com/mosaicadb/mosaica/issues/123)).
     When one exists, this is where it gets its layered coverage.
     """
     stage = layers["base+A+B"]

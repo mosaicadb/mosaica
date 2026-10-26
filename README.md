@@ -146,4 +146,4 @@ This separation means Mosaica can sit underneath an application with its own use
 
 ## Licence
 
-[Apache-2.0](LICENSE). Copyright 2026 Joe Ennis.
+[Apache-2.0](LICENSE). Copyright 2026 The Mosaica authors.

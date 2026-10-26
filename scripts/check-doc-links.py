@@ -48,7 +48,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-SCAN_MARKDOWN = ["docs", "probes", "conformance", "clients", "reference", "bench"]
+SCAN_MARKDOWN = ["docs", "conformance", "clients", "reference", "bench"]
 SCAN_ROOT_FILES = ["CLAUDE.md", "README.md"]
 SCAN_CODE = {"crates": (".rs",), "clients": (".ts",)}
 
