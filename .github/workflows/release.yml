@@ -115,7 +115,9 @@ jobs:
           mkdir dist
           for dir in binaries/mosaica-binary-*; do
             triple=${dir#binaries/mosaica-binary-}
-            name="mosaica-$VERSION-$triple"
+            # No version in the name, so /releases/latest/download/mosaica-<triple>.tar.gz always
+            # fetches the newest release; the binary's --version and the changelog carry it.
+            name="mosaica-$triple"
             mkdir "$name"
             cp "$dir"/* "$name"/
             chmod +x "$name"/mosaica*
@@ -324,7 +326,9 @@ jobs:
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          tags=(-t "$image:$VERSION")
+          # `next` follows every release, candidates included; `latest` and the minor tag follow
+          # full releases only, as npm's dist-tags do.
+          tags=(-t "$image:$VERSION" -t "$image:next")
           if [ "$PRERELEASE" = false ]; then
             tags+=(-t "$image:${VERSION%.*}" -t "$image:latest")
           fi
