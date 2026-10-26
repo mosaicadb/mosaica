@@ -1,6 +1,6 @@
 # Inserting and committing
 
-`insert` hands a table to something declared and names the columns it reads. `commit` makes what was inserted part of the database: the first commit builds it and starts its server, and each later one sends what was inserted since. `check` says what the next commit would do, and sends nothing.
+Use `insert` to hand a table to something you have declared, naming the columns it reads from. Nothing reaches the database until `commit`, which builds the database and starts its server the first time, and sends what was inserted since on each later call. To see what the next commit would do without sending anything, call `check`.
 
 ## Database
 

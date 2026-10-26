@@ -1,6 +1,8 @@
 # Connecting and creating
 
-`connect` reads a database someone else runs, with a token: one its operator issued, one `login` makes from a password, an API key or an OIDC access token, or one `authorise` makes, or none for a server started with `mosaica serve --open`. `create` and `open` give a `Database`: a database in a directory, which runs its own server once it is committed, and makes its tokens with its own operator credential. A token says which access terms its holder reads with: those granted to the principal it was made for, or those the operator named.
+Use `connect` to read a database that someone else runs. It takes a token, which decides the access terms you read with, and a server started with `mosaica serve --open` needs none. The database's operator can issue you a token, `login` makes one from a password, an API key or an OIDC access token, and `authorise` makes one for someone else to read with.
+
+Use `create` or `open` when the database is your own. Each gives a `Database` in a directory, which starts its own server at the first commit and makes its tokens with its own operator credential.
 
 ::: mosaica._viewer.connect
 

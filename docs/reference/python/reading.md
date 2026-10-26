@@ -1,6 +1,8 @@
 # Reading
 
-A reader holds a set of access terms and sees an item when its terms satisfy one of the item's labels. Every count, map, record and annotation a reader is given is computed over the items it may see. A `Database` reads with its operator's own token, which holds `read-all` and sees every item that is not deleted or suppressed, including an item committed under a new term or label after the token was made, once the commit is flushed. `Database.viewer` gives a `Viewer` holding the terms you name, and `connect` one holding the terms its token grants.
+A reader holds a set of access terms and sees an item when those terms satisfy one of the item's labels, so every count, map, record and annotation it is given covers only the items it may see. Use `connect` for a reader whose terms come from its token, or `Database.viewer` to read your own database as someone holding the terms you name.
+
+A `Database` itself reads with its operator's token, which holds `read-all`. It therefore sees every item that is not deleted or suppressed, including items committed after the token was made, once their commit is flushed.
 
 ## Database
 

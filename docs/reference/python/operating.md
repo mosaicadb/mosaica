@@ -1,6 +1,6 @@
 # Operating
 
-These methods change what a committed database serves, and reach the server under it. Before the first commit nothing is serving a database, so `remove`, `suppress`, `unsuppress`, `leave`, `drop_layer`, `drop_view`, `compact` and `status` are refused.
+These methods change what a committed database serves, for example by deleting or suppressing items, and reach the server running under it. Because nothing serves a database before its first commit, `remove`, `suppress`, `unsuppress`, `leave`, `drop_layer`, `drop_view`, `compact` and `status` are refused until then.
 
 ## Database
 
