@@ -84,10 +84,12 @@ Every third-party action in `release.yml` and `wheels.yml` is pinned to a commit
 | `archives` | One `mosaica-<target>.tar.gz` per target, with no version in the name so `/releases/latest/download/` links stay fixed, with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, `README.md` and `CHANGELOG.md`, and `SHA256SUMS`. |
 | `npm-pack` | Builds the four npm packages and packs them. |
 | `pypi` | Publishes `mosaica-native`, waits until PyPI serves it, then publishes `mosaica`, through trusted publishing. |
-| `npm` | Publishes the four tarballs in dependency order through trusted publishing, with provenance; a pre-release goes to the `next` dist-tag. |
+| `npm` | Publishes the four tarballs in dependency order through trusted publishing, with provenance; the newest release goes to `latest`, a later candidate to `next` (see below). |
 | `crates` | Packages and builds the twenty crates, then `cargo publish --workspace --no-verify` through trusted publishing, in dependency order. |
-| `image-build`, `image` | Builds the image natively on amd64 and arm64, pushes both by digest, then tags the pair as the version and `next`, and for a full release also the minor version and `latest`. |
-| `github-release` | Creates the release with the changelog section as its notes, marked pre-release for an `-rc` tag. |
+| `image-build`, `image` | Builds the image natively on amd64 and arm64, pushes both by digest, then tags the pair as the version and `next`, the newest release also `latest`, and a full release also the minor version. |
+| `github-release` | Creates the release with the changelog section as its notes, marked latest if it is the newest release and pre-release otherwise. |
+
+The newest release is a full release, or any candidate while no full release (`vX.Y.Z`) has been tagged. So until 0.1.0 every candidate is what `pip install mosaica`, `npm install @mosaicajs/client`, the image's `latest` and the releases page's latest download give; after it, a candidate is a pre-release that only `next` follows.
 
 ## When a publish fails
 

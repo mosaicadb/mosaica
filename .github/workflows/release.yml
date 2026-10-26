@@ -49,6 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      newest: ${{ steps.version.outputs.newest }}
       pep440: ${{ steps.version.outputs.pep440 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,7 +71,13 @@ jobs:
           version=$(python3 scripts/version.py)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "pep440=$(python3 scripts/version.py pep440)" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$([[ "$version" == *-* ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          prerelease=$([[ "$version" == *-* ]] && echo true || echo false)
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          # Until the first full release, each candidate is the newest release everywhere: npm's and
+          # the image's `latest`, and the release page GitHub calls latest. After it, a candidate is
+          # a pre-release that only `next` follows.
+          full=$(git tag -l 'v*' | grep -cE '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          echo "newest=$([[ $prerelease == false || $full -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
       # The gate (ci.yml) runs on every push to main. Only a passing run for a push to main counts,
       # not one for a pull request, so tag after the gate is green on main.
       - name: the gate passed on the tagged commit
@@ -213,7 +220,7 @@ jobs:
       - name: publish in dependency order
         env:
           VERSION: ${{ needs.verify.outputs.version }}
-          DIST_TAG: ${{ needs.verify.outputs.prerelease == 'true' && 'next' || 'latest' }}
+          DIST_TAG: ${{ needs.verify.outputs.newest == 'true' && 'latest' || 'next' }}
         run: |
           for name in client deck components react; do
             # A package an earlier attempt published is left as it is, so a re-run is safe.
@@ -324,14 +331,14 @@ jobs:
         env:
           VERSION: ${{ needs.verify.outputs.version }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          NEWEST: ${{ needs.verify.outputs.newest }}
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          # `next` follows every release, candidates included; `latest` and the minor tag follow
-          # full releases only, as npm's dist-tags do.
+          # `next` follows every release, `latest` the newest (see verify), the minor tag full
+          # releases only.
           tags=(-t "$image:$VERSION" -t "$image:next")
-          if [ "$PRERELEASE" = false ]; then
-            tags+=(-t "$image:${VERSION%.*}" -t "$image:latest")
-          fi
+          if [ "$NEWEST" = true ]; then tags+=(-t "$image:latest"); fi
+          if [ "$PRERELEASE" = false ]; then tags+=(-t "$image:${VERSION%.*}"); fi
           sources=()
           for digest in digests/*; do sources+=("$image@sha256:${digest#digests/}"); done
           docker buildx imagetools create "${tags[@]}" "${sources[@]}"
@@ -358,10 +365,10 @@ jobs:
       - name: create the release
         env:
           GH_TOKEN: ${{ github.token }}
-          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          NEWEST: ${{ needs.verify.outputs.newest }}
         run: |
           python3 scripts/version.py notes > notes.md
-          flags=()
-          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); fi
+          flags=(--latest)
+          if [ "$NEWEST" = false ]; then flags=(--prerelease --latest=false); fi
           gh release create "$GITHUB_REF_NAME" assets/* --title "Mosaica $GITHUB_REF_NAME" \
             --notes-file notes.md --verify-tag "${flags[@]}"
