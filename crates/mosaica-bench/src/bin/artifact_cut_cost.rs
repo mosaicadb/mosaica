@@ -49,9 +49,8 @@
 //! serving pass was measured, and it is wrong in one case: **a principal who can see the whole
 //! corpus passes every artifact**, so at a 10⁷-artifact treed layer and whole-map zoom the cut is
 //! handed the entire population and costs **a second**. That is now the largest single term in such
-//! a request — larger than the verdict pass it rides on, which
-//! the serving-scale probe brings
-//! to ~135 ms with the same population.
+//! a request — larger than the verdict pass it rides on, which the serving-scale probe brings to
+//! ~135 ms with the same population.
 //!
 //! It does not contradict the ~100 ns per *passing* artifact rule; it is that rule at a passing
 //! count nothing had measured. Every narrower principal stays cheap for the same reason: at a mask

@@ -6,10 +6,9 @@ snapshot's `title` and `abstract` back onto the entity space that file fixed, so
 can be declared over real writing rather than over generated strings — which is the only kind of
 input that tells you anything about an analyser, a term distribution or a posting's shape.
 
-**The join is by `id`, and it is total.** All 2,422,486
-embedding ids match a snapshot id verbatim; the assert here is that fact as a check,
-because a partial join would silently give some fraction of the corpus an empty title and read as
-a recall bug in whatever measured it later.
+**The join is by `id`, and it is total.** All 2,422,486 embedding ids match a snapshot id
+verbatim; the assert here is that fact as a check, because a partial join would silently give
+some fraction of the corpus an empty title and read as a recall bug in whatever measured it later.
 
 **Whitespace is normalised and nothing else is.** The snapshot wraps both fields at ~80 columns
 with embedded newlines, and an abstract additionally opens with two spaces. Runs of whitespace
