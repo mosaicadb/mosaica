@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mosaica viewer</title>
+    <!-- No icon to fetch: a headed browser asks for one and the dev server's 404 reads as an error. -->
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/style.css" />
+    <!-- The elements fetch no font; this page loads Instrument Sans, their default face. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <!-- The explorer is the map with its status strip, tools, field cards, display popover,
+         selection and item card; the instruments beside it are the demo's own: dataset and
+         principal, where the session credential stays, and the readouts that measure rather than
+         show. -->
+    <mosaica-explorer id="explorer" layout="overlay"></mosaica-explorer>
+    <aside id="instruments"></aside>
+    <button id="instruments-toggle" type="button" aria-controls="instruments" aria-expanded="false">Instruments</button>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

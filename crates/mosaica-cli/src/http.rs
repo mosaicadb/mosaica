@@ -1,0 +1,517 @@
+//! The HTTP the identity and write verbs share: where a request goes, one request and its answer,
+//! the control plane's credential, and printing an answer.
+//!
+//! Secrets are never arguments, which other users of the machine can read: the control plane's
+//! credential is read from `MOSAICA_CREDENTIAL`. Where it is unset, the request is sent without a
+//! credential, as an open server serves it.
+
+use std::io::{BufRead, Read, Write};
+use std::process::ExitCode;
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use clap::Args;
+use serde_json::Value;
+
+/// How long the identity verbs wait for an answer.
+pub(crate) const IDENTITY_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long a write waits for an answer: the clients' figure, since a write may wait on the log's
+/// fsync behind a busy executor, and one sent with `?wait=visible` for
+/// `serve.visible_wait_max_secs` beside.
+pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The longest wait between attempts after a `429`, in seconds. A longer one asked for is cut to
+/// this.
+const MAX_BACKOFF: f64 = 30.0;
+
+/// The shortest wait a `429` asks for, in seconds, and the wait where it names none.
+const MIN_BACKOFF: f64 = 1.0;
+
+/// The most one request waits in all between attempts after a `429`, in seconds. A `429` is waited
+/// out and the request sent again while the waits stay within this; the `429` whose wait would
+/// take them past it is the answer.
+const RETRY_BUDGET_S: f64 = 300.0;
+
+/// Where a request goes: `http://host:port`, or `unix:<path>` for a control plane on a Unix
+/// socket.
+#[derive(Clone, Debug)]
+pub(crate) enum Target {
+    Http(String),
+    Unix(std::path::PathBuf),
+}
+
+impl Target {
+    pub(crate) fn parse(raw: &str) -> Result<Target, String> {
+        if let Some(path) = raw.strip_prefix("unix:") {
+            return Ok(Target::Unix(path.into()));
+        }
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            return Ok(Target::Http(raw.trim_end_matches('/').to_owned()));
+        }
+        Err(format!(
+            "`{raw}` is not an address; write `http://<host>:<port>`, or `unix:<path>` for a Unix \
+             socket"
+        ))
+    }
+}
+
+/// One request's answer.
+pub(crate) struct Answer {
+    pub(crate) status: u16,
+    pub(crate) body: Vec<u8>,
+    /// The `retry-after` header, where the answer has one.
+    retry_after: Option<String>,
+}
+
+impl Answer {
+    pub(crate) fn ok(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
+
+    /// The body as JSON, or `null` where it is not JSON.
+    pub(crate) fn json(&self) -> Value {
+        serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    }
+
+    pub(crate) fn text(&self) -> String {
+        String::from_utf8_lossy(&self.body).trim_end().to_owned()
+    }
+}
+
+/// A request body and its content type.
+pub(crate) type Body<'a> = (&'a str, &'a [u8]);
+
+/// One request with a JSON body, or none.
+pub(crate) fn send_json(
+    target: &Target,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: Option<&Value>,
+) -> Result<Answer, String> {
+    with_json(body, |body| {
+        send(target, method, path, bearer, &[], body, IDENTITY_TIMEOUT)
+    })
+}
+
+/// `send` given `body` as a JSON request body.
+fn with_json<T>(body: Option<&Value>, send: impl FnOnce(Option<Body>) -> T) -> T {
+    let bytes = body.map(Value::to_string);
+    send(
+        bytes
+            .as_deref()
+            .map(|bytes| ("application/json", bytes.as_bytes())),
+    )
+}
+
+/// One request, sent once.
+pub(crate) fn send(
+    target: &Target,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    headers: &[(&str, &str)],
+    body: Option<Body>,
+    timeout: Duration,
+) -> Result<Answer, String> {
+    // A line break in a header would end it and start another, written as given into the
+    // request head over a Unix socket.
+    let broken = |text: &str| text.contains(['\r', '\n']);
+    if let Some((name, _)) = headers
+        .iter()
+        .find(|(name, value)| broken(name) || broken(value))
+    {
+        return Err(format!("the {name} header holds a line break; remove it"));
+    }
+    match target {
+        Target::Http(base) => {
+            static CLIENT: OnceLock<Result<reqwest::blocking::Client, String>> = OnceLock::new();
+            let client = CLIENT
+                .get_or_init(|| {
+                    reqwest::blocking::Client::builder()
+                        .build()
+                        .map_err(|e| format!("starting the HTTP client: {e}"))
+                })
+                .as_ref()
+                .map_err(Clone::clone)?;
+            // A write with no body names a type too: an open server refuses a write without one.
+            let (content_type, bytes) = body.unwrap_or((written_type(method), &[]));
+            let method = reqwest::Method::from_bytes(method.as_bytes()).expect("a known method");
+            let mut req = client
+                .request(method, format!("{base}{path}"))
+                .timeout(timeout);
+            if let Some(bearer) = bearer {
+                req = req.bearer_auth(bearer);
+            }
+            for (name, value) in headers {
+                req = req.header(*name, *value);
+            }
+            if !content_type.is_empty() {
+                req = req.header(reqwest::header::CONTENT_TYPE, content_type);
+            }
+            if body.is_some() {
+                req = req.body(bytes.to_vec());
+            }
+            let resp = req.send().map_err(|e| format!("{base}{path}: {e}"))?;
+            let status = resp.status().as_u16();
+            let retry_after = resp
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned);
+            let bytes = resp.bytes().map_err(|e| format!("{base}{path}: {e}"))?;
+            Ok(Answer {
+                status,
+                body: bytes.to_vec(),
+                retry_after,
+            })
+        }
+        Target::Unix(socket) => unix_request(socket, method, path, bearer, headers, body, timeout),
+    }
+}
+
+/// HTTP/1.1 over a Unix socket, one request per connection.
+fn unix_request(
+    socket: &std::path::Path,
+    method: &str,
+    path: &str,
+    bearer: Option<&str>,
+    headers: &[(&str, &str)],
+    body: Option<Body>,
+    timeout: Duration,
+) -> Result<Answer, String> {
+    let at = || format!("unix:{}", socket.display());
+    let mut stream = std::os::unix::net::UnixStream::connect(socket)
+        .map_err(|e| format!("connecting to {}: {e}", at()))?;
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
+    let mut head = format!("{method} {path} HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n");
+    if let Some(bearer) = bearer {
+        head.push_str(&format!("authorization: Bearer {bearer}\r\n"));
+    }
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    let (content_type, bytes) = body.unwrap_or((written_type(method), &[]));
+    if !content_type.is_empty() {
+        head.push_str(&format!("content-type: {content_type}\r\n"));
+    }
+    head.push_str(&format!("content-length: {}\r\n\r\n", bytes.len()));
+    stream
+        .write_all(head.as_bytes())
+        .and_then(|()| stream.write_all(bytes))
+        .map_err(|e| format!("writing to {}: {e}", at()))?;
+    let mut raw = Vec::new();
+    stream
+        .read_to_end(&mut raw)
+        .map_err(|e| format!("reading from {}: {e}", at()))?;
+    let split = raw
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or_else(|| format!("{} answered without a complete header", at()))?;
+    let headers = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
+    let status = headers
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| format!("{} answered without a status", at()))?;
+    let retry_after = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("retry-after:"))
+        .map(|value| value.trim().to_owned());
+    let rest = &raw[split + 4..];
+    let body = if headers.contains("transfer-encoding: chunked") {
+        dechunk(rest).ok_or_else(|| format!("{} answered a malformed chunked body", at()))?
+    } else {
+        rest.to_vec()
+    };
+    Ok(Answer {
+        status,
+        body,
+        retry_after,
+    })
+}
+
+fn dechunk(mut rest: &[u8]) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    loop {
+        let end = rest.windows(2).position(|w| w == b"\r\n")?;
+        let size = std::str::from_utf8(&rest[..end]).ok()?;
+        let size = usize::from_str_radix(size.split(';').next()?.trim(), 16).ok()?;
+        rest = &rest[end + 2..];
+        if size == 0 {
+            return Some(out);
+        }
+        out.extend_from_slice(rest.get(..size)?);
+        rest = rest.get(size + 2..)?;
+    }
+}
+
+/// One request's retries: the waits taken after a `429`, and whether an unanswered request was
+/// sent once more.
+#[derive(Default)]
+struct Retry {
+    waited: f64,
+    resent: bool,
+}
+
+impl Retry {
+    /// The wait before sending the request again after `sent`, or `None` where `sent` is the
+    /// answer: a `429` whose wait keeps the waits within the budget, or, for a request carrying a
+    /// batch id, the first time no answer came, which takes nothing from the budget.
+    fn after(&mut self, sent: &Result<Answer, String>, replayable: bool) -> Option<f64> {
+        match sent {
+            Ok(answer) if answer.status == 429 => {
+                let wait = retry_after(answer).min(MAX_BACKOFF);
+                (self.waited + wait <= RETRY_BUDGET_S).then(|| {
+                    self.waited += wait;
+                    wait
+                })
+            }
+            Err(_) if replayable && !self.resent => {
+                self.resent = true;
+                Some(MIN_BACKOFF)
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The wait an answer asks for before the request is sent again, in seconds: its `retry-after`
+/// header where it has one, or else its body's `retry_after_s`; 1 second where neither names a
+/// number, and never less than 1 second.
+fn retry_after(answer: &Answer) -> f64 {
+    let named = match answer.retry_after.as_deref() {
+        Some(header) => header.trim().parse::<f64>().ok(),
+        None => answer.json()["retry_after_s"].as_f64(),
+    };
+    named
+        .filter(|seconds| seconds.is_finite())
+        .map_or(MIN_BACKOFF, |seconds| seconds.max(MIN_BACKOFF))
+}
+
+/// A path segment, percent-encoded so a name holding `/` or a space reaches the route whole.
+pub(crate) fn segment(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// Prints the answer, or the refusal, and exits accordingly.
+pub(crate) fn finish(verb: &str, answer: Result<Answer, String>) -> ExitCode {
+    match answer {
+        Ok(answer) if answer.ok() => {
+            if !answer.body.is_empty() {
+                println!("{}", answer.text());
+            }
+            ExitCode::SUCCESS
+        }
+        Ok(answer) => {
+            eprintln!(
+                "mosaica {verb}: the server answered {}: {}",
+                answer.status,
+                answer.text()
+            );
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("mosaica {verb}: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The content type a request with no body names: JSON for a write, none for a `GET`.
+fn written_type(method: &str) -> &'static str {
+    match method {
+        "GET" => "",
+        _ => "application/json",
+    }
+}
+
+/// The bearer in the environment variable `name`, trimmed, or `None` where it is unset or blank,
+/// so the request goes without one, as an open server serves it.
+pub(crate) fn env_bearer(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
+}
+
+pub(crate) fn env_secret(name: &str, what: &str) -> Result<String, String> {
+    env_bearer(name).ok_or_else(|| format!("no {what}: set {name}"))
+}
+
+/// The first line of stdin, trimmed of its line ending.
+pub(crate) fn stdin_secret(what: &str) -> Result<String, String> {
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .map_err(|e| format!("reading the {what} from stdin: {e}"))?;
+    let line = line.trim_end_matches(['\r', '\n']).to_owned();
+    if line.is_empty() {
+        return Err(format!("no {what}: write it on stdin"));
+    }
+    Ok(line)
+}
+
+/// The control plane's address. The credential is read from `MOSAICA_CREDENTIAL`: the operator
+/// credential, an API key or an OIDC access token, or none where it is unset.
+#[derive(Args)]
+pub(crate) struct Control {
+    /// The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket.
+    #[arg(long, value_name = "ADDRESS")]
+    control: String,
+}
+
+impl Control {
+    /// The plane, for writes.
+    pub(crate) fn writer(&self) -> Result<Plane, String> {
+        Plane::writer(&self.control)
+    }
+
+    /// One request with a JSON body or none, waiting at most `timeout` for each answer.
+    pub(crate) fn call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        timeout: Duration,
+    ) -> Result<Answer, String> {
+        Plane::connect(&self.control, timeout)?.call(method, path, body.as_ref())
+    }
+}
+
+/// The control plane, with its credential read.
+pub(crate) struct Plane {
+    target: Target,
+    credential: Option<String>,
+    timeout: Duration,
+}
+
+impl Plane {
+    /// The plane at `address`, for writes.
+    pub(crate) fn writer(address: &str) -> Result<Plane, String> {
+        Plane::connect(address, WRITE_TIMEOUT)
+    }
+
+    fn connect(address: &str, timeout: Duration) -> Result<Plane, String> {
+        Ok(Plane {
+            target: Target::parse(address)?,
+            credential: env_bearer("MOSAICA_CREDENTIAL"),
+            timeout,
+        })
+    }
+
+    /// One request with a JSON body, or none, sent again after a `429`.
+    pub(crate) fn call(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<Answer, String> {
+        with_json(body, |body| self.send(method, path, &[], body))
+    }
+
+    /// One request, sent again with the same headers and bytes after a `429`, once the wait it
+    /// names has passed: at least 1 second and at most 30 a wait, while the waits total at most
+    /// five minutes.
+    pub(crate) fn send(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<Body>,
+    ) -> Result<Answer, String> {
+        self.exchange(method, path, headers, body, false)
+    }
+
+    /// One request carrying a batch id, sent as [`Plane::send`] sends one, and sent once more, the
+    /// same bytes under the same id, when no answer comes: the server answers a body it already
+    /// accepted under the id as a replay. A second time without an answer is the answer.
+    pub(crate) fn send_batch(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<Body>,
+    ) -> Result<Answer, String> {
+        self.exchange(method, path, headers, body, true)
+    }
+
+    fn exchange(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: Option<Body>,
+        replayable: bool,
+    ) -> Result<Answer, String> {
+        let mut retry = Retry::default();
+        loop {
+            let sent = send(
+                &self.target,
+                method,
+                path,
+                self.credential.as_deref(),
+                headers,
+                body,
+                self.timeout,
+            );
+            match retry.after(&sent, replayable) {
+                Some(wait) => std::thread::sleep(Duration::from_secs_f64(wait)),
+                None => return sent,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_chunked_body_is_joined_and_a_cut_one_refused() {
+        assert_eq!(
+            dechunk(b"3\r\nabc\r\n2;x=y\r\nde\r\n0\r\n\r\n").as_deref(),
+            Some(&b"abcde"[..])
+        );
+        assert_eq!(dechunk(b"3\r\nab"), None);
+    }
+
+    #[test]
+    fn a_resend_takes_nothing_from_the_429_budget() {
+        let busy = Ok(Answer {
+            status: 429,
+            body: Vec::new(),
+            retry_after: Some("30".to_string()),
+        });
+        let mut retry = Retry::default();
+        assert_eq!(
+            retry.after(&Err("no answer".to_string()), true),
+            Some(MIN_BACKOFF)
+        );
+        assert_eq!(
+            retry.after(&Err("no answer".to_string()), true),
+            None,
+            "a second time without an answer ends the request"
+        );
+        let waits = std::iter::from_fn(|| retry.after(&busy, true)).count();
+        assert_eq!(waits as f64, RETRY_BUDGET_S / MAX_BACKOFF);
+        let mut once = Retry::default();
+        assert_eq!(once.after(&Err("no answer".to_string()), false), None);
+    }
+
+    #[test]
+    fn a_segment_keeps_unreserved_bytes_and_encodes_the_rest() {
+        assert_eq!(segment("ann.b-c_d~"), "ann.b-c_d~");
+        assert_eq!(segment("a/b c"), "a%2Fb%20c");
+    }
+}

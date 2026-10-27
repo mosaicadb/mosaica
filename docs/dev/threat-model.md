@@ -1,0 +1,504 @@
+# Threat model
+
+The full statement of Mosaica's security claims, for contributors and assessors. The published summary is [the security chapter](../system/security.md).
+
+Every count, cluster, density figure and label Mosaica serves is computed from inside the
+requesting viewer's own visible set, not filtered into that shape afterward.
+
+## The adversary and the boundary
+
+A viewer holds a valid session token and can make as many requests with it as they like. This is
+the adversary the properties below are built against: a legitimate user with any grant, who can
+ask anything and read every response, but cannot forge a credential or bypass authorisation.
+
+A viewer's token is worth exactly the terms its principal resolved to when the session was minted.
+The identity catalogue decides them: a local principal holds the terms granted to it and to its
+groups, and an OIDC identity the terms its provider's claim rules produce from a token whose
+signature, issuer, audience and lifetime the server has checked. A session is minted at
+`POST /v1/login` from a password, an API key or an access token, or at `POST /session/authorise`
+by an API key whose principal holds `authorise-as`, which acts as any principal. That key belongs
+to an integrator's backend; whoever holds it reads everything any principal may. A session minted
+through `authorise-as` carries the target's terms and its `read` and `write`, and never its
+`read-all`, so the key reads what each principal's terms admit and no more. The catalogue and
+the server's credential checks are inside the trusted computing base. The terms they resolve, and
+the access labels those terms satisfy, are what every later check in this chapter tests against.
+
+A principal holding `read-all`, granted directly, through a group or through an OIDC role
+mapping, authorises a session for itself that satisfies every index key, including one promoted
+after the session was authorised. Its authorised set is every item listed under any key at the
+corpus's current watermark, rebuilt at each publication, so it is every item the corpus holds, and
+an item a flush places joins it when that publication reaches the session. The overlay is
+subtracted from it at every request, so a deletion or suppression applies to it. It satisfies
+every view's, group's, layer's and artifact's own label and every layer's default label, and an
+artifact's membership requirement still applies to it. The operator credential mints such a
+session for the superuser on the session plane, and may also mint one holding a set of terms it
+names.
+
+A session holds the terms resolved when it was minted. A catalogue change that could change them,
+or the principal's permissions, ends the session: a grant, a membership, a disabled or deleted
+principal, a password set or cleared, a revoked key, or a changed provider. A session also ends at
+its key's expiry, its access token's `exp`, the deployment's configured token lifetime, a logout or
+a revocation. An OIDC identity's claims are trusted as its provider asserts them; a change at the
+provider reaches a session only when the session's token expires.
+
+A bundle holder holds the built artifact on disk: the manifest with the bundle's identity key, the
+full term index and the geometry. Nothing here defends against this party.
+
+An operator drives the control plane: ingest, deletion, suppression, compaction and the catalogue.
+Every route on the control plane, without exception, requires a credential: the operator
+credential, which authenticates a built-in superuser holding every permission, an API key, or an
+OIDC access token. Writes, flush and compaction need `write`. Declarations and drops need
+`write-all` beside it. Status and the catalogue need `admin`. A principal holding `write` and not
+`write-all` names only the items, layers, views and artifacts a session holding its terms would be
+served, suppressed items included; anything else answers as absent. Deleting an artifact also deletes the
+artifacts attached to it outside the writer's terms: every viewer is denied a dependent once what
+it attaches to is deleted, so the cascade removes nothing anyone is shown. The operator holds
+`write-all`.
+
+`admin` can grant any permission to any principal, itself included. A principal holding `admin`
+can therefore give itself `read-all` and `write-all` and read and write every item, so `admin` is
+trusted as the operator is. A role mapping that gives an OIDC identity a group holding `admin`
+extends that trust to whoever the identity provider says is in the mapped claim.
+
+The operator credential is refused at startup when it is empty, since an empty bearer would
+authenticate as the superuser. A password is checked over whatever transport reaches the viewer
+listener, which serves plain HTTP, so a deployment that takes passwords terminates TLS in front of
+it. Failed password attempts are limited per name, so anyone who knows a principal's name can
+lock it out of password login with ten wrong attempts every fifteen minutes; its API keys and
+sessions are unaffected.
+
+An open server (`serve.open`, or `mosaica serve --open`) is for one person on one machine. It
+serves every request on every plane as the superuser, whatever credential the request carries. A
+viewer request is served through one session minted as `POST /session/authorise` mints
+`read_all: true`, and a session or control request holds every permission. Anything on the
+machine that can reach a loopback address therefore reads and changes everything. The server
+refuses to start unless every address it listens on is loopback, and refuses to start beside
+anything that gives it users: a principal or an OIDC provider in its catalogue, an OIDC provider
+in its configuration, `cors_origins` or `dev_cors_origins`. While open it creates no principal and
+no provider. Three guards keep a web page on another site out. Every plane refuses a request whose
+`Host`, or absolute-form request line, names anything but `localhost` or a loopback address, or
+that carries no host or two. A site that rebinds its own name to 127.0.0.1 therefore gets nothing,
+since the browser sends that name. Every plane refuses a request by any method but `GET`, `HEAD`,
+`OPTIONS` and `TRACE` sent with no content type, or as `text/plain`,
+`application/x-www-form-urlencoded` or `multipart/form-data`, which is what a browser sends to
+another origin without a preflight. Any other type needs the server's CORS approval, which the
+viewer plane gives only to a page from a loopback origin and the session and control planes give
+to none. Every plane also refuses a request whose `Origin` is not a loopback origin, and one with
+no `Origin` whose `Sec-Fetch-Site` is `cross-site`, so a page on another site reads nothing even
+with a `GET`. A page on `localhost` calling `127.0.0.1` is cross-site to its browser, so a loopback
+`Origin` is admitted whatever `Sec-Fetch-Site` says. A client that is not a browser sends neither
+header and is unaffected.
+
+Every cache that holds a viewer's visible set, or a quantity computed from it, is keyed to one
+session and is never read by another session, with four exceptions, each keyed on the session's
+grant: the index keys it satisfies, or every key for a session that reads every item. The first is
+the authorised set, shared by every session with the same grant. The second is the authorised set's
+projection into each view's row order, per shard, keyed by the grant, the view, the shard, the
+shard's identity, the prefix and the geometry's version, and held in memory only. Its key carries
+the grant whole and nothing else of the credential; the identity key a response is cached under is
+the session's own. The other two are counts over the grant's base rows. A view's base is the rows
+the last build or compaction wrote; a flush adds rows above it.
+
+The per-artifact counts, position sums and boxes of an annotation level served from a column are
+counted once per grant over the grant's base rows in every shard and held as one sum, keyed by the
+grant, the level's column in each shard and each shard's identity, which a compaction rotates. A
+growth between compactions adds to them in place, and a shard whose rows are counted again replaces
+that shard's part of the sum. They are written to the server's cache directory and read back after
+a restart. Beside them the server holds the labels of every deleted and suppressed base row in each
+view, per view and level, whoever is asking.
+
+The figures of a number or timestamp field (the count of its finite values, their sum, the items
+with none, and its eight smallest and eight largest values with their rows) are stored in the bundle
+by a build and a compaction, per view and per list of index keys the base rows' items carry. A
+grant's are the merge of the lists it satisfies, by the same rule that builds its authorised set,
+and the merge is held per grant, shard identity, view and field.
+
+Both kinds of shared count include rows that are deleted or suppressed, so no request is served them
+alone. Every request subtracts the base rows its own composed visible set removes, read from the
+overlay it loaded at its start, and adds its own rows above the base. For an annotation level the
+subtraction is cached under every shard's deny version for the view, each of which moves whenever
+that shard's deleted and suppressed base rows change, and the rows above the base under the
+overlay's version, which every deny moves. A
+field's smallest and largest value are the first of the kept extremes whose row the request does not
+subtract, and where it subtracts all eight kept on a side, a walk of the grant's base rows less
+those it subtracts. A request that starts after a suppression is accepted therefore subtracts the
+suppressed rows, even where it waits for counts whose build began before the suppression. The
+figures served are the visible set's, as a walk of that set row by row would produce them, and a
+suppressed item's value moves no field's smallest or largest value from the next request. What the
+sharing does disclose, through response time, is in the residual table below.
+
+A client (the TypeScript or Python library, or a component built on it) is not a trust boundary at
+all. Every count, sample and label it receives has already been computed inside the viewer's own
+visible set before it left the server. A bug in client code can only misdraw what the server
+already sent it.
+
+```mermaid
+flowchart LR
+  subgraph untrusted["outside the boundary: the adversary"]
+    viewer["a viewer<br/>valid token, any grant,<br/>unlimited requests"]
+    client["client code<br/>in the viewer's hands;<br/>never decides what is visible"]
+  end
+
+  subgraph trusted["inside the boundary"]
+    session["login and session plane<br/>turn a credential into a token<br/>holding the principal's terms"]
+    serve["mosaica serve<br/>composes the visible set every request,<br/>answers only from inside it"]
+    control["control plane<br/>write: ingest, delete, suppress,<br/>flush, compact;<br/>admin: catalogue, status"]
+    bundle["bundle and log on disc<br/>everything, including the<br/>identifier key"]
+  end
+
+  issuer["the integrating application"] -- "authorise-as key" --> session
+  client -- "password, API key<br/>or access token" --> session
+  session -- "token" --> client
+  client -- "token + query" --> serve
+  serve -- "counts, samples, labels:<br/>from the visible set only" --> client
+  control -- "ingest, delete,<br/>suppress, compact" --> serve
+  serve <--> bundle
+
+  holder["a bundle holder"] -. "has everything;<br/>no property below holds against them" .-> bundle
+```
+
+*What crosses each boundary. A viewer receives responses computed inside its own visible set; a
+writer is trusted; a bundle holder already has everything the server has.*
+
+## Every quantity is computed from the viewer's own visible set
+
+A served quantity MUST be computed from inside the requesting viewer's visible set alone. A count,
+a density cell, a cluster's shape or a label taken over the whole corpus and then checked against
+that set before display is a defect, not a filtered view.
+
+An item carries access labels, each an expression over terms such as `secret&(team_a|team_b)`, and a
+token holds the terms its credential names. A token's terms are trimmed and compared with a label's
+terms byte for byte, so a label whose quoted term starts or ends with whitespace is refused where it
+is written. An item is in the authorised set when the token's terms satisfy one of its labels, and
+the authorised set is built once per session, at authorisation ([access
+control](../system/access-control.md#how-labels-are-indexed)). The expressions have no negation, so holding
+more terms never admits fewer items. The visible set is the authorised set minus the overlay, the
+record of every item currently hidden by a deletion or a suppression, composed at the start of every
+request, before anything reads it. Everything that counts, draws or labels an item reads that one
+set. A filter narrows which of the visible set is drawn or counted into the filtered set, and can
+never widen it, so adding a filter cannot introduce an access defect. The visible set is the only
+path to the geometry: the geometry arrays have no other entry point, so no code path can build an
+aggregate over rows the visible set excludes. Nothing checks this at build time; the guarantee rests
+on the code's shape and on review.
+
+A suppression applies to every request that starts after it is accepted, because the overlay is
+read fresh each time the visible set is composed. A request already running when it is accepted
+may or may not reflect it. A deletion's rows leave the corpus only at
+compaction; until then they are removed from the visible set the same way a suppressed item's are.
+
+An edit moves an item to a new entity and deletes the old one, and none of it can widen what a
+viewer sees. A suppression standing against the old entity is copied to the new one in the same WAL
+record. An unsuppress lifts an item's suppression. A compaction drops the suppression of every
+entity it removes, the old entity among them, while an item that still exists keeps its suppression
+on its current entity, so an id freed there and issued to another item carries no suppression. The
+item's label is the edit's from the acknowledgement: until a flush places the new entity's rows the
+item is in no view, and once placed it is served under the new label only. A content generated from
+the item keeps it among its generating items, so the content stays served, and still only to a
+viewer who can see every one of them.
+
+The content key on a response is advisory: it lets a client tell that the corpus has changed since
+its last request, but it carries no authorisation weight, and presenting an old one never restores
+access a newer request would refuse.
+
+## A derived artifact is served on the terms its layer declares
+
+Labels and artifacts such as clusters, hulls and hierarchy levels are built from sets of items.
+Whether a viewer is served one is decided per request, over the viewer's own visible set, on two
+axes the layer declares:
+
+- **An access label of its own.** A layer, or an artifact within it, can carry an access label
+  like an item, and is then visible only to viewers whose terms satisfy it.
+- **A membership requirement.** How much of the artifact's member set the viewer must be able to
+  see: all of it, any of it, a fraction, a count, or none. "All" withholds a label if a single
+  member is hidden. "None" serves the artifact to every viewer the access label admits: that is
+  right for a boundary that exists whether or not this viewer can see a document inside it.
+
+Both tests MUST run on the visible set, never on the filtered set, so narrowing a query cannot make
+a withheld artifact appear. A count or a hull served with an artifact is computed over the members
+the viewer can see.
+
+The artifacts of each tile are found with structures that know nothing of any viewer. A level
+served from a column stores each artifact's members as a bitmap of the bundle's base rows and a
+covering of at most 32 row ranges that holds them all, whoever can see them. A covering proposes
+artifacts that could have a member in a tile. Each proposal is kept only where the artifact is
+served to this viewer, has a visible count above zero, and has a member in the viewer's visible
+rows inside the tile, tested against the member bitmap or against a scan of those visible rows. An
+artifact the covering proposes wrongly, or whose members in the tile the viewer cannot see, is
+dropped and leaves no trace in the frame. The member bitmaps, the coverings, the cached counts over
+a grant's rows and the labels of denied rows are read only inside the server. A response carries
+an artifact's `mosaica_id`, key and content, its count over the viewer's visible set, and the
+centroid and box of the members the viewer can see.
+
+## A cluster's colour is computed from what the viewer is served
+
+A request may name a palette size, and each artifact it serves then carries a slot: a number below
+that size which the client turns into a colour ([annotations](../system/annotations.md#on-the-map)). The
+slots are worked out once for each session and layer, from the artifacts the viewer is served that
+hold a member they can see, the viewer's tree over those artifacts, each one's count of visible
+members and `mosaica_id`, and a centre over the members the viewer can see: the centroid the
+level's figures carry, which are counted over the viewer's visible set, or the mean over a sample
+of the viewer's visible items. The sample is the visible items whose `mosaica_id` falls below a cut
+set by the size of the visible set and a constant, so an item the viewer cannot see is never in it.
+An artifact the viewer is not
+served is no input, and the viewer's slots are those of a corpus without it: a test compares the
+slots of a viewer from whom an artifact's label withholds it with the slots after that artifact is
+suppressed, and finds them equal. A slot therefore says nothing about an artifact the viewer is not
+served, about a member they cannot see, or about the slots another viewer is given. The slots are
+held per credential, keyed on the digest of its grant and the digest of the credential itself,
+since an artifact's own labels and the layers a viewer reaches are tested against every term the
+credential names; two sessions share slots only where they hold one credential. A deletion, a
+suppression, an edit or a publication is answered with slots worked out over it. So is any change
+on a layer whose criterion is a fraction or whose content has a generating set, where an ingested
+member the viewer cannot see can withhold an artifact. After an ingest or a growth on any other
+layer, the slots held answer until they are worked out again, which starts once the response is
+sent; they were worked out over items and artifacts the viewer could see, and no artifact they
+name is withheld by the change.
+
+## Samples are taken after masking
+
+Where more items are in view than a response carries, the sample MUST be drawn from the viewer's
+own visible set. A viewer with a narrow grant sees a sample of what they can see, never a sample
+taken over the whole corpus with the hidden points removed.
+
+The artifacts of a tile are limited the same way. A request names a quota of artifacts per level
+and tile, at most `selection.max_artifacts_per_tile`, and the tile holds the first of them by the
+viewer's own count of each artifact's visible members, then by `mosaica_id`. The artifacts it
+chooses among are those already served to the viewer with a visible member in the tile, so a
+viewer with a narrow grant sees the largest of the artifacts they can see there. How many of an
+artifact's members other viewers can see has no bearing on its place.
+
+## A client never sees an entity id
+
+Inside the server every item is addressed by an entity id: a dense integer assigned at ingest, and
+the key under which its terms, memberships and labels are stored. It is an implementation detail
+of the index, not a property of the data, and it is assigned once and kept for the item's life. An
+item's identity outside the server is the `mosaica_id` the client is given and the values of its
+unique fields, which the operator supplied.
+
+The entity id MUST NOT appear in anything a client can read.
+Entity ids are dense and, within one ingest batch, ordered by access terms, so a viewer holding a
+few could estimate a lower bound on how many items they cannot see and how the ones they can see
+group by access. A bulk read in stored order discloses the second of these, as
+[reading in bulk](#reading-in-bulk) states. No content is at stake: content is protected by the
+first property.
+
+The `mosaica_id` a client receives is a keyed permutation of the item's number, the entity id it was
+first given, and of its tenancy, how many items held that number before it, so two of them reveal
+nothing about whether their items are adjacent. A deleted item's number is issued again at the next
+tenancy, so a `mosaica_id` a client holds never comes to name another item. The key is drawn from
+the operating system's random source each time `mosaica build` creates a bundle, and is stored in
+that bundle's manifest. Nobody configures or supplies it, and no response or log line carries it. A
+copy of a bundle keeps its `mosaica_id`s. A rebuild creates a new bundle with a new key, so every
+`mosaica_id` changes. No request accepts an entity id, so a client cannot enumerate them by trying
+values. A bulk read's cursor holds internal positions only inside its encryption, and a cursor the
+server did not issue for that read does not open. The permutation is not cryptographic, and it
+should not be assumed to resist a viewer who has obtained known pairs of an entity id and its
+`mosaica_id`; no route on the viewer plane yields one, so what the permutation hides does not depend
+on cryptographic strength.
+
+An artifact's or a layer's `mosaica_id` is the same permutation of a kind bit, the layer's space
+and the entity in that space. An
+artifact's entity id is internal as an item's is, and is never on the wire. The kind, the shard,
+the tenancy and the layer space are inside the permuted input, so a viewer cannot read them or
+order identifiers by them. The server reads the kind from the inverted identifier: an artifact's
+identifier names nothing where an item is read, an item's names nothing where an artifact is read,
+and a dropped layer's identifiers name nothing anywhere, including after its name is registered
+again.
+
+## A lookup by value answers an invisible holder as absent
+
+A viewer can ask for items by a value they name. An `eq` or `in` filter on a unique field names
+values, and the server answers with the items holding them. The field's index maps a value to its
+holder across the whole corpus, so the server intersects what the index returns with the viewer's
+visible set before any other part of the request reads it. A value held only by an item the viewer
+may not see gives the same answer, with the same status and the same shape, as a value no item
+holds. The item card route does the same for a `mosaica_id`: an item the viewer may not see and an
+identifier naming nothing both answer `404 unknown`.
+
+The control plane answers a writer from inside its scope, as the viewer plane answers a viewer from
+inside its visible set, except for uniqueness. An ingest row carrying a unique value names the item
+that holds it where the writer's scope holds that item, and the receipt answers its `mosaica_id`. A
+value held only by an item outside the scope names nothing where a row only addresses items by it,
+which answers as a value no item holds does. Where the row would create an item with it, or set it
+on the item the row names, the row is refused as `value_held`: the value is held, and nothing else
+about the holder is said, neither its `mosaica_id` nor how many hold it, in the receipt or in a
+strict batch's `409`. A writer without `write-all` therefore learns, of an item outside its terms,
+that some item holds a value it tried to set, and nothing more. An ingest row whose values name two
+items in the scope is refused and listed by its position and reason; in a strict batch the batch is
+refused with `409`, naming the values and the holders' `mosaica_id`s so that the operator can find
+the item to change. It names the `mosaica_id`, never the entity id. A declaration of `unique` at a
+running service is refused where values are held twice, and the refusal names how many there are and
+up to ten of the values, and no item. A build leaves out each later row naming an item or setting a
+value an earlier row of its file named or set. Its report counts the rows it left out and names up
+to ten of their values, and it names no item.
+
+Artifact keys have the same exception as values. A publication under a key an artifact outside the
+writer's terms holds is refused as the key taken, naming no artifact. A writer without `write-all`
+is not told, of a `derived` vocabulary, which keys of a page it added, since whether a key was held
+before says that some item carried it. In both cases the lookups are made as for a held value or
+key, so the time of the scope test is the one difference from one nobody holds; for an artifact
+that test counts its members and generating sets within the scope.
+
+## An incomplete answer is refused
+
+A response MUST NOT be returned in a form that looks complete when it is not, and MUST NOT be
+returned as an empty result standing in for "not answered". Where a response streams, a connection
+that drops, or a fault that cuts the stream mid-transfer, leaves the client holding a prefix of its
+own response. That is allowed: the missing trailer frame makes the prefix detectable as incomplete
+rather than mistakable for a complete answer. What the rule forbids is a partial answer a client
+cannot tell from a complete one.
+
+A bulk read follows the same rule. Every response the server ends closes with a trailer that says
+why it ended and carries the cursor to continue from, so a response that stops at a limit is
+complete as a response and says that the read is not ([serving](../system/serving.md#bulk-reads)).
+
+## Reading in bulk
+
+`POST /v1/items` and `POST /v1/artifacts` answer under the properties above. Every page composes the
+visible set again, an item's labels are the clauses of its labels the viewer satisfies, as on the
+item card, and an artifact is served on its layer's terms, as in the artifacts of each tile. An
+item's unique values are fields like any other, returned only on request, in that item's own row.
+
+A read of items whose filter bounds its matches through a unique field's index or an artifact's
+membership is driven from those matches ([queries](../system/queries.md#filters)). The bound is
+intersected with the viewer's visible set before it is counted or read, and the choice of route
+follows its size, so a value held only by an item the viewer cannot see drives the read exactly as
+a value nobody holds, with the same rows, counts and pages. The index lookup's own time can differ
+between a value that is held and one that is not, which the timing row below covers.
+
+**Stored order shows which items share a full set of index keys.** A read of items in stored order
+returns a viewer's items shard by shard, in shard number order, and within a shard in the order of
+their numbers, the entity id each was first given there. Shards are cut from the build's one
+numbering, so the walk shows nothing that numbering does
+not. Within each build batch and each ingest window, numbers are assigned in order of each item's
+full set of index keys: its labels read as one disjunction, each term among its operands, and one
+key for each conjunction among them ([access control](../system/access-control.md#how-labels-are-indexed)),
+including keys the viewer does not satisfy.
+Within one set, a build orders items by their map cell in the build's anchor view and then by source
+order, and an ingest orders them in the order its window received them, so a viewer who reads
+positions or unique values can see where one set ends and the next begins.
+
+An edit moves an item to a new entity and keeps its number, so the item keeps its place. A deleted
+item's number is issued again, lowest first, to an item a later window inserts, which therefore
+stands where the deleted item stood. A viewer who sees the items either side of it learns that an
+item between them was deleted, though they may never have seen it, and that at least as many were
+deleted there as new items appear between them.
+
+A viewer therefore learns which of their visible items share a full set of index keys, and roughly
+in which batch or window each arrived. Where two such groups show the same clauses on the item card,
+the viewer learns that the items of at least one of them carry a key the viewer does not satisfy,
+which is what the item card withholds by serving only clauses the viewer satisfies. The sets are
+ordered by the keys' internal numbers, which follow the order in which keys first appeared, so the
+order of the sets hints at which keys the viewer does not satisfy appeared first. The viewer learns
+no term's name, no count of the items they cannot see beyond that lower bound on deletions, and
+nothing about any one item outside their visible set but that it was deleted from between two of
+theirs. Map order discloses none of this grouping and serves every field stored order serves. **Not
+built yet:** restricting stored order to some viewers. Every viewer may ask for it, and a viewer
+held to map order would lose speed and no data.
+
+**The cursor is sealed to one read.** A cursor carries internal positions: a map cell and a
+`mosaica_id` in map order, a shard and an item's number in stored order, and an artifact's level and
+publication ordinal on the artifacts route. It also carries the order and the size of the next
+stretch the filter is evaluated over. It is sealed with XChaCha20-Poly1305, an authenticated cipher,
+under a key derived from the bundle's identity key, with a random nonce drawn for each cursor, so a
+viewer can read nothing from a cursor, and two cursors for one position differ and cannot be
+matched. Authenticated with it are the route, the view and its incarnation, a SHA-256 of the
+authorisation data the session was opened with, and on the artifacts route the layer's name, its own
+internal identity and the level named, and on the aggregate route a SHA-256 of the request's set,
+reference and groupings with the internal identity of each layer they name. A cursor therefore opens
+only in the read it was issued for, and only in a session opened with byte-identical authorisation
+data. A viewer cannot use one to name a position they were not served. Every such failure is one
+refusal, decided before any position in the cursor is used, and a cursor issued by another bundle
+does not open.
+
+**No stored block is sent as it is.** A compressed block of the record store, like a stored
+column, holds the values of items the viewer may not see beside those they may. Every page is
+therefore built afresh: each value of a row the read took inside the visible set is decoded and
+written into a new Arrow batch, and a request for `zstd` compresses that new batch.
+
+## Counting by group
+
+`POST /v1/aggregate` counts how the viewer's items are distributed across the values of a category
+field, bins of a number or timestamp field, the artifacts of a layer and the cells of the map, and
+it answers under the properties above. Every page composes the visible set again, and the set and
+the reference set it is compared with are both drawn from it, so every count, total and lift is
+taken over items the viewer may see, and a deletion or suppression applies from the next page.
+
+A value of a `derived` vocabulary gets a row only where the viewer can see an item carrying it, and
+is never counted in `rest`. A named value the viewer may not see gets no row, exactly as a value
+that does not exist. The artifacts of a layer are listed on the terms the artifacts of each tile are
+served on,
+tested against the visible set and never the filtered set, and an item held only by an artifact
+withheld from the viewer counts as `none`, so a withheld artifact cannot show through `rest`. A
+histogram with no range takes its edges from the smallest and largest value among the items the
+viewer may see in the view, read from the field's figures above, so an item the viewer may not see,
+or an item with no row in the view, moves no edge. A sampled histogram's default edges are the same
+exact ones. A grouping's field figures serve those figures, over the visible set only, and are
+refused with a filter or a reference. A sampled histogram counts the set's items below one cut on
+`mosaica_id`, taken from the set's composed count. The identity bands decide only which rows are read, and every entry read is tested
+against the set before it is counted. So an item the viewer may not see is never in a sample, never
+moves the count the cut is taken from, and never moves an edge. Whether a set is sampled depends on
+its composed size and the sample size alone. How each piece of it is read, from the band or by
+scanning, is decided from the band's entry count, which includes rows the viewer cannot see; both
+read the same items, and the choice puts this route in the timing row below. Rows carry vocabulary
+keys, bin edges, `mosaica_id`s and cell prefixes; the codes and ordinals the engine counts with
+travel only inside the sealed cursor. Where a field keeps a record of which items carry each value,
+a value's count is read from that record over the whole corpus and intersected with the visible set,
+which puts this route in the timing row below.
+
+A tree's artifacts ranked at a cut are the artifacts the viewport's treed frame draws for the same
+view, zoom, box and budget, computed by the same function: the artifacts the viewer is served with
+a member they may see in the cut's tiles, cut over the viewer's own tree, where a withheld node
+occupies no level. The filter never decides which artifacts are in the cut. A budget only chooses
+how finely to draw what the viewer may already see, so a principal that fails a trunk is shown its
+children in its place, as the map shows them.
+
+## Residual disclosure
+
+Seven channels let a viewer learn something beyond the items they are entitled to see, past what
+the properties above bound. Each row states its own status: most channels are accepted for the
+reason given, and one, the per-tile timing channel, remains open.
+
+| What a viewer can learn | How | Severity | Why | Specification rows |
+|---|---|---|---|---|
+| Roughly how much of the corpus lies outside their own set; that a token, keyword, category value or unique field value they can name exists somewhere in the corpus, and coarsely how widely; and that the corpus is being written to | Response time for a viewport, a filter, a category listing, a count by group or a bulk read in either order grows with the work a request does over rows and terms the viewer cannot see, not only their own. A changed content key on a response says the corpus has changed since the viewer's last request | Low | Only the per-tile timing component of this row is open and unquantified: correlating cost with the viewer's own visible count leaves a residual nobody has bounded. A response's cost also varies with how many artifacts in view were withheld by their own label or their membership requirement, since each is found before it is tested, and the identifier route does more work for a withheld artifact than for an identifier naming nothing; a viewer needs an artifact's `mosaica_id` to probe the second, and is never served one for an artifact withheld from them. A `member_of` leaf can name an artifact by its key instead, which a viewer can guess, so a key that names nothing is put through the same count and verdict for its layer and level as the key of a withheld artifact. What remains between the two is the verdict's tests of the one artifact and its masked count, measured at about 1 to 7 µs on a level served by row and about 14 µs on one served by artifact, on requests of a few hundred microseconds. On the route that serves the artifacts of each tile, the candidates a tile tests are proposed by coverings of every member, seen or not, so how long a tile takes also depends on where members the viewer cannot see lie; which artifacts the tile serves does not. A viewer whose visible set has lost any base row to a deletion or suppression has those rows subtracted from an annotation level's counts using labels the server reads for every deleted and suppressed base row in the view, under any grant. Where more than 4,096 of those rows have no label held, the request walks the viewer's whole visible set instead, which takes longer the more items the viewer may see, while the labels are read in the background. Such a viewer's response time therefore moves with how many rows were deleted or suppressed anywhere in the view since the labels were last read, including rows under keys the viewer does not hold. The channel is coarse, and it reveals the volume of deletions and suppressions in the view, never which rows; it is accepted on that basis, close to knowing that the corpus is being written to. Every other component (the category, text and suggestion timing variants, and the content key itself) is bounded to a quantity the viewer already possesses or is about to receive, and is accepted on that basis. A count by group reads each value's per-value record over the whole corpus where the field keeps one, as a category listing's visibility test and a suggestion's do, so its time depends on how many values exist and coarsely how widely each is held, including a value named in the request that the viewer cannot see. That is accepted, on the same basis as the listing and suggestion timing. A sampled histogram reads every entry of a band in the pieces it reads from the band, including deleted, suppressed and invisible rows, and chooses between the band and a scan of the set's own rows by comparing the band's entries with the set's rows, so its time depends on how many rows below the cut the viewer cannot see. The answer does not: both reads take the same items. The entry count is bounded by the view's rows below the cut, a coarse figure about the whole view; it is accepted on the same basis. Selection skips each of a tile's parts, its rows in one segment, that holds no row the viewer may see, and on a bundle of several point shards a request leaves out each shard in which the viewer sees nothing, a shard's fixed cost per request. Which parts and shards those are follows where the viewer's own items lie and, once a deleted item's number is issued again, deletions of items the viewer may never have seen. No response names a part or a shard. The time tells the viewer about where their own items are stored and, coarsely, about deletions, and is accepted on the same basis as the volume of deletions above. A finer per-term version of the content key, and a timing channel over how many partitions a token reaches, are specified but not built: a deployment holds one partition today and nothing finer than the coarse content key reaches the wire | C4, C14, C15, C19, C21, C24, C25, C26, C31 |
+| When an item they once saw was deleted or suppressed; and, by comparing `mosaica_id`s out of band, that two viewers are looking at the same item | A `mosaica_id` is stable for the item's life in one bundle, so a held one stops resolving on the viewer's next request after the change, and never names another item. Two viewers who compare `mosaica_id`s for items they can each see can tell they name the same item. An operator's unique values carry whatever structure the operator put in them | Medium | The price of a `mosaica_id` a client can bookmark and share. Nothing lets a client vary the key | C6, C17 |
+| A lower bound on how many values a category has | Where an operator numbers a vocabulary's values densely, the largest code a viewer can see bounds the count from below | Low | The operator's own numbering; an owner ruling that set-size inference from it is not defended against | C22 |
+| That their visible items in a region group together, a fact about structure that includes unseen items | A minimum-visible-count threshold a layer declares bounds how finely a grouping's presence is exposed against the viewer's own visible set, and filtering cannot deepen it | Low | The threshold decides whether a grouping's existence is announced, not whether its count is protected: a viewport and the density layer already serve exact masked counts over any region a viewer can name, whatever threshold a layer declares | C1 |
+| Which of their visible items share a full set of index keys, and so, where two such groups show the same clauses on the item card, that items in at least one of them carry a key the viewer does not satisfy; roughly in which build batch or ingest window each arrived; and a hint of the order in which keys they do not satisfy first appeared | A bulk read of items in stored order returns items shard by shard and in number order within a shard, which groups them by full key set, and their positions or unique values show where one set ends and the next begins ([reading in bulk](#reading-in-bulk)) | Medium | Bounded to how the viewer's own visible items group: no term's name, no count of the items the viewer cannot see, and nothing about any one item outside their visible set. Map order returns the same rows and fields and discloses none of it | none |
+| That an item they never saw was deleted, and roughly where in stored order it stood | A deleted item's number is issued again to an item a later window inserts, so in stored order the new item stands where the deleted one stood ([reading in bulk](#reading-in-bulk)). A viewer who sees the items either side, and then a new one between them, learns that at least one item between them was deleted | Medium | Bounded to positions among the viewer's own visible items, and only where a new item the viewer can see takes the number: no term, label or field of the deleted item, and no count beyond a lower bound. The price of a number space that follows the live corpus rather than every item ever inserted. Map order returns the same rows and fields and discloses none of it | none |
+| That another session with the same grant, which includes every anonymous viewer of a public deployment, recently made a request, opened this view, read a layer's level, or read a field's figures in this view; and, weakly, how busy sessions under other grants are | Four entries are shared by every session with the same grant: the authorised set, built on the grant's first request; its projection into a view's row order, built on the grant's first request in the view; the per-artifact counts, centroids and boxes of a level served from a column, built on its first read under the grant; and a field's figures, joined from the bundle's stored tallies on the field's first summary or histogram with default edges, or walked for a field declared at a running service. A read the cache already holds answers in milliseconds, and one that builds the entry takes longer: up to seconds for an authorised set, a projection, a level or a walked field, and milliseconds for a joined field. So the time a first response takes says whether another such session asked for the same entry since it was last built: since the last write, for the authorised set; since the last restart or eviction, for a projection, which a background pass carries across flushes, merges and compactions; since the last compaction, for a level's counts, which are kept on disk across a restart; and since the last compaction or restart, for a field's figures. The authorised set and the projection are kept per shard, so their first touch is sampled per shard. Eviction is least recently used across all grants, so an entry that was expected to be held and has to be built again says other sessions have been busy | Low | It discloses activity and nothing about any item: the shared entry is computed from rows the asker's grant admits, and every request subtracts what its own overlay denies and adds its own rows above the base before anything is served | none |
+
+A caller-declared quantity the service serves as declared, rather than a viewer's own inference, is
+not a residual channel and does not appear above: a caller-declared generating set, an authored
+gate label on a vocabulary value, an artifact layer's own access label, and a caller's
+membership-requirement declaration are covered under what this does not claim, below.
+
+## What this does not claim
+
+| Not claimed | Why not |
+|---|---|
+| Cryptographic strength of the `mosaica_id` | Not needed. The permutation hides a lower bound on the number of hidden items, a low-severity channel. The grouping by access it would also hide is disclosed by a stored-order read. An adversary who recovered the key would be back at that channel and nothing more. |
+| A defence against a bundle holder | Anyone holding the bundle has the key, the term index and the coordinates. None of the properties above are claimed against them. |
+| Isolation of partitions | **Not built yet.** The design specifies that a partition a token cannot reach must contribute nothing to an answer, and a partition the system cannot reach through failure must be treated as an error rather than an empty contribution. A deployment today has one partition, so neither case can arise, and neither rule has anything to test it. |
+| Verification of what an operator declares | A vocabulary value, a layer's or an artifact's own access label, or supplied artifact content that the operator declares visible is served as declared. The service cannot check provenance. An item with no access label of its own is refused at a build and at ingest unless its view names a default label, in which case it is treated as if it carried that label and nothing wider. |
+| Quantification of the timing channel | Open in the register: correlating a tile's service time with the viewer's own visible count leaves a residual nobody has quantified, so it is recorded rather than closed. |
+| Protection of data at rest | This chapter covers what a viewer can learn from responses. Data on disc has a different adversary. |
+| The client as a trust boundary | The client never decides what is visible; every value it holds has already been computed inside the visible set. Its rules concern truthful display. |
+
+## Evidence
+
+| Property | How it is checked | What is not covered |
+|---|---|---|
+| Every quantity computed from the viewer's own visible set | Compared, value for value, against an independent second implementation across three planted states, over the three surfaces the comparison covers: tiles, the points batch and the density layer's masked per-cell counts. The same property was probed manually against a running server across the request contract and the memory-safety surface beneath it, and no route past it was found | Served artifacts travel on their own route and are not part of this comparison; the row on the artifacts of each tile below covers them. The three-surface differential and the manual assessment ran over corpora whose items each carry single terms. A second differential covers access expressions on a built bundle: over items carrying conjunctions, disjunctions with a conjunction among their operands, several labels each, a conjunction another label absorbs and a quoted term, it compares which items a bulk read returns to each of fifteen principals, the `labels` beside each, and each item's card, with an oracle that parses and evaluates each item's own labels. It does not compare tiles or counts over such a corpus. Labels holding a conjunction written by ingest are checked by Rust tests of the engine over a flush and a restart |
+| A derived artifact served on the terms its layer declares | Compared against an independent implementation with two viewers differing by exactly one item inside an artifact's member set, under the strictest requirement, and the difference asserted before anything downstream rests on it. An artifact's own label is compared against an independent implementation over a built bundle and a service the artifacts were published into, across a restart and a fold; and a viewer lacking a label is shown to get byte-identical answers, on every viewer route, from a deployment holding the artifact and one that never published it | The other membership requirements are covered by Rust tests rather than the differential suite |
+| The artifacts of each tile, and every figure served beside an artifact, are the visible set's | Compared, tile by tile, against an independent implementation that places each visible point in its tile from its source position and finds its artifacts from the fixture's own shapes and grouping rule: over two spatial layers and an enumerated layer of overlapping groups whose form the server chooses, under a quota small enough to bind, for a viewer who sees part of the corpus and one who sees all of it, before and after a deny. Rust tests of the engine compare each tile's frame with an oracle over the visible points, for a level served from a label column, one stored by artifact and one served from a list column, at several depths, for viewers who see everything, a third and nothing. They compare each level's counts, centroids and boxes with a walk of the composed visible set row by row, over corpora with one key per item, several, conjunctions and a label per document, for principals who see everything, part and nothing and a session that reads every item, through a suppression on a box's edge and its lift, deletions, ingest, growth, a fold, a restart and a projection one generation behind. The identifier scan sweeps every frame of the route | The independent comparison covers items carrying one term each. Several keys per item, conjunctions and per-document labels are covered by the Rust tests of the figures, which read the route over the whole map as one tile. No scan covers the response's timing |
+| Samples taken after masking | Compared against an independent implementation with a wrong-shaped stand-in, a sample taken in storage order rather than from the visible set, that the comparison is required to disagree with | None |
+| A client never sees an entity id | Scanned across every wire surface, including the density layer's sub-cell counts, and the logs, for a byte pattern matching the underlying identity, with a planted true positive on every scan confirming the scan itself works. The scan covers both bulk reads, each read whole across responses and the items read in both orders, and every cursor they issue, whose decoded bytes are swept at every offset. The entity ids of the artifacts served are swept for beside the items' | A cursor's bytes are swept for 8-byte values only. Counts, coordinates, shapes, text and the logs are swept for entity ids of 100,000 and above only, items' and artifacts' alike, since smaller integers occur on the wire for other reasons. An artifact's entity id is below that floor for the first 34,464 artifacts of its layer's first level, so the entities of the artifacts the scan publishes are swept for in identifier columns and cursors only. In the suite's mode over several point shards an item's entity id is its number in its shard, and only the catalogue's first shard, of 131,073 items, holds numbers from 100,000, so the floored sweeps there cover that shard's numbers from 100,000 and nothing else. The scan of the artifacts routes publishes a layer and runs in both modes |
+| No figure taken over one shard reaches a response | The conformance suite builds each of three corpora as one shard and as several, serves both, sends the same requests as the same principals, and compares every field of every answer: viewports with and without a filter and a highlight, the artifacts of each tile, bulk items and artifacts in both orders across pages, item and artifact cards, browse, the aggregate's groupings, categories, suggest, `/v1/meta` and the corpus-wide figures of `/control/status`. Each comparison is made as built, after a script of an ingest of new items, an edit, a deletion, a suppression and a publication, and again after a compaction and a restart. Every answer over several shards is also swept for entity ids | Identifiers are compared through a key both modes share, cursors and elapsed times for presence only, and rows ordered or chosen by `mosaica_id` among equals as multisets. The samples drawn by rank are not compared, nor, where θ's occupied tiles come from the sketch, the served counts and the points. The status figures kept per shard or per process are not compared: the write executor's counters, segment counts, fragmentation and the compaction's counters and shard |
+| A lookup by value answers an invisible holder as absent | Rust tests of the engine ask, as a viewer lacking a holder's term, for its value in a keyword and an integer unique field, and check that the answer equals the answer for a value nobody holds. Server tests check that the control plane's strict `409` names the holder's `mosaica_id` | Not compared with the independent implementation, and no scan covers the answer's timing |
+| A sampled histogram counts only items the viewer may see | Compared, row for row, against an independent implementation that draws each principal's sample from its own visible items: over three principals, two filters and no filter, and every route a field's values are read by, the counts scaled from the oracle's items below the cut, the default edges those of the whole visible set, and the head's figures. Rust tests of the engine show a narrower viewer's sampled tables, read from bands holding entries it cannot see, equal to a broad viewer's once every item the narrower viewer cannot see is suppressed | The independent implementation predicts from the set's size and the sample size whether each set is sampled, and requires the head to agree. No scan covers the response's timing |
+| Counting by group answers under the properties above | Compared, row for row, against an independent implementation that counts sets of entities: over the adversarial mask catalogue under three principals of very different coverage, a `derived` and a `public` indexed field and a drawn one, by count and by a named list holding a hidden value, a value with no item and one that does not exist, alone and with cells down to depth 20, with no filter, a category filter and a region, against the whole visible set as reference; and cells over the whole view and over areas, which list only their own cells, with the whole view past the cell limit refused; over two spatial layers under three principals, by count and by a named list holding an id that names nothing; and over a tree of overlapping artifacts, some withheld by their own label, by a label no point carries, by their membership requirement or by the layer's default label. Server tests read tables whole through the cursor, apply a suppression from the next response, and check that a client going away frees its admission. Rust tests of the engine and the server plant a derived value whose only carrier is hidden, an artifact withheld by its own label, overlapping artifacts, a second view and a suppression between two pages of one table | A suppression between two pages of one table is not compared with the independent implementation, and no scan covers the response's timing |
+| A field's figures are the visible set's | Compared against an independent implementation that works out each principal's count, items with no value, smallest, largest and mean from the items it may see: over three principals and six fields read by every route, with no filter and two filters, and through a suppression of the items holding the extremes, its lift, a deletion, an ingest, a fold and a restart, with the default edges of a histogram counted whole and sampled after each. Rust tests of the engine plant the extremes on items a narrower viewer cannot see and on items with rows only in a view it cannot reach, suppress more of a side's extremes than are kept, and read the figures back after a restart | No scan covers the response's timing |
+| An incomplete answer is refused | The built half is covered by tests around shared in-progress work and cancellation, though not by the differential test form the design describes | The two partition rules have no test at all: a deployment has one partition, so neither can be exercised |
+| A bulk read answers under the properties above | The identifier scan above reads the bulk read of items whole, over a synthetic catalogue of adversarial masks, in both orders and across several responses. It checks that no row is returned twice, that the number of rows equals the viewport's visible count, that both orders return the same set of rows, and that each row's unique `serial` is its own item's in the independent implementation's bundle. Rust tests of the items route plant a narrower viewer and a label the viewer does not hold, and a deletion and a suppression accepted between responses and between two pages of one response. Rust tests of the artifacts route plant an artifact withheld by its own label, an attached label whose target is withheld, content the viewer may not read and a parent the viewer is not served, and check that none of them leaves a row, a count, a parent entry or a page; a deny accepted between two responses applies from the next, and a merge between two pages of one response renews the filter. Server tests end responses at each budget and at the stream deadline, and check each trailer's cursor. The TypeScript, Python and command-line clients' tests cut responses before their trailers and check that each keeps its whole pages and the cursor after the last of them | Which rows a bulk read serves, and their values, are not compared with the independent implementation: the Rust tests compare them with each fixture's own expected values. The artifacts route has no test of a deny between two pages of one response. A response cut because its client stopped reading is tested only through the viewport, whose responses are sent by the same code |

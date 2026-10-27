@@ -1,0 +1,28 @@
+# The plain-HTML example
+
+One page with no build step. `index.html` loads the single-file bundle by relative path with its integrity hash, and mounts `<mosaica-explorer>` with a `viewer-url` and a `token`. `server.mjs` is the app server beside it: it serves the page and the bundle, mints tokens, and proxies the viewer routes.
+
+Run these in this directory. npm finds the workspace from here, so the first command runs here as it would in `clients/ts`. If `clients/ts/node_modules` is absent, run `npm ci` in `clients/ts` first.
+
+```bash
+npm run bundle -w @mosaicajs/components    # writes components/dist/mosaica-components.js and its .sri
+MOSAICA_API_KEY=$(cat ../../../../mosaica-demo/presets/2m4.key) node server.mjs    # http://localhost:5180
+```
+
+The server expects the demo's `2m4` scale (`./run_demo.sh --scale 2m4` at the repository root): a viewer listener on `127.0.0.1:37585` and a session listener on `127.0.0.1:49303`. `MOSAICA_API_KEY` is an API key whose principal holds `authorise-as`; `run_demo.sh` writes one to `mosaica-demo/presets/2m4.key` at the repository root. `users.json` lists the signed-in users the page offers and the Mosaica principal each reads as. Those principals are the ones `run_demo.sh` creates when it measures the 2m4 presets, named `holding-` and a digest of their terms; `mosaica principal list` shows them. `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL` point the server at another deployment, whose principals `users.json` then has to name, and `PORT` moves it off 5180. The server finds the bundle in the installed `@mosaicajs/components` package, which in this workspace is `components/` itself. Copied out of the checkout with `index.html`, it serves the bundle of the published package after `npm install @mosaicajs/components` beside it, as [the first tutorial](../../../../docs/start/first-map.md#open-the-map) does. Until the bundle is there the server answers the page with a 503 naming both commands.
+
+## Where the token comes from
+
+The page never holds the API key. `server.mjs` does. When the page asks `POST /token` for its user, the server calls `POST /session/authorise` naming that user's principal and returns the viewer token (`authorise()` in `server.mjs`). A real application takes the user from its own sign-in instead of a query parameter.
+
+The key can mint a session for any principal holding `read`. This app server therefore decides which principal each of its users reads as, and the answer is only as trustworthy as the sign-in behind it. What each principal may see is decided by the terms the deployment's catalogue grants it.
+
+## Reaching the viewer routes
+
+The page calls the viewer routes on its own origin. `server.mjs` proxies `/v1/*` to the viewer listener and forwards every response header. The client reads `etag`, `x-mosaica-identity-key`, `x-mosaica-pin`, `x-mosaica-stale`, `x-mosaica-region`, `x-mosaica-server-us` and `x-mosaica-admission-us`, so a proxy in front of the viewer listener has to pass them through.
+
+A deployment can instead list the page's origin in `serve.cors_origins`. That admits the page to the viewer listener only, and the session listener stays closed to browsers. `serve.dev_cors_origins`, which the demo uses, also opens the session listener and is for development only.
+
+## The other examples
+
+`../react-explorer`, `../canvas-store` and `../deck-host` get their tokens from this server: their Vite dev servers proxy `/token` and `/users` here and `/v1/*` to the viewer listener. Start this one first.

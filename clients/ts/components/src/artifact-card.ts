@@ -1,0 +1,309 @@
+import {css, html, nothing, type TemplateResult} from 'lit';
+import {property} from 'lit/decorators.js';
+import {artifactName, isFilterLayer, withMember, withoutMember, type Artifact, type ArtifactDetail, type ClauseVerb, type Masked, type Refusal} from '@mosaicajs/client';
+import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
+import {attachContextRoot, defineOnce} from './define.js';
+import {icon} from './icons.js';
+import {reasonOf, refusedState, renderState} from './states.js';
+import {chrome, tokens} from './tokens.js';
+import './count.js';
+
+/** A parent's or child's name, or {@link UNNAMED}. */
+const nameSpan = (name: string | null) => html`<span part="name" class="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>`;
+
+/** A `role="button"` row's keys: Enter and Space press it. */
+const onKeys = (press: () => void) => (e: KeyboardEvent) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  press();
+};
+
+/** What each kind of drawn shape says on the card. */
+const SHAPE_TEXT: Record<'derived' | 'predicate' | 'authored', string> = {
+  derived: 'Drawn around the members you can see',
+  predicate: 'The same for everyone',
+  authored: 'The same for everyone'
+};
+
+/**
+ * Use the artifact card to show an artifact the viewer has opened on the map, such as a cluster. An
+ * artifact is a named group of items in an annotation layer. The card's count covers every member
+ * the viewer may see, so it does not change as the map moves. Pressing one of the artifact's
+ * parents or children opens that one instead.
+ *
+ * The card reads the store's opened artifact, or the `artifact` you set.
+ *
+ * The card's buttons filter or highlight the map by the artifact's members wherever they are, or
+ * filter to everything outside it. Fit to cluster fires `mosaica-artifactfit`, and
+ * `<mosaica-explorer>` responds by fitting its map to the artifact. A filter layer draws nothing,
+ * so its artifacts have no Fit button.
+ *
+ * @summary A card showing an artifact's details, parents and children.
+ * @tagname mosaica-artifact-card
+ * @category Elements
+ * @slot actions - Buttons beside the close button, such as the explorer's Pin.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactfit']>} mosaica-artifactfit - Fit to
+ *   cluster was pressed. `<mosaica-explorer>` fits its map to the artifact.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A filter
+ *   or highlight button added or removed a `member_of` clause.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-close']>} mosaica-close - The close button was
+ *   pressed, with `what` set to `artifact`.
+ * @csspart title - The heading, with the level's or layer's title and the close button.
+ * @csspart close - The close button.
+ * @csspart state - The state line, with `data-state`.
+ * @csspart refusal - The words "Not available", with `data-code` set to the refusal's code.
+ * @csspart reason - The server's reason for the refusal, under "Not available".
+ * @csspart headline - The artifact's name, with `data-unnamed` if it has none.
+ * @csspart count - The count of items the viewer may see.
+ * @csspart content - The artifact's description, or its attached topic.
+ * @csspart value - The layer and the key.
+ * @csspart shape - How the layer's shapes are made, with `data-kind` (`derived`, `predicate` or
+ *   `authored`).
+ * @csspart label - The headings above the parents and the children.
+ * @csspart parents - The list of parents.
+ * @csspart parent - One parent, with `data-id`.
+ * @csspart children - The list of children in this view.
+ * @csspart child - One child, with `data-id`.
+ * @csspart name - A parent's or child's name, with `data-unnamed` if it has none.
+ * @csspart fit - The Fit to cluster button.
+ * @csspart verbs - The clause buttons.
+ * @csspart filter - The Filter to this button, with `aria-pressed` while its clause is on.
+ * @csspart highlight - The Highlight this button, with `aria-pressed` while its clause is on.
+ * @csspart outside - The Outside this button, with `aria-pressed` while its clause is on.
+ */
+export class MosaicaArtifactCard extends MosaicaElement {
+  static override styles = [
+    tokens,
+    chrome,
+    css`
+      :host {
+        display: block;
+      }
+      [part='title'] .what {
+        flex: 1;
+        min-width: 0;
+      }
+      [part='headline'] {
+        margin-bottom: 6px;
+      }
+      [part='count'] {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      [part='count'] mosaica-count::part(count) {
+        font-size: 20px;
+        font-weight: 600;
+      }
+      [part='count'] mosaica-count::part(label) {
+        font-size: 13px;
+      }
+      [part='content'] {
+        margin: 0 0 10px;
+        font-size: 12px;
+        color: var(--_mosaica-ink-2);
+      }
+      .children-label {
+        margin: 12px 0 4px;
+      }
+      [part='children'] {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      [part='child'] mosaica-count::part(count) {
+        margin-left: auto;
+        color: var(--_mosaica-ink-2);
+        font-size: 12px;
+        font-weight: 400;
+      }
+      [part='fit'] {
+        margin-top: 12px;
+      }
+      [part='verbs'] {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      [part='verbs'] .btn[aria-pressed='true'] {
+        border-color: currentColor;
+        background: var(--_mosaica-surface-2);
+      }
+      [part='verbs'] [data-verb='highlight'][aria-pressed='true'] {
+        background: var(--_mosaica-highlight-soft);
+        color: var(--_mosaica-highlight);
+      }
+      .parents-label {
+        margin: 12px 0 4px;
+      }
+      [part='parents'] {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      [part='parent'] mosaica-count::part(count) {
+        margin-left: auto;
+        color: var(--_mosaica-ink-2);
+        font-size: 12px;
+        font-weight: 400;
+      }
+      [part='close'] {
+        width: 24px;
+        height: 24px;
+        margin: -4px -4px -4px 0;
+        display: grid;
+        place-items: center;
+        border-radius: 5px;
+        color: var(--_mosaica-ink-2);
+      }
+      [part='close']:hover {
+        background: var(--_mosaica-surface-2);
+      }
+    `
+  ];
+
+  /** The artifact to show, if you fetch its details yourself. It replaces the store's opened artifact. */
+  @property({attribute: false}) accessor artifact: {id: bigint; detail: ArtifactDetail} | null = null;
+  /** A refusal to show instead of an artifact, if you fetch its details yourself. */
+  @property({attribute: false}) accessor refusal: Refusal | null = null;
+
+  private get shown(): {artifact: {id: bigint; detail: ArtifactDetail} | null; refusal: Refusal | null} {
+    if (this.artifact || this.refusal) return {artifact: this.artifact, refusal: this.refusal};
+    const sel = this.resolvedStore?.get('selection');
+    return {artifact: sel?.artifact ?? null, refusal: sel?.artifactRefusal ?? null};
+  }
+
+  /**
+   * One of the card's clause buttons: a `member_of` clause on this artifact, as a filter or a
+   * highlight, inside or outside. The button shows whether the clause is on; clicking a pressed
+   * button withdraws it. The artifact holds one clause in each position, so Filter to this and
+   * Outside this replace each other, and a highlight is kept beside either.
+   */
+  private verb(layer: string, artifact: bigint, outside: boolean, verb: ClauseVerb, label: string, name: string | null) {
+    const s = this.resolvedStore;
+    const held = s?.get('filters').members ?? [];
+    const on = held.some((c) => c.layer === layer && c.artifact === artifact && c.outside === outside && c.verb === verb);
+    const title =
+      verb === 'filter'
+        ? outside
+          ? 'Narrow the map and every count to what is not in this artifact'
+          : "Narrow the map and every count to this artifact's members"
+        : "Keep the map and light this artifact's members";
+    return html`<button
+      part=${outside ? 'outside' : verb === 'filter' ? 'filter' : 'highlight'}
+      class="btn"
+      type="button"
+      data-verb=${verb}
+      aria-pressed=${on ? 'true' : 'false'}
+      title=${title}
+      @click=${() => {
+        if (!s) return;
+        const members = on
+          ? withoutMember(s.get('filters').members, layer, artifact, verb)
+          : withMember(s.get('filters').members, {layer, artifact, outside, verb, ...(name === null ? {} : {label: name})});
+        s.setMembers(members);
+        emit(this, 'mosaica-clausechange', {id: idString(artifact), layer, outside, verb, on: !on});
+      }}
+    >
+      ${icon(outside ? 'outside' : verb === 'filter' ? 'filter' : 'highlight', 14)}${label}
+    </button>`;
+  }
+
+  override render(): TemplateResult | typeof nothing {
+    const {artifact, refusal} = this.shown;
+    // The heading is the level's title on a levelled layer (County, Admin 2), else the layer's.
+    const metaLayers = this.resolvedStore?.get('meta')?.layers ?? [];
+    const row = artifact ? this.resolvedStore?.get('artifacts')?.served.find((a) => a.mosaicaId === artifact.id) : undefined;
+    // A filter layer's artifacts are never served, so the layer falls back to the drill-down's;
+    // otherwise the card would offer Fit on a layer with nothing drawn.
+    const declaredLayer = row?.layer ?? artifact?.detail.layer;
+    const decl = declaredLayer === undefined ? undefined : metaLayers.find((l) => l.name === declaredLayer);
+    const what = (row && decl?.levels.find((lv) => lv.level === row.rung)?.title) || decl?.title || decl?.name || 'Selected';
+    // The close button appears only while the card shows something to close.
+    const heading = (closable: boolean) =>
+      html`<h2 part="title"><span class="what">${what}</span>${closable
+        ? html`<slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'artifact'})}>${icon('close', 14)}</button>`
+        : nothing}</h2>`;
+    if (refusal) {
+      return html`<div class="panel">${heading(true)}${refusedState('Not available', refusal.code, null, reasonOf(refusal))}</div>`;
+    }
+    if (!artifact) {
+      if (!this.resolvedStore) return html`<div class="panel">${heading(false)}${renderState('detached', null)}</div>`;
+      return html`<div class="panel">${heading(false)}<span part="state" data-state="empty">Nothing selected</span></div>`;
+    }
+    const s = this.resolvedStore;
+    const artifacts = s?.get('artifacts');
+    const served = artifacts?.served ?? [];
+    const attached = artifacts?.attached ?? new Map<bigint, string>();
+    // The artifact's row and children are read from the served set now, on every render.
+    const here = served.find((a) => a.mosaicaId === artifact.id);
+    // On a `dag` layer a child appears on the card of each served parent.
+    const children = served.filter((a) => a.parentIds.includes(artifact.id)).sort((a, b) => (a.maskedCount < b.maskedCount ? 1 : a.maskedCount > b.maskedCount ? -1 : 0));
+    // Parents from the served set, which holds every parent the map draws. The hierarchy panel
+    // asks `POST /v1/artifacts/browse` for the rest.
+    const parents = here ? served.filter((a) => here.parentIds.includes(a.mosaicaId)).sort((a, b) => (a.maskedCount < b.maskedCount ? 1 : a.maskedCount > b.maskedCount ? -1 : 0)) : [];
+    const stale = s?.get('status').stale ?? false;
+    const count: Masked = {value: Number(artifact.detail.maskedCount), exact: true};
+    const id = idString(artifact.id);
+    // The kind of shape the layer draws, so a reader knows whether the outline depends on what
+    // they may see.
+    const shape = decl?.shape ? {kind: decl.shape, text: SHAPE_TEXT[decl.shape]} : null;
+    // A clause made here carries the drawn name as its label, since nothing downstream can resolve it.
+    const clauseName = here ? artifactName(here, attached) : null;
+    return html`<div class="panel">${heading(true)}
+      <span part="state" data-state="shown"></span>
+      <div part="headline" class="card-title" ?data-unnamed=${clauseName === null}>${clauseName ?? UNNAMED}</div>
+      <div part="count"><mosaica-count .masked=${count} .stale=${stale} label="members"></mosaica-count></div>
+      ${here && here.content.length > 0 && attached.has(here.mosaicaId) ? html`<p part="content">${attached.get(here.mosaicaId)}</p>` : here && here.content.length > 1 ? html`<p part="content">${here.content.slice(1).join(' · ')}</p>` : nothing}
+      <div class="field">
+        <div class="k">Layer</div><div part="value" class="v">${decl?.title || artifact.detail.layer}</div>
+        ${artifact.detail.key ? html`<div class="k">Key</div><div part="value" class="v mono">${artifact.detail.key}</div>` : nothing}
+        ${shape ? html`<div class="k">Shape</div><div part="shape" class="v" data-kind=${shape.kind}>${shape.text}</div>` : nothing}
+      </div>
+      ${parents.length > 0
+        ? html`<div part="label" class="xs muted parents-label">Parents</div>
+            <ul part="parents" class="list">
+              ${parents.map(
+                (pnt: Artifact) => html`<li part="parent" class="item child" role="button" tabindex="0" data-id=${idString(pnt.mosaicaId)} @click=${() => void s?.openArtifact(pnt.mosaicaId)} @keydown=${onKeys(() => void s?.openArtifact(pnt.mosaicaId))}>
+                  ${nameSpan(artifactName(pnt, attached))}
+                  <mosaica-count .masked=${{value: Number(pnt.maskedCount), exact: true} as Masked} .stale=${stale}></mosaica-count>
+                </li>`
+              )}
+            </ul>`
+        : nothing}
+      ${children.length > 0
+        ? html`<div part="label" class="xs muted children-label">Children in this view</div>
+            <ul part="children" class="list">
+              ${children.map(
+                (c: Artifact) => html`<li part="child" class="item child" role="button" tabindex="0" data-id=${idString(c.mosaicaId)} @click=${() => void s?.openArtifact(c.mosaicaId)} @keydown=${onKeys(() => void s?.openArtifact(c.mosaicaId))}>
+                  ${nameSpan(artifactName(c, attached))}
+                  <mosaica-count .masked=${{value: Number(c.maskedCount), exact: true} as Masked} .stale=${stale}></mosaica-count>
+                </li>`
+              )}
+            </ul>`
+        : nothing}
+      ${
+        // A filter layer draws nothing, so there is nothing to fit to.
+        decl && isFilterLayer(decl)
+          ? nothing
+          : html`<button part="fit" class="btn" type="button" @click=${() => emit(this, 'mosaica-artifactfit', {id})}>${icon('fit', 14)}Fit to cluster</button>`
+      }
+      <div part="verbs" role="group" aria-label="This artifact">
+        ${this.verb(artifact.detail.layer, artifact.id, false, 'filter', 'Filter to this', clauseName)}
+        ${this.verb(artifact.detail.layer, artifact.id, false, 'highlight', 'Highlight this', clauseName)}
+        ${this.verb(artifact.detail.layer, artifact.id, true, 'filter', 'Outside this', clauseName)}
+      </div>
+    </div>`;
+  }
+}
+
+attachContextRoot();
+defineOnce('mosaica-artifact-card', MosaicaArtifactCard);
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'mosaica-artifact-card': MosaicaArtifactCard;
+  }
+}

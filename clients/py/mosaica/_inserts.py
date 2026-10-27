@@ -1,0 +1,555 @@
+"""`insert`, which hands a table to something declared and names the columns that thing reads.
+
+A `declare_*` method says what exists and takes no data, and `insert(target, table, **columns)`
+hands a table to a declared target and names the columns the target reads. The package rewrites
+no data: a frame is written to disc as it was given, a path is read where it lies, and the
+declaration names the columns. Every insert reports the columns it read and the columns it
+ignored.
+
+The coordinates, the access labels, the key column of a table of items inserted into a layer
+(`insert(layer, table, key=)`) and a group's view column are named on every call and never
+matched by name. A table names the item each row belongs to by the columns it carries of the
+attributes declared `unique`, each under the attribute's own name or the one `columns=` names for
+it. An artifacts table, a label set's table read with `contents=`, a members table, a roster and
+a value set are in Mosaica's own shape, and the build and the publication routes read their
+columns under the canonical names whatever the call says. So each column with the name of a
+keyword the call left out, `key` among them, is read as that keyword, and a keyword the call
+gives names the column read for it. A label set's text given with `text=` is written into such a
+table by the package, so only its `key` is matched. A canonical column that the call reads
+another column in place of is refused, because the build and the routes would read it although
+the insert listed it as ignored. `level` and `attached_level` are read under their own names
+alone, because the build's `fields` map cannot move them, so those keywords take the canonical
+name and a column with any other name has to be renamed in the table. A membership shape is named
+by its kind, as in `shape="polygon"`, and its columns are read under their own names.
+
+Before the first commit an insert binds its table to its target for the build: a frame is
+written under `sources/`, a path is recorded, and the declaration names the file and the
+columns. After the first commit the same insert is sent by its target's route at the next
+`commit()`, so its frame is written under `.mosaica/inserts/` and nothing is written under
+`sources/`, because `mosaica check` reads every file in `[sources]` as part of the corpus.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
+
+from ._refusal import Refusal
+from ._reports import Summarised, _count
+
+#: Where a frame inserted after the first commit is written. Not `sources/`: `mosaica check` reads
+#: every key of `[sources]` as a file the declaration is built from.
+INSERT_FOLDER = ".mosaica/inserts"
+
+#: An artifacts table's columns, in the build's own field set: the ones a declaration's `fields`
+#: map can move, so the call may name a column of any name for each.
+ARTIFACT_FIELDS = (
+    "key", "view", "space", "contents", "parent", "attached_layer", "attached_key", "members",
+    "excluding",
+)
+
+#: The artifact columns the build reads under their own names alone: neither is in its `fields`
+#: map, so the keyword takes the canonical name and a column called anything else is renamed in
+#: the table rather than mapped here.
+ARTIFACT_CANONICAL_ONLY = ("level", "attached_level")
+
+#: A membership shape's own columns, by the kind `shape=` names. Read under their own names, the
+#: build's `fields` map moving none of them.
+SHAPE_COLUMNS = {
+    "bbox": ("min_x", "min_y", "max_x", "max_y"),
+    "circle": ("cx", "cy", "r"),
+    "ellipse": ("cx", "cy", "a", "b", "angle"),
+    "polygon": ("geometry",),
+}
+
+#: The publication record's own field for each kind, the record carrying `bbox = [min_x, min_y,
+#: max_x, max_y]`, `circle = [cx, cy, r]` and `ellipse = [cx, cy, a, b, angle]`. A polygon's
+#: `geometry` column is WKB at the build and the record's `wkt` is text, so the two doors read one
+#: column two ways.
+SHAPE_RECORD_FIELD = {
+    "bbox": "bbox", "circle": "circle", "ellipse": "ellipse", "polygon": "wkt",
+}
+SHAPE_FIELDS = tuple(SHAPE_RECORD_FIELD.values())
+
+#: A members table's columns, likewise, `level` being canonical. Each member is named by the
+#: unique attributes' columns the table carries.
+MEMBER_FIELDS = ("key", "rank")
+MEMBER_CANONICAL_ONLY = ("level",)
+
+#: A value set's columns, and a roster's own two beside the metadata names its group declared.
+VOCABULARY_FIELDS = ("key", "title", "code")
+ROSTER_FIELDS = ("key", "visibility")
+
+
+def _artifact_columns() -> tuple[str, ...]:
+    """Every column name an artifacts table carries meaning under."""
+    shapes = tuple(dict.fromkeys(one for kind in SHAPE_COLUMNS for one in SHAPE_COLUMNS[kind]))
+    return ARTIFACT_FIELDS + ARTIFACT_CANONICAL_ONLY + shapes
+
+
+@dataclass
+class Contract:
+    """Which columns one kind of target reads, and which of them the call must name."""
+
+    required: tuple[str, ...]
+    optional: tuple[str, ...] = ()
+    #: One of these must be named, where the contract names a pair.
+    either: tuple[str, ...] = ()
+    #: The column names this kind of table carries meaning under. A keyword among them that the
+    #: call leaves out is read from the column of its name; one of these the call reads another
+    #: column in place of is refused, naming the column and the two remedies, so nothing is read
+    #: silently at either door.
+    canonical: tuple[str, ...] = ()
+    #: The keywords whose column the build reads under its own name alone.
+    canonical_only: tuple[str, ...] = ()
+    #: The keywords whose value is a key rather than a column: one view for a whole table.
+    values: tuple[str, ...] = ()
+    #: Whether this table carries a membership shape, which `shape=` names by its kind.
+    shaped: bool = False
+
+
+CONTRACTS: dict[tuple[str, str], Contract] = {
+    ("view", "rows"): Contract(required=("x", "y"), optional=("access",)),
+    ("view_group", "rows"): Contract(
+        required=("x", "y"), optional=("access", "view"), values=("view_key",)
+    ),
+    ("view_group", "roster"): Contract(
+        required=("key",), optional=("visibility",), canonical=ROSTER_FIELDS
+    ),
+    ("attribute", "values"): Contract(required=("value",), optional=("view",)),
+    ("layer", "key"): Contract(required=("key",), optional=("view",)),
+    ("layer", "artifacts"): Contract(
+        required=("key",),
+        optional=(
+            "level", "parent", "contents", "attached_layer", "attached_level", "attached_key",
+            "members", "excluding", "space", "view", "access",
+        ),
+        canonical=_artifact_columns(),
+        canonical_only=ARTIFACT_CANONICAL_ONLY,
+        shaped=True,
+    ),
+    ("layer", "members"): Contract(
+        required=("key",),
+        optional=("level", "rank", "view"),
+        canonical=MEMBER_FIELDS + MEMBER_CANONICAL_ONLY,
+        canonical_only=MEMBER_CANONICAL_ONLY,
+    ),
+    ("labels", "text"): Contract(
+        required=("key",),
+        either=("text", "contents"),
+        optional=(
+            "level", "parent", "attached_layer", "attached_key", "attached_level", "members",
+            "excluding", "space",
+        ),
+        canonical=_artifact_columns(),
+        canonical_only=ARTIFACT_CANONICAL_ONLY,
+    ),
+    ("labels", "members"): Contract(
+        required=("key",),
+        optional=("level", "rank"),
+        canonical=MEMBER_FIELDS + MEMBER_CANONICAL_ONLY,
+        canonical_only=MEMBER_CANONICAL_ONLY,
+    ),
+    ("vocabulary", "values"): Contract(
+        required=("key",), optional=("title", "code"), canonical=VOCABULARY_FIELDS
+    ),
+}
+
+#: Under a projection a view's coordinates are `lon` and `lat`, so those are the two names the
+#: call gives rather than `x` and `y`.
+PROJECTED = {"x": "lon", "y": "lat"}
+
+
+def by_name(names, schema, stated: dict, taken=()) -> dict:
+    """Each of `names` with the column it is read from, as `{name: column}`: the column `stated`
+    gives it, else the column of its own name, where the table carries that column and it is not
+    one of `taken`."""
+    matched = {}
+    for name in names:
+        column = stated.get(name, name)
+        if column in schema and column not in taken:
+            matched[name] = column
+    return matched
+
+
+def with_columns_by_name(contract: Contract, schema, named: dict) -> dict:
+    """The call's keywords, and for a table in Mosaica's own shape each keyword it left out whose
+    column the table carries under the keyword's own name. A column the call names for another
+    keyword is not read twice.
+
+    A label set's text given with `text=` is no such table: the SDK writes the table the layer
+    reads from the key, the text and the keywords the call states, so only `key` is matched."""
+    if not contract.canonical:
+        return named
+    keywords = [
+        one
+        for one in contract.required + contract.optional + contract.either
+        if one in contract.canonical and one not in named
+    ]
+    if "text" in named:
+        keywords = [one for one in keywords if one == "key"]
+    return {**by_name(keywords, schema, {}, taken=set(named.values())), **named}
+
+
+def projected(block: dict) -> bool:
+    """Whether a view's or view group's declaration places its points under a projection."""
+    return block.get("projection", "none") != "none"
+
+
+def axes(block: dict) -> tuple[str, str]:
+    """A view's two coordinate names, which the insert's columns are held under and the ingest
+    route reads."""
+    return (PROJECTED["x"], PROJECTED["y"]) if projected(block) else ("x", "y")
+
+
+@dataclass(repr=False)
+class Insert(Summarised):
+    """The record of one `insert` call, which says what table was handed to which target and
+    which of its columns are read.
+
+    - `target`: the name of the declared thing the table was handed to.
+    - `kind`: what the target is, as `"view"`, `"view_group"`, `"attribute"`, `"layer"`,
+      `"labels"` or `"vocabulary"`.
+    - `role`: which of the target's tables this is, as `"rows"`, `"roster"`, `"values"`,
+      `"key"`, `"artifacts"`, `"members"` or `"text"`.
+    - `columns`: the column the call named for each thing the target reads, such as
+      `{"x": "x", "y": "y", "access": "labels"}`.
+    - `named_attributes`: on a view's rows, the column each attribute is filled from, as
+      `{attribute: column}`.
+    - `items`: the column the table carries for each attribute declared `unique`, as
+      `{attribute: column}`, which is how each row names its item.
+    - `metadata_columns`: on a view group's roster, the column each metadata value is read from.
+    - `shape`, `shape_columns`: on an annotations table, the kind of shape its rows carry and the
+      columns the shape is read from.
+    - `view_key`: the one view of a view group that every row is in, when `view_key=` named it.
+    - `read`, `ignored`: the table's columns in its own order, split into those that are read
+      and those that are ignored.
+    - `rows`: how many rows the table has.
+    - `schema`: each column's Arrow type.
+    - `path`: the Parquet file that holds the rows. `in_place` is `True` when that is the file
+      the call gave, and `False` when the package wrote the table into the database's directory.
+    - `source`, `declared_path`: the name and the path that the declaration file gives the
+      table before the first commit.
+    """
+
+    target: str
+    kind: str
+    role: str
+    columns: dict[str, str] = field(default_factory=dict)
+    named_attributes: dict[str, str] = field(default_factory=dict)
+    items: dict[str, str] = field(default_factory=dict)
+    metadata_columns: dict[str, str] = field(default_factory=dict)
+    shape: str | None = None
+    shape_columns: list[str] = field(default_factory=list)
+    view_key: str | None = None
+    source: str | None = None
+    path: Path | None = None
+    declared_path: str | None = None
+    in_place: bool = False
+    rows: int = 0
+    schema: dict[str, Any] = field(default_factory=dict)
+    read: list[str] = field(default_factory=list)
+    ignored: list[str] = field(default_factory=list)
+
+    def table(self) -> pa.Table:
+        """The inserted rows, read back from `path` as a pyarrow table."""
+        return pq.read_table(self.path)
+
+    def summary(self) -> list[str]:
+        """The lines `print()` shows, which are one line naming the target, the number of rows,
+        and the columns read and ignored."""
+        into = self.target if self.role in ("rows", "key", "values") else (
+            f"{self.target} ({self.role})"
+        )
+        if self.view_key is not None:
+            into += f", view {self.view_key}"
+        ignored = f"; ignored {', '.join(self.ignored)}" if self.ignored else ""
+        return [
+            f"{into}: {_count(self.rows, 'row')} "
+            f"(read {', '.join(self.read) or 'nothing'}{ignored})"
+        ]
+
+
+def is_path(data: Any) -> bool:
+    return isinstance(data, (str, os.PathLike))
+
+
+def as_table(data: Any) -> pa.Table:
+    """A frame as an Arrow table. pandas, polars and pyarrow all arrive through `pa.table`."""
+    if isinstance(data, pa.Table):
+        return data
+    return pa.table(data)
+
+
+def decoded(table: pa.Table) -> pa.Table:
+    """The table with each dictionary column, or list of dictionary values, as its plain values,
+    and each timestamp column in microseconds.
+
+    A pandas `Categorical` arrives as an Arrow dictionary column. Decoding it here means every
+    target that reads a string column reads a categorical one the same way, at the build and at
+    a running server.
+
+    pandas keeps a timestamp in nanoseconds, and a `timestamp_us` column holds microseconds, the
+    only unit the build and a running server read. A timestamp in another unit is cast to
+    microseconds, keeping its time zone: a part below a microsecond is dropped, and a moment
+    microseconds cannot hold is refused.
+    """
+    for at, column in enumerate(table.schema):
+        plain = _plain_type(column.type)
+        if plain != column.type:
+            table = table.set_column(
+                at, pa.field(column.name, plain, column.nullable), table.column(at).cast(plain)
+            )
+        elif pa.types.is_timestamp(column.type) and column.type.unit != "us":
+            micro = pa.timestamp("us", column.type.tz)
+            options = pc.CastOptions(micro, allow_time_truncate=True)
+            try:
+                cast = pc.cast(table.column(at), options=options)
+            except pa.ArrowInvalid as why:
+                raise Refusal(
+                    f"column {column.name!r} holds a moment a timestamp in microseconds cannot "
+                    f"hold: {why}"
+                ) from None
+            table = table.set_column(at, pa.field(column.name, micro, column.nullable), cast)
+    return table
+
+
+def _plain_type(dtype: pa.DataType) -> pa.DataType:
+    if pa.types.is_dictionary(dtype):
+        return dtype.value_type
+    if pa.types.is_list(dtype) and pa.types.is_dictionary(dtype.value_type):
+        return pa.list_(dtype.value_type.value_type)
+    if pa.types.is_large_list(dtype) and pa.types.is_dictionary(dtype.value_type):
+        return pa.large_list(dtype.value_type.value_type)
+    return dtype
+
+
+def schema_of(data: Any) -> dict:
+    """One frame's or file's columns and their types, without reading a row where it is a file."""
+    if is_path(data):
+        return _named_types(pq.ParquetFile(Path(data).expanduser()).schema_arrow)
+    return _named_types(as_table(data).schema)
+
+
+def _named_types(schema) -> dict:
+    return dict(zip(schema.names, schema.types))
+
+
+def build(
+    target: str,
+    kind: str,
+    role: str,
+    data: Any,
+    named: dict[str, str],
+    directory: Path,
+    source: str,
+    at_build: bool,
+    projected: bool = False,
+    metadata: tuple[str, ...] = (),
+    named_attributes: dict[str, str] | None = None,
+    items: dict[str, str] | None = None,
+) -> Insert:
+    """One insert: the table where it belongs, the columns checked, the two lists computed."""
+    contract = CONTRACTS[(kind, role)]
+    folder = "sources" if at_build else INSERT_FOLDER
+    if is_path(data):
+        path = Path(data).expanduser().resolve()
+        if not path.exists():
+            raise Refusal(f"insert into {target!r}: {path} does not exist")
+        file = pq.ParquetFile(path)
+        schema = _named_types(file.schema_arrow)
+        rows = file.metadata.num_rows
+        insert = Insert(
+            target=target,
+            kind=kind,
+            role=role,
+            source=source,
+            path=path,
+            declared_path=os.path.relpath(path, directory),
+            in_place=True,
+            rows=rows,
+            schema=schema,
+        )
+    else:
+        table = decoded(as_table(data))
+        path = directory / folder / f"{source}.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, path)
+        insert = Insert(
+            target=target,
+            kind=kind,
+            role=role,
+            source=source,
+            path=path,
+            declared_path=f"{folder}/{source}.parquet",
+            rows=table.num_rows,
+            schema=_named_types(table.schema),
+        )
+    _check(insert, contract, named, projected, metadata)
+    insert.named_attributes = dict(named_attributes or {})
+    insert.items = dict(items or {})
+    _lists(insert, contract)
+    return insert
+
+
+def _check(
+    insert: Insert,
+    contract: Contract,
+    named: dict[str, str],
+    projected: bool,
+    metadata: tuple[str, ...],
+) -> None:
+    """Every column the target needs is named on the call, and every name is a column."""
+    required = tuple(
+        PROJECTED[role] if projected and role in PROJECTED else role
+        for role in contract.required
+    )
+    optional = tuple(
+        PROJECTED[role] if projected and role in PROJECTED else role
+        for role in contract.optional
+    )
+    known = set(required) | set(optional) | set(contract.either) | set(metadata)
+    known |= set(contract.values)
+    if contract.shaped:
+        known.add("shape")
+    unknown = sorted(set(named) - known)
+    if unknown:
+        raise Refusal(
+            f"insert into {insert.kind} {insert.target!r}: "
+            + ", ".join(f"{name}=" for name in unknown)
+            + " names nothing this target reads. It reads "
+            + ", ".join(f"{name}=" for name in sorted(known))
+        )
+    missing = [role for role in required if role not in named]
+    if missing:
+        raise Refusal(
+            f"insert into {insert.kind} {insert.target!r}: "
+            + ", ".join(f"{role}=" for role in missing)
+            + " is not named, and this target reads it from every table it is given. Name the "
+            "column it is in"
+        )
+    if contract.either and not any(role in named for role in contract.either):
+        raise Refusal(
+            f"insert into {insert.kind} {insert.target!r}: name the column the text is in, "
+            + " or ".join(f"{role}=" for role in contract.either)
+        )
+    if "view" in contract.optional and "view_key" in contract.values:
+        named_view = [one for one in ("view", "view_key") if one in named]
+        if not named_view:
+            raise Refusal(
+                f"insert into {insert.kind} {insert.target!r}: a group's rows say which of its "
+                f"views each belongs to. Name the column that says which with view=, or the one "
+                f"view this whole table is for with view_key="
+            )
+        if len(named_view) == 2:
+            raise Refusal(
+                f"insert into {insert.kind} {insert.target!r}: view= names the column that says "
+                f"which view each row belongs to and view_key= names one view for the whole "
+                f"table. A table is one or the other, so name one of them"
+            )
+    insert.view_key = named.pop("view_key", None)
+    shape = named.pop("shape", None) if contract.shaped else None
+    shaped = _shape_columns(insert, shape)
+    for role, column in named.items():
+        if column not in insert.schema:
+            raise Refusal(
+                f"insert into {insert.kind} {insert.target!r}: {role}={column!r} names no column "
+                f"of this table. Its columns are {', '.join(insert.schema)}"
+            )
+        if role in contract.canonical_only and column != role:
+            raise Refusal(
+                f"insert into {insert.kind} {insert.target!r}: {role}={column!r} is read by the "
+                f"build under its own name, {role!r}, and no declaration moves it. Rename the "
+                f"column in the table"
+            )
+    # Each role keeps the name the call gave it: a projected view names `lon=` and `lat=`, which
+    # is what its declaration writes.
+    insert.columns = {
+        role: column for role, column in named.items() if role not in metadata
+    }
+    insert.metadata_columns = {
+        role: column for role, column in named.items() if role in metadata
+    }
+    insert.shape = shape
+    insert.shape_columns = list(shaped)
+    _refuse_a_column_read_silently(insert, contract, shaped)
+
+
+def _shape_columns(insert: Insert, shape: str | None) -> tuple[str, ...]:
+    """The columns `shape=` names, each read under its own name."""
+    if shape is None:
+        return ()
+    if shape not in SHAPE_COLUMNS:
+        raise Refusal(
+            f"insert into {insert.kind} {insert.target!r}: shape={shape!r} is not a shape kind. "
+            f"It is one of {', '.join(sorted(SHAPE_COLUMNS))}, and its columns are read under "
+            f"their own names"
+        )
+    missing = [column for column in SHAPE_COLUMNS[shape] if column not in insert.schema]
+    if missing:
+        raise Refusal(
+            f"insert into {insert.kind} {insert.target!r}: shape={shape!r} is written in "
+            f"{', '.join(SHAPE_COLUMNS[shape])}, and this table carries no "
+            f"{', '.join(missing)}. The build reads them under those names, so the columns are "
+            f"renamed in the table"
+        )
+    return SHAPE_COLUMNS[shape]
+
+
+def _refuse_a_column_read_silently(
+    insert: Insert, contract: Contract, shaped: tuple[str, ...]
+) -> None:
+    """A canonical column the call did not name, after the keywords left out were matched by name.
+
+    The build reads such a column under its own name whatever the SDK prints, so one the call read
+    another column in place of, or a shape column `shape=` did not name, is refused rather than
+    read silently at one door and ignored at the other.
+    """
+    if not contract.canonical:
+        return
+    named = set(insert.columns.values()) | set(insert.metadata_columns.values()) | set(shaped)
+    unnamed = [
+        column
+        for column in insert.schema
+        if column in set(contract.canonical) and column not in named
+    ]
+    if not unnamed:
+        return
+    raise Refusal(
+        f"insert into {insert.kind} {insert.target!r}: this table carries "
+        + ", ".join(repr(column) for column in unnamed)
+        + ", which the build and the publication routes read under that name whatever this call "
+        "says. Name it on the call ("
+        + ", ".join(_remedy(column) for column in unnamed)
+        + "), or drop the column from the table"
+    )
+
+
+def _remedy(column: str) -> str:
+    """How a column of this name is named on the call."""
+    for kind, columns in SHAPE_COLUMNS.items():
+        if column in columns:
+            return f"shape={kind!r}"
+    return f"{column}="
+
+
+def _lists(insert: Insert, contract: Contract) -> None:
+    """The columns this insert read and the columns it ignored, in the table's own order.
+
+    What is read is what the call named and what was matched by name, and nothing else: a
+    canonical column read neither way is refused above rather than read here, so the two lists say
+    the same thing at both doors.
+    """
+    read = set(insert.columns.values())
+    read |= set(insert.metadata_columns.values())
+    read |= set(insert.named_attributes.values())
+    read |= set(insert.items.values())
+    read |= set(insert.shape_columns)
+    insert.read = [column for column in insert.schema if column in read]
+    insert.ignored = [column for column in insert.schema if column not in read]

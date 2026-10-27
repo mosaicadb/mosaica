@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# Build the benchmark fixture bundles: each scale x the label sets reachable at it.
+#
+# A "scale" is a prefix filter on the SOURCE entity id (`--limit`, `entity_id < limit`), never a
+# separate corpus file — the fixture design. Geometry is label-independent and shared;
+# only the pairs file changes per label set. Any scale is therefore buildable: 5000000 works as
+# well as the defaults, bounded only by the source (geometry.parquet holds 10^9 rows).
+#
+# Idempotent: a bundle the current reader can open is skipped, so a killed run resumes by
+# re-invocation.
+#
+# ## Stale bundles rebuild themselves
+#
+# Fixtures outlive the code that wrote them. A bundle built before a manifest field was added or
+# renamed still has its `CURRENT`, still looks complete, and fails to load with a bare serde
+# complaint about a missing field from whichever tool next opens it, hours into a campaign and
+# nowhere near this script.
+#
+# So "already built" is decided by asking the reader, not by looking for `CURRENT`: `mosaica
+# verify` opens the bundle exactly as the engine and the bench harness do. A bundle it refuses is
+# reported with the reader's own words and **rebuilt**, not skipped. The alternative — a list of
+# required fields kept here in shell — would be a second copy of the reader's contract, and would
+# be stale the next time the first copy moved, which is the failure being fixed.
+#
+# The gate costs a full read-protocol check on a bundle that opens, and a manifest parse on one
+# that does not — a stale bundle is refused before any data is read. Measured on this corpus:
+# 17 ms at 250,000 items, 145 ms at 2,422,486, and 3 ms to refuse a stale 2,422,486-item bundle.
+# Set against a build of several seconds at the same scale, the gate is not worth an opt-out.
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MOSAICA="$ROOT/target/release/mosaica"
+GEOMETRY="$ROOT/data/scaled/geometry.parquet"
+PAIRS_DIR="$ROOT/data/scaled/pairs"
+
+DEFAULT_SCALES="250000,2422486,25000000"
+DEFAULT_SETS="categories-archive,categories-subclass,hash-flat,surnames,hiterms,hiterms-ov0.5,hiterms-ov0.9"
+
+usage() {
+  cat <<EOF
+Build benchmark fixture bundles.
+
+Usage: ${BASH_SOURCE[0]##*/} [options]
+
+  --scales LIST       comma-separated item counts   (default: $DEFAULT_SCALES)
+  --label-sets LIST   comma-separated pairs files   (default: all seven)
+  --fixtures DIR      output root                   (default: /tmp/mosaica-bench/fixtures)
+  --log-dir DIR       per-build logs                (default: /tmp/mosaica-bench/logs)
+  --list              print the plan and exit, building nothing
+  -h, --help          this
+
+Each existing bundle is opened with \`mosaica verify\` before being skipped. One the current
+reader refuses — a fixture older than a change to the bundle format — is reported as STALE and
+rebuilt. \`--list\` names them without rebuilding, so this doubles as the answer to a loader
+error like "missing field" from any tool that reads a fixture.
+
+Examples:
+  ${BASH_SOURCE[0]##*/} --scales 2422486 --label-sets categories-archive,hash-flat
+  ${BASH_SOURCE[0]##*/} --scales 5000000 --label-sets categories-subclass
+  ${BASH_SOURCE[0]##*/} --fixtures /data/fixtures --list
+
+Note: hiterms* cover entity_id < 10^7 only. Above that their tail carries no terms at all —
+invisible to every principal — so those combinations are skipped rather than built silently
+(the fixture design).
+EOF
+}
+
+SCALES_ARG="$DEFAULT_SCALES"
+SETS_ARG="$DEFAULT_SETS"
+FIXTURES="/tmp/mosaica-bench/fixtures"
+LOG_DIR="/tmp/mosaica-bench/logs"
+LIST_ONLY=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --scales)     SCALES_ARG="${2:?--scales needs a value}"; shift 2 ;;
+    --label-sets) SETS_ARG="${2:?--label-sets needs a value}"; shift 2 ;;
+    --fixtures)   FIXTURES="${2:?--fixtures needs a value}"; shift 2 ;;
+    --log-dir)    LOG_DIR="${2:?--log-dir needs a value}"; shift 2 ;;
+    --list)       LIST_ONLY=1; shift ;;
+    -h|--help)    usage; exit 0 ;;
+    *)            echo "unknown option: $1" >&2; echo >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+IFS=',' read -r -a SCALES <<< "$SCALES_ARG"
+IFS=',' read -r -a ALL_SETS <<< "$SETS_ARG"
+
+for s in "${SCALES[@]}"; do
+  [[ "$s" =~ ^[0-9]+$ ]] || { echo "--scales: '$s' is not a number" >&2; exit 2; }
+done
+
+# Entity cap per label set; 0 means uncapped. A build past the cap would produce a corpus whose
+# tail carries NO terms at all — invisible to every principal — which is the silent hole
+# the fixture design warns about, so those combinations are skipped rather than built.
+declare -A CAP=( [hiterms]=10000000 [hiterms-ov0.5]=10000000 [hiterms-ov0.9]=10000000 )
+
+mkdir -p "$FIXTURES" "$LOG_DIR"
+
+# One declaration for every fixture: one view over the scaled geometry, its points' labels in the
+# exploded relation each label set supplies, the identity extent the Morton branch requires, and
+# the unique `id` the relation names each point by and `--limit` keeps a prefix of.
+# The label set differs per build, so that source is overridden on the command line by its own
+# name (`--file labels=…`, configuration.md §8); the geometry is the same file every time and its
+# path is written here.
+CONFIG="$ROOT/data/scaled/bench-fixtures.config.toml"
+cat > "$CONFIG" <<'TOML'
+[sources]
+geometry = "geometry.parquet"
+labels   = "pairs/categories-subclass.pairs.parquet"
+
+[defaults]
+source     = "geometry"
+
+# The dense `entity_id` the geometry and every label relation name each point by.
+[[attribute]]
+name   = "id"
+type   = "u32"
+unique = true
+field  = "entity_id"
+
+[[view]]
+name             = "s0"
+extent           = { min = 0.0, max = 65536.0 }
+source           = "geometry"
+point_visibility = { source = "labels", default = "public" }
+TOML
+
+# The deployment file each build is invoked against. `[bundle].path` is rewritten per fixture
+# below and `--out` names it too, which is the ordinary override.
+DEPLOYMENT="$LOG_DIR/fixtures.mosaica.toml"
+cat > "$DEPLOYMENT" <<TOML
+[bundle]
+path  = "$FIXTURES/bundle"
+cache = "$LOG_DIR/cache"
+wal   = "$LOG_DIR/wal.log"
+
+[build]
+schema = "$CONFIG"
+
+[disclosure]
+token_max_lifetime = 3600
+
+[serve]
+viewer  = "127.0.0.1:37585"
+session = "127.0.0.1:49303"
+control = "127.0.0.1:45721"
+TOML
+
+[[ -x "$MOSAICA" ]] || { echo "missing $MOSAICA — run: cargo build --release -p mosaica" >&2; exit 1; }
+[[ -f "$GEOMETRY" ]] || { echo "missing $GEOMETRY" >&2; exit 1; }
+
+built=0; skipped=0; failed=0; stale=0
+started_all=$(date +%s)
+
+# What the reader says when it cannot open the bundle, with its "FAILED <path>: " prefix stripped
+# so the line reads as a reason rather than a second path. Empty output means it opened cleanly.
+reader_refusal() { # reader_refusal <bundle root>
+  local verdict
+  if verdict="$("$MOSAICA" verify "$1" 2>&1)"; then
+    return 0
+  fi
+  echo "${verdict#FAILED*: }"
+  return 1
+}
+
+for scale in "${SCALES[@]}"; do
+  for set_name in "${ALL_SETS[@]}"; do
+    cap="${CAP[$set_name]:-0}"
+    if [[ "$cap" != "0" && "$scale" -gt "$cap" ]]; then
+      echo "SKIP  scale=$scale set=$set_name — label set covers entity_id < $cap only"
+      continue
+    fi
+
+    pairs="$PAIRS_DIR/$set_name.pairs.parquet"
+    [[ -f "$pairs" ]] || { echo "SKIP  scale=$scale set=$set_name — no $pairs"; continue; }
+
+    out="$FIXTURES/$scale/$set_name"
+    refusal=""
+    if [[ -f "$out/CURRENT" ]]; then
+      if refusal="$(reader_refusal "$out")"; then
+        echo "HAVE  scale=$scale set=$set_name"
+        skipped=$((skipped + 1)); continue
+      fi
+      echo "STALE scale=$scale set=$set_name — $refusal"
+      stale=$((stale + 1))
+    fi
+
+    if [[ "$LIST_ONLY" == "1" ]]; then
+      if [[ -n "$refusal" ]]; then
+        echo "TODO  scale=$scale set=$set_name -> $out  (rebuild over the stale bundle)"
+      else
+        echo "TODO  scale=$scale set=$set_name -> $out"
+      fi
+      continue
+    fi
+
+    log="$LOG_DIR/build-$scale-$set_name.log"
+    echo "BUILD scale=$scale set=$set_name -> $out"
+    rm -rf "$out"; mkdir -p "$out"
+    started=$(date +%s)
+    if "$MOSAICA" build \
+        --deployment "$DEPLOYMENT" \
+        --file "labels=$pairs" --out "$out" \
+        --limit "$scale" >"$log" 2>&1; then
+      elapsed=$(( $(date +%s) - started ))
+      bytes=$(du -sb "$out" | cut -f1)
+      echo "  ok  ${elapsed}s  $(numfmt --to=iec "$bytes")"
+      built=$((built + 1))
+    else
+      echo "  FAIL — see $log"; tail -5 "$log" | sed 's/^/      /'
+      failed=$((failed + 1))
+    fi
+  done
+done
+
+# Alias the 2.4M categories-subclass bundle to the path `benches/viewport.rs` and
+# `mosaica-bench`'s `viewport_latency` binary both default to, so existing tooling keeps working
+# against the same bytes rather than building a second copy.
+canonical="$FIXTURES/2422486/categories-subclass"
+if [[ -f "$canonical/CURRENT" && ! -e /tmp/mosaica-2m4 ]]; then
+  ln -s "$canonical" /tmp/mosaica-2m4 && echo "LINK  /tmp/mosaica-2m4 -> $canonical"
+fi
+
+echo "----"
+echo "built=$built skipped=$skipped stale=$stale failed=$failed in $(( $(date +%s) - started_all ))s"
+if [[ "$LIST_ONLY" == "1" && "$stale" -gt 0 ]]; then
+  echo "$stale bundle(s) the current reader cannot open. Re-run without --list to rebuild them."
+fi
+du -sh "$FIXTURES" 2>/dev/null
+exit $(( failed > 0 ? 1 : 0 ))

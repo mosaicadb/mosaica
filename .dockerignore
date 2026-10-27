@@ -1,0 +1,8 @@
+# Only the Rust workspace and the licence files the image carries go into the build context.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+crates/**/target/
+!LICENSE
+!THIRD_PARTY_LICENSES

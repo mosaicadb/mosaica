@@ -1,0 +1,589 @@
+//! Stage 2's write half: artifacts get in, land on entities of their own, and come back after a
+//! restart on the same entities the caller was handed identifiers for.
+//!
+//! The read half — masked counts against a tile — is `artifacts.rs`'s predicate, tested there, and
+//! reaches the viewport with the row-space projection. What is pinned here is everything between a
+//! caller's batch and durable state, because each of these fails in a way that looks like success:
+//! an artifact republished onto an ordinal that already existed still serves *an* artifact; a
+//! membership lost at a restart still serves a cluster, just an empty one; and an entity reissued
+//! after a rotation still resolves a `mosaica_id`, just to the wrong thing.
+
+mod common;
+
+use common::*;
+use mosaica_engine::{AcceptError, Engine};
+use mosaica_lifecycle::membership::{IncomingAttachment, IncomingGrowth};
+use mosaica_lifecycle::resolve::Reason;
+use mosaica_lifecycle::{wal::ChangeOp, ExecError, IncomingArtifact};
+use mosaica_types::layer::{ContentDeclaration, LayerDeclaration};
+use mosaica_types::{EntityId, MosaicaId};
+
+fn declaration(name: &str) -> LayerDeclaration {
+    LayerDeclaration {
+        content: ContentDeclaration {
+            computed: vec!["centroid".into()],
+            supplied: Vec::new(),
+        },
+        ..flat_declaration(name)
+    }
+}
+
+fn artifact(key: &str, members: Vec<EntityId>) -> IncomingArtifact {
+    IncomingArtifact::from_entities(Some(key.into()), members)
+}
+
+/// The batch is the commit unit, and each artifact gets an entity of its own — the address by which
+/// it can later be suppressed, and the only one that crosses the wire.
+#[test]
+fn a_published_batch_takes_one_entity_per_artifact_and_none_of_them_is_the_layers() {
+    let fx = fixture();
+    let engine = fx.open();
+    let (layer_id, _) = engine.register_layer(declaration("clusters/a")).unwrap();
+
+    let ids = engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![
+                artifact("c0", fx.members(0..40)),
+                artifact("c1", fx.members(40..90)),
+                artifact("c2", fx.members(90..95)),
+            ],
+        )
+        .expect("a batch into a registered enumerated layer publishes");
+
+    assert_eq!(ids.len(), 3);
+    assert_eq!(engine.published_artifacts(), 3);
+
+    // Distinct identifiers, distinct entities, and each resolves to the ordinal it was published
+    // at — in the caller's submitted order.
+    let targets: Vec<_> = ids.iter().map(|id| artifact_target(&engine, *id)).collect();
+    let distinct: std::collections::BTreeSet<_> = targets.iter().collect();
+    assert_eq!(distinct.len(), 3, "one entity per artifact");
+
+    for (i, target) in targets.iter().enumerate() {
+        let at = engine.locate_artifact(*target).expect("it is an artifact");
+        assert_eq!(at.layer, "clusters/a");
+        assert_eq!(at.level, 0);
+        assert_eq!(at.ordinal, i as u32);
+        assert_eq!(at.key.as_deref(), Some(["c0", "c1", "c2"][i]));
+    }
+
+    // The layer's own entity is not one of them, which is what keeps suppressing the layer from
+    // suppressing artifact ordinal zero.
+    let layer_target = artifact_target(&engine, layer_id);
+    assert!(
+        engine.locate_artifact(layer_target).is_none(),
+        "a layer sits outside every level's run"
+    );
+    assert!(!targets.contains(&layer_target));
+}
+
+/// A second batch continues the first's numbering. Restarting it would overwrite the first batch's
+/// artifacts in place — same ordinals, same entities, different members — and every `mosaica_id`
+/// the first batch handed out would silently name the second's clusters.
+#[test]
+fn a_second_batch_continues_the_numbering_rather_than_restarting_it() {
+    let fx = fixture();
+    let engine = fx.open();
+    engine.register_layer(declaration("clusters/a")).unwrap();
+
+    let first = engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("c0", fx.members(0..10))],
+        )
+        .unwrap();
+    let second = engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("c1", fx.members(10..20))],
+        )
+        .unwrap();
+
+    assert_ne!(first[0], second[0]);
+    assert_eq!(
+        engine
+            .locate_artifact(artifact_target(&engine, second[0]))
+            .unwrap()
+            .ordinal,
+        1
+    );
+    assert_eq!(engine.published_artifacts(), 2);
+
+    // And a key already in the level mints nothing: the record is applied under the fill rule
+    // (`ingest.md` §1.5), so its members join the held artifact and the answer is the held
+    // artifact's own identifier.
+    let again = engine
+        .put_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("c0", fx.members(20..30))],
+        )
+        .expect("a held key is accepted under the fill rule");
+    assert_eq!(again.created, 0, "nothing was minted under a held key");
+    assert_eq!(
+        again.joined, 10,
+        "the members joined the artifact the key names"
+    );
+    assert_eq!(
+        again.mosaica_ids,
+        vec![first[0]],
+        "the identity did not move"
+    );
+    assert_eq!(
+        engine.published_artifacts(),
+        2,
+        "and no second artifact exists"
+    );
+}
+
+/// An artifact's or a layer's identifier in a member table is refused as naming no item.
+#[test]
+fn an_artifacts_or_a_layers_identifier_names_no_item() {
+    let fx = fixture();
+    let engine = fx.open();
+    let (layer_id, _) = engine.register_layer(declaration("clusters/a")).unwrap();
+    let ids = engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("c0", fx.members(0..10))],
+        )
+        .unwrap();
+    let point = fx.members(0..1)[0];
+    let table = mosaica_engine::AddressTable {
+        rows: 3,
+        mosaica_id: Some(vec![
+            Some(layer_id),
+            Some(ids[0]),
+            Some(engine.mosaica_id_of(point).unwrap()),
+        ]),
+        columns: Vec::new(),
+    };
+    assert_eq!(
+        verdicts(&engine, table, false),
+        vec![
+            Err(Reason::UnknownMosaicaId),
+            Err(Reason::UnknownMosaicaId),
+            Ok(mosaica_types::Target::Item(
+                mosaica_types::ShardId::ZERO,
+                point
+            )),
+        ]
+    );
+    assert_eq!(items_of(&engine, &[layer_id, ids[0]]), vec![None, None]);
+}
+
+/// **The durability assertion.** The WAL is the only place a membership lives, so a restart is the
+/// whole test: the artifacts must come back at the same ordinals, on the same entities, with the
+/// same keys, and a layer registered afterwards takes none of their identifiers.
+#[test]
+fn a_publication_survives_a_restart_and_its_entities_are_not_reissued() {
+    let fx = fixture();
+    let ids = {
+        let engine = fx.open();
+        engine.register_layer(declaration("clusters/a")).unwrap();
+        engine
+            .publish_artifacts(
+                "clusters/a".into(),
+                0,
+                vec![
+                    artifact("c0", fx.members(0..40)),
+                    artifact("c1", fx.members(40..90)),
+                ],
+            )
+            .unwrap()
+    };
+
+    let engine = fx.open();
+    assert_eq!(engine.published_artifacts(), 2);
+    for (i, id) in ids.iter().enumerate() {
+        let at = engine
+            .locate_artifact(artifact_target(&engine, *id))
+            .expect("the identifier the caller holds still names this artifact");
+        assert_eq!(at.ordinal, i as u32);
+        assert_eq!(at.key.as_deref(), Some(["c0", "c1"][i]));
+    }
+
+    // A layer registered after the restart numbers its artifacts from the same entity in a space
+    // of its own, so the first of them has another identifier.
+    engine.register_layer(declaration("clusters/b")).unwrap();
+    let fresh = engine
+        .publish_artifacts(
+            "clusters/b".into(),
+            0,
+            vec![artifact("d0", fx.members(0..10))],
+        )
+        .unwrap();
+    assert!(!ids.contains(&fresh[0]));
+    assert_eq!(
+        artifact_target(&engine, fresh[0]).entity(),
+        artifact_target(&engine, ids[0]).entity()
+    );
+    for id in &ids {
+        let at = engine.locate_artifact(artifact_target(&engine, *id)).unwrap();
+        assert_eq!(
+            at.layer, "clusters/a",
+            "an identifier issued before the restart still names the artifact it was issued for"
+        );
+    }
+}
+
+/// Wait for the executor's drain close to publish the memberships, and return the extent files.
+fn published_extents(fx: &Fixture) -> Vec<std::path::PathBuf> {
+    let dir = fx.root.join("v00000").join(common::SHARD.members_rel());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let found: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "tsmb"))
+            .collect();
+        if !found.is_empty() {
+            return found;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no membership extent was published within 10s; publication runs at the executor's \
+             drain close, so this is either a publication that refused or one that never ran"
+        );
+        std::thread::yield_now();
+    }
+}
+
+/// **The assertion the whole packing exists for: a membership outlives the log.**
+///
+/// Before the extent, the WAL was a membership's only home and rotation was pinned from the first
+/// publication onwards, because reclaiming a member would have destroyed the only copy. This deletes
+/// the log outright — a harsher test than a rotation, and decisive: whatever comes back came from
+/// the manifest.
+#[test]
+fn a_published_membership_survives_the_loss_of_the_whole_log() {
+    let fx = fixture();
+    let ids = {
+        let engine = fx.open();
+        engine.register_layer(declaration("clusters/a")).unwrap();
+        let ids = engine
+            .publish_artifacts(
+                "clusters/a".into(),
+                0,
+                vec![
+                    artifact("c0", fx.members(0..40)),
+                    artifact("c1", fx.members(40..90)),
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            published_extents(&fx).len(),
+            1,
+            "one file per level per publication"
+        );
+        ids
+    };
+
+    // The log goes entirely. Nothing else on disk carried a membership before this change.
+    remove_the_whole_log(&fx.wal);
+
+    let engine = fx.open();
+    assert_eq!(
+        engine.published_artifacts(),
+        2,
+        "both artifacts came back from the manifest, with no log to replay"
+    );
+    for (i, id) in ids.iter().enumerate() {
+        let at = engine
+            .locate_artifact(artifact_target(&engine, *id))
+            .expect("the identifier the caller holds still names this artifact");
+        assert_eq!(at.ordinal, i as u32);
+        assert_eq!(
+            at.key.as_deref(),
+            Some(["c0", "c1"][i]),
+            "the caller's key travels in the extent — nothing else durable carries it"
+        );
+    }
+}
+
+/// A second publication appends an extent rather than rewriting the first, and the two union.
+#[test]
+fn a_later_publication_appends_an_extent_and_the_two_union_at_open() {
+    let fx = fixture();
+    {
+        let engine = fx.open();
+        engine.register_layer(declaration("clusters/a")).unwrap();
+        engine
+            .publish_artifacts(
+                "clusters/a".into(),
+                0,
+                vec![artifact("c0", fx.members(0..40))],
+            )
+            .unwrap();
+        assert_eq!(published_extents(&fx).len(), 1);
+
+        engine
+            .publish_artifacts(
+                "clusters/a".into(),
+                0,
+                vec![artifact("c1", fx.members(40..90))],
+            )
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while published_extents(&fx).len() < 2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the second extent never appeared"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    remove_the_whole_log(&fx.wal);
+    let engine = fx.open();
+    assert_eq!(
+        engine.published_artifacts(),
+        2,
+        "both extents were unioned at open"
+    );
+}
+
+/// An artifact takes an entity precisely so `/control/changes` works on it unchanged — the same
+/// route, the same two removal rules, no second mechanism.
+#[test]
+fn an_artifacts_entity_takes_a_suppression_like_any_other() {
+    let fx = fixture();
+    let engine = fx.open();
+    engine.register_layer(declaration("clusters/a")).unwrap();
+    let ids = engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("c0", fx.members(0..40))],
+        )
+        .unwrap();
+
+    let served = |engine: &Engine| {
+        artifacts_of(engine, &full_coverage_credential())
+            .iter()
+            .any(|a| a.mosaica_id == ids[0])
+    };
+    assert!(served(&engine));
+    let target = artifact_target(&engine, ids[0]);
+    engine
+        .accept_changes(vec![(target, ChangeOp::Suppress)])
+        .expect("an artifact suppression is an ordinary change");
+    assert!(!served(&engine), "a suppression withholds the artifact at the ack");
+
+    // And it comes back — a suppression is the reversible one of the two removal rules.
+    engine.accept_changes(vec![(target, ChangeOp::Unsuppress)]).unwrap();
+    assert!(served(&engine), "the unsuppressed artifact is served again");
+}
+
+/// A deleted artifact's key names nothing from the deletion's acknowledgement: a growth by it and
+/// an attachment to it are refused, and a publication under it creates a new artifact. The key
+/// then names the new artifact alone, and only the new one is served, before any compaction,
+/// across a restart, and after the compaction that removes the deleted one and a restart.
+#[test]
+fn a_deleted_artifacts_key_publishes_a_new_artifact_before_any_compaction() {
+    let fx = fixture();
+    let engine = fx.open();
+    engine.register_layer(declaration("clusters/a")).unwrap();
+    let mut labels = flat_declaration("labels/a");
+    labels.depends_on = vec!["clusters/a".into()];
+    engine.register_layer(labels).unwrap();
+    let deleted = engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("k", fx.members(0..40))],
+        )
+        .unwrap()[0];
+    engine
+        .accept_changes(vec![(artifact_target(&engine, deleted), ChangeOp::Delete)])
+        .unwrap();
+
+    // Resolved before the compaction, which moves the bundle to another prefix.
+    let joiners = fx.members(100..125);
+    let joining = std::cell::Cell::new(0);
+    let grow = |engine: &Engine| {
+        let from = joining.get();
+        joining.set(from + 5);
+        engine.grow_memberships(
+            "clusters/a".into(),
+            0,
+            vec![IncomingGrowth::from_entities(
+                "k".into(),
+                joiners[from..from + 5].to_vec(),
+            )],
+        )
+    };
+    assert!(
+        matches!(
+            grow(&engine),
+            Err(AcceptError::Exec(ExecError::LayerRefused { .. }))
+        ),
+        "a growth by a deleted artifact's key is refused"
+    );
+    let attached = engine.publish_artifacts(
+        "labels/a".into(),
+        0,
+        vec![IncomingArtifact::attached(
+            Some("l0".into()),
+            fx.members(0..40),
+            Vec::new(),
+            IncomingAttachment {
+                layer: "clusters/a".into(),
+                level: 0,
+                key: "k".into(),
+            },
+        )],
+    );
+    assert!(
+        matches!(
+            attached,
+            Err(AcceptError::Exec(ExecError::LayerRefused { .. }))
+        ),
+        "an attachment to a deleted artifact's key is refused"
+    );
+
+    let put = engine
+        .put_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![artifact("k", fx.members(40..80))],
+        )
+        .expect("a deleted artifact's key is published again");
+    assert_eq!(put.created, 1, "the publication created an artifact");
+    let new = put.mosaica_ids[0];
+    assert_ne!(new, deleted);
+    let names_the_new_one = |engine: &Engine, when: &str| {
+        let served: Vec<MosaicaId> = artifacts_of(engine, &full_coverage_credential())
+            .iter()
+            .filter(|a| a.layer == "clusters/a")
+            .map(|a| a.mosaica_id)
+            .collect();
+        assert_eq!(served, vec![new], "{when}: only the new artifact is served");
+        let grown = grow(engine)
+            .unwrap_or_else(|e| panic!("{when}: a growth by the key is refused: {e:?}"));
+        assert_eq!(
+            grown[0].mosaica_id, new,
+            "{when}: a growth by the key joins the new artifact"
+        );
+    };
+    names_the_new_one(&engine, "before any compaction");
+
+    drop(engine);
+    let engine = fx.open();
+    names_the_new_one(&engine, "across a restart");
+    fold(&engine);
+    assert_eq!(
+        engine.generation_status().layer_spaces.retirable,
+        0,
+        "the compaction removed the deleted artifact"
+    );
+    names_the_new_one(&engine, "after the compaction");
+    drop(engine);
+    let engine = fx.open();
+    names_the_new_one(&engine, "after the compaction and a restart");
+}
+
+/// **A membership that came back from an extent is read through that extent**, and it is the set
+/// that was published.
+///
+/// The equality is what matters: a view over the wrong bytes is a membership whose masked count is
+/// low for every viewer, which the existence criterion renders as absent with nothing anywhere to
+/// notice. The `is_mapped` half is the other one — where a membership lives is invisible to every
+/// reader, so without this the seed could stop mapping and only a memory measurement would say so.
+/// The build asserts the same pair over its own publication (`mosaica-build`'s `layers.rs`).
+#[test]
+fn a_membership_seeded_from_an_extent_is_read_through_it() {
+    let fx = fixture();
+    let members: Vec<u32> = {
+        let engine = fx.open();
+        engine.register_layer(declaration("clusters/a")).unwrap();
+        engine
+            .publish_artifacts(
+                "clusters/a".into(),
+                0,
+                vec![artifact("c0", fx.members(0..40))],
+            )
+            .unwrap();
+        assert_eq!(published_extents(&fx).len(), 1);
+        let mut members: Vec<u32> = fx
+            .members(0..40)
+            .into_iter()
+            .map(|e| e.raw() as u32)
+            .collect();
+        members.sort_unstable();
+        members
+    };
+
+    // The log goes, so nothing replays over the seed: a WAL record postdates the manifest and
+    // `apply` puts that artifact's membership back on the heap, which is correct and is not what
+    // this case is about.
+    remove_the_whole_log(&fx.wal);
+
+    let engine = fx.open();
+    let seeded = engine.level_memberships_for_test("clusters/a", 0);
+    assert_eq!(seeded.len(), 1, "the one artifact came back from the extent");
+    assert_eq!(seeded[0].0, 0);
+    assert_eq!(
+        seeded[0].1, members,
+        "the view is the set the caller published"
+    );
+    assert!(
+        seeded[0].2,
+        "and it is read through the extent rather than copied onto the heap"
+    );
+}
+
+/// **A membership published into a running node is read through the extent that publication
+/// wrote**, without waiting for a restart or a fold.
+///
+/// The publication builds the bitmap in memory and writes the bytes a moment later. Leaving the
+/// bitmap where it was is a copy of a file this process holds open, carried in anonymous memory
+/// for as long as the node runs — and a node that never restarts never gets it back.
+///
+/// **Mutation:** remove the rehousing from the overlay publication and `owned_memberships_for_test`
+/// stays at the number of artifacts published.
+#[test]
+fn a_membership_published_at_a_running_node_is_read_through_its_extent() {
+    let fx = fixture();
+    let engine = fx.open();
+    engine.register_layer(declaration("clusters/a")).unwrap();
+    engine
+        .publish_artifacts(
+            "clusters/a".into(),
+            0,
+            vec![
+                artifact("c0", fx.members(0..40)),
+                artifact("c1", fx.members(40..90)),
+            ],
+        )
+        .unwrap();
+    assert_eq!(published_extents(&fx).len(), 1);
+
+    // The publication is the executor's, so the rehousing lands with it rather than with the call
+    // that returned above.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while engine.owned_memberships_for_test() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a membership stayed on the heap after the extent naming it was published"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let published = engine.level_memberships_for_test("clusters/a", 0);
+    assert_eq!(published.len(), 2);
+    assert!(
+        published.iter().all(|(_, _, mapped)| *mapped),
+        "both memberships are views over the extent this node just wrote"
+    );
+    let mut first: Vec<u32> = fx.members(0..40).iter().map(|e| e.raw() as u32).collect();
+    first.sort_unstable();
+    assert_eq!(published[0].1, first, "and the sets are what was published");
+}

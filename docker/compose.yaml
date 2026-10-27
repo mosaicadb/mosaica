@@ -1,0 +1,30 @@
+# Mosaica from the image built by the repository's Dockerfile. docker/README.md walks through it.
+#
+#   docker compose run --rm mosaica build    # once, to create the database
+#   docker compose up -d                     # serve it
+
+services:
+  mosaica:
+    image: mosaica
+    build:
+      context: ..
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./config:/etc/mosaica:ro
+      - mosaica-data:/var/lib/mosaica
+    secrets:
+      - mosaica_operator
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "127.0.0.1:8082:8082"
+    restart: unless-stopped
+
+volumes:
+  mosaica-data:
+
+secrets:
+  mosaica_operator:
+    file: ./secrets/mosaica_operator

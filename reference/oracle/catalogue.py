@@ -1,0 +1,1604 @@
+"""The adversarial mask catalogue — a corpus built so that each mask *shape* is reachable.
+
+Conformance design §2 names the catalogue: "empty; single item; ~0.01% coverage; 100%;
+straddling the ~5% crossover; **container-boundary masks, achieved by deliberately sparse entity
+allocation**; all-in-one-tile; watermark-straddling; overlay-heavy; post-deletion states at every
+ledger stage." This module supplies the build-time half of that list. The states that need a
+running write path (watermark-straddling, post-deletion at every ledger stage) are driven through
+the control plane on top of this corpus by `oracle.journal.AckedJournal`, not baked into it.
+
+**Why a purpose-built corpus rather than the 250k Phase 0 fixture.** A viewer's mask is the union
+of the postings of the terms its token grants (§6.3). So the only masks a test can actually put in
+front of the engine are unions of posting lists — an arbitrary entity set is *not* reachable, and
+a catalogue defined as "pick 15 entities" would be a fiction the server never sees. The corpus
+below is therefore designed backwards from the catalogue: every case is one term (or a small union
+of terms) whose posting list **is** the intended entity set, exactly.
+
+## How the entity IDs are pinned
+
+Entity IDs are not the fixture's to choose — `mosaica-build` assigns them, permanently (I9), in
+**term-signature order**: items are sorted by their sorted term-ID list and each item's entity ID is
+its position in that order (§11.1; `mosaica_build::signature_sort_key`). The minor key is the
+**Morton code**, with the item's position in the points file below it for totality
+([decision 0073](../../docs/decisions/0073-entity-ties-are-ordered-by-morton-code.md)).
+
+The corpus exploits the major key rather than working around it:
+
+* every item carries **exactly one** term, so its signature is a one-element list;
+* the terms are laid out in **contiguous blocks of source ID**, block `g` carrying term `g`.
+
+The signature sort therefore orders the blocks by `g`, and **each block is a contiguous entity-ID
+range whose bounds the fixture chose** — which is the whole of what the catalogue needs. That is
+what makes the container-boundary case constructible at all: Roaring's cost model is O(containers
+touched), a container is a 2¹⁶ span of entity space, and a mask that never crosses a multiple of
+65,536 exercises no container arithmetic whatsoever. `boundary` is a 100-entity block placed astride
+65,536 deliberately; `filler_tail` spans 131,072 for the same reason at 100% coverage.
+
+## Two equalities this module used to assume, and no longer may
+
+Both were true when the catalogue was designed, both were stated here as arguments rather than
+checked per item, and both are now false. They are written out because each broke **silently**: the
+corpus went on being the shape it claims, and only the per-item joins moved.
+
+**`entity_id == source_id` is gone**, with decision 0073's Morton tiebreak. Ties within a block used
+to break by source ID, so the assignment collapsed to the identity; they now break by geometry, so a
+block's entities are the same *set* in the same *range* and are internally permuted. Every join from
+a planted value to a served one must go through [`entities_by_source`] — the bundle's own index of
+the unique field `serial` is the real bridge and always was. What makes this worth a paragraph is
+how it hid: `verify()`
+compares each block's postings against its entity range **as a set**, and a within-block permutation
+preserves a set exactly, so the check whose comment said it re-derived the identity never tested it.
+
+**Term `g` is no longer term ID `g`.** `public` is interned first, at term `0`
+(`per-point-attributes.md` §3.8), so first appearance interns the corpus's term `g` as dictionary
+term `g + 1`. `Block.term_id` is the id the **source corpus** writes, and the descriptor is still
+`str(term_id)`; the **dictionary** id is `Block.dict_term_id(bundle)`, resolved from the bundle
+rather than computed. Anything reading the bundle's own `terms/pairs.parquet` or its postings wants
+the second — the two files spell the same fact in different numbers, and asking one with the other's
+number silently answers about a different block.
+
+**What is assumed at test time is now checked at test time.** `verify()` re-derives every block from
+the built bundle's own postings, checks the interning rule against the documented one rather than
+against an assumption, and — new — checks that every entity's source id lands in the same block the
+entity does. That last one is what a set comparison could not see: a within-block permutation passes
+it, and a cross-block reassignment does not.
+
+## `fx_key`
+
+Conformance design §2 and decision 4: every fixture item carries a unique planted **declared
+scalar**, `fx_key`, served in the points batch. It is the legitimate handle→item join — the oracle
+identifies a served point without a reverse map or an extra endpoint, and therefore with **no I10
+tension**: entity IDs never cross the trust boundary, and this
+is how the oracle names an item without one.
+
+`fx_key` is drawn from a seeded RNG and is deliberately **not a function of the entity ID**. That
+is load-bearing, not tidiness: a join key derived from the entity ID would *be* an encoding of the
+entity ID, so serving it would be the very disclosure I10 forbids and the byte-scanner's sweep
+exists to catch. The fixture holds the mapping because it planted it; nothing recovers `fx_key`
+from an entity ID or the reverse.
+
+**Served, since 2026-08-07.** The build gained declared-column support, so `fx_key` is declared in
+[`SCHEMA_TOML`], compiled into `MANIFEST.declared_scalars`, written into `columns.arrow` and
+carried in the points batch. It was planted in the points parquet long before that, against the
+day the gap closed; `conformance/tests/test_mask_catalogue.py` held a strict xfail throughout,
+which is what made the closure a test that flipped rather than a gap somebody had to remember.
+
+## `serial`
+
+The source id offset by [`PLANTED_ID_BASE`], declared `unique`: the column both corpus files
+carry, so each row names its item by it. It rises with the source id, so the build meets the items
+in source order, which the block layout above is designed against.
+The bundle's index of it is how this module carries a source id to the entity the build made of it
+([`entities_by_source`]). The offset keeps it clear of the entity-id range, for the byte scan's
+reason: it is rendered, and served on every item card.
+
+## Reuse is decided by a stamped recipe, not by a predicate over the artefact
+
+The bundle is built once per `mosaica` binary and reused. **What may be reused is decided
+by comparing the full input set against a `FIXTURE.json` receipt written beside the bundle** — see
+[`recipe`] — and never by inspecting the bundle for properties a reader happens to think of. That
+distinction is the whole mechanism, and it is here because the predicate form failed twice: a
+hand-maintained "does it look right" test is an allowlist that has to be extended in step with
+every new build input, and the input that is *not* on it is exactly the one that goes silently
+wrong. The silent direction is the dangerous one — change `SEED` or `ONE_TILE_TX` and `verify()`
+still passes, because it re-derives geometry from the *bundle*, while every planted `fx_key` and
+every geometric claim in the test suite is computed from the *new* corpus. Bundle and corpus
+diverge with nothing failing.
+
+The receipt is therefore written **last**, after the build subprocess returns, and deleted before
+a rebuild starts: an interrupted or failed build leaves no receipt, so the next run rebuilds. And
+the corpus parquet is written only on the build path — writing it unconditionally is what let the
+two diverge in the first place.
+"""
+
+from __future__ import annotations
+
+import json
+import random
+import shutil
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+from .bundle import Bundle
+from .harness import (
+    build_argv,
+    cli_build,
+    ensure_cli_built,
+    fixture_dir,
+    open_bundle_with_source,
+    recipe_matches,
+    shards_toml,
+    write_deployment,
+    write_recipe,
+)
+from .identity import item_of_key, numbers_of
+from .layout import holds_only_the_build_publication
+
+WORK_DIR_NAME = "catalogue"
+
+#: The view's quantisation frame — the grid's own coordinates, since this catalogue states its
+#: expected answers in cells. Written into the declaration below rather than passed at invocation:
+#: the extent belongs to the view (`configuration.md` §1).
+EXTENT = (0.0, 65536.0, 0.0, 65536.0)
+VIEW_ID = "s0"
+SEED = 20260731
+
+POINTS_NAME = "catalogue-points.parquet"
+PAIRS_NAME = "catalogue-pairs.parquet"
+SCHEMA_NAME = "catalogue-config.toml"
+DEPLOYMENT_NAME = "catalogue-mosaica.toml"
+
+# The declaration that makes `fx_key` a served column (per-point-attributes §4.2). Written beside
+# the points parquet on the build path, and named by `mosaica.toml`'s `build.schema`.
+#
+# **`u64` and not a category**, deliberately: `fx_key` is 64 random bits with no vocabulary and no
+# presentation, and declaring a category would need a value set enumerating every item — the
+# fixture would then be maintaining a 1:1 vocabulary to say nothing. `render = true` is
+# what puts it in `columns.arrow` and therefore in the points batch, which is the join this exists
+# for.
+#
+# Its content is part of [`recipe`] rather than only its filename: the receipt reduces paths to
+# basenames, so a changed declaration under an unchanged name would otherwise reuse a bundle built
+# against the old one — the silent divergence this module's doc warns about, arriving by a new
+# route.
+#
+# The two filter columns exist for `conformance/tests/test_filter_differential.py` (I12's mask
+# half). Both are `index`-only, so neither touches the points batch, the hot column, or any
+# existing point-set assertion — a mask-catalogue test built before them sees the same wire bytes.
+#
+# **`department` is deliberately decorrelated from the grant structure.** The catalogue's terms
+# are contiguous source-id blocks; `department` cycles with period 6 (`(source_id // 2) % 3`), so
+# every block of consequence contains every cycling value and every cycling value spans every
+# block. If the attribute tracked the terms — one department per block — then masking and
+# filtering would select the same items for different reasons, every cross-principal assertion
+# would pass vacuously, and the differential would prove nothing. The decorrelation is asserted
+# by a test, not just stated here.
+#
+# `visibility = "derived"` on `department`, deliberately: the hidden-value/nonexistent-value
+# outcome rule (per-point-attributes §3.8, C11) is only *about* a gated vocabulary, and `omega`
+# — planted only in `high_tail`, a block no catalogue mask case is granted — is the value a test
+# principal provably cannot see a member of. `hollow` is declared and planted nowhere: a known
+# value with no members anywhere, the third outcome that must be indistinguishable from the
+# other two.
+#
+# **`archive` is the `public` counterpart, and it exists to be *routed*.** Decision 0063 answers a
+# category operand from the column's derived postings where the vocabulary is `public` and from the
+# masked scan where it is `derived` — two evaluation routes that must produce the same sets. A
+# corpus carrying only a `derived` category exercises one of them, so the differential would
+# ratify the scan and say nothing about the route that replaced it. `archive` cycles on a fourth
+# period (`(source_id // 5) % 3`), decorrelated from the term blocks, the department cycle's 6 and
+# the title cycle's 12; `void` is declared and planted nowhere, which is the routed reading of an
+# absent keyed record.
+#
+# **`shelf` is the render-only category** (records §2/§3): `render = true`, no `index`, so its
+# codes ride the hot column and today it publishes no filter operand. It exists for the row-space
+# route (records §6.2, decision 0068): when that lands, `render = true` implies filterable and
+# `/v1/meta` widens — [`filter_operands_expected`] is the one place that widening is recorded.
+# `public`, so the routed reading stays clear of the vocabulary-control ruling a `derived`
+# rendered category waits on; a fifth period (`(source_id // 7) % 3`), decorrelated like the rest.
+#
+# **`title` and `submitter` are the two keyword columns** (records §4.3) — the only declarable
+# string family, `utf8` being retired. Each is an open, exact vocabulary stored as a sorted
+# per-layer dictionary with a `u32` ordinal column. Two of them, with different value shapes: the
+# `submitter` shapes are chosen backwards from the catalogue entries records §10 gives this family
+# — see [`submitter_of`], which names each one at the branch that plants it — while `title`'s stems
+# give the string operators a second, differently distributed vocabulary to disagree over. Both are
+# `index`-only, because `render` on a keyword is refused (a keyword's slot would be its ordinal,
+# and an ordinal is a per-layer position).
+#
+# **`note` and `pages` are blob-resident** — neither key set, so their values live only in the
+# record blob, `attrs/record/` (records §3): a string and a numeric, exercising mixed row content.
+# `note`'s declared type is `keyword`, and it plants the **empty string**, which is not the
+# contradiction it looks like: the empty string is refused as a *dictionary key* and a blob-resident
+# column has no dictionary — its row carries the bytes the wire carried.
+# Their planting carries the blob's adversarial shapes: an empty string (a value, not an absence),
+# a present zero in `pages` (distinguishable from the absent stride), a row larger than the 32 KiB
+# block target (an oversized block of its own — records §3's "target, not a cap"), and entities
+# absent from both (absent from has-row entirely).
+#: The acquisition half, built from this module's own constants rather than restated, so that
+#: `EXTENT`, `VIEW_ID` and the two file names stay the single statement of each. One points file
+#: carries identity, geometry and every declared column, so the view and every attribute name one
+#: source; the exploded `(serial, term_id)` relation is the other. `[sources]` writes each path
+#: once, **relative to this document**, which the generator writes beside them
+#: (`configuration.md` §3).
+#:
+#: The extent is the grid's own: the catalogue states its expected answers in cells, so a fitted
+#: box would move every one of them.
+_ACQUISITION_TOML = f"""\
+[sources]
+points = "{POINTS_NAME}"
+pairs  = "{PAIRS_NAME}"
+
+[defaults]
+source = "points"
+
+[[view]]
+name             = "{VIEW_ID}"
+extent           = {{ x = [{EXTENT[0]}, {EXTENT[1]}], y = [{EXTENT[2]}, {EXTENT[3]}] }}
+point_visibility = {{ source = "pairs", default = "public" }}
+"""
+
+SCHEMA_TOML = _ACQUISITION_TOML + """\
+
+[[vocabulary]]
+name       = "department"
+width      = "u8"
+value_set  = "closed"
+visibility = "derived"
+  [vocabulary.values]
+  alpha  = 1
+  beta   = 2
+  gamma  = 3
+  omega  = 4
+  solo   = 5
+  hollow = 6
+
+[[vocabulary]]
+name       = "archive"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+  [vocabulary.values]
+  red   = 11
+  green = 22
+  blue  = 33
+  void  = 44
+
+[[vocabulary]]
+name       = "shelf"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+  [vocabulary.values]
+  north = 51
+  south = 52
+  east  = 53
+
+[[attribute]]
+name     = "serial"
+type     = "u64"
+render   = true
+unique   = true
+
+[[attribute]]
+name     = "fx_key"
+type     = "u64"
+render   = true
+
+[[attribute]]
+name       = "department"
+type       = "category"
+index      = true
+vocabulary = "department"
+
+[[attribute]]
+name       = "archive"
+type       = "category"
+index      = true
+vocabulary = "archive"
+
+[[attribute]]
+name     = "title"
+type     = "keyword"
+index    = true
+
+[[attribute]]
+name       = "shelf"
+type       = "category"
+render     = true
+vocabulary = "shelf"
+
+[[attribute]]
+name     = "submitter"
+type     = "keyword"
+index    = true
+
+[[attribute]]
+name     = "abstract"
+type     = "text"
+index    = true
+analyser = "unicode"
+
+[[attribute]]
+name     = "note"
+type     = "keyword"
+
+[[attribute]]
+name     = "pages"
+type     = "u32"
+"""
+
+# The declaration's own key→code pinning, transcribed for the filter oracle. The oracle resolves
+# a code operand through this — the *declaration* is the authority on codes (per-point-attributes
+# §3.4) — and never through the bundle, which is what keeps its derivation independent of the
+# artefact under test.
+DEPARTMENT_CODES: dict[str, int] = {
+    "alpha": 1,
+    "beta": 2,
+    "gamma": 3,
+    "omega": 4,
+    "solo": 5,
+    "hollow": 6,
+}
+
+# The `public` column's pinning, kept separate because each column owns its own code space
+# (filter-index §2.2): one shared map would resolve one column's key against the other's codes.
+ARCHIVE_CODES: dict[str, int] = {
+    "red": 11,
+    "green": 22,
+    "blue": 33,
+    "void": 44,
+}
+
+# The render-only category's pinning — its own code space, like the other two. Not a filter
+# oracle input today (no operand exists to resolve); it becomes one when the row-space route
+# lands (records §6.2) and the filter differential gains a `shelf` column.
+SHELF_CODES: dict[str, int] = {
+    "north": 51,
+    "south": 52,
+    "east": 53,
+}
+
+# The one entity carrying `solo` — a single-member value, inside `cross_lo` so the crossover
+# principals can see it. Chosen not to collide with the absence rule below.
+DEPARTMENT_SOLO_ID = 69_000
+
+# Absence strides. Every planted column leaves its value off a thin, deterministic scattering of
+# entities so presence is partial — the ordinary case filter-index §2.1 designs for — and an
+# entity with no value must match no predicate (for a blob column: contributes nothing to the
+# row). Distinct primes, and distinct from every other period in this corpus (the term blocks,
+# the department cycle's 6, the title cycle's 12), so absence correlates with nothing. The blob
+# pair's product, 113 × 127 = 14,351, is what makes whole entities absent from the has-row
+# bitmap: its ten multiples under `N_ITEMS` carry no blob-resident value at all.
+DEPARTMENT_ABSENT_STRIDE = 101
+TITLE_ABSENT_STRIDE = 103
+ARCHIVE_ABSENT_STRIDE = 107
+SHELF_ABSENT_STRIDE = 109
+NOTE_ABSENT_STRIDE = 113
+PAGES_ABSENT_STRIDE = 127
+SUBMITTER_ABSENT_STRIDE = 131
+ABSTRACT_ABSENT_STRIDE = 137
+
+# `pages` is planted as a *present zero* on this stride (after the absence rule): the blob must
+# keep "carries the value 0" and "carries no value" distinct, absence being absence from the row.
+PAGES_ZERO_STRIDE = 17
+
+# Two designated `note` entities, both inside `cross_lo` (so the crossover principals can reach
+# them at drill-down) and off every stride above. The oversize row is larger than the 32 KiB
+# block target, so the build must give it an oversized block of its own (records §3 — the target
+# is a target, not a cap); the empty string is a value and must survive as one.
+NOTE_OVERSIZE_ID = 65_700
+NOTE_EMPTY_ID = 65_701
+
+
+def department_of(source_id: int) -> str | None:
+    """`department` as planted, a pure function of the source id (== entity id, per this module's
+    interning argument). This is the oracle's side of the filter differential: what the entity was
+    *given*, upstream of what the build stored."""
+    if source_id % DEPARTMENT_ABSENT_STRIDE == 0:
+        return None
+    if source_id == DEPARTMENT_SOLO_ID:
+        return "solo"
+    high_tail = BLOCKS["high_tail"]
+    if high_tail.start <= source_id < high_tail.stop:
+        return "omega"
+    return ("alpha", "beta", "gamma")[(source_id // 2) % 3]
+
+
+def archive_of(source_id: int) -> str | None:
+    """`archive` as planted — the `public` column, whose operands the engine answers from the
+    derived postings rather than by scanning (decision 0063). Same contract as [`department_of`]:
+    what the entity was *given*, upstream of what the build stored."""
+    if source_id % ARCHIVE_ABSENT_STRIDE == 0:
+        return None
+    return ("red", "green", "blue")[(source_id // 5) % 3]
+
+
+# The four stems cycle with period 12 (stride 3 × 4 stems) — a third period, decorrelated from
+# both the term blocks and the department cycle. The stems are chosen for the string operators:
+# `prefix "smi"` matches smith and smithy but not smythe; `contains "myth"` matches smythe only;
+# and the appended source id makes every full title unique, so `eq` has a single-member value to
+# select.
+_TITLE_STEMS = ("smith", "smithy", "jones", "smythe")
+
+
+# **The offset every planted value applies before writing an id into free text**, and it is not
+# decoration. `test_byte_scan` reads every maximal run of ASCII decimal digits out of a
+# `/v1/items` body and fails if one equals a real entity id — the I10 check that no identifier
+# crosses the trust boundary. A bare source id in planted prose collides with that by
+# construction, because source ids and entity ids share the range `[0, N_ITEMS)`; the scan then
+# reports the fixture quoting itself as a leak. Offsetting past `N_ITEMS` keeps every value unique
+# and legible while putting its number outside the id space the scan searches, and because the
+# scan's runs are maximal no shorter id matches inside the longer one either.
+#
+# This became visible only when drill-down began returning every declared field (records §3): the
+# planted `title` had embedded its id since the column was added, and nothing had served it.
+PLANTED_ID_BASE = 1_000_000
+
+
+def title_of(source_id: int) -> str | None:
+    """`title` as planted — see [`department_of`]."""
+    if source_id % TITLE_ABSENT_STRIDE == 0:
+        return None
+    return f"{_TITLE_STEMS[(source_id // 3) % 4]}-{PLANTED_ID_BASE + source_id}"
+
+
+# ---------------------------------------------------------------------------------------------
+# abstract — the text column
+# ---------------------------------------------------------------------------------------------
+
+# The prose is assembled from four slots, and each slot exists to make one property of the family
+# falsifiable rather than incidentally true.
+#
+# **A shared head, so every document has words in common.** Without it the postings are all
+# singletons, every `match` is answered by one posting, and a conjunction that took the first
+# token's answer instead of the intersection would pass.
+_ABSTRACT_HEAD = "the archive holds"
+
+# **An adjacent pair and its reverse, planted on different entities.** This is the whole of what
+# separates `phrase` from `match`: an entity carrying both words apart matches the conjunction and
+# must not match the phrase. `_ABSTRACT_PAIR` is the ordered one; the same two words appear
+# reversed and separated on the complementary residue, so both directions have a witness and a
+# counter-witness.
+_ABSTRACT_PAIR = ("quiet", "harbour")
+
+# **Non-Latin prose on a stride**, because the analyser's whole reason for being is that a
+# split-on-spaces tokeniser produces garbage for scripts without inter-word spaces. A conformance
+# suite whose text is all English tests the index and not the analyser. The Japanese phrase
+# segments into several tokens with no space between them; the Thai likewise.
+_ABSTRACT_CJK = "日本語のテキスト"
+_ABSTRACT_THAI = "ภาษาไทยเป็นภาษา"
+
+# **A word carried by exactly one entity**, the text family's answer to the keyword ordinal
+# boundaries: a `match` on it is a single-item answer, and a posting confused across layers or
+# ordinals returns a different item rather than none. Off every stride, inside `cross_lo`.
+ABSTRACT_SOLE_ID = 65_902
+ABSTRACT_SOLE_WORD = "quinquagenarian"
+
+# A word no document carries, for the hidden-versus-absent pair the register accepts as a timing
+# channel (Appendix C, C25) and requires to be *identical in the answer*.
+ABSTRACT_ABSENT_WORD = "zzzznonesuch"
+
+
+def abstract_of(source_id: int) -> str | None:
+    """`abstract` as planted — the text column. See [`department_of`] for the contract: what the
+    entity was *given*, upstream of the tokens the build derived from it.
+
+    The oracle answers `match` and `phrase` by tokenising this string through the **same analyser
+    the engine used**, reached over `mosaica tokenise` so neither side owns a second segmentation
+    (decision 0070). What the differential then compares is two constructions over one token
+    stream: the engine's dictionary-and-postings, and a per-entity walk of this function.
+    """
+    if source_id % ABSTRACT_ABSENT_STRIDE == 0:
+        return None
+    first, second = _ABSTRACT_PAIR
+    parts = [_ABSTRACT_HEAD]
+    # The adjacency witness and its counter-witness, on complementary residues so both are dense
+    # enough for every catalogue principal to reach some of each.
+    if source_id % 3 == 0:
+        parts.append(f"{first} {second}")
+    elif source_id % 3 == 1:
+        # Both words, in the other order and not adjacent: matches the conjunction, not the phrase.
+        parts.append(f"{second} of the {first}")
+    if source_id % 5 == 0:
+        parts.append(_ABSTRACT_CJK)
+    if source_id % 7 == 0:
+        parts.append(_ABSTRACT_THAI)
+    if source_id == ABSTRACT_SOLE_ID:
+        parts.append(ABSTRACT_SOLE_WORD)
+    # A per-entity token, so the vocabulary has the long singleton tail real prose has and the
+    # postings exercise both encodings. Offset past the id space for `PLANTED_ID_BASE`'s reason.
+    parts.append(f"ref{PLANTED_ID_BASE + source_id}")
+    return " ".join(parts)
+
+
+def shelf_of(source_id: int) -> str | None:
+    """`shelf` as planted — the render-only category. Same contract as [`department_of`]: what
+    the entity was *given*, upstream of the code the build stored in the hot column."""
+    if source_id % SHELF_ABSENT_STRIDE == 0:
+        return None
+    return ("north", "south", "east")[(source_id // 7) % 3]
+
+
+# ---------------------------------------------------------------------------------------------
+# submitter — the keyword column
+# ---------------------------------------------------------------------------------------------
+
+# The three regions both keyword families share. A shared region is deliberate: it gives
+# `contains "apac"` a needle that spans the repeat-heavy family *and* the near-unique one, which is
+# the shape the dictionary walk has to get right (a substring may span a front-coded elision).
+_SUBMITTER_REGIONS = ("apac", "emea", "latam")
+
+# The repeat-heavy family's twelve hub letters. **Letters, not numbers**, and that is the
+# `PLANTED_ID_BASE` rule arriving by its other door: a bucket written `03` is the digit run `03`,
+# which `test_byte_scan` reads out of a drill-down body as the integer 3 — a real entity id. A
+# keyword's values reach a client as text, so nothing here may carry a bare small number.
+_SUBMITTER_HUB_LETTERS = "abcdefghijkl"
+
+# One entity in 19 (after the absence rule) carries a value **no other entity carries**; the rest
+# share a hub. The stride is a prime distinct from every other period in this corpus, so which
+# entities are unique correlates with nothing — and it sizes the base build's dictionary at
+# ~8,000 keys, which is what puts both `contains` routes in play across the catalogue's principals:
+# the engine chooses narrow below ~15% of the dictionary's key count and broad at or above it, so
+# the small cases take one route and the crossover and full-coverage cases take the other.
+SUBMITTER_UNIQUE_STRIDE = 19
+
+# **The two ordinal-boundary values** (records §10). Sorted lexicographically, `aaa-` precedes
+# every `hub-`/`node-` value and `zzz-` follows every one, so these are the first and the last key
+# of the base build's dictionary — ordinals 0 and `len - 1`. Each is carried by exactly one entity,
+# which makes `eq` on them a single-item answer a cross-layer ordinal confusion cannot fake: an
+# engine that resolved ordinal 0 against the base and then scanned a *flush extent* with it would
+# return that extent's own first-key rows instead.
+#
+# Both ids sit inside `cross_lo` so a principal short of full coverage can reach them, and both are
+# off `SUBMITTER_ABSENT_STRIDE`.
+SUBMITTER_FIRST_ID = 65_900
+SUBMITTER_LAST_ID = 65_901
+SUBMITTER_FIRST = "aaa-ingress-anchor"
+SUBMITTER_LAST = "zzz-egress-anchor"
+
+
+def submitter_of(source_id: int) -> str | None:
+    """`submitter` as planted — the keyword column. Same contract as [`department_of`]: what the
+    entity was *given*, upstream of the ordinal the build stored.
+
+    Three value shapes, each here for a catalogue entry records §10 names:
+
+    * the two **anchors**, one entity each, first and last in byte order — the ordinal boundaries;
+    * `node-<region>-<id>`, one entity each, heavily prefix-shared — a `prefix` range over one
+      region spans thousands of keys and therefore hundreds of front-coded blocks, which is the
+      only way a prefix range crosses a block boundary rather than sitting inside one;
+    * `hub-<region>-<letter>`, thirty-six values carried by thousands of entities each — the
+      repeat-heavy half, and the values a flush extent can also carry so that one string has a
+      *different ordinal in each layer*.
+    """
+    if source_id % SUBMITTER_ABSENT_STRIDE == 0:
+        return None
+    if source_id == SUBMITTER_FIRST_ID:
+        return SUBMITTER_FIRST
+    if source_id == SUBMITTER_LAST_ID:
+        return SUBMITTER_LAST
+    region = _SUBMITTER_REGIONS[(source_id // 13) % 3]
+    if source_id % SUBMITTER_UNIQUE_STRIDE == 0:
+        return f"node-{region}-{PLANTED_ID_BASE + source_id}"
+    return f"hub-{region}-{_SUBMITTER_HUB_LETTERS[(source_id // 3) % 12]}"
+
+
+def submitter_values_in_order() -> list[str]:
+    """Every distinct planted `submitter`, in the byte order a sorted dictionary holds them.
+
+    **Not a dictionary, and not an accelerator.** Nothing evaluates a filter through this list:
+    `oracle.filters` answers `eq`, `in`, `prefix` and `contains` by walking [`submitter_of`] one
+    entity at a time, which is what keeps the oracle a second derivation rather than a
+    transcription of the artefact (records §10). This exists so a test can *name* the values whose
+    ordinals are the base build's dictionary boundaries without opening the artefact to find out
+    which they are — and the answers those tests then assert still come from the per-entity walk,
+    so a build that wrote a different dictionary disagrees with the oracle rather than with this.
+
+    Every planted value is ASCII, so Python's code-point order is the byte order the dictionary is
+    sorted in.
+    """
+    return sorted({v for e in range(N_ITEMS) if (v := submitter_of(e)) is not None})
+
+
+# The blob-resident string's cycling stems — a period of 33 (stride 11 × 3 ledgers), decorrelated
+# from every other cycle here. The appended source id makes every full note unique, so the future
+# drill-down differential compares a value only its entity can carry.
+_NOTE_LEDGERS = ("acquisitions", "loans", "conservation")
+
+
+def note_of(source_id: int) -> str | None:
+    """`note` as planted — blob-resident, so nothing serves it before the drill-down assembly
+    lands; the build stores it in `attrs/record/` now. Same contract as [`department_of`]."""
+    if source_id % NOTE_ABSENT_STRIDE == 0:
+        return None
+    if source_id == NOTE_OVERSIZE_ID:
+        # 320,000 bytes uncompressed, a pure function of the id range: the one row the block target
+        # cannot hold, which must become an oversized block of its own rather than split.
+        return "".join(f"{i:08x}" for i in range(40_000))
+    if source_id == NOTE_EMPTY_ID:
+        return ""
+    return (
+        f"{_NOTE_LEDGERS[(source_id // 11) % 3]} ledger, "
+        f"accession {PLANTED_ID_BASE + source_id}"
+    )
+
+
+def pages_of(source_id: int) -> int | None:
+    """`pages` as planted — the blob-resident numeric. Same contract as [`department_of`]; the
+    zero stride plants a *present* zero, which the blob must keep distinct from absence."""
+    if source_id % PAGES_ABSENT_STRIDE == 0:
+        return None
+    if source_id % PAGES_ZERO_STRIDE == 0:
+        return 0
+    return (source_id * 37 + 11) % 4999
+
+
+def blob_entities_expected(bundle) -> set[int]:
+    """The entities the record blob's has-row bitmap must contain, from the generation functions
+    alone: everyone with at least one blob-resident value. This is the fixture-input half of the
+    blob's one licensed artefact check (records §3, review B7) — the *addressing* is what the
+    artefact walk verifies; *which entities have a row* is the fixture's own fact.
+
+    The generation functions take a **source** id and has-row is in entity space, so the set is
+    carried across by [`entities_by_source`]. It used to be returned in source space and compared
+    directly, which was the same set only while the two spaces were one (decision 0073).
+    """
+    entity_of = entities_by_source(bundle)
+    return {
+        entity_of[source]
+        for source in range(N_ITEMS)
+        if note_of(source) is not None
+        or pages_of(source) is not None
+        # **`abstract` counts here even though it is indexed**: text is blob-resident whatever its
+        # flags, so an entity with prose has a blob row for it whether or not it has a `note` or
+        # `pages` (records §4.4). Omitting it would make the has-row expectation short by every
+        # entity whose only blob-resident value is its prose.
+        or abstract_of(source) is not None
+    }
+
+
+def record_of(source_id: int, fx: list[int]) -> dict[str, object]:
+    """Every declared column's planted value for one entity — the record, as the fixture defines
+    it, across all three homes (records §3): hot column (`fx_key`, `shelf`), entity space
+    (`department`, `archive`, `title`), record blob (`note`, `pages`).
+
+    This is the oracle's side of the record-always-exists differential (records §10): when
+    drill-down assembles the record from its three homes, `/v1/items/{mosaica_id}` must return
+    exactly these values for every visible entity. Absent values are omitted, not `None`-valued —
+    absence is absence from the record, exactly as it is absence from the blob row.
+
+    A keyword's record is its **key**, never its ordinal: the dictionary is an index internal and
+    an ordinal is a per-layer position, so nothing about either crosses the trust boundary
+    (records §4.3).
+
+    `fx` is [`fx_keys`]'s list, passed in because recomputing 150,000 seeded draws per entity
+    would make a whole-corpus sweep quadratic; the caller computes it once.
+    """
+    values: dict[str, object] = {
+        "fx_key": fx[source_id],
+        "shelf": shelf_of(source_id),
+        "department": department_of(source_id),
+        "archive": archive_of(source_id),
+        "title": title_of(source_id),
+        "submitter": submitter_of(source_id),
+        # **A text column's record is its prose**, not its terms: the tokens are an index and the
+        # blob is where the value lives, which is the two-homes rule (records §4.4).
+        "abstract": abstract_of(source_id),
+        "note": note_of(source_id),
+        "pages": pages_of(source_id),
+    }
+    return {name: value for name, value in values.items() if value is not None}
+
+
+def filter_operands_expected() -> dict[str, tuple[str, frozenset[str]]]:
+    """What `/v1/meta` must publish as `filter_operands`: column → (family, operator set),
+    exactly — no more and no fewer. The meta conformance test asserts equality against this
+    function alone, so the operand surface is recorded in **one place**.
+
+    What the exactness pins: the blob-resident columns (`note`, `pages`) publish no operand —
+    records §3 gives them no query surface — while every *rendered* column publishes one, because
+    decision 0068 makes `render = true` imply filterable and the row-space route answers it over
+    the request's own rows. That covers the render-only category (`shelf`) and, since decision
+    0064's render half landed, the rendered number `fx_key`: a number's absence now lives in a
+    presence bitmap beside the hot column, so a range no longer matches the rows that have no
+    value. A column's operand set is a property of its family alone — routing is a property of the
+    deployment's declaration, never of the query surface.
+
+    **`submitter` publishes `keyword` and its four string operators, and `range` is not among
+    them.** A keyword's stored values are ordinals — positions in the layer's own sorted dictionary
+    — so a numeric range over them would compare one layer's positions against another's and answer
+    the same request differently against the base build and against a flush extent, invisibly. The
+    family derivation enumerates the numeric types rather than defaulting to them precisely so that
+    cannot happen (records §4.3); this line is where the surface it produces is pinned.
+    """
+    return {
+        "department": ("category", frozenset({"eq", "in"})),
+        "archive": ("category", frozenset({"eq", "in"})),
+        "shelf": ("category", frozenset({"eq", "in"})),
+        "title": ("keyword", frozenset({"eq", "in", "prefix", "contains"})),
+        "submitter": ("keyword", frozenset({"eq", "in", "prefix", "contains"})),
+        # **`abstract` publishes `text` and exactly two operators, and none of the four string
+        # predicates is among them.** That absence is the point of the family split: a text
+        # column's stored form is a token index, so there is no stored value for `eq` to compare
+        # bytes against or for `prefix` to anchor on. `phrase` is published beside `match` because
+        # it is built — an operand list that named an operator the parse gate would refuse is the
+        # drift this function exists to pin.
+        "abstract": ("text", frozenset({"match", "phrase"})),
+        "fx_key": ("numeric", frozenset({"eq", "in", "range"})),
+        # The unique field: a rendered number, so the same family as `fx_key`.
+        "serial": ("numeric", frozenset({"eq", "in", "range"})),
+    }
+
+# The whole map, as `(x0, y0, x1, y1)` — the request's bbox order, which is **not** the order
+# `Bundle.extent` uses for the same four numbers (`(x_min, x_max, y_min, y_max)`). Writing the
+# extent's order into a request produces a degenerate bbox at `x = 0` that still enumerates one
+# tile column per depth, so the request succeeds, the counts agree with an oracle asking the same
+# wrong question, and the differential silently compares almost nothing. Defined once, here,
+# because it cost a debugging round and the failure is invisible — two copies means one copy
+# without this comment.
+FULL_VIEWPORT = (0.0, 0.0, 65536.0, 65536.0)
+
+# The depth-6 tile the `one_tile` block is confined to. Depth 6 splits each axis into 64 columns
+# of 1,024 grid cells; column 17 is an arbitrary interior choice, away from both the origin and
+# the Morton-maximal corner the canary occupies.
+ONE_TILE_DEPTH = 6
+ONE_TILE_TX = 17
+ONE_TILE_TY = 17
+
+
+@dataclass(frozen=True)
+class Block:
+    """One contiguous entity-ID range, carrying exactly one term.
+
+    `term_id` is the term id the **source corpus** writes into its `(entity_id, term_id)` relation,
+    and its access descriptor is its decimal spelling. It is **not** the bundle's own
+    dictionary id: `public` is interned first at term `0`, so the dictionary's is one higher. Use
+    [`Block.dict_term_id`] for anything read out of the bundle, and see the module doc for why
+    asking one file with the other's number is silently wrong rather than an error.
+    """
+
+    name: str
+    start: int
+    stop: int
+    term_id: int
+
+    @property
+    def size(self) -> int:
+        return self.stop - self.start
+
+    @property
+    def descriptor(self) -> str:
+        return str(self.term_id)
+
+    @property
+    def entities(self) -> set[int]:
+        """The block's **entity** ids, which are its source range — as a set.
+
+        The range survives decision 0073; the order inside it does not, so this is the one thing
+        that may be read as both spaces at once. A per-item join between them goes through
+        [`entities_by_source`].
+        """
+        return set(range(self.start, self.stop))
+
+    def dict_term_id(self, bundle) -> int:
+        """This block's term id **in the bundle's dictionary**, resolved rather than computed.
+
+        Resolved, because computing it would mean writing the interning rule down a second time
+        where nothing checks it — and the rule has already moved once. `verify()` is where the rule
+        is checked; this is where it is used.
+        """
+        term_id = bundle.term_id_of(self.descriptor.encode("ascii"))
+        if term_id is None:
+            raise KeyError(
+                f"block {self.name}: descriptor {self.descriptor!r} is not in the bundle's "
+                "dictionary — the corpus and the bundle disagree about what was interned"
+            )
+        return term_id
+
+
+def entity_of_fx_key(bundle) -> dict[int, int]:
+    """`fx_key -> entity id`, the suite's one legitimate handle→item join.
+
+    A served point carries its planted `fx_key` and its opaque `mosaica_id`; the key is what lets a
+    differential name the item without a reverse map and without an entity id crossing the boundary
+    (I10). The keys are planted **by source id**, so the join lands in source space and is carried
+    the last hop by [`entities_by_source`].
+    """
+    entity_of = entities_by_source(bundle)
+    return {key: entity_of[source] for source, key in enumerate(fx_keys())}
+
+
+def entities_by_source(bundle) -> dict[int, int]:
+    """`source id -> item` (`identity.item_key`) for every planted item, from the bundle's index of
+    `serial`.
+
+    The generation functions take a source id and every answer the engine gives is in entity space;
+    the two are not equal (decision 0073), so every per-item join between them comes through here.
+    """
+    return {
+        serial - PLANTED_ID_BASE: entity
+        for serial, entity in bundle.unique_entities("serial").items()
+    }
+
+
+def entity_of_source(bundle, source_id: int) -> int:
+    """[`entities_by_source`] for one item."""
+    return bundle.unique_entities("serial")[PLANTED_ID_BASE + source_id]
+
+
+def source_of_entity(bundle) -> dict[int, int]:
+    """[`entities_by_source`] the other way: `item -> source id`."""
+    return {entity: source for source, entity in entities_by_source(bundle).items()}
+
+
+def items_of(bundle, entities) -> set[int]:
+    """The items (`identity.item_key`) a block's or a case's designed ids name. Those ids are
+    source ids, resolved through the bundle's index of `serial`."""
+    entity_of = entities_by_source(bundle)
+    return {entity_of[source] for source in entities}
+
+
+def dict_terms(bundle, names) -> set[int]:
+    """The bundle's dictionary ids for a set of block names — what a grant set means to `postings`
+    and to the bundle's own `terms/pairs.parquet`."""
+    return {BLOCKS[name].dict_term_id(bundle) for name in names}
+
+
+# The layout. Sizes are quoted as coverage of the 150,000-item corpus the list sums to.
+#
+#   filler_head  65,500   43.67%   bulk, so `boundary` lands astride 65,536
+#   boundary        100    0.07%   65,500..65,600 — straddles the first container boundary
+#   single            1             the single-item mask
+#   sparse           15    0.01%   the sparsest catalogue member
+#   cross_lo      3,750    2.50%   below §7.2's ~5% direct-evaluation crossover
+#   cross_hi     11,250    7.50%   cross_lo ∪ cross_hi = 10.00%, above it
+#   one_tile        250    0.17%   geometry confined to one depth-6 tile
+#   filler_tail  59,134   39.42%   spans the second container boundary, 131,072
+#   high_tail    10,000    6.67%   140,000..150,000 — every member above the byte-scan's floor
+#
+# `high_tail` is the one block with no `MaskCase`. It exists so that a grant set can put entity ids
+# **on both sides of a grant boundary while every one of them is above `SAFE_ID_FLOOR`**, which is
+# what `conformance/tests/test_byte_scan.py` needs and what no other layout here can supply: the
+# floor is 100,000, blocks are the grantable unit, and before this block existed `filler_tail` was
+# the only block straddling the floor — so every entity id above it was admitted together or denied
+# together, and the scan's "admitted *and* denied ids above the floor" precondition was
+# unsatisfiable on this corpus. Splitting the tail rather than giving the byte-scan a third corpus
+# keeps one designed entity-ID layout in the suite. `filler_tail` was resized to compensate, so
+# `N_ITEMS`, every other block's entity range, and both container claims are unchanged.
+#
+# **APPEND-ONLY, and this is load-bearing rather than a style preference.** A block's position in
+# this list is two things at once: `_build_blocks` hands out term IDs by index, and it lays the
+# entity ranges out end to end in the same order. Inserting a block anywhere but the end therefore
+# renumbers every later block's *term* and moves every later block's *entity range* — which
+# silently re-points `boundary` away from 65,536, moves `filler_tail` off 131,072, and changes
+# every case's `mosaica_id` ordering, i.e. §7.2's served set. `verify()` catches the term
+# renumbering loudly; it cannot catch "the case no longer straddles what it was designed to
+# straddle" beyond the two boundary claims it checks by name. Append, and resize `filler_tail` to
+# compensate.
+_LAYOUT: list[tuple[str, int]] = [
+    ("filler_head", 65_500),
+    ("boundary", 100),
+    ("single", 1),
+    ("sparse", 15),
+    ("cross_lo", 3_750),
+    ("cross_hi", 11_250),
+    ("one_tile", 250),
+    ("filler_tail", 59_134),
+    ("high_tail", 10_000),
+]
+
+
+# The corpus size, **derived** rather than declared. Two constraints fix the number the layout is
+# built to: it must exceed 2¹⁶ by enough that a block can straddle 65,536 with real entities either
+# side *and* a second container boundary (131,072) falls inside the corpus; and the §7.2 oracle is
+# a literal row-by-row definition, so every doubling doubles the differential's run time. 150,000
+# satisfies both — three Roaring containers, and a full pass costs tens of milliseconds. Derived
+# because the two were separate constants that had to be edited in step, and a `_LAYOUT` that no
+# longer sums to `N_ITEMS` is a corpus with a gap in it.
+N_ITEMS = sum(size for _, size in _LAYOUT)
+
+
+def _build_blocks() -> dict[str, Block]:
+    blocks: dict[str, Block] = {}
+    cursor = 0
+    for term_id, (name, size) in enumerate(_LAYOUT):
+        blocks[name] = Block(name=name, start=cursor, stop=cursor + size, term_id=term_id)
+        cursor += size
+    return blocks
+
+
+BLOCKS: dict[str, Block] = _build_blocks()
+
+CONTAINER_SIZE = 1 << 16
+
+# The entity id above which `conformance/tests/test_byte_scan.py` can tell a leaked id from a
+# legitimate small integer the harness itself emits — ports, `k`, zoom, status codes, none of which
+# exceed 65,535. It lives here, not with the scan, because it is a constraint on **this layout**:
+# `high_tail` is placed to satisfy it and `verify()` reports a corpus that stops doing so in
+# `floor_failures`. The scan asserts its own floor matches this one, so the two cannot drift apart.
+HIGH_ID_FLOOR = 100_000
+
+# The shard size of the many-shard mode. The smallest that keeps `filler_tail` astride 131,072
+# inside shard 0, so both container claims still hold there; the remaining 18,927 items, the tail
+# of `filler_tail` and all of `high_tail`, form shard 1. Every number in shard 1 is below
+# `HIGH_ID_FLOOR`, and no size that splits the corpus keeps `high_tail` above it, so the claims
+# `verify()` makes for the byte scan's floor hold in the one-shard mode only.
+SHARD_SIZE_MANY = 131_073
+
+
+def schema_toml() -> str:
+    """The declaration the build reads: [`SCHEMA_TOML`] and the mode's `[shards]` table."""
+    return SCHEMA_TOML + shards_toml(N_ITEMS, size=SHARD_SIZE_MANY)
+
+
+@dataclass(frozen=True)
+class MaskCase:
+    """One catalogue member: the property it attacks, the grant that reaches it, and the entity
+    set that grant must produce.
+
+    `grants` are descriptors as `POST /session/authorise` takes them. `entities` is the case's set
+    in the build's numbering; `items_of` gives the items the engine's mask must come out as —
+    checked against the bundle's own postings by `verify()`, so a case can never silently drift
+    into testing a different shape from the one it is named for.
+    """
+
+    name: str
+    attacks: str
+    grants: tuple[str, ...]
+    entities: frozenset[int]
+
+    @property
+    def coverage(self) -> float:
+        return len(self.entities) / N_ITEMS
+
+    @property
+    def containers(self) -> set[int]:
+        """The Roaring containers this mask touches — `entity_id >> 16`. The measured cost model
+        is O(containers touched), so this is the quantity the container-boundary case exists to
+        move (CLAUDE.md, "bitmap operations cost O(containers touched), not O(cardinality)")."""
+        return {e >> 16 for e in self.entities}
+
+
+def _case(name: str, attacks: str, block_names: list[str]) -> MaskCase:
+    blocks = [BLOCKS[n] for n in block_names]
+    entities: set[int] = set()
+    for b in blocks:
+        entities |= b.entities
+    return MaskCase(
+        name=name,
+        attacks=attacks,
+        grants=tuple(b.descriptor for b in blocks),
+        entities=frozenset(entities),
+    )
+
+
+def catalogue() -> list[MaskCase]:
+    """The catalogue, each member named for the property it attacks (brief item 1).
+
+    Adding a member costs three edits, and each is deliberate: append to `_LAYOUT` (append-only —
+    see the note there — resizing `filler_tail` to compensate), add a `_case(...)` here, and add
+    the name to `test_the_catalogue_covers_the_properties_the_design_names`. The third is not
+    duplication to be factored out: that test transcribes conformance design §2's list, and a
+    version that imported the names from here could not notice a case being deleted. Its docstring
+    argues the point at the site where somebody would be tempted.
+
+    `overlay_heavy` is deliberately absent: it is not a *shape* of the build-time mask but a state
+    of the overlay, so it is a base case plus a journal of acked control operations
+    (`oracle.journal.AckedJournal`). `overlay_heavy_base()` names the case it is built on.
+    """
+    return [
+        MaskCase(
+            name="empty",
+            attacks="the zero-visibility principal — every count and every selection must be empty, "
+            "and θ's anchor V_total is 0, which §7.2's closed form divides by",
+            grants=(),
+            entities=frozenset(),
+        ),
+        _case(
+            "single_item",
+            "the floor clause with nothing to floor: one visible entity, so |vis(T)| < k_min in "
+            "the one tile it occupies and 0 everywhere else",
+            ["single"],
+        ),
+        _case(
+            "sparse_0_01pct",
+            "the sparsest principal — 0.01% coverage, where §7.2 says direct evaluation is the "
+            "only affordable route and a candidate list would visit thousands of nodes",
+            ["sparse"],
+        ),
+        _case(
+            "full_100pct",
+            "100% coverage — the cap clause binds nearly everywhere, and the mask spans every "
+            "container in the corpus",
+            [name for name, _ in _LAYOUT],
+        ),
+        # **The crossover pair is prospective, and that is the right order to build it in.** §7.2
+        # puts the direct-evaluation/candidate-list boundary at roughly 5% coverage, but Phase 1
+        # has no candidate-list route at all — both cases go through direct evaluation today, so
+        # the pair currently proves only that the same route computes the same definition at two
+        # coverages. Building the fixture before the route is deliberate: the pair is what a
+        # candidate-list implementation would be measured against on the day it lands, and a
+        # catalogue that acquired its crossover cases *after* the route would be a catalogue
+        # designed around the implementation it is meant to test.
+        _case(
+            "crossover_below",
+            "2.5% coverage, just below §7.2 r18's ~5% direct-evaluation boundary",
+            ["cross_lo"],
+        ),
+        _case(
+            "crossover_above",
+            "10% coverage, just above the ~5% boundary — the same geometry either side of the "
+            "crossover, so a route that changes there must still compute the same definition",
+            ["cross_lo", "cross_hi"],
+        ),
+        _case(
+            "container_boundary",
+            "a mask astride a 2¹⁶ entity-ID boundary: two Roaring containers for 100 entities. At "
+            "10⁴ dense IDs no mask straddles anything, so this case does not occur by accident — "
+            "it is the only member that exercises container arithmetic at all",
+            ["boundary"],
+        ),
+        _case(
+            "all_in_one_tile",
+            "every visible item inside a single depth-6 tile — one tile carries the whole mask and "
+            "every other tile in the viewport is empty",
+            ["one_tile"],
+        ),
+    ]
+
+
+def overlay_heavy_base() -> MaskCase:
+    """The case `AckedJournal`-driven overlay states are layered on: large enough that a few
+    hundred denies is a real perturbation and not a rounding error, small enough to address item
+    by item over the control plane."""
+    return _case(
+        "overlay_heavy_base",
+        "the base for the overlay-heavy state — deletes, suppressions and predicate changes "
+        "composed on top, per I1's (token_mask \\ L) ∪ direct_eval(L)",
+        ["cross_lo"],
+    )
+
+
+# ---------------------------------------------------------------------------------------------
+# fx_key
+# ---------------------------------------------------------------------------------------------
+
+# The RNG streams are **separate and independently seeded**, so the planted keys are a pure
+# function of `SEED` alone and not of how many draws the geometry happens to take. [`fx_keys`] can
+# then be recomputed by anything that needs the mapping — a test, a reuse path — without writing
+# the corpus, and without the recomputation having to mirror `write_corpus`'s draw order to stay
+# correct. A shared stream made "recompute the keys" and "rewrite the corpus" the same operation,
+# which is how the parquet came to be rewritten on the reuse path.
+_FX_SEED = SEED
+_GEOMETRY_SEED = SEED ^ 0x9E3779B9
+
+
+def fx_keys() -> list[int]:
+    """The planted join scalars, `source_id -> fx_key`, as a pure function of `SEED`.
+
+    Drawn from a seeded RNG and rejected on collision; see the module doc for why it must NOT be a
+    function of the entity ID. This is *the* definition — `write_corpus` plants exactly this list.
+    """
+    return _draw_fx_keys(random.Random(_FX_SEED))
+
+
+def ingest_fx_keys(n: int) -> list[int]:
+    """`fx_key` values for items **ingested at runtime**, disjoint from the planted ones.
+
+    A declared column must be present in every ingest batch (contracts §2.2): the scalar tail is
+    read back positionally, so an omitted column shifts every later scalar rather than defaulting.
+    Once the catalogue declares `fx_key`, a conformance test that ingests has to supply one, and
+    the value is the fixture's to choose — an ingested item is not in [`fx_keys`], whose list is
+    the corpus.
+
+    **Its own seeded stream, and rejected against the planted set.** Deriving one from another
+    identifier would make it an encoding of that identifier, and re-using a planted key would make
+    two items answer to one join value — the mapping `fx_key` exists to be. Separate streams
+    are this module's existing discipline (see [`fx_keys`]), for the same reason: the values stay a
+    pure function of `SEED` and not of how many draws anything else took.
+    """
+    planted = set(fx_keys())
+    rng = random.Random(SEED ^ 0x5851_F42D_4C95_7F2D)
+    seen: set[int] = set()
+    keys: list[int] = []
+    for _ in range(n):
+        while True:
+            k = rng.getrandbits(64)
+            if k not in planted and k not in seen:
+                break
+        seen.add(k)
+        keys.append(k)
+    return keys
+
+
+def _draw_fx_keys(rng: random.Random) -> list[int]:
+    seen: set[int] = set()
+    keys: list[int] = []
+    for _ in range(N_ITEMS):
+        while True:
+            k = rng.getrandbits(64)
+            if k not in seen:
+                break
+        seen.add(k)
+        keys.append(k)
+    return keys
+
+
+# ---------------------------------------------------------------------------------------------
+# Corpus synthesis and build
+# ---------------------------------------------------------------------------------------------
+
+
+def _geometry(rng: random.Random) -> list[tuple[float, float]]:
+    """Uniform over the extent, except `one_tile`, which is confined to one depth-6 tile.
+
+    Uniform placement is what keeps the crossover cases meaningful. §7.2's ~5% crossover is a
+    statement about a *tile's* coverage, and the catalogue can only choose a mask's coverage of
+    the whole corpus; the two coincide only while geometry is independent of the mask. Scattering
+    every block over the whole extent makes that so by construction — and it is also what the
+    Phase 0 measurement found real masks to be (results §5: "realistic masks are essentially
+    scattered under Morton order").
+    """
+    cell = 1 << (16 - ONE_TILE_DEPTH)
+    tile_x0, tile_x1 = ONE_TILE_TX * cell, (ONE_TILE_TX + 1) * cell
+    tile_y0, tile_y1 = ONE_TILE_TY * cell, (ONE_TILE_TY + 1) * cell
+    one_tile = BLOCKS["one_tile"]
+
+    out: list[tuple[float, float]] = []
+    for source_id in range(N_ITEMS):
+        if one_tile.start <= source_id < one_tile.stop:
+            # A margin of one grid cell either side, so float32 rounding at the parquet round
+            # trip cannot push a point across the tile edge.
+            x = rng.uniform(tile_x0 + 1.0, tile_x1 - 1.0)
+            y = rng.uniform(tile_y0 + 1.0, tile_y1 - 1.0)
+        else:
+            x = rng.uniform(0.0, 65536.0)
+            y = rng.uniform(0.0, 65536.0)
+        out.append((x, y))
+    return out
+
+
+def _term_of(source_id: int) -> int:
+    for block in BLOCKS.values():
+        if block.start <= source_id < block.stop:
+            return block.term_id
+    raise AssertionError(f"source id {source_id} is in no block")
+
+
+def _serials() -> list[int]:
+    return [PLANTED_ID_BASE + i for i in range(N_ITEMS)]
+
+
+def write_corpus(work_dir: Path) -> tuple[Path, Path, list[int]]:
+    """Write `catalogue-points.parquet` and `catalogue-pairs.parquet`; return them and the planted
+    `fx_key`s indexed by source id.
+
+    **Called only on the build path.** It used to run unconditionally, including when the bundle
+    was about to be reused — so a changed `SEED` or `ONE_TILE_TX` rewrote the corpus under a bundle
+    that was never rebuilt from it. See the module doc.
+    """
+    work_dir.mkdir(parents=True, exist_ok=True)
+    fx = fx_keys()
+    geometry = _geometry(random.Random(_GEOMETRY_SEED))
+
+    points_path = work_dir / POINTS_NAME
+    pairs_path = work_dir / PAIRS_NAME
+
+    pq.write_table(
+        pa.table(
+            {
+                # The unique field: how this row and the relation's rows name one item.
+                "serial": pa.array(_serials(), type=pa.uint64()),
+                "x": pa.array([g[0] for g in geometry], type=pa.float32()),
+                "y": pa.array([g[1] for g in geometry], type=pa.float32()),
+                "fx_key": pa.array(fx, type=pa.uint64()),
+                # The filter columns, as the declaration requires them in the source: a category
+                # arrives as its *key* (utf8) and is resolved against the declared vocabulary,
+                # never as a code (input.rs — a data file supplying codes would be a second place
+                # codes are decided); a filter-only string is its bytes. A null is the absent
+                # value, which the build stores as presence-bitmap absence.
+                "department": pa.array(
+                    [department_of(i) for i in range(N_ITEMS)], type=pa.string()
+                ),
+                "archive": pa.array([archive_of(i) for i in range(N_ITEMS)], type=pa.string()),
+                "title": pa.array([title_of(i) for i in range(N_ITEMS)], type=pa.string()),
+                # A keyword arrives as its **value**, never as an ordinal: the ordinal is the
+                # build's to assign, per layer, and a data file supplying one would be naming a
+                # position in a dictionary that does not exist yet (records §4.3).
+                "submitter": pa.array(
+                    [submitter_of(i) for i in range(N_ITEMS)], type=pa.string()
+                ),
+                # The render-only category arrives as its key, like the other two categories.
+                "shelf": pa.array([shelf_of(i) for i in range(N_ITEMS)], type=pa.string()),
+                # A text column arrives as its prose, exactly as written — the analyser is the
+                # build's and a data file supplying tokens would be naming a segmentation the
+                # manifest has not recorded yet (records §4.4, decision 0070).
+                "abstract": pa.array([abstract_of(i) for i in range(N_ITEMS)], type=pa.string()),
+                # The blob-resident pair. A null is the absent value — for these, absence from
+                # the record blob's row and (jointly) from its has-row bitmap.
+                "note": pa.array([note_of(i) for i in range(N_ITEMS)], type=pa.string()),
+                "pages": pa.array([pages_of(i) for i in range(N_ITEMS)], type=pa.uint32()),
+            }
+        ),
+        points_path,
+    )
+    pq.write_table(
+        pa.table(
+            {
+                "serial": pa.array(_serials(), type=pa.uint64()),
+                "term_id": pa.array([_term_of(i) for i in range(N_ITEMS)], type=pa.uint32()),
+            }
+        ),
+        pairs_path,
+    )
+    return points_path, pairs_path, fx
+
+
+def recipe(work_dir: Path, bundle_root: Path) -> dict:
+    """**Every input the built bundle is a function of.** Stamped beside the bundle; a mismatch is
+    a rebuild.
+
+    The list is the point, so it is written out rather than computed: the corpus is a function of
+    `_LAYOUT` (which fixes both the term IDs and the entity ranges), `SEED` (geometry and the
+    planted `fx_key`s), the `ONE_TILE_*` constants, the declaration, and the CLI arguments — of
+    which the identity key is
+    the one that decides `mosaica_id`, and therefore §7.2's entire served order. Anything that
+    lands here later must be added; a recipe that omits an input is a reuse test that pins the
+    suite to the older fixture, which is the failure this replaced.
+
+    Absolute paths are reduced to their basenames so the stamp is comparable across checkouts and
+    worktrees — the path a fixture was built from is not a property of the fixture, and including
+    it would force a rebuild per worktree for no reason.
+    """
+    # The declaration names its sources and extent, and the deployment file names the declaration,
+    # so the invocation carries only those two paths. The binary's own path is not an input.
+    argv = build_argv(work_dir / DEPLOYMENT_NAME, bundle_root)[1:]
+    return {
+        # 10: both files name their items by `serial`, the source id offset past the entity-id
+        #     range, which both carry in place of the source id (2026-09-27).
+        # 9: the corpus gained the keyword column (`submitter`) and its planting rules, for the
+        #    keyword family's conformance coverage (2026-08-13).
+        # 8: every planted value that writes an id into free text (`note`, `title`) offsets it by
+        #    `PLANTED_ID_BASE`, so the byte scan stops reading the fixture quoting itself as a
+        #    leak once drill-down serves those fields (2026-08-12).
+        # 6: the corpus gained the render-only category (`shelf`) and the blob-resident pair
+        #    (`note`, `pages`) for the record-blob conformance capability (2026-08-12).
+        # 5: the corpus gained a `public` category, `archive`, so the differential covers the
+        # postings route decision 0063 opened as well as the scan (2026-08-10).
+        # 4: the corpus gained the two filter columns (`department`, `title`) and their planting
+        # rules (2026-08-09). The `schema` key alone would force the rebuild — the declaration's
+        # content is in the receipt — but the planted *values* are a function of the strides and
+        # the solo id, which `SCHEMA_TOML` does not carry, so they are stamped below and the
+        # version moves with them.
+        # 3: the bundle gained a declared `fx_key` column (2026-08-07).
+        "recipe_version": 10,
+        "layout": [list(entry) for entry in _LAYOUT],
+        "n_items": N_ITEMS,
+        "seed": SEED,
+        "fx_seed": _FX_SEED,
+        "geometry_seed": _GEOMETRY_SEED,
+        "extent": list(EXTENT),
+        "view": VIEW_ID,
+        # The two corpus file names moved off the argv and into the declaration (the `[sources]`
+        # table), whose text is baked into `SCHEMA_TOML` at import — so they are stamped directly,
+        # exactly as `view` and `extent` are, rather than relied on through the schema text.
+        "points_name": POINTS_NAME,
+        "pairs_name": PAIRS_NAME,
+        "one_tile": [ONE_TILE_DEPTH, ONE_TILE_TX, ONE_TILE_TY],
+        # The filter columns' planting rules — everything `department_of`/`title_of` are a
+        # function of that the schema text is not. An edited stride under an unchanged
+        # declaration would otherwise reuse a bundle whose stored values no longer match the
+        # oracle's derivation, and the differential would report an engine bug that is a stale
+        # fixture.
+        "filter_columns": {
+            "department_solo_id": DEPARTMENT_SOLO_ID,
+            "department_absent_stride": DEPARTMENT_ABSENT_STRIDE,
+            "title_absent_stride": TITLE_ABSENT_STRIDE,
+            "title_stems": list(_TITLE_STEMS),
+            "archive_absent_stride": ARCHIVE_ABSENT_STRIDE,
+        },
+        # The render-only category's and the blob pair's planting rules — same reasoning as
+        # `filter_columns`: everything the generation functions are a function of that the
+        # schema text does not carry.
+        "render_category": {
+            "shelf_absent_stride": SHELF_ABSENT_STRIDE,
+        },
+        # The keyword column's planting rules — same reasoning again, and load-bearing twice over
+        # here: the ordinal-boundary tests name `SUBMITTER_FIRST`/`SUBMITTER_LAST` as the first and
+        # last key of the base dictionary, which is only true while the regions, the hub letters
+        # and the unique stride are the ones the bundle was built from.
+        "keyword_column": {
+            "submitter_absent_stride": SUBMITTER_ABSENT_STRIDE,
+            "submitter_unique_stride": SUBMITTER_UNIQUE_STRIDE,
+            "submitter_regions": list(_SUBMITTER_REGIONS),
+            "submitter_hub_letters": _SUBMITTER_HUB_LETTERS,
+            "submitter_first": [SUBMITTER_FIRST_ID, SUBMITTER_FIRST],
+            "submitter_last": [SUBMITTER_LAST_ID, SUBMITTER_LAST],
+        },
+        "record_columns": {
+            "note_absent_stride": NOTE_ABSENT_STRIDE,
+            "note_ledgers": list(_NOTE_LEDGERS),
+            "note_oversize_id": NOTE_OVERSIZE_ID,
+            "note_empty_id": NOTE_EMPTY_ID,
+            "planted_id_base": PLANTED_ID_BASE,
+            "pages_absent_stride": PAGES_ABSENT_STRIDE,
+            "pages_zero_stride": PAGES_ZERO_STRIDE,
+        },
+        # The declaration's *content*, not just its filename. `build_argv` below reduces paths to
+        # basenames, so an edited `SCHEMA_TOML` under an unchanged name would leave the receipt
+        # identical and reuse a bundle whose columns no longer match the declaration.
+        "schema": schema_toml(),
+        "build_argv": [Path(a).name if a.startswith("/") else a for a in argv],
+    }
+
+
+def catalogue_points_path(work_dir: Path | None = None) -> Path:
+    """The points Parquet [`build_catalogue_bundle`] built from — the oracle's source geometry.
+
+    Exposed because the oracle now recomputes geometry from the build's *input* rather than from
+    `columns.arrow`, and the catalogue is the one corpus whose input this module owns.
+    """
+    return (fixture_dir(WORK_DIR_NAME) if work_dir is None else work_dir) / POINTS_NAME
+
+
+def open_catalogue_bundle(bundle_root: Path, work_dir: Path | None = None) -> Bundle:
+    """The catalogue bundle at `bundle_root` with its points file attached as its source geometry,
+    keyed by `serial`."""
+    return open_bundle_with_source(
+        bundle_root, catalogue_points_path(work_dir), field="serial", column=None
+    )
+
+
+def build_catalogue_bundle(work_dir: Path | None = None) -> tuple[Path, list[int]]:
+    """Synthesise the corpus and build it; return `(bundle_root, fx_keys)`.
+
+    Reused rather than rebuilt only when the receipt beside the bundle matches [`recipe`] exactly.
+    See the module doc for why the reuse test is a stamped recipe and not a predicate over the
+    artefact.
+    """
+    work_dir = fixture_dir(WORK_DIR_NAME) if work_dir is None else work_dir
+    work_dir.mkdir(parents=True, exist_ok=True)
+    bundle_root = work_dir / "bundle-catalogue"
+    wanted = recipe(work_dir, bundle_root)
+
+    if _is_usable_bundle(bundle_root, wanted):
+        return bundle_root, fx_keys()
+
+    ensure_cli_built()
+    # The receipt goes first and the bundle second, so that a build interrupted anywhere in
+    # between leaves a state the next run rebuilds rather than reuses.
+    write_recipe(bundle_root, None)
+    if bundle_root.exists():
+        shutil.rmtree(bundle_root)
+    write_corpus(work_dir)
+    # Written on the build path only, beside the corpus and for the same reason: writing it
+    # unconditionally is what let bundle and corpus diverge before.
+    (work_dir / SCHEMA_NAME).write_text(schema_toml())
+    write_deployment(
+        work_dir / DEPLOYMENT_NAME, bundle=bundle_root, schema=work_dir / SCHEMA_NAME
+    )
+    cli_build(work_dir / DEPLOYMENT_NAME, bundle_root)
+    write_recipe(bundle_root, wanted)
+    return bundle_root, fx_keys()
+
+
+def _is_usable_bundle(bundle_root: Path, wanted: dict) -> bool:
+    """The receipt matches, there is a readable post-r6 bundle under it, and nothing has been
+    published into it since the build.
+
+    The receipt is the test, and it records the binary that built the bundle as well as the
+    inputs ([`harness.write_recipe`]). The two structural checks below are a cheap second gate
+    against a bundle that was damaged or *written to* after its receipt was written — cases the
+    receipt cannot see, because neither is an input. All three are tolerant of anything
+    unreadable: what cannot be confirmed is rebuilt, because being wrong in that direction costs a
+    build and being wrong in the other hands every test a fixture nobody asked for.
+
+    **The published-state check is not hypothetical.** An accepted deny is written into the bundle
+    prefix as a further `SEGMENTS-<n>.json` (contracts §2.3), so any driver that points a server at
+    this shared fixture and then suppresses or deletes an item leaves the fixture denied for every
+    later reader, on this run and the next. Drivers isolate themselves by serving a copy
+    (`conformance/conftest.py`'s `private_catalogue_bundle`); this is the backstop for the one that
+    forgets, and it turns a wrong answer into a rebuild.
+    """
+    if not recipe_matches(bundle_root, wanted):
+        return False
+    try:
+        current = json.loads((bundle_root / "CURRENT").read_text())
+        prefix = bundle_root / current["prefix"]
+        manifest = json.loads((prefix / "MANIFEST.json").read_text())
+        if "identity" not in manifest:
+            return False
+        return holds_only_the_build_publication(prefix)
+    except (OSError, KeyError, ValueError):
+        return False
+
+
+# ---------------------------------------------------------------------------------------------
+# Verification — the catalogue's own claims, re-derived from the built bundle
+# ---------------------------------------------------------------------------------------------
+
+
+@dataclass
+class VerificationReport:
+    """What `verify()` established, so a test can assert on it rather than re-deriving it."""
+
+    row_count: int = 0
+    blocks: dict[str, set[int]] = field(default_factory=dict)
+    failures: list[str] = field(default_factory=list)
+    #: The claims made for the byte scan's floor (check 8), which a bundle of several shards
+    #: cannot meet ([`SHARD_SIZE_MANY`]).
+    floor_failures: list[str] = field(default_factory=list)
+
+
+def verify(bundle: Bundle) -> VerificationReport:
+    """Re-derive every claim this module makes from the bundle itself, and collect the failures.
+
+    Deliberately returns rather than raises, so one test reports every way the catalogue has
+    drifted instead of the first. What is checked:
+
+    1. the corpus has `N_ITEMS` rows;
+    2. each block's descriptor interned **by the documented rule** — `public` first at term `0`,
+       then the corpus's terms in first-appearance order, so the corpus's term `g` is the
+       dictionary's `g + 1`. Checked against the rule rather than against an assumed equality,
+       which is what this said before `public` moved;
+    3. each block's postings are **exactly** its intended contiguous entity range, in the build's
+       numbering (`Bundle.build_number`);
+    3b. every entity's **source id lands in the same block the entity does** — the per-item half
+       of check 3, which a set comparison cannot make. A within-block permutation (which is what
+       decision 0073's Morton tiebreak produces) passes it; a cross-block reassignment does not.
+       Without this, the day `entity_id == source_id` stopped holding, nothing here noticed;
+    4. `container_boundary` really spans more than one Roaring container — entities either side of
+       a multiple of 65,536 in one shard, which is the only reason the case exists;
+    5. `full_100pct` spans every container of every shard the corpus reaches;
+    6. `all_in_one_tile`'s rows really share one depth-6 tile;
+    7. the crossover cases really sit either side of 5%;
+    8. `high_tail` lies wholly above `HIGH_ID_FLOOR` and another block reaches above it, reported
+       in `floor_failures`.
+    """
+    report = VerificationReport()
+    seg = bundle.segment(VIEW_ID)
+    report.row_count = seg.row_count
+    if seg.row_count != N_ITEMS:
+        report.failures.append(f"segment has {seg.row_count} rows, expected {N_ITEMS}")
+
+    # `public` is interned first, at term 0 (`per-point-attributes.md` §3.8), and the corpus's own
+    # terms follow it in first-appearance order over the source-ID-sorted points. So the corpus's
+    # term `g` is the dictionary's `g + 1`. Written as an offset derived from the rule rather than
+    # as a constant, so a reader can see which rule is being checked.
+    public_term = bundle.term_id_of(b"public")
+    if public_term != 0:
+        report.failures.append(
+            f"`public` interned as term {public_term}, not 0 — every block's dictionary id below "
+            "is derived from that rule, and the whole offset moves with it"
+        )
+    expected_offset = 1 if public_term == 0 else 0
+
+    source_of = source_of_entity(bundle)
+    for block in BLOCKS.values():
+        term_id = bundle.term_id_of(block.descriptor.encode("ascii"))
+        if term_id is None:
+            report.failures.append(f"block {block.name}: descriptor {block.descriptor!r} not interned")
+            continue
+        if term_id != block.term_id + expected_offset:
+            report.failures.append(
+                f"block {block.name}: descriptor {block.descriptor!r} interned as term {term_id}, "
+                f"not {block.term_id + expected_offset} — first-appearance interning after "
+                "`public` no longer holds, so a grant resolved by number names a different block"
+            )
+        postings = set(int(e) for e in bundle.postings(term_id).tolist())
+        report.blocks[block.name] = postings
+        built = {bundle.build_number(item) for item in postings}
+        if built != block.entities:
+            report.failures.append(
+                f"block {block.name}: postings are not the contiguous range "
+                f"[{block.start}, {block.stop}) — got {len(built)} entities in "
+                f"[{min(built, default=-1)}, {max(built, default=-1)}]. The build's "
+                f"signature-sorted assignment (§11.1) no longer puts this block's items in the "
+                f"entity range the fixture chose, so no catalogue member straddles what it claims to."
+            )
+            continue
+        # **Check 3b, and it is the one that was missing.** The comparison above is between sets,
+        # so it holds under any permutation *inside* the block — which is exactly what decision
+        # 0073 introduced, and exactly what made every per-item join in this suite silently wrong
+        # while this function reported green. Here the two spaces are compared item by item.
+        strayed = [
+            (entity, source_of[entity])
+            for entity in sorted(postings)
+            if not (block.start <= source_of[entity] < block.stop)
+        ]
+        if strayed:
+            entity, source = strayed[0]
+            report.failures.append(
+                f"block {block.name}: entity {entity} was assigned to source id {source}, which is "
+                f"outside [{block.start}, {block.stop}) — {len(strayed)} of {len(postings)} strayed. "
+                "A block's entity range and its source range must hold the same items, however the "
+                "two are ordered inside it, or every planted value this suite joins is a different "
+                "item's."
+            )
+
+    # Both container claims are derived from each shard's high water. A container is
+    # `(shard, number >> 16)`. `boundary` must span more than one, and full coverage every container
+    # of every shard the corpus reaches.
+    def containers(items: set[int]) -> set[tuple[int, int]]:
+        return {(shard, number >> 16) for shard, number in map(item_of_key, items)}
+
+    boundary_containers = containers(report.blocks.get("boundary", set()))
+    if len(boundary_containers) < 2:
+        report.failures.append(
+            f"container_boundary touches (shard, container) {sorted(boundary_containers)} — "
+            "fewer than two, so the case exercises no container arithmetic at all"
+        )
+    everything: set[int] = set()
+    for postings in report.blocks.values():
+        everything |= postings
+    expected_containers = {
+        (record["id"], container)
+        for record in bundle.shards
+        for container in range(((int(record["high_water"]) - 1) >> 16) + 1)
+    }
+    if containers(everything) != expected_containers:
+        report.failures.append(
+            f"full coverage touches (shard, container) {sorted(containers(everything))}, not "
+            f"{sorted(expected_containers)} — every container the corpus reaches"
+        )
+
+    # `high_tail`'s reason for existing, checked rather than described. The byte-scan needs a grant
+    # set whose admitted *and* denied entity ids — each item's number in its shard, which is what a
+    # leak would carry — both reach above `HIGH_ID_FLOOR`; that holds only while `high_tail` sits
+    # entirely above the floor and some other block still reaches above it too. Resizing
+    # `filler_tail` breaks the second half silently — the block boundaries move, no posting check
+    # notices, and the byte-scan's precondition assertion fires far from the cause.
+    high_tail = report.blocks.get("high_tail", set())
+    if not high_tail:
+        # Checked rather than skipped. `blocks.get(..., set())` followed by `if high_tail` would
+        # make deleting or renaming the block a silent pass — and `outside_above` below would still
+        # be satisfied by `filler_tail`, so `verify()` would report green on a corpus that cannot
+        # supply the byte-scan's grant set at all.
+        report.floor_failures.append(
+            "high_tail is absent from the corpus, so no grant set can put entity ids above "
+            f"{HIGH_ID_FLOOR} on both sides of it — see the layout note"
+        )
+    if high_tail and min(numbers_of(high_tail)) < HIGH_ID_FLOOR:
+        report.floor_failures.append(
+            f"high_tail starts at {min(numbers_of(high_tail))}, below the byte-scan floor "
+            f"{HIGH_ID_FLOOR} — its members are no longer all separable from the small integers "
+            "the harness emits"
+        )
+    outside_above = {e for e in numbers_of(everything - high_tail) if e >= HIGH_ID_FLOOR}
+    if not outside_above:
+        report.floor_failures.append(
+            f"no block outside high_tail reaches above {HIGH_ID_FLOOR}, so a grant of high_tail "
+            "leaves nothing denied above the floor and the byte-scan can only check one direction"
+        )
+
+    one_tile = report.blocks.get("one_tile", set())
+    tiles = _tiles_of(bundle, one_tile, ONE_TILE_DEPTH)
+    if len(tiles) != 1:
+        report.failures.append(
+            f"all_in_one_tile's entities occupy {len(tiles)} depth-{ONE_TILE_DEPTH} tiles, not 1"
+        )
+
+    lo = len(report.blocks.get("cross_lo", set())) / N_ITEMS
+    hi = (len(report.blocks.get("cross_lo", set())) + len(report.blocks.get("cross_hi", set()))) / N_ITEMS
+    if not lo < 0.05 < hi:
+        report.failures.append(
+            f"the crossover cases no longer straddle 5%: below={lo:.4%} above={hi:.4%}"
+        )
+
+    return report
+
+
+def _tiles_of(bundle: Bundle, entities: set[int], depth: int) -> set[int]:
+    """The depth-`depth` tiles the given entities' rows fall in, recomputed from geometry."""
+    seg = bundle.segment(VIEW_ID)
+    codes = bundle.row_morton_codes(VIEW_ID)
+    shift = 32 - 2 * depth
+    out: set[int] = set()
+    for row in range(seg.row_count):
+        if int(seg.entity_id[row]) in entities:
+            out.add(codes[row] >> shift)
+    return out

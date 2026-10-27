@@ -1,0 +1,159 @@
+{
+  "name": "@mosaicajs/components",
+  "version": "0.1.0",
+  "description": "The mosaica-* web components: a map, filters, counts, item cards and an explorer over a Mosaica server, plus a single-file bundle.",
+  "keywords": [
+    "mosaica",
+    "web-components",
+    "lit",
+    "map",
+    "visualisation"
+  ],
+  "homepage": "https://github.com/mosaicadb/mosaica/tree/main/clients/ts/components#readme",
+  "bugs": {
+    "url": "https://github.com/mosaicadb/mosaica/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mosaicadb/mosaica.git",
+    "directory": "clients/ts/components"
+  },
+  "license": "Apache-2.0",
+  "author": "mosaicadb",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "mosaica-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./store": {
+      "mosaica-source": "./src/store-element.ts",
+      "types": "./dist/store-element.d.ts",
+      "default": "./dist/store-element.js"
+    },
+    "./map": {
+      "mosaica-source": "./src/map.ts",
+      "types": "./dist/map.d.ts",
+      "default": "./dist/map.js"
+    },
+    "./status": {
+      "mosaica-source": "./src/status.ts",
+      "types": "./dist/status.d.ts",
+      "default": "./dist/status.js"
+    },
+    "./count": {
+      "mosaica-source": "./src/count.ts",
+      "types": "./dist/count.d.ts",
+      "default": "./dist/count.js"
+    },
+    "./item-card": {
+      "mosaica-source": "./src/item-card.ts",
+      "types": "./dist/item-card.d.ts",
+      "default": "./dist/item-card.js"
+    },
+    "./field-card": {
+      "mosaica-source": "./src/field-card.ts",
+      "types": "./dist/field-card.d.ts",
+      "default": "./dist/field-card.js"
+    },
+    "./filter-panel": {
+      "mosaica-source": "./src/filter-panel.ts",
+      "types": "./dist/filter-panel.d.ts",
+      "default": "./dist/filter-panel.js"
+    },
+    "./filter": {
+      "mosaica-source": "./src/filter.ts",
+      "types": "./dist/filter.d.ts",
+      "default": "./dist/filter.js"
+    },
+    "./cluster-filter": {
+      "mosaica-source": "./src/cluster-filter.ts",
+      "types": "./dist/cluster-filter.d.ts",
+      "default": "./dist/cluster-filter.js"
+    },
+    "./selection": {
+      "mosaica-source": "./src/selection.ts",
+      "types": "./dist/selection.d.ts",
+      "default": "./dist/selection.js"
+    },
+    "./layer-picker": {
+      "mosaica-source": "./src/layer-picker.ts",
+      "types": "./dist/layer-picker.d.ts",
+      "default": "./dist/layer-picker.js"
+    },
+    "./view-picker": {
+      "mosaica-source": "./src/view-picker.ts",
+      "types": "./dist/view-picker.d.ts",
+      "default": "./dist/view-picker.js"
+    },
+    "./key-picker": {
+      "mosaica-source": "./src/key-picker.ts",
+      "types": "./dist/key-picker.d.ts",
+      "default": "./dist/key-picker.js"
+    },
+    "./artifact-card": {
+      "mosaica-source": "./src/artifact-card.ts",
+      "types": "./dist/artifact-card.d.ts",
+      "default": "./dist/artifact-card.js"
+    },
+    "./hierarchy": {
+      "mosaica-source": "./src/hierarchy.ts",
+      "types": "./dist/hierarchy.d.ts",
+      "default": "./dist/hierarchy.js"
+    },
+    "./colour-editor": {
+      "mosaica-source": "./src/colour-editor.ts",
+      "types": "./dist/colour-editor.d.ts",
+      "default": "./dist/colour-editor.js"
+    },
+    "./explorer": {
+      "mosaica-source": "./src/explorer.ts",
+      "types": "./dist/explorer.d.ts",
+      "default": "./dist/explorer.js"
+    },
+    "./mosaica-components.js": "./dist/mosaica-components.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../scripts/build-package.mjs && npm run bundle",
+    "prepack": "node ../scripts/pack.mjs before",
+    "postpack": "node ../scripts/pack.mjs after",
+    "bundle": "vite build && node scripts/sri.mjs",
+    "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@lit/context": "^1.1.0",
+    "@mosaicajs/client": "0.1.0",
+    "@mosaicajs/deck": "0.1.0"
+  },
+  "peerDependencies": {
+    "@deck.gl/aggregation-layers": "^9.3.7",
+    "@deck.gl/core": "^9.3.7",
+    "@deck.gl/layers": "^9.3.7",
+    "@luma.gl/core": "^9.3.6",
+    "lit": "^3.3.0"
+  },
+  "devDependencies": {
+    "@deck.gl/aggregation-layers": "^9.3.7",
+    "@deck.gl/core": "^9.3.7",
+    "@deck.gl/layers": "^9.3.7",
+    "@luma.gl/core": "^9.3.6",
+    "happy-dom": "^21.0.4",
+    "lit": "^3.3.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.0",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.12",
+    "esbuild": "^0.28.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

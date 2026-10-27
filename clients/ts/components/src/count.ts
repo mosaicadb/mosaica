@@ -1,0 +1,84 @@
+import {LitElement, css, html, nothing, type TemplateResult} from 'lit';
+import {property} from 'lit/decorators.js';
+import {formatCount, formatMasked, type Count, type Masked} from '@mosaicajs/client';
+import {attachContextRoot, defineOnce} from './define.js';
+import {tokens} from './tokens.js';
+
+/**
+ * Use `<mosaica-count>` when you build your own panel from the store's projections and want its
+ * counts to look like those of the other elements. It has no store, so you set its properties
+ * yourself.
+ *
+ * A sample `Count` set in `count` shows as `4,812 of 12,465`, the marks shown out of those served.
+ * A `Masked` count set in `masked` shows as one figure, marked `≈` when it is an estimate. When
+ * both are set, the element shows `count`. It shows nothing for an inexact sample, or for any count
+ * while `stale` is set.
+ *
+ * @summary A single formatted count.
+ * @tagname mosaica-count
+ * @category Elements
+ * @csspart count - The figure, with `data-kind` (`sample`, `scalar` or `none`), `data-exact` (`true`
+ *   or `false`), `data-empty` (`true` if nothing is shown) and, with `figure="shown"`, `data-total`.
+ * @csspart label - The `label` text after the figure, shown only with the figure.
+ */
+export class MosaicaCount extends LitElement {
+  static override styles = [
+    tokens,
+    css`
+      :host {
+        display: inline;
+      }
+      [part='count'] {
+        color: var(--_mosaica-ink);
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+      }
+      [part='label'] {
+        color: var(--_mosaica-ink-2);
+        margin-left: 0.4em;
+      }
+    `
+  ];
+
+  /** A sample count: how many marks are shown of how many are served. */
+  @property({attribute: false}) accessor count: Count | null = null;
+  /** A masked count over the items the viewer may see. Shown if `count` is not set. */
+  @property({attribute: false}) accessor masked: Masked | null = null;
+  /** Shows nothing, for a count that is out of date because the data changed. */
+  @property({type: Boolean}) accessor stale = false;
+  /** Text rendered after the figure, such as `matched`. */
+  @property() accessor label = '';
+  /**
+   * `both` shows a sample as `shown of total`. `shown` shows the shown figure alone and puts the
+   * total in the `count` part's `data-total`.
+   */
+  @property() accessor figure: 'both' | 'shown' = 'both';
+  /** Shortens figures of a thousand or more to one decimal, as `16.8M`. */
+  @property({type: Boolean}) accessor compact = false;
+
+  override render(): TemplateResult | typeof nothing {
+    const kind = this.count ? 'sample' : this.masked ? 'scalar' : 'none';
+    const opts = {stale: this.stale, compact: this.compact};
+    const pair = this.count ? formatCount(this.count, opts) : this.masked ? formatMasked(this.masked, opts) : '';
+    const text = this.count && this.figure === 'shown' && pair !== '' ? pair.split(' of ')[0]! : pair;
+    const total = this.count && this.figure === 'shown' && pair !== '' ? pair.split(' of ')[1] : undefined;
+    const exact = this.count ? this.count.exact : this.masked ? this.masked.exact : false;
+    return html`<span
+        part="count"
+        data-kind=${kind}
+        data-exact=${exact ? 'true' : 'false'}
+        data-empty=${text === '' ? 'true' : 'false'}
+        data-total=${total ?? nothing}
+        >${text}</span
+      >${this.label && text !== '' ? html`<span part="label">${this.label}</span>` : nothing}`;
+  }
+}
+
+attachContextRoot();
+defineOnce('mosaica-count', MosaicaCount);
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'mosaica-count': MosaicaCount;
+  }
+}

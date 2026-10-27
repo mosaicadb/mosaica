@@ -1,0 +1,25 @@
+{
+  "name": "@mosaicajs/example-own-ui",
+  "license": "Apache-2.0",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The second TypeScript tutorial's page: a bare <mosaica-map> over 50,000 arXiv papers, driven by the page's own controls, results list and detail panel.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc",
+    "test:live": "vitest run test/page.live.test.ts"
+  },
+  "dependencies": {
+    "@mosaicajs/client": "*",
+    "@mosaicajs/components": "*"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "typescript": "^5.9.0",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.12"
+  }
+}

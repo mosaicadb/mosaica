@@ -1,0 +1,13 @@
+# Reference
+
+These pages state what each interface accepts and returns.
+
+- [HTTP API](http.md): the viewer, session and control planes, from the OpenAPI description.
+- [Wire framing](../openapi/README.md): the framed Arrow bodies of `POST /v1/viewport`, `POST /v1/artifacts/viewport`, `POST /v1/items`, `POST /v1/artifacts` and `POST /v1/aggregate`, with decoders in Python and JavaScript.
+- [Capabilities](capabilities.md): which route, function, method or command performs each core capability on each of the four surfaces.
+- [CLI](cli.md): the `mosaica` command and its subcommands.
+- [mosaica.toml](mosaica-toml.md): the deployment file, which says where the bundle is and how the server listens and bounds its work.
+- [schema.toml](schema-toml.md): the schema, which says what a build reads and what each view, vocabulary, attribute and layer is.
+- [Python client](python/index.md): the `mosaica` package.
+- [TypeScript client](typescript.md): the `@mosaicajs/client` package.
+- [Components](components.md): the web components, their attributes, events and styling.

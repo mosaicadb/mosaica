@@ -1,0 +1,69 @@
+{
+  "name": "@mosaicajs/client",
+  "version": "0.1.0",
+  "description": "The Mosaica browser client: a headless store over a Mosaica server's map, filters, counts, items and writes, with no DOM.",
+  "keywords": [
+    "mosaica",
+    "map",
+    "visualisation",
+    "arrow",
+    "client"
+  ],
+  "homepage": "https://github.com/mosaicadb/mosaica/tree/main/clients/ts/core#readme",
+  "bugs": {
+    "url": "https://github.com/mosaicadb/mosaica/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mosaicadb/mosaica.git",
+    "directory": "clients/ts/core"
+  },
+  "license": "Apache-2.0",
+  "author": "mosaicadb",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "mosaica-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./internal": {
+      "mosaica-source": "./src/internal.ts",
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    },
+    "./decode.worker": {
+      "mosaica-source": "./src/decode.worker.ts",
+      "types": "./dist/decode.worker.d.ts",
+      "default": "./dist/decode.worker.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": [
+    "./dist/decode.worker.js"
+  ],
+  "scripts": {
+    "build": "node ../scripts/build-package.mjs && rolldown src/decode.worker.ts --format esm --platform browser --minify --file dist/decode.worker.js",
+    "prepack": "node ../scripts/pack.mjs before",
+    "postpack": "node ../scripts/pack.mjs after",
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "apache-arrow": "^21.0.0",
+    "fzstd": "^0.1.1"
+  },
+  "devDependencies": {
+    "rolldown": "^1.2.1",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.12"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

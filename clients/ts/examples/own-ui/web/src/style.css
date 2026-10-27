@@ -1,0 +1,81 @@
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  font: 14px/1.4 system-ui, sans-serif;
+}
+
+header {
+  padding: 12px 20px;
+  border-bottom: 1px solid #ddd;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 240px 1fr 320px;
+  min-height: 0;
+}
+
+#controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+  border-right: 1px solid #ddd;
+}
+
+#controls label,
+#controls fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#controls fieldset {
+  margin: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid #ddd;
+}
+
+#controls .toggle {
+  flex-direction: row;
+  align-items: center;
+}
+
+aside {
+  padding: 16px 20px;
+  border-left: 1px solid #ddd;
+  overflow-y: auto;
+}
+
+#paper {
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ddd;
+}
+
+#paper h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+#results {
+  padding-left: 20px;
+}
+
+#results li {
+  margin-bottom: 6px;
+}
+
+mosaica-map {
+  --mosaica-map-height: 100%;
+}

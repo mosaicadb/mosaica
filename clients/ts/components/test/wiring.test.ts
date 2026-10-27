@@ -1,0 +1,553 @@
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import META_FIXTURE from '../../core/test/fixtures/meta.json' with {type: 'json'};
+import type {Store, TokenSupplier} from '@mosaicajs/client';
+import '../src/store-element.js';
+import '../src/status.js';
+import {MosaicaStatus} from '../src/status.js';
+import {MosaicaCount} from '../src/count.js';
+import {defineOnce} from '../src/define.js';
+import {emit} from '../src/base.js';
+import {deep, fakeStore, meta, mount, settle, status} from './fake-store.js';
+
+/**
+ * Store precedence (property, context, own, detached), an own store that follows its attributes,
+ * `defineOnce` on a double import, and events bubbling composed with decimal-string ids.
+ */
+
+afterEach(() => {
+  document.body.innerHTML = '';
+});
+
+// An own store opens a session at once; there is no server here, and the refusal is the point.
+globalThis.fetch = async () => {
+  throw new Error('no server in this test');
+};
+
+describe('store precedence', () => {
+  it('a .store property outranks a provider above', async () => {
+    const provided = fakeStore({status: status({status: 'empty'})});
+    const own = fakeStore({status: status({status: 'shown'})});
+    const host = await mount('<mosaica-store><mosaica-status></mosaica-status></mosaica-store>');
+    (host.querySelector('mosaica-store') as unknown as {store: unknown}).store = provided;
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    el.store = own;
+    await settle(host);
+    expect(el.activeStore).toBe(own);
+    expect(el.source).toBe('property');
+  });
+
+  it('a provider above answers at connection', async () => {
+    const provided = fakeStore({status: status({status: 'empty'})});
+    const host = await mount('<mosaica-store><mosaica-status></mosaica-status></mosaica-store>');
+    (host.querySelector('mosaica-store') as unknown as {store: unknown}).store = provided;
+    await settle(host);
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    expect(el.activeStore).toBe(provided);
+    expect(el.source).toBe('context');
+  });
+
+  it('a provider that connects later is adopted by a detached element — the context root replays', async () => {
+    const host = await mount('<div id="wrap"><mosaica-status></mosaica-status></div>');
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    expect(el.source).toBe('detached');
+    // Wrap it in a provider after the fact.
+    const provider = document.createElement('mosaica-store');
+    const wrap = host.querySelector('#wrap')!;
+    wrap.replaceChild(provider, el);
+    provider.append(el);
+    const provided = fakeStore({status: status({status: 'empty'})});
+    (provider as unknown as {store: unknown}).store = provided;
+    await settle(host);
+    expect(el.activeStore).toBe(provided);
+    expect(el.source).toBe('context');
+  });
+
+  it('a panel that cannot build its own store is detached without a provider or a property', async () => {
+    const host = await mount('<mosaica-status viewer-url="http://x" token="t"></mosaica-status>');
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    expect(el.source).toBe('detached');
+    expect(el.activeStore).toBeNull();
+  });
+
+  it('<mosaica-store> builds its own store from attributes and provides it', async () => {
+    const host = await mount('<mosaica-store viewer-url="http://127.0.0.1:1" token="t"><mosaica-status></mosaica-status></mosaica-store>');
+    const provider = host.querySelector('mosaica-store') as unknown as {source: string; activeStore: unknown; dispose(): void};
+    expect(provider.source).toBe('own');
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    expect(el.activeStore).toBe(provider.activeStore);
+    provider.dispose();
+  });
+
+  it('disconnecting never disposes the store; reconnecting keeps it', async () => {
+    const provided = fakeStore({status: status({status: 'empty'})});
+    const host = await mount('<mosaica-status></mosaica-status>');
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    el.store = provided;
+    await settle(host);
+    el.remove();
+    expect(provided.calls.some((c) => c.name === 'dispose')).toBe(false);
+    host.append(el);
+    await settle(host);
+    expect(el.activeStore).toBe(provided);
+  });
+});
+
+describe('configuration after connection', () => {
+  type Provider = HTMLElement & {source: string; activeStore: Store | null; store: Store | null; viewerUrl: string; token: string; authorise: TokenSupplier | null; dispose(): void};
+
+  async function bare(markup = '<mosaica-store><mosaica-status></mosaica-status></mosaica-store>') {
+    const host = await mount(markup);
+    const el = host.querySelector('mosaica-store') as Provider;
+    return {host, el, child: host.querySelector('mosaica-status') as MosaicaStatus};
+  }
+
+  it('builds a store from viewer-url alone, for an open server, and another once a token arrives', async () => {
+    const {host, el, child} = await bare();
+    expect(el.source).toBe('detached');
+    el.setAttribute('viewer-url', 'http://127.0.0.1:1');
+    await settle(host);
+    expect(el.source).toBe('own');
+    const tokenless = el.activeStore;
+    expect(child.activeStore).toBe(tokenless);
+    el.setAttribute('token', 't');
+    await settle(host);
+    expect(el.source).toBe('own');
+    expect(el.activeStore).not.toBe(tokenless);
+    expect(child.activeStore).toBe(el.activeStore);
+    el.dispose();
+  });
+
+  it('builds one from a token alone, asking the page’s own origin, and joins a path or a full URL to each route', async () => {
+    const asked: string[] = [];
+    const before = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      throw new Error('no server in this test');
+    };
+    try {
+      for (const [attribute, prefix] of [
+        ['', '/v1/'],
+        ['viewer-url="/mosaica/"', '/mosaica/v1/'],
+        ['viewer-url="http://127.0.0.1:1/base"', 'http://127.0.0.1:1/base/v1/']
+      ] as const) {
+        asked.length = 0;
+        const {host, el} = await bare(`<mosaica-store ${attribute} token="t"></mosaica-store>`);
+        await settle(host);
+        expect(el.source).toBe('own');
+        await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
+        expect(asked.every((url) => url.startsWith(prefix))).toBe(true);
+        el.dispose();
+        document.body.innerHTML = '';
+      }
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('reads an open server from viewer-url alone, sending no authorization, and shows another server’s refusal', async () => {
+    const sent: (string | null)[] = [];
+    let open = true;
+    const before = globalThis.fetch;
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get('authorization');
+      sent.push(authorization);
+      if (open) return new Response('{}', {status: 500});
+      return new Response(JSON.stringify({error: 'bad-credential', detail: 'send a session token as a bearer'}), {
+        status: 401,
+        headers: {'content-type': 'application/json'}
+      });
+    };
+    try {
+      let {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1"></mosaica-store>');
+      await settle(host);
+      expect(el.source).toBe('own');
+      await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0));
+      expect(sent.every((header) => header === null)).toBe(true);
+      el.dispose();
+      document.body.innerHTML = '';
+
+      open = false;
+      ({host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:2"></mosaica-store>'));
+      await settle(host);
+      await vi.waitFor(() => expect(el.activeStore!.get('status').refusal).toMatchObject({code: 'bad-credential', detail: 'send a session token as a bearer'}));
+      el.dispose();
+      document.body.innerHTML = '';
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('asks for 50 artifacts per tile where the page sets no artifacts-per-tile, and the number the page sets otherwise', async () => {
+    const meta = JSON.stringify(META_FIXTURE);
+    const before = globalThis.fetch;
+    const perTile: unknown[] = [];
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.endsWith('/v1/meta')) return new Response(meta, {headers: {'content-type': 'application/json'}});
+      if (url.endsWith('/v1/artifacts/viewport')) perTile.push(JSON.parse(String(init?.body)).per_tile);
+      return new Response('{}', {status: 500});
+    };
+    try {
+      for (const [attribute, asked] of [['', 50], [' artifacts-per-tile="7"', 7]] as const) {
+        perTile.length = 0;
+        const {host, el} = await bare(`<mosaica-store viewer-url="http://127.0.0.1:1"${attribute}></mosaica-store>`);
+        await settle(host);
+        const store = el.activeStore!;
+        await vi.waitFor(() => expect(store.get('meta')).not.toBeNull());
+        store.setLayers(['clusters/x']);
+        store.setView({bbox: [0, 0, 1000, 1000], zoom: 0, width: 512, height: 512});
+        await vi.waitFor(() => expect(perTile).toContain(asked), {timeout: 4_000});
+        el.dispose();
+        document.body.innerHTML = '';
+      }
+    } finally {
+      globalThis.fetch = before;
+    }
+  });
+
+  it('builds one from an authorise supplier set after insertion', async () => {
+    const {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1"></mosaica-store>');
+    el.authorise = async () => ({token: 't', expiresAt: 1});
+    await settle(host);
+    expect(el.source).toBe('own');
+    el.dispose();
+  });
+
+  it('rebuilds on a changed token, viewer-url or authorise, disposing the store it built', async () => {
+    const {host, el, child} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1" token="a"><mosaica-status></mosaica-status></mosaica-store>');
+    const built: Store[] = [el.activeStore!];
+    const disposed: Store[] = [];
+    const watch = (s: Store) => vi.spyOn(s, 'dispose').mockImplementation(() => void disposed.push(s));
+    watch(built[0]!);
+    for (const change of [() => (el.token = 'b'), () => (el.viewerUrl = 'http://127.0.0.1:2'), () => (el.authorise = async () => ({token: 'c', expiresAt: 1}))]) {
+      change();
+      await settle(host);
+      const next = el.activeStore!;
+      expect(next).not.toBe(built.at(-1));
+      expect(disposed).toEqual(built);
+      expect(child.activeStore).toBe(next);
+      built.push(next);
+      watch(next);
+    }
+    // No token and no supplier: a store that sends none, as an open server takes.
+    el.token = '';
+    el.authorise = null;
+    await settle(host);
+    expect(el.source).toBe('own');
+    built.push(el.activeStore!);
+    watch(el.activeStore!);
+    // Nothing to build from: detached, and the last one disposed.
+    el.viewerUrl = '';
+    await settle(host);
+    expect(el.source).toBe('detached');
+    expect(el.activeStore).toBeNull();
+    expect(child.activeStore).toBeNull();
+    expect(disposed).toEqual(built);
+  });
+
+  it('builds a new store when another authorise function is set, through null in one task too', async () => {
+    const {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1"></mosaica-store>');
+    const asked: string[] = [];
+    // An expiry in the past, so the store asks its supplier on every request.
+    const supplier = (name: string) => async () => {
+      asked.push(name);
+      return {token: name, expiresAt: 1};
+    };
+    el.authorise = supplier('first');
+    await settle(host);
+    const first = el.activeStore!;
+    const firstDisposed = vi.spyOn(first, 'dispose');
+    el.authorise = supplier('second');
+    await settle(host);
+    const second = el.activeStore!;
+    expect(second).not.toBe(first);
+    expect(firstDisposed).toHaveBeenCalled();
+    asked.length = 0;
+    await second.browse({layer: 'x'}).catch(() => {});
+    expect(asked).toEqual(['second']);
+
+    // Cleared and set again before the element updates.
+    const secondDisposed = vi.spyOn(second, 'dispose');
+    el.authorise = null;
+    el.authorise = supplier('third');
+    await settle(host);
+    expect(el.activeStore).not.toBe(second);
+    expect(secondDisposed).toHaveBeenCalled();
+    asked.length = 0;
+    await el.activeStore!.browse({layer: 'x'}).catch(() => {});
+    expect(asked).toEqual(['third']);
+    el.dispose();
+  });
+
+  it('keeps its own store, undisposed, when removed and appended again', async () => {
+    const {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1" token="a"></mosaica-store>');
+    const built = el.activeStore!;
+    const disposed = vi.spyOn(built, 'dispose');
+    el.remove();
+    await settle(host);
+    host.append(el);
+    await settle(host);
+    expect(el.activeStore).toBe(built);
+    expect(el.source).toBe('own');
+    expect(disposed).not.toHaveBeenCalled();
+    el.dispose();
+  });
+
+  it('an explorer that detaches passes null to its pieces, which detach with it', async () => {
+    await import('../src/explorer.js');
+    const host = await mount('<mosaica-explorer viewer-url="http://127.0.0.1:1" token="a"></mosaica-explorer>');
+    const explorer = host.querySelector('mosaica-explorer') as unknown as Provider;
+    const map = explorer.shadowRoot!.querySelector('mosaica-map') as unknown as Provider;
+    expect(map.activeStore).toBe(explorer.activeStore);
+    expect(map.source).toBe('context');
+    explorer.token = '';
+    explorer.viewerUrl = '';
+    await settle(host);
+    expect(explorer.source).toBe('detached');
+    expect(map.activeStore).toBeNull();
+    expect(map.source).toBe('detached');
+  });
+
+  it('keeps a store handed in by property through a configuration change, and never disposes it', async () => {
+    const {host, el} = await bare('<mosaica-store viewer-url="http://127.0.0.1:1" token="a"></mosaica-store>');
+    const own = el.activeStore!;
+    const ownDisposed = vi.spyOn(own, 'dispose');
+    const given = fakeStore({status: status({})});
+    el.store = given;
+    await settle(host);
+    expect(el.source).toBe('property');
+    expect(ownDisposed).toHaveBeenCalled();
+    el.token = 'b';
+    await settle(host);
+    expect(el.activeStore).toBe(given);
+    // Withdrawn, the element falls back to building its own from what it is configured with.
+    el.store = null;
+    await settle(host);
+    expect(el.source).toBe('own');
+    el.dispose();
+    expect(given.calls.some((c) => c.name === 'dispose')).toBe(false);
+  });
+
+  it('keeps a store from a provider through its own configuration, and never disposes it', async () => {
+    const provided = fakeStore({status: status({})});
+    const host = await mount('<mosaica-store><mosaica-store id="inner"></mosaica-store></mosaica-store>');
+    (host.querySelector('mosaica-store') as Provider).store = provided;
+    await settle(host);
+    const inner = host.querySelector('#inner') as Provider;
+    expect(inner.source).toBe('context');
+    inner.viewerUrl = 'http://127.0.0.1:1';
+    inner.token = 't';
+    await settle(host);
+    expect(inner.activeStore).toBe(provided);
+    inner.dispose();
+    expect(provided.calls.some((c) => c.name === 'dispose')).toBe(false);
+  });
+
+  for (const tag of ['mosaica-map', 'mosaica-explorer']) {
+    it(`${tag} builds its own store from attributes set after insertion`, async () => {
+      await import('../src/explorer.js');
+      const host = await mount(`<${tag}></${tag}>`);
+      const el = host.querySelector(tag) as unknown as Provider;
+      expect(el.source).toBe('detached');
+      el.viewerUrl = 'http://127.0.0.1:1';
+      el.token = 't';
+      await settle(host);
+      expect(el.source).toBe('own');
+      el.dispose();
+      expect(el.activeStore).toBeNull();
+    });
+  }
+});
+
+describe('defineOnce', () => {
+  it('a second definition of a tag is a no-op, so a double import does not throw', () => {
+    expect(customElements.get('mosaica-status')).toBe(MosaicaStatus);
+    expect(() => defineOnce('mosaica-status', class extends HTMLElement {})).not.toThrow();
+    expect(customElements.get('mosaica-status')).toBe(MosaicaStatus);
+    expect(() => defineOnce('mosaica-count', MosaicaCount)).not.toThrow();
+  });
+});
+
+describe('events', () => {
+  it('bubble through shadow roots, composed, carrying ids as decimal strings', async () => {
+    const host = await mount('<mosaica-store><mosaica-status></mosaica-status></mosaica-store>');
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    const inner = el.shadowRoot!.querySelector('[part="strip"]') as HTMLElement;
+    let seen: CustomEvent | null = null;
+    document.body.addEventListener('mosaica-pick', (e) => (seen = e as CustomEvent));
+    emit(inner, 'mosaica-pick', {id: (2n ** 64n - 1n).toString(10)});
+    expect(seen).not.toBeNull();
+    expect(seen!.composed).toBe(true);
+    expect(seen!.bubbles).toBe(true);
+    expect(seen!.detail.id).toBe('18446744073709551615');
+  });
+});
+
+describe('event details', () => {
+  it('are typed on HTMLElementEventMap for a plain TypeScript listener', () => {
+    const el = document.createElement('div');
+    const seen: string[] = [];
+    el.addEventListener('mosaica-clausechange', (e) => seen.push(`${e.detail.layer}:${e.detail.id}:${e.detail.verb}`));
+    el.addEventListener('mosaica-levelchange', (e) => seen.push(String(e.detail.level)));
+    // @ts-expect-error: a close names what closed, and carries no id.
+    el.addEventListener('mosaica-close', (e) => seen.push(e.detail.id));
+    emit(el, 'mosaica-clausechange', {id: '7', layer: 'mesh', outside: false, verb: 'highlight', on: true});
+    emit(el, 'mosaica-levelchange', {level: 2});
+    expect(seen).toEqual(['mesh:7:highlight', '2']);
+  });
+
+  it('carry an opened artifact’s count as a decimal string, so the detail is JSON', async () => {
+    const {MosaicaMap} = await import('../src/map.js');
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as InstanceType<typeof MosaicaMap>;
+    const store = fakeStore({status: status({})});
+    map.store = store;
+    await settle(host);
+    const details: unknown[] = [];
+    host.addEventListener('mosaica-artifactopen', (e) => details.push(e.detail));
+    store.set('selection', {item: null, itemRefusal: null, artifact: {id: 9n, detail: {layer: 'l', key: null, maskedCount: 2n ** 63n, centroid: null, box: null, shape: null}}, artifactRefusal: null});
+    expect(JSON.parse(JSON.stringify(details))).toEqual([{id: '9', detail: {layer: 'l', key: null, maskedCount: '9223372036854775808', centroid: null, box: null, shape: null}}]);
+  });
+
+  it('a click picks with the id alone, and the record arriving opens the item with it however it was selected; a refusal opens nothing', async () => {
+    const {MosaicaMap} = await import('../src/map.js');
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as InstanceType<typeof MosaicaMap>;
+    const store = fakeStore({status: status({})});
+    map.store = store;
+    await settle(host);
+    const seen: [string, unknown][] = [];
+    host.addEventListener('mosaica-pick', (e) => seen.push(['pick', e.detail]));
+    host.addEventListener('mosaica-itemopen', (e) => {
+      expect(e.bubbles && e.composed).toBe(true);
+      seen.push(['itemopen', e.detail]);
+    });
+    (map as unknown as {onClick(info: unknown): void}).onClick({index: 0, x: 5, y: 5, sourceLayer: {id: 'marks-p0', props: {mosaicaIds: new BigUint64Array([2n ** 63n])}}, coordinate: [5, 5]});
+    const record = {fields: {name: 'Ada'}, labels: [], views: [], scoped: {}};
+    store.set('selection', {item: {id: 2n ** 63n, detail: record}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    // Selected without a click, as by `Store.pick`.
+    store.set('selection', {item: {id: 3n, detail: record}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    store.set('selection', {item: null, itemRefusal: {code: 'unknown', detail: 'no', status: 404}, artifact: null, artifactRefusal: null});
+    expect(seen).toEqual([
+      ['pick', {id: '9223372036854775808'}],
+      ['itemopen', {id: '9223372036854775808', record}],
+      ['itemopen', {id: '3', record}]
+    ]);
+  });
+
+  it('carry an artifact selection’s id as a decimal string, so the detail is JSON', async () => {
+    const {MosaicaMap} = await import('../src/map.js');
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as InstanceType<typeof MosaicaMap>;
+    const store = fakeStore({status: status({})});
+    map.store = store;
+    await settle(host);
+    const details: unknown[] = [];
+    host.addEventListener('mosaica-selectchange', (e) => details.push(e.detail));
+    const shape = {kind: 'artifact', id: 2n ** 64n - 1n} as const;
+    map.select(shape);
+    store.set('region', {shape, status: 'shown', refusal: null, visible: null, matched: {value: 3, exact: true}, served: {shown: 3, total: 3, exact: true}, verdict: null, held: {ids: new BigUint64Array(), positions: new Float32Array(), count: 0}});
+    expect(details).toHaveLength(2);
+    for (const d of details) expect(JSON.parse(JSON.stringify(d)).shape).toEqual({kind: 'artifact', id: '18446744073709551615'});
+  });
+});
+
+describe('<mosaica-map> defaults', () => {
+  it('draws the points and no density unless a host asks otherwise', async () => {
+    await import('../src/map.js');
+    type Display = {density: string; noPoints: boolean};
+    const map = document.createElement('mosaica-map') as unknown as Display;
+    expect([map.density, map.noPoints]).toEqual(['none', false]);
+    const asked = document.createElement('div');
+    asked.innerHTML = '<mosaica-map density="hex" no-points></mosaica-map>';
+    document.body.append(asked);
+    const el = asked.firstElementChild as unknown as Display;
+    expect([el.density, el.noPoints]).toEqual(['hex', true]);
+    asked.remove();
+  });
+});
+
+describe('<mosaica-map> display', () => {
+  it('keys density’s colours while they encode counts, and not for the warm-grey wash under the points', async () => {
+    await import('../src/map.js');
+    const host = await mount('<mosaica-map density="smooth"></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; density: string; noPoints: boolean; densityColours: string};
+    map.store = fakeStore({meta: meta(), status: status({})});
+    await settle(host);
+    expect(deep(host, '[part="density-key"]')).toBeNull();
+    map.noPoints = true;
+    await settle(host);
+    expect(deep(host, '[part="density-key"]')).not.toBeNull();
+    map.noPoints = false;
+    map.densityColours = 'magma';
+    await settle(host);
+    expect(deep(host, '[part="density-key"]')).not.toBeNull();
+    map.density = 'contours';
+    await settle(host);
+    expect(deep(host, '[part="density-key"]')).toBeNull();
+  });
+
+  it('shares the palette and ramp a host sets with every element over its store', async () => {
+    await import('../src/map.js');
+    const {colouringOf} = await import('../src/colouring.js');
+    const host = await mount('<mosaica-map category-palette="dark2" ramp="cividis" ramp-scale="log" ramp-reverse></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown};
+    const store = fakeStore({meta: meta(), status: status({})});
+    map.store = store;
+    await settle(host);
+    const {palette, ramp, scale, reverse} = colouringOf(store);
+    expect({palette, ramp, scale, reverse}).toEqual({palette: 'dark2', ramp: 'cividis', scale: 'log', reverse: true});
+  });
+
+  it('sizes by the column a host names, between the sizes it sets, shared with every element over its store', async () => {
+    await import('../src/map.js');
+    const {sizingOf} = await import('../src/colouring.js');
+    const host = await mount('<mosaica-map size-by="citations" size-min="3" size-max="11" size-scale="rank"></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; sizeBy: string};
+    const store = fakeStore({meta: meta(), status: status({})});
+    map.store = store;
+    await settle(host);
+    // Sized by rank, the store is asked to keep a sample of the column's values.
+    expect(store.calls.filter((c) => c.name === 'setSizeBy').map((c) => c.args)).toEqual([['citations', {rank: true}]]);
+    expect(sizingOf(store)).toEqual({min: 3, max: 11, scale: 'rank'});
+    map.sizeBy = 'none';
+    await settle(host);
+    expect(store.calls.filter((c) => c.name === 'setSizeBy').map((c) => c.args[0])).toEqual(['citations', null]);
+  });
+
+  it('asks the store to sample the size column when the scale moves to rank, and to stop when it moves off', async () => {
+    await import('../src/map.js');
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; sizeScale: string};
+    const store = fakeStore({meta: meta(), status: status({})});
+    store.set('legend', {...store.get('legend'), sizeBy: 'citations'});
+    map.store = store;
+    await settle(host);
+    map.sizeScale = 'rank';
+    await settle(host);
+    map.sizeScale = 'log';
+    await settle(host);
+    expect(store.calls.filter((c) => c.name === 'setSizeBy').map((c) => c.args)).toEqual([
+      ['citations', {rank: true}],
+      ['citations', {rank: false}]
+    ]);
+  });
+
+  it('ignores a size that is not a finite number above zero, as it ignores such a budget', async () => {
+    await import('../src/map.js');
+    const {sizingOf} = await import('../src/colouring.js');
+    const host = await mount('<mosaica-map size-min="-3" size-max="NaN"></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; sizeMin: number; sizeMax: number};
+    const store = fakeStore({meta: meta(), status: status({})});
+    map.store = store;
+    await settle(host);
+    expect(sizingOf(store)).toEqual({min: 2, max: 9, scale: 'linear'});
+    map.sizeMax = Infinity;
+    map.sizeMin = 0;
+    await settle(host);
+    expect(sizingOf(store)).toEqual({min: 2, max: 9, scale: 'linear'});
+    map.sizeMax = 12;
+    await settle(host);
+    expect(sizingOf(store).max).toBe(12);
+  });
+});

@@ -1,0 +1,79 @@
+{
+  "name": "@mosaicajs/react",
+  "version": "0.1.0",
+  "description": "React hooks over the headless store, and typed wrappers for the mosaica-* elements behind a separate entry.",
+  "keywords": [
+    "mosaica",
+    "react",
+    "hooks",
+    "map",
+    "visualisation"
+  ],
+  "homepage": "https://github.com/mosaicadb/mosaica/tree/main/clients/ts/react#readme",
+  "bugs": {
+    "url": "https://github.com/mosaicadb/mosaica/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mosaicadb/mosaica.git",
+    "directory": "clients/ts/react"
+  },
+  "license": "Apache-2.0",
+  "author": "mosaicadb",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "mosaica-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./components": {
+      "mosaica-source": "./src/components.ts",
+      "types": "./dist/components.d.ts",
+      "default": "./dist/components.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node ../scripts/build-package.mjs",
+    "prepack": "node ../scripts/pack.mjs before",
+    "postpack": "node ../scripts/pack.mjs after",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@mosaicajs/client": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@lit/react": "^1.0.0",
+    "@mosaicajs/components": "^0.1.0",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@lit/react": {
+      "optional": true
+    },
+    "@mosaicajs/components": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@lit/react": "^1.0.8",
+    "@mosaicajs/components": "^0.1.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "happy-dom": "^21.0.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.12"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,421 @@
+{
+  "api_version": 1,
+  "bundle_format": 35,
+  "declared_scalars": [
+    {
+      "analyser": null,
+      "arrow_type": "u8",
+      "category": {
+        "kind": "declared",
+        "visibility": "public",
+        "vocabulary": "colour"
+      },
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "colour",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "u16",
+      "category": {
+        "kind": "declared",
+        "visibility": "public",
+        "vocabulary": "family"
+      },
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "family",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "u16",
+      "category": {
+        "kind": "discovered",
+        "visibility": "derived",
+        "vocabulary": "tag"
+      },
+      "homes": [
+        "rendered",
+        "value_column"
+      ],
+      "index": false,
+      "name": "tag",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "bool",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "flag",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "u8",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "small",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "u16",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "medium",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "u32",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "rank",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "u64",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "hash",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "i8",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "tiny",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "i16",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "short",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "i32",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "offset",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "i64",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "long",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "timestamp_us",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "at",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "f32",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "ratio",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "f64",
+      "category": null,
+      "homes": [
+        "rendered"
+      ],
+      "index": false,
+      "name": "exact",
+      "render": true,
+      "unique": false
+    },
+    {
+      "analyser": "unicode/icu4x-2.2/p1",
+      "arrow_type": "text",
+      "category": null,
+      "homes": [
+        "record"
+      ],
+      "index": true,
+      "name": "title",
+      "render": false,
+      "unique": false
+    },
+    {
+      "analyser": null,
+      "arrow_type": "keyword",
+      "category": null,
+      "homes": [
+        "value_column"
+      ],
+      "index": true,
+      "name": "code",
+      "render": false,
+      "unique": false
+    }
+  ],
+  "filter_operands": [
+    {
+      "column": "colour",
+      "family": "category",
+      "operands": [
+        "eq",
+        "in"
+      ]
+    },
+    {
+      "column": "family",
+      "family": "category",
+      "operands": [
+        "eq",
+        "in"
+      ]
+    },
+    {
+      "column": "tag",
+      "family": "category",
+      "operands": [
+        "eq",
+        "in"
+      ]
+    },
+    {
+      "column": "flag",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "small",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "medium",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "rank",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "hash",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "tiny",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "short",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "offset",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "long",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "at",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "ratio",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "exact",
+      "family": "numeric",
+      "operands": [
+        "eq",
+        "in",
+        "range"
+      ]
+    },
+    {
+      "column": "title",
+      "family": "text",
+      "operands": [
+        "match",
+        "phrase"
+      ]
+    },
+    {
+      "column": "code",
+      "family": "keyword",
+      "operands": [
+        "eq",
+        "in",
+        "prefix",
+        "contains"
+      ]
+    }
+  ],
+  "groups": [],
+  "layers": [],
+  "scoped_scalars": [],
+  "selection": {
+    "k_max_marks": 500,
+    "k_min": 2,
+    "max_aggregate_bins": 1000,
+    "max_aggregate_cells": 1048576,
+    "max_aggregate_groupings": 16,
+    "max_aggregate_named": 1000,
+    "max_aggregate_top": 1000,
+    "max_artifacts_per_tile": 1000,
+    "max_browse_rows": 200,
+    "max_category_values": 1000,
+    "max_k": 1000,
+    "max_page_bytes": 67108864,
+    "max_page_rows": 100000,
+    "max_region_cells": 262144,
+    "max_region_vertices": 10000,
+    "max_shape_vertices": 1000000,
+    "max_suggest_set_entities": 10000000,
+    "max_suggestion_walk": 100000,
+    "max_suggestions": 20,
+    "max_tiles_per_request": 262144,
+    "max_underlay_offset": 4,
+    "theta_target_marks": 16
+  },
+  "views": [
+    {
+      "display_name": "s0",
+      "group": null,
+      "id": "s0",
+      "key": null,
+      "metadata": null,
+      "projection": "none",
+      "quantisation": {
+        "x_max": 1000,
+        "x_min": 0,
+        "y_max": 1000,
+        "y_min": 0
+      },
+      "tile": null,
+      "tile_scheme": null,
+      "world_aspect": null
+    }
+  ]
+}

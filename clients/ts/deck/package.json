@@ -1,0 +1,69 @@
+{
+  "name": "@mosaicajs/deck",
+  "version": "0.1.0",
+  "description": "A deck.gl layer that draws a Mosaica store, for a host with its own Deck.",
+  "keywords": [
+    "mosaica",
+    "deck.gl",
+    "map",
+    "visualisation",
+    "webgl"
+  ],
+  "homepage": "https://github.com/mosaicadb/mosaica/tree/main/clients/ts/deck#readme",
+  "bugs": {
+    "url": "https://github.com/mosaicadb/mosaica/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mosaicadb/mosaica.git",
+    "directory": "clients/ts/deck"
+  },
+  "license": "Apache-2.0",
+  "author": "mosaicadb",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "mosaica-source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./internal": {
+      "mosaica-source": "./src/internal.ts",
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "node ../scripts/build-package.mjs",
+    "prepack": "node ../scripts/pack.mjs before",
+    "postpack": "node ../scripts/pack.mjs after",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@mosaicajs/client": "0.1.0"
+  },
+  "peerDependencies": {
+    "@deck.gl/aggregation-layers": "^9.3.7",
+    "@deck.gl/core": "^9.3.7",
+    "@deck.gl/layers": "^9.3.7",
+    "@luma.gl/core": "^9.3.6"
+  },
+  "devDependencies": {
+    "@deck.gl/aggregation-layers": "^9.3.7",
+    "@deck.gl/core": "^9.3.7",
+    "@deck.gl/layers": "^9.3.7",
+    "@luma.gl/core": "^9.3.6",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.12"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

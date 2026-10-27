@@ -1,0 +1,1385 @@
+//! An ingest batch on the handler's side: each row resolved to the item it names, compared with
+//! what that item stores, and the rows that write something submitted to the write executor.
+//!
+//! The handler reads one generation for the whole batch, off the executor thread. It resolves
+//! every row through [`mosaica_lifecycle::resolve`], then reads what each named item stores, in
+//! ascending order by shard and entity, and decides the row:
+//!
+//! - a row the rule refuses writes nothing, and the receipt names it with its reason; a strict
+//!   batch is refused whole at its first refused row instead. A row naming no item and carrying no
+//!   position is refused as naming no item, since it cannot create one;
+//! - a row naming no item creates one, in the batch's view, at the row's position;
+//! - a row naming an item and changing nothing stored writes nothing and is counted unchanged;
+//! - a row naming an item that has no row in the batch's view, carrying a position there and
+//!   changing nothing else, adds the item to the view in place: the item keeps its entity, and the
+//!   flush places the row below the view's newest rows where the item is older than them;
+//! - any other row edits the item: its entity is deleted and a new one carries everything the item
+//!   holds, the row's values over the stored ones, in every view the item is in. The item keeps its
+//!   number and so its `mosaica_id`.
+//!
+//! The rows that create, add or edit are submitted with the unique entries' sequence number the
+//! handler read at, and each edit with the views its item held. The executor checks, from memory,
+//! what can have moved since: a named item deleted, edited or added to a view, a value given a
+//! holder. Where something has, it resolves and decides the batch again itself, against what the
+//! items hold then, by the same rule ([`Resolver::plan_ingest`]), and the batch applies to the
+//! items where they are.
+
+use std::collections::BTreeMap;
+
+use mosaica_lifecycle::resolve::{self, Identifier, Key, Reason, Refusal, RowIdentity};
+use mosaica_lifecycle::{
+    BatchArtifacts, ExecError, IngestRow, RowOutcome, RowReceipt, Slot, UnallocatedEdit,
+    UnallocatedRow, WalScalar,
+};
+use mosaica_store::manifest::DeclaredScalar;
+use mosaica_store::unique::{key_of, value_text};
+use mosaica_types::{EntityId, ItemAt, MosaicaId, TermId};
+use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::engine::Engine;
+use crate::resolver::{Resolver, WriteScope};
+use crate::write::joined::{self, BlobRow};
+use crate::write::{AcceptError, IngestSubmission, SubmittedEdit};
+use crate::Generation;
+
+/// An ingest batch as the caller sent it.
+#[derive(Debug, Clone)]
+pub struct IngestRequest {
+    /// The caller that sent the batch. A retry is matched by it and `batch_id` together, so two
+    /// callers' batches under one id are two batches.
+    pub principal: String,
+    pub batch_id: String,
+    pub body_hash: [u8; 32],
+    /// The view the batch's positions and group-scoped values are in, resolved by the caller to
+    /// a declared view's id; `None` for a batch that names no view.
+    pub view: Option<String>,
+    pub rows: Vec<IngestRow>,
+    /// The artifacts the batch's rows name in a column named for a layer.
+    pub artifacts: BatchArtifacts,
+    /// Refuse the whole batch at its first refused row, instead of applying the other rows.
+    pub strict: bool,
+    /// The batch carries a `mosaica_id` column, whether or not any row gives one.
+    pub mosaica_id_column: bool,
+}
+
+/// What an accepted batch did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IngestReceipt {
+    /// One per row, in request order: the item the row created or named, or none for a refused
+    /// row.
+    pub mosaica_ids: Vec<Option<MosaicaId>>,
+    /// The rows the identity rule refused, by position in the request, with the reason.
+    pub refused: Vec<(usize, Reason)>,
+    pub created: u64,
+    /// Rows that changed an item they named.
+    pub edited: u64,
+    /// Rows that added an existing item to the batch's view.
+    pub added: u64,
+    /// Rows that named an item and changed nothing.
+    pub unchanged: u64,
+    /// Artifacts the batch's membership columns created, for keys no artifact held on an open
+    /// layer.
+    pub minted: u64,
+    /// Memberships the batch's membership columns added, to artifacts it created and to held
+    /// ones alike. A row whose one change is a membership changes the artifact, not the item, and
+    /// is counted unchanged.
+    pub joined: u64,
+    /// The batch id was accepted before with this body. The `mosaica_id`s are the first
+    /// acceptance's, and every count is zero, since this request changed nothing.
+    pub replayed: bool,
+    /// The rows that created an item indexed under more than
+    /// [`mosaica_authz::MAX_KEYS_PER_ITEM`] keys, by position in the request. They are stored all
+    /// the same.
+    pub over_bound: Vec<usize>,
+}
+
+impl IngestReceipt {
+    fn of(receipt: &[RowReceipt], minted: u64, joined: u64, replayed: bool) -> IngestReceipt {
+        let count = |outcome| {
+            if replayed {
+                return 0;
+            }
+            receipt.iter().filter(|r| r.outcome == outcome).count() as u64
+        };
+        IngestReceipt {
+            mosaica_ids: receipt
+                .iter()
+                .map(|r| r.mosaica_id.map(MosaicaId::new))
+                .collect(),
+            refused: receipt
+                .iter()
+                .enumerate()
+                .filter_map(|(at, r)| match r.outcome {
+                    RowOutcome::Refused(reason) => Some((at, reason)),
+                    _ => None,
+                })
+                .collect(),
+            created: count(RowOutcome::Created),
+            edited: count(RowOutcome::Edited),
+            added: count(RowOutcome::Added),
+            unchanged: count(RowOutcome::Unchanged),
+            minted: if replayed { 0 } else { minted },
+            joined: if replayed { 0 } else { joined },
+            replayed,
+            over_bound: receipt
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.over_bound)
+                .map(|(at, _)| at)
+                .collect(),
+        }
+    }
+}
+
+/// The edits an earlier resolution of a batch made, by request row and the item edited.
+pub(crate) type Prepared = FxHashMap<(usize, ItemAt), SubmittedEdit>;
+
+/// A batch resolved against one generation: the rows it writes, and what every request row
+/// became.
+#[derive(Default)]
+pub(crate) struct Planned {
+    /// The rows the batch writes: items it creates, and items it adds to its view in place.
+    pub(crate) rows: Vec<UnallocatedRow>,
+    /// The items the batch moves to new entities.
+    pub(crate) edits: Vec<SubmittedEdit>,
+    /// One per row of the request: the written row it became, or the item it left unchanged.
+    pub(crate) slots: Vec<Slot>,
+    /// The unique values the created and edited rows set, as `(declared position, key widened)`.
+    pub(crate) keys: Vec<(u16, u128)>,
+    /// The unique values the refused rows carry; the executor resolves again where one gains a
+    /// holder.
+    pub(crate) refused_keys: Vec<(u16, u128)>,
+    /// The items holding the values of rows refused as `value_held`; the executor resolves again
+    /// where one has gone.
+    pub(crate) held_by: Vec<ItemAt>,
+    /// The artifacts the written rows name in a column named for a layer, resolved and grown when
+    /// the window closes, in the same commit as the rows.
+    pub(crate) artifacts: BatchArtifacts,
+    /// The request rows creating or editing an item indexed under more keys than
+    /// [`mosaica_authz::MAX_KEYS_PER_ITEM`].
+    pub(crate) over_bound: Vec<u32>,
+}
+
+/// The keys row `at`'s labels index its item under, by the rule a build applies to its access
+/// column ([`mosaica_authz::index_keys`]).
+fn index_keys(at: usize, labels: &[Vec<u8>]) -> Result<Vec<Vec<u8>>, AcceptError> {
+    let texts = labels
+        .iter()
+        .map(|label| std::str::from_utf8(label))
+        .collect::<Result<Vec<&str>, _>>()
+        .map_err(|_| {
+            AcceptError::Contract(format!(
+                "row {at}, access: a label is not UTF-8; write each label as UTF-8 text"
+            ))
+        })?;
+    mosaica_authz::index_keys(texts)
+        .map_err(|e| AcceptError::Contract(format!("row {at}, access: {e}")))
+}
+
+impl Engine {
+    /// Take an ingest batch: resolve it, write what it changes, and answer what it did. Nothing
+    /// is written for a batch whose every row changes nothing.
+    ///
+    /// Blocking: a tokio handler calls this inside `spawn_blocking`.
+    pub fn ingest(&self, request: IngestRequest) -> Result<IngestReceipt, AcceptError> {
+        self.ingest_as(request, WriteScope::All)
+    }
+
+    /// [`Engine::ingest`] by a writer of `scope` ([`WriteScope`]); a row setting a label its terms
+    /// do not satisfy is refused as `label_not_held`.
+    pub fn ingest_as(
+        &self,
+        request: IngestRequest,
+        scope: WriteScope,
+    ) -> Result<IngestReceipt, AcceptError> {
+        #[cfg(feature = "fault-injection")]
+        self.switches.park_ingest_while_wanted();
+        // A stepped-down node would bury what it accepts under a manifest assembled from older
+        // served state; denies are not gated.
+        if self.any_partition_stepped_down() {
+            return Err(AcceptError::SteppedDown);
+        }
+        if let Some((held_hash, receipt)) = self
+            .write
+            .live()
+            .accepted_batch(&request.principal, &request.batch_id)
+        {
+            if held_hash == request.body_hash {
+                return Ok(IngestReceipt::of(&receipt, 0, 0, true));
+            }
+            return Err(AcceptError::Exec(ExecError::BatchConflict {
+                batch_id: request.batch_id,
+            }));
+        }
+        let generation = self.generation();
+        let unique_seq = generation.unique_live.seq();
+        let planned = self
+            .resolver(&generation, &scope)
+            .plan_ingest(&request, Prepared::default())?;
+        drop(generation);
+        #[cfg(feature = "fault-injection")]
+        self.switches.hold_write_check_if_wanted();
+        // Built only where a layer column names artifacts.
+        let scope = match request.artifacts.is_empty() {
+            true => scope,
+            false => self.scope_masks(&scope).map_err(AcceptError::Engine)?,
+        };
+        let submission = IngestSubmission {
+            request: std::sync::Arc::new(request),
+            scope,
+            planned,
+            unique_seq,
+        };
+        let ingested = self.write.accept_ingest(submission)?;
+        Ok(IngestReceipt::of(
+            &ingested.receipt,
+            ingested.minted,
+            ingested.joined,
+            ingested.replayed,
+        ))
+    }
+}
+
+impl Resolver<'_> {
+    /// Resolve and decide every row of `request` against the resolver's generation. `prepared`
+    /// holds the edits an earlier resolution of the batch made, by request row and item.
+    pub(crate) fn plan_ingest(
+        &self,
+        request: &IngestRequest,
+        mut prepared: Prepared,
+    ) -> Result<Planned, AcceptError> {
+        let generation = self.generation;
+        let manifest = &generation.bundle.manifest;
+        let declared = &manifest.declared_scalars;
+        let meta = crate::viewport::meta_of(generation);
+        let view = match request.view.as_deref() {
+            None => None,
+            Some(id) => Some(meta.views.iter().find(|v| v.id == id).ok_or_else(|| {
+                AcceptError::UnknownView {
+                    index: 0,
+                    view: id.to_string(),
+                }
+            })?),
+        };
+
+        let mut identities = Vec::with_capacity(request.rows.len());
+        for (index, row) in request.rows.iter().enumerate() {
+            if row.scalars.len() > declared.len() {
+                return Err(AcceptError::ScalarArity {
+                    index,
+                    expected: declared.len(),
+                    got: row.scalars.len(),
+                });
+            }
+            if let Some((x, y)) = row.position {
+                let Some(view) = view else {
+                    return Err(AcceptError::Contract(format!(
+                        "row {index} carries coordinates and the batch names no view; name the \
+                         view in x-mosaica-view"
+                    )));
+                };
+                if !view.quantisation.contains(x, y) {
+                    return Err(AcceptError::OutsideExtent {
+                        index,
+                        x,
+                        y,
+                        quantisation: view.quantisation,
+                    });
+                }
+            }
+            identities.push(RowIdentity {
+                mosaica_id: row.mosaica_id,
+                unique: carried_keys(declared, row),
+            });
+        }
+
+        // A row carrying no position cannot create an item, so a batch without one creates nothing
+        // and refuses a row naming no item, as a build refuses an attribute file's.
+        let creates = view.is_some() && request.rows.iter().any(|row| row.position.is_some());
+        let batch = match creates {
+            true => resolve::Batch::Creates,
+            false => resolve::Batch::Edits,
+        };
+        // A batch that only addresses items needs a column to address them by, as a build's
+        // attribute file does.
+        if !creates && !request.rows.is_empty() {
+            let mosaica = request.mosaica_id_column
+                || request.rows.iter().any(|row| row.mosaica_id.is_some());
+            let unique = declared.iter().enumerate().any(|(at, d)| {
+                d.unique
+                    && request
+                        .rows
+                        .iter()
+                        .any(|row| at < row.scalars.len() && !row.omitted.contains(&at))
+            });
+            resolve::require_identifier(mosaica, usize::from(unique)).map_err(|e| {
+                AcceptError::Contract(format!(
+                    "this batch creates no item, since no row carries a position, so its rows \
+                     address items, and {e}"
+                ))
+            })?;
+        }
+        let unreadable = |e: mosaica_store::StoreError| AcceptError::Unreadable(e.to_string());
+        // A row setting a label the writer's terms do not satisfy is refused before the rule, and
+        // names nothing, so it claims neither an item nor a value. A label that does not parse is
+        // left to the row's decision, which refuses the batch where the row would write it.
+        let mut unheld: FxHashSet<usize> = FxHashSet::default();
+        let mut default_held = true;
+        if let WriteScope::Terms(..) = self.scope {
+            let satisfied = |at: usize, labels: &[Vec<u8>]| {
+                let texts: Vec<std::borrow::Cow<'_, str>> = labels
+                    .iter()
+                    .map(|label| String::from_utf8_lossy(label))
+                    .collect();
+                self.scope.admits(&texts) || index_keys(at, labels).is_err()
+            };
+            for (at, row) in request.rows.iter().enumerate() {
+                if row
+                    .labels
+                    .as_deref()
+                    .is_some_and(|labels| !satisfied(at, labels))
+                {
+                    unheld.insert(at);
+                    identities[at] = RowIdentity::default();
+                }
+            }
+            if let Some(default) = view.and_then(|view| view.point_default.as_ref()) {
+                default_held = self.scope.admits(&[default]);
+            }
+        }
+        // A row that would create an item and cannot is refused: one carrying no position, as
+        // naming no item, and one taking a default label the writer's terms do not satisfy. The
+        // batch is decided again without their values, so that a refused row sets none a later
+        // row sets, until no other row is refused so.
+        let mut unplaced: FxHashSet<usize> = FxHashSet::default();
+        let mut verdicts = loop {
+            let verdicts = resolve::resolve(&identities, self, batch).map_err(unreadable)?;
+            let creating = |at: usize| match &verdicts[at] {
+                resolve::Verdict::Creates => true,
+                resolve::Verdict::Refused(Refusal::ValueHeld { creates, .. }) => *creates,
+                _ => false,
+            };
+            let more: Vec<usize> = (0..request.rows.len())
+                .filter(|at| creating(*at) && !unplaced.contains(at) && !unheld.contains(at))
+                .filter(|at| {
+                    let row = &request.rows[*at];
+                    row.position.is_none() || (row.labels.is_none() && !default_held)
+                })
+                .collect();
+            if more.is_empty() {
+                break verdicts;
+            }
+            for at in more {
+                identities[at].unique.clear();
+                match request.rows[at].position {
+                    None => unplaced.insert(at),
+                    Some(_) => unheld.insert(at),
+                };
+            }
+        };
+        for &at in &unplaced {
+            verdicts[at] = resolve::Verdict::Refused(Refusal::NamesNoItem { row: at });
+        }
+        for &at in &unheld {
+            verdicts[at] = resolve::Verdict::Refused(Refusal::LabelNotHeld { row: at });
+        }
+        if let Some(refusal) = resolve::first_refusal(&verdicts).filter(|_| request.strict) {
+            return Err(AcceptError::Conflict(
+                self.refusal_text(generation, declared, request, refusal),
+            ));
+        }
+        let refused: Vec<Option<Reason>> = verdicts
+            .iter()
+            .map(|verdict| match verdict {
+                resolve::Verdict::Refused(refusal) => Some(refusal.kind()),
+                _ => None,
+            })
+            .collect();
+        let named: Vec<Option<ItemAt>> = verdicts
+            .into_iter()
+            .map(|verdict| match verdict {
+                resolve::Verdict::Names(item) => Some(item),
+                _ => None,
+            })
+            .collect();
+
+        let scoped_families = view
+            .map(|v| crate::write::scoped_families_of_view(manifest, &v.id))
+            .unwrap_or_default();
+        let owner_view = view.map(|v| crate::write::scoped_owner_view_of(manifest, &v.id));
+        let mut rows = Vec::new();
+        let mut edits: Vec<SubmittedEdit> = Vec::new();
+        let mut slots = Vec::with_capacity(request.rows.len());
+        let mut keys = Vec::new();
+        let mut refused_keys = Vec::new();
+        // The request row each written row came from, and each edit, for the membership columns.
+        let mut written_from: Vec<usize> = Vec::new();
+        let mut edited_from: Vec<usize> = Vec::new();
+        let mut joined_from: Vec<usize> = Vec::new();
+
+        // Named items in ascending order by shard and entity, so the stored reads walk each
+        // shard's layers forwards.
+        let mut order: Vec<(ItemAt, usize)> = named
+            .iter()
+            .enumerate()
+            .filter_map(|(at, item)| item.map(|e| (e, at)))
+            .collect();
+        order.sort_unstable();
+        // An edit an earlier resolution made of the item a row still names stands while the
+        // item's rows are in the views they were in: it was read from that entity, whose values
+        // and positions only an edit changes.
+        let mut kept: FxHashMap<usize, SubmittedEdit> = FxHashMap::default();
+        for &(item, at) in &order {
+            if let Some(edit) = prepared.remove(&(at, item)) {
+                let shard = generation.shard_of(item.shard);
+                if joined::views_holding(shard, item.entity) == edit.held_views {
+                    kept.insert(at, edit);
+                }
+            }
+        }
+        let fresh: Vec<(ItemAt, usize)> = order
+            .iter()
+            .copied()
+            .filter(|(_, at)| !kept.contains_key(at))
+            .collect();
+        let mut stored = Stored {
+            blobs: Self::read_blobs(generation, request, &fresh, false)?,
+            not_members: self.memberships_not_held(request, &named),
+        };
+        let mut decided: FxHashMap<usize, Decided> =
+            kept.keys().map(|at| (*at, Decided::Edited)).collect();
+        for &(item, at) in &fresh {
+            let decision = self.decide(
+                generation,
+                request,
+                at,
+                item,
+                view,
+                owner_view.as_deref(),
+                scoped_families,
+                &stored,
+            )?;
+            decided.insert(at, decision);
+        }
+
+        // An edit carries every value the item holds, so the items edited are read whole.
+        let edited: Vec<(ItemAt, usize)> = fresh
+            .iter()
+            .copied()
+            .filter(|(_, at)| matches!(decided.get(at), Some(Decided::Edited)))
+            .collect();
+        // The first read took the rows carrying a blob-resident column; the rest are read here.
+        let unread: Vec<(ItemAt, usize)> = match &stored.blobs {
+            Some(_) => edited
+                .iter()
+                .copied()
+                .filter(|(_, at)| !Self::carries_resident(generation, &request.rows[*at]))
+                .collect(),
+            None => edited.clone(),
+        };
+        if !unread.is_empty() {
+            let more = Self::read_blobs(generation, request, &unread, true)?.unwrap_or_default();
+            match stored.blobs.as_mut() {
+                Some(blobs) => blobs.extend(more),
+                None => stored.blobs = Some(more),
+            }
+        }
+        // Each named item's number in its shard, which its `mosaica_id` is taken from and an edit
+        // keeps.
+        let mut held: FxHashMap<ItemAt, (EntityId, u64)> = FxHashMap::default();
+        for (shard, items) in
+            mosaica_types::by_shard(order.iter().map(|(item, _)| (item.shard, *item)))
+        {
+            let shard = generation.shard_of(shard);
+            let entities: Vec<EntityId> = items.iter().map(|item| item.entity).collect();
+            let numbers = crate::edited::numbers_of(shard, &entities).map_err(unreadable)?;
+            let ids =
+                crate::edited::ids_of_numbers(self.key, shard, &numbers).map_err(unreadable)?;
+            held.extend(
+                items
+                    .into_iter()
+                    .zip(numbers.into_iter().zip(ids.into_iter().map(|id| id.raw()))),
+            );
+        }
+
+        for (at, (row, item)) in request.rows.iter().zip(&named).enumerate() {
+            if let Some(reason) = refused[at] {
+                refused_keys.extend(identities[at].unique.iter().copied());
+                slots.push(Slot::Refused(reason));
+                continue;
+            }
+            match item {
+                None => {
+                    let (Some(view), Some((x, y))) = (view, row.position) else {
+                        unreachable!("a row naming no item without a position is refused above")
+                    };
+                    let descriptors = self.label_of(at, row.labels.as_deref(), view)?;
+                    keys.extend(identities[at].unique.iter().copied());
+                    slots.push(Slot::Written {
+                        row: rows.len() as u32,
+                        mosaica_id: None,
+                    });
+                    written_from.push(at);
+                    rows.push(UnallocatedRow {
+                        view: view.id.clone(),
+                        join: None,
+                        descriptors,
+                        x,
+                        y,
+                        scalars: row.scalars.clone(),
+                        scoped: row.scoped.clone(),
+                        // Resolved once the whole batch is decided, so a refused batch interns
+                        // no term.
+                        terms: Vec::new(),
+                    });
+                }
+                Some(item) => {
+                    let (number, mosaica_id) = held[item];
+                    match decided.remove(&at).expect("every named row was decided") {
+                        Decided::Unchanged => slots.push(Slot::Unchanged {
+                            item: *item,
+                            mosaica_id,
+                        }),
+                        Decided::Joined => {
+                            slots.push(Slot::Joined {
+                                item: *item,
+                                mosaica_id,
+                            });
+                            joined_from.push(at);
+                        }
+                        Decided::Added(join) => {
+                            slots.push(Slot::Written {
+                                row: rows.len() as u32,
+                                mosaica_id: Some(mosaica_id),
+                            });
+                            written_from.push(at);
+                            rows.push(*join);
+                        }
+                        Decided::Edited => {
+                            let blob = match &stored.blobs {
+                                Some(blobs) => BlobRow::of(blobs.get(item).cloned()),
+                                None => BlobRow::default(),
+                            };
+                            let edit = match kept.remove(&at) {
+                                Some(edit) => edit,
+                                None => self.carry(
+                                    generation, &meta, request, at, *item, number, view, blob,
+                                )?,
+                            };
+                            keys.extend(identities[at].unique.iter().copied());
+                            slots.push(Slot::Edited {
+                                edit: edits.len() as u32,
+                                mosaica_id,
+                            });
+                            edited_from.push(at);
+                            edits.push(edit);
+                        }
+                    }
+                }
+            }
+        }
+
+        let bound = mosaica_authz::MAX_KEYS_PER_ITEM;
+        let mut over_bound = Vec::new();
+        let live = self.live;
+        for (row, at) in rows.iter_mut().zip(&written_from) {
+            if row.join.is_none() {
+                row.terms = live.resolve_terms(&generation.dict, &row.descriptors);
+                if row.terms.len() > bound {
+                    over_bound.push(*at as u32);
+                }
+            }
+        }
+        for (edit, at) in edits.iter_mut().zip(&edited_from) {
+            let first = &mut edit.edit.rows[0];
+            first.terms = live.resolve_terms(&generation.dict, &first.descriptors);
+            if first.terms.len() > bound {
+                over_bound.push(*at as u32);
+            }
+        }
+        let artifacts =
+            Self::written_memberships(request, &written_from, &edited_from, &joined_from);
+        let held: Vec<(u16, u128)> = refused
+            .iter()
+            .zip(&identities)
+            .filter(|(reason, _)| **reason == Some(Reason::ValueHeld))
+            .flat_map(|(_, identity)| identity.unique.iter().copied())
+            .collect();
+        let held_by = self.holders_of_keys(&held).map_err(unreadable)?;
+        Ok(Planned {
+            rows,
+            edits,
+            slots,
+            keys,
+            refused_keys,
+            held_by,
+            artifacts,
+            over_bound,
+        })
+    }
+
+    /// Every item holding one of `keys`, each `(declared position, key widened)`, deleted ones
+    /// aside.
+    fn holders_of_keys(
+        &self,
+        keys: &[(u16, u128)],
+    ) -> Result<Vec<ItemAt>, mosaica_store::StoreError> {
+        let declared = &self.generation.bundle.manifest.declared_scalars;
+        let mut by_field: BTreeMap<u16, Vec<u128>> = BTreeMap::new();
+        for (field, key) in keys {
+            by_field.entry(*field).or_default().push(*key);
+        }
+        let mut out = Vec::new();
+        for (field, keys) in by_field {
+            let Some(d) = declared.get(usize::from(field)) else {
+                continue;
+            };
+            let Some(keys) = crate::unique::keys_of_widened(d, keys) else {
+                continue;
+            };
+            let held = crate::unique::holders(self.generation, &d.name, &keys)?;
+            out.extend(held.into_iter().map(|(_, item)| item));
+        }
+        Ok(out)
+    }
+
+    /// The edit a row makes of the item `old`: every view the item holds a row in, and the batch's
+    /// view where the row places the item there; the row's label and values where it carries them
+    /// and the stored ones where it leaves them out; and the item's number, which its new entity in
+    /// the item's shard keeps.
+    #[allow(clippy::too_many_arguments)]
+    fn carry(
+        &self,
+        generation: &Generation,
+        meta: &crate::viewport::EngineMeta,
+        request: &IngestRequest,
+        at: usize,
+        item: ItemAt,
+        number: EntityId,
+        view: Option<&crate::viewport::MetaView>,
+        mut blob: BlobRow,
+    ) -> Result<SubmittedEdit, AcceptError> {
+        let row = &request.rows[at];
+        let manifest = &generation.bundle.manifest;
+        let declared = &manifest.declared_scalars;
+        let shard = generation.shard_of(item.shard);
+        let old = item.entity;
+        let held_views = joined::views_holding(shard, old);
+        let placing = view.zip(row.position);
+        let buffered = shard.buffer.get(old);
+        let own_view = match (placing, buffered) {
+            (Some((view, _)), _) => view.id.clone(),
+            (None, Some(item)) => item.view.clone(),
+            (None, None) => held_views.first().cloned().expect(
+                "a live item holds a row in some view: a view drop deletes the items it leaves in \
+                 none",
+            ),
+        };
+        let mut views: Vec<String> = vec![own_view.clone()];
+        views.extend(held_views.iter().filter(|v| **v != own_view).cloned());
+
+        let descriptors = match &row.labels {
+            Some(labels) => index_keys(at, labels)?,
+            None => self.stored_label(generation, item)?,
+        };
+        let carried =
+            |position: usize| position < row.scalars.len() && !row.omitted.contains(&position);
+        let scalars: Vec<WalScalar> = declared
+            .iter()
+            .enumerate()
+            .map(|(position, d)| match carried(position) {
+                true => row.scalars[position].clone(),
+                false => {
+                    joined::held_entity_value(generation, item, position, d, buffered, &mut blob)
+                        .unwrap_or(WalScalar::Null)
+                }
+            })
+            .collect();
+        // The batch's view's owner addresses the row's group-scoped values; every other view's
+        // cells are carried.
+        let batch_owner = view.map(|v| crate::write::scoped_owner_view_of(manifest, &v.id));
+        let declared_len = declared.len();
+
+        let mut rows = Vec::with_capacity(views.len());
+        // A key shared by several views is one cell per family, carried by the first row that
+        // addresses it.
+        let mut owners_carried: Vec<String> = Vec::new();
+        let mut addressed = false;
+        for view_id in &views {
+            let (x, y) = match placing {
+                Some((view, position)) if view.id == *view_id => position,
+                _ => {
+                    let frame = meta
+                        .views
+                        .iter()
+                        .find(|v| v.id == *view_id)
+                        .ok_or_else(|| AcceptError::UnknownView {
+                            index: at,
+                            view: view_id.clone(),
+                        })?;
+                    self.stored_xy(generation, item, frame)?.ok_or_else(|| {
+                        AcceptError::Unreadable(format!(
+                            "row {at}'s item has no readable row in view '{view_id}'"
+                        ))
+                    })?
+                }
+            };
+            let families = crate::write::scoped_families_of_view(manifest, view_id);
+            let owner = crate::write::scoped_owner_view_of(manifest, view_id);
+            let from_row = batch_owner.as_deref() == Some(owner.as_str());
+            addressed |= from_row;
+            let repeated = owners_carried.contains(&owner);
+            owners_carried.push(owner.clone());
+            let scoped: Vec<WalScalar> = families
+                .iter()
+                .enumerate()
+                .map(|(position, family)| {
+                    if repeated {
+                        return Ok(WalScalar::Null);
+                    }
+                    let supplied = row
+                        .scoped
+                        .get(position)
+                        .filter(|_| from_row && !row.omitted.contains(&(declared_len + position)));
+                    match supplied {
+                        Some(value) => Ok(value.clone()),
+                        None => Ok(joined::held_scoped_value(
+                            generation,
+                            item,
+                            position,
+                            family,
+                            &joined::declared_of_scoped(family),
+                            &owner,
+                        )?
+                        .unwrap_or(WalScalar::Null)),
+                    }
+                })
+                .collect::<Result<_, AcceptError>>()?;
+            let first = rows.is_empty();
+            // A join row carries what every row carries, as a row adding an item in place does:
+            // the item's own row holds the rest.
+            let scalars: Vec<WalScalar> = match first {
+                true => scalars.clone(),
+                false => declared
+                    .iter()
+                    .zip(&scalars)
+                    .map(|(d, value)| match d.carried_on_join_row() {
+                        true => value.clone(),
+                        false => WalScalar::Null,
+                    })
+                    .collect(),
+            };
+            rows.push(UnallocatedRow {
+                view: view_id.clone(),
+                join: None,
+                descriptors: if first {
+                    descriptors.clone()
+                } else {
+                    Vec::new()
+                },
+                x,
+                y,
+                scalars,
+                scoped,
+                terms: Vec::new(),
+            });
+        }
+        // The row's scoped values are the batch view's key's, which only a row in a view of that
+        // key holds.
+        if let (Some(view), false) = (view, addressed) {
+            let supplies = crate::write::scoped_families_of_view(manifest, &view.id)
+                .iter()
+                .enumerate()
+                .any(|(position, family)| {
+                    !row.omitted.contains(&(declared_len + position))
+                        && row.scoped.get(position).is_some_and(|value| {
+                            !joined::scalar_is_absent(value, &joined::declared_of_scoped(family))
+                        })
+                });
+            if supplies {
+                return Err(AcceptError::Contract(format!(
+                    "row {at} sets values scoped to view '{}' for an item with no row there; send \
+                     the item's position in that view with them",
+                    view.id
+                )));
+            }
+        }
+        Ok(SubmittedEdit {
+            edit: UnallocatedEdit {
+                shard: item.shard,
+                old,
+                number,
+                rows,
+            },
+            held_views,
+        })
+    }
+
+    /// An item's stored label as descriptors: its buffered row's terms, or the terms a flush wrote
+    /// for it, each read back to the descriptor it was resolved from.
+    fn stored_label(
+        &self,
+        generation: &Generation,
+        item: ItemAt,
+    ) -> Result<Vec<Vec<u8>>, AcceptError> {
+        let shard = generation.shard_of(item.shard);
+        let terms: Vec<TermId> = match shard.buffer.get(item.entity) {
+            Some(buffered) => buffered.terms.clone(),
+            None => joined::flushed_terms_of(shard, item.entity).ok_or_else(|| {
+                AcceptError::Unreadable("an edited item's label could not be read".to_string())
+            })?,
+        };
+        let novel: FxHashSet<TermId> = terms
+            .iter()
+            .copied()
+            .filter(|term| term.raw() >= generation.dict.len())
+            .collect();
+        let novel = if novel.is_empty() {
+            FxHashMap::default()
+        } else {
+            self.live.descriptors_of(&novel)
+        };
+        terms
+            .iter()
+            .map(|term| {
+                generation
+                    .dict
+                    .descriptor(*term)
+                    .map(<[u8]>::to_vec)
+                    .or_else(|| novel.get(term).cloned())
+                    .ok_or_else(|| {
+                        AcceptError::Unreadable(
+                            "an edited item's label names a term with no descriptor".to_string(),
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    /// The item's position in `view`'s frame, or `None` where it has no row there: a buffered
+    /// row's coordinates as sent, or the centre of a flushed row's cell, which quantises back to
+    /// the cell.
+    fn stored_xy(
+        &self,
+        generation: &Generation,
+        item: ItemAt,
+        view: &crate::viewport::MetaView,
+    ) -> Result<Option<(f64, f64)>, AcceptError> {
+        if let Some(buffered) = generation
+            .shard_of(item.shard)
+            .buffer
+            .rows_of(item.entity)
+            .find(|buffered| buffered.view == view.id)
+        {
+            return Ok(Some((buffered.x, buffered.y)));
+        }
+        let q = view.quantisation;
+        Ok(self
+            .stored_position(generation, item, view)?
+            .map(|(fx, fy)| {
+                (
+                    mosaica_spatial::unfixed32(fx, q.x_min, q.x_max),
+                    mosaica_spatial::unfixed32(fy, q.y_min, q.y_max),
+                )
+            }))
+    }
+
+    /// A new item's label as descriptors: the row's, or the view's default where it leaves its
+    /// label out.
+    fn label_of(
+        &self,
+        at: usize,
+        labels: Option<&[Vec<u8>]>,
+        view: &crate::viewport::MetaView,
+    ) -> Result<Vec<Vec<u8>>, AcceptError> {
+        let labels: Vec<Vec<u8>> = match labels {
+            Some(labels) => labels.to_vec(),
+            None => match &view.point_default {
+                Some(default) => vec![default.as_bytes().to_vec()],
+                None => {
+                    return Err(AcceptError::Contract(format!(
+                        "row {at} creates an item with no access label, and view '{}' declares \
+                         no `point_visibility.default`; label the row, or declare the default",
+                        view.id
+                    )))
+                }
+            },
+        };
+        index_keys(at, &labels)
+    }
+
+    /// Decide one row naming `item` against what the item stores.
+    #[allow(clippy::too_many_arguments)]
+    fn decide(
+        &self,
+        generation: &Generation,
+        request: &IngestRequest,
+        at: usize,
+        item: ItemAt,
+        view: Option<&crate::viewport::MetaView>,
+        owner_view: Option<&str>,
+        scoped_families: &[mosaica_store::manifest::ScopedScalar],
+        stored: &Stored,
+    ) -> Result<Decided, AcceptError> {
+        let row = &request.rows[at];
+        let manifest = &generation.bundle.manifest;
+        let declared = &manifest.declared_scalars;
+        let shard = generation.shard_of(item.shard);
+        let buffered = shard.buffer.get(item.entity);
+        let mut blob = match &stored.blobs {
+            Some(blobs) => BlobRow::of(blobs.get(&item).cloned()),
+            None => BlobRow::default(),
+        };
+        let membership = || match stored.not_members.contains_key(&at) {
+            true => Decided::Joined,
+            false => Decided::Unchanged,
+        };
+        let carried = |position: usize| !row.omitted.contains(&position);
+
+        if let Some(labels) = &row.labels {
+            let descriptors = index_keys(at, labels)?;
+            // A novel descriptor is on no stored label.
+            let supplied = self.live.lookup_terms(&generation.dict, &descriptors);
+            let held: Option<Vec<TermId>> = match buffered {
+                Some(buffered) => Some(buffered.terms.clone()),
+                None => joined::flushed_terms_of(shard, item.entity),
+            };
+            let same = match (supplied, held) {
+                (Some(mut supplied), Some(mut held)) => {
+                    supplied.sort_unstable();
+                    supplied.dedup();
+                    held.sort_unstable();
+                    held.dedup();
+                    held == supplied
+                }
+                _ => false,
+            };
+            if !same {
+                return Ok(Decided::Edited);
+            }
+        }
+
+        // Each carried value against the stored one; a null is compared as no value.
+        for (position, d) in declared.iter().enumerate() {
+            let Some(value) = row.scalars.get(position).filter(|_| carried(position)) else {
+                continue;
+            };
+            let value = (!joined::scalar_is_absent(value, d)).then_some(value);
+            let held =
+                joined::held_entity_value(generation, item, position, d, buffered, &mut blob);
+            let same = match (value, &held) {
+                (Some(value), Some(held)) => {
+                    joined::supplied_as_stored(generation, value, d).same_as(held)
+                }
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                return Ok(Decided::Edited);
+            }
+        }
+
+        let (Some(view), Some((x, y))) = (view, row.position) else {
+            // No position: nothing about the item's views changes.
+            if let Some(owner_view) = owner_view {
+                if scoped_against_held(generation, item, row, scoped_families, owner_view, false)?
+                    .is_none()
+                {
+                    return Ok(Decided::Edited);
+                }
+            }
+            return Ok(membership());
+        };
+        let owner_view = owner_view.expect("a view has an owner view");
+        let adding = match self.stored_position(generation, item, view)? {
+            Some(held) => {
+                if held != fixed(view.quantisation, x, y) {
+                    return Ok(Decided::Edited);
+                }
+                false
+            }
+            None => true,
+        };
+        let Some(repeated) =
+            scoped_against_held(generation, item, row, scoped_families, owner_view, adding)?
+        else {
+            return Ok(Decided::Edited);
+        };
+        if !adding {
+            return Ok(membership());
+        }
+        // The row a view gains carries the item's values. A value every row carries is read from
+        // the item where the row leaves it out, so the view holds what the item's other views do.
+        let scalars: Vec<WalScalar> = declared
+            .iter()
+            .enumerate()
+            .map(|(position, d)| match row.scalars.get(position) {
+                Some(value) if carried(position) => value.clone(),
+                _ if d.carried_on_join_row() => {
+                    joined::held_entity_value(generation, item, position, d, buffered, &mut blob)
+                        .unwrap_or(WalScalar::Null)
+                }
+                _ => WalScalar::Null,
+            })
+            .collect();
+        // A cell this view's key already holds keeps the one value; the row's copy is dropped.
+        let mut scoped = row.scoped.clone();
+        for position in repeated {
+            scoped[position] = WalScalar::Null;
+        }
+        Ok(Decided::Added(Box::new(UnallocatedRow {
+            view: view.id.clone(),
+            join: Some(item),
+            descriptors: Vec::new(),
+            x,
+            y,
+            scalars,
+            scoped,
+            terms: Vec::new(),
+        })))
+    }
+
+    /// The rows naming an item that an artifact their membership columns name does not hold,
+    /// with that artifact's layer: such a row would change what the item belongs to. One read of
+    /// the artifact store for the batch.
+    fn memberships_not_held(
+        &self,
+        request: &IngestRequest,
+        named: &[Option<ItemAt>],
+    ) -> FxHashMap<usize, String> {
+        if request.artifacts.memberships.is_empty() {
+            return FxHashMap::default();
+        }
+        let live = self.live;
+        live.with_artifacts(|store| {
+            let mut out = FxHashMap::default();
+            for membership in &request.artifacts.memberships {
+                let ordinal = store.ordinal_of_key(
+                    &membership.layer,
+                    membership.level,
+                    membership.view.as_deref(),
+                    &membership.key,
+                );
+                for &at in &membership.rows {
+                    let at = at as usize;
+                    let Some(item) = named.get(at).copied().flatten() else {
+                        continue;
+                    };
+                    // The item's shard's slice lists the artifact where it holds a member there.
+                    let slice = crate::write::slice_of(store, item.shard);
+                    let record = ordinal.and_then(|ordinal| {
+                        slice.get(&membership.layer, membership.level, ordinal)
+                    });
+                    let held = u32::try_from(item.entity.raw())
+                        .ok()
+                        .zip(record)
+                        .is_some_and(|(member, record)| slice.members_of(record).contains(member));
+                    if !held {
+                        out.entry(at).or_insert_with(|| membership.layer.clone());
+                    }
+                }
+            }
+            out
+        })
+    }
+
+    /// The record-blob rows of the named items, read in one walk over the blocks they sit in:
+    /// every item's where `whole`, for the edits that carry them, and otherwise only where a row
+    /// carries a column stored there, for the comparison. `None` where a comparison's walk could
+    /// not be made, and each row is then read alone; an edit's is refused, since it would carry
+    /// nothing where a value is stored.
+    fn read_blobs(
+        generation: &Generation,
+        request: &IngestRequest,
+        order: &[(ItemAt, usize)],
+        whole: bool,
+    ) -> Result<Option<FxHashMap<ItemAt, Vec<mosaica_filter::RecordField>>>, AcceptError> {
+        let manifest = &generation.bundle.manifest;
+        let resident = manifest
+            .declared_scalars
+            .iter()
+            .any(|d| d.blob_resident(&manifest.vocabularies));
+        let mut blobs = FxHashMap::default();
+        if !resident {
+            return Ok(Some(blobs));
+        }
+        let wanted = order
+            .iter()
+            .filter(|(_, at)| whole || Self::carries_resident(generation, &request.rows[*at]))
+            .map(|(item, _)| (item.shard, *item));
+        for (shard, items) in mosaica_types::by_shard(wanted) {
+            let wanted: croaring::Bitmap = items
+                .iter()
+                .filter_map(|item| u32::try_from(item.entity.raw()).ok())
+                .collect();
+            let read = generation
+                .shard_of(shard)
+                .filter_columns
+                .records()
+                .for_each_row_in(&wanted, &mut |entity, fields| {
+                    blobs.insert(ItemAt::new(shard, EntityId::new(u64::from(entity))), fields);
+                    Ok(())
+                });
+            match read {
+                Ok(()) => {}
+                Err(e) if whole => {
+                    return Err(AcceptError::Unreadable(format!("the record blob: {e}")))
+                }
+                Err(_) => return Ok(None),
+            }
+        }
+        Ok(Some(blobs))
+    }
+
+    /// Whether `row` carries a column whose value lives in the record blob.
+    fn carries_resident(generation: &Generation, row: &IngestRow) -> bool {
+        let manifest = &generation.bundle.manifest;
+        manifest.declared_scalars.iter().enumerate().any(|(at, d)| {
+            at < row.scalars.len()
+                && !row.omitted.contains(&at)
+                && d.blob_resident(&manifest.vocabularies)
+        })
+    }
+
+    /// The item's position in `view`, quantised, or `None` where it has no row there.
+    fn stored_position(
+        &self,
+        generation: &Generation,
+        item: ItemAt,
+        view: &crate::viewport::MetaView,
+    ) -> Result<Option<(u32, u32)>, AcceptError> {
+        if let Some(buffered) = generation
+            .shard_of(item.shard)
+            .buffer
+            .rows_of(item.entity)
+            .find(|buffered| buffered.view == view.id)
+        {
+            return Ok(Some(fixed(view.quantisation, buffered.x, buffered.y)));
+        }
+        for partition in generation.bundle.partitions.values() {
+            let Some(view_data) = partition
+                .shard(item.shard)
+                .and_then(|shard| shard.views.get(&view.id))
+            else {
+                continue;
+            };
+            let found = crate::viewport::segment_row_of(&view.id, view_data, item.entity)
+                .map_err(|e| AcceptError::Unreadable(e.to_string()))?;
+            if let Some((segment, local)) = found {
+                return Ok(Some(mosaica_spatial::unsplit32(
+                    mosaica_types::MortonCode::new(segment.morton.u32()[local]),
+                    segment.columns.residual()[local],
+                )));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The batch's membership columns, over the rows it writes, edits and joins in place: an
+    /// unchanged row has been found to be a member of every artifact it names already.
+    /// `written_from` is the request row each written row came from, `edited_from` each edit's
+    /// and `joined_from` each join's in place, numbered on in that order.
+    fn written_memberships(
+        request: &IngestRequest,
+        written_from: &[usize],
+        edited_from: &[usize],
+        joined_from: &[usize],
+    ) -> BatchArtifacts {
+        let position: BTreeMap<u32, u32> = written_from
+            .iter()
+            .chain(edited_from)
+            .chain(joined_from)
+            .enumerate()
+            .map(|(written, at)| (*at as u32, written as u32))
+            .collect();
+        let memberships = request
+            .artifacts
+            .memberships
+            .iter()
+            .filter_map(|membership| {
+                let rows: Vec<u32> = membership
+                    .rows
+                    .iter()
+                    .filter_map(|at| position.get(at).copied())
+                    .collect();
+                (!rows.is_empty()).then(|| mosaica_lifecycle::BatchMembership {
+                    rows,
+                    ..membership.clone()
+                })
+            })
+            .collect();
+        BatchArtifacts {
+            memberships,
+            edges: request.artifacts.edges.clone(),
+        }
+    }
+
+    /// A refusal as the caller reads it: rows by position, values as sent, items by
+    /// `mosaica_id`.
+    fn refusal_text(
+        &self,
+        generation: &Generation,
+        declared: &[DeclaredScalar],
+        request: &IngestRequest,
+        refusal: &Refusal,
+    ) -> String {
+        let tid = |item: ItemAt| crate::unique::mosaica_id_text(self.key, generation, item);
+        let value = |row: usize, field: Identifier| match field {
+            Identifier::MosaicaId => "its mosaica_id".to_string(),
+            Identifier::Unique(at) => {
+                let at = usize::from(at);
+                let text = request.rows[row]
+                    .scalars
+                    .get(at)
+                    .map(value_text)
+                    .unwrap_or_default();
+                format!("'{}' = {text}", declared[at].name)
+            }
+        };
+        match refusal {
+            Refusal::NamesTwo { row, named } => {
+                let mut seen = Vec::new();
+                let parts: Vec<String> = named
+                    .iter()
+                    .filter(|(_, item)| {
+                        let fresh = !seen.contains(item);
+                        seen.push(*item);
+                        fresh
+                    })
+                    .map(|(field, item)| {
+                        format!("{} names item {}", value(*row, *field), tid(*item))
+                    })
+                    .collect();
+                format!(
+                    "row {row} names more than one item: {}; send values that name one item",
+                    parts.join(" and ")
+                )
+            }
+            Refusal::UnknownMosaicaId { row } => {
+                let id = request.rows[*row]
+                    .mosaica_id
+                    .map(|t| t.raw())
+                    .unwrap_or_default();
+                format!(
+                    "row {row}'s mosaica_id {id} names no item; leave mosaica_id out to create \
+                     an item, which is given its mosaica_id when it is created"
+                )
+            }
+            Refusal::NamesNoItem { row } => format!(
+                "row {row} names no item and carries no position, so it creates nothing; send a \
+                 value that names an item, or the row's coordinates in the batch's view"
+            ),
+            Refusal::OneItemTwice { rows, item } => format!(
+                "rows {} and {} both name item {}; send one row per item",
+                rows[0],
+                rows[1],
+                tid(*item)
+            ),
+            Refusal::OneValueTwice { rows, field } => format!(
+                "rows {} and {} both carry {}; a unique value is held by one item, so send it \
+                 in one row",
+                rows[0],
+                rows[1],
+                value(rows[1], *field).trim_start_matches("its ")
+            ),
+            Refusal::ValueHeld { row, field, .. } => format!(
+                "row {row} carries {}, which an item holds; a unique value is held by one item, \
+                 so send another value or leave it out",
+                value(*row, *field).trim_start_matches("its ")
+            ),
+            Refusal::LabelNotHeld { row } => {
+                let labels: Vec<String> = request.rows[*row]
+                    .labels
+                    .iter()
+                    .flatten()
+                    .map(|label| format!("'{}'", String::from_utf8_lossy(label)))
+                    .collect();
+                let labels = match labels.is_empty() {
+                    true => "the view's default access label".to_string(),
+                    false => format!("the access label {}", labels.join(", ")),
+                };
+                format!(
+                    "row {row} sets {labels}, which this credential's terms do not satisfy; send \
+                     a label they satisfy, or write with a credential holding `write-all`"
+                )
+            }
+        }
+    }
+}
+
+/// What a batch's named items store, read once for the whole batch rather than per row.
+struct Stored {
+    /// Each named item's record-blob row, where a row carries a column stored there.
+    blobs: Option<FxHashMap<ItemAt, Vec<mosaica_filter::RecordField>>>,
+    /// The rows whose membership columns name an artifact that does not hold their item.
+    not_members: FxHashMap<usize, String>,
+}
+
+/// What one row naming an item does to it.
+enum Decided {
+    Unchanged,
+    /// The row places the item in artifacts that do not hold it, and changes nothing else.
+    Joined,
+    /// The row adds the item to the batch's view in place, as this row.
+    Added(Box<UnallocatedRow>),
+    /// The row changes the item, which moves to a new entity.
+    Edited,
+}
+
+/// The unique values a row carries, as the resolver takes them. A null never identifies an item.
+fn carried_keys(declared: &[DeclaredScalar], row: &IngestRow) -> Vec<(u16, Key)> {
+    declared
+        .iter()
+        .enumerate()
+        .filter(|(at, d)| d.unique && !row.omitted.contains(at))
+        .filter_map(|(at, d)| {
+            let value = row.scalars.get(at)?;
+            key_of(d.arrow_type, value).map(|key| (at as u16, key.widen()))
+        })
+        .collect()
+}
+
+/// A position in a view's frame, as its segment stores it.
+fn fixed(q: mosaica_store::manifest::Quantisation, x: f64, y: f64) -> (u32, u32) {
+    (
+        mosaica_spatial::fixed32(x, q.x_min, q.x_max),
+        mosaica_spatial::fixed32(y, q.y_min, q.y_max),
+    )
+}
+
+/// The group-scoped values a row carries against the cells they address: the positions whose held
+/// value the row repeats, or `None` where one differs. An empty cell takes a value where the row
+/// adds the item to the view (`adding`), and differs from one otherwise.
+fn scoped_against_held(
+    generation: &Generation,
+    item: ItemAt,
+    row: &IngestRow,
+    families: &[mosaica_store::manifest::ScopedScalar],
+    owner_view: &str,
+    adding: bool,
+) -> Result<Option<Vec<usize>>, AcceptError> {
+    let declared_len = generation.bundle.manifest.declared_scalars.len();
+    let mut repeated = Vec::new();
+    for (position, family) in families.iter().enumerate() {
+        if row.omitted.contains(&(declared_len + position)) {
+            continue;
+        }
+        let Some(supplied) = row.scoped.get(position) else {
+            continue;
+        };
+        let d = joined::declared_of_scoped(family);
+        let supplied = (!joined::scalar_is_absent(supplied, &d)).then_some(supplied);
+        let held = joined::held_scoped_value(generation, item, position, family, &d, owner_view)?;
+        match (supplied, held) {
+            (None, None) => {}
+            (Some(_), None) if adding => {}
+            (Some(value), Some(held))
+                if joined::supplied_as_stored(generation, value, &d).same_as(&held) =>
+            {
+                repeated.push(position)
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(repeated))
+}

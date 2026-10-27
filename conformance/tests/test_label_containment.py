@@ -1,0 +1,363 @@
+"""**I3: a label is served iff its generating set is a subset of `M_auth`** — both halves.
+
+Conformance §4.4's I3 row, black-box, over `oracle.label_fixture`: the containment property across
+principals and zoom tiers, and the cache half behaviourally rather than by hook.
+
+**Why this row was uncovered and is not a "nothing to test" row.** Containment is built and
+enforced on every route that serves an artifact — `|G ∩ M| == |G|`, all or nothing, against the
+composed mask and never a filtered one — and the engine's own tests cover the property in
+substance. What did not exist was a black-box assertion driving the real binary over HTTP, which is
+this file. *We cannot test this* and *we have not tested this* are different claims and only the
+first is an excuse.
+
+**The whole difference between the two principals is one entity.** `oracle.label_fixture` plants
+source id `SPLIT` carrying a term one principal holds and the other does not, and puts it inside
+the widest generating set and nowhere else. So `CORE` is short of that set by exactly one member
+and short of nothing else — asserted here from the masked counts, which differ by one, before any
+containment claim is made. A fixture two principals a hundred entities apart would make every
+absence explicable a dozen ways.
+
+**Absence is checked against a control in the same response**, which is what stops this passing for
+the wrong reason. `CORE` is served `l-core` — same layer, same membership, same request — and is
+served `l-ranked`'s *narrower* content. So `l-whole`'s absence is containment and not a principal
+who sees nothing, a layer gate, or an existence criterion: the layer is `public`, its artifact gate
+is `inherited`, and its `require_member_visibility` is `none`, so containment is the only test in
+the predicate that can fail here.
+
+**And absence is absence, not a stripped artifact.** Decision 0076 forbids the in-between state —
+identity and count served with the description missing — so the assertion is that no row of the
+frame carries the key at all, never that its content list is empty.
+"""
+
+from __future__ import annotations
+
+import shutil
+
+import pytest
+
+from oracle import label_fixture as lf
+from oracle.harness import JOIN_FIELD, spawn_server, stop_server
+from oracle.wire import decode_viewport_artifacts
+
+#: The whole extent, so every artifact's members are inside every request's tiles and an absence is
+#: never a viewport question.
+WHOLE_MAP = [0.0, 0.0, lf.EXTENT_MAX, lf.EXTENT_MAX]
+
+#: The zoom tiers the property is checked across. Depth 0 is one tile over the corpus; depth 6 is
+#: 4,096, so the artifact pass resolves its membership against a viewport made of many ranges
+#: rather than one.
+TIERS = [0, 2, 4, 6]
+
+
+@pytest.fixture(scope="session")
+def label_bundle(tmp_path_factory):
+    """The containment fixture's bundle, built once for the module."""
+    return lf.build_label_bundle(tmp_path_factory.mktemp("label-fixture"))
+
+
+@pytest.fixture(scope="session")
+def label_server(tmp_path_factory, label_bundle):
+    """A read-only server over it. Tests that mutate the overlay spawn their own against a private
+    copy — a suppression is durable, and one leaking into another test's warm state is exactly the
+    confusion this module is about."""
+    server, proc = spawn_server(label_bundle, tmp_path_factory.mktemp("label-server"))
+    yield server
+    stop_server(proc)
+
+
+def served(server, token: str, zoom: int = 0) -> dict[str, tuple[int, tuple[str, ...]]]:
+    """The artifacts of one response, keyed by the publisher's own key.
+
+    A dict is the right shape here precisely because the assertions are about **which keys are
+    present**: a missing key is a `KeyError` at the point of use and an unexpected one shows up in
+    the set comparison, where a list of rows would let either pass unnoticed.
+    """
+    body = server.artifacts_viewport(token, lf.VIEW_ID, zoom, WHOLE_MAP)
+    return {
+        artifact.key: (artifact.masked_count, tuple(artifact.content))
+        for artifact in decode_viewport_artifacts(body)
+        if artifact.layer == lf.LAYER
+    }
+
+
+WHOLE_SET_TEXT = "drawn from the whole set"
+CORE_ALONE_TEXT = "drawn from the core alone"
+
+
+def test_the_fixture_separates_the_two_principals_by_exactly_one_entity(label_server):
+    """**The fixture's own claim, checked before anything rests on it.**
+
+    Everything below reads "one member short" as the reason for an absence. That is only the reason
+    if the two principals really are one member apart over the sets in question — so the masked
+    count of the artifact both are served, taken over a membership neither generating set covers,
+    must differ by exactly one, and the fixture's own arithmetic must agree with the engine's.
+    """
+    whole = served(label_server, label_server.authorise(lf.WHOLE_TERMS)["token"])
+    core = served(label_server, label_server.authorise(lf.CORE_TERMS)["token"])
+
+    assert whole["l-core"][0] - core["l-core"][0] == 1, (
+        "the two principals must be one member apart over this artifact, or an absence below "
+        "would be explicable by a difference nobody planted"
+    )
+    # And the difference is the entity the fixture says it is, computed from the planting rules
+    # rather than from anything the service returned.
+    visible_difference = lf.visible_to(lf.WHOLE_TERMS) - lf.visible_to(lf.CORE_TERMS)
+    assert visible_difference == {lf.SPLIT}
+    assert lf.SPLIT in lf.WIDE_SET and lf.SPLIT not in lf.NARROW_SET
+
+
+@pytest.mark.parametrize("zoom", TIERS)
+def test_a_generating_set_one_member_short_serves_no_artifact_at_all(label_server, zoom):
+    """**The headline, at every tier.** A viewer holding all but one member of a content's
+    generating set is served **nothing** for that artifact — not its identity, not its masked
+    count, not the artifact with its description missing (decision 0076).
+
+    The control is in the same response: the same principal, over the same layer and the same
+    membership, is served `l-core`, whose generating set they do contain. So the absent one is
+    absent for containment and not for anything else in the predicate.
+    """
+    whole = served(label_server, label_server.authorise(lf.WHOLE_TERMS)["token"], zoom)
+    core = served(label_server, label_server.authorise(lf.CORE_TERMS)["token"], zoom)
+
+    assert set(whole) == {"l-whole", "l-ranked", "l-core"}, (
+        "the wider principal contains every generating set here, so nothing is withheld from it — "
+        "without this the test could pass against a service serving no artifacts at all"
+    )
+    assert "l-whole" not in core, (
+        "one member short of its only content's generating set, so the artifact is absent whole"
+    )
+    assert set(core) == {"l-ranked", "l-core"}
+
+
+@pytest.mark.parametrize("zoom", TIERS)
+def test_the_first_contained_content_is_the_one_served(label_server, zoom):
+    """**Ranked contents are a fallback, not an all-or-nothing.** `l-ranked` carries two: a wide
+    one and a narrow one. The wider principal reads the wide one; the narrower principal, one
+    member short of it, reads the narrow one — the same artifact, the same identity, a different
+    description.
+
+    This is the other half of what makes the absence above meaningful: containment picks the first
+    set the viewer contains **entirely**, and only where there is no such set does the artifact go.
+    """
+    whole = served(label_server, label_server.authorise(lf.WHOLE_TERMS)["token"], zoom)
+    core = served(label_server, label_server.authorise(lf.CORE_TERMS)["token"], zoom)
+
+    assert whole["l-ranked"][1] == (WHOLE_SET_TEXT,)
+    assert core["l-ranked"][1] == (CORE_ALONE_TEXT,)
+    assert whole["l-core"][1] == core["l-core"][1] == (CORE_ALONE_TEXT,)
+
+
+@pytest.mark.parametrize("zoom", TIERS)
+def test_a_principal_containing_no_generating_set_is_served_no_artifact(label_server, zoom):
+    """A viewer holding a term none of the generating sets touches is served the layer's artifacts
+    not at all — and reaches the layer, which is what makes this containment rather than the gate:
+    `visibility` is `public`, so the layer resolves for them exactly as it does for the other two.
+    """
+    other = served(label_server, label_server.authorise(lf.OTHER_TERMS)["token"], zoom)
+    assert other == {}
+
+
+# ---------------------------------------------------------------------------------------------
+# The cache half — behavioural, not by hook
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "warming",
+    [
+        pytest.param([0], id="one-tier"),
+        pytest.param([0, 2, 4, 6, 0], id="ascending-then-back"),
+        pytest.param([6, 4, 2, 0], id="descending"),
+    ],
+)
+def test_no_cache_above_the_containment_check_outlives_an_overlay_change(
+    tmp_path, tmp_path_factory, label_bundle, warming
+):
+    """**Warm every tier a request touches, remove one generating-set member, ask again on the same
+    token — and the label must be gone.**
+
+    Conformance §4.4 asks for this behaviourally rather than by hook, and the reason is that the
+    hook version tests the caches somebody remembered to name. What a warming order actually
+    exercises here is the mask fragments, the session's resolved visibility and the row-space
+    artifact projections; the servable-label tier design §8.5 anticipated is not built, containment
+    being evaluated per request. A green run says no cache above the check outlived the change,
+    without enumerating internals.
+
+    **The same token, deliberately.** A fresh session would resolve visibility after the change and
+    prove nothing about what the old one was holding. The stamp is *not* re-presented: since
+    [decision 0041](../../docs/decisions/0041-pins-become-a-staleness-stamp.md) a geometry stamp is
+    advisory and never authorisation, so presenting one is an ordinary request with an ordinary
+    answer and could not keep a suppression out either way. The row was written when the pin was
+    the presentable proxy; the token is what carries session state now.
+
+    **A suppression, not a deletion**, because the two retire by different rules (write-path §5.4)
+    and only one of them is about this. What is being asserted is that the *serving* answer moves
+    at the ack; a deletion would assert that and a fold's arithmetic at once.
+    """
+    private = tmp_path / "bundle"
+    shutil.copytree(label_bundle, private)
+    server, proc = spawn_server(private, tmp_path_factory.mktemp("label-overlay"))
+    try:
+        token = server.authorise(lf.WHOLE_TERMS)["token"]
+        for zoom in warming:
+            warm = served(server, token, zoom)
+            assert warm["l-whole"][1] == (WHOLE_SET_TEXT,), "warming must serve the label"
+
+        # Addressed by its source id, the unique field every file of the fixture names it by, so
+        # the entity is named by the fixture rather than looked up through a bundle read.
+        assert _change(server, lf.SPLIT, "suppress").status_code == 200
+
+        after = served(server, token, warming[-1])
+        assert "l-whole" not in after, (
+            "one member of its generating set left M_auth at the ack, so the label is withheld — "
+            "a cache above the containment check would still be serving it"
+        )
+        assert after["l-ranked"][1] == (CORE_ALONE_TEXT,), (
+            "and the ranked artifact falls back to the content it still contains"
+        )
+        assert after["l-core"][0] == 60 - 1, "the count moves with the mask too"
+
+        # **The strongest form of the claim.** Removing the entity from `M_auth` by suppression and
+        # never granting it in the first place are two routes to one mask, and containment is a
+        # function of the mask alone — so this principal's answer is now exactly the narrower
+        # principal's, key for key and value for value.
+        narrower = served(server, server.authorise(lf.CORE_TERMS)["token"], warming[-1])
+        assert after == narrower
+    finally:
+        stop_server(proc)
+
+
+# ---------------------------------------------------------------------------------------------
+# A generating set whose members arrived after the build
+# ---------------------------------------------------------------------------------------------
+
+
+def _ingest_batch(rows: list[tuple[int, list[str]]]) -> bytes:
+    """A `/control/ingest` body for this fixture's bundle: `(source_id, x, y, access)`.
+
+    Each row names its item by source id, so an ingested member is addressed the same way a built
+    one is.
+    """
+    import io  # noqa: PLC0415
+
+    import pyarrow as pa  # noqa: PLC0415
+    import pyarrow.ipc as ipc  # noqa: PLC0415
+
+    schema = pa.schema(
+        [
+            pa.field(JOIN_FIELD, pa.uint64()),
+            pa.field("x", pa.float32()),
+            pa.field("y", pa.float32()),
+            pa.field("access", pa.list_(pa.utf8())),
+        ]
+    )
+    batch = pa.record_batch(
+        [
+            pa.array([source_id for source_id, _ in rows], pa.uint64()),
+            pa.array([100.0 + i for i in range(len(rows))], pa.float32()),
+            pa.array([200.0 + i for i in range(len(rows))], pa.float32()),
+            pa.array([terms for _, terms in rows], pa.list_(pa.utf8())),
+        ],
+        schema=schema,
+    )
+    sink = io.BytesIO()
+    with ipc.new_stream(sink, schema) as writer:
+        writer.write_batch(batch)
+    return sink.getvalue()
+
+
+def _members(source_ids: list[int]) -> dict:
+    """A member table naming items by their source id, the fixture's unique field."""
+    return {JOIN_FIELD: [str(e) for e in source_ids]}
+
+
+def _change(server, source_id: int, op: str):
+    """One `/control/changes` item addressing an item by its source id, the fixture's unique field."""
+    return server.changes([{"op": op, "match": {JOIN_FIELD: str(source_id)}}], strict=True)
+
+
+#: Source ids for the two items this case ingests. Above the fixture's own range, so neither can
+#: be confused with a built entity.
+INGESTED_SHARED = 900
+INGESTED_EDGE = 901
+
+
+def test_a_generating_set_holding_an_ingested_member_is_served_on_the_same_rule(
+    tmp_path, tmp_path_factory, label_bundle
+):
+    """**Where a member's row came from does not decide who is served.**
+
+    A label published over a generating set that holds entities which arrived through
+    `/control/ingest` is served to a principal who holds every member of it and withheld from one
+    who lacks a single member — the same answer the built sets above get. A member is projected
+    into the row space it occupies, and a flushed entity occupies an extent row.
+
+    The publication names entities that are still in the commit buffer when it is accepted, so the
+    set has no rows for them until the flush; the label is served from that publication onwards.
+
+    **The control is in the same response.** The narrower principal is served the built labels it
+    contains, so the one absence is containment rather than a layer gate or an empty viewport.
+    """
+    private = tmp_path / "bundle"
+    shutil.copytree(label_bundle, private)
+    server, proc = spawn_server(private, tmp_path_factory.mktemp("label-ingested"))
+    try:
+        assert (
+            server.ingest(
+                _ingest_batch(
+                    [
+                        (INGESTED_SHARED, [str(lf.CORE_TERM), str(lf.EDGE_TERM)]),
+                        (INGESTED_EDGE, [str(lf.EDGE_TERM)]),
+                    ]
+                ),
+                "label-containment-ingest",
+            ).status_code
+            == 200
+        )
+
+        # Published while its members are still buffered: the set names two entities with no rows.
+        resp = server.publish_artifacts(
+            lf.LAYER.replace("/", "%2F"),
+            artifacts=[
+                {
+                    "key": "l-ingested",
+                    "members": _members(lf.NARROW_SET),
+                    "content": [
+                        {
+                            "values": ["drawn from what arrived since the build"],
+                            "generated_from": _members(
+                                [*lf.NARROW_SET, INGESTED_SHARED, INGESTED_EDGE]
+                            ),
+                        }
+                    ],
+                }
+            ],
+            strict=True,
+        )
+        assert resp.status_code == 201, resp.text
+
+        whole_token = server.authorise(lf.WHOLE_TERMS)["token"]
+        core_token = server.authorise(lf.CORE_TERMS)["token"]
+        # The flush that gives the ingested entities rows and publishes the artifact.
+        server.flush()
+        whole = served(server, whole_token)
+        assert whole["l-ingested"][1] == ("drawn from what arrived since the build",), (
+            "a principal holding every member of the set is served the content"
+        )
+        core = served(server, core_token)
+        assert "l-ingested" not in core, (
+            "one ingested member carries the edge term alone, so this principal is one member "
+            "short and the artifact is absent whole"
+        )
+        # The control in the same response: this principal is served the built labels it contains,
+        # so the absence above is containment rather than a gate or an empty viewport.
+        assert set(core) == {"l-ranked", "l-core"}
+
+        # A suppression of the ingested member withholds it from the wider principal too, and an
+        # unsuppress restores it: a deny reaches an extent row as it reaches a base row.
+        assert _change(server, INGESTED_SHARED, "suppress").status_code == 200
+        assert "l-ingested" not in served(server, whole_token)
+        assert _change(server, INGESTED_SHARED, "unsuppress").status_code == 200
+        assert "l-ingested" in served(server, whole_token)
+    finally:
+        stop_server(proc)

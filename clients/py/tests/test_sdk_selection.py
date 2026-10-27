@@ -1,0 +1,436 @@
+"""A selection's numbers, checked against the same numbers computed from the source table.
+
+The notebook corpus is committed and served, and every count here is compared with a pandas
+computation over `points.parquet`: the rows a reader's access terms reach, the rows a filter
+matches, and the rows whose position lies inside a box.
+"""
+
+from __future__ import annotations
+
+import json
+import numpy as np
+import pyarrow as pa
+import pytest
+import traitlets
+
+from mosaica import Refusal
+
+from test_sdk_corpus import declare_notebook
+
+pd = pytest.importorskip("pandas")
+pytest.importorskip("pyarrow")
+
+
+@pytest.fixture(scope="module")
+def points():
+    from conftest import notebook_corpus
+
+    frame = pd.read_parquet(notebook_corpus() / "points.parquet")
+    # A row with no access label carries the view's default, which is `public`.
+    frame["labels"] = [
+        list(labels) if labels is not None and len(labels) else ["public"]
+        for labels in frame["categories"]
+    ]
+    return frame
+
+
+@pytest.fixture(scope="module")
+def db(tmp_path_factory):
+    """The notebook corpus, committed and served once for every test here that only reads it."""
+    from conftest import binary, notebook_corpus
+    from mosaica._database import create
+
+    binary()
+    one = create(tmp_path_factory.mktemp("selection"))
+    declare_notebook(one, notebook_corpus())
+    report = one.commit()
+    assert report.ok, report.log
+    yield one
+    one.close()
+
+
+def seen_by(points, terms):
+    """The rows a reader holding `terms` may see: those sharing at least one label with it."""
+    held = set(terms)
+    return points[[bool(held.intersection(labels)) for labels in points["labels"]]]
+
+
+def clear_edge(values, near: float) -> float:
+    """A coordinate near `near` halfway between two neighbouring values, so no row sits on it."""
+    ordered = np.unique(values)
+    at = int(np.searchsorted(ordered, near))
+    return float((ordered[at - 1] + ordered[at]) / 2.0)
+
+
+def box_of(points, low: float, high: float) -> tuple:
+    """A box from the `low` to the `high` quantile on each axis, its edges clear of every row."""
+    return (
+        clear_edge(points["x"], points["x"].quantile(low)),
+        clear_edge(points["y"], points["y"].quantile(low)),
+        clear_edge(points["x"], points["x"].quantile(high)),
+        clear_edge(points["y"], points["y"].quantile(high)),
+    )
+
+
+def inside(points, box) -> "pd.DataFrame":
+    return points[
+        (points["x"] >= box[0])
+        & (points["x"] <= box[2])
+        & (points["y"] >= box[1])
+        & (points["y"] <= box[3])
+    ]
+
+
+def test_a_views_count_is_every_row_inserted_into_it(db, points):
+    assert db.view("s0").count() == len(points)
+
+
+def test_a_filtered_count_is_the_rows_the_filter_matches(db, points):
+    expression = {"primary_category": {"in": ["cs.LG", "stat.ML"]}}
+    expected = points["primary_category"].isin(["cs.LG", "stat.ML"]).sum()
+    assert db.view("s0").filter(expression).count() == expected
+
+
+def test_two_filters_must_both_match(db, points):
+    both = db.view("s0").filter({"archive": {"eq": "cs"}}).filter(
+        {"primary_category": {"eq": "cs.LG"}}
+    )
+    expected = ((points["archive"] == "cs") & (points["primary_category"] == "cs.LG")).sum()
+    assert both.count() == expected
+    assert both.filters == {
+        "all_of": [{"archive": {"eq": "cs"}}, {"primary_category": {"eq": "cs.LG"}}]
+    }
+
+
+def test_within_counts_exactly_the_rows_inside_the_box(db, points):
+    box = box_of(points, 0.3, 0.6)
+    expected = len(inside(points, box))
+    assert 0 < expected < len(points)
+    assert db.view("s0").within(box).count() == expected
+
+
+def test_a_sample_of_a_box_says_it_was_answered_exactly_and_counts_what_count_counts(db, points):
+    """A box is a `region` filter, so a sample of it says how the region was answered, and a
+    sample of no points counts it as `count()` does; without a box there is no verdict."""
+    box = box_of(points, 0.3, 0.6)
+    counted = db.view("s0").within(box).sample(k=0)
+    assert counted.schema.metadata[b"mosaica.region"] == b"exact"
+    matched = json.loads(counted.schema.metadata[b"mosaica.counts"])["matched"]
+    assert matched == len(inside(points, box)) == db.view("s0").within(box).count()
+    assert b"mosaica.region" not in db.view("s0").sample(k=0).schema.metadata
+    tiles = db.viewport_artifacts("s0", 0, per_tile=1, filters={"region": {"bbox": list(box)}})
+    assert tiles.schema.metadata[b"mosaica.region"] == b"exact"
+
+
+def test_a_filter_and_a_box_compose(db, points):
+    box = box_of(points, 0.2, 0.8)
+    expression = {"archive": {"eq": "math"}}
+    expected = (inside(points, box)["archive"] == "math").sum()
+    assert 0 < expected
+    assert db.view("s0").filter(expression).within(box).count() == expected
+    # The order they are applied in does not change the answer.
+    assert db.view("s0").within(box).filter(expression).count() == expected
+
+
+def test_two_boxes_count_their_overlap(db, points):
+    first, second = box_of(points, 0.1, 0.6), box_of(points, 0.4, 0.9)
+    narrowed = db.view("s0").within(first).within(second)
+    overlap = narrowed.box
+    assert overlap == (second[0], second[1], first[2], first[3])
+    assert narrowed.count() == len(inside(inside(points, first), second))
+
+
+@pytest.mark.parametrize("terms", [["cs.LG"], ["math.DS", "math.FA", "hep-th"]])
+def test_one_selection_counts_what_each_reader_may_see(db, points, terms):
+    box = box_of(points, 0.1, 0.9)
+    expression = {"archive": {"in": ["cs", "math", "hep-th"]}}
+    seen = seen_by(inside(points, box), terms)
+    expected = seen["archive"].isin(["cs", "math", "hep-th"]).sum()
+    assert 0 < expected
+    assert db.viewer(terms).view("s0").filter(expression).within(box).count() == expected
+
+
+def test_two_readers_of_one_selection_get_different_counts(db, points):
+    narrow = db.viewer(["cs.LG"]).view("s0").count()
+    broad = db.viewer(["cs.LG", "math.DS"]).view("s0").count()
+    assert narrow == len(seen_by(points, ["cs.LG"]))
+    assert broad == len(seen_by(points, ["cs.LG", "math.DS"]))
+    assert narrow < broad < db.view("s0").count()
+
+
+def test_two_boxes_that_do_not_overlap_select_nothing(db, points):
+    apart = db.view("s0").within(box_of(points, 0.1, 0.3)).within(box_of(points, 0.6, 0.9))
+    assert apart.box is None
+    assert apart.count() == 0
+
+
+def test_a_selection_is_unchanged_by_the_selections_made_from_it(db):
+    papers = db.view("s0")
+    papers.filter({"archive": {"eq": "cs"}})
+    papers.within((0.0, 0.0, 1.0, 1.0))
+    assert papers.filters is None and papers.box is None
+
+
+def test_an_unknown_view_is_refused(db):
+    with pytest.raises(Refusal):
+        db.view("no-such-view")
+    with pytest.raises(Refusal):
+        db.viewer(["cs.LG"]).view("no-such-view")
+
+
+def test_a_box_given_backwards_is_refused(db):
+    with pytest.raises(Refusal):
+        db.view("s0").within((10.0, 0.0, 0.0, 10.0))
+
+
+def test_a_sample_is_bounded_by_k_and_carries_the_counts_it_came_from(db, points):
+    import json
+
+    box = box_of(points, 0.2, 0.8)
+    sample = db.view("s0").within(box).sample(zoom=2, k=16)
+    counts = json.loads(sample.schema.metadata[b"mosaica.counts"])
+    assert 0 < sample.num_rows == counts["served"] < counts["matched"]
+    assert counts["matched"] == len(inside(points, box))
+    sent = json.loads(sample.schema.metadata[b"mosaica.request"])
+    assert sent["bbox"] == list(box) and sent["zoom"] == 2 and sent["k"] == 16
+
+
+def test_a_sample_carries_category_keys_for_the_items_it_drew(db, points):
+    sample = db.view("s0").sample(k=4)
+    assert pa.types.is_dictionary(sample.schema.field("primary_category").type)
+    drawn = sample.to_pylist()[:12]
+    by_id = points.set_index("entity_id")
+    for row in drawn:
+        source = by_id.loc[db.item(row["mosaica_id"])["fields"]["id"]]
+        assert row["primary_category"] == source["primary_category"]
+        assert row["archive"] == source["archive"]
+
+
+def test_a_second_sample_asks_for_no_key_it_already_has(db, monkeypatch):
+    from mosaica import Viewer
+
+    asked = []
+    send = Viewer._request
+
+    def recorded(self, method, path, body):
+        asked.append(path)
+        return send(self, method, path, body)
+
+    monkeypatch.setattr(Viewer, "_request", recorded)
+    # A set of terms no other test reads with, so no key is held yet.
+    papers = db.viewer(["cs.LG", "hep-th"]).view("s0")
+    papers.sample(k=4)
+    first = [path for path in asked if path.startswith("/v1/categories/")]
+    assert len(first) == 2  # one request per category column
+    asked.clear()
+    papers.sample(k=4)
+    assert [path for path in asked if path.startswith("/v1/categories/")] == []
+
+
+def test_categories_lists_every_value_of_a_vocabulary(db):
+    from conftest import notebook_corpus
+
+    vocabulary = pd.read_parquet(notebook_corpus() / "primary_category.parquet")
+    listed = db.categories("primary_category")
+    assert isinstance(listed, pa.Table)
+    assert listed.column_names == ["key", "code", "title"]
+    listed = listed.to_pandas()
+    assert sorted(listed["key"]) == sorted(vocabulary["key"])
+    assert dict(zip(listed["key"], listed["code"])) == dict(
+        zip(vocabulary["key"], vocabulary["code"])
+    )
+
+
+def test_categories_resolves_the_codes_it_is_given(db):
+    listed = db.categories("primary_category").to_pandas()
+    held = listed.iloc[[7, 0, 3]]
+    found = db.categories("primary_category", codes=[int(c) for c in held["code"]] + [65000])
+    assert found.column_names == ["key", "code", "title"]
+    assert found.to_pylist() == held.sort_values("key").to_dict("records")
+    assert db.categories("primary_category", codes=[]).num_rows == 0
+    with pytest.raises(Refusal):
+        db.categories("primary_category", codes=[1], prefix="cs")
+
+
+def test_categories_with_a_prefix_counts_the_items_carrying_each_value(db, points):
+    found = db.categories("archive", prefix="ma")
+    assert found.column_names == ["key", "code", "title", "count"]
+    assert found.schema.metadata[b"mosaica.more"] == b"false"
+    assert found.schema.metadata[b"mosaica.total"] == str(len(points)).encode()
+    found = found.to_pandas()
+    assert "math" in set(found["key"])
+    carried = points["archive"].value_counts()
+    for key, count in zip(found["key"], found["count"]):
+        assert count == carried.get(key, 0)
+
+
+def test_categories_with_a_prefix_counts_what_the_reader_may_see(db, points):
+    found = db.viewer(["cs.LG"]).categories("archive", prefix="c").to_pandas()
+    seen = seen_by(points, ["cs.LG"])["archive"].value_counts()
+    assert dict(zip(found["key"], found["count"])) == {
+        key: seen.get(key, 0) for key in found["key"]
+    }
+
+
+def test_categories_under_a_filter_count_the_rows_it_passes(db, points):
+    box = box_of(points, 0.2, 0.7)
+    expression = {"all_of": [
+        {"primary_category": {"in": ["cs.LG", "stat.ML"]}},
+        {"region": {"bbox": list(box)}},
+    ]}
+    passing = inside(points, box)
+    passing = passing[passing["primary_category"].isin(["cs.LG", "stat.ML"])]
+    unfiltered = db.categories("archive", prefix="", view="s0")
+    found = db.categories("archive", prefix="", view="s0", filters=expression)
+    assert found.column("key").to_pylist() == unfiltered.column("key").to_pylist()
+    carried = passing["archive"].value_counts()
+    counts = dict(zip(found.column("key").to_pylist(), found.column("count").to_pylist()))
+    assert counts == {key: carried.get(key, 0) for key in counts}
+    assert 0 in counts.values() and any(counts.values())
+    assert found.schema.metadata[b"mosaica.total"] == str(len(passing)).encode()
+    with pytest.raises(Refusal):
+        db.categories("archive", view="s0", filters=expression)
+    with pytest.raises(Refusal):
+        db.categories("archive", view="s0", codes=[1], filters=expression)
+
+
+def test_a_map_opens_on_the_selections_view_filters_and_box(db, points, stub_bundle):
+    box = box_of(points, 0.2, 0.8)
+    expression = {"archive": {"eq": "cs"}}
+    m = db.view("s0").filter(expression).within(box).map(
+        colour_by="primary_category", layers=[], height=320, size_by="submitted_at"
+    )
+    assert m.view == "s0"
+    assert m.filters == expression
+    assert m.bbox == list(box)
+    assert m.colour_by == "primary_category" and m.layers == [] and m.height == 320
+    assert m.size_by == "submitted_at"
+    assert (m.budget, m.budget_min, m.budget_max) == (0, 1_000, 2_000_000)
+    assert (m.cluster_budget, m.cluster_budget_min, m.cluster_budget_max) == (1_000, 10, 10_000)
+
+
+def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stub_bundle):
+    """A naive moment is read as UTC, as the corpus's naive timestamp column was stored, so each
+    spelling counts what pandas counts over the source table."""
+    import datetime
+
+    expected = int((points["submitted_at"] >= pd.Timestamp("2017-01-01")).sum())
+    assert 0 < expected < len(points)
+    utc = datetime.timezone.utc
+    for moment in (
+        datetime.datetime(2017, 1, 1),
+        datetime.datetime(2017, 1, 1, 1, tzinfo=datetime.timezone(datetime.timedelta(hours=1))),
+        datetime.date(2017, 1, 1),
+        pd.Timestamp("2017-01-01"),
+        np.datetime64("2017-01-01"),
+        str(int(datetime.datetime(2017, 1, 1, tzinfo=utc).timestamp()) * 1_000_000),
+    ):
+        selection = db.view("s0").filter({"submitted_at": {"range": {"gte": moment}}})
+        assert selection.count() == expected, moment
+    selection = db.view("s0").filter({"submitted_at": {"in": [pd.Timestamp("2017-01-01")]}})
+    assert selection.count() == int((points["submitted_at"] == pd.Timestamp("2017-01-01")).sum())
+    # No moment is refused before a request is sent, whichever library's NaT it is.
+    for missing in (pd.NaT, np.datetime64("NaT", "us")):
+        with pytest.raises(Refusal) as refused:
+            db.view("s0").filter({"submitted_at": {"range": {"gte": missing}}}).count()
+        assert refused.value.status is None
+    # A string is sent as it is: the server reads it, and refuses one that names no moment.
+    with pytest.raises(Refusal):
+        db.view("s0").filter({"submitted_at": {"range": {"gte": "last spring"}}}).count()
+    assert db.view("s0").filter({"arxiv_id": {"eq": "2017-01-01"}}).count() == 0
+    # A sample and the annotations of each tile take a moment in their filters as a count does,
+    # and their metadata carries the request as it was sent.
+    after = {"submitted_at": {"range": {"gte": datetime.datetime(2017, 1, 1)}}}
+    sample = db.view("s0").filter(after).sample(k=10)
+    sent = json.loads(sample.schema.metadata[b"mosaica.request"])
+    assert sent["filters"] == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
+    assert json.loads(sample.schema.metadata[b"mosaica.counts"])["matched"] == expected
+    layer = db.meta()["layers"][0]["name"]
+    tiles = db.viewport_artifacts("s0", 0, per_tile=5, layers=[layer], filters=after)
+    assert json.loads(tiles.schema.metadata[b"mosaica.request"])["filters"] == sent["filters"]
+    m = db.view("s0").filter({"submitted_at": {"range": {"gte": datetime.date(2017, 1, 1)}}}).map()
+    assert m.filters == {"submitted_at": {"range": {"gte": 1_483_228_800_000_000}}}
+
+
+def test_a_map_naming_what_the_reader_cannot_see_is_refused(db, stub_bundle):
+    """A view, a layer or a column the meta does not list is refused at the call, where the map
+    would otherwise open on the first view, draw one colour or drop the layer."""
+    for wrong in (
+        {"view": "nope"},
+        {"layers": ["nope"]},
+        {"colour_by": "nope"},
+        {"colour_by": "cluster:nope"},
+        {"colour_by": "title"},
+        {"size_by": "nope"},
+    ):
+        with pytest.raises(Refusal):
+            db.map(**wrong)
+    for wrong in ({"layers": "nope"}, {"colour_by": "nope"}, {"size_by": "nope"}):
+        with pytest.raises(Refusal):
+            db.view("s0").map(**wrong)
+    layer = db.meta()["layers"][0]["name"]
+    assert db.map(colour_by=f"cluster:{layer}", layers=[layer]).colour_by == f"cluster:{layer}"
+
+
+def test_every_route_to_a_map_takes_the_point_budget(db, stub_bundle):
+    settings = {
+        "budget": 40_000,
+        "budget_min": 500,
+        "budget_max": 90_000,
+        "cluster_budget": 300,
+        "cluster_budget_min": 5,
+        "cluster_budget_max": 5_000,
+    }
+    for m in (db.map(**settings), db.viewer(["cs.LG"]).map(**settings), db.view("s0").map(**settings)):
+        assert (m.budget, m.budget_min, m.budget_max) == (40_000, 500, 90_000)
+        assert (m.cluster_budget, m.cluster_budget_min, m.cluster_budget_max) == (300, 5, 5_000)
+
+
+def test_every_route_to_a_map_takes_the_maps_other_settings(db, stub_bundle):
+    """A selection's map takes what the others take, such as the field that titles a point, and
+    leaves its view and filters to the selection."""
+    settings = {"title_field": "title", "explorer_layout": "overlay", "size_min": 3.0}
+    selection = db.view("s0").filter({"title": {"match": "transformer"}})
+    for m in (db.map(**settings), db.viewer(["cs.LG"]).map(**settings), selection.map(**settings)):
+        assert (m.title_field, m.explorer_layout, m.size_min) == ("title", "overlay", 3.0)
+    assert selection.map(title_field="title").filters == selection.filters
+    with pytest.raises(Refusal):
+        selection.map(filters={"title": {"match": "graph"}})
+
+
+def test_a_box_counted_over_a_cover_counts_at_least_the_items_inside(served, corpus, points):
+    """A server whose outline budget is one cell counts a box over the cells covering it."""
+    from mosaica import open as reopen
+
+    db = served(lambda one: declare_notebook(one, corpus))
+    box = box_of(points, 0.3, 0.6)
+    exact = len(inside(points, box))
+    path = db.path
+    db.close()
+    deployment = path / "mosaica.toml"
+    deployment.write_text(
+        deployment.read_text().replace("[serve]\n", "[serve]\nmax_region_cells = 1\n")
+    )
+    again = reopen(path)
+    try:
+        count = again.view("s0").within(box).count()
+        assert type(count) is int and count >= exact
+        counted = again.view("s0").within(box).sample(k=0).schema.metadata
+        assert counted[b"mosaica.region"].startswith(b"cover; depth=")
+        assert json.loads(counted[b"mosaica.counts"])["matched"] == count
+    finally:
+        again.close()
+
+
+def test_every_route_to_a_map_takes_the_basemap_as_given(db, stub_bundle, tmp_path):
+    image = tmp_path / "plan.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n")
+    routes = (db.map, db.viewer(["cs.LG"]).map, db.view("s0").map)
+    for route in routes:
+        assert route().basemap is None
+        assert route(basemap="none").basemap == "none"
+        m = route(basemap={"s0": {"image": image, "bounds": [0, 0, 1, 1]}})
+        assert m.basemap == {"s0": {"image": image, "bounds": [0.0, 0.0, 1.0, 1.0]}}
+        assert m.get_state()["_basemap"] == {"value": {"s0": {"image": {"local": str(image)}, "bounds": [0.0, 0.0, 1.0, 1.0]}}, "images": {str(image): 1}}
+        with pytest.raises(traitlets.TraitError):
+            route(basemap={"image": tmp_path / "missing.png"})

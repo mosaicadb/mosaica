@@ -1,0 +1,660 @@
+import {describe, expect, it, vi} from 'vitest';
+import {MosaicaClient} from '../src/client.js';
+import {createStore} from '../src/store.js';
+import type {ViewportPart, ViewportResponse} from '../src/types.js';
+import {artifact, fakeClock, fakeScheduler, layer, meta, response, servedResult, settle, tile, tileAnswers, view, scalar, camera} from './support.js';
+import {dataToWorldXY, mortonOfTile} from '../src/coords.js';
+import {tileRectOfBbox} from '../src/budget.js';
+
+/**
+ * The store across several views: one store and one byte budget, with a replica, a presenter and a
+ * channel per view, and a switch that changes which view is current.
+ *
+ * `v0`, `v1` and `v2` share one frame and one group, as a slider's views do; `far` quantises
+ * against another frame. Runs against a fake client, clock and frame scheduler, and asserts which
+ * requests went out, under which view, and what the projections said.
+ */
+
+const FRAME = {xMin: 0, xMax: 100, yMin: 0, yMax: 200};
+const OTHER_FRAME = {xMin: -1000, xMax: 1000, yMin: -500, yMax: 500};
+
+const inGroup = (id: string, quantisation: typeof FRAME, group: string | null) =>
+  view(id, {quantisation, roster: group ? {group, key: id, metadata: {}} : null});
+
+const everyView = {views: ['v0', 'v1', 'v2', 'far'], computedContent: ['centroid', 'box']};
+
+const META = meta({
+  views: [inGroup('far', OTHER_FRAME, null), inGroup('v0', FRAME, 'g'), inGroup('v1', FRAME, 'g'), inGroup('v2', FRAME, 'g')],
+  groups: [{name: 'g', title: 'quarters', membersOf: null, views: ['v0', 'v1', 'v2']}],
+  declaredScalars: [scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']})],
+  layers: [layer('l', everyView), layer('m', everyView)],
+  filterOperands: [{column: 'archive', family: 'category', operands: ['in']}]
+});
+
+type FakeRequest = {view: string; zoom: number; bbox?: [number, number, number, number]; tiles?: bigint[]; filters?: unknown; k?: number; layers?: string[]};
+
+/**
+ * A response answering every tile the request spans, so coverage is the client's arithmetic: the
+ * served points on the first, and the rest empty, which the server leaves out.
+ */
+function responseCovering(req: FakeRequest, served = 3): ViewportResponse {
+  // No membership column, so a band is colour-stale when a layer goes on while its view is held.
+  const scalars = {archive: {arrowType: 'u16' as const, values: Uint16Array.from({length: served}, () => 5)}};
+  const q = META.views.find((v) => v.id === req.view)!.quantisation;
+  let prefixes: bigint[];
+  if (req.tiles) prefixes = req.tiles;
+  else {
+    const [x0, y0] = dataToWorldXY(req.bbox![0], req.bbox![1], q);
+    const [x1, y1] = dataToWorldXY(req.bbox![2], req.bbox![3], q);
+    const rect = tileRectOfBbox([Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)], req.zoom);
+    prefixes = [];
+    for (let y = rect.y0; y <= rect.y1; y++) for (let x = rect.x0; x <= rect.x1; x++) prefixes.push(mortonOfTile(x, y, req.zoom));
+  }
+  const tiles = prefixes.slice(0, 1).map((prefix) => tile(prefix, 1000n));
+  return response(servedResult(served, tiles, {scalars}));
+}
+
+/**
+ * One artifact per view in every tile, identified by the view that served it, so a projection
+ * carrying the wrong one shows here.
+ */
+const tilesOf = tileAnswers((_tile, req) => [artifact(BigInt(META.views.findIndex((v) => v.id === req.view) + 1), {key: req.view, maskedCount: 5n})]);
+
+/** The ground a view was asked about, over every piece its requests were split into. */
+function union(boxes: [number, number, number, number][]): [number, number, number, number] {
+  return boxes.reduce<[number, number, number, number]>(
+    (a, b) => [Math.min(a[0], b[0], b[2]), Math.min(a[1], b[1], b[3]), Math.max(a[2], b[0], b[2]), Math.max(a[3], b[1], b[3])],
+    [Infinity, Infinity, -Infinity, -Infinity]
+  );
+}
+
+/** The `region` leaf anywhere in a filter expression, or null. */
+function regionOf(expr: unknown): boolean {
+  if (!expr || typeof expr !== 'object') return false;
+  const node = expr as Record<string, unknown>;
+  if (node.region) return true;
+  for (const key of ['all_of', 'any_of', 'none_of']) {
+    const kids = node[key];
+    if (Array.isArray(kids) && kids.some(regionOf)) return true;
+  }
+  return false;
+}
+
+function open(opts: {
+  view?: string;
+  clock: ReturnType<typeof fakeClock>;
+  scheduler: ReturnType<typeof fakeScheduler>;
+  prefetch?: boolean;
+  /**
+   * A view whose requests hand their points over as a part and then never resolve, as a response
+   * mid-stream. What is drawn is a partial frame, presented while the request is in flight.
+   */
+  streaming?: string;
+}) {
+  const viewport = vi.fn(
+    async (
+      _token: string,
+      req: FakeRequest,
+      {onPart}: {onPart?: (part: ViewportPart) => void | Promise<void>} = {}
+    ) => {
+      const answer = {...responseCovering(req), region: regionOf(req.filters) ? {exact: true as const, depth: null} : null};
+      if (opts.streaming === req.view && onPart) {
+        await onPart({result: answer.result, identityKey: answer.identityKey, contentKey: answer.contentKey});
+        // The points went to the sink and the response never comes.
+        return new Promise<never>(() => {});
+      }
+      return answer;
+    }
+  );
+  const traces: {kind: string; fields: Record<string, number | string>}[] = [];
+  const viewportArtifacts = vi.fn(tilesOf);
+  const client = {
+    meta: async () => META,
+    viewport,
+    viewportArtifacts,
+    item: async () => ({fields: {}}),
+    artifact: async () => ({layer: 'l', key: 'k', maskedCount: 42n, centroid: null, box: null, shape: null}),
+    categories: async () => [],
+    suggest: async (_token: string, column: string, q: string) => ({status: 'ok' as const, column, q, values: [], more: false}),
+    close: () => {}
+  } as unknown as MosaicaClient;
+  const store = createStore({
+    viewerUrl: 'http://viewer',
+    token: 'tok',
+    client,
+    view: opts.view,
+    clock: opts.clock,
+    scheduler: opts.scheduler,
+    prefetch: opts.prefetch ?? false,
+    replica: {revalidateAfterMs: Infinity},
+    artifacts: {perTile: 10},
+    instruments: {onTrace: (kind, fields) => traces.push({kind, fields})}
+  });
+  /** Every viewport request issued for one view, and every artifacts request. */
+  const asked = (id: string) => [...viewport.mock.calls, ...viewportArtifacts.mock.calls].filter((c) => (c[1] as FakeRequest).view === id);
+  /** Holds the next `/v1/meta` read open, as a `clear` waiting for the next viewer's meta. */
+  const holdMeta = () => Object.assign(client, {meta: () => new Promise<never>(() => {})});
+  return {store, viewport, asked, traces, holdMeta};
+}
+
+/** Brings a store to its first shown frame in whichever view it opened on. */
+async function shown(
+  store: ReturnType<typeof open>['store'],
+  clock: ReturnType<typeof fakeClock>,
+  scheduler: ReturnType<typeof fakeScheduler>
+): Promise<void> {
+  store.setView(camera(store.frame(), [0, 0, 50, 50], 800, 400));
+  await clock.advance(600);
+  scheduler.flush();
+}
+
+describe('a switch within a group keeps the camera and the selection', () => {
+  it('re-asks the same tiles under the new view, with the region leaf still on the request', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    store.select({kind: 'box', bbox: [10, 10, 20, 20]});
+    await clock.advance(600);
+    scheduler.flush();
+    // The camera's own ground, which the requests for v0 covered between them.
+    const camera: [number, number, number, number] = [0, 0, 50, 50];
+    expect(store.get('region')).not.toBeNull();
+
+    store.setCurrentView('v1');
+
+    // Published at once, with no marks: v0's marks are not drawn under v1's id.
+    expect(store.get('view').id).toBe('v1');
+    expect(store.get('view').composition).toBeNull();
+    expect(store.get('marks').bands).toEqual([]);
+    // The selection is a shape in the shared frame and means the same thing here.
+    expect(store.get('region')!.shape).toEqual({kind: 'box', bbox: [10, 10, 20, 20]});
+    expect(asked('v1')).toHaveLength(0);
+
+    await clock.advance(600);
+    scheduler.flush();
+
+    // The camera did not move, so the incoming view is asked about the same ground. Compared by the
+    // ground the requests span: the budget chooses the depth per view, and a request rectangle is
+    // tile-aligned and inset by half a grid unit, so the comparison is to within one.
+    const ground = union(asked('v1').map((c) => (c[1] as FakeRequest).bbox!));
+    expect(ground[0]).toBeLessThan(0.01);
+    expect(ground[1]).toBeLessThan(0.01);
+    expect(ground[2]).toBeGreaterThanOrEqual(camera[2]);
+    expect(ground[3]).toBeGreaterThanOrEqual(camera[3]);
+    // Its counts are re-asked under the new view: the region is composed into the filters.
+    const after = asked('v1').at(-1)![1] as FakeRequest;
+    expect(regionOf(after.filters)).toBe(true);
+    expect(store.get('view').composition).not.toBeNull();
+    expect(store.get('status').status).toBe('shown');
+  });
+
+  it('draws a view returned to from its own held bands, without asking', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    store.setCurrentView('v1');
+    await clock.advance(600);
+    scheduler.flush();
+    const askedV0 = asked('v0').length;
+
+    store.setCurrentView('v0');
+    // One scheduler tick, no clock: the frame comes from what v0 already holds.
+    scheduler.flush();
+
+    expect(store.get('view').id).toBe('v0');
+    expect(store.get('view').composition).not.toBeNull();
+    expect(store.get('status').status).toBe('shown');
+    expect(asked('v0')).toHaveLength(askedV0);
+  });
+
+  it('drops every column’s held suggestion page and refusal on a switch, even within the same frame', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+
+    store.suggest('archive', '', 'filter');
+    await clock.advance(200);
+    expect(store.get('filters').suggestions['archive']).toEqual({q: '', verb: 'filter', values: [], more: false, total: null});
+
+    store.setCurrentView('v1');
+    // A suggestion page is per column and view, so it does not carry over.
+    expect(store.get('filters').suggestions).toEqual({});
+    expect(store.get('filters').suggestErrors).toEqual({});
+
+    // The dedupe was cleared with it, so the same ask under the new view reaches the client.
+    store.suggest('archive', '', 'filter');
+    await clock.advance(200);
+    expect(store.get('filters').suggestions['archive']).toEqual({q: '', verb: 'filter', values: [], more: false, total: null});
+  });
+});
+
+describe('a switch across frames publishes no camera and drops the selection', () => {
+  it('publishes an empty frame at loading, asks nothing, and answers the map’s refit', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    store.select({kind: 'box', bbox: [10, 10, 20, 20]});
+    await clock.advance(600);
+    scheduler.flush();
+
+    store.setCurrentView('far');
+
+    expect(store.get('view').id).toBe('far');
+    expect(store.get('view').composition).toBeNull();
+    expect(store.get('marks').bands).toEqual([]);
+    expect(store.get('tiles').tiles).toEqual([]);
+    expect(store.get('region')).toBeNull();
+    expect(store.get('status').status).toBe('loading');
+
+    // No camera means no question: nothing is asked until the map refits and says where it is.
+    await clock.advance(2000);
+    scheduler.flush();
+    expect(asked('far')).toHaveLength(0);
+
+    store.setView(camera(store.frame(), [-1000, -500, 1000, 500], 800, 400));
+    await clock.advance(600);
+    scheduler.flush();
+    expect(asked('far').length).toBeGreaterThan(0);
+    expect(store.get('view').composition).not.toBeNull();
+  });
+
+  it('takes the refit from inside the switch, where the map actually makes it', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    // With a layer on, building the incoming view publishes its channel's state, which is the first
+    // publish a subscriber sees during the switch.
+    store.setLayers(['l']);
+    await shown(store, clock, scheduler);
+
+    // The map refits from a subscription, so its `setView` lands during `setCurrentView`. The
+    // store must already point at the incoming view, or the camera is scheduled on the view being
+    // left and the switch stays at `loading`.
+    let refitted = false;
+    const stop = store.subscribe(() => {
+      if (refitted || store.frame() !== OTHER_FRAME) return;
+      refitted = true;
+      store.setView(camera(store.frame(), [-1000, -500, 1000, 500], 800, 400));
+    });
+    store.setCurrentView('far');
+    await clock.advance(600);
+    scheduler.flush();
+    stop();
+
+    expect(refitted).toBe(true);
+    expect(asked('far').length).toBeGreaterThan(0);
+    // Nothing was asked for the view left behind after the switch began.
+    expect(asked('v0').filter((c) => c[1].bbox?.[0] === -1000)).toHaveLength(0);
+    expect(store.get('view').composition).not.toBeNull();
+  });
+});
+
+describe('a refit made during a switch across frames is the camera the store keeps', () => {
+  for (const when of ['the first publish', 'the frame publish'] as const) {
+    it(`asks for the incoming view again under a filter set after a refit at ${when}`, async () => {
+      const clock = fakeClock();
+      const scheduler = fakeScheduler();
+      const {store, viewport} = open({view: 'v0', clock, scheduler});
+      await clock.advance(1);
+      await shown(store, clock, scheduler);
+
+      let refitted = false;
+      const refit = () => {
+        if (refitted || store.frame() !== OTHER_FRAME) return;
+        refitted = true;
+        store.setView(camera(store.frame(), [-1000, -500, 1000, 500], 800, 400));
+      };
+      const stop = when === 'the first publish' ? store.subscribe(refit) : store.subscribe('view', refit);
+      store.setCurrentView('far');
+      await clock.advance(600);
+      scheduler.flush();
+      stop();
+      expect(refitted).toBe(true);
+
+      store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
+      await clock.advance(600);
+      scheduler.flush();
+      const filtered = viewport.mock.calls.map((c) => c[1] as FakeRequest).filter((r) => r.view === 'far' && r.filters);
+      expect(filtered.length).toBeGreaterThan(0);
+    });
+  }
+});
+
+describe('a view that is not current asks for nothing', () => {
+  it('issues no request for a view stepped through and left before its settle', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+
+    store.setCurrentView('v1');
+    await clock.advance(50);
+    store.setCurrentView('v2');
+    await clock.advance(600);
+    scheduler.flush();
+
+    // The step the slider passed over cost nothing; the one it stopped on asked once.
+    expect(asked('v1')).toHaveLength(0);
+    expect(asked('v2').length).toBeGreaterThan(0);
+  });
+
+  it('asks nothing for a held view when the layers change', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    store.setCurrentView('v1');
+    await clock.advance(600);
+    scheduler.flush();
+    store.setCurrentView('v0');
+    await clock.advance(600);
+    scheduler.flush();
+    const held = asked('v1').length;
+    expect(held).toBeGreaterThan(0);
+
+    store.setLayers(['l']);
+    await clock.advance(2000);
+    scheduler.flush();
+
+    expect(asked('v1')).toHaveLength(held);
+    expect(store.get('artifacts').layers).toEqual(['l']);
+  });
+});
+
+describe('a view that is not current asks for nothing: the paths that reach the driver', () => {
+  it('does not ask for a stepped-to view whose bands are colour-stale under a layer switched on', async () => {
+    // The colour-stale refetch reschedules the driver; a view the slider is passing through does
+    // not ask through that route either.
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    store.setLayers(['l']);
+    await shown(store, clock, scheduler);
+    // v1 is warmed with `l` on, so its channel has answered and its bands carry `l`'s column.
+    store.setCurrentView('v1');
+    await clock.advance(600);
+    scheduler.flush();
+    store.setCurrentView('v0');
+    await clock.advance(600);
+    scheduler.flush();
+    // A second layer goes on while v1 is held, so every band v1 holds is colour-stale when it draws
+    // again.
+    store.setLayers(['l', 'm']);
+    await clock.advance(600);
+    scheduler.flush();
+    const held = asked('v1').length;
+
+    // Stepping through v1: its redraw frame is presented while it is current, and the coverage check
+    // runs against it.
+    store.setCurrentView('v1');
+    scheduler.flush();
+    await clock.advance(50);
+    store.setCurrentView('v2');
+    await clock.advance(600);
+    scheduler.flush();
+
+    expect(asked('v1')).toHaveLength(held);
+    expect(asked('v2').length).toBeGreaterThan(0);
+  });
+
+  it('issues no anticipation for a view left inside its idle window', async () => {
+    // With prefetch on, a settled view arms the idle timer for its ring. Leaving before it fires
+    // cancels it, as it cancels the pan's debounce.
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler, prefetch: true});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+
+    // A pan re-arms the idle timer that buys the ring; 100 ms is inside its window. The camera is
+    // small against the frame, so the ring reaches ground the render rect did not cover.
+    store.setView(camera(store.frame(), [40, 90, 45, 95], 800, 400));
+    await clock.advance(100);
+    const before = asked('v0').length;
+    store.setCurrentView('v1');
+    await clock.advance(4000);
+    scheduler.flush();
+
+    expect(asked('v0')).toHaveLength(before);
+    expect(asked('v1').length).toBeGreaterThan(0);
+
+    // The same store left alone through the same window does fetch its ring.
+    const clock2 = fakeClock();
+    const scheduler2 = fakeScheduler();
+    const alone = open({view: 'v0', clock: clock2, scheduler: scheduler2, prefetch: true});
+    await clock2.advance(1);
+    await shown(alone.store, clock2, scheduler2);
+    alone.store.setView(camera(alone.store.frame(), [40, 90, 45, 95], 800, 400));
+    await clock2.advance(100);
+    const stillHere = alone.asked('v0').length;
+    await clock2.advance(4000);
+    scheduler2.flush();
+    expect(alone.asked('v0').length).toBeGreaterThan(stillHere);
+  });
+});
+
+describe('the switch’s own rules', () => {
+  it('ignores an id the bundle does not declare, and reports it', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, traces} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+
+    store.setCurrentView('nope');
+
+    expect(store.get('view').id).toBe('v0');
+    expect(traces.filter((t) => t.kind === 'view-switch' && t.fields.refused === 1 && t.fields.id === 'nope')).toHaveLength(1);
+    // No throw and no neighbour: the frame on screen is untouched.
+    expect(store.get('view').composition).not.toBeNull();
+  });
+
+  it('applies a call made before meta in place of options.view', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    store.setCurrentView('v2');
+    await clock.advance(1);
+
+    expect(store.get('view').id).toBe('v2');
+    await shown(store, clock, scheduler);
+    expect(asked('v0')).toHaveLength(0);
+    expect(asked('v2').length).toBeGreaterThan(0);
+  });
+
+  it('does nothing when the id is already current', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked, traces} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    const before = asked('v0').length;
+
+    store.setCurrentView('v0');
+    await clock.advance(600);
+    scheduler.flush();
+
+    expect(asked('v0')).toHaveLength(before);
+    expect(traces.filter((t) => t.kind === 'view-switch')).toHaveLength(0);
+  });
+});
+
+describe('the projections follow the view being entered', () => {
+  it('carries the incoming view’s artifacts at the switch, never the outgoing view’s', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    store.setLayers(['l']);
+    await shown(store, clock, scheduler);
+    await clock.advance(600);
+    scheduler.flush();
+    expect(store.get('artifacts').served.length).toBeGreaterThan(0);
+    const inV0 = store.get('artifacts').served;
+
+    // Cold: the view being entered has answered nothing, and says so.
+    store.setCurrentView('far');
+    expect(store.get('artifacts').served).toEqual([]);
+    expect(store.get('artifacts').status).toBe('idle');
+
+    // Warm: the view returned to carries its own held set, published at the switch.
+    store.setView(camera(store.frame(), [-1000, -500, 1000, 500], 800, 400));
+    await clock.advance(600);
+    scheduler.flush();
+    const inFar = store.get('artifacts').served;
+    expect(inFar.length).toBeGreaterThan(0);
+    store.setCurrentView('v0');
+    expect(store.get('artifacts').served).not.toBe(inFar);
+    expect(store.get('artifacts').served.map((a) => a.mosaicaId)).toEqual(inV0.map((a) => a.mosaicaId));
+  });
+
+  it('holds a cold switch at loading through the first partial frame', async () => {
+    // A switch's `loading` is ended by a frame derived from the view's own bands. A cold view has
+    // none, so the first frame is part of the request it triggered, whose status is the driver's.
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store} = open({view: 'v0', clock, scheduler, streaming: 'far'});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+
+    store.setCurrentView('far');
+    expect(store.get('status').status).toBe('loading');
+
+    store.setView(camera(store.frame(), [-1000, -500, 1000, 500], 800, 400));
+    await clock.advance(600);
+    scheduler.flush();
+
+    // A frame is drawn from the part while its request has not answered.
+    expect(store.get('view').composition).not.toBeNull();
+    expect(store.get('status').status).toBe('loading');
+  });
+});
+
+describe('the replica projection reports across views, and clear() empties them all', () => {
+  it('counts every view holding a band, and the bytes of all of them', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    const oneView = store.get('replica');
+    expect(oneView.views).toBe(1);
+    expect(oneView.bytes).toBeGreaterThan(0);
+
+    store.setCurrentView('v1');
+    await clock.advance(600);
+    scheduler.flush();
+
+    const two = store.get('replica');
+    expect(two.views).toBe(2);
+    expect(two.bytes).toBeGreaterThan(oneView.bytes);
+    // `points` and `bands` are the current view's.
+    expect(two.bands).toBeGreaterThan(0);
+
+    store.clear();
+
+    expect(store.get('replica').views).toBe(0);
+    expect(store.get('replica').bytes).toBe(0);
+    expect(store.get('view').composition).toBeNull();
+  });
+});
+
+describe('what a filter change, a switch and a clear leave behind', () => {
+  it('drops a held view’s bands when the filters change, so returning to it asks again under the new filter', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    store.setCurrentView('v1');
+    await clock.advance(600);
+    scheduler.flush();
+
+    store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
+    await clock.advance(600);
+    scheduler.flush();
+    const askedV0 = asked('v0').length;
+
+    store.setCurrentView('v0');
+    scheduler.flush();
+    // v0's bands answered the unfiltered question, so there is nothing to draw from.
+    expect(store.get('marks').bands).toEqual([]);
+    await clock.advance(600);
+    scheduler.flush();
+    expect(asked('v0').length).toBeGreaterThan(askedV0);
+    expect((asked('v0').at(-1)![1] as FakeRequest).filters).toEqual({archive: {in: ['cs']}});
+  });
+
+  it('cancels the outgoing view’s artifact request on a switch', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked} = open({view: 'v0', clock, scheduler});
+    store.setLayers(['l']);
+    await clock.advance(1);
+    // Filtered, so the channel asks the server rather than answering from scopes it holds whole.
+    store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
+    await shown(store, clock, scheduler);
+    await clock.advance(1000);
+    scheduler.flush();
+
+    // The point path asks at once; the channel's request waits for the view to be still, and the
+    // switch comes first.
+    store.setView(camera(store.frame(), [10, 10, 60, 60], 800, 400));
+    await settle();
+    const askedV0 = asked('v0').length;
+    store.setCurrentView('far');
+    await clock.advance(1000);
+    scheduler.flush();
+    expect(asked('v0')).toHaveLength(askedV0);
+  });
+
+  it('cancels the pending artifact request on clear()', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked, holdMeta} = open({view: 'v0', clock, scheduler});
+    store.setLayers(['l']);
+    await clock.advance(1);
+    // Filtered, so the channel asks the server rather than answering from scopes it holds whole.
+    store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}});
+    await shown(store, clock, scheduler);
+    await clock.advance(1000);
+    scheduler.flush();
+    // Held still, so a new view is the channel's alone to ask about.
+    store.setView(camera(store.frame(), [0, 0, 50, 50], 800, 400));
+    scheduler.flush();
+    await clock.advance(10);
+    const askedV0 = asked('v0').length;
+
+    // Until the next meta arrives, a request can only be one the clear left pending.
+    holdMeta();
+    store.clear();
+    await clock.advance(1000);
+    expect(asked('v0')).toHaveLength(askedV0);
+  });
+
+  it('cancels a switch’s settle on clear()', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store, asked, holdMeta} = open({view: 'v0', clock, scheduler});
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+
+    store.setCurrentView('v1');
+    holdMeta();
+    store.clear();
+    await clock.advance(1000);
+    scheduler.flush();
+    expect(asked('v1')).toHaveLength(0);
+  });
+});

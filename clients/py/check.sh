@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# The Python package's half of the gate: `mosaica`'s tests, and the wheel's build hook run for
+# real — a wheel built from this checkout, with the components' bundle inside it.
+#
+# Why the hook is exercised here rather than trusted: the hook is the only thing standing between
+# `pip install mosaica[widget]` and a widget with no JavaScript in it, and a hook that fails
+# silently (npm absent, a dist path renamed, hatchling dropping the untracked file) produces a wheel
+# that installs cleanly and raises at the first `Map()`. So this builds the wheel and reads its
+# listing. It needs Python >= 3.12, `uv` or `python3 -m venv`, Node for the hook — the same Node
+# `check-clients.sh` already needs — and a cargo toolchain for the companion wheel below.
+#
+# The demo notebooks are in the pytest step: `tests/test_sdk_examples.py` executes the cells of
+# `examples/notebook_marimo.py` and the two tutorials, `examples/01_getting_started.py` and
+# `examples/02_analysing_a_map.py`, against a real build and a
+# real server, and checks that the Jupyter notebook beside each is the marimo file's export, so
+# the walk a reader is pointed at cannot drift from the package. It skips, naming what is
+# missing, where `data/notebook-sample/` or the `mosaica` binary is absent.
+#
+# The venv is `clients/py/.venv` (gitignored), made and checked by `venv.sh`.
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+source ./venv.sh
+
+install() {
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install -q --python "$py" "$@"
+  else
+    "$py" -m pip install -q "$@"
+  fi
+}
+
+# `mosaica` depends on the companion platform wheel, `mosaica-native`, which carries the
+# `mosaica` binary and the `_mosaica` extension module. It is not published, so from a checkout it
+# comes from beside this package — and its own hook runs cargo, which is why this script is no
+# longer cargo-free. An editable install leaves both artifacts in `clients/py-native`'s source
+# tree, where the package finds them.
+echo "check-python: installing mosaica-native editable (runs cargo)"
+install -e ../py-native
+
+# An editable install runs the build hook (hatchling builds an editable as a wheel), so this is
+# the first run of the hook: `mosaica/static/mosaica-components.js` exists after it or the
+# install failed. `hatchling` and `build` are the wheel step's tools.
+echo "check-python: installing mosaica[dev] editable (runs the build hook)"
+install -e '.[dev]' hatchling build ruff
+if [ ! -s mosaica/static/mosaica-components.js ]; then
+  echo "check-python: the build hook left no bundle at mosaica/static/mosaica-components.js" >&2
+  exit 1
+fi
+
+echo "check-python: ruff"
+"$py" -m ruff check .
+
+echo "check-python: pytest"
+"$py" -m pytest -q
+
+# The wheel itself, and its listing: the bundle must be inside it and must be the one just built.
+echo "check-python: building the wheel"
+rm -rf dist
+"$py" -m build --wheel --no-isolation --outdir dist . >/dev/null
+wheel=$(ls dist/mosaica-*.whl)
+if ! "$py" - "$wheel" <<'PY'
+import sys, zipfile, hashlib, pathlib
+wheel = sys.argv[1]
+with zipfile.ZipFile(wheel) as z:
+    names = z.namelist()
+    want = "mosaica/static/mosaica-components.js"
+    for name in (want, want + ".LICENSE.txt"):
+        if name not in names:
+            print(f"check-python: {wheel} does not contain {name}", file=sys.stderr)
+            sys.exit(1)
+    packaged = z.read(want)
+    built = pathlib.Path("../ts/components/dist/mosaica-components.js").read_bytes()
+    if hashlib.sha384(packaged).digest() != hashlib.sha384(built).digest():
+        print("check-python: the wheel's bundle differs from the components' dist", file=sys.stderr)
+        sys.exit(1)
+    print(f"check-python: {pathlib.Path(wheel).name} holds {want} ({len(packaged)} bytes)")
+PY
+then exit 1; fi
+
+echo "check-python: ok"

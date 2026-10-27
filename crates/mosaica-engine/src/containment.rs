@@ -1,0 +1,594 @@
+//! The containment partition: `G ⊆ M_auth` answered from terms, once for every principal there
+//! will ever be.
+//!
+//! # What it replaces, and why the replacement is exact
+//!
+//! Containment is the question *does this viewer hold every member of this content's generating
+//! set*. [`crate::artifacts::ArtifactRows::satisfied_rank`] answers it by intersecting the
+//! projected set with the composed mask, per artifact, per request. `annotations.md` §4 says why
+//! that is more work than the question needs:
+//!
+//! > what decides is **which** terms, never *how many* items
+//!
+//! An entity is in `M_auth` exactly when one of its own terms is one the principal satisfies, so
+//!
+//! ```text
+//! G ⊆ M_auth   ⟺   ⋀ over e in G of ( ⋁ over t in signature(e) of satisfied(t) )
+//! ```
+//!
+//! — a conjunction of disjunctions over term ids, **with nothing about the mask in it**. Composed
+//! once where row forms are built, canonicalised and interned, it is shared by every artifact that
+//! draws its generating set from the same signatures and by every token that will ever ask
+//! (`design/artifact-serving-at-scale.md` §4.2).
+//!
+//! **The equivalence is between two whole tests, not two halves**, and it holds in three parts:
+//!
+//! 1. **Projection loss is checked first and is not in the expression.** A generating set holding a
+//!    member still in the commit buffer projects to fewer rows than the record declares, and can
+//!    never be contained — see [`crate::artifacts::ArtifactRecords`]. That test is per view, so it
+//!    stays on the row form; the expression is view-independent and says nothing about it.
+//! 2. **The fragment is exactly the terms, over the base rows.** `M_auth`'s base is `⋃ postings(t)`
+//!    over the satisfied terms, so a base-row entity is in it precisely when its signature meets
+//!    the principal's term set. The composer reads the build's postings and no delta tier, so it
+//!    knows the signature of an entity the build read and not of one that arrived by ingest. A
+//!    generating set is projected over the whole row space, and an ordinal one of whose sets holds
+//!    a row at or above `base_rows` therefore **declines** here: the row form checks it before
+//!    asking an expression ([`crate::artifacts::ArtifactRows::partition_answers`]) and the exact
+//!    masked-count route answers. Composing over the delta tiers would make the partition cover
+//!    those ordinals too; that is unmeasured and not built.
+//! 3. **The deny correction is the acceptance test, not a refinement** (`design/artifact-serving-at-scale.md`
+//!    §4.2; the review's finding 2). A deletion or a suppression removes a member from `M_auth`
+//!    whatever the terms say, so an expression consulted alone is **fail-open for exactly the case
+//!    the write cycle exists to make safe**. It is answered live per request, from the same
+//!    `minus` the composed mask carries — see [`crate::compose::MaskedSet::withholds_any`] — which
+//!    is re-derived at the deny's acknowledgement and, on an unsuppress, **re-derived rather than
+//!    subtracted**, so `delete → suppress → unsuppress` leaves the entity deleted.
+//!
+//! ⊘ **The Σ|G| inverted index is deferred and this is the reason.** §4.2 proposes an
+//! entity → artifacts index so a deny can correct the partition at the acknowledgement; it is in
+//! tension with `annotation-write-cycle.md` §4.5, whose whole content is that the deny lane does
+//! no artifact work, and reconciling the two is not this stage's. Evaluating the correction live
+//! per **served candidate** is correct without it and is viewport-bounded: it costs one bitmap
+//! intersection over a generating set, for the artifacts a viewport actually reaches.
+//!
+//! # Why term signatures are enough
+//!
+//! The expression is over **term signatures**: an entity's set of index keys. Authorisation is
+//! signature-shaped, since an entity is visible iff its keys meet the principal's satisfied set,
+//! and `build_fragment` unions postings over that set and does nothing else. Each conjunction an item's
+//! labels hold at the top level is one key of its own, which the satisfied set holds exactly when
+//! the principal satisfies the conjunction ([`mosaica_authz::LabelIndex`]).
+//!
+//! # What is canonical, and what is not
+//!
+//! Two expressions are equal when their canonical encodings are equal: each clause's terms sorted
+//! ascending and deduplicated, the clauses sorted and deduplicated. That is a **syntactic**
+//! canonicalisation. Absorption is not applied — a clause that is a superset of another is
+//! implied by it and could be dropped — because it costs O(clauses²) at composition and buys only
+//! sharing, never correctness: two expressions that fail to intern together give the same answer
+//! twice rather than a wrong answer once.
+//!
+//! An **empty clause** is an entity in no posting at all: unsatisfiable, and it makes the whole
+//! expression unsatisfiable, which is the fail-closed reading and matches what the masked-count
+//! route does with a member no term reaches. An expression with **no clauses** over a set the
+//! record declares empty — a cardinality of zero — is corpus-independent content and is satisfied
+//! by everyone, which is what `ContentSet::generated_from` documents such a set to mean.
+//!
+//! **Each expression carries the size of the set it was composed over**, and answers only where
+//! that size is the caller's. A shard's partition is composed over its slice of each set, so a
+//! slice with no member has no clause and would otherwise answer for the whole set.
+
+use std::cell::RefCell;
+use std::io;
+use std::sync::Arc;
+
+use croaring::Bitmap;
+use rustc_hash::FxHashMap;
+
+use mosaica_authz::postings::PostingsReader;
+use mosaica_lifecycle::membership::ArtifactStore;
+use mosaica_store::derived::{compose_containment, generating_entities, SignatureIndex};
+use mosaica_store::membership::ContainmentPack;
+use mosaica_types::TermId;
+
+use crate::artifacts::LevelSlice;
+use crate::session::SatisfiedKeys;
+
+/// What composing a partition needs from the generation.
+pub struct PartitionSource<'a> {
+    /// The base postings — the build's `terms/postings.arrow`, which no flush rewrites.
+    pub postings: &'a PostingsReader,
+}
+
+/// One level's containment partition: an interned expression per `(artifact, rank)`.
+///
+/// **Keyed by nothing about a principal**, which is the property that does not depend on how many
+/// expressions there turn out to be: one copy serves every token there will ever be, where the
+/// per-token structure [decision 0093] deletes would have cost 99–343 ms of setup and ~4 MB each.
+///
+/// **The in-memory form *is* the durable form** — a [`ContainmentPack`], which is either a mapped
+/// file the fold wrote or the same bytes held in a buffer. That is what makes
+/// `2026-08-21-artifact-layout-selection.md` §9's constraint 13 a change of backing rather than a
+/// second encoder: at ten million artifacts a level's table and column are tens of megabytes, and
+/// page cache is reclaimable where an anonymous allocation is an OOM. Both routes go through the
+/// same framing checks, so a mapped file cannot be read by rules the composed form was never
+/// checked against.
+///
+/// [decision 0093]: ../../../docs/decisions/0093-nothing-is-materialised-per-token-over-the-artifact-population.md
+#[derive(Debug, Clone)]
+pub struct ContainmentPartition {
+    /// `Arc` because a level's form is shared by every request that reaches it and cloned by
+    /// nothing that means to copy it.
+    pack: Arc<ContainmentPack>,
+}
+
+impl ContainmentPartition {
+    /// Compose one `(layer, level)`'s partition against the base postings.
+    ///
+    /// **Two walks of the level under one borrow of the store**, which is the one-snapshot rule
+    /// (`2026-08-21-artifact-layout-selection.md` §9, constraint 1): the first collects the
+    /// entities the generating sets name so the signature pass knows what to look for, the second
+    /// composes. A growth landing between them would leave the expression describing a set the
+    /// membership no longer has, so both come from the same `&ArtifactStore`.
+    pub fn compose(
+        store: &ArtifactStore,
+        layer: &str,
+        level: u32,
+        postings: &PostingsReader,
+    ) -> io::Result<Self> {
+        Self::compose_slice(&LevelSlice::new(store, store, layer, level, None), postings)
+    }
+
+    /// [`Self::compose`] over one shard's slice of a level.
+    pub(crate) fn compose_slice(
+        slice: &LevelSlice<'_>,
+        postings: &PostingsReader,
+    ) -> io::Result<Self> {
+        // **Unfiltered by view, and correctly so**: the partition is addressed by ordinal and
+        // rank and is not per row, so an entry for an artifact of another view of the group is
+        // never asked about — the row form a request tests against holds that view's ordinals
+        // alone (`ArtifactStore::level_in_view`, `views.md` §3.5).
+        let contents = |visit: &mut dyn FnMut(u32, &[&Bitmap])| {
+            for (ordinal, record) in slice.level() {
+                let generating: Vec<&Bitmap> =
+                    record.contents.iter().map(|c| &c.generated_from).collect();
+                visit(ordinal, &generating);
+            }
+        };
+        let wanted = generating_entities(&contents);
+        let signatures = SignatureIndex::of_postings(&wanted, postings)?;
+        Ok(Self::of_bytes(compose_containment(&contents, &signatures)))
+    }
+
+    /// Frame composed bytes into the durable form, and read them back through the same checks a
+    /// mapped file takes. **The round trip is not ceremony**: it is what makes the two routes one
+    /// reader, so a framing rule can never hold for a file and not for the form a publication
+    /// built.
+    fn of_bytes(bytes: Vec<u8>) -> Self {
+        let pack = ContainmentPack::from_bytes(bytes)
+            .expect("a partition this crate just composed frames by construction");
+        ContainmentPartition {
+            pack: Arc::new(pack),
+        }
+    }
+
+    /// Open a fold-written partition, mapped in place. A torn or foreign file **refuses** —
+    /// see [`ContainmentPack`], and note that the failure it prevents is permissive rather than
+    /// absent: an expression read short has clauses nobody has to satisfy.
+    pub fn open(path: &std::path::Path) -> mosaica_store::Result<Self> {
+        Ok(ContainmentPartition {
+            pack: Arc::new(ContainmentPack::open(path)?),
+        })
+    }
+
+    /// The durable bytes — what the fold writes into the prefix beside the membership extents.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.pack.as_bytes()
+    }
+
+    /// How many distinct expressions this level composed to. **The census's number**
+    /// (`design/artifact-serving-at-scale.md` §4.2): the vocabulary's under per-term authoring, the
+    /// population's when generating sets are drawn across a real signature distribution, and it is
+    /// what [`Self::answers`] switches on.
+    pub fn expressions(&self) -> usize {
+        self.pack.expressions() as usize
+    }
+
+    /// How many `(artifact, rank)` pairs the column holds.
+    pub fn pairs(&self) -> usize {
+        self.pack.pairs() as usize
+    }
+
+    /// Bytes per identifier — 2 until the expression count passes `u16::MAX`, then 4.
+    pub fn id_width(&self) -> u8 {
+        self.pack.id_width()
+    }
+
+    /// How many ordinals this partition covers, holes included.
+    pub fn len(&self) -> usize {
+        self.pack.ordinals() as usize
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The identifier at rank `rank` of entry `k`, or `None` past the artifact's contents.
+    fn id_at(&self, k: usize, rank: usize) -> Option<u32> {
+        let lo = self.pack.at(k) as usize;
+        let hi = self.pack.at(k + 1) as usize;
+        let index = lo.checked_add(rank)?;
+        (index < hi).then(|| self.pack.id(index))
+    }
+
+    /// Whether `satisfied` meets every clause of expression `id`.
+    ///
+    /// **No early exit on a clause the viewer nearly holds**, in the same spirit as
+    /// `satisfied_rank`'s: the loop stops at the first clause that fails, which is a fact about the
+    /// artifact's own composition and not about how close the viewer came — and the expression is
+    /// shared by every principal that reaches it.
+    fn satisfied_by(&self, id: u32, satisfied: &dyn SatisfiedKeys) -> bool {
+        let lo = self.pack.expression_at(id as usize) as usize;
+        let clauses = self.pack.word(lo + 1);
+        let mut at = lo + 2;
+        for _ in 0..clauses {
+            let len = self.pack.word(at) as usize;
+            let met =
+                (at + 1..at + 1 + len).any(|w| satisfied.holds_key(TermId::new(self.pack.word(w))));
+            if !met {
+                return false;
+            }
+            at += 1 + len;
+        }
+        true
+    }
+
+    /// How many members the set expression `id` was composed over.
+    fn members_of(&self, id: u32) -> u64 {
+        u64::from(self.pack.word(self.pack.expression_at(id as usize) as usize))
+    }
+
+    /// This principal's answers for a **single** artifact — always the lazy face.
+    ///
+    /// **The switch below is about how much of a level a request is going to walk, and these
+    /// callers walk one ordinal.** The drill-down route resolves one identifier and the dependency
+    /// prerequisite resolves one target, so settling the whole expression table would be
+    /// whole-population work for one answer — and the dependency route runs *per attached
+    /// candidate*, which would make it whole-population work per artifact.
+    pub fn answer_for_one<'a>(
+        &'a self,
+        satisfied: &'a dyn SatisfiedKeys,
+    ) -> ContainmentAnswers<'a> {
+        ContainmentAnswers {
+            partition: self,
+            satisfied,
+            memo: Memo::Sparse(RefCell::new(FxHashMap::default())),
+        }
+    }
+
+    /// This principal's answers over the whole level, ready to be asked per candidate.
+    pub fn answers<'a>(&'a self, satisfied: &'a dyn SatisfiedKeys) -> ContainmentAnswers<'a> {
+        let memo = if self.expressions() <= dense_limit(self.pairs()) {
+            // **The union route, in the form this stage can take.** With few distinct expressions
+            // the whole table is cheaper to settle once than to memoise: every candidate that
+            // arrives finds its answer already there, and nothing is allocated per ask.
+            Memo::Dense(
+                (0..self.expressions() as u32)
+                    .map(|id| self.satisfied_by(id, satisfied))
+                    .collect(),
+            )
+        } else {
+            // **Per-candidate evaluation, memoised, which is the route the census says carries the
+            // real corpus.** Where the expression count approaches the artifact count, settling the
+            // table is the whole-population work the partition exists to avoid; asking on demand is
+            // bounded by the viewport, and the memo makes a repeated expression free without
+            // making an untouched one cost anything.
+            Memo::Sparse(RefCell::new(FxHashMap::default()))
+        };
+        ContainmentAnswers {
+            partition: self,
+            satisfied,
+            memo,
+        }
+    }
+}
+
+/// One set a test names: its member count and its clauses.
+#[cfg(test)]
+pub(crate) type SizedSet<'a> = (u32, &'a [&'a [u32]]);
+
+#[cfg(test)]
+impl ContainmentPartition {
+    /// A partition over sets named by their sizes and clauses: ordinals, then ranks, each a set's
+    /// member count and clauses.
+    pub(crate) fn of_sets(ordinals: &[&[SizedSet<'_>]]) -> Self {
+        let mut builder = mosaica_store::derived::ContainmentBuilder::new();
+        for (ordinal, ranks) in ordinals.iter().enumerate() {
+            builder.push(
+                ordinal as u32,
+                ranks.iter().map(|(members, clauses)| {
+                    mosaica_store::derived::encode_expression(*members, clauses.to_vec())
+                }),
+            );
+        }
+        Self::of_bytes(builder.finish())
+    }
+
+    /// A partition over clauses named directly: ordinals, then ranks, then clauses, then terms,
+    /// each set of as many members as it has clauses.
+    ///
+    /// **Test-only, and it exists so a predicate case is about the predicate.** Composing from
+    /// postings would put the signature inversion inside every assertion about which rank is
+    /// served; the inversion has its own cases, and `tests/artifact_containment.rs` drives both
+    /// together against the masked-count route.
+    pub(crate) fn of_clauses(ordinals: &[&[&[&[u32]]]]) -> Self {
+        let sized: Vec<Vec<SizedSet<'_>>> = ordinals
+            .iter()
+            .map(|ranks| ranks.iter().map(|clauses| (clauses.len() as u32, *clauses)).collect())
+            .collect();
+        let sized: Vec<&[SizedSet<'_>]> = sized.iter().map(Vec::as_slice).collect();
+        Self::of_sets(&sized)
+    }
+}
+
+/// The width at which settling the whole expression table stops being the cheaper route.
+///
+/// **A choice with a measurement's shape behind it and not a ruling.** The probe switches its own
+/// two routes at `settled + open > max(rows / 64, 4096)`
+/// (`design/artifact-serving-at-scale.md` §4.2), and the quantity it is comparing is the same one:
+/// how much of the population a request is about to touch, against how much a whole-population
+/// pass would cost. Here the population is the level's `(artifact, rank)` pairs, because that is
+/// what a request may walk, and the floor keeps a small level on the dense route where the
+/// allocation is nothing. It appears in no design document, and a build that picks a different
+/// constant measures a different system — recorded at
+/// `2026-08-21-artifact-layout-selection.md` §9, constraint 5.
+fn dense_limit(pairs: usize) -> usize {
+    (pairs / 64).max(4096)
+}
+
+enum Memo {
+    /// Every expression settled up front.
+    Dense(Vec<bool>),
+    /// Settled on first ask. `RefCell` because the predicate takes `&self` — one request, one
+    /// thread, and the borrow never spans a call out.
+    Sparse(RefCell<FxHashMap<u32, bool>>),
+}
+
+/// One principal's view of one level's partition.
+pub struct ContainmentAnswers<'a> {
+    partition: &'a ContainmentPartition,
+    satisfied: &'a dyn SatisfiedKeys,
+    memo: Memo,
+}
+
+impl ContainmentAnswers<'_> {
+    /// Whether this principal satisfies the expression at `(ordinal, rank)` and the expression is
+    /// over exactly `size` members, the caller's slice of the set.
+    ///
+    /// `None` where the partition does not cover `ordinal`, or lists it with no expression at
+    /// `rank`, which puts the caller back on the masked-count route.
+    pub fn satisfies(&self, ordinal: u32, rank: usize, size: u64) -> Option<bool> {
+        let Some(k) = self.partition.pack.entry(ordinal) else {
+            // Unlisted: the empty expression, which only an empty set meets.
+            return self.covers(ordinal).then_some(size == 0);
+        };
+        let id = self.partition.id_at(k, rank)?;
+        if self.partition.members_of(id) != size {
+            return Some(false);
+        }
+        Some(match &self.memo {
+            Memo::Dense(settled) => settled[id as usize],
+            Memo::Sparse(memo) => {
+                if let Some(answer) = memo.borrow().get(&id) {
+                    return Some(*answer);
+                }
+                let answer = self.partition.satisfied_by(id, self.satisfied);
+                memo.borrow_mut().insert(id, answer);
+                answer
+            }
+        })
+    }
+
+    /// Whether this level's partition covers `ordinal` at all.
+    pub fn covers(&self, ordinal: u32) -> bool {
+        (ordinal as usize) < self.partition.len()
+    }
+
+    /// Whether the whole expression table was settled up front — the two faces, observable so a
+    /// test can assert which one a level took. Operator- and test-facing only; it names no
+    /// principal and no artifact.
+    pub fn settled_eagerly(&self) -> bool {
+        matches!(self.memo, Memo::Dense(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustc_hash::FxHashSet;
+
+    fn satisfied(terms: &[u32]) -> FxHashSet<TermId> {
+        terms.iter().map(|t| TermId::new(*t)).collect()
+    }
+
+    /// One artifact per expression, so an ordinal indexes the case being made.
+    fn partition_of(expressions: &[&[&[u32]]]) -> ContainmentPartition {
+        let ordinals: Vec<&[&[&[u32]]]> = expressions.iter().map(std::slice::from_ref).collect();
+        ContainmentPartition::of_clauses(&ordinals)
+    }
+
+    /// The identifier at `(ordinal, rank)`, where the partition lists `ordinal`.
+    fn id_of(partition: &ContainmentPartition, ordinal: u32, rank: usize) -> Option<u32> {
+        partition
+            .pack
+            .entry(ordinal)
+            .and_then(|k| partition.id_at(k, rank))
+    }
+
+    /// Whether `terms` contain rank 0 of `ordinal`, whose set has as many members as clauses.
+    fn holds(partition: &ContainmentPartition, ordinal: u32, terms: &[u32]) -> bool {
+        let held = satisfied(terms);
+        let size = id_of(partition, ordinal, 0).map_or(0, |id| partition.members_of(id));
+        partition
+            .answers(&held)
+            .satisfies(ordinal, 0, size)
+            .expect("the fixture covers this ordinal")
+    }
+
+    /// The whole of the expression's semantics in one case: **every** clause must be met, and one
+    /// term anywhere in a clause meets it. A viewer holding most of a generating set's signatures
+    /// and missing one is not contained — which is `satisfied_rank`'s rule, restated in terms.
+    #[test]
+    fn a_conjunction_of_disjunctions_and_not_a_coverage_fraction() {
+        let partition = partition_of(&[&[&[1, 2], &[3]]]);
+        assert!(holds(&partition, 0, &[1, 3]));
+        assert!(holds(&partition, 0, &[2, 3]));
+        // Holds one clause entirely and every term of a dozen others: still not contained.
+        assert!(!holds(&partition, 0, &[1, 2, 4, 5, 6, 7, 8, 9]));
+        assert!(!holds(&partition, 0, &[3]));
+    }
+
+    /// An empty clause is a member no term reaches, and it makes the expression unsatisfiable for
+    /// everybody — the fail-closed direction, and the same answer the masked-count route gives a
+    /// member outside every posting.
+    #[test]
+    fn a_member_no_term_reaches_contains_nobody() {
+        let partition = partition_of(&[&[&[1], &[]]]);
+        assert!(!holds(&partition, 0, &[1]));
+        assert!(!holds(&partition, 0, &[0, 1, 2, 3, 4, 5]));
+    }
+
+    /// No clauses at all is an **empty generating set** — corpus-independent content — and it is
+    /// satisfied by everyone, including a principal holding nothing. Collapsing this with the case
+    /// above would withhold every corpus-independent label from every viewer.
+    #[test]
+    fn an_empty_generating_set_contains_everyone() {
+        let partition = partition_of(&[&[]]);
+        assert!(holds(&partition, 0, &[]));
+    }
+
+    /// An expression over fewer members than the record declares — a shard's part of a set, or
+    /// none of it — is not contained, whatever the viewer holds.
+    #[test]
+    fn an_expression_over_part_of_a_set_contains_nobody() {
+        let partition = ContainmentPartition::of_sets(&[&[(1, &[&[1]]), (0, &[])]]);
+        let held = satisfied(&[1]);
+        let answers = partition.answers(&held);
+        assert_eq!(answers.satisfies(0, 0, 1), Some(true), "the slice is the whole set");
+        assert_eq!(answers.satisfies(0, 0, 3), Some(false), "a slice of three members");
+        assert_eq!(answers.satisfies(0, 1, 3), Some(false), "an empty slice of three members");
+        assert_eq!(answers.satisfies(0, 1, 0), Some(true), "an empty set");
+    }
+
+    /// Interning is by canonical form, so two generating sets of one size drawn from the same
+    /// signatures share one identifier however differently they were written down.
+    #[test]
+    fn the_same_expression_written_two_ways_interns_once() {
+        let partition = partition_of(&[&[&[1, 2], &[3]], &[&[3], &[1, 2]], &[&[1, 2], &[1, 2]]]);
+        assert_eq!(
+            partition.expressions(),
+            2,
+            "clause order is not part of the identity"
+        );
+        assert_eq!(partition.pairs(), 3);
+        assert_eq!(id_of(&partition, 0, 0), id_of(&partition, 1, 0));
+    }
+
+    /// **A `u16` column that would truncate is promoted rather than wrapped.** The failure this
+    /// forbids is silent: a wrapped identifier names a *different* expression, so an artifact is
+    /// served on another artifact's containment answer.
+    #[test]
+    fn the_identifier_column_promotes_rather_than_truncating() {
+        // One distinct expression per ordinal, past the point a two-byte identifier can address.
+        let terms: Vec<Vec<u32>> = (0..=u16::MAX as u32 + 1).map(|t| vec![t]).collect();
+        let clauses: Vec<Vec<&[u32]>> = terms.iter().map(|t| vec![t.as_slice()]).collect();
+        let ranks: Vec<&[&[u32]]> = clauses.iter().map(Vec::as_slice).collect();
+        let ordinals: Vec<&[&[&[u32]]]> = ranks.iter().map(std::slice::from_ref).collect();
+
+        let narrow = ContainmentPartition::of_clauses(&ordinals[..u16::MAX as usize + 1]);
+        assert_eq!(narrow.expressions(), u16::MAX as usize + 1);
+        assert_eq!(narrow.id_width(), 2, "still addressable by two bytes");
+
+        let wide = ContainmentPartition::of_clauses(&ordinals);
+        assert_eq!(wide.expressions(), u16::MAX as usize + 2);
+        assert_eq!(
+            wide.id_width(),
+            4,
+            "the column widened rather than wrapping"
+        );
+        // The last two ordinals name *different* expressions, which is exactly what a wrap would
+        // have destroyed.
+        assert!(holds(&wide, u16::MAX as u32 + 1, &[u16::MAX as u32 + 1]));
+        assert!(!holds(&wide, u16::MAX as u32 + 1, &[0]));
+        assert!(holds(&wide, 0, &[0]));
+    }
+
+    /// **The durable form is the in-memory form.** A composed partition written to a file and
+    /// opened mapped answers identically — which is what makes the fold's consolidation a change
+    /// of backing rather than a second encoder.
+    #[test]
+    fn a_partition_answers_the_same_mapped_as_composed() {
+        let composed = partition_of(&[&[&[1, 2], &[3]], &[&[7]], &[]]);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("partition.tscp");
+        std::fs::write(&path, composed.as_bytes()).unwrap();
+        let mapped = ContainmentPartition::open(&path).unwrap();
+
+        assert_eq!(mapped.len(), composed.len());
+        assert_eq!(mapped.pairs(), composed.pairs());
+        assert_eq!(mapped.expressions(), composed.expressions());
+        for terms in [&[1u32, 3][..], &[3], &[7], &[]] {
+            for ordinal in 0..3u32 {
+                assert_eq!(
+                    holds(&mapped, ordinal, terms),
+                    holds(&composed, ordinal, terms),
+                    "the mapped partition disagrees at ordinal {ordinal} for {terms:?}"
+                );
+            }
+        }
+    }
+
+    /// A file that is not a partition, or is one written by a different packer, **refuses**. The
+    /// framing lives in `mosaica_store::membership`, which has the exhaustive cases; this pins
+    /// that the engine's opener goes through them rather than around.
+    #[test]
+    fn a_torn_partition_file_refuses_rather_than_opening_short() {
+        let composed = partition_of(&[&[&[1, 2], &[3]]]);
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("torn.tscp");
+        let mut bytes = composed.as_bytes().to_vec();
+        bytes.truncate(bytes.len() - 4);
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(ContainmentPartition::open(&path).is_err());
+    }
+
+    /// The two faces answer identically; only the work differs. A level whose expressions are few
+    /// settles the table, one whose expressions approach its pairs settles them on demand — and a
+    /// route that disagreed with the other would be two transcriptions of one rule.
+    #[test]
+    fn both_faces_give_the_same_answer() {
+        assert_eq!(dense_limit(0), 4096);
+        assert_eq!(dense_limit(1_000_000), 15_625);
+        let partition = partition_of(&[&[&[1]], &[&[2]], &[&[1], &[2]]]);
+        let held = satisfied(&[1]);
+        let dense = partition.answers(&held);
+        assert!(dense.settled_eagerly());
+        let sparse = ContainmentAnswers {
+            partition: &partition,
+            satisfied: &held,
+            memo: Memo::Sparse(RefCell::new(FxHashMap::default())),
+        };
+        for (ordinal, declared) in [(0u32, 1u64), (1, 1), (2, 2)] {
+            assert_eq!(
+                dense.satisfies(ordinal, 0, declared),
+                sparse.satisfies(ordinal, 0, declared),
+                "the two faces disagree at ordinal {ordinal}"
+            );
+        }
+        assert_eq!(dense.satisfies(0, 0, 1), Some(true));
+        assert_eq!(dense.satisfies(1, 0, 1), Some(false));
+        assert_eq!(dense.satisfies(2, 0, 2), Some(false));
+        assert_eq!(dense.satisfies(0, 1, 1), None, "no second rank to answer for");
+        assert_eq!(dense.satisfies(9, 0, 1), None, "past the level");
+    }
+}

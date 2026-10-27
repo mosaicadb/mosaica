@@ -1,0 +1,304 @@
+"""The viewer plane's verbs from Python, against a served database.
+
+What is asked for through the HTTP API is asked for here: the artifacts each tile serves, the
+drill-down on one of them, the highlight that lights a served set without moving it, and the
+control-plane verbs that undo a declaration or end a deletion. The bulk reads are in
+`test_sdk_records.py`.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+
+import pytest
+
+from mosaica import Refusal, authorise, connect
+
+pytest.importorskip("pyarrow")
+
+import pyarrow as pa  # noqa: E402
+
+from test_sdk_identity import papers, string_ids  # noqa: E402
+from test_sdk_records import papers as five_clusters  # noqa: E402
+
+
+@pytest.fixture
+def db(served, corpus):
+    return served(string_ids)
+
+
+def counts(table) -> dict:
+    return json.loads(table.schema.metadata[b"mosaica.counts"])
+
+
+# ------------------------------------------------------------------------ the artifacts by tile
+
+
+def test_the_tiles_serve_the_artifacts_of_the_layers_asked_for(db):
+    """A layer published from Python is read back from Python, a row in each tile it has an item
+    in, with the same count in each."""
+    tiles = []
+    served = db.viewport_artifacts("map", 1, per_tile=5, layers="all", on_tile=tiles.append)
+    assert served.num_rows > 0
+    assert len(tiles) == 4
+    assert {row["layer"] for row in served.to_pylist()} == {"clusters"}
+    assert {row["masked_count"] for row in served.to_pylist()} == {20}
+    assert len({row["mosaica_id"] for row in served.to_pylist()}) == 1
+    assert {row["tile"] for row in served.to_pylist()} <= {0, 1, 2, 3}
+    assert sum(table.num_rows for table in tiles) == served.num_rows
+
+
+def test_the_tiles_asked_for_no_layer_serve_no_artifact(db):
+    """A tile is answered whether it holds an artifact or not, with the same columns."""
+    served = db.viewport_artifacts("map", 0, per_tile=5, layers=[])
+    assert served.num_rows == 0
+    assert served.column_names[-2:] == ["tile", "slot"]
+
+
+def test_every_route_gives_a_cluster_the_one_slot_below_the_palette_size_asked_for(served, corpus):
+    """Five clusters read by tile, by lineage, by identifier and in an aggregate: each carries
+    one slot below the size sent, the same on every route, and none where no size is sent."""
+    db = served(five_clusters)
+    viewer = db.viewer()
+    plain = db.viewport_artifacts("map", 1, per_tile=5, layers=["clusters"])
+    assert set(plain.column("slot").to_pylist()) == {None}
+    tiles = db.viewport_artifacts("map", 1, per_tile=5, layers=["clusters"], palette_size=8)
+    assert json.loads(tiles.schema.metadata[b"mosaica.request"])["palette_size"] == 8
+    slots = {}
+    for row in tiles.to_pylist():
+        assert 0 <= row["slot"] < 8
+        assert slots.setdefault(row["mosaica_id"], row["slot"]) == row["slot"]
+    assert len(slots) == 5
+    assert len(set(slots.values())) > 1
+
+    browsed = viewer.browse_artifacts("map", "clusters", palette_size=8)["artifacts"]
+    assert {row["mosaica_id"]: row["slot"] for row in browsed} == slots
+    assert {row.get("slot") for row in viewer.browse_artifacts("map", "clusters")["artifacts"]} == {None}
+
+    read = db.artifacts("map", "clusters", ["slot"], palette_size=8)
+    assert dict(zip(read.column("mosaica_id").to_pylist(), read.column("slot").to_pylist())) == slots
+    assert read.schema.field("slot").type == pa.uint8()
+
+    (top,) = db.aggregate("map", [{"count": True, "by": {"layer": "clusters", "top": 5, "palette_size": 8}}])
+    assert {row["key"]: row["slot"] for row in top.to_pylist() if row["group"] == "listed"} == slots
+
+    with pytest.raises(Refusal, match="422"):
+        db.viewport_artifacts("map", 1, per_tile=5, layers=["clusters"], palette_size=33)
+
+
+def test_a_sample_tags_its_points_and_the_tags_are_read_by_identifier(db):
+    """The points of a layer named carry its column, and a read by those identifiers is the
+    artifacts the tags name."""
+    sample = db.view("map").sample(layers=["clusters"])
+    tags = {tag for tag in sample.column("membership:clusters").to_pylist() if tag is not None}
+    assert len(tags) == 1
+    read = db.viewer().artifacts("map", "clusters", ["masked_count"], ids=[*tags, 1])
+    assert read.column("mosaica_id").to_pylist() == list(tags)
+    assert read.column("masked_count").to_pylist() == [20]
+
+
+def test_a_sample_reads_as_its_points_table(db):
+    """The points, their columns and the counts in the metadata."""
+    served = db.view("map").sample(k=8, layers="all")
+    assert "mosaica_id" in served.column_names
+    assert served.num_rows == len(served) == served.points.num_rows
+    assert counts(served)["visible"] == 20
+
+
+def test_a_sample_serves_a_null_where_an_item_has_no_rendered_value(served, corpus):
+    """An item with no value in a rendered number column is a null in the points table, and a
+    NaN in pandas; a genuine zero stays a zero. `n` names each item and every item has one."""
+    heat = [None if i % 3 == 0 else float(i % 2) for i in range(20)]
+
+    def declare(db):
+        db.declare_view("map", extent={"x": [-5, 40], "y": [-5, 40]})
+        db.declare_attribute("paper", type="keyword", unique=True)
+        db.declare_attribute("heat", type="f64", render=True)
+        db.declare_attribute("n", type="u32", render=True)
+        table = papers([f"p{i}" for i in range(20)])
+        table = table.append_column("heat", pa.array(heat, pa.float64()))
+        table = table.append_column("n", pa.array(range(20), pa.uint32()))
+        db.insert("map", table, x="x", y="y", access="labels")
+
+    points = served(declare).view("map").sample(k=100)
+    served_heat = points.column("heat").to_pylist()
+    names = points.column("n").to_pylist()
+    assert points.column("n").null_count == 0
+    assert {n: h for n, h in zip(names, served_heat)} == {n: heat[n] for n in names}
+    assert None in served_heat and 0.0 in served_heat
+    frame = points.to_pandas()
+    assert frame["heat"].isna().sum() == served_heat.count(None)
+    assert (frame["heat"] == 0.0).sum() == served_heat.count(0.0)
+
+
+def coordinates(table) -> tuple:
+    """The version an answer was read at, as `pin` takes it, and whether it is stale."""
+    metadata = table.schema.metadata
+    return json.loads(metadata[b"mosaica.pin"]), metadata[b"mosaica.stale"]
+
+
+def test_a_pin_sent_back_is_current_until_a_commit_moves_the_data_on(db):
+    """A sample's pin, sent back on a sample or a read by tile, names the version they are read
+    at, so neither is stale. After a commit adds a paper, the same pin is stale on both, and the
+    pin the new answer carries is current again."""
+    whole = db.view("map")
+    pin, stale = coordinates(whole.sample())
+    assert stale == b"false"
+    assert coordinates(whole.sample(pin=pin)) == (pin, b"false")
+    tiles = db.viewport_artifacts("map", 0, per_tile=5, layers="all", pin=pin)
+    assert coordinates(tiles) == (pin, b"false")
+    assert b"mosaica.region" not in tiles.schema.metadata
+
+    db.insert("map", papers(["p20"], x=20.0), x="x", y="y", access="labels")
+    assert db.commit().ok
+    later = whole.sample(pin=pin)
+    moved, stale = coordinates(later)
+    assert stale == b"true" and moved != pin
+    assert counts(later)["visible"] == 21
+    tiles = db.viewport_artifacts("map", 0, per_tile=5, layers="all", pin=pin)
+    assert coordinates(tiles) == (moved, b"true")
+    assert coordinates(whole.sample(pin=moved)) == (moved, b"false")
+
+
+def test_a_highlight_lights_the_served_set_without_moving_it(db):
+    """One request, two expressions: the served set is identical and the counts gain one."""
+    one = db.viewer().browse_artifacts("map", "clusters")["artifacts"][0]["mosaica_id"]
+    plain = db.view("map").sample(k=512)
+    dark = db.view("map").sample(k=512, highlight={"any_of": []})
+    lit = db.view("map").sample(
+        k=512,
+        highlight={"member_of": {"layer": "clusters", "artifact": one}},
+    )
+    # The map does not move and the marks do not resample: only the bit changes.
+    assert counts(dark)["served"] == counts(lit)["served"] == counts(plain)["served"]
+    assert dark.num_rows == lit.num_rows == plain.num_rows
+    assert counts(dark)["highlighted"] == 0
+    assert counts(lit)["highlighted"] == 20
+    assert not any(dark.column("highlighted").to_pylist())
+    assert all(lit.column("highlighted").to_pylist())
+
+
+def test_member_of_names_an_artifact_by_its_key_as_by_its_id(db):
+    """`member_of` with the key an artifact was inserted under lights what its id lights."""
+    one = db.viewer().browse_artifacts("map", "clusters")["artifacts"][0]
+    by_id = db.view("map").sample(
+        k=512, highlight={"member_of": {"layer": "clusters", "artifact": one["mosaica_id"]}}
+    )
+    by_key = db.view("map").sample(
+        k=512, highlight={"member_of": {"layer": "clusters", "key": one["key"]}}
+    )
+    assert counts(by_key)["highlighted"] == counts(by_id)["highlighted"] == 20
+    assert by_key.column("highlighted").to_pylist() == by_id.column("highlighted").to_pylist()
+
+
+def test_a_sample_over_tiles_answers_for_those_tiles(db):
+    """`tiles` in place of the box: the tiles named, at the zoom named."""
+    assert db.view("map").sample(zoom=0, tiles=[0]).num_rows > 0
+
+
+def test_an_underlay_offset_serves_the_sub_cells_frame(db):
+    """The frame a non-zero offset asks for reaches the caller rather than being dropped."""
+    served = db.view("map").sample(zoom=0, underlay_offset=2)
+    assert served.sub_cells is not None and served.sub_cells.num_rows > 0
+    assert db.view("map").sample(zoom=0).sub_cells is None
+
+
+def test_on_counts_receives_the_counts_once_and_they_are_the_samples(db):
+    """The counts reach `on_counts` as they land, with the sub-cells where an offset asks for
+    them, and they are the counts the finished sample carries."""
+    for offset in (None, 2):
+        seen = []
+        served = db.view("map").sample(
+            zoom=0, underlay_offset=offset, on_counts=lambda tiles, cells: seen.append((tiles, cells))
+        )
+        assert len(seen) == 1
+        tiles, cells = seen[0]
+        totals = json.loads(served.schema.metadata[b"mosaica.counts"])
+        assert {name: sum(tiles.column(name).to_pylist()) for name in totals} == totals
+        if offset is None:
+            assert cells is None
+        else:
+            assert cells.equals(served.sub_cells)
+
+
+# ---------------------------------------------------------------------------- the artifact verbs
+
+
+def test_browse_and_artifact_agree_on_one_annotation(db):
+    """The two routes over one artifact: the lineage page, then its own record."""
+    viewer = db.viewer()
+    page = viewer.browse_artifacts("map", "clusters")
+    assert [row["key"] for row in page["artifacts"]] == ["c0"]
+    one = page["artifacts"][0]
+
+    record = viewer.artifact(one["mosaica_id"], "map")
+    assert record["layer"] == "clusters"
+    assert record["key"] == "c0"
+    assert record["masked_count"] == int(one["masked_count"]) == 20
+    # A flat layer's annotation has no children.
+    assert one["child_count"] == 0
+    assert viewer.browse_artifacts("map", "clusters", parent=one["mosaica_id"])["artifacts"] == []
+
+
+def test_a_database_browses_and_reads_an_annotation_as_its_own_reader(db):
+    page = db.browse_artifacts("map", "clusters")
+    assert page == db.viewer().browse_artifacts("map", "clusters")
+    one = page["artifacts"][0]["mosaica_id"]
+    assert db.artifact(one, "map", zoom=0) == db.viewer().artifact(one, "map", zoom=0)
+
+
+def test_an_artifact_a_principal_may_not_see_is_not_found(db):
+    """`404` is the only failure shape here, and it distinguishes nothing."""
+    with pytest.raises(Refusal):
+        db.viewer().artifact(2**63 + 1, "map")
+
+
+def test_browse_refuses_both_forms_at_once(db):
+    """A search and a children page are two questions, and the route takes one."""
+    with pytest.raises(Refusal):
+        db.viewer().browse_artifacts("map", "clusters", parent=1, q="c0")
+
+
+# ---------------------------------------------------------------------------- the operator verbs
+
+
+def test_status_is_read_from_the_database(db):
+    """The operator's counterpart of `meta()`, which the commit plan already sizes from."""
+    assert db.status()["limits"]
+
+
+def test_compact_is_accepted(db):
+    """A deletion leaves the overlay at the fold, and this is how one is asked for."""
+    assert db.remove({"paper": ["p0"]}).ok
+    request = db.compact()["request"]
+    assert request >= 1
+    deadline = time.monotonic() + 60
+    while (requests := db.status()["compaction"]["requests"])["answered"] < request:
+        assert time.monotonic() < deadline, requests
+        time.sleep(0.05)
+    refusal = requests["last_refusal"]
+    assert refusal is None or refusal["request"] < request, refusal
+
+
+def test_a_layer_is_dropped_and_none_of_its_annotations_is_served(db):
+    db.drop_layer("clusters")
+    assert db.viewport_artifacts("map", 0, per_tile=5, layers="all").num_rows == 0
+    assert "clusters" not in [layer["name"] for layer in db.meta()["layers"]]
+
+
+def test_a_revoked_token_stops_reading_and_a_reader_holding_its_credential_renews(db):
+    """The capability never transits a second time: what is sent is the `token_id`. The token
+    ends, and a reader holding the `Token` gets another from the credential that made it."""
+    token = authorise(db.session_url, db.operator_credential, terms=["public"])
+    holding = connect(db.viewer_url, token)
+    bare = connect(db.viewer_url, token.token)
+    assert holding.meta()["views"]
+    assert bare.meta()["views"]
+
+    db.revoke(token)
+    with pytest.raises(Refusal):
+        bare.meta()
+    assert holding.meta()["views"]
+    # A handle naming no live session is accepted in silence.
+    db.revoke(token)

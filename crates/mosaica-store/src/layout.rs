@@ -1,0 +1,390 @@
+//! Where a prefix's files live. A `_rel` path is prefix-relative with forward slashes, as a
+//! manifest's `files` map keys it.
+
+use std::path::{Path, PathBuf};
+
+use mosaica_types::view::{ViewIncarnation, DECLARED_INCARNATION};
+use mosaica_types::{LayerSpace, ShardId};
+
+use crate::edited::Direction;
+use crate::manifest::RecordExtent;
+
+pub use mosaica_types::view::{group_view_id, GROUP_SEPARATOR};
+
+pub const DICTIONARY_DIR: &str = "dictionary";
+
+/// The directory of the dictionary extent a flush or a coalesce writes, where `id` is the flush's
+/// segment id or the coalesce's id.
+pub fn dictionary_extent_dir_rel(id: &str) -> String {
+    format!("{DICTIONARY_DIR}/{id}")
+}
+
+/// The extent's file in [`dictionary_extent_dir_rel`].
+pub fn dictionary_extent_rel(id: &str) -> String {
+    format!("{}/terms-0.dict", dictionary_extent_dir_rel(id))
+}
+
+pub fn partitions_dir(prefix_dir: &Path) -> PathBuf {
+    prefix_dir.join("partitions")
+}
+
+/// A partition's directory, prefix-relative: where its `SEGMENTS-<n>.json` are.
+pub fn partition_rel(partition: &str) -> String {
+    format!("partitions/{partition}")
+}
+
+/// [`partition_rel`] under `prefix_dir`.
+pub fn partition_dir(prefix_dir: &Path, partition: &str) -> PathBuf {
+    prefix_dir.join(partition_rel(partition))
+}
+
+/// The name of the `SEGMENTS-<n>.json` publication `n` writes in a partition's, a shard's or a
+/// layer space's directory.
+pub fn segments_name(n: u64) -> String {
+    format!("SEGMENTS-{n}.json")
+}
+
+/// Whether `file`, a file name, is a publication's manifest: `MANIFEST.json`, or a
+/// [`segments_name`] with `n` spelled as it writes it.
+pub fn is_manifest_name(file: &str) -> bool {
+    file == "MANIFEST.json"
+        || file
+            .strip_prefix("SEGMENTS-")
+            .and_then(|rest| rest.strip_suffix(".json"))
+            .is_some_and(|n| n.parse::<u64>().is_ok_and(|parsed| parsed.to_string() == n))
+}
+
+/// The directory under a partition's holding its shards' directories.
+pub const SHARDS_DIR: &str = "shards";
+
+/// The directory under a partition's holding its layer spaces' directories.
+pub const LAYERS_DIR: &str = "layers";
+
+/// A shard's member packs, under its directory.
+const MEMBERS_DIR: &str = "members";
+
+/// A layer space's record packs, under its directory.
+const RECORDS_DIR: &str = "records";
+
+/// A layer space's content extents, under its directory.
+const CONTENT_DIR: &str = "content";
+
+/// Whether `rel` is a member pack, a record pack or a content extent file of `partition`.
+pub fn is_artifact_file(partition: &str, rel: &str) -> bool {
+    let under = |root: String, dirs: &[&str]| {
+        rel.strip_prefix(&format!("{root}/"))
+            .and_then(|rest| rest.split_once('/'))
+            .is_some_and(|(_, tail)| {
+                dirs.iter()
+                    .any(|dir| tail.strip_prefix(dir).is_some_and(|t| t.starts_with('/')))
+            })
+    };
+    under(layer_spaces_rel(partition), &[RECORDS_DIR, CONTENT_DIR])
+        || under(shards_rel(partition), &[MEMBERS_DIR])
+}
+
+/// A partition's shard directories, prefix-relative.
+pub fn shards_rel(partition: &str) -> String {
+    format!("{}/{SHARDS_DIR}", partition_rel(partition))
+}
+
+/// The shard whose directory under [`shards_rel`] holds `rel`, a prefix-relative path; `None`
+/// for a path outside every shard's directory.
+pub fn shard_of(partition: &str, rel: &str) -> Option<ShardId> {
+    let rest = rel.strip_prefix(&shards_rel(partition))?.strip_prefix('/')?;
+    let number = rest.split('/').next()?;
+    ShardId::new(number.parse().ok()?).ok()
+}
+
+/// A partition's layer-space directories, prefix-relative.
+pub fn layer_spaces_rel(partition: &str) -> String {
+    format!("{}/{LAYERS_DIR}", partition_rel(partition))
+}
+
+/// One component for a plain view, two for a group's: `:` is not a path character everywhere.
+pub fn view_path_components(view_id: &str) -> Vec<&str> {
+    match view_id.split_once(GROUP_SEPARATOR) {
+        Some((group, key)) => vec![group, key],
+        None => vec![view_id],
+    }
+}
+
+/// Where one point shard's files live.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShardLayout<'a> {
+    pub partition: &'a str,
+    pub shard: ShardId,
+}
+
+impl<'a> ShardLayout<'a> {
+    pub const fn new(partition: &'a str, shard: ShardId) -> Self {
+        ShardLayout { partition, shard }
+    }
+
+    /// The shard's directory, prefix-relative: `partitions/<partition>/shards/<shard>`.
+    pub fn rel(self) -> String {
+        format!("{}/{}", shards_rel(self.partition), self.shard)
+    }
+
+    /// The shard's `SEGMENTS-<n>.json`, prefix-relative.
+    pub fn manifest_rel(self, n: u64) -> String {
+        format!("{}/{}", self.rel(), segments_name(n))
+    }
+
+    pub fn dir(self, prefix_dir: &Path) -> PathBuf {
+        prefix_dir.join(self.rel())
+    }
+
+    /// `views/<view>` or `views/<group>/<key>`.
+    pub fn view_rel(self, view_id: &str) -> String {
+        format!(
+            "{}/views/{}",
+            self.rel(),
+            view_path_components(view_id).join("/")
+        )
+    }
+
+    pub fn permutation_rel(self, view_id: &str) -> String {
+        format!("{}/permutation.bin", self.view_rel(view_id))
+    }
+
+    pub fn segments_rel(self, view_id: &str) -> String {
+        format!("{}/segments", self.view_rel(view_id))
+    }
+
+    pub fn segment_rel(self, view_id: &str, seg_id: &str) -> String {
+        format!("{}/{seg_id}", self.segments_rel(view_id))
+    }
+
+    /// `attrs/<column>`: a column's base and extents, or a group-scoped family's views.
+    pub fn column_rel(self, column: &str) -> String {
+        format!("{}/attrs/{column}", self.rel())
+    }
+
+    /// The record blob's base. `record` is reserved out of column names, so no column shares it.
+    pub fn record_rel(self) -> String {
+        self.column_rel("record")
+    }
+
+    pub fn record_extents_rel(self) -> String {
+        format!("{}/extents", self.record_rel())
+    }
+
+    /// `attrs/<column>/<view components>`: one view's column of a group-scoped family.
+    ///
+    /// `@<incarnation>` marks the last component above [`DECLARED_INCARNATION`], so a recreated
+    /// key's base does not overwrite its predecessor's, which the live manifest may still name. `@`
+    /// is reserved out of view keys.
+    pub fn scoped_column_rel(
+        self,
+        column: &str,
+        view_id: &str,
+        incarnation: ViewIncarnation,
+    ) -> String {
+        let mut rel = format!(
+            "{}/{}",
+            self.column_rel(column),
+            view_path_components(view_id).join("/")
+        );
+        if incarnation != DECLARED_INCARNATION {
+            rel.push('@');
+            rel.push_str(&incarnation.to_string());
+        }
+        rel
+    }
+
+    pub fn terms_rel(self) -> String {
+        format!("{}/terms", self.rel())
+    }
+
+    pub fn postings_rel(self) -> String {
+        format!("{}/postings.arrow", self.terms_rel())
+    }
+
+    pub fn pairs_rel(self) -> String {
+        format!("{}/pairs.parquet", self.terms_rel())
+    }
+
+    pub fn entities_rel(self) -> String {
+        format!("{}/entities", self.rel())
+    }
+
+    pub fn unique_index_rel(self, attribute: &str) -> String {
+        format!("{}/unique/{attribute}", self.entities_rel())
+    }
+
+    pub fn edited_runs_rel(self, direction: Direction) -> String {
+        format!("{}/edited/{}", self.entities_rel(), direction.name())
+    }
+
+    /// The entity-to-term transpose's base. Its extents are under `extents/`.
+    pub fn entity_terms_rel(self) -> String {
+        format!("{}/terms", self.entities_rel())
+    }
+
+    pub fn tenancy_rel(self) -> String {
+        format!("{}/tenancy", self.rel())
+    }
+
+    pub fn members_rel(self) -> String {
+        format!("{}/{MEMBERS_DIR}", self.rel())
+    }
+
+    pub fn coalesced_rel(self, id: &str) -> String {
+        format!("{}/coalesced/{id}", self.rel())
+    }
+
+    /// The directory one kind of derived structure is filed in: a `DerivedForm::dir`, or the term
+    /// images'.
+    pub fn derived_rel(self, kind: &str) -> String {
+        format!("{}/{kind}", self.rel())
+    }
+}
+
+/// Where one layer space's files live: its artifacts' records, their supplied content and their
+/// held shapes. A space's members are in each shard's slice, under [`ShardLayout::members_rel`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LayerSpaceLayout<'a> {
+    pub partition: &'a str,
+    pub space: LayerSpace,
+}
+
+impl<'a> LayerSpaceLayout<'a> {
+    pub const fn new(partition: &'a str, space: LayerSpace) -> Self {
+        LayerSpaceLayout { partition, space }
+    }
+
+    /// The space's directory, prefix-relative: `partitions/<partition>/layers/<space>`.
+    pub fn rel(self) -> String {
+        format!("{}/{}", layer_spaces_rel(self.partition), self.space)
+    }
+
+    /// The space's `SEGMENTS-<n>.json`, prefix-relative.
+    pub fn manifest_rel(self, n: u64) -> String {
+        format!("{}/{}", self.rel(), segments_name(n))
+    }
+
+    pub fn dir(self, prefix_dir: &Path) -> PathBuf {
+        prefix_dir.join(self.rel())
+    }
+
+    /// The record packs: one per publication per level.
+    pub fn records_rel(self) -> String {
+        format!("{}/{RECORDS_DIR}", self.rel())
+    }
+
+    /// The supplied content's record-blob extents.
+    pub fn content_rel(self) -> String {
+        format!("{}/{CONTENT_DIR}", self.rel())
+    }
+
+    /// The three files of the content extent named `stem`.
+    pub fn content_extent(self, stem: &str) -> RecordExtent {
+        let rel = self.content_rel();
+        RecordExtent {
+            blocks: format!("{rel}/{stem}.blocks.bin"),
+            hasrow: format!("{rel}/{stem}.hasrow.roaring"),
+            directory: format!("{rel}/{stem}.directory.arrow"),
+        }
+    }
+
+    /// The directory one kind of derived structure is filed in: a `DerivedForm::dir`.
+    pub fn derived_rel(self, kind: &str) -> String {
+        format!("{}/{kind}", self.rel())
+    }
+}
+
+#[cfg(test)]
+pub(crate) const TEST_SHARD: ShardLayout<'static> = ShardLayout::new("p", ShardId::ZERO);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_names_the_shard_whose_directory_holds_it() {
+        let one = ShardId::new(1).unwrap();
+        let rel = ShardLayout::new("p", one).members_rel();
+        assert_eq!(shard_of("p", &rel), Some(one));
+        assert_eq!(
+            shard_of("p", &format!("{}/x", TEST_SHARD.rel())),
+            Some(ShardId::ZERO)
+        );
+        assert_eq!(shard_of("q", &rel), None);
+        assert_eq!(shard_of("p", "partitions/p/layers/0/records"), None);
+        assert_eq!(shard_of("p", "partitions/p/shardsx/0/a"), None);
+    }
+
+    #[test]
+    fn a_manifest_name_is_one_a_publication_writes() {
+        assert!(is_manifest_name("MANIFEST.json"));
+        assert!(is_manifest_name(&segments_name(0)));
+        assert!(is_manifest_name(&segments_name(11)));
+        for name in [
+            "SEGMENTS-.json",
+            "SEGMENTS-01.json",
+            "SEGMENTS-1.json.tmp",
+            "SEGMENTS-x.json",
+        ] {
+            assert!(!is_manifest_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_scoped_columns_path_moves_with_the_incarnation_and_not_at_the_build() {
+        let declared =
+            TEST_SHARD.scoped_column_rel("mood", "quarter:2026-Q3", DECLARED_INCARNATION);
+        assert_eq!(declared, "partitions/p/shards/0/attrs/mood/quarter/2026-Q3");
+        let recreated = TEST_SHARD.scoped_column_rel("mood", "quarter:2026-Q3", 4);
+        assert_eq!(
+            recreated,
+            "partitions/p/shards/0/attrs/mood/quarter/2026-Q3@4"
+        );
+        assert_ne!(
+            TEST_SHARD.scoped_column_rel("mood", "quarter:2026-Q3", 4),
+            TEST_SHARD.scoped_column_rel("mood", "quarter:2026-Q3", 5)
+        );
+        assert_eq!(
+            TEST_SHARD.scoped_column_rel("mood", "world", DECLARED_INCARNATION),
+            "partitions/p/shards/0/attrs/mood/world"
+        );
+        assert_eq!(
+            TEST_SHARD.scoped_column_rel("mood", "world", 2),
+            "partitions/p/shards/0/attrs/mood/world@2"
+        );
+    }
+
+    #[test]
+    fn a_layer_spaces_files_are_beside_the_shards_and_not_under_one() {
+        let space = LayerSpaceLayout::new("p", LayerSpace::new(7).unwrap());
+        assert_eq!(space.rel(), "partitions/p/layers/7");
+        assert_eq!(space.records_rel(), "partitions/p/layers/7/records");
+        assert_eq!(space.content_rel(), "partitions/p/layers/7/content");
+        assert_eq!(space.derived_rel("shape-held"), "partitions/p/layers/7/shape-held");
+        assert!(!space.rel().starts_with(&TEST_SHARD.rel()));
+    }
+
+    #[test]
+    fn a_plain_view_is_one_component_and_a_groups_view_is_two() {
+        assert_eq!(
+            Path::new("/p").join(TEST_SHARD.view_rel("world")),
+            Path::new("/p/partitions/p/shards/0/views/world")
+        );
+        assert_eq!(
+            view_path_components("quarter:2026-Q2"),
+            ["quarter", "2026-Q2"]
+        );
+        assert_eq!(
+            TEST_SHARD.view_rel("world"),
+            "partitions/p/shards/0/views/world"
+        );
+        assert_eq!(
+            TEST_SHARD.view_rel("quarter:2026-Q2"),
+            "partitions/p/shards/0/views/quarter/2026-Q2"
+        );
+        assert_eq!(
+            TEST_SHARD.segment_rel("quarter:2026-Q2", "seg-1"),
+            "partitions/p/shards/0/views/quarter/2026-Q2/segments/seg-1"
+        );
+    }
+}

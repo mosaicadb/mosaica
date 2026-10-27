@@ -1,0 +1,22 @@
+{
+ "reader": {
+  "label": "narrow — term 14",
+  "principal": "holding-75fd229c68471d3d"
+ },
+ "analyst": {
+  "label": "sparse — 1.9% (420 terms)",
+  "principal": "holding-152e73b4e67744e5"
+ },
+ "editor": {
+  "label": "medium — 19% (413 terms)",
+  "principal": "holding-13d985831f978f1a"
+ },
+ "curator": {
+  "label": "heavy — 50% (3724 terms)",
+  "principal": "holding-7d138dcb85f2439a"
+ },
+ "admin": {
+  "label": "full — top 4096 terms",
+  "principal": "holding-c5a39a77e513e7ee"
+ }
+}

@@ -1,0 +1,118 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mosaica-access",
+    "crates/mosaica-types",
+    "crates/mosaica-roaring",
+    "crates/mosaica-cache",
+    "crates/mosaica-analyse",
+    "crates/mosaica-catalogue",
+    "crates/mosaica-authz",
+    "crates/mosaica-filter",
+    "crates/mosaica-store",
+    "crates/mosaica-spatial",
+    "crates/mosaica-lifecycle",
+    "crates/mosaica-engine",
+    "crates/mosaica-wire",
+    "crates/mosaica-config",
+    "crates/mosaica-server",
+    "crates/mosaica-filter-write",
+    "crates/mosaica-build",
+    "crates/mosaica-corpus",
+    "crates/mosaica-cli",
+    "crates/mosaica-bench",
+    "crates/mosaica-python",
+    "crates/mosaica-docgen",
+]
+
+[workspace.package]
+# The one version of the release: every crate, both Python wheels and the npm packages carry it.
+# `python3 scripts/version.py set X.Y.Z` writes it everywhere else, and `scripts/version.py check`
+# refuses a copy that differs.
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["mosaicadb"]
+repository = "https://github.com/mosaicadb/mosaica"
+homepage = "https://github.com/mosaicadb/mosaica"
+readme = "README.md"
+keywords = ["spatial", "map", "visualization", "access-control", "roaring"]
+categories = ["database-implementations", "visualization", "web-programming::http-server"]
+
+[workspace.dependencies]
+# The workspace's own crates. Each carries the release version, pinned exactly, so that `cargo publish`
+# accepts the path dependency and a published crate resolves only the set it was released with.
+# `scripts/version.py set` rewrites these pins with the version above.
+mosaica-access = { path = "crates/mosaica-access", version = "=0.1.0" }
+mosaica-types = { path = "crates/mosaica-types", version = "=0.1.0" }
+mosaica-roaring = { path = "crates/mosaica-roaring", version = "=0.1.0" }
+mosaica-cache = { path = "crates/mosaica-cache", version = "=0.1.0" }
+mosaica-analyse = { path = "crates/mosaica-analyse", version = "=0.1.0" }
+mosaica-catalogue = { path = "crates/mosaica-catalogue", version = "=0.1.0" }
+mosaica-authz = { path = "crates/mosaica-authz", version = "=0.1.0" }
+mosaica-filter = { path = "crates/mosaica-filter", version = "=0.1.0" }
+mosaica-store = { path = "crates/mosaica-store", version = "=0.1.0" }
+mosaica-spatial = { path = "crates/mosaica-spatial", version = "=0.1.0" }
+mosaica-lifecycle = { path = "crates/mosaica-lifecycle", version = "=0.1.0" }
+mosaica-engine = { path = "crates/mosaica-engine", version = "=0.1.0" }
+mosaica-wire = { path = "crates/mosaica-wire", version = "=0.1.0" }
+mosaica-config = { path = "crates/mosaica-config", version = "=0.1.0" }
+mosaica-server = { path = "crates/mosaica-server", version = "=0.1.0" }
+mosaica-filter-write = { path = "crates/mosaica-filter-write", version = "=0.1.0" }
+mosaica-build = { path = "crates/mosaica-build", version = "=0.1.0" }
+mosaica-corpus = { path = "crates/mosaica-corpus", version = "=0.1.0" }
+
+croaring = "2.8.0"
+rayon = "1"
+proptest = "1"
+# **Pinned exactly.** `mosaica_store::columns` writes `columns.arrow` in place by learning the
+# file's layout from arrow's own `FileWriter` run into a recording sink, which depends on that
+# writer handing each buffer to the sink separately. A 60.x that encoded a batch contiguously
+# before writing it would materialise the whole body — ~70 GB at rung 6 — inside the layout pass.
+# The `Recorder`'s refusal above `MAX_FRAMING_WRITE` is what catches it; the pin is what stops a
+# `cargo update` from reaching it in the first place. The writer is in arrow-ipc, and arrow takes
+# its sub-crates by caret, so the arrow-ipc pin is the one that holds the writer; arrow is pinned
+# to the same version so the two move together.
+arrow = { version = "=60.0.0", default-features = false, features = ["ipc"] }
+arrow-ipc = { version = "=60.0.0", default-features = false }
+tempfile = "3"
+# Test-only, and dev-only everywhere it is used: compile-fail harness for the invariants that
+# are upheld by the type system (I4). See crates/mosaica-types/tests/compile_fail.rs.
+trybuild = "1"
+rand = "0.8"
+memmap2 = "0.9"
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parquet = { version = "60", default-features = false, features = ["arrow", "snap", "zstd"] }
+# The record blob's block compression (records-and-search §3). The same libzstd the parquet
+# feature above already links, taken directly for the whole-block frames the blob reads and
+# writes.
+zstd = "0.14"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+postcard = { version = "1", features = ["use-std"] }
+crc32fast = "1"
+# Keyword keys in the key index are the XXH3-128 hash of the string (`mosaica_store::key_index`).
+twox-hash = { version = "2.1", default-features = false, features = ["xxhash3_128"] }
+arc-swap = "1"
+parking_lot = "0.12"
+# Facade only, no subscriber: a no-op wherever nothing attaches one. Promoted here on its
+# second consumer (mosaica-store's step-down warn, mosaica-server's request logging) per the
+# workspace convention that a dependency taken by two crates is versioned in one place.
+tracing = "0.1"
+# The paged-records cursor's seal: XChaCha20-Poly1305, whose 24-byte nonce is drawn at random per
+# cursor without a counter to keep.
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
+# The paged-records cursor's text form, base64url without padding.
+base64 = "0.22"
+
+# Debug info in dev and test builds is line tables only. The 161 integration-test binaries each
+# statically link the engine; with full debug info they ran 300–600 MB apiece, every upstream
+# edit gave each a fresh hash, and cargo never removes the old one — `target/debug/deps` reached
+# 311 GB across 7,024 files on 2026-09-02. Line tables keep backtraces and panics resolvable to a
+# file and line; only stepping through locals in a debugger wants more, and that can be asked for
+# with `CARGO_PROFILE_DEV_DEBUG=full` on the one build that needs it. A nightly `cargo sweep
+# --time 2` in the user crontab removes what accumulates regardless.
+[profile.dev]
+debug = "line-tables-only"

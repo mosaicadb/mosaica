@@ -1,0 +1,21 @@
+{
+  "name": "@mosaicajs/spike",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@deck.gl/core": "^9.3.7",
+    "@deck.gl/geo-layers": "^9.3.7",
+    "@deck.gl/layers": "^9.3.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.12"
+  }
+}

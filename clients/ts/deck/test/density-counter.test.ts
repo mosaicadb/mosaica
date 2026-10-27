@@ -1,0 +1,428 @@
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {LayerManager, OrthographicView, type Layer} from '@deck.gl/core';
+import {tableFromArrays} from 'apache-arrow';
+import {MosaicaError, createStore, type AggregateRequest, type AggregateResult, type MosaicaClient} from '@mosaicajs/client';
+import {mortonOfTile} from '@mosaicajs/client/internal';
+import {SELECTION, fakeClock, fakeScheduler, camera as cameraOver, meta, response, result as viewportResult, view} from '../../core/test/support.js';
+import {DENSITY_CELL_SIZES, DENSITY_SETTLE_MS, DensityCounter, cellDepth, resolutionStops, type DensityCamera} from '../src/density-counter.js';
+import {MosaicaLayer} from '../src/layer.js';
+import {fakeDevice} from './fake-device.js';
+
+/**
+ * The counter against a real store over a fake client: which cells it asks for at a camera, when
+ * it asks, and what it hands the layer to draw. The view's extent is the world's, so an asked area
+ * reads in world units.
+ */
+
+const WIDTH = 1000;
+const HEIGHT = 800;
+const camera = (target: [number, number], zoom: number): DensityCamera => ({target, zoom, width: WIDTH, height: HEIGHT});
+
+/**
+ * A store whose `aggregate` answers each grouping with one cell at its depth, of 9 items in the
+ * first grouping and one more in each after, unless told to refuse.
+ */
+async function setUp(maxAggregateCells = SELECTION.maxAggregateCells, viewport: MosaicaClient['viewport'] = async () => response(viewportResult()), maxAggregateGroupings = SELECTION.maxAggregateGroupings) {
+  const asked: AggregateRequest[] = [];
+  const refusals: Error[] = [];
+  const aggregate = vi.fn(async (_token: string, req: AggregateRequest): Promise<AggregateResult> => {
+    asked.push(req);
+    const refusal = refusals.shift();
+    if (refusal) throw refusal;
+    return {
+      tables: req.groupings.map((g, i) => ({
+        grouping: i,
+        total: 9 + i,
+        referenceTotal: null,
+        groups: null,
+        sample: null,
+        rows: tableFromArrays({cell: BigUint64Array.from([mortonOfTile(1, 1, g.cells!.depth)]), count: BigUint64Array.from([BigInt(9 + i)])})
+      })),
+      region: null,
+      recomposed: false,
+      identityKey: 'ik',
+      next: null
+    };
+  });
+  const client = {
+    meta: async () =>
+      meta({
+        views: [view('s0', {quantisation: {xMin: 0, xMax: 512, yMin: 0, yMax: 512}}), view('s1', {quantisation: {xMin: 0, xMax: 1024, yMin: 0, yMax: 1024}})],
+        filterOperands: [{column: 'year', family: 'numeric', operands: ['range']}],
+        selection: {...SELECTION, maxAggregateCells, maxAggregateGroupings}
+      }),
+    viewport,
+    aggregate,
+    close: () => {}
+  } as unknown as MosaicaClient;
+  const clock = fakeClock();
+  const scheduler = fakeScheduler();
+  const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false});
+  await clock.advance(1);
+  await vi.advanceTimersByTimeAsync(0);
+  const changes = {n: 0};
+  const counter = new DensityCounter(store, () => (changes.n += 1));
+  /** Let the settle timer run and the answer land. */
+  const settle = () => vi.advanceTimersByTimeAsync(DENSITY_SETTLE_MS);
+  const depths = () => asked.map((r) => r.groupings[0]!.cells!.depth);
+  return {store, counter, asked, refusals, settle, depths, changes, clock, scheduler};
+}
+
+/** The cells at a grouping's depth in its area in view s0, counted as the server counts them. */
+function serverCells(grouping: AggregateRequest['groupings'][number]): number {
+  const {depth, area} = grouping.cells!;
+  const side = 2 ** depth;
+  const index = (v: number) => Math.min(side - 1, Math.max(0, Math.floor((v / 512) * side)));
+  return (index(area![2]) - index(area![0]) + 1) * (index(area![3]) - index(area![1]) + 1);
+}
+
+describe('the depth a stop asks for', () => {
+  it('is the depth whose cells come nearest the stop’s size on screen at the zoom', () => {
+    // At zoom 0 the world is 512 px wide: depth 5 cells are 16 px, depth 6 cells 8 px.
+    expect(cellDepth(0, 16)).toBe(5);
+    expect(cellDepth(0, 8)).toBe(6);
+    // 12 px is nearer 16 than 8 on a log scale.
+    expect(cellDepth(0, 12)).toBe(5);
+    // Each zoom level doubles the cells' size, so the depth follows the zoom one for one.
+    expect(cellDepth(3, 16)).toBe(8);
+    expect(cellDepth(3.4, 16)).toBe(8);
+    expect(cellDepth(3.6, 16)).toBe(9);
+  });
+
+  it('disables the stops whose cells over the asked area pass the server’s limit', () => {
+    const at = camera([256, 256], 2);
+    const all = resolutionStops(at, SELECTION.maxAggregateCells);
+    expect(all.every((s) => s.enabled)).toBe(true);
+    expect(all.map((s) => s.px)).toEqual([...DENSITY_CELL_SIZES]);
+    // 1000 × 800 px with the margin is 1500 × 1200 px asked: at 32 px about 47 × 38 cells, at
+    // 4 px about 375 × 300. A limit of 20,000 cells admits the coarse stops and not the fine.
+    const limited = resolutionStops(at, 20_000);
+    const enabled = limited.filter((s) => s.enabled).map((s) => s.px);
+    expect(enabled.length).toBeGreaterThan(0);
+    expect(enabled.length).toBeLessThan(DENSITY_CELL_SIZES.length);
+    // The enabled stops are the coarse end: once one is disabled every finer one is.
+    expect(limited.map((s) => s.enabled)).toEqual(DENSITY_CELL_SIZES.map((_, i) => i < enabled.length));
+  });
+});
+
+describe('DensityCounter', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const ON = {on: true, cellPx: 12};
+
+  it('asks nothing while the camera moves, and once when it has rested', async () => {
+    const {counter, asked, settle} = await setUp();
+    counter.set(ON);
+    // A two-second zoom gesture: a camera change each frame.
+    for (let frame = 0; frame < 120; frame++) {
+      counter.look(camera([256, 256], 1 + frame / 40));
+      await vi.advanceTimersByTimeAsync(16);
+    }
+    expect(asked).toHaveLength(0);
+    await settle();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.groupings[0]).toEqual({count: true, cells: {depth: cellDepth(1 + 119 / 40, 12), area: expect.any(Array) as unknown}});
+    await settle();
+    expect(asked).toHaveLength(1);
+  });
+
+  it('counts over the highlight, which the store joins to the filters', async () => {
+    const {store, counter, asked, settle} = await setUp();
+    store.setFilters({filter: {}, highlight: {year: {family: 'numeric', gte: 2020, lte: null}}});
+    counter.set(ON);
+    counter.look(camera([256, 256], 1));
+    await settle();
+    expect(asked.at(-1)!.filters).toEqual({year: {range: {gte: 2020}}});
+    // A new highlight asks once, over the new highlight.
+    const before = asked.length;
+    store.setFilters({filter: {}, highlight: {year: {family: 'numeric', gte: 2021, lte: null}}});
+    await settle();
+    expect(asked.length).toBe(before + 1);
+    expect(asked.at(-1)!.filters).toEqual({year: {range: {gte: 2021}}});
+  });
+
+  it('draws the viewport’s tile counts before the points land, until the aggregate route answers', async () => {
+    let land: () => void = () => {};
+    // One tile at the request's depth, holding 50 visible items of which 40 match, with its one
+    // point held back until `land`.
+    const viewport = (async (_t: string, req: {zoom: number; k?: number}, {onCounts}: {onCounts?: (c: unknown) => void} = {}) => {
+      const tiles = [{tile: mortonOfTile(0, 0, req.zoom), visible: 50n, matched: 40n, highlighted: 40n, served: 1n}];
+      const answer = response(viewportResult({tiles, ids: BigUint64Array.from([1n]), codes: BigUint64Array.from([0n]), positions: Float64Array.from([1, 1]), world: Float32Array.from([0.1, 0.1])}));
+      if (!onCounts) return answer;
+      onCounts({tiles, subCells: null, identityKey: 'ik', contentKey: 'ck'});
+      await new Promise<void>((resolve) => (land = resolve));
+      return answer;
+    }) as unknown as MosaicaClient['viewport'];
+    const {store, counter, settle, clock, scheduler} = await setUp(SELECTION.maxAggregateCells, viewport);
+    counter.set(ON);
+    store.setView(cameraOver(store.frame(), [0, 0, 512, 512], WIDTH, HEIGHT));
+    await clock.advance(600);
+    await vi.advanceTimersByTimeAsync(0);
+    scheduler.flush();
+
+    // No point is drawn, and density is drawn from the tile's matched count at the frame's depth.
+    expect(store.get('marks').count.shown).toBe(0);
+    const early = counter.counts()!;
+    expect(early.depth).toBe(store.get('view').depth);
+    expect(early.cells.map((c) => [c.x, c.y, c.count])).toEqual([[0, 0, 40]]);
+
+    land();
+    await clock.advance(600);
+    await vi.advanceTimersByTimeAsync(0);
+    scheduler.flush();
+    expect(counter.counts()!.cells.map((c) => c.count)).toEqual([40]);
+
+    // Once the aggregate route answers, its cells alone are drawn.
+    counter.look(camera([256, 256], 1));
+    await settle();
+    expect(counter.counts()!.cells.map((c) => c.count)).toEqual([9]);
+
+    // Off draws nothing, whatever the tiles hold.
+    counter.set({on: false, cellPx: 12});
+    expect(counter.counts()).toBeNull();
+  });
+
+  it('draws the last answer while the next is asked for, and the new one once it lands', async () => {
+    const {counter, settle, changes} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 1));
+    expect(counter.counts()).toBeNull();
+    await settle();
+    const first = counter.counts()!;
+    expect(first.depth).toBe(cellDepth(1, 12));
+    expect(first.cells.map((c) => c.count)).toEqual([9]);
+    const seen = changes.n;
+    counter.look(camera([256, 256], 3));
+    await vi.advanceTimersByTimeAsync(DENSITY_SETTLE_MS - 1);
+    expect(counter.counts()).toBe(first);
+    await settle();
+    expect(counter.counts()!.depth).toBe(cellDepth(3, 12));
+    expect(changes.n).toBeGreaterThan(seen);
+  });
+
+  it('asks nothing for a pan inside the area held, and asks again past it or at another depth', async () => {
+    const {counter, asked, settle} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 2));
+    await settle();
+    expect(asked).toHaveLength(1);
+    // At zoom 2 the viewport is 250 world units wide and the area reaches 62.5 past each side.
+    counter.look(camera([300, 256], 2));
+    await settle();
+    expect(asked).toHaveLength(1);
+    // A small zoom out that keeps the depth and the viewport inside the area asks nothing either.
+    counter.look(camera([300, 256], 1.9));
+    await settle();
+    expect(asked).toHaveLength(1);
+    counter.look(camera([400, 256], 2));
+    await settle();
+    expect(asked).toHaveLength(2);
+    counter.look(camera([400, 256], 3));
+    await settle();
+    expect(asked).toHaveLength(3);
+  });
+
+  it('asks with each answer for two coarser levels, each a depth coarser and twice as far', async () => {
+    const {counter, asked, settle} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 4));
+    await settle();
+    const cells = asked[0]!.groupings.map((g) => g.cells!);
+    const depth = cellDepth(4, 12);
+    expect(cells.map((c) => c.depth)).toEqual([depth, depth - 1, depth - 2]);
+    const width = (i: number) => cells[i]!.area![2] - cells[i]!.area![0];
+    // At zoom 4 the viewport is 62.5 world units wide, so none of the three areas meets the world's edge.
+    expect(width(0)).toBeCloseTo(1.5 * 62.5);
+    expect(width(1)).toBeCloseTo(2 * width(0));
+    expect(width(2)).toBeCloseTo(4 * width(0));
+  });
+
+  it('asks for no more levels than the server takes groupings in one request', async () => {
+    const {counter, asked, settle} = await setUp(SELECTION.maxAggregateCells, undefined, 2);
+    counter.set(ON);
+    counter.look(camera([256, 256], 4));
+    await settle();
+    expect(asked[0]!.groupings).toHaveLength(2);
+  });
+
+  it('asks for no coarser level past the one that holds the world', async () => {
+    const {counter, asked, settle} = await setUp();
+    counter.set(ON);
+    // At zoom 0.5 the viewport is about 707 world units wide: the finest area is already the world.
+    counter.look(camera([256, 256], 0.5));
+    await settle();
+    expect(asked[0]!.groupings).toHaveLength(1);
+  });
+
+  it('draws the coarser levels on a zoom out before the next answer, the finest that holds the viewport', async () => {
+    const {counter, settle, changes} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 4));
+    await settle();
+    const depth = cellDepth(4, 12);
+    expect(counter.counts()!.depth).toBe(depth);
+    // Zoomed out by half: the viewport passes the finest area and fits the first ring's.
+    const seen = changes.n;
+    counter.look(camera([256, 256], 3));
+    expect(counter.counts()!.depth).toBe(depth - 1);
+    expect(counter.counts()!.cells.map((c) => c.count)).toEqual([10]);
+    expect(changes.n).toBeGreaterThan(seen);
+    counter.look(camera([256, 256], 2));
+    expect(counter.counts()!.depth).toBe(depth - 2);
+    // Past every level held, the widest is drawn.
+    counter.look(camera([256, 256], 1));
+    expect(counter.counts()!.depth).toBe(depth - 2);
+    // Back in, the finest is drawn again.
+    counter.look(camera([256, 256], 4));
+    expect(counter.counts()!.depth).toBe(depth);
+  });
+
+  it('sends nothing for the old area when the filters change during a move that leaves it', async () => {
+    const {store, counter, asked, settle} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 2));
+    await settle();
+    expect(asked).toHaveLength(1);
+    counter.look(camera([450, 256], 2));
+    store.setFilters({filter: {}, highlight: {year: {family: 'numeric', gte: 2020, lte: null}}});
+    await vi.advanceTimersByTimeAsync(10);
+    expect(asked).toHaveLength(1);
+    // The counts held are still drawn until the next answer.
+    expect(counter.counts()).not.toBeNull();
+    await settle();
+    expect(asked).toHaveLength(2);
+  });
+
+  it('asks again when the resolution changes, and drops everything when turned off', async () => {
+    const {store, counter, asked, settle, depths} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 2));
+    await settle();
+    counter.set({on: true, cellPx: 4});
+    await settle();
+    expect(depths()).toEqual([cellDepth(2, 12), cellDepth(2, 4)]);
+    counter.set({on: false, cellPx: 4});
+    expect(counter.counts()).toBeNull();
+    expect([...store.get('aggregates').keys()]).toEqual([]);
+    counter.look(camera([100, 100], 4));
+    await settle();
+    expect(asked).toHaveLength(2);
+  });
+
+  it('never asks for more cells than the server’s limit: it asks for the finest stop that fits', async () => {
+    const limit = 20_000;
+    const {counter, asked, settle, depths} = await setUp(limit);
+    const at = camera([256, 256], 2);
+    const stops = resolutionStops(at, limit);
+    const finest = stops.filter((s) => s.enabled).at(-1)!;
+    counter.set({on: true, cellPx: 4});
+    counter.look(at);
+    await settle();
+    expect(stops.find((s) => s.px === 4)!.enabled).toBe(false);
+    expect(depths()).toEqual([finest.depth]);
+    expect(counter.stops()).toEqual(stops);
+    // Wherever the camera stands, the cells the server counts over each area asked for fit.
+    for (const [x, y, zoom] of [[0, 0, 2], [511, 511, 3], [123.4, 300.9, 4.6], [256, 256, -1]] as const) {
+      counter.look(camera([x, y], zoom));
+      await settle();
+      for (const grouping of asked.at(-1)!.groupings) expect(serverCells(grouping)).toBeLessThanOrEqual(limit);
+    }
+  });
+
+  it('asks one depth coarser after a 422, whatever its wording, and gives up after three', async () => {
+    const {counter, refusals, settle, depths} = await setUp();
+    refusals.push(new MosaicaError(422, 'contract', 'no'));
+    counter.set({on: true, cellPx: 4});
+    counter.look(camera([256, 256], 2));
+    await settle();
+    const fine = cellDepth(2, 4);
+    expect(depths()).toEqual([fine, fine - 1]);
+    expect(counter.counts()!.depth).toBe(fine - 1);
+    for (let i = 0; i < 4; i++) refusals.push(new MosaicaError(422, 'contract', 'no'));
+    counter.look(camera([256, 256], 4));
+    await settle();
+    const deeper = cellDepth(4, 4);
+    expect(depths().slice(2)).toEqual([deeper, deeper - 1, deeper - 2, deeper - 3]);
+    expect(counter.counts()).toBeNull();
+  });
+
+  it('draws nothing after any other refusal, and asks again at the next rest', async () => {
+    const {counter, refusals, asked, settle} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 2));
+    await settle();
+    expect(counter.counts()).not.toBeNull();
+    refusals.push(new MosaicaError(403, 'bad-credential', 'the token is not valid'));
+    counter.look(camera([256, 256], 4));
+    await settle();
+    expect(counter.counts()).toBeNull();
+    const after = asked.length;
+    // The same camera is asked for again at the next rest, and the answer is drawn.
+    counter.look(camera([256, 256], 4));
+    await settle();
+    expect(asked.length).toBe(after + 1);
+    expect(counter.counts()).not.toBeNull();
+  });
+
+  it('asks at once at a view switch, over the area in the new view’s coordinates', async () => {
+    const {store, counter, asked, settle} = await setUp();
+    counter.set(ON);
+    counter.look(camera([256, 256], 2));
+    await settle();
+    expect(asked).toHaveLength(1);
+    store.setCurrentView('s1');
+    await vi.advanceTimersByTimeAsync(0);
+    const last = asked.at(-1)!;
+    expect(last.view).toBe('s1');
+    // s1's extent is twice s0's on each axis, so the same world area is twice as large in data.
+    const [a0, , a2] = asked[0]!.groupings[0]!.cells!.area!;
+    const [b0, , b2] = last.groupings[0]!.cells!.area!;
+    expect(b2 - b0).toBeCloseTo(2 * (a2 - a0));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(counter.counts()).not.toBeNull();
+  });
+
+  it('drops the counts held when the store forgets what the server answered, and re-reads the stops at the next meta', async () => {
+    const {store, counter, settle, changes} = await setUp(20_000);
+    counter.set({on: true, cellPx: 4});
+    counter.look(camera([256, 256], 2));
+    await settle();
+    expect(counter.counts()).not.toBeNull();
+    const seen = changes.n;
+    store.clear();
+    expect(counter.counts()).toBeNull();
+    expect(counter.stops().every((s) => s.enabled)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    // `meta` is back: the stops past the limit are disabled again, and the counter has said so.
+    expect(counter.stops().some((s) => !s.enabled)).toBe(true);
+    expect(changes.n).toBeGreaterThan(seen);
+    await settle();
+    expect(counter.counts()).not.toBeNull();
+  });
+});
+
+describe('MosaicaLayer over a store alone', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps a counter of its own and draws density from it', async () => {
+    vi.stubGlobal('ImageData', class {
+      constructor(readonly data: Uint8ClampedArray, readonly width: number, readonly height: number) {}
+    });
+    const {store, asked} = await setUp();
+    const manager = new LayerManager(fakeDevice(), {});
+    manager.activateViewport(new OrthographicView({flipY: true}).makeViewport({width: 800, height: 600, viewState: {target: [256, 256, 0], zoom: 1}})!);
+    const draw = () => manager.setLayers([new MosaicaLayer({id: 'mosaica', store, density: 'grid', densityResolution: 16})]);
+    draw();
+    await vi.advanceTimersByTimeAsync(DENSITY_SETTLE_MS);
+    expect(asked.map((r) => r.groupings[0]!.cells!.depth)).toEqual([cellDepth(1, 16)]);
+    draw();
+    await vi.advanceTimersByTimeAsync(0);
+    draw();
+    const grid = ((manager.getLayers().find((l) => l.id === 'mosaica') as unknown as MosaicaLayer).getSubLayers() as Layer[]).find((l) => l.id === 'mosaica-density-grid');
+    expect((grid?.props as {visible: boolean} | undefined)?.visible).toBe(true);
+    manager.finalize();
+    vi.unstubAllGlobals();
+  });
+});

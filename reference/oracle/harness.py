@@ -1,0 +1,1159 @@
+"""Shared server-spawning harness (Task 15).
+
+Extracted from `reference/tests/conftest.py` so `conformance/` can reuse it without copy-paste —
+CLAUDE.md's "Python drives, never implements" applies to test drivers too: one process-spawning
+implementation, reused by both suites, not two divergent copies.
+
+Everything here does the same thing `reference/tests/conftest.py` did before this refactor: build
+the release `mosaica` binary via cargo if it is missing, build a fixture bundle via the CLI if one
+is missing at the requested root, spawn `mosaica serve` as a real subprocess against a
+`mosaica.toml` this module writes, and give the caller an HTTP-only `Server` handle. Nothing here
+calls into `mosaica-engine` directly — only HTTP and the filesystem (Phase 1's fixture bundle
+build is via the CLI subprocess, same as before).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import functools
+import hashlib
+import json
+import os
+import re
+import signal
+import shutil
+import socket
+import subprocess
+import time
+from pathlib import Path
+
+import requests
+
+from .layout import holds_only_the_build_publication
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CLI_BIN = REPO_ROOT / "target" / "release" / "mosaica"
+
+OPERATOR_CREDENTIAL = "reference-oracle-operator-secret"
+
+DEFAULT_POINTS = "data/scaled/geometry.parquet"
+DEFAULT_PAIRS = "data/scaled/pairs/categories-subclass.pairs.parquet"
+DEFAULT_LIMIT = 250_000
+DEFAULT_EXTENT = "0,65536,0,65536"
+DEFAULT_VIEW = "s0"
+#: The unique attribute both files of the default fixture name their items by, and the column both
+#: carry it in. Its value is the corpus's own item number.
+JOIN_FIELD = "source_id"
+JOIN_COLUMN = "entity_id"
+
+
+# ---------------------------------------------------------------------------------------------
+# Fixture reuse: a stamped recipe, not a predicate over the artefact
+# ---------------------------------------------------------------------------------------------
+#
+# A fixture bundle is built once per `mosaica` binary ([`fixture_dir`]) and reused. Deciding
+# *whether* it may be reused by inspecting the bundle is the construction that failed twice in this
+# file's own history — once on the r6 `identity` object, once on a build flag — and each time the
+# fix was to extend the predicate by one more clause. That is an allowlist, and the input
+# that is not on it is precisely the one that goes wrong silently.
+#
+# The receipt inverts it: the builder writes down **the whole input set** it built from, and the
+# reuse test is equality against the input set the caller wants now. Adding a build input can then
+# only fail in the safe direction — an unrecorded input is a rebuild that was not needed, never a
+# reuse that should not have happened. It is also the answer to how the suite sat red for a month:
+# green was a function of `(checkout, /tmp state)` rather than of the checkout, because the state
+# in `/tmp` carried no record of what produced it.
+
+
+#: Where the fixture directories live.
+FIXTURE_ROOT = Path("/tmp")
+
+#: How long a fixture directory for another binary may go unused before [`fixture_dir`] deletes it.
+FIXTURE_MAX_IDLE_SECONDS = 7 * 24 * 3600
+
+
+def _binary_digest() -> str:
+    return hashlib.sha256(CLI_BIN.read_bytes()).hexdigest()
+
+
+@functools.cache
+def builder_identity() -> str:
+    """The SHA-256 of the `mosaica` binary that builds every fixture this session. Every receipt
+    records it ([`write_recipe`]), so a bundle built by any other binary is rebuilt.
+
+    Computed once per process, so a session's fixtures stay at one path if the binary is rebuilt
+    while it runs.
+    """
+    ensure_cli_built()
+    return _binary_digest()
+
+
+# ---------------------------------------------------------------------------------------------
+# The suite's two modes
+# ---------------------------------------------------------------------------------------------
+
+#: Names the mode a run builds its fixtures in: `one`, the default, builds each corpus at the
+#: default shard size, so as one shard; `many` builds each past a `[shards] size` that splits it.
+SHARDS_ENV = "MOSAICA_CONFORMANCE_SHARDS"
+
+#: The shards a corpus is split into in the many-shard mode where its fixture names no size.
+MANY_SHARDS = 4
+
+
+@functools.cache
+def _run_mode() -> bool:
+    mode = os.environ.get(SHARDS_ENV, "one")
+    if mode not in ("one", "many"):
+        raise ValueError(f"{SHARDS_ENV}={mode!r} names no mode; set it to `one` or `many`")
+    return mode == "many"
+
+
+#: The mode [`shards_mode`] sets for the fixtures built inside it, or None for the run's.
+_mode_override: bool | None = None
+
+
+def many_shards() -> bool:
+    """Whether fixtures built now are built over several shards: the run's mode ([`SHARDS_ENV`]),
+    or the one [`shards_mode`] sets."""
+    return _run_mode() if _mode_override is None else _mode_override
+
+
+@contextlib.contextmanager
+def shards_mode(many: bool):
+    """Build the fixtures inside in the many-shard mode if `many`, else in the one-shard mode,
+    whatever the run's mode is: for a test that compares the two."""
+    global _mode_override
+    before = _mode_override
+    _mode_override = many
+    try:
+        yield
+    finally:
+        _mode_override = before
+
+
+def shards_toml(items: int, *, size: int | None = None) -> str:
+    """The `[shards]` table a fixture's declaration ends with: nothing in the one-shard mode, and
+    in the many-shard mode `size`, or a size that splits `items` built items into [`MANY_SHARDS`]
+    shards."""
+    if not many_shards():
+        return ""
+    if size is None:
+        size = max(1, -(-items // MANY_SHARDS))
+    return f"\n[shards]\nsize = {size}\n"
+
+
+def fixture_dir(name: str) -> Path:
+    """Where the fixture `name` lives between runs: `/tmp/mosaica-<name>-<digest>`, with the first
+    12 hex digits of [`builder_identity`]. The many-shard mode's fixtures are named `<name>-many`,
+    so the two modes never share a bundle.
+
+    The binary includes the commit it was built from, so each commit has its own directory, and a
+    rebuild in one checkout never replaces a bundle another checkout is reading. Checkouts with
+    the same binary share one build.
+
+    Each call marks this directory as used, and deletes the directories of `name` for other
+    binaries that have gone unused for 7 days. Only names of exactly that form are deleted.
+    """
+    if many_shards():
+        name = f"{name}-many"
+    path = FIXTURE_ROOT / f"mosaica-{name}-{builder_identity()[:12]}"
+    keyed = re.compile(rf"mosaica-{re.escape(name)}-[0-9a-f]{{12}}")
+    idle_since = time.time() - FIXTURE_MAX_IDLE_SECONDS
+    with os.scandir(FIXTURE_ROOT) as entries:
+        for entry in entries:
+            if entry.name == path.name or not keyed.fullmatch(entry.name):
+                continue
+            try:
+                idle = (
+                    entry.is_dir(follow_symlinks=False)
+                    and entry.stat(follow_symlinks=False).st_mtime < idle_since
+                )
+            except OSError:
+                continue
+            if idle:
+                shutil.rmtree(entry.path, ignore_errors=True)
+    if path.is_dir():
+        os.utime(path)
+    return path
+
+
+def recipe_path(bundle_root: Path) -> Path:
+    """The receipt's path — *beside* the bundle, not inside it.
+
+    Outside, because the bundle is a `mosaica build` output and the byte-scanner and the shape
+    checks treat everything under it as the build's own; a fixture-management file living there
+    would be the suite planting something in the artefact it is supposed to be auditing.
+    """
+    return bundle_root.parent / f"{bundle_root.name}.FIXTURE.json"
+
+
+def read_recipe(bundle_root: Path) -> dict | None:
+    """The stamped recipe, or `None` if there isn't a readable one."""
+    try:
+        return json.loads(recipe_path(bundle_root).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _receipt(wanted: dict) -> dict:
+    """The recipe as stamped: the caller's inputs and the binary that built from them."""
+    return {**wanted, "binary_sha256": builder_identity()}
+
+
+def recipe_matches(bundle_root: Path, wanted: dict) -> bool:
+    """Whether the bundle at `bundle_root` was built from `wanted` by this session's binary."""
+    return read_recipe(bundle_root) == _receipt(wanted)
+
+
+def write_recipe(bundle_root: Path, wanted: dict | None) -> None:
+    """Stamp the recipe and the binary's digest, or remove the stamp when `wanted` is `None`.
+
+    Removing first and stamping last is what makes the receipt mean "this bundle was built from
+    this, completely": a build that dies part way through leaves no receipt at all. The binary is
+    hashed again before stamping. If cargo rebuilt it after [`builder_identity`] read it, which a
+    commit or a saved edit during a session causes, nothing is stamped: the bundle serves this
+    session and the next one rebuilds it.
+    """
+    path = recipe_path(bundle_root)
+    path.unlink(missing_ok=True)
+    if wanted is None or _binary_digest() != builder_identity():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_receipt(wanted), indent=2, sort_keys=True))
+
+
+def free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+# `mosaica serve` binds its listeners only after it has opened the bundle, and a port `free_port`
+# released can be taken by another socket in that time. A start that exits because a port was
+# taken is started again on fresh ones.
+SPAWN_ATTEMPTS = 3
+
+
+class PortTaken(RuntimeError):
+    """`mosaica serve` exited at startup because a port it was given is in use."""
+
+
+def exited_early(returncode: int, output: str) -> RuntimeError:
+    error = PortTaken if "Address already in use" in output else RuntimeError
+    return error(f"mosaica serve exited early ({returncode}):\n{output}")
+
+
+def ensure_cli_built() -> None:
+    """Build `target/release/mosaica` with **default features**, always.
+
+    It does not short-circuit on `CLI_BIN.exists()`: an existence check cannot tell a
+    default-feature binary from one built with a measurement feature, and cargo, which tracks
+    the feature set, rebuilds a binary left behind with the wrong features in about a second
+    when nothing else changed. Anything needing a non-default binary builds it to its own path
+    and never to `CLI_BIN`.
+    """
+    subprocess.run(
+        ["cargo", "build", "--release", "-p", "mosaica"],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+
+
+def build_argv(deployment: Path, out: Path, *args: str) -> list[str]:
+    """The `mosaica build` invocation [`cli_build`] runs, for a recipe to record. `args` follow
+    `--out`."""
+    return [str(CLI_BIN), "build", "--deployment", str(deployment), "--out", str(out), *args]
+
+
+def cli_build(deployment: Path, out: Path, *args: str, capture_output: bool = False) -> None:
+    """Build the bundle `deployment` describes into `out`, raising `CalledProcessError` if the
+    build fails. The caller runs [`ensure_cli_built`] first."""
+    subprocess.run(  # nosemgrep: our own binary and fixture paths, as a list, with no shell
+        build_argv(deployment, out, *args),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=capture_output,
+    )
+
+
+def write_deployment(path: Path, *, bundle: Path, schema: Path) -> Path:
+    """Write the `mosaica.toml` a build is invoked against, and hand back its path.
+
+    **Every harness here names it with `--deployment` rather than letting the search find one.**
+    `mosaica build` walks up from the working directory looking for this file (`configuration.md`
+    §3); a test run's working directory is the repository, which has none, and whatever the search
+    found above it would not be the fixture's. Naming it is the deterministic half.
+
+    The `[serve]` section is here because the file describes a whole deployment; nothing in a build
+    reads it, and the serving *secrets* are read at startup rather than at parse, so a build needs
+    none of them exported.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""
+[bundle]
+path  = "{bundle}"
+cache = "{bundle}.cache"
+wal   = "{bundle}.wal"
+
+[build]
+schema = "{schema}"
+
+[disclosure]
+token_max_lifetime = 3600
+
+[serve]
+viewer  = "127.0.0.1:37585"
+session = "127.0.0.1:49303"
+control = "127.0.0.1:45721"
+"""
+    )
+    return path
+
+
+def run_build(args: list[str]) -> subprocess.CompletedProcess:
+    """Run `mosaica build` and hand back the completed process, refusal or not.
+
+    The fixture builders build through [`cli_build`], which raises, because for them a failed
+    build is a broken harness. The schema-refusal catalogue is the opposite test:
+    the refusal *is* the subject (records §2; decision 0013's naming discipline), so the caller
+    asserts on the exit status and the message rather than having them converted into a
+    `CalledProcessError`. Output is captured — stderr is where the CLI reports a refusal — and
+    text-decoded so a test can grep it for the reason the message must name.
+    """
+    ensure_cli_built()
+    return subprocess.run(
+        [str(CLI_BIN), "build", *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def open_bundle_with_source(
+    bundle_root: Path,
+    points: Path | str,
+    limit: int | None = None,
+    *,
+    field: str = JOIN_FIELD,
+    column: str | None = JOIN_COLUMN,
+) -> "object":
+    """Open `bundle_root` as an oracle [`Bundle`] with its **source geometry attached**.
+
+    This is the escape `conformance.md` §1's layering rule requires, and the only one: the oracle's
+    geometry now comes from the points file the build consumed, and a definitional module may not
+    go looking for it. So a driver — this function — resolves the path and hands it in, exactly as
+    the fixture already hands in the identity key.
+
+    Every driver that opens a bundle for a geometry comparison must come through here rather than
+    calling `Bundle(root)` directly, because a `Bundle` with no source attached refuses to derive
+    a code at all. That refusal is deliberate: the alternative, falling back to the stored column,
+    is the tautology the third input exists to remove, and it would fire silently exactly when a
+    harness forgot to wire the source up.
+
+    `field` is the unique attribute the points file names its items by and `column` the column it
+    is in; the defaults are the default fixture's.
+
+    `limit` must match the `--limit` the bundle was built with: the corpus is 10⁹ rows and the
+    fixture is a prefix of it, so reading the whole file to check a prefix would exhaust the
+    machine (`read_source_geometry`).
+
+    **Nothing binds `points` to `bundle_root`.** No digest, no manifest entry — see
+    `bundle.SourceGeometry`'s note. Handing in the wrong file is a whole-suite geometry failure
+    that reads like an engine bug.
+    """
+    from .bundle import Bundle, read_source_geometry  # noqa: PLC0415 — avoids an import cycle
+
+    bundle = Bundle(bundle_root)
+    bundle.attach_source_geometry(
+        read_source_geometry(points, bundle.extent, limit, field=field, column=column)
+    )
+    return bundle
+
+
+def ensure_fixture_bundle(
+    bundle_root: Path,
+    *,
+    points: str = DEFAULT_POINTS,
+    pairs: str = DEFAULT_PAIRS,
+    limit: int | None = DEFAULT_LIMIT,
+    extent: str = DEFAULT_EXTENT,
+    view_id: str = DEFAULT_VIEW,
+) -> None:
+    """Build a bundle at `bundle_root` via the CLI, if one doesn't already exist there.
+
+    A **pre-r6 bundle at `bundle_root` is rebuilt rather than reused.** Contracts r6 makes
+    MANIFEST's `identity` object required — an absent one is a typed reader error, not a
+    default — so `mosaica serve` correctly refuses a bundle built before r6. Testing for
+    `CURRENT` alone would hand every test a bundle the server will not open, and the failure
+    surfaces as an opaque fixture-setup error rather than "your fixture is stale".
+
+    Every build generates the bundle's identity key, so the fixture's `mosaica_id`s differ between
+    rebuilds, which is why nothing may persist them across runs.
+
+    The receipt above, not this docstring, keeps a flag from being forgotten: reuse is decided by
+    comparing the full argument set against the stamp.
+    """
+    args = _fixture_build_argv(
+        bundle_root, points=points, pairs=pairs, limit=limit, extent=extent, view_id=view_id
+    )
+    wanted = fixture_recipe(args, declaration=_fixture_config_text(view_id, extent))
+    if _fixture_bundle_is_usable(bundle_root, wanted):
+        return
+    if bundle_root.exists():
+        print(
+            f"fixture at {bundle_root} was not built from this harness's current inputs "
+            f"(stamp={read_recipe(bundle_root)}, wanted={_receipt(wanted)}) — rebuilding"
+        )
+    ensure_cli_built()
+    write_recipe(bundle_root, None)
+    if bundle_root.exists():
+        shutil.rmtree(bundle_root)
+    _write_fixture_config(bundle_root, view_id, extent)
+    write_deployment(
+        _fixture_deployment_path(bundle_root),
+        bundle=bundle_root,
+        schema=_fixture_config_path(bundle_root),
+    )
+    cli_build(
+        _fixture_deployment_path(bundle_root),
+        bundle_root,
+        *_fixture_build_args(points=points, pairs=pairs, limit=limit),
+    )
+    write_recipe(bundle_root, wanted)
+
+
+def _fixture_config_path(bundle_root: Path) -> Path:
+    """Where this fixture's declaration is written — beside the bundle, since the corpus it names
+    lives at absolute paths only `--file` may carry (configuration.md §3, §8)."""
+    return bundle_root.parent / f"{bundle_root.name}.config.toml"
+
+
+def _fixture_deployment_path(bundle_root: Path) -> Path:
+    return bundle_root.parent / f"{bundle_root.name}.mosaica.toml"
+
+
+def _extent_toml(extent: str) -> str:
+    """`x_min,x_max,y_min,y_max` — the shape every caller here already had — as the view's own
+    `extent` key. The frame belongs to the view now, not to the invocation (configuration.md §1)."""
+    x_min, x_max, y_min, y_max = (part.strip() for part in extent.split(","))
+    return f"extent = {{ x = [{x_min}, {x_max}], y = [{y_min}, {y_max}] }}"
+
+
+def _fixture_config_text(view_id: str, extent: str) -> str:
+    """One view, its frame, its geometry, and the relation its points' labels are in. The one
+    attribute is the item number both files carry, which names each row's item.
+
+    The two sources are named relatively **and overridden on the command line**: the files live
+    under `data/scaled/`, which is a path this document may not carry (§3), and an override is
+    what a deployment staging a source elsewhere reaches for.
+
+    A pure function of the two things it varies with, because the **declaration is part of the
+    recipe**: the extent moved out of the invocation and into this document, so a receipt that
+    stamped only the argv would reuse a bundle quantised against a different frame — every stored
+    cell wrong, and the bundle well-formed.
+    """
+    return (
+        '[sources]\npoints = "points.parquet"\npairs = "pairs.parquet"\n\n'
+        f'[[view]]\nname = "{view_id}"\n{_extent_toml(extent)}\n'
+        'source = "points"\n'
+        'point_visibility = { source = "pairs", default = "public" }\n\n'
+        + join_attribute_toml("points")
+    )
+
+
+def join_attribute_toml(source: str) -> str:
+    """The `[[attribute]]` block declaring [`JOIN_FIELD`] unique, read from each file's
+    [`JOIN_COLUMN`] and from `source` for its values. Every file carrying that column names its
+    rows' items by it."""
+    return (
+        f'[[attribute]]\nname = "{JOIN_FIELD}"\ntype = "u64"\nunique = true\n'
+        f'field = "{JOIN_COLUMN}"\nsource = "{source}"\n'
+    )
+
+
+def _write_fixture_config(bundle_root: Path, view_id: str, extent: str) -> Path:
+    path = _fixture_config_path(bundle_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_fixture_config_text(view_id, extent))
+    return path
+
+
+def _fixture_build_argv(
+    bundle_root: Path,
+    *,
+    points: str,
+    pairs: str,
+    limit: int | None,
+    extent: str,
+    view_id: str,
+) -> list[str]:
+    return build_argv(
+        _fixture_deployment_path(bundle_root),
+        bundle_root,
+        *_fixture_build_args(points=points, pairs=pairs, limit=limit),
+    )
+
+
+def _fixture_build_args(*, points: str, pairs: str, limit: int | None) -> list[str]:
+    args = ["--file", f"points={points}", "--file", f"pairs={pairs}"]
+    if limit is not None:
+        args += ["--limit", str(limit)]
+    return args
+
+
+def _input_stamp(argv: list[str]) -> dict:
+    """`(size, mtime_ns)` of every input file the build reads, keyed by its `--file` binding.
+
+    **The argv alone is not the recipe.** A binding names a path, and a probe script
+    that regenerates a corpus *in place* leaves both paths identical while changing every byte
+    behind them — which is not hypothetical: `data/scaled/geometry.parquet` was regenerated on
+    2026-08-02 to carry sub-cell residuals and to correct an axis transposition, and an argv-only
+    receipt would have handed every test a bundle built from the file that no longer exists,
+    reporting a reuse rather than a staleness.
+
+    Size and mtime rather than a digest, deliberately: the points file is 10 GB and this runs at
+    the top of every test session, so hashing it would cost more than the rebuild it is protecting
+    against. The failure it cannot see — a same-size edit that preserves mtime — is not a shape any
+    generator here produces, and the structural gate in `_fixture_bundle_is_usable` is the second
+    line against damage a receipt cannot observe.
+    """
+    stamp = {}
+    for i, arg in enumerate(argv):
+        if arg != "--file" or i + 1 >= len(argv):
+            continue
+        key, _, raw = argv[i + 1].partition("=")
+        path = Path(raw)
+        try:
+            st = path.stat()
+            stamp[key] = [st.st_size, st.st_mtime_ns]
+        except OSError:
+            # An input that cannot be stat'd is recorded as absent rather than raised on: the
+            # build itself is about to fail on it and will say so far better than this would.
+            stamp[key] = None
+    return stamp
+
+
+def fixture_recipe(argv: list[str], *, declaration: str = "") -> dict:
+    """The stamped input set for [`ensure_fixture_bundle`]: the whole `mosaica build` invocation,
+    plus a stamp of the input *files* it names ([`_input_stamp`]).
+
+    Everything this fixture is a function of is an argument to that command, a file that command
+    reads, or a line of the **declaration** it reads them through — there is no synthesised corpus
+    here, unlike the mask catalogue's. The declaration is stamped whole because the extent lives
+    in it now rather than in the invocation, and a bundle quantised against a different frame has
+    every stored cell wrong while remaining perfectly well-formed. The binary's path, the `--out`
+    path and the `--deployment` path are dropped: none is a property of the fixture, and including
+    them would force a rebuild per worktree. The binary itself is recorded by [`write_recipe`].
+
+    The recipe cannot pin the identity key: every build generates its own, so two bundles from an
+    identical recipe have different `mosaica_id`s. Nothing may persist a `mosaica_id` from this
+    fixture across runs, as the docstring above says.
+    """
+    argv = argv[1:]
+    for flag in ("--out", "--deployment"):
+        at = argv.index(flag)
+        argv = argv[:at] + argv[at + 2 :]
+    return {
+        "recipe_version": 3,
+        "build_argv": argv,
+        "declaration": declaration,
+        "inputs": _input_stamp(argv),
+    }
+
+
+def _fixture_bundle_is_usable(bundle_root: Path, wanted: dict) -> bool:
+    """The receipt matches, there is a readable bundle under it, and the bundle is still the
+    build's own output — not one a previous run's write-path tests have advanced.
+
+    The structural half is a second gate against damage *after* the receipt was written (a wiped
+    `/tmp`, a half-deleted tree) — something the receipt cannot see. Deliberately tolerant of an
+    unreadable or malformed bundle: anything that cannot be confirmed is treated as needing a
+    rebuild. Being wrong in that direction costs a rebuild; being wrong in the other hands every
+    test a bundle that is not the one it asked for.
+
+    **The pristine check is the third gate, and it closes a poisoning the receipt structurally
+    cannot see.** The bundle root is the deployment root: a suite run's `/control/changes` tests
+    ack into a WAL in the run's own tmp dir, but the flushes those acks trigger publish
+    `SEGMENTS-N.json` sets — and the deny state they carry — INTO this shared bundle,
+    durably. The receipt still matches (same argv, same inputs), so the next run's differential
+    is handed a corpus whose visible counts disagree with the oracle's parquet-derived ones by
+    exactly the previous run's suppressions and deletes. Measured: a fresh fixture passes the
+    differential, the very next invocation fails it, deterministically. A fresh build writes
+    exactly one publication per partition (`SEGMENTS-0.json`); any partition carrying another has
+    been served against with writes and is rebuilt.
+    """
+    if not recipe_matches(bundle_root, wanted):
+        return False
+    try:
+        current = json.loads((bundle_root / "CURRENT").read_text())
+        prefix_dir = bundle_root / current["prefix"]
+        if json.loads((prefix_dir / "MANIFEST.json").read_text()) is None:
+            return False
+        return holds_only_the_build_publication(prefix_dir)
+    except (OSError, KeyError, ValueError):
+        return False
+
+
+def compaction_answered(before: dict, now: dict) -> bool:
+    """Whether a `POST /control/compact` is answered, from `/control/status`'s `compaction` block
+    read before the request (`before`) and since (`now`). The request is answered when
+    `fold_requested` falls. Raises `RuntimeError` when a compaction fails, or when the request is
+    answered with none published."""
+    if now["fold_failures"] > before["fold_failures"]:
+        raise RuntimeError(f"the compaction failed: {now}")
+    if now["fold_requested"]:
+        return False
+    if now["folds"] > before["folds"]:
+        return True
+    raise RuntimeError(f"the compaction was refused: {now}")
+
+
+class Server:
+    """An HTTP-only handle to a running `mosaica serve` process."""
+
+    def __init__(
+        self,
+        viewer_port: int,
+        session_port: int,
+        control_port: int,
+        operator_credential: str = OPERATOR_CREDENTIAL,
+    ):
+        self.viewer_base = f"http://127.0.0.1:{viewer_port}"
+        self.session_base = f"http://127.0.0.1:{session_port}"
+        self.control_base = f"http://127.0.0.1:{control_port}"
+        self.operator_credential = operator_credential
+
+    def authorise(self, terms: list[str]) -> dict:
+        """A session holding exactly `terms` and `read`, minted with the operator credential. The
+        server holds a term trimmed, and drops one that is empty, holds a control character or is
+        `public`."""
+        resp = requests.post(
+            f"{self.session_base}/session/authorise",
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            json={"terms": terms},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def viewport(
+        self,
+        token: str,
+        view_id: str,
+        zoom: int,
+        bbox,
+        k: int | None = None,
+        underlay_offset: int | None = None,
+        filters: dict | None = None,
+        **extra,
+    ) -> bytes:
+        """Returns the raw framed body (matches the pre-refactor `reference/tests/conftest.py`
+        behaviour exactly — the differential suite depends on getting bytes back here)."""
+        return self.viewport_response(
+            token,
+            view_id,
+            zoom,
+            bbox,
+            k=k,
+            underlay_offset=underlay_offset,
+            filters=filters,
+            **extra,
+        ).content
+
+    def meta(self, token: str) -> dict:
+        """`GET /v1/meta`. Carries the §7.2 selection constants (`selection.k_min`,
+        `selection.k_max_marks`, `selection.theta_target_marks`) the oracle needs to reproduce the
+        served set — it cannot know deployment config any other way."""
+        resp = requests.get(
+            f"{self.viewer_base}/v1/meta",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def viewport_response(
+        self,
+        token: str,
+        view_id: str,
+        zoom: int,
+        bbox,
+        k: int | None = None,
+        underlay_offset: int | None = None,
+        filters: dict | None = None,
+        **extra,
+    ) -> requests.Response:
+        """Like `viewport`, but returns the full `requests.Response` — for callers that need
+        headers (e.g. `x-mosaica-pin`) alongside the body."""
+        resp = self.viewport_request(
+            token,
+            view_id,
+            zoom,
+            bbox,
+            k=k,
+            underlay_offset=underlay_offset,
+            filters=filters,
+            **extra,
+        )
+        resp.raise_for_status()
+        return resp
+
+    def viewport_request(
+        self,
+        token: str,
+        view_id: str,
+        zoom: int,
+        bbox,
+        k: int | None = None,
+        underlay_offset: int | None = None,
+        filters: dict | None = None,
+        **extra,
+    ) -> requests.Response:
+        """[`viewport_response`] without the raise — for tests whose subject *is* the refusal
+        (contracts §3.2: an unknown filter column is a `422`), where
+        `raise_for_status` would convert the assertion target into a harness exception."""
+        body = {"view": view_id, "zoom": zoom, "bbox": list(bbox)}
+        # `layers` omitted means no layers; the oracle tags points with every layer the principal
+        # reaches.
+        body["layers"] = "all"
+        if k is not None:
+            body["k"] = k
+        if underlay_offset is not None:
+            body["underlay_offset"] = underlay_offset
+        if filters is not None:
+            body["filters"] = filters
+        # **Every other request field, passed through by name.** `highlight`, `point_rows`,
+        # `levels`, `artifact_budget`: each is one JSON key with no harness-side
+        # translation, and naming them one by one here would make this file a second copy of the
+        # request schema that has to be edited whenever the first one is.
+        body.update({key: value for key, value in extra.items() if value is not None})
+        return requests.post(
+            f"{self.viewer_base}/v1/viewport",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+            timeout=30,
+        )
+
+    def artifacts_viewport(
+        self,
+        token: str,
+        view_id: str,
+        zoom: int,
+        bbox,
+        filters: dict | None = None,
+        **extra,
+    ) -> bytes:
+        """`POST /v1/artifacts/viewport`'s raw framed body: every layer the principal reaches
+        unless `layers` names some, and every artifact of each tile unless `per_tile` names a
+        quota, the deployment's ceiling being every one."""
+        resp = self.artifacts_viewport_request(token, view_id, zoom, bbox, filters, **extra)
+        resp.raise_for_status()
+        return resp.content
+
+    def artifacts_viewport_request(
+        self,
+        token: str,
+        view_id: str,
+        zoom: int,
+        bbox,
+        filters: dict | None = None,
+        **extra,
+    ) -> requests.Response:
+        """[`artifacts_viewport`] without the raise, for a test whose subject is the refusal.
+        `bbox` `None` sends the request's `tiles` in its place."""
+        body = {"view": view_id, "zoom": zoom, "layers": "all"}
+        if bbox is not None:
+            body["bbox"] = list(bbox)
+        if filters is not None:
+            body["filters"] = filters
+        body.update({key: value for key, value in extra.items() if value is not None})
+        if "per_tile" not in body:
+            body["per_tile"] = self.meta(token)["selection"]["max_artifacts_per_tile"]
+        return requests.post(
+            f"{self.viewer_base}/v1/artifacts/viewport",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+            timeout=30,
+        )
+
+    def artifact_card(self, token: str, mosaica_id: int, view_id: str, **body) -> requests.Response:
+        """`POST /v1/artifacts/{mosaica_id}`: one artifact's card, its drawn shape included."""
+        return requests.post(
+            f"{self.viewer_base}/v1/artifacts/{mosaica_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"view": view_id, **body},
+            timeout=30,
+        )
+
+    def items(self, token: str, **body) -> requests.Response:
+        """`POST /v1/items` with `body` as given: the raw response, since a refusal is as much an
+        answer here as a body."""
+        return requests.post(
+            f"{self.viewer_base}/v1/items",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+            timeout=60,
+        )
+
+    def artifacts(self, token: str, **body) -> requests.Response:
+        """`POST /v1/artifacts` with `body` as given: the raw response."""
+        return requests.post(
+            f"{self.viewer_base}/v1/artifacts",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+            timeout=60,
+        )
+
+    def aggregate(self, token: str, **body) -> requests.Response:
+        """`POST /v1/aggregate` with `body` as given: the raw response."""
+        return requests.post(
+            f"{self.viewer_base}/v1/aggregate",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+            timeout=60,
+        )
+
+    def item(self, token: str, handle: int, pin: str | None = None) -> requests.Response:
+        body: dict = {}
+        if pin is not None:
+            body["pin"] = pin
+        return requests.post(
+            f"{self.viewer_base}/v1/items/{handle}",
+            headers={"Authorization": f"Bearer {token}"},
+            json=body,
+            timeout=10,
+        )
+
+    def change(self, mosaica_id: int | str, op: str, *, strict: bool = False) -> requests.Response:
+        """One `/control/changes` item, naming the item by its `mosaica_id`."""
+        return self.changes([{"op": op, "match": {"mosaica_id": str(mosaica_id)}}], strict=strict)
+
+    def browse(self, token: str, **body) -> requests.Response:
+        """`POST /v1/artifacts/browse` (`highlight-and-hierarchy.md` §4) — the raw response, not
+        the parsed page, because half of what this verb has to be asked is its refusals."""
+        return requests.post(
+            f"{self.viewer_base}/v1/artifacts/browse",
+            headers={"Authorization": f"Bearer {token}"},
+            json={key: value for key, value in body.items() if value is not None},
+            timeout=30,
+        )
+
+    def register_layer(self, declaration: dict) -> requests.Response:
+        """`PUT /control/layers` — register one annotation layer. The body is the declaration
+        exactly as `mosaica_types::layer::LayerDeclaration` serialises it."""
+        return requests.put(
+            f"{self.control_base}/control/layers",
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            json=declaration,
+            timeout=30,
+        )
+
+    def drop_layer(self, name: str, *, wait: bool = True) -> requests.Response:
+        """`DELETE /control/layers/{name}`. `wait` answers once readers no longer see the layer."""
+        resp = requests.delete(
+            f"{self.control_base}/control/layers/{name}",
+            params={"wait": "visible"} if wait else {},
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp
+
+    def publish_artifacts(self, layer: str, *, strict: bool = False, **body) -> requests.Response:
+        """`PUT /control/layers/{name}/artifacts` — one publication into one level. `strict`
+        refuses the whole publication at its first refused member."""
+        return requests.put(
+            f"{self.control_base}/control/layers/{layer}/artifacts",
+            params={"strict": str(strict).lower()},
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            json=body,
+            timeout=60,
+        )
+
+    def changes(self, items: list[dict], *, strict: bool = False) -> requests.Response:
+        """`POST /control/changes`. `strict` refuses the whole request at its first refused item;
+        without it, refused items are listed in the answer and the rest applied."""
+        return requests.post(
+            f"{self.control_base}/control/changes",
+            params={"strict": str(strict).lower()},
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            json=items,
+            timeout=10,
+        )
+
+    def ingest(self, body: bytes, batch_id: str, *, strict: bool = False) -> requests.Response:
+        """An Arrow ingest batch. `strict` refuses the whole batch at its first refused row."""
+        return requests.post(
+            f"{self.control_base}/control/ingest",
+            params={"strict": str(strict).lower()},
+            headers={
+                "Authorization": f"Bearer {self.operator_credential}",
+                "x-mosaica-batch-id": batch_id,
+                "Content-Type": "application/vnd.apache.arrow.stream",
+            },
+            data=body,
+            timeout=10,
+        )
+
+    def status(self) -> dict:
+        resp = requests.get(
+            f"{self.control_base}/control/status",
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def refreshed(self, timeout: float = 60.0) -> None:
+        """Wait until no session refresh is running. A publication arms the refresh of every
+        resident session as it lands, and until that refresh reaches a session its reads serve the
+        previous generation's rows beside the current generation's deletions."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self.status()["write_executor"]["flush"]["refresh_in_flight"]:
+                return
+            time.sleep(0.05)
+        raise TimeoutError(f"a session refresh was still running after {timeout}s")
+
+    def flush(self, timeout: float = 60.0) -> None:
+        """Ask for a flush and **wait for one to complete** (contracts §3.4).
+
+        The route answers `202` — accepted, not done — so a caller that returned there would be
+        asserting against whichever generation happened to be live. The barrier is
+        `/control/status`'s own `flushes` counter rising past the value read before the request,
+        which is the executor's record of a publication rather than an inference from one.
+        """
+        before = self.status()["write_executor"]["flush"]["flushes"]
+        resp = requests.post(
+            f"{self.control_base}/control/flush",
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.status()["write_executor"]["flush"]["flushes"] > before:
+                return
+            time.sleep(0.1)
+        raise TimeoutError(f"no flush completed within {timeout}s")
+
+    def published(self, timeout: float = 120.0) -> None:
+        """Return once readers see every write the server answered before this call: a flush
+        asked for with `wait=visible`, whose answer waits for that publication."""
+        resp = requests.post(
+            f"{self.control_base}/control/flush",
+            params={"wait": "visible"},
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        assert resp.status_code == 202 and resp.json()["visible"], resp.text
+
+    def compact(self, timeout: float = 300.0) -> None:
+        """Ask for a compaction and wait until the server answers the request. The server compacts
+        every shard with something to reclaim, one after another, and keeps `fold_requested`
+        raised until the last publishes. Raises `RuntimeError` as [`compaction_answered`] does."""
+        before = self.status()["compaction"]
+        resp = requests.post(
+            f"{self.control_base}/control/compact",
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if compaction_answered(before, self.status()["compaction"]):
+                return
+            time.sleep(0.2)
+        raise TimeoutError(f"the compaction request was not answered within {timeout}s")
+
+
+def write_config(
+    tmp_dir: Path,
+    bundle_root: Path,
+    cache_dir: Path,
+    wal_path: Path,
+    viewer_port: int,
+    session_port: int,
+    control_port: int,
+    *,
+    theta_target_marks: int | None = None,
+    k_min: int = 2,
+    k_max_marks: int | None = None,
+    max_k: int | None = None,
+    max_underlay_cells: int | None = None,
+    serve_extra: str | None = None,
+) -> Path:
+    """Write a `mosaica.toml`.
+
+    `serve_extra` is appended verbatim to the `[serve]` section — for a suite that means to
+    exercise one more knob (`max_region_cells`, say) without this signature growing a parameter
+    per knob.
+
+    `theta_target_marks` defaults to a value large enough to **saturate** theta, which turns §7.2's
+    selection into "serve every visible row up to the cap". Suites that assert masking or wire shape
+    want that: with theta live, every point-set assertion would also depend on the density rule's
+    threshold clause, so a masking bug and a theta bug would be indistinguishable. Pass a real value
+    to exercise density deliberately.
+    """
+    if theta_target_marks is None:
+        theta_target_marks = 1 << 40
+    # Both caps default well above any harness fixture, for the same reason as theta: a suite
+    # asserting masking or wire shape should not have its point sets silently truncated by a cap
+    # it did not choose. Suites that mean to exercise a cap pass one.
+    if k_max_marks is None:
+        k_max_marks = 1_000_000
+    if max_k is None:
+        max_k = 1_000_000
+    # Left at the server's own default unless a caller asks. The §3.3 underlay multiplies the tile
+    # count by 4^offset, and the deployment default (8192 cells) refuses a wide bbox at a deep zoom
+    # with a 422 rather than truncating — correct for a deployment, and a suite that means to sweep
+    # the underlay across a zoom range has to raise it deliberately rather than discover it as an
+    # unexplained 422.
+    config_text = f"""
+[bundle]
+path = "{bundle_root}"
+cache = "{cache_dir}"
+wal = "{wal_path}"
+
+[disclosure]
+token_max_lifetime = 3600
+
+[serve]
+viewer = "127.0.0.1:{viewer_port}"
+session = "127.0.0.1:{session_port}"
+control = "127.0.0.1:{control_port}"
+operator_credential_env = "MOSAICA_REFERENCE_OPERATOR_CRED"
+max_k = {max_k}
+k_min = {k_min}
+k_max_marks = {k_max_marks}
+theta_target_marks = {theta_target_marks}
+"""
+    if max_underlay_cells is not None:
+        config_text += f"max_underlay_cells = {max_underlay_cells}\n"
+    if serve_extra:
+        config_text += serve_extra.rstrip() + "\n"
+    config_text += f'\n[catalogue]\ndir = "{tmp_dir / "catalogue"}"\n'
+    config_path = tmp_dir / "mosaica.toml"
+    config_path.write_text(config_text)
+    return config_path
+
+
+def spawn_server(
+    bundle_root: Path,
+    tmp_dir: Path,
+    *,
+    cache_dir: Path | None = None,
+    wal_path: Path | None = None,
+    log_path: Path | None = None,
+    env_extra: dict[str, str] | None = None,
+    max_k: int | None = None,
+    k_max_marks: int | None = None,
+    theta_target_marks: int | None = None,
+    max_underlay_cells: int | None = None,
+    serve_extra: str | None = None,
+) -> tuple[Server, subprocess.Popen]:
+    """Start `mosaica serve` against `bundle_root`, using `cache_dir`/`wal_path` (defaulting to
+    `tmp_dir/cache`, `tmp_dir/wal.log`) for its durable state. Passing the SAME `cache_dir`/
+    `wal_path` across two calls is exactly the restart-on-same-state case
+    (`test_restart_replay.py`).
+
+    The child's stdout and stderr are appended to `log_path`, by default `tmp_dir/serve.log`,
+    never piped: nothing reads a pipe while the server runs, and once its buffer is full the
+    server's next log line blocks the thread writing it, the write executor's included.
+    """
+    ensure_cli_built()
+
+    cache_dir = cache_dir if cache_dir is not None else (tmp_dir / "cache")
+    wal_path = wal_path if wal_path is not None else (tmp_dir / "wal.log")
+    log_path = log_path if log_path is not None else (tmp_dir / "serve.log")
+
+    for attempt in range(SPAWN_ATTEMPTS):
+        viewer_port = free_port()
+        session_port = free_port()
+        control_port = free_port()
+
+        config_path = write_config(
+            tmp_dir,
+            bundle_root,
+            cache_dir,
+            wal_path,
+            viewer_port,
+            session_port,
+            control_port,
+            max_k=max_k,
+            k_max_marks=k_max_marks,
+            theta_target_marks=theta_target_marks,
+            max_underlay_cells=max_underlay_cells,
+            serve_extra=serve_extra,
+        )
+
+        env = os.environ.copy()
+        env["MOSAICA_REFERENCE_OPERATOR_CRED"] = OPERATOR_CREDENTIAL
+        if env_extra:
+            env.update(env_extra)
+
+        log_file = open(log_path, "ab")
+        log_start = log_file.tell()
+
+        proc = subprocess.Popen(
+            # `--deployment`, not `-c`: the configuration rework made `mosaica.toml` the one document
+            # both entry points read, and `serve` takes the same flag `build` does
+            # (`configuration.md` §3). The old spelling was refused at argument parsing, so every
+            # spawn here failed at startup rather than in a test's own assertion.
+            [str(CLI_BIN), "serve", "--deployment", str(config_path)],
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+        log_file.close()  # the child inherited the fd; our handle can close now
+
+        srv = Server(viewer_port, session_port, control_port)
+        try:
+            wait_healthy(proc, srv, log_path, log_start)
+        except PortTaken:
+            if attempt == SPAWN_ATTEMPTS - 1:
+                raise
+            continue
+        return srv, proc
+    raise AssertionError("unreachable")
+
+
+def wait_healthy(proc: subprocess.Popen, srv: Server, log_path: Path, log_start: int) -> None:
+    """Wait up to 20 s for `proc` to answer `/healthz`; raise what it said if it exits first."""
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            extra = log_path.read_bytes()[log_start:].decode(errors="replace")
+            raise exited_early(proc.returncode, extra)
+        try:
+            resp = requests.get(f"{srv.viewer_base}/healthz", timeout=1)
+            if resp.status_code == 200:
+                return
+        except requests.exceptions.ConnectionError:
+            pass
+        time.sleep(0.1)
+    proc.terminate()
+    raise RuntimeError("mosaica serve did not become healthy within 20s")
+
+
+def stop_server(proc: subprocess.Popen) -> None:
+    """Graceful stop (SIGTERM, then SIGKILL if it doesn't exit) — used for normal teardown."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def kill_server(proc: subprocess.Popen) -> None:
+    """SIGKILL — no graceful shutdown, no chance to flush anything not already fsynced. This is
+    the restart-replay test's crash simulation: whatever the WAL doesn't already have durably is
+    allowed to be lost, but nothing it does have may reappear as anything other than what it was
+    acked as."""
+    os.kill(proc.pid, signal.SIGKILL)
+    proc.wait(timeout=10)

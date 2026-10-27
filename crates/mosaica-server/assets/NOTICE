@@ -1,0 +1,10 @@
+world.mbw
+
+Made with Natural Earth. Free vector and raster map data @ naturalearthdata.com.
+
+world.mbw is encoded from three Natural Earth 1:50m layers (land, coastline, and admin 0
+boundary lines on land), version 5.1.2, as published in the nvkelso/natural-earth-vector
+repository at tag v5.1.2. Natural Earth is in the public domain; no permission is needed to
+use, modify or distribute it. https://www.naturalearthdata.com/about/terms-of-use/
+
+scripts/build-world-basemap.py writes world.mbw from those files and names their URLs.

@@ -1,0 +1,29 @@
+{
+  "artifacts": [
+    {
+      "mosaica_id": "6181494199330052182",
+      "key": "hdb-050002",
+      "masked_count": 26903,
+      "matched_count": 58,
+      "rung": 1,
+      "parent_ids": [
+        "10206212928649141060"
+      ],
+      "child_count": 2,
+      "slot": null
+    },
+    {
+      "mosaica_id": "14670319876650055602",
+      "key": "hdb-050001",
+      "masked_count": 438,
+      "matched_count": 0,
+      "rung": 1,
+      "parent_ids": [
+        "10206212928649141060"
+      ],
+      "child_count": 2,
+      "slot": null
+    }
+  ],
+  "parents": []
+}

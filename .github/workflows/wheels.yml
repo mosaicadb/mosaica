@@ -1,0 +1,250 @@
+# The platform wheels for `mosaica-native` — the companion distribution that carries the
+# `mosaica` executable and the `_mosaica` extension module.
+#
+# Not part of the per-PR gate and deliberately not attached to it. Six cross-builds of the whole
+# workspace is minutes of runner time per platform, and nothing here checks behaviour: what a wheel
+# holds is checked by `clients/py/check.sh`, on one platform, in the gate. This job answers the
+# other question — whether the build works for a platform this machine is not.
+#
+# Nothing is published from here. The wheels and the bare `mosaica` binaries are uploaded as
+# artifacts. `release.yml` calls this workflow on a version tag and publishes them, `mosaica-native`
+# before `mosaica`, because the version is pinned `==` on both sides: a `mosaica` that reached PyPI
+# without its matching `mosaica-native` is uninstallable, and the reverse is a stale binary
+# against a bundle format that refuses it.
+#
+# **One object per platform, not one per Python.** `mosaica-python` builds against the stable ABI
+# (`abi3-py312`), so a platform's wheel is `cp312-abi3` and serves every Python from 3.12 up. That
+# is why this is cargo and not cibuildwheel: cibuildwheel's value is a matrix over interpreter
+# versions, and there is no such matrix here. Six cargo builds and six `python -m build` calls
+# are the whole job.
+#
+# **What the Linux tags claim.** Measured 2026-09-21 on a developer machine: the binary and the
+# extension link libc, libm, libgcc_s and nothing else — croaring, zstd and parquet are static and
+# TLS is rustls — so there is no bundling for auditwheel to do and the manylinux tag is the only
+# work. The tag is a claim about glibc symbol versions, though, not about which libraries are
+# linked: an ordinary `cargo build` on that machine required GLIBC_2.34 and would have been a lie
+# as `manylinux_2_28`. cargo-zigbuild's `.2.28` suffix is what makes the claim true, and the
+# `glibc` step below reads the symbols back rather than trusting it.
+#
+# **macOS** cross-compiles from the arm64 runner to x86_64 with a plain rustup target: the SDK
+# there serves both. **musl** builds with the static CRT turned off, because a cdylib linked
+# against a static libc is not loadable as an extension module; the binary in the same wheel then
+# needs musl's loader, which is what a musllinux wheel's platform has.
+
+name: wheels
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
+jobs:
+  native:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      # `target` is what cargo builds, with cargo-zigbuild's glibc suffix where there is one;
+      # `triple` is the same target without it, which rustup installs and the binary's artifact
+      # is named by.
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: manylinux_2_28_x86_64
+            target: x86_64-unknown-linux-gnu.2.28
+            triple: x86_64-unknown-linux-gnu
+            cargo: zigbuild
+          - runner: ubuntu-24.04
+            platform: manylinux_2_28_aarch64
+            target: aarch64-unknown-linux-gnu.2.28
+            triple: aarch64-unknown-linux-gnu
+            cargo: zigbuild
+          - runner: ubuntu-24.04
+            platform: musllinux_1_2_x86_64
+            target: x86_64-unknown-linux-musl
+            triple: x86_64-unknown-linux-musl
+            cargo: zigbuild
+          - runner: ubuntu-24.04
+            platform: musllinux_1_2_aarch64
+            target: aarch64-unknown-linux-musl
+            triple: aarch64-unknown-linux-musl
+            cargo: zigbuild
+          - runner: macos-15
+            platform: macosx_11_0_arm64
+            target: aarch64-apple-darwin
+            triple: aarch64-apple-darwin
+            cargo: build
+            deployment_target: "11.0"
+          - runner: macos-15
+            platform: macosx_10_12_x86_64
+            target: x86_64-apple-darwin
+            triple: x86_64-apple-darwin
+            cargo: build
+            deployment_target: "10.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          targets: ${{ matrix.triple }}
+      # No build cache: these artefacts are released, and a cache restored from another workflow's
+      # run could put objects into them that this source did not produce.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      # zig is the cross-linker and the glibc version selector. Both come from PyPI, at the versions
+      # pinned here, so the runner needs no system packages.
+      - name: install cargo-zigbuild
+        if: matrix.cargo == 'zigbuild'
+        run: pip install cargo-zigbuild==0.24.0 ziglang==0.17.0
+      - run: pip install build==1.6.1 hatchling==1.32.4
+      - name: build the wheel
+        working-directory: clients/py-native
+        shell: bash
+        env:
+          MOSAICA_NATIVE_TARGET: ${{ matrix.target }}
+          MOSAICA_NATIVE_CARGO: ${{ matrix.cargo }}
+          MOSAICA_NATIVE_PLATFORM: ${{ matrix.platform }}
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+          # A cdylib for a musl target is linked against a static libc unless this says otherwise,
+          # and a statically linked libc inside a shared object is not loadable by an interpreter.
+          RUSTFLAGS: ${{ contains(matrix.target, 'musl') && '-C target-feature=-crt-static' || '' }}
+        run: python -m build --wheel --no-isolation --outdir dist .
+      # The tag is a promise about the oldest glibc the wheel runs on. Read it back from the
+      # symbols rather than trusting the linker flag that was meant to set it.
+      - name: the glibc versions the artifacts require
+        if: contains(matrix.target, 'linux-gnu')
+        run: |
+          cd clients/py-native/mosaica_native
+          highest=$(objdump -T mosaica _mosaica.abi3.so \
+                    | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -n 1)
+          echo "highest required: $highest"
+          test "$highest" = "GLIBC_2.28" || {
+            echo "the wheel is tagged ${{ matrix.platform }} but needs $highest" >&2
+            exit 1
+          }
+      # What the wheel holds, from the wheel: a build that produced no extension module, or one
+      # the archive dropped as untracked, installs cleanly and fails at the first import.
+      - name: the wheel's contents
+        shell: bash
+        run: |
+          python - clients/py-native/dist/*.whl <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              names = z.namelist()
+              print("\n".join(f"{i.file_size:>10}  {i.filename}" for i in z.infolist()))
+          binary = [n for n in names if n.rsplit("/", 1)[-1] == "mosaica"]
+          extension = [n for n in names if "_mosaica." in n and not n.endswith(".py")]
+          if not binary or not extension:
+              sys.exit(f"{sys.argv[1]} holds {binary} and {extension}; it needs one of each")
+          PY
+      # The native build is the one this runner can also run. The cross-builds are checked by
+      # their contents and their symbols only, which is what the gate can see from here.
+      - name: import it and run it
+        if: matrix.platform == 'manylinux_2_28_x86_64' || matrix.platform == 'macosx_11_0_arm64'
+        shell: bash
+        run: |
+          python -m venv /tmp/wheelcheck
+          vpy=/tmp/wheelcheck/bin/python
+          "$vpy" -m pip install --force-reinstall clients/py-native/dist/*.whl
+          cd /tmp
+          "$vpy" -c "
+          import subprocess, mosaica_native, _mosaica
+          print(_mosaica)
+          print(subprocess.run([mosaica_native.binary_path(), '--version'], check=True))
+          "
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mosaica-native-${{ matrix.platform }}
+          path: clients/py-native/dist/*.whl
+      # The same executable on its own, for the release's archives.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mosaica-binary-${{ matrix.triple }}
+          path: |
+            clients/py-native/mosaica_native/mosaica
+          if-no-files-found: error
+
+  # `mosaica` itself: one `py3-none-any` wheel for every platform, built where the components'
+  # bundle can be built, which is the only reason this needs Node.
+  pure:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.15"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: npm --prefix clients/ts ci
+      - run: pip install build==1.6.1 hatchling==1.32.4
+      - run: python -m build --wheel --no-isolation --outdir dist clients/py
+      - name: it is pure and it is pinned
+        run: |
+          python - dist/*.whl <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              info = next(n for n in z.namelist() if n.endswith(".dist-info/WHEEL"))
+              info = info.rsplit("/", 1)[0]
+              tag = dict(
+                  line.split(": ", 1)
+                  for line in z.read(f"{info}/WHEEL").decode().splitlines()
+                  if ": " in line
+              )["Tag"]
+              requires = [
+                  line for line in z.read(f"{info}/METADATA").decode().splitlines()
+                  if line.startswith("Requires-Dist:")
+              ]
+          print(tag, *requires, sep="\n")
+          if tag != "py3-none-any":
+              sys.exit(f"mosaica is tagged {tag}; the base wheel carries no compiled artifact")
+          if not any("mosaica-native==" in r and "platform_machine" in r for r in requires):
+              sys.exit("mosaica must pin mosaica-native exactly, behind a platform marker")
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mosaica
+          path: dist/*.whl
+
+  # The two wheels together, as a user installs them: `mosaica` with the matching `mosaica-native`
+  # from this run and nothing else from either project, in a clean virtualenv, then the import and
+  # the binary. Both must report the version in Cargo.toml.
+  smoke:
+    needs: [native, pure]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: "{mosaica,mosaica-native-manylinux_2_28_x86_64}"
+          path: dist
+          merge-multiple: true
+      - name: install both wheels in a clean virtualenv and run them
+        run: |
+          version=$(python3 scripts/version.py)
+          pep440=$(python3 scripts/version.py pep440)
+          python3 -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install "pyarrow>=14.0.1"
+          /tmp/smoke/bin/pip install --no-index --find-links dist "mosaica==$version"
+          cd /tmp
+          /tmp/smoke/bin/python - "$version" "$pep440" <<'PY'
+          import subprocess, sys
+          import mosaica
+          want, want_python = sys.argv[1], sys.argv[2]
+          printed = subprocess.run(
+              ["/tmp/smoke/bin/mosaica", "--version"], check=True, capture_output=True, text=True
+          ).stdout.strip()
+          print(mosaica.__version__, printed, sep="\n")
+          if mosaica.__version__ != want_python or not printed.startswith(f"mosaica {want}"):
+              sys.exit(f"the wheels report {mosaica.__version__} and {printed!r}; Cargo.toml says {want}")
+          PY

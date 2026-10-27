@@ -1,0 +1,37 @@
+[package]
+name = "mosaica-authz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Per-viewer visible sets as Roaring bitmaps for Mosaica. Internal crate of the mosaica binary, with no stable API."
+
+[features]
+default = []
+# Per-stage bench accessors on `DeltaTier` — the record search and the view construction, which
+# `posting_at` does in one call. OFF by default; `mosaica-bench` is the only crate that turns it
+# on (mirroring `mosaica-engine/bench-timing`), and it adds no behaviour to either path.
+bench-timing = []
+
+[dependencies]
+croaring = { workspace = true }
+mosaica-types = { workspace = true }
+mosaica-access = { workspace = true }
+# The single-flight cache the fragment tier is built on, shared with mosaica-engine so the state
+# machine and its rules exist once.
+mosaica-cache = { workspace = true }
+rustc-hash = "1"
+arrow = { workspace = true }
+memmap2 = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+croaring = { workspace = true }
+proptest = { workspace = true }
+rand = { workspace = true }

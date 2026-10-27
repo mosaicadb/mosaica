@@ -1,0 +1,189 @@
+site_name: Mosaica
+site_description: An interactive map over billions of points, served from one machine while the data changes.
+repo_url: https://github.com/mosaicadb/mosaica
+edit_uri: ""
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  language: en
+  logo: assets/brand/mosaica-mark.svg
+  favicon: assets/brand/favicon.svg
+  font:
+    text: Instrument Sans
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.tabs.link
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+extra_css:
+  - stylesheets/mosaica.css
+
+# Files under docs/ that are not pages of the site.
+exclude_docs: |
+  /README.md
+  /writing.md
+  /sharding.md
+  /dev/
+  /pytest.ini
+  /tests/
+  /openapi/templates/
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  # Code in docs/start and docs/guides included from the runnable examples under clients/, by section.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+      dedent_subsections: true
+  # The HTTP API page's response tabs.
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search:
+      lang: en
+  - neoteroi.mkdocsoad:
+      use_pymdownx: true
+      # Overrides of the plugin's table templates, which otherwise print descriptions as raw
+      # Markdown. The path is relative to the directory mkdocs runs in.
+      templates_path: docs/openapi/templates
+  # No tooltip on a link to a documented object: it would repeat the heading and its module path.
+  - autorefs:
+      link_titles: false
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [clients/py]
+          options:
+            # The docstrings are Markdown, with parameters as bullets, so no section is parsed.
+            docstring_style: null
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            separate_signature: true
+            line_length: 80
+            show_signature_annotations: true
+            signature_crossrefs: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - Start:
+      - start/index.md
+      - Install and configure: start/install.md
+      - Your first map from files: start/first-map.md
+      - Python notebooks: start/python.md
+      - Your first map in a web page: start/typescript.md
+      - Your own interface around the map: start/typescript-own-ui.md
+  - How it works:
+      - Overview: system/overview.md
+      - Data model: system/data-model.md
+      - Views and projections: system/views.md
+      - Queries: system/queries.md
+      - Serving: system/serving.md
+      - Changing data: system/write-path.md
+      - Clients: system/clients.md
+      - Maps in the browser: system/browser-maps.md
+      - Annotations: system/annotations.md
+      - Access control: system/access-control.md
+      - Users and roles: system/users-and-roles.md
+      - Security: system/security.md
+  - Guides:
+      - guides/index.md
+      - Call Mosaica from a backend: guides/backend.md
+      - Run Mosaica under systemd: guides/systemd.md
+      - Run Mosaica with Docker: guides/docker.md
+      - Operate a deployment: guides/operating.md
+      - Size and tune a deployment: guides/sizing.md
+      - Schedule compactions: guides/compaction.md
+      - Put Mosaica behind TLS: guides/tls.md
+      - Rebuild and replace the bundle: guides/rebuild.md
+      - Troubleshooting: guides/troubleshooting.md
+  - Reference:
+      - reference/index.md
+      - HTTP API: reference/http.md
+      - Wire framing: openapi/README.md
+      - Capabilities: reference/capabilities.md
+      - CLI: reference/cli.md
+      - mosaica.toml: reference/mosaica-toml.md
+      - schema.toml: reference/schema-toml.md
+      - Python client:
+          - reference/python/index.md
+          - Connecting and creating: reference/python/connecting.md
+          - Declaring: reference/python/declaring.md
+          - Inserting and committing: reference/python/inserting.md
+          - Reading: reference/python/reading.md
+          - Operating: reference/python/operating.md
+          - The notebook map: reference/python/widget.md
+      # The pages under reference/typescript/ and reference/components/ are generated by
+      # clients/ts/scripts/reference.mjs, which scripts/check-docs.sh runs before the build.
+      - TypeScript client:
+          - reference/typescript.md
+          - "@mosaicajs/client": reference/typescript/client.md
+          - "@mosaicajs/deck": reference/typescript/deck.md
+          - "@mosaicajs/components": reference/typescript/components.md
+          - "@mosaicajs/react": reference/typescript/react.md
+          - "@mosaicajs/react/components": reference/typescript/react/components.md
+      - Components:
+          - reference/components.md
+          - mosaica-explorer: reference/components/mosaica-explorer.md
+          - mosaica-map: reference/components/mosaica-map.md
+          - mosaica-store: reference/components/mosaica-store.md
+          - mosaica-status: reference/components/mosaica-status.md
+          - mosaica-count: reference/components/mosaica-count.md
+          - mosaica-layer-picker: reference/components/mosaica-layer-picker.md
+          - mosaica-view-picker: reference/components/mosaica-view-picker.md
+          - mosaica-key-picker: reference/components/mosaica-key-picker.md
+          - mosaica-filter-panel: reference/components/mosaica-filter-panel.md
+          - mosaica-field-card: reference/components/mosaica-field-card.md
+          - mosaica-filter: reference/components/mosaica-filter.md
+          - mosaica-cluster-filter: reference/components/mosaica-cluster-filter.md
+          - mosaica-colour-editor: reference/components/mosaica-colour-editor.md
+          - mosaica-selection: reference/components/mosaica-selection.md
+          - mosaica-item-card: reference/components/mosaica-item-card.md
+          - mosaica-artifact-card: reference/components/mosaica-artifact-card.md
+          - mosaica-hierarchy: reference/components/mosaica-hierarchy.md
+          - Events: reference/components/events.md
+          - Theme tokens: reference/components/tokens.md

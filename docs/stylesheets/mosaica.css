@@ -1,0 +1,106 @@
+/* The palette of the browser components (clients/ts/components/src/tokens.ts): ink on white, with
+   the highlight violet for links. */
+:root {
+  --md-primary-fg-color: #ffffff;
+  --md-primary-fg-color--light: #f3f3f0;
+  --md-primary-fg-color--dark: #e5e5e1;
+  --md-primary-bg-color: #1b1d21;
+  --md-primary-bg-color--light: #565c64;
+  --md-accent-fg-color: #5b3fc4;
+  --md-accent-fg-color--transparent: rgba(91, 63, 196, 0.1);
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-fg-color: #1b1d21;
+  --md-default-fg-color--light: #565c64;
+  --md-default-fg-color--lighter: rgba(27, 29, 33, 0.32);
+  --md-default-fg-color--lightest: #e5e5e1;
+  --md-default-bg-color: #ffffff;
+  --md-code-fg-color: #1b1d21;
+  --md-code-bg-color: #f3f3f0;
+  --md-typeset-color: #1b1d21;
+  --md-typeset-a-color: #5b3fc4;
+  --md-footer-fg-color: #eceef1;
+  --md-footer-bg-color: #1b1d21;
+  --md-footer-bg-color--dark: #111317;
+  --mosaica-line: #e5e5e1;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #111317;
+  --md-primary-fg-color--light: #23272d;
+  --md-primary-fg-color--dark: #0b0c0f;
+  --md-primary-bg-color: #eceef1;
+  --md-primary-bg-color--light: #a7adb6;
+  --md-accent-fg-color: #c3a6ee;
+  --md-accent-fg-color--transparent: rgba(195, 166, 238, 0.12);
+  --md-default-fg-color: #eceef1;
+  --md-default-fg-color--light: #a7adb6;
+  --md-default-fg-color--lighter: rgba(236, 238, 241, 0.32);
+  --md-default-fg-color--lightest: #2b2f36;
+  --md-default-bg-color: #1a1d22;
+  --md-code-fg-color: #eceef1;
+  --md-code-bg-color: #23272d;
+  --md-typeset-color: #eceef1;
+  --md-typeset-a-color: #c3a6ee;
+  --md-footer-fg-color: #eceef1;
+  --md-footer-bg-color: #111317;
+  --md-footer-bg-color--dark: #0b0c0f;
+  --mosaica-line: #2b2f36;
+}
+
+/* A white header needs a rule beneath it in place of the shadow. */
+.md-header,
+.md-header--shadow {
+  box-shadow: none;
+  border-bottom: 1px solid var(--mosaica-line);
+}
+
+/* The site name in the header is set as the wordmark, close beside the mark. */
+.md-header__button.md-logo {
+  margin-inline-end: 0;
+  padding-inline-end: 0;
+}
+
+/* As the lockup: the mark is the height of a capital and sits on the baseline, 0.12em from the
+   word. The width is the one from which Material shows the logo rather than the menu button. */
+@media screen and (min-width: 76.25em) {
+  .md-header__button.md-logo img {
+    height: 0.786rem;
+  }
+
+  [dir] .md-header__inner > .md-header__title {
+    margin-inline-start: 0.13rem;
+  }
+}
+
+.md-header__title {
+  font-size: 1.1rem;
+}
+
+.md-header__topic:first-child {
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  text-transform: lowercase;
+}
+
+[data-md-color-scheme="default"] .md-search__input {
+  background-color: #f3f3f0;
+}
+
+[data-md-color-scheme="default"] .md-search__input:hover {
+  background-color: #efefeb;
+}
+
+.md-typeset h1 {
+  color: var(--md-default-fg-color);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* The logo is drawn in ink; on the dark header it is drawn light. */
+[data-md-color-scheme="slate"] .md-logo img {
+  filter: invert(1);
+}

@@ -1,0 +1,34 @@
+{
+  "name": "mosaica-clients",
+  "license": "Apache-2.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.15"
+  },
+  "workspaces": [
+    "spike",
+    "core",
+    "deck",
+    "components",
+    "react",
+    "viewer",
+    "harness",
+    "wire-example",
+    "examples/plain-html",
+    "examples/react-explorer",
+    "examples/canvas-store",
+    "examples/deck-host",
+    "examples/getting-started/web",
+    "examples/own-ui/web"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build -w @mosaicajs/client && npm run build -w @mosaicajs/deck && npm run build -w @mosaicajs/components && npm run build -w @mosaicajs/react",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p scripts/tsconfig.json"
+  },
+  "devDependencies": {
+    "@custom-elements-manifest/analyzer": "^0.11.0",
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.13.1"
+  }
+}

@@ -1,0 +1,60 @@
+[package]
+name = "mosaica-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "The batch build that turns source files into a Mosaica bundle. Internal crate of the mosaica binary, with no stable API."
+
+[dependencies]
+rustc-hash = "1"
+rayon = "1"
+libc = "0.2"
+# Entity-indexed build scratch lives in a mapped file rather than the heap — see `spill::MappedU32`.
+memmap2 = { workspace = true }
+mosaica-types = { workspace = true, features = ["serde"] }
+mosaica-access = { workspace = true }
+mosaica-spatial = { workspace = true }
+# The text family's analysers, resolved at schema parse so a name this build does not carry is
+# refused where its author can read the message (decision 0070).
+mosaica-analyse = { workspace = true }
+mosaica-store = { workspace = true }
+# The layer registry, the entity allocator and the artifact store — **the same code the control
+# plane runs**, so a layer declared as a build input is validated, allocated and published by one
+# implementation rather than by a second copy of the rules (see `layers.rs`). The edge is one-way:
+# lifecycle knows nothing of the build.
+mosaica-lifecycle = { workspace = true }
+mosaica-authz = { workspace = true }
+# The build writes the filter artefact through the crate that reads it, exactly as it writes
+# authorisation postings through `mosaica-authz` — the format's owner owns both halves, so the
+# writer and the reader cannot drift. An earlier revision kept this test-only on the grounds that a
+# build-time dependency on a read crate inverts the layering; that stopped being true when the build
+# began emitting the value column rather than only its accelerator.
+mosaica-filter = { workspace = true }
+mosaica-filter-write = { workspace = true }
+# Non-test: the presence bitmap the value column is addressed by (filter-index §2.1).
+croaring = { workspace = true }
+arrow = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+chrono = { workspace = true }
+
+[dev-dependencies]
+# The read route, for the text index's end-to-end test only: a build crate that depended on the
+# engine in anger would invert the layer graph, which `check-layers.sh` denies. A dev-dependency is
+# the same shape the engine's own tests use to reach the build.
+mosaica-engine = { path = "../mosaica-engine" }
+croaring = { workspace = true }
+tempfile = { workspace = true }
+proptest = { workspace = true }
+sha2 = { workspace = true }
+# docs/reference/schema-toml.md is rendered from this crate's source (`src/config/reference.rs`).
+mosaica-docgen = { path = "../mosaica-docgen" }
+

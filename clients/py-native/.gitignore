@@ -1,0 +1,7 @@
+# The two artifacts the build hook copies in from a cargo build; never committed — 34 MB of
+# binary would otherwise land in git on every change to any crate.
+mosaica_native/mosaica
+mosaica_native/_mosaica.*
+dist/
+build/
+*.egg-info/

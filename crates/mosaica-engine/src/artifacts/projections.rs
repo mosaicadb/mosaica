@@ -1,0 +1,1079 @@
+//! The per-deployment cache of row forms, and the persisted structures it adopts.
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use croaring::Bitmap;
+
+use mosaica_lifecycle::membership::ArtifactStore;
+use mosaica_types::layer::LayerDeclaration;
+use mosaica_types::ShardId;
+
+
+use crate::containment::ContainmentPartition;
+use crate::row_column::RowColumn;
+use mosaica_store::membership::LabelColumnPack;
+use crate::tile_index::TileIndex;
+
+use super::*;
+
+/// What a cached [`ArtifactRows`] was built from: the prefix (a fold renumbers the base row
+/// space), the view (row space is per view), and the level's version (a publication adds
+/// memberships a stale form would serve as missing). A mismatch on any term rebuilds the form.
+///
+/// Keyed on the level's version rather than the store's, so one suppression, one growth or one
+/// publication elsewhere does not invalidate every level's form in every view.
+///
+/// The segments version is not a term: a flush extends a held form instead of invalidating it
+/// ([`ArtifactProjections::extend_flushed`]), and a merge permutes rows the form holds and is
+/// caught by [`ArtifactRows::covers`] at every hit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ProjectionKey {
+    pub(super) prefix: String,
+    pub(super) view: String,
+    pub(super) level_version: u64,
+    /// The geometry an *attribute* predicate's membership was evaluated against, and `0` for every
+    /// other level. A stored or spatial membership is instead extended and rebased in place
+    /// ([`ArtifactProjections::extend_flushed`], [`ArtifactProjections::rebase_merged`]); an
+    /// attribute predicate's membership is the value column, rebuilt whenever the geometry moves.
+    pub(super) live: u64,
+}
+
+impl ProjectionKey {
+    /// Whether a form held under this key answers for `wanted` — the level as last published,
+    /// which may be up to a tick behind the store. Every term but the level version is an
+    /// equality; the level version is a floor, so a form waiting for its next tick is served as
+    /// last published, which can only undercount.
+    pub(super) fn stale_form_of(&self, wanted: &ProjectionKey) -> bool {
+        self.prefix == wanted.prefix
+            && self.view == wanted.view
+            && self.live == wanted.live
+            && self.level_version <= wanted.level_version
+    }
+}
+
+/// `(shard, view, layer, level)` — what one cached projection is *for*, as against the
+/// [`ProjectionKey`] that says when it stops being valid. Replace-on-mismatch, not an LRU, so the
+/// map is bounded by the number of live coordinates rather than a capacity.
+///
+/// The view is here and not in [`PartitionAddress`]: a containment expression names entities'
+/// terms, so no row space is involved and one file answers for every view; an extent is a pair of
+/// rows, answering for exactly the view it was projected through.
+pub(super) type LevelAddress = (ShardId, String, String, u32);
+
+/// This level, of this layer, in this view of this shard, under this prefix, at this version —
+/// the coordinate a level's derived structures are claimed, composed and filed at.
+pub(super) struct Coordinate<'a> {
+    pub(super) prefix: &'a str,
+    pub(super) shard: ShardId,
+    pub(super) view: &'a str,
+    /// The incarnation of the view's key whose artifacts the level draws.
+    pub(super) incarnation: mosaica_types::view::ViewIncarnation,
+    pub(super) layer: &'a str,
+    pub(super) level: u32,
+    /// The shard's version of the level ([`ArtifactStore::level_version`]).
+    pub(super) level_version: u64,
+    /// The level's records version ([`ArtifactStore::records_version`]), which the records every
+    /// shard's form shares are filed at.
+    pub(super) records_version: u64,
+}
+
+impl Coordinate<'_> {
+    /// Where this level's row form, tile index and row column are filed.
+    pub(super) fn address(&self) -> LevelAddress {
+        (self.shard, self.view.to_string(), self.layer.to_string(), self.level)
+    }
+
+    pub(super) fn records_address(&self) -> RecordsAddress {
+        (self.view.to_string(), self.layer.to_string(), self.level)
+    }
+
+    pub(super) fn partition_address(&self) -> PartitionAddress {
+        (self.shard, self.layer.to_string(), self.level)
+    }
+
+    pub(super) fn derived_key(&self) -> DerivedKey {
+        DerivedKey::of(self.prefix, self.level_version)
+    }
+
+    /// What the level's records are filed at.
+    pub(super) fn records_key(&self) -> DerivedKey {
+        DerivedKey::of(self.prefix, self.records_version)
+    }
+
+    /// What a row form of this level is valid at. `live` is the caller's because only the caller
+    /// knows whether the level evaluates a value column.
+    pub(super) fn projection_key(&self, live: u64) -> ProjectionKey {
+        ProjectionKey {
+            prefix: self.prefix.to_string(),
+            view: self.view.to_string(),
+            level_version: self.level_version,
+            live,
+        }
+    }
+}
+
+/// `(shard, layer, level)` — what one cached partition is *for*: one shard's partition is composed
+/// over its slice of each generating set, against its own postings. No view, because a
+/// containment expression is over terms and no row space is involved. No prefix, because the
+/// prefix is a validity term; putting it in the address would leave every fold's entries behind
+/// instead of replacing them.
+pub(super) type PartitionAddress = (ShardId, String, u32);
+
+/// `(view, layer, level)` — what one level's records are for. No shard: every shard's form shares
+/// them, at the level's records version.
+pub(super) type RecordsAddress = (String, String, u32);
+
+/// What a cached [`ContainmentPartition`], an adopted [`TileIndex`] and an adopted [`RowColumn`]
+/// were composed or projected under — one key for all three. The prefix fixes the base row space
+/// and the level's version fixes the records, and for a partition the postings it was composed
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct DerivedKey {
+    pub(super) prefix: String,
+    pub(super) level_version: u64,
+}
+
+impl DerivedKey {
+    pub(super) fn of(prefix: &str, level_version: u64) -> Self {
+        DerivedKey {
+            prefix: prefix.to_string(),
+            level_version,
+        }
+    }
+}
+
+/// What one accepted write did to a level, held by the executor until the next flush tick and
+/// applied to the level's row forms there ([`ArtifactProjections::publish`]). Entity space and a
+/// delta, exactly as the log record carries it, applied once per view over that view's own row
+/// space.
+///
+/// `before` is the level version this write followed. The deltas of an interval carry consecutive
+/// versions, so a form at version *v* takes the ones from *v* on and none it already holds.
+#[derive(Debug)]
+pub struct LevelDelta {
+    pub before: u64,
+    pub kind: DeltaKind,
+}
+
+/// The four shapes a [`LevelDelta`] takes, one per route by which artifact state enters.
+#[derive(Debug)]
+pub enum DeltaKind {
+    /// One `WalRecord::ArtifactGrow` decoded: `(ordinal, the entities joining)` per membership it
+    /// grew, and one page per generating set it moved. One record carries both because one record
+    /// moves the level's version once.
+    Grown {
+        joins: Vec<(u32, Bitmap)>,
+        pages: Vec<SetPage>,
+    },
+    /// The ordinals a publication claimed. The records themselves are read back from the store,
+    /// which has already applied them.
+    Published(Vec<u32>),
+    /// The ordinals a fill changed: a parent list, an attachment, a shape or a content's values.
+    /// The membership is untouched; the ordinal's records entry and generating sets are read from
+    /// the store.
+    Filled(Vec<u32>),
+}
+
+/// One page of one content's generating set, as the row forms take it.
+#[derive(Debug)]
+pub struct SetPage {
+    pub ordinal: u32,
+    /// The content's position in the artifact's content row.
+    pub position: u16,
+    /// The entities joining. Unioned into the served operator where the page holds no leave.
+    pub joining: Bitmap,
+    /// Whether this page re-derives the artifact's operators whole from entity truth: a union
+    /// cannot express a leave, so a page holding one does and a page of joins alone does not.
+    pub whole: bool,
+}
+
+/// Where the rows of a write's delta come from, per level — what [`ArtifactProjections::publish`]
+/// is told beside the delta. `None` at the call is an attribute predicate, whose membership is the
+/// value column and takes no delta.
+pub enum DeltaRows<'a> {
+    /// A stored membership: the delta's rows are the records' members, projected through the
+    /// view's row space.
+    Projected,
+    /// A spatial membership: the rows of the ordinal asked for, resolved from its shape over every
+    /// live segment. A growth never reaches a spatial level, so this is asked for a publication's
+    /// new ordinals only.
+    Resolved(&'a dyn Fn(u32) -> Bitmap),
+}
+
+/// Where a level's rows come from when a geometry publication brings its held form forward — what
+/// [`ArtifactProjections::extend_flushed`] and [`ArtifactProjections::rebase_merged`] are told per
+/// `(layer, level)`. `None` is a level that takes no delta here: an attribute predicate.
+pub enum SegmentRows {
+    /// A stored membership: the segment's rows are projected from the records through its extent.
+    Projected,
+    /// A spatial membership: the segment resolved against the level's shapes, segment-local rows
+    /// per ordinal, parallel to the level's ordinals.
+    Resolved(Arc<Vec<Option<Bitmap>>>),
+}
+
+/// One held row form, what it describes and how far its rows have been brought.
+#[derive(Debug)]
+pub(super) struct Held {
+    pub(super) key: ProjectionKey,
+    /// The `segments_version` the form's rows were last brought to — the generation it was built
+    /// against, or the last one whose publication extended or rebased it on the executor.
+    pub(super) at: u64,
+    pub(super) rows: Arc<ArtifactRows>,
+}
+
+/// A level's band-order labels as the prefix names them, mapped on first use.
+#[derive(Debug)]
+pub(super) struct HeldBandLabels {
+    /// The segment whose band entries the copy follows.
+    seg_id: String,
+    path: std::path::PathBuf,
+    opened: std::sync::OnceLock<Option<Arc<mosaica_store::bands::BandLabels>>>,
+}
+
+/// The engine cache directory's subdirectory for row-column compositions. Its own directory rather
+/// than the cache root, so the open-time sweep cannot reach the fragment cache beside it.
+pub const ROW_COLUMN_SCRATCH_DIR: &str = "row-columns";
+
+// `Default` is [`ArtifactProjections::new`]'s own scaffold and not a constructor. Every field but
+// the scratch path is an empty cache, and the scratch path a default gives is a directory no
+// composition can write through. `new` fills it in; a caller that used `default` directly would
+// get a projection that declined every level it was asked for.
+#[derive(Debug, Default)]
+pub struct ArtifactProjections {
+    pub(super) cached: Mutex<BTreeMap<LevelAddress, Held>>,
+    /// The containment partitions, keyed without the view: the expression names entities' terms,
+    /// so two views of the same level compose the same table, and composing it is costly enough to
+    /// share. The row form's projection-loss test still stays per view.
+    pub(super) partitions_held: Mutex<BTreeMap<PartitionAddress, (DerivedKey, ContainmentPartition)>>,
+    /// The fold-written tile indexes adopted at open, waiting for the level's first request to
+    /// claim one. Claimed once and then dropped, unlike the map above it: an index belongs to one
+    /// view, so once that view's row form has taken it there is nothing left for a second reader.
+    pub(super) indexes_held: Mutex<BTreeMap<LevelAddress, (DerivedKey, TileIndex)>>,
+    /// The fold-written row-major columns adopted at open. Held for the prefix's life rather than
+    /// claimed once, unlike [`Self::indexes_held`]: the pack is mapped, so holding it costs its
+    /// per-artifact counts, and every build of the level starts from it, a rebuild included,
+    /// rather than from a projection that holds the level's rows.
+    pub(super) columns_held: Mutex<BTreeMap<LevelAddress, (DerivedKey, RowColumn)>>,
+    /// The base half of an attribute predicate's row column, per `(view, layer, level)`. Held
+    /// rather than claimed, as [`Self::columns_held`] is: it is taken again at every flush, since
+    /// the form above it rebuilds on the geometry moving and the base does not.
+    pub(super) predicate_bases: Mutex<BTreeMap<LevelAddress, (DerivedKey, Arc<RowColumn>)>>,
+    /// The label column of each level served artifact-major whose memberships partition the
+    /// rows, as the prefix holds it, keyed at the version it was written for. A point's cluster
+    /// tag is read from it; nothing serves the level from it.
+    pub(super) labels_held: Mutex<BTreeMap<LevelAddress, (DerivedKey, Arc<LabelColumnPack>)>>,
+    /// Each level's labels in the base segment's band-entry order, keyed at the version they were
+    /// written for. Opened on first use, since opening checks the file against that segment's
+    /// bands.
+    pub(super) band_labels_held: Mutex<BTreeMap<LevelAddress, (DerivedKey, Arc<HeldBandLabels>)>>,
+    /// Each level's records per view, at the version they describe, shared by every shard's form.
+    /// Weak, so a write moves them rather than copying, and nothing here outlives the forms.
+    pub(super) records_held:
+        Mutex<BTreeMap<RecordsAddress, (DerivedKey, std::sync::Weak<ArtifactRecords>)>>,
+    /// How many forms this has built since the engine opened. Read by the fold's own log line and
+    /// by [`crate::Engine::artifact_cache_builds`].
+    pub(super) builds: std::sync::atomic::AtomicU64,
+    /// How many containment partitions this has composed since the engine opened. Operator plane
+    /// only.
+    pub(super) partitions: std::sync::atomic::AtomicU64,
+    /// How many partitions this adopted from the prefix at open rather than composing.
+    adopted: std::sync::atomic::AtomicU64,
+    /// How many fold-written tile indexes this claimed from the prefix rather than deriving.
+    pub(super) indexes_adopted: std::sync::atomic::AtomicU64,
+    /// How many fold-written row-major columns this claimed from the prefix rather than composing.
+    pub(super) columns_adopted: std::sync::atomic::AtomicU64,
+    /// How many levels were recorded row-major and are being served artifact-major: their
+    /// memberships turned out to overlap, or the fold's file would not open. Both layouts answer
+    /// identically. Counted per build, not per request; it names no artifact and no principal.
+    pub(super) fallbacks: std::sync::atomic::AtomicU64,
+    /// How many row-major columns this composed rather than claiming from the prefix. A predicate
+    /// level's base column counts here too and never has an adopted twin, since the fold writes no
+    /// file for it.
+    pub(super) columns_composed: std::sync::atomic::AtomicU64,
+    /// Where a composition's partition buckets and the column it writes live — the deployment's
+    /// cache directory, never the bundle.
+    scratch: std::path::PathBuf,
+}
+
+/// Whether a level of this layer may be served from its column alone — the one place the rule is
+/// stated, so two callers cannot decide it differently and flip the level's form between requests.
+/// A layer that derives a `hull` is excluded: a hull needs one artifact's rows materialised, unlike
+/// the figures ([`crate::figures::Figures`]) a column-only level otherwise serves.
+pub fn serves_column_only(declaration: &LayerDeclaration) -> bool {
+    !declaration
+        .content
+        .computed
+        .iter()
+        .filter_map(|name| crate::derived::ComputedProperty::parse(name))
+        .any(|p| p == crate::derived::ComputedProperty::Hull)
+}
+
+/// The layer an extent of `shard` belongs to, `shard`'s version of its level now, and whether the
+/// level's records and that shard's slice are both still at the versions the extent was written
+/// at. `None` where no layer holds the space or the store holds no slice of `shard`.
+fn standing<'s>(
+    store: &'s ArtifactStore,
+    shard: ShardId,
+    extent: &mosaica_store::manifest::DerivedExtent,
+) -> Option<(&'s str, u64, bool)> {
+    let layer = store.layer_in(extent.space)?;
+    let now = store.slice(shard)?.level_version(layer, extent.level);
+    let standing = extent.stands(store.records_version(layer, extent.level), now, false);
+    Some((layer, now, standing))
+}
+
+impl ArtifactProjections {
+    pub fn new(scratch: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            scratch: scratch.into(),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn scratch(&self) -> &std::path::Path {
+        &self.scratch
+    }
+
+    /// The level's records at `address` and `key`, `len` long, as another shard's form holds
+    /// them, else `make`'s, held for the next. Held records at another key or length are stale and
+    /// are replaced.
+    pub(super) fn shared_records(
+        &self,
+        address: RecordsAddress,
+        key: DerivedKey,
+        len: usize,
+        make: impl FnOnce() -> Arc<ArtifactRecords>,
+    ) -> Arc<ArtifactRecords> {
+        let mut held = self.records_held.lock().unwrap_or_else(|e| e.into_inner());
+        let shared = held
+            .get(&address)
+            .filter(|(held_key, _)| *held_key == key)
+            .and_then(|(_, records)| records.upgrade())
+            .filter(|shared| shared.len() == len);
+        if let Some(shared) = shared {
+            return shared;
+        }
+        let made = make();
+        held.insert(address, (key, Arc::downgrade(&made)));
+        made
+    }
+
+    pub fn builds(&self) -> u64 {
+        self.builds.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn partitions(&self) -> u64 {
+        self.partitions.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn adopted(&self) -> u64 {
+        self.adopted.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn indexes_adopted(&self) -> u64 {
+        self.indexes_adopted
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn columns_adopted(&self) -> u64 {
+        self.columns_adopted
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn layout_fallbacks(&self) -> u64 {
+        self.fallbacks.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn columns_composed(&self) -> u64 {
+        self.columns_composed
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Adopts every derived file of `extents`, each beside the shard it was written for, whose
+    /// level is still at the version it was written for.
+    pub fn adopt_derived(
+        &self,
+        prefix_dir: &std::path::Path,
+        prefix: &str,
+        extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
+        store: &ArtifactStore,
+        enumerated: &std::collections::BTreeSet<String>,
+    ) {
+        self.adopt_all(prefix_dir, prefix, extents, store);
+        self.adopt_indexes(prefix_dir, prefix, extents, store);
+        self.adopt_columns(prefix_dir, prefix, extents, store, enumerated);
+        self.adopt_labels(prefix_dir, prefix, extents, store);
+    }
+
+    /// Take the label columns and band-order copies this prefix's manifests name, for every level
+    /// still at the version they were written for. A stale one would name the artifact a row held
+    /// before a growth, so the version check is an equality, and the reader checks it again
+    /// against the form it serves beside.
+    pub fn adopt_labels(
+        &self,
+        prefix_dir: &std::path::Path,
+        prefix: &str,
+        extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
+        store: &ArtifactStore,
+    ) {
+        let mut labels = self.labels_held.lock().unwrap_or_else(|e| e.into_inner());
+        let mut copies = self.band_labels_held.lock().unwrap_or_else(|e| e.into_inner());
+        labels.clear();
+        copies.clear();
+        for (shard, extent) in extents {
+            let Some(view) = extent.view.as_deref() else {
+                continue;
+            };
+            let Some((layer, now, true)) = standing(store, *shard, extent) else {
+                continue;
+            };
+            let address = (*shard, view.to_string(), layer.to_string(), extent.level);
+            let key = DerivedKey::of(prefix, now);
+            let path = prefix_dir.join(&extent.path);
+            match &extent.form {
+                mosaica_store::manifest::DerivedForm::LevelLabels => {
+                    match LabelColumnPack::open(&path) {
+                        Ok(pack) => {
+                            labels.insert(address, (key, Arc::new(pack)));
+                        }
+                        Err(error) => tracing::error!(
+                            layer = %layer,
+                            level = extent.level,
+                            view = %view,
+                            path = %extent.path,
+                            %error,
+                            "ALARM: a level's label column named by the manifest would not open; \
+                             its points are tagged from the level's memberships instead"
+                        ),
+                    }
+                }
+                mosaica_store::manifest::DerivedForm::BandLabels { seg_id } => {
+                    copies.insert(
+                        address,
+                        (
+                            key,
+                            Arc::new(HeldBandLabels {
+                                seg_id: seg_id.clone(),
+                                path,
+                                opened: std::sync::OnceLock::new(),
+                            }),
+                        ),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The label column of `(view, layer, level)` in `shard` where the prefix holds one written at
+    /// `level_version`.
+    pub(crate) fn level_labels(
+        &self,
+        prefix: &str,
+        shard: ShardId,
+        view: &str,
+        layer: &str,
+        level: u32,
+        level_version: u64,
+    ) -> Option<Arc<LabelColumnPack>> {
+        let held = self.labels_held.lock().unwrap_or_else(|e| e.into_inner());
+        let (key, pack) = held.get(&(shard, view.to_string(), layer.to_string(), level))?;
+        (*key == DerivedKey::of(prefix, level_version)).then(|| Arc::clone(pack))
+    }
+
+    /// The band-order copy of `(view, layer, level)`'s labels in `shard` where the prefix holds
+    /// one written at `level_version`, with the `seg_id` of the segment whose bands it follows.
+    /// `None` also where the file will not open against that segment's bands.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn band_labels(
+        &self,
+        prefix: &str,
+        shard: ShardId,
+        view: &str,
+        layer: &str,
+        level: u32,
+        level_version: u64,
+        segment: &mosaica_store::read::SegmentData,
+    ) -> Option<Arc<mosaica_store::bands::BandLabels>> {
+        let held = {
+            let held = self.band_labels_held.lock().unwrap_or_else(|e| e.into_inner());
+            let (key, copy) = held.get(&(shard, view.to_string(), layer.to_string(), level))?;
+            if *key != DerivedKey::of(prefix, level_version) || copy.seg_id != segment.seg_id {
+                return None;
+            }
+            Arc::clone(copy)
+        };
+        held.opened
+            .get_or_init(|| {
+                match mosaica_store::bands::BandLabels::open(&held.path, &segment.bands) {
+                    Ok(copy) => Some(Arc::new(copy)),
+                    Err(error) => {
+                        tracing::error!(
+                            layer = %layer,
+                            level,
+                            view = %view,
+                            path = %held.path.display(),
+                            %error,
+                            "ALARM: a level's band-order labels named by the manifest would not \
+                             open; its points are tagged from the level's label column instead"
+                        );
+                        None
+                    }
+                }
+            })
+            .clone()
+    }
+
+    /// Take the fold-written partitions this prefix's manifests name, for every level whose
+    /// coordinate still holds: a stale partition would answer containment for a generating set
+    /// that has since grown, the permissive direction, so the version check is an equality.
+    ///
+    /// Every failure is a drop, not an error: a file that will not map, a file whose framing
+    /// refuses, a coordinate that has moved, each means the level is recomposed on first use, which
+    /// is the answer every request took before the fold wrote anything.
+    pub fn adopt_all(
+        &self,
+        prefix_dir: &std::path::Path,
+        prefix: &str,
+        extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
+        store: &ArtifactStore,
+    ) {
+        // Everything held for another prefix leaves here, so a request still building on the
+        // outgoing generation cannot remove what this adoption inserts ([`Self::claim_index`]).
+        self.partitions_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, (key, _)| key.prefix == prefix);
+        for (shard, extent) in extents
+            .iter()
+            .filter(|(_, e)| e.form == mosaica_store::manifest::DerivedForm::Containment)
+        {
+            let Some((layer, level_version, standing)) = standing(store, *shard, extent) else {
+                continue;
+            };
+            if !standing {
+                tracing::info!(
+                    layer = %layer,
+                    level = extent.level,
+                    composed_at = extent.slice_version,
+                    now = level_version,
+                    "a fold-written containment partition is not adopted: the level has moved                      since it was composed, so it is recomposed on first use"
+                );
+                continue;
+            }
+            let path = prefix_dir.join(&extent.path);
+            let partition = match ContainmentPartition::open(&path) {
+                Ok(partition) => partition,
+                Err(error) => {
+                    // A fault rather than a cadence: the manifest names a file the prefix should
+                    // hold and it did not open.
+                    tracing::error!(
+                        layer = %layer,
+                        level = extent.level,
+                        path = %extent.path,
+                        %error,
+                        "ALARM: a containment partition named by the manifest would not open;                          containment is correct and the level recomposes on first use"
+                    );
+                    continue;
+                }
+            };
+            self.adopted
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.partitions_held
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    (*shard, layer.to_string(), extent.level),
+                    (DerivedKey::of(prefix, level_version), partition),
+                );
+        }
+    }
+
+    /// Take the fold-written tile indexes this prefix's manifests name, for every
+    /// `(view, layer, level)` whose coordinate still holds. [`Self::adopt_all`]'s rule with a view
+    /// on it, but a stale index is wrong the opposite way: a growth adds members the index's
+    /// extents do not reach, so an artifact can be treated as settled — its whole membership
+    /// assumed inside the viewport — when it is not, and its masked count then answers for the
+    /// members in view rather than all of them. Equality on the version, and the view compared too.
+    pub fn adopt_indexes(
+        &self,
+        prefix_dir: &std::path::Path,
+        prefix: &str,
+        extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
+        store: &ArtifactStore,
+    ) {
+        self.indexes_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, (key, _)| key.prefix == prefix);
+        for (shard, extent) in extents {
+            let (mosaica_store::manifest::DerivedForm::TileIndex, Some(view)) =
+                (&extent.form, extent.view.as_deref())
+            else {
+                continue;
+            };
+            let Some((layer, level_version, standing)) = standing(store, *shard, extent) else {
+                continue;
+            };
+            if !standing {
+                tracing::info!(
+                    layer = %layer,
+                    level = extent.level,
+                    view = %view,
+                    projected_at = extent.slice_version,
+                    now = level_version,
+                    "a fold-written tile index is not adopted: the level has moved since it was \
+                     projected, so its extents are derived on first use"
+                );
+                continue;
+            }
+            let path = prefix_dir.join(&extent.path);
+            let index = match TileIndex::open(&path) {
+                Ok(index) => index,
+                Err(error) => {
+                    // A fault rather than a cadence: the manifest names a file the prefix should
+                    // hold and it did not open.
+                    tracing::error!(
+                        layer = %layer,
+                        level = extent.level,
+                        view = %view,
+                        path = %extent.path,
+                        %error,
+                        "ALARM: a tile index named by the manifest would not open; candidacy is \
+                         correct and the level's index is derived on first use"
+                    );
+                    continue;
+                }
+            };
+            self.indexes_held
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    (*shard, view.to_string(), layer.to_string(), extent.level),
+                    (DerivedKey::of(prefix, level_version), index),
+                );
+        }
+    }
+
+    /// Take the fold-written row-major columns this prefix's manifests name that still stand
+    /// ([`DerivedExtent::stands`], with the layers in `enumerated`). Unlike an index, a column the
+    /// level has moved past is kept, keyed at the version it describes, and the build that claims
+    /// it completes it rather than projecting the level whole ([`Self::claim_column`]).
+    ///
+    /// [`DerivedExtent::stands`]: mosaica_store::manifest::DerivedExtent::stands
+    ///
+    /// The manifest's layout tag is checked against the file's own magic rather than trusted over
+    /// it: a mis-described file refuses at the first bytes, landing here as a drop and a
+    /// recomposition rather than a misread column. A column is adopted only with the member file
+    /// written beside it, and a recomposition writes both.
+    pub fn adopt_columns(
+        &self,
+        prefix_dir: &std::path::Path,
+        prefix: &str,
+        extents: &[(ShardId, mosaica_store::manifest::DerivedExtent)],
+        store: &ArtifactStore,
+        enumerated: &std::collections::BTreeSet<String>,
+    ) {
+        self.columns_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|_, (key, _)| key.prefix == prefix);
+        for (shard, extent) in extents {
+            let (mosaica_store::manifest::DerivedForm::RowColumn { layout }, Some(view)) =
+                (&extent.form, extent.view.as_deref())
+            else {
+                continue;
+            };
+            let layout = *layout;
+            let Some((layer, level_version, _)) = standing(store, *shard, extent) else {
+                continue;
+            };
+            let records = store.records_version(layer, extent.level);
+            if !extent.stands(records, level_version, enumerated.contains(layer)) {
+                tracing::warn!(
+                    layer = %layer,
+                    level = extent.level,
+                    view = %view,
+                    written_at = ?(extent.level_version, extent.slice_version),
+                    now = ?(records, level_version),
+                    "a fold-written row-major column does not stand at its level's versions; it \
+                     is not adopted and the level is recomposed on first use"
+                );
+                continue;
+            }
+            let path = prefix_dir.join(&extent.path);
+            let members = extents.iter().find_map(|(held, m)| {
+                (held == shard
+                    && m.form == mosaica_store::manifest::DerivedForm::RowMembers
+                    && m.same_level(extent))
+                .then_some(m)
+            });
+            let Some(members) = members else {
+                tracing::error!(
+                    layer = %layer,
+                    level = extent.level,
+                    view = %view,
+                    path = %extent.path,
+                    "ALARM: a row-major column named by the manifest has no member file beside it; \
+                     it is not adopted and the level is recomposed on first use"
+                );
+                continue;
+            };
+            let column = match RowColumn::open(&path, &prefix_dir.join(&members.path), layout) {
+                Ok(column) => column,
+                Err(error) => {
+                    // A fault rather than a cadence: the manifest names a file the prefix should
+                    // hold, in a form it claims to be in, and it did not open as that form.
+                    tracing::error!(
+                        layer = %layer,
+                        level = extent.level,
+                        view = %view,
+                        path = %extent.path,
+                        layout = ?layout,
+                        %error,
+                        "ALARM: a row-major column named by the manifest would not open as the \
+                         form the manifest names; the level is recomposed on first use"
+                    );
+                    continue;
+                }
+            };
+            self.columns_held
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    (*shard, view.to_string(), layer.to_string(), extent.level),
+                    (DerivedKey::of(prefix, extent.slice_version), column),
+                );
+        }
+    }
+
+    /// The form held for one `(view, layer, level)` in `shard`, or `None` where none is.
+    pub fn held_form(
+        &self,
+        shard: ShardId,
+        view: &str,
+        layer: &str,
+        level: u32,
+    ) -> Option<Arc<ArtifactRows>> {
+        self.held_form_at(shard, view, layer, level)
+            .map(|(rows, _)| rows)
+    }
+
+    /// The form held for one `(view, layer, level)` in `shard` and the level version it is at,
+    /// where one is.
+    pub(crate) fn held_form_at(
+        &self,
+        shard: ShardId,
+        view: &str,
+        layer: &str,
+        level: u32,
+    ) -> Option<(Arc<ArtifactRows>, u64)> {
+        self.cached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&(shard, view.to_string(), layer.to_string(), level))
+            .map(|held| (Arc::clone(&held.rows), held.key.level_version))
+    }
+
+    /// File `held` under `address` unless what is there is later on either term — the segments
+    /// version its rows were brought to, or the level version its records describe (see
+    /// [`Held::at`]). A form later on one term and earlier on the other is kept out and what it
+    /// built discarded, so a build straddling a flush or a merge cannot replace a newer form with
+    /// an older one and send masked counts backwards for the next reader.
+    pub(super) fn insert_newest(&self, address: LevelAddress, held: Held) {
+        let mut cached = self.cached.lock().unwrap_or_else(|e| e.into_inner());
+        if cached.get(&address).is_some_and(|standing| {
+            standing.at > held.at || standing.key.level_version > held.key.level_version
+        }) {
+            return;
+        }
+        cached.insert(address, held);
+    }
+
+    /// How many forms are held. Operator plane only.
+    pub fn held(&self) -> usize {
+        self.cached.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// Drop everything held for one layer, in every view. Called when the layer is dropped: a name
+    /// registered again is another layer whose levels' versions continue past the dropped one's,
+    /// so a form left behind could never be handed to anybody, only stay resident.
+    pub fn forget(&self, layer: &str) {
+        self.cached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, _), _| held != layer);
+        self.partitions_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, held, _), _| held != layer);
+        self.indexes_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, _), _| held != layer);
+        self.columns_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, _), _| held != layer);
+        // Held rather than claimed, so nothing else would ever remove it otherwise.
+        self.predicate_bases
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, _), _| held != layer);
+        self.labels_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, _), _| held != layer);
+        self.band_labels_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, _), _| held != layer);
+        self.records_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, held, _), _| held != layer);
+    }
+
+    /// Drop everything held for one `(layer, level)`, in every view — what a layout flip needs. The
+    /// cached row form is replace-on-mismatch, so a fold's new prefix would replace it at the
+    /// level's next request anyway; the held adoption maps are the problem, since a level that
+    /// flipped to row-major is never asked for its tile index again and the last generation's copy
+    /// is pinned for the process's life. Removal only, so its worst outcome is one level rebuilding
+    /// what it would have adopted.
+    pub fn forget_level(&self, layer: &str, level: u32) {
+        self.cached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, held_level), _| held != layer || *held_level != level);
+        self.partitions_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, held, held_level), _| held != layer || *held_level != level);
+        self.indexes_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, held_level), _| held != layer || *held_level != level);
+        self.columns_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, held_level), _| held != layer || *held_level != level);
+        self.predicate_bases
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, held_level), _| held != layer || *held_level != level);
+        self.labels_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, held_level), _| held != layer || *held_level != level);
+        self.band_labels_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, _, held, held_level), _| held != layer || *held_level != level);
+        self.records_held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(_, held, held_level), _| held != layer || *held_level != level);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mosaica_lifecycle::membership::{ArtifactRecord, Attachment, ContentSet, Members};
+    use mosaica_store::permutation::{Permutation, RowSpace};
+    use mosaica_types::layer::ServingLayout;
+    use mosaica_types::{EntityId, LayerSpace};
+
+    use super::*;
+    use crate::artifacts::test_support::declaration;
+
+    const CLUSTERS: &str = "clusters/a";
+    const LABELS: &str = "labels/a";
+
+    /// A shard's row space over its eight entities, each entity its own row.
+    fn row_space(dir: &std::path::Path, name: &str) -> RowSpace {
+        let path = dir.join(name);
+        let entities: Vec<EntityId> = (0..8).map(EntityId::new).collect();
+        mosaica_store::write::write_permutation(&path, &entities, 8).expect("permutation writes");
+        RowSpace::new(Arc::new(Permutation::load(&path).expect("loads")), 8)
+    }
+
+    /// One shard's slice of an artifact at `entity`: `members` and one content generated from
+    /// `generating` there, of `cardinality` members over every shard.
+    fn slice(entity: u64, members: &[u32], generating: &[u32], cardinality: u64) -> ArtifactRecord {
+        ArtifactRecord {
+            entity: EntityId::new(entity),
+            key: None,
+            view: None,
+            incarnation: 0,
+            members: Members::owned(Bitmap::of(members)),
+            declares_members: None,
+            contents: vec![ContentSet {
+                values: None,
+                digest: [0; 32],
+                generated_from: Bitmap::of(generating),
+                cardinality,
+            }],
+            withdrawn: Box::default(),
+            attached_to: None,
+            parents: Vec::new(),
+            access: Vec::new(),
+        }
+    }
+
+    /// One layer's level 0: its name, its space, and its records by ordinal.
+    type Level<'a> = (&'a str, LayerSpace, Vec<(u32, ArtifactRecord)>);
+
+    /// A store holding each of `levels`, three ordinals long, at level version 7.
+    fn store_of(levels: Vec<Level<'_>>) -> ArtifactStore {
+        let mut store = ArtifactStore::new();
+        for (layer, space, records) in levels {
+            for (ordinal, record) in records {
+                store.seed(layer, space, 0, ordinal, record, None);
+            }
+            store.seed_extent_bound(layer, space, 0, 3);
+            store.seed_level_version(layer, 0, 7);
+        }
+        store
+    }
+
+    /// `layer`'s form in `shard`, of `store`'s slice, with `records`' whole records.
+    fn form(
+        projections: &ArtifactProjections,
+        dir: &std::path::Path,
+        shard: u32,
+        layer: &str,
+        (store, records): (&ArtifactStore, &ArtifactStore),
+    ) -> Arc<ArtifactRows> {
+        projections
+            .get_or_build(
+                "v0",
+                ShardId::new(shard).expect("in range"),
+                "s0",
+                mosaica_types::view::DECLARED_INCARNATION,
+                layer,
+                0,
+                store,
+                records,
+                &row_space(dir, &format!("shard-{shard}.bin")),
+                None,
+                ServingLayout::ArtifactMajor,
+                None,
+                0,
+                &declaration(false, None),
+            )
+            .0
+    }
+
+    /// A slot, empty, where the shard holds no member; the records beside them are one value,
+    /// shared by every shard's form.
+    #[test]
+    fn every_shards_form_of_a_level_holds_every_ordinal_over_one_set_of_records() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let labelled = ArtifactRecord {
+            access: vec![b"t".to_vec()],
+            ..slice(1_000, &[0, 1], &[0, 1], 3)
+        };
+        let first = store_of(vec![(
+            CLUSTERS,
+            LayerSpace::ZERO,
+            vec![(0, labelled), (2, slice(1_002, &[], &[], 0))],
+        )]);
+        // The other shard's slice holds no label, as the open's slices do not.
+        let second = store_of(vec![(
+            CLUSTERS,
+            LayerSpace::ZERO,
+            vec![(0, slice(1_000, &[5], &[5], 3)), (2, slice(1_002, &[3, 4], &[], 0))],
+        )]);
+        let projections = ArtifactProjections::new(dir.path());
+        let a = form(&projections, dir.path(), 0, CLUSTERS, (&first, &first));
+        let b = form(&projections, dir.path(), 1, CLUSTERS, (&second, &first));
+
+        for ordinal in 0..4 {
+            assert_eq!(a.holds(ordinal), b.holds(ordinal), "ordinal {ordinal}");
+        }
+        assert!(!a.holds(1) && a.holds(2));
+        assert_eq!(a.get(2), Some(&Bitmap::new()), "a slot, empty, where the shard has none");
+        assert_eq!(b.get(2), Some(&Bitmap::of(&[3, 4])));
+        assert_eq!(a.get(0), Some(&Bitmap::of(&[0, 1])));
+        assert_eq!(b.get(0), Some(&Bitmap::of(&[5])));
+        assert_eq!(a.generating_size(0, 0) + b.generating_size(0, 0), 3);
+        assert!(Arc::ptr_eq(&a.records, &b.records), "one set of records for every shard");
+        assert_eq!(b.records().declared_sizes(0), &[3]);
+        assert!(!b.records().access(0).is_empty(), "the label is the whole record's");
+        assert!(!Arc::ptr_eq(&a, &b));
+        let held = |shard| projections.held_form(shard, "s0", CLUSTERS, 0);
+        assert!(held(ShardId::ZERO).is_some_and(|held| Arc::ptr_eq(&held, &a)));
+        assert!(held(ShardId::new(1).unwrap()).is_some_and(|held| Arc::ptr_eq(&held, &b)));
+
+        // Built in the other order, the slice's form still takes the whole records.
+        let projections = ArtifactProjections::new(dir.path());
+        let b = form(&projections, dir.path(), 1, CLUSTERS, (&second, &first));
+        assert!(!b.records().access(0).is_empty());
+        let a = form(&projections, dir.path(), 0, CLUSTERS, (&first, &first));
+        assert!(Arc::ptr_eq(&a.records, &b.records));
+    }
+
+    /// A label whose members are all in shard 0 has an empty slice in shard 1, and its form there
+    /// holds that slice, not the cluster's members.
+    #[test]
+    fn an_artifact_with_members_in_another_shard_borrows_nothing_here() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cluster = |members: &[u32]| slice(1_000, members, &[], 0);
+        let label = |members: &[u32]| ArtifactRecord {
+            attached_to: Some(Attachment {
+                layer: CLUSTERS.into(),
+                space: LayerSpace::ZERO,
+                level: 0,
+                ordinal: 0,
+                entity: EntityId::new(1_000),
+            }),
+            declares_members: Some(true),
+            ..slice(2_000, members, &[], 0)
+        };
+        let labels = LayerSpace::new(1).expect("in range");
+        let first = store_of(vec![
+            (CLUSTERS, LayerSpace::ZERO, vec![(0, cluster(&[0, 1]))]),
+            (LABELS, labels, vec![(0, label(&[1]))]),
+        ]);
+        let second = store_of(vec![
+            (CLUSTERS, LayerSpace::ZERO, vec![(0, cluster(&[5, 6]))]),
+            (LABELS, labels, vec![(0, label(&[]))]),
+        ]);
+        let projections = ArtifactProjections::new(dir.path());
+        let a = form(&projections, dir.path(), 0, LABELS, (&first, &first));
+        let b = form(&projections, dir.path(), 1, LABELS, (&second, &first));
+        assert_eq!(a.get(0), Some(&Bitmap::of(&[1])));
+        assert_eq!(b.get(0), Some(&Bitmap::new()), "the label's own slice, empty here");
+        assert!(b.inherited.is_empty(), "nothing was borrowed");
+    }
+
+    /// A derived file adopted for one shard is claimed by that shard's form alone: another shard's
+    /// rows are not the ones it was written over.
+    #[test]
+    fn an_adopted_index_is_claimed_by_its_own_shard_alone() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let only = |members: &[u32]| {
+            store_of(vec![(CLUSTERS, LayerSpace::ZERO, vec![(0, slice(1_000, members, &[], 0))])])
+        };
+        let (first, second) = (only(&[0]), only(&[5]));
+        let bytes = mosaica_store::membership::pack_tile_index(8, &[(0, 0)]);
+        std::fs::write(dir.path().join("index.tsti"), bytes).expect("written");
+        let extent = mosaica_store::manifest::DerivedExtent {
+            path: "index.tsti".into(),
+            space: LayerSpace::ZERO,
+            level: 0,
+            level_version: 7,
+            slice_version: 7,
+            view: Some("s0".into()),
+            incarnation: None,
+            form: mosaica_store::manifest::DerivedForm::TileIndex,
+        };
+        let projections = ArtifactProjections::new(dir.path());
+        projections.adopt_indexes(dir.path(), "v0", &[(ShardId::ZERO, extent)], &first);
+        let _ = form(&projections, dir.path(), 1, CLUSTERS, (&second, &first));
+        assert_eq!(projections.indexes_adopted(), 0, "another shard's index is not claimed");
+        let _ = form(&projections, dir.path(), 0, CLUSTERS, (&first, &first));
+        assert_eq!(projections.indexes_adopted(), 1);
+    }
+}

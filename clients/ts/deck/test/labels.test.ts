@@ -1,0 +1,161 @@
+import {describe, expect, it} from 'vitest';
+import {LABEL_SIZE_MAX, LABEL_SIZE_MIN, MAX_DISPLACEMENT, MAX_LABEL_CHARS, labelSize, placeLabels, labelLine, type LabelCandidate} from '../src/labels.js';
+import type {Meta} from '@mosaicajs/client';
+import {drawnLevel} from '../src/layer.js';
+
+const at = (id: number, x: number, y: number, priority: number, width = 60, height = 24): LabelCandidate => ({id: BigInt(id), x, y, width, height, priority});
+
+function rects(candidates: LabelCandidate[]) {
+  const placed = placeLabels(candidates);
+  return placed.map((p) => {
+    const c = candidates.find((k) => k.id === p.id)!;
+    return {...p, x0: c.x + p.dx - c.width / 2, y0: c.y + p.dy - c.height / 2, x1: c.x + p.dx + c.width / 2, y1: c.y + p.dy + c.height / 2};
+  });
+}
+
+describe('label placement (§5.10)', () => {
+  it('keeps the higher priority at its centroid and moves the lower with a leader; nothing overlaps', () => {
+    const placed = rects([at(1, 100, 100, 5), at(2, 110, 104, 900)]);
+    const big = placed.find((p) => p.id === 2n)!;
+    const small = placed.find((p) => p.id === 1n)!;
+    expect(big.dx).toBe(0);
+    expect(big.dy).toBe(0);
+    expect(big.leader).toBe(false);
+    expect(small.leader).toBe(true);
+    expect(small.x0 < big.x1 && big.x0 < small.x1 && small.y0 < big.y1 && big.y0 < small.y1).toBe(false);
+  });
+
+  it('places no two labels over each other, and leaves out what fits nowhere', () => {
+    // Twenty labels on one spot: within 40 px of the spot only the centroid and the two vertical
+    // nudges are free, so three are placed and the rest wait for zoom.
+    const many = Array.from({length: 20}, (_, i) => at(i + 1, 300, 300, 20 - i));
+    const placed = rects(many);
+    expect(placed.length).toBe(3);
+    for (let i = 0; i < placed.length; i++) {
+      for (let j = i + 1; j < placed.length; j++) {
+        const a = placed[i]!;
+        const b = placed[j]!;
+        expect(a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1, `${a.id} over ${b.id}`).toBe(false);
+        // Neighbours keep clear space of about half a line between them.
+        const clear = Math.max(b.x0 - a.x1, a.x0 - b.x1, b.y0 - a.y1, a.y0 - b.y1);
+        expect(clear, `${a.id} beside ${b.id}`).toBeGreaterThanOrEqual(8);
+      }
+    }
+    // The first to be left out is a low priority, never the highest.
+    expect(placed.some((p) => p.id === 1n)).toBe(true);
+  });
+
+  it('is translation-invariant — a pan moves every label and changes no placement', () => {
+    const base = [at(1, 100, 100, 5), at(2, 110, 104, 900), at(3, 400, 50, 50), at(4, 405, 60, 40)];
+    const shifted = base.map((c) => ({...c, x: c.x + 1234.5, y: c.y - 777}));
+    expect(placeLabels(shifted)).toEqual(placeLabels(base));
+  });
+
+  it('never leads a label across the map: a move beyond 40 px drops the label instead', () => {
+    // Two wide labels on one spot: the lower would have to move its own width (208 px) sideways
+    // or its height (32 px) up or down. Up and down are taken by two more; nothing else is within
+    // reach, so it is left out rather than drawn 208 px away on a leader.
+    const wide = (id: number, priority: number) => at(id, 500, 500, priority, 200, 24);
+    const placed = placeLabels([wide(1, 100), wide(2, 90), wide(3, 80), wide(4, 70)]);
+    expect(placed.map((p) => p.id)).toEqual([1n, 2n, 3n]);
+    for (const p of placed) expect(Math.hypot(p.dx, p.dy)).toBeLessThanOrEqual(MAX_DISPLACEMENT);
+    // The moved ones carry a leader; the one at its centroid does not.
+    expect(placed.find((p) => p.id === 1n)!.leader).toBe(false);
+    expect(placed.filter((p) => p.leader).map((p) => p.id)).toEqual([2n, 3n]);
+    // A wider bound admits the sideways try: the rule is the bound, not the ring.
+    const loose = placeLabels([wide(1, 100), wide(2, 90), wide(3, 80), wide(4, 70)], 300);
+    expect(loose.length).toBe(4);
+    expect(Math.abs(loose.find((p) => p.id === 4n)!.dx)).toBe(208);
+    expect(MAX_DISPLACEMENT).toBe(40);
+  });
+
+  it('sizes a name by its masked count, on a logarithmic band over the range drawn', () => {
+    // The ends are the range's ends: the largest count on screen is the largest name on screen.
+    expect(labelSize(380_069, 176, 380_069)).toBeCloseTo(LABEL_SIZE_MAX, 6);
+    expect(labelSize(176, 176, 380_069)).toBeCloseTo(LABEL_SIZE_MIN, 6);
+    // Monotone in the count, and never outside the band.
+    let previous = 0;
+    for (const count of [176, 1_000, 29_369, 87_295, 380_069]) {
+      const size = labelSize(count, 176, 380_069);
+      expect(size).toBeGreaterThan(previous);
+      expect(size).toBeGreaterThanOrEqual(LABEL_SIZE_MIN);
+      expect(size).toBeLessThanOrEqual(LABEL_SIZE_MAX);
+      previous = size;
+    }
+    // Logarithmic: 29,369 against 380,069 is 7.7% of the range linearly and over half of it on
+    // the band.
+    const midway = (labelSize(29_369, 176, 380_069) - LABEL_SIZE_MIN) / (LABEL_SIZE_MAX - LABEL_SIZE_MIN);
+    expect(midway).toBeGreaterThan(0.55);
+    expect(midway).toBeLessThan(0.75);
+    // A count ten times another is a fixed step, whatever the decade.
+    const step = (n: number) => labelSize(n * 10, 1, 1e6) - labelSize(n, 1, 1e6);
+    expect(step(10)).toBeCloseTo(step(10_000), 6);
+    // Out-of-range and absurd inputs land inside the band rather than off it: a count of zero is
+    // a count of one, and one outside the range extends it rather than escaping the ends.
+    expect(labelSize(0, 176, 380_069)).toBe(LABEL_SIZE_MIN);
+    expect(labelSize(1e9, 176, 380_069)).toBe(LABEL_SIZE_MAX);
+    expect(labelSize(-5, 176, 380_069)).toBe(LABEL_SIZE_MIN);
+  });
+
+  it('a frontier with no range — one name, or every count equal — takes the top of the band', () => {
+    // Nothing to divide by, and no division done: the largest count on screen draws largest, and
+    // where every count is the largest that holds of all of them.
+    expect(labelSize(4_812, 4_812, 4_812)).toBe(LABEL_SIZE_MAX);
+    expect(labelSize(1, 1, 1)).toBe(LABEL_SIZE_MAX);
+    expect(labelSize(0, 0, 0)).toBe(LABEL_SIZE_MAX);
+    // And an empty frontier's sentinel range (no candidate at all) does not produce a NaN.
+    expect(Number.isFinite(labelSize(500, Number.POSITIVE_INFINITY, 0))).toBe(true);
+  });
+});
+
+describe('a name on one line', () => {
+  it('keeps a name that fits whole, on one line', () => {
+    expect(labelLine('quantum error correction')).toBe('quantum error correction');
+    expect(labelLine('graph  neural\nnetworks')).toBe('graph neural networks');
+  });
+
+  it('cuts a longer name at a word and marks the cut', () => {
+    const line = labelLine('Large language models: alignment, evaluation and the long tail of instruction following');
+    expect(line.length).toBeLessThanOrEqual(MAX_LABEL_CHARS + 1);
+    expect(line).toBe('Large language models: alignment…');
+    // A first word longer than the line is cut inside the word.
+    expect(labelLine('x'.repeat(MAX_LABEL_CHARS + 10))).toBe(`${'x'.repeat(MAX_LABEL_CHARS)}…`);
+  });
+
+  it('moves a label that would sit closer than half a line to a neighbour', () => {
+    // Two one-line names 20 px apart on 16 px boxes leave 4 px between them: too close.
+    const line = (id: number, y: number, priority: number) => at(id, 0, y, priority, 100, 16);
+    const placed = placeLabels([line(1, 0, 2), line(2, 20, 1)]);
+    expect(placed.find((p) => p.id === 1n)).toEqual({id: 1n, dx: 0, dy: 0, leader: false});
+    expect(placed.find((p) => p.id === 2n)?.leader).toBe(true);
+  });
+
+  it('places a label by the box it actually draws', () => {
+    // Two labels a line apart on the same anchor: a taller box, such as one with a topic beneath,
+    // refuses the overlap a one-line box allows.
+    const box = (id: bigint, y: number, height: number): LabelCandidate => ({id, x: 0, y, width: 100, height, priority: Number(id)});
+    const tall = placeLabels([box(2n, 0, 40), box(1n, 30, 40)]);
+    expect(tall.length).toBe(1);
+    const short = placeLabels([box(2n, 0, 12), box(1n, 30, 12)]);
+    expect(short.length).toBe(2);
+  });
+});
+
+describe('drawnLevel', () => {
+  const layer = (name: string, kind: string, levels: number[]) => ({name, hierarchy: {kind, pruneChildren: false}, levels: levels.map((level) => ({level, title: null}))}) as unknown as Meta['layers'][number];
+  const META = {layers: [layer('bands', 'tiered', [0, 1, 2]), layer('tree', 'nested', [])]} as unknown as Meta;
+
+  it('is the chosen level, else the top level served of the layer coloured by or drawn first, and the cut served on a tree', () => {
+    const none = [] as never[];
+    expect(drawnLevel(META, {layers: ['bands'], served: none}, null, undefined)).toBe(0);
+    expect(drawnLevel(META, {layers: ['tree'], served: none}, 'cluster:bands', undefined)).toBe(0);
+    expect(drawnLevel(META, {layers: ['bands'], served: none}, null, 2)).toBe(2);
+    expect(drawnLevel(META, {layers: ['tree'], served: none}, null, undefined)).toBeUndefined();
+  });
+
+  it('follows the levels the camera’s zoom serves: where the top level is not served, the next one down', () => {
+    const at = (rungs: number[]) => rungs.map((rung, i) => ({layer: 'bands', rung, mosaicaId: BigInt(i)})) as never;
+    expect(drawnLevel(META, {layers: ['bands'], served: at([1, 2, 1])}, null, undefined)).toBe(1);
+    expect(drawnLevel(META, {layers: ['bands'], served: at([2, 0, 1])}, null, undefined)).toBe(0);
+  });
+});

@@ -1,0 +1,521 @@
+"""The local server: the deployment file, its secret, and the `mosaica serve` child process.
+
+`commit()` starts `mosaica serve` as a child of the kernel over the directory's `mosaica.toml`.
+The three planes are on loopback at port 0, so the kernel picks no ports and the child says which
+ones it bound by printing one JSON line on stdout. The line is written once all three planes are
+listening, so the announced viewer address is already answering when it arrives.
+
+There is no fallback that guesses a port. A guess is a second process's port as readily as this
+one's, and the notebook would then hold a URL answering for somebody else's server. A child that
+announces nothing is a refusal carrying what the child wrote.
+
+The child is started with `--exit-on-stdin-close`, and this process holds the pipe to its
+standard input. Closing the pipe stops it, which is how `close()`, a `Database` no longer
+referenced and the exit handler stop it. The pipe also closes however this process ends, so the
+child stops when a marimo kernel leaves through `os._exit` or a kernel is killed, which run no
+exit handler. Nothing is ever killed by process name, since a kill by name reaches every other
+server on the machine.
+
+The server deletes nothing. A temporary database's directory is removed by this process, at
+`close()`, once the `Database` is unreferenced, and at exit. A process that ends without its exit
+handler leaves the directory behind, so each one holds a lock file this process keeps locked for
+the directory's life, and the system releases the lock however the process ends. `create()`
+removes every temporary directory beside the one it makes whose lock it can take, its owner
+having gone. Only a directory named `mosaica-*` holding that lock file is a candidate.
+
+A process forked from this one, as multiprocessing's fork start method forks it, would hold the
+pipes and locks open after this process ends. The child's copies are pointed at the null device as
+it starts, and the child forgets this process's servers and directories, so its own exit handler
+leaves them alone.
+
+The child runs in a session of its own (a process group of its own on Windows). A kernel's signal
+to its own process group, and a Jupyter kernel's wait at shutdown for the children in its group to
+end, then do not reach it; the pipe stops it instead.
+"""
+
+from __future__ import annotations
+
+import atexit
+import importlib
+import json
+import os
+import queue
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+from dataclasses import dataclass
+from importlib.machinery import ExtensionFileLoader
+from importlib.util import module_from_spec, spec_from_loader
+from pathlib import Path
+from types import ModuleType
+
+from ._refusal import Refusal
+from ._toml import dumps
+
+#: How long `start` waits for the announce line before it gives up, in seconds, unless
+#: `MOSAICA_SERVE_TIMEOUT` names another.
+SERVE_TIMEOUT = 30.0
+
+#: How many of the child's lines are kept for a refusal message.
+KEPT_LINES = 200
+
+
+def serve_timeout() -> float:
+    return float(os.environ.get("MOSAICA_SERVE_TIMEOUT", SERVE_TIMEOUT))
+
+
+#: The deployment's token lifetime, which `[disclosure]` requires and has no backstop default.
+TOKEN_MAX_LIFETIME = 3600
+
+_running: dict[int, subprocess.Popen] = {}
+
+#: The directories of the temporary databases this process made and has not closed.
+temporary: set[Path] = set()
+
+#: The file a temporary database's directory holds, locked by the process that made it.
+LOCK = "mosaica-temporary.lock"
+
+#: The open, locked lock file of each temporary directory this process made, by directory.
+_locks: dict[Path, int] = {}
+
+
+def _take(descriptor: int) -> bool:
+    """Lock an open file without waiting, and say whether the lock was taken. Two descriptors
+    opened on one file are locked apart, within one process as between two."""
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def make_temporary(parent: Path | None) -> Path:
+    """A new temporary database directory under `parent`, or the system's temporary directory,
+    holding its lock file locked by this process. The directories whose owners have gone are
+    removed first.
+
+    The lock file is locked under another name and then renamed, so a directory whose lock file
+    has its name is locked from the moment it has one.
+    """
+    sweep(parent)
+    directory = Path(tempfile.mkdtemp(prefix="mosaica-", dir=parent))
+    making = directory / (LOCK + ".new")
+    descriptor = os.open(making, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    if not _take(descriptor):
+        os.close(descriptor)
+        raise Refusal(f"create: {making} could not be locked, so {directory} is not made")
+    os.replace(making, directory / LOCK)
+    _locks[directory] = descriptor
+    return directory
+
+
+def hold(directory: Path) -> None:
+    """Lock the lock file a temporary directory left behind holds, for as long as this process
+    has the database open, so no sweep removes it meanwhile. A directory holding no lock file is
+    left as it is; one whose lock another live process holds is refused."""
+    lock = directory / LOCK
+    if lock.is_symlink() or not lock.is_file():
+        return
+    descriptor = os.open(lock, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+    if not _take(descriptor):
+        os.close(descriptor)
+        raise Refusal(
+            f"open: {directory} is a temporary database another live process holds open; use "
+            f"it from that process, or keep a copy of it there with save(path)"
+        )
+    _locks[directory] = descriptor
+
+
+def let_go(directory: Path) -> None:
+    """Unlock a lock file `hold` locked, leaving the directory for the next sweep."""
+    descriptor = _locks.pop(directory, None)
+    if descriptor is not None:
+        os.close(descriptor)
+
+
+def sweep(parent: Path | None) -> None:
+    """Remove each temporary database directory under `parent` whose lock file can be locked,
+    the process that made it having ended. Nothing else is touched: a candidate is a directory,
+    not a link, named `mosaica-*`, holding a regular file named `LOCK`."""
+    base = Path(parent) if parent is not None else Path(tempfile.gettempdir())
+    for directory in base.glob("mosaica-*"):
+        lock = directory / LOCK
+        try:
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            if lock.is_symlink() or not lock.is_file():
+                continue
+            descriptor = os.open(lock, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+        except OSError:
+            continue
+        taken = _take(descriptor)
+        os.close(descriptor)
+        if taken:
+            shutil.rmtree(directory, ignore_errors=True)
+
+
+def _forget_in_a_forked_child() -> None:
+    """In a process forked from this one: point its copies of the servers' standard input pipes
+    and of the lock files at the null device, so this process's end still closes the pipes and
+    frees the locks, and forget them, so the child's exit handler stops and removes nothing.
+    Only `os` calls, which take no lock another thread may have held at the fork."""
+    null = os.open(os.devnull, os.O_RDWR)
+    try:
+        for child in list(_running.values()):
+            if child.stdin is not None:
+                try:
+                    os.dup2(null, child.stdin.fileno())
+                except (OSError, ValueError):
+                    pass
+        for descriptor in list(_locks.values()):
+            try:
+                os.dup2(null, descriptor)
+            except OSError:
+                pass
+    finally:
+        os.close(null)
+    _running.clear()
+    temporary.clear()
+    _locks.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_forget_in_a_forked_child)
+
+
+class Held:
+    """What one database holds outside this process: its server, and its directory where it is a
+    temporary one. `release` gives both up; the `Database` holds no reference back, so a finaliser
+    can release them once the `Database` is gone."""
+
+    def __init__(self, path: Path, is_temporary: bool) -> None:
+        self.path = path
+        self.temporary = is_temporary
+        self.child: subprocess.Popen | None = None
+        if is_temporary:
+            temporary.add(path)
+
+
+def release(held: Held) -> None:
+    """Stop the database's server, and remove its directory if it is a temporary one."""
+    if held.child is not None:
+        stop(held.child)
+        held.child = None
+    if held.temporary and held.path in temporary:
+        remove(held.path)
+    else:
+        let_go(held.path)
+
+
+def remove(directory: Path) -> None:
+    """Remove a temporary directory this process made. Its lock is let go first, since Windows
+    removes no file held open."""
+    descriptor = _locks.pop(directory, None)
+    if descriptor is not None:
+        os.close(descriptor)
+    shutil.rmtree(directory, ignore_errors=True)
+    temporary.discard(directory)
+
+
+class ServeRefused(Refusal):
+    """The `Refusal` raised when the server a database starts does not report the addresses it
+    listens on.
+
+    `Database.serve()` raises it, as does any call that starts the server, such as the first
+    `commit()`. A server that prints no line naming its viewer, session and control addresses
+    within the wait is stopped, and the message holds the last lines it wrote to its output and
+    error streams. A server whose line leaves an address out is stopped too, and the message
+    quotes the line. The wait is 30 seconds unless the `MOSAICA_SERVE_TIMEOUT` environment
+    variable names another, so raise it on a machine where the server takes longer to start.
+    """
+
+
+@dataclass
+class Listening:
+    """The addresses a database's server listens on, each as `host:port`, which
+    `Database.serve()` returns.
+
+    - `viewer`: the viewer plane, which readers read from with a token.
+    - `session`: the session plane, where the operator credential or an API key holding
+      `authorise-as` makes and revokes tokens.
+    - `control`: the control plane, where the operator declares and writes.
+    """
+
+    viewer: str
+    session: str
+    control: str
+
+
+def write_deployment(directory: Path) -> Path:
+    """Write `mosaica.toml`, which `mosaica build` and `mosaica serve` both read.
+
+    Every path in it resolves against this file's own directory, so the database directory serves
+    from wherever it is copied to.
+
+    `serve.cors_loopback` lets a page served from this machine read from the server, which is
+    what a notebook's map needs, since its page's address is not known in advance. The server
+    listens on this machine only. The catalogue of principals, credentials and grants is kept
+    under `.mosaica/catalogue`.
+    """
+    serve = {
+        "viewer": "127.0.0.1:0",
+        "session": "127.0.0.1:0",
+        "control": "127.0.0.1:0",
+        "operator_credential_file": ".mosaica/operator.cred",
+        "cors_loopback": True,
+    }
+    document = {
+        "bundle": {"path": "bundle"},
+        "build": {"schema": "schema.toml"},
+        "disclosure": {"token_max_lifetime": TOKEN_MAX_LIFETIME},
+        "serve": serve,
+        "catalogue": {"dir": ".mosaica/catalogue"},
+    }
+    # The engine's cache directory is opened rather than created, so a deployment file naming one
+    # that does not exist refuses to start with an IO error.
+    (directory / ".mosaica" / "cache").mkdir(parents=True, exist_ok=True)
+    path = directory / "mosaica.toml"
+    path.write_text(dumps(document), encoding="utf-8")
+    return path
+
+
+def secrets_for(directory: Path) -> None:
+    """Write the operator credential, once per database.
+
+    It is written under `.mosaica/`, which is owner-only, and the file is created owner-only
+    rather than created and then narrowed: between a write and a `chmod` the secret is readable by
+    anyone on the machine.
+    """
+    private = directory / ".mosaica"
+    private.mkdir(parents=True, exist_ok=True)
+    private.chmod(0o700)
+    _secret(private / "operator.cred", lambda: secrets.token_urlsafe(32))
+
+
+def _secret(path: Path, mint) -> None:
+    if path.exists():
+        return
+    value = mint()
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as file:
+        file.write(value if value.endswith("\n") else value + "\n")
+
+
+def start(
+    binary: str,
+    deployment: Path,
+    timeout: float | None = None,
+) -> tuple[subprocess.Popen, Listening]:
+    """Start `mosaica serve`, stopped when its standard input closes, and read the addresses it
+    bound."""
+    apart = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
+    child = subprocess.Popen(
+        [binary, "serve", "--deployment", str(Path(deployment).absolute()), "--exit-on-stdin-close"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        cwd=str(Path(deployment).parent),
+        **apart,
+    )
+    _running[child.pid] = child
+    errors = _drain(child.stderr)
+    try:
+        return child, read_announce(
+            child.stdout, serve_timeout() if timeout is None else timeout, lambda: "".join(errors)
+        )
+    except ServeRefused:
+        stop(child)
+        raise
+
+
+def read_announce(stdout, timeout: float, stderr_text) -> Listening:
+    """Read the child's output until the line announcing its addresses.
+
+    The line is JSON carrying `event: "listening"` and the three planes' bound addresses. Lines
+    that are not that are skipped, the child's own logging having shared the stream before now.
+
+    One reader holds the stream for the life of the child: it stops queueing lines once the
+    announce line is found and keeps reading, so a child that logs after it has started never
+    fills the pipe and blocks.
+    """
+    reader = _Reader(stdout)
+    reader.start()
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            line = reader.lines.get(timeout=min(remaining, 0.25))
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        announce = _announce(line)
+        if announce is not None:
+            reader.queueing = False
+            return announce
+    raise ServeRefused(
+        "mosaica serve announced no listening line within "
+        f"{timeout:g}s. The SDK waits for one line of JSON on stdout carrying "
+        '\'"event": "listening"\' and the viewer, session and control addresses. '
+        "What the child wrote:\n"
+        + "".join(f"  stdout: {line}" for line in reader.kept[-20:])
+        + _tail(stderr_text())
+    )
+
+
+class _Reader(threading.Thread):
+    """One thread per stream: it queues lines while `queueing`, and keeps the last of them."""
+
+    def __init__(self, stream) -> None:
+        super().__init__(daemon=True)
+        self.stream = stream
+        self.lines: queue.Queue = queue.Queue()
+        self.kept: list[str] = []
+        self.queueing = True
+
+    def run(self) -> None:
+        for line in self.stream:
+            self.kept.append(line)
+            del self.kept[:-KEPT_LINES]
+            if self.queueing:
+                self.lines.put(line)
+        self.lines.put(None)
+
+
+def _announce(line: str) -> Listening | None:
+    line = line.strip()
+    if not line.startswith("{"):
+        return None
+    try:
+        document = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(document, dict) or document.get("event") != "listening":
+        return None
+    missing = [k for k in ("viewer", "session", "control") if not document.get(k)]
+    if missing:
+        raise ServeRefused(
+            f"mosaica serve's listening line names no {', '.join(missing)} address: {line}"
+        )
+    return Listening(
+        viewer=str(document["viewer"]),
+        session=str(document["session"]),
+        control=str(document["control"]),
+    )
+
+
+def _drain(stream) -> list[str]:
+    """Keep reading a pipe the SDK does not parse, so the child never blocks writing to it."""
+    reader = _Reader(stream)
+    reader.queueing = False
+    reader.start()
+    return reader.kept
+
+
+def _tail(text: str) -> str:
+    if not text:
+        return ""
+    return "\n" + "".join(f"  stderr: {line}\n" for line in text.strip().splitlines()[-20:])
+
+
+def stop(child: subprocess.Popen, timeout: float = 5.0) -> None:
+    """Stop the child by closing its standard input, then by its pid if it is still there."""
+    _running.pop(child.pid, None)
+    if child.stdin is not None and not child.stdin.closed:
+        try:
+            child.stdin.close()
+        except OSError:
+            pass
+    try:
+        child.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # `Popen` signals only a child it has not reaped, so a pid handed on is never signalled.
+        child.kill()
+        child.wait(timeout=timeout)
+
+
+@atexit.register
+def _stop_everything() -> None:
+    for child in list(_running.values()):
+        stop(child)
+    for directory in list(temporary):
+        remove(directory)
+
+
+def find_binary() -> tuple[str, str]:
+    """The `mosaica` binary and where it was found.
+
+    `MOSAICA_BIN` when set, else the `mosaica-native` platform wheel, else a checkout's target
+    directory, release before debug. A `mosaica` on `PATH` is used only when `MOSAICA_BIN` names
+    it.
+    """
+    named = os.environ.get("MOSAICA_BIN")
+    if named:
+        if not Path(named).exists():
+            raise Refusal(f"MOSAICA_BIN names {named}, which does not exist")
+        return named, "MOSAICA_BIN"
+    try:
+        from mosaica_native import binary_path
+    except ImportError:
+        pass
+    else:
+        return binary_path(), "the mosaica-native wheel"
+    for parent in Path(__file__).resolve().parents:
+        for profile in ("release", "debug"):
+            candidate = parent / "target" / profile / "mosaica"
+            if candidate.exists():
+                return str(candidate), f"this checkout's target/{profile}"
+    from . import __version__
+
+    raise Refusal(
+        "no `mosaica` binary at MOSAICA_BIN, in the mosaica-native wheel, or in a "
+        f"checkout's target directory; install the wheel this package was made with, "
+        f"`pip install \"mosaica-native=={__version__}\"`, or build the binary with "
+        "`cargo build --release -p mosaica` and name it in MOSAICA_BIN"
+    )
+
+
+def find_extension() -> ModuleType | None:
+    """The `_mosaica` extension module, or `None` where nothing carries it.
+
+    The same order as `find_binary`: whatever is already importable as `_mosaica`, then the
+    `mosaica-native` wheel, then a checkout's target directory, where cargo names it
+    `lib_mosaica.so`, which Python will not import by name, so it is loaded by path.
+    """
+    for name in ("_mosaica", "mosaica_native._mosaica"):
+        try:
+            return importlib.import_module(name)
+        except ImportError:
+            pass
+    for parent in Path(__file__).resolve().parents:
+        for profile in ("release", "debug"):
+            for built in ("lib_mosaica.so", "lib_mosaica.dylib", "_mosaica.dll"):
+                candidate = parent / "target" / profile / built
+                if not candidate.exists():
+                    continue
+                loader = ExtensionFileLoader("_mosaica", str(candidate))
+                spec = spec_from_loader("_mosaica", loader)
+                module = module_from_spec(spec)
+                sys.modules["_mosaica"] = module
+                loader.exec_module(module)
+                return module
+    return None

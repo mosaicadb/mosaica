@@ -1,0 +1,1715 @@
+//! **An attribute column declared while the service runs** (`ingest.md` §1.3, §6.3; decision
+//! 0136, track T4): every family declares, rows carry it from the acknowledgement, an entity
+//! that predates the declaration reads absent on every reader without a record-blob read, a
+//! declaration between a batch's admission and its window close pads the rows rather than
+//! failing the flush, a restart replays the declaration, the fold writes the column into the
+//! base, and a redeclaration answers the column that exists or refuses a different identity.
+//!
+//! The fixture declares three columns at the build (a rendered `u8` category, a rendered, indexed
+//! `f32`, and the indexed unique `id` its access relation names items by), so every case runs over a
+//! schema in which the build's columns and the runtime ones are one list, and the runtime ones
+//! append after positions the build already filled.
+
+mod common;
+
+use mosaica_engine::SuggestRequest;
+
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::path::Path;
+use std::sync::Arc;
+
+use arrow::array::{Float32Array, Float64Array, StringArray, UInt64Array};
+use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+use arrow::record_batch::RecordBatch;
+use parquet::arrow::ArrowWriter;
+
+use common::*;
+use mosaica_engine::filter::{Endpoint, FilterExpr, FilterOperand, Scalar};
+use mosaica_engine::{
+    AcceptError, AttributeRequest, CategoryQuery, ColumnBuf, Engine, EngineConfig, ScalarOut,
+    Session, ViewportRequest,
+};
+use mosaica_lifecycle::command::UnallocatedRow;
+use mosaica_lifecycle::wal::WalScalar;
+use mosaica_lifecycle::ExecError;
+use mosaica_store::read::open_bundle;
+use mosaica_types::layer::LayerScope;
+use mosaica_types::{AttrLocalId, EntityId};
+
+const N_ITEMS: u64 = 120;
+const VIEWPORT: [f64; 4] = [0.0, 0.0, 1000.0, 1000.0];
+
+/// A rendered `u8` category and a rendered, indexed `f32`; a second vocabulary, `dept`, that no
+/// build column names, so a runtime category over it fixes its width at the declaration.
+const SCHEMA_TOML: &str = r#"
+[[vocabulary]]
+name       = "band"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+  [vocabulary.values]
+  low = 1
+  mid = 2
+  high = 3
+
+[[vocabulary]]
+name       = "dept"
+width      = "u8"
+value_set  = "closed"
+visibility = "derived"
+  [vocabulary.values]
+  eng = 5
+  ops = 6
+  legal = 7
+
+[[attribute]]
+name       = "band"
+type       = "category"
+render     = true
+vocabulary = "band"
+
+[[attribute]]
+name   = "score"
+type   = "f32"
+render = true
+index  = true
+
+# Indexed, so no build column is blob-resident and a built item's card opens no blob.
+[[attribute]]
+name   = "id"
+type   = "u64"
+unique = true
+index  = true
+field  = "entity_id"
+"#;
+
+fn band_of(entity: u64) -> &'static str {
+    match entity % 3 {
+        0 => "low",
+        1 => "mid",
+        _ => "high",
+    }
+}
+
+fn score_of(entity: u64) -> f32 {
+    (entity % 97) as f32 * 0.5
+}
+
+/// The points, with an all-null `late` column where `late` is set, for a build that declares it.
+fn write_points(path: &Path, n: u64, late: bool) {
+    let mut fields = vec![
+        Field::new("entity_id", DataType::UInt64, false),
+        Field::new("x", DataType::Float64, false),
+        Field::new("y", DataType::Float64, false),
+        Field::new("band", DataType::Utf8, false),
+        Field::new("score", DataType::Float32, false),
+    ];
+    if late {
+        fields.push(Field::new("late", DataType::Float32, true));
+    }
+    let schema = Arc::new(ArrowSchema::new(fields));
+    let ids: Vec<u64> = (0..n).collect();
+    let xs: Vec<f64> = ids.iter().map(|e| ((e * 37) % 1000) as f64).collect();
+    let ys: Vec<f64> = ids.iter().map(|e| ((e * 53) % 1000) as f64).collect();
+    let bands: Vec<&str> = ids.iter().map(|e| band_of(*e)).collect();
+    let scores: Vec<f32> = ids.iter().map(|e| score_of(*e)).collect();
+    let mut columns: Vec<arrow::array::ArrayRef> = vec![
+        Arc::new(UInt64Array::from(ids.clone())),
+        Arc::new(Float64Array::from(xs)),
+        Arc::new(Float64Array::from(ys)),
+        Arc::new(StringArray::from(bands)),
+        Arc::new(Float32Array::from(scores)),
+    ];
+    if late {
+        columns.push(Arc::new(Float32Array::from(vec![None::<f32>; ids.len()])));
+    }
+    let batch = RecordBatch::try_new(schema.clone(), columns).unwrap();
+    let mut w = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+    w.write(&batch).unwrap();
+    w.close().unwrap();
+}
+
+fn build_fixture_with_schema(root: &Path, tmp: &Path, shard_size: Option<u64>) {
+    build_fixture_declaring(root, tmp, shard_size, false)
+}
+
+/// [`build_fixture_with_schema`], declaring an indexed `f32` named `late` after the build's
+/// columns where `late` is set, which no built item carries: the column a running service
+/// declares in [`AttributeRequest`] form below, declared at the build instead.
+fn build_fixture_declaring(root: &Path, tmp: &Path, shard_size: Option<u64>, late: bool) {
+    let points = tmp.join("points.parquet");
+    let pairs = tmp.join("pairs.parquet");
+    write_points(&points, N_ITEMS, late);
+    write_pairs_n(&pairs, N_ITEMS);
+    let schema_path = tmp.join("schema.toml");
+    let toml = if late {
+        format!("{SCHEMA_TOML}\n[[attribute]]\nname  = \"late\"\ntype  = \"f32\"\nindex = true\n")
+    } else {
+        SCHEMA_TOML.to_string()
+    };
+    std::fs::write(&schema_path, toml).unwrap();
+    let schema = mosaica_build::config::Config::parse(&schema_path, &Default::default())
+        .expect("the fixture schema parses")
+        .schema;
+    mosaica_build::build(&mosaica_build::BuildArgs {
+        views: vec![mosaica_build::ViewArgs {
+            visibility: None,
+            view_id: "s0".to_string(),
+            title: None,
+            projection: mosaica_spatial::Projection::None,
+            extent: extent(),
+            points: Some(points.clone()),
+            point_fields: Default::default(),
+            select: None,
+            access: mosaica_build::config::AccessInput::relation(pairs),
+        }],
+        anchor: 0,
+        groups: Vec::new(),
+        scoped_attributes: Vec::new(),
+        attribute_sources: mosaica_build::config::AttributeSource::over(points, &schema),
+        out: root.to_path_buf(),
+        limit: None,
+        shard_size,
+        strict: false,
+        identity_key: test_key(),
+        layers: Vec::new(),
+        layer_inputs: Vec::new(),
+        scoped_layers: Default::default(),
+        emit_oracle_pairs: true,
+        batch_items: None,
+        memory_budget: None,
+        band_rows: None,
+        schema,
+    })
+    .expect("a build with a declared schema succeeds");
+}
+
+/// The fixture on disc: a bundle root and the tempdir it lives in.
+struct Fixture {
+    tmp: tempfile::TempDir,
+    root: std::path::PathBuf,
+}
+
+fn fixture() -> Fixture {
+    fixture_at(None)
+}
+
+/// The fixture built at `shard_size`.
+fn fixture_at(shard_size: Option<u64>) -> Fixture {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("bundle");
+    build_fixture_with_schema(&root, tmp.path(), shard_size);
+    Fixture { tmp, root }
+}
+
+/// An engine over the fixture with the executor running and the background refresh off, for
+/// `tests/fold.rs`'s reason: a pass after a publication rebuilds each resident session's
+/// fragment, which would make a check that failed to notice a publication indistinguishable from
+/// one that noticed.
+fn engine_over(fx: &Fixture) -> Engine {
+    let mut engine = Engine::open(
+        &fx.root,
+        &fx.tmp.path().join("cache"),
+        &fx.tmp.path().join("wal.log"),
+        config_uncapped(),
+    )
+    .expect("the engine opens");
+    engine.start_write_executor(8).expect("the executor starts");
+    engine.set_background_refresh_for_test(false);
+    engine
+}
+
+/// Reopen the same bundle and the same log, which is the restart every durability claim below
+/// is made against. The old engine is dropped first so its executor releases the log.
+fn restart(fx: &Fixture, engine: Engine) -> Engine {
+    drop(engine);
+    engine_over(fx)
+}
+
+fn request(name: &str, ty: &str) -> AttributeRequest {
+    AttributeRequest {
+        name: name.to_string(),
+        title: None,
+        ty: ty.to_string(),
+        vocabulary: None,
+        analyser: None,
+        index: false,
+        render: false,
+        scope: LayerScope::Entity,
+        unique: false,
+    }
+}
+
+/// One row carrying `scalars`, under the label every principal of the fixture holds.
+fn row(terms: &Engine, scalars: Vec<WalScalar>) -> UnallocatedRow {
+    row_under(terms, b"0", scalars)
+}
+
+/// [`row`] under one label of the caller's choosing.
+fn row_under(
+    terms: &Engine,
+    label: &[u8],
+    scalars: Vec<WalScalar>,
+) -> UnallocatedRow {
+    UnallocatedRow {
+        view: "s0".to_string(),
+        join: None,
+        descriptors: vec![label.to_vec()],
+        x: 500.0,
+        y: 500.0,
+        scalars,
+        terms: terms.resolve_terms(&[label.to_vec()]),
+        scoped: Vec::new(),
+    }
+}
+
+/// The build's columns, with no `id`, so the row creates an item.
+fn build_columns(band: &str, score: f32) -> Vec<WalScalar> {
+    vec![
+        WalScalar::Utf8(band.to_string()),
+        WalScalar::F32(score),
+        WalScalar::Null,
+    ]
+}
+
+fn ingest(engine: &Engine, batch: &str, rows: Vec<UnallocatedRow>) -> Vec<EntityId> {
+    let mut hash = [0u8; 32];
+    hash[..batch.len().min(32)].copy_from_slice(&batch.as_bytes()[..batch.len().min(32)]);
+    engine
+        .ingest_rows(rows, batch.to_string(), hash)
+        .unwrap_or_else(|e| panic!("batch {batch} is accepted: {e}"))
+}
+
+fn session(engine: &Engine) -> Session {
+    engine.authorise(&full_coverage_credential()).unwrap()
+}
+
+fn viewport(engine: &Engine, session: &Session, filter: Option<FilterExpr>) -> ViewportOut {
+    let mut req = ViewportRequest::new("s0", 0, VIEWPORT, (N_ITEMS + 100) as usize);
+    req.filter = filter;
+    let out = engine.viewport(session, req).unwrap();
+    ViewportOut {
+        ids: out.points.iter().map(|(id, _)| id.raw()).collect(),
+        names: out.scalar_names.clone(),
+    }
+}
+
+struct ViewportOut {
+    ids: Vec<u64>,
+    names: Vec<String>,
+}
+
+fn leaf(column: &str, operand: FilterOperand) -> FilterExpr {
+    FilterExpr::Leaf {
+        column: column.to_string(),
+        operand,
+    }
+}
+
+fn at_least(value: f64) -> FilterOperand {
+    FilterOperand::Range {
+        lo: Some(Endpoint {
+            value: Scalar::Float(value),
+            inclusive: true,
+        }),
+        hi: None,
+    }
+}
+
+fn fields_of(engine: &Engine, session: &Session, entity: EntityId) -> BTreeMap<String, ScalarOut> {
+    let id = engine.mosaica_id_of(entity).unwrap();
+    engine
+        .item(session, id)
+        .unwrap()
+        .expect("the item is visible to a full principal")
+        .fields
+        .into_iter()
+        .map(|f| (f.name, f.value))
+        .collect()
+}
+
+fn declared_names(engine: &Engine) -> Vec<String> {
+    engine
+        .meta()
+        .declared_scalars
+        .iter()
+        .map(|d| d.name.clone())
+        .collect()
+}
+
+/// How many of the prefix's partitions hold an entity-space base value file for `column`, over the
+/// number of partitions. A column declared at a running service has no base until a fold writes one
+/// (`ingest.md` §6.3), so this is 0 before the fold and every partition after it.
+fn partitions_with_base(root: &Path, column: &str) -> (usize, usize) {
+    let bundle = open_bundle(root).expect("the bundle opens");
+    let values = root
+        .join(current_prefix(root))
+        .join(common::SHARD.column_rel(column))
+        .join(mosaica_filter::VALUES_FILE);
+    (usize::from(values.is_file()), bundle.partitions.len())
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/// **Every family declares at a running service, rows carry it from the acknowledgement, and an
+/// entity that predates the declaration reads absent on every reader.** The absence is answered
+/// from the segment schema: the record-blob read counter does not move for the older entity,
+/// while it does for one whose row the flush wrote into the blob. None of these columns is
+/// rendered, so the render list stays the build's.
+#[test]
+fn every_family_declares_at_runtime_and_earlier_entities_read_absent_without_a_blob_read() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+
+    let declared = [
+        AttributeRequest {
+            index: true,
+            ..request("sentiment", "f32")
+        },
+        AttributeRequest {
+            index: true,
+            ..request("note", "keyword")
+        },
+        AttributeRequest {
+            index: true,
+            ..request("prose", "text")
+        },
+        AttributeRequest {
+            vocabulary: Some("dept".to_string()),
+            index: true,
+            ..request("tag", "category")
+        },
+        // Neither flag: blob-resident, served at drill-down alone (records §3).
+        request("memo", "u16"),
+    ];
+    for r in declared {
+        assert!(
+            !engine
+                .declare_attribute(r.clone())
+                .expect("the declaration is accepted"),
+            "'{}' is a new column",
+            r.name
+        );
+    }
+    assert_eq!(
+        declared_names(&engine),
+        ["band", "score", "id", "sentiment", "note", "prose", "tag", "memo"],
+        "the runtime columns append after the build's, in declaration order"
+    );
+    let meta = engine.meta();
+    let tag = meta
+        .declared_scalars
+        .iter()
+        .find(|d| d.name == "tag")
+        .unwrap();
+    assert_eq!(tag.arrow_type, mosaica_engine::ScalarType::U8);
+    assert_eq!(tag.vocabulary.as_deref(), Some("dept"));
+
+    // Rows carrying every column, ingestable at the ack.
+    let full = |sentiment: f32, note: &str, prose: &str, tag: &str, memo: u16| {
+        let mut scalars = build_columns("mid", 1.0);
+        scalars.extend([
+            WalScalar::F32(sentiment),
+            WalScalar::Utf8(note.to_string()),
+            WalScalar::Utf8(prose.to_string()),
+            WalScalar::Utf8(tag.to_string()),
+            WalScalar::U16(memo),
+        ]);
+        row(&engine, scalars)
+    };
+    let new = ingest(
+        &engine,
+        "carrying",
+        vec![
+            full(0.9, "alpha", "the quick brown fox", "eng", 7),
+            full(0.2, "beta", "a slow red hen", "ops", 8),
+            full(0.7, "alpha", "the quick grey wolf", "eng", 9),
+        ],
+    );
+    publish_buffered(&engine);
+
+    let session = session(&engine);
+    let out = viewport(&engine, &session, None);
+    assert_eq!(
+        out.names,
+        ["band", "score"],
+        "no column declared here is rendered, so the render tail is the build's"
+    );
+    // A built item: a build issues entity ids from 0.
+    let old = EntityId::new(0);
+
+    // The drill-down: absent for the older entity, from the schema, with no blob read.
+    let reads_before = engine
+        .generation()
+        .only_shard()
+        .filter_columns
+        .record_reads();
+    let old_fields = fields_of(&engine, &session, old);
+    assert_eq!(
+        old_fields.keys().cloned().collect::<Vec<_>>(),
+        ["band", "id", "score"],
+        "an entity that predates the declaration carries none of the new columns"
+    );
+    assert_eq!(
+        engine
+            .generation()
+            .only_shard()
+            .filter_columns
+            .record_reads(),
+        reads_before,
+        "absence is answered from the segment schema, never by opening a blob"
+    );
+    let new_fields = fields_of(&engine, &session, new[0]);
+    assert_eq!(new_fields["sentiment"], ScalarOut::F32(0.9));
+    assert_eq!(new_fields["note"], ScalarOut::Utf8("alpha".to_string()));
+    assert_eq!(
+        new_fields["prose"],
+        ScalarOut::Utf8("the quick brown fox".to_string())
+    );
+    assert_eq!(new_fields["tag"], ScalarOut::Utf8("eng".to_string()));
+    assert_eq!(new_fields["memo"], ScalarOut::U16(7));
+    assert!(
+        engine
+            .generation()
+            .only_shard()
+            .filter_columns
+            .record_reads()
+            > reads_before,
+        "the entity whose row the flush wrote is read from the blob"
+    );
+
+    // The filter, per family, over the ingested rows.
+    let ids_of = |entities: &[EntityId]| -> Vec<u64> {
+        let mut ids: Vec<u64> = entities
+            .iter()
+            .map(|e| engine.mosaica_id_of(*e).unwrap().raw())
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+    let sorted = |mut ids: Vec<u64>| {
+        ids.sort_unstable();
+        ids
+    };
+    assert_eq!(
+        sorted(viewport(&engine, &session, Some(leaf("sentiment", at_least(0.5)))).ids),
+        ids_of(&[new[0], new[2]])
+    );
+    assert_eq!(
+        sorted(
+            viewport(
+                &engine,
+                &session,
+                Some(leaf("note", FilterOperand::TextEquals("alpha".to_string())))
+            )
+            .ids
+        ),
+        ids_of(&[new[0], new[2]])
+    );
+    assert_eq!(
+        sorted(
+            viewport(
+                &engine,
+                &session,
+                Some(leaf(
+                    "prose",
+                    FilterOperand::Match {
+                        query: "quick".to_string(),
+                        minimum: None,
+                    }
+                ))
+            )
+            .ids
+        ),
+        ids_of(&[new[0], new[2]])
+    );
+    assert_eq!(
+        sorted(
+            viewport(
+                &engine,
+                &session,
+                Some(leaf("tag", FilterOperand::Equals(AttrLocalId::new(6))))
+            )
+            .ids
+        ),
+        ids_of(&[new[1]])
+    );
+
+    // The categories vocabulary of a `derived` runtime category: the values a visible member
+    // carries, from the extents alone, since the column has no base postings before the fold.
+    let page = engine
+        .categories(
+            &session,
+            "tag",
+            CategoryQuery::Page {
+                after: None,
+                limit: 10,
+            },
+        )
+        .unwrap()
+        .expect("a runtime category column answers");
+    let keys: Vec<&str> = page.values.iter().map(|v| v.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["eng", "ops"],
+        "only the values an ingested row carries"
+    );
+
+    // And the suggest verb, whose index the declaration built for a vocabulary no build column
+    // named: a value a visible member carries is offered, one nothing carries is not.
+    let suggested = engine
+        .suggest(
+            &session,
+            SuggestRequest {
+                column: "tag",
+                view: None,
+                filter: None,
+                q: "e",
+                limit: 20,
+                counts: false,
+                walk_budget: 100_000,
+                max_suggest_set_entities: 0,
+                cancel: None,
+            },
+        )
+        .expect("a runtime category's vocabulary has a suggestion index")
+        .expect("the column answers");
+    let keys: Vec<&str> = suggested.values.iter().map(|v| v.key.as_str()).collect();
+    assert_eq!(keys, ["eng"]);
+}
+
+/// **A declaration between a batch's admission and its window close pads the rows** (`ingest.md`
+/// §7.1): a batch admitted at the earlier arity closes and flushes under the wider schema with
+/// the new column absent, and a batch decoded against the earlier schema after the declaration
+/// is accepted the same way. A row longer than the schema is still refused.
+#[test]
+fn a_declaration_mid_ingest_pads_earlier_rows_and_neither_panics_nor_fails_the_flush() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+
+    // Admitted and closed under the build's arity, buffered for the flush.
+    let before = ingest(
+        &engine,
+        "before",
+        vec![row(&engine, build_columns("low", 2.0))],
+    );
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("late", "f32")
+        })
+        .expect("the declaration is accepted");
+    // Decoded against the earlier schema: shorter by one, padded at its window's close.
+    let after = ingest(
+        &engine,
+        "after-short",
+        vec![row(&engine, build_columns("mid", 3.0))],
+    );
+    // And a row longer than the schema is refused before anything is admitted.
+    let mut long = build_columns("high", 4.0);
+    long.extend([WalScalar::F32(1.0), WalScalar::F32(2.0)]);
+    let refused = engine
+        .ingest_rows(
+            vec![row(&engine, long)],
+            "after-long".to_string(),
+            [7u8; 32],
+        )
+        .expect_err("a row longer than the schema is refused");
+    assert!(
+        matches!(
+            refused,
+            AcceptError::ScalarArity {
+                got: 5,
+                expected: 4,
+                ..
+            }
+        ),
+        "{refused}"
+    );
+    let carrying = ingest(
+        &engine,
+        "after-full",
+        vec![row(&engine, {
+            let mut s = build_columns("high", 4.0);
+            s.push(WalScalar::F32(0.75));
+            s
+        })],
+    );
+
+    publish_buffered(&engine);
+
+    let session = session(&engine);
+    let id = |e: EntityId| engine.mosaica_id_of(e).unwrap().raw();
+    assert_eq!(
+        fields_of(&engine, &session, carrying[0])["late"],
+        ScalarOut::F32(0.75)
+    );
+    assert!(
+        !fields_of(&engine, &session, before[0]).contains_key("late"),
+        "a padded row's absence is an absence, not a zero"
+    );
+    assert!(
+        !fields_of(&engine, &session, after[0]).contains_key("late"),
+        "a row decoded against the earlier schema is padded the same way"
+    );
+    assert_eq!(
+        viewport(&engine, &session, Some(leaf("late", at_least(0.0)))).ids,
+        vec![id(carrying[0])],
+        "a filter over the column matches the row that carried it and no padded row"
+    );
+}
+
+/// **A negation over a field declared at a running service answers as one over the same field
+/// declared at the build**, before the first flush of a row carrying it and after, for a viewer
+/// who sees a subset: a suppressed item and an item outside the grant are in neither answer.
+#[test]
+fn a_negation_over_a_field_declared_while_running_answers_as_one_declared_at_the_build() {
+    let live = fixture();
+    let built = {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("bundle");
+        build_fixture_declaring(&root, tmp.path(), None, true);
+        Fixture { tmp, root }
+    };
+    let engines = [engine_over(&live), engine_over(&built)];
+    engines[0]
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("late", "f32")
+        })
+        .expect("the declaration is accepted");
+    let suppressed = (0..N_ITEMS)
+        .find(|&s| subset_sees(s))
+        .expect("an item the subset viewer sees");
+    let late = |label: &[u8], value: Option<f32>| {
+        let mut scalars = build_columns("low", 1.0);
+        scalars.push(value.map_or(WalScalar::Null, WalScalar::F32));
+        (label.to_vec(), scalars)
+    };
+    // Kept, kept, matched, and kept but outside the subset viewer's grant.
+    let rows = [
+        late(b"1", Some(0.5)),
+        late(b"1", None),
+        late(b"1", Some(2.0)),
+        late(b"0", Some(0.5)),
+    ];
+    let mut ingested = Vec::new();
+    for engine in &engines {
+        let entity = item_of_id(engine, suppressed)
+            .unwrap()
+            .expect("a built item");
+        engine
+            .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+            .unwrap();
+        let unallocated = rows
+            .iter()
+            .map(|(label, scalars)| row_under(engine, label, scalars.clone()))
+            .collect();
+        ingested.push(ingest(engine, "late-rows", unallocated));
+    }
+    let negation = FilterExpr::NoneOf(vec![leaf("late", at_least(1.0))]);
+    let answer = |engine: &Engine| {
+        let session = engine.authorise(&subset_credential()).unwrap();
+        let mut ids = viewport(engine, &session, Some(negation.clone())).ids;
+        ids.sort_unstable();
+        ids
+    };
+    let id = |engine: &Engine, e: EntityId| engine.mosaica_id_of(e).unwrap().raw();
+    let built_items = |engine: &Engine| -> Vec<u64> {
+        let mut ids: Vec<u64> = (0..N_ITEMS)
+            .filter(|&s| subset_sees(s) && s != suppressed)
+            .map(|s| {
+                id(
+                    engine,
+                    item_of_id(engine, s).unwrap().expect("a built item"),
+                )
+            })
+            .collect();
+        ids.sort_unstable();
+        ids
+    };
+
+    // Before the flush the ingested rows hold no row in the view: every visible built item.
+    for engine in &engines {
+        assert_eq!(answer(engine), built_items(engine));
+    }
+    for engine in &engines {
+        publish_buffered(engine);
+    }
+    for (engine, entities) in engines.iter().zip(&ingested) {
+        let mut want = built_items(engine);
+        want.extend([id(engine, entities[0]), id(engine, entities[1])]);
+        want.sort_unstable();
+        assert_eq!(answer(engine), want);
+    }
+    assert_eq!(answer(&engines[0]), answer(&engines[1]));
+}
+
+/// **A restart replays the declaration**, from the log alone before any publication and from
+/// the segments manifest after one; and the log holding the declaration beside a batch admitted
+/// under the earlier arity flushes after the restart.
+#[test]
+fn a_restart_replays_the_declaration_from_the_log_and_from_the_manifest() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    let before = ingest(
+        &engine,
+        "before",
+        vec![row(&engine, build_columns("low", 2.0))],
+    );
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("sentiment", "f32")
+        })
+        .expect("the declaration is accepted");
+    // Nothing published: the declaration is in the log alone.
+    let engine = restart(&fx, engine);
+    assert_eq!(declared_names(&engine), ["band", "score", "id", "sentiment"]);
+    assert!(
+        engine
+            .declare_attribute(AttributeRequest {
+                index: true,
+                ..request("sentiment", "f32")
+            })
+            .expect("an identical redeclaration is accepted"),
+        "the replayed column is the one the redeclaration meets"
+    );
+    let carrying = ingest(
+        &engine,
+        "carrying",
+        vec![row(&engine, {
+            let mut s = build_columns("mid", 1.0);
+            s.push(WalScalar::F32(0.6));
+            s
+        })],
+    );
+    publish_buffered(&engine);
+    let side = open_bundle(&fx.root).unwrap();
+    let published: Vec<&str> = side
+        .partitions
+        .values()
+        .flat_map(|p| p.manifest.attributes.iter().map(|d| d.name.as_str()))
+        .collect();
+    assert_eq!(
+        published,
+        ["sentiment"],
+        "the segments manifest is the durable home"
+    );
+
+    // Published: the manifest carries it, and the log may not.
+    let engine = restart(&fx, engine);
+    assert_eq!(declared_names(&engine), ["band", "score", "id", "sentiment"]);
+    let session = session(&engine);
+    let id = |e: EntityId| engine.mosaica_id_of(e).unwrap().raw();
+    assert!(!fields_of(&engine, &session, before[0]).contains_key("sentiment"));
+    assert_eq!(
+        fields_of(&engine, &session, carrying[0])["sentiment"],
+        ScalarOut::F32(0.6)
+    );
+    assert_eq!(
+        viewport(&engine, &session, Some(leaf("sentiment", at_least(0.5)))).ids,
+        vec![id(carrying[0])]
+    );
+}
+
+/// **The fold materialises the column into the base**: every segment of the new prefix carries
+/// it, the new `MANIFEST.json` declares it beside the build's columns, the segments manifest's
+/// runtime list is empty, and the reopened prefix serves and filters it.
+#[test]
+fn the_fold_carries_a_runtime_column_into_the_base() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("sentiment", "f32")
+        })
+        .expect("the declaration is accepted");
+    // A second runtime column no flush ever carries, so the fold writes it an empty base.
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("never", "i64")
+        })
+        .expect("the declaration is accepted");
+    let carrying = ingest(
+        &engine,
+        "carrying",
+        vec![row(&engine, {
+            let mut s = build_columns("mid", 1.0);
+            s.extend([WalScalar::F32(0.6), WalScalar::Null]);
+            s
+        })],
+    );
+    publish_buffered(&engine);
+    assert_eq!(
+        partitions_with_base(&fx.root, "sentiment"),
+        (0, 1),
+        "before the fold the column has no base and its stack is the flush's extents alone"
+    );
+
+    fold(&engine);
+    assert_eq!(engine.generation().prefix, "v00001");
+    assert_eq!(
+        partitions_with_base(&fx.root, "sentiment"),
+        (1, 1),
+        "the fold wrote the column's base"
+    );
+    let folded = open_bundle(&fx.root).unwrap();
+    assert_eq!(
+        folded
+            .manifest
+            .declared_scalars
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>(),
+        ["band", "score", "id", "sentiment", "never"],
+        "the new MANIFEST.json declares the runtime columns after the build's"
+    );
+    assert!(
+        folded
+            .partitions
+            .values()
+            .all(|p| p.manifest.attributes.is_empty()),
+        "the runtime list is empty once the fold has written the columns"
+    );
+
+    let session = session(&engine);
+    let id = engine.mosaica_id_of(carrying[0]).unwrap().raw();
+    assert_eq!(
+        fields_of(&engine, &session, carrying[0])["sentiment"],
+        ScalarOut::F32(0.6)
+    );
+    assert_eq!(
+        viewport(&engine, &session, Some(leaf("sentiment", at_least(0.5)))).ids,
+        vec![id],
+        "the folded base column answers the filter"
+    );
+    assert!(
+        viewport(
+            &engine,
+            &session,
+            Some(leaf("never", FilterOperand::Range { lo: None, hi: None }))
+        )
+        .ids
+        .is_empty(),
+        "a column no row carried folds to an empty base"
+    );
+
+    // And the folded prefix reopens, with the declarations now the build's.
+    let engine = restart(&fx, engine);
+    assert_eq!(
+        declared_names(&engine),
+        ["band", "score", "id", "sentiment", "never"]
+    );
+    let session = self::session(&engine);
+    assert_eq!(
+        viewport(&engine, &session, Some(leaf("sentiment", at_least(0.5)))).ids,
+        vec![id]
+    );
+}
+
+/// Each point's `heat` where it carries one, and its `tag` code, 0 where it carries none, by
+/// `mosaica_id`.
+type Drawn = BTreeMap<u64, (Option<f32>, u8)>;
+
+/// Every point the whole viewport serves, as [`Drawn`], and the render tail's names.
+fn drawn(engine: &Engine) -> (Vec<String>, Drawn) {
+    let session = session(engine);
+    let req = ViewportRequest::new("s0", 0, VIEWPORT, (N_ITEMS + 100) as usize);
+    let out = engine.viewport(&session, req).unwrap();
+    let names = out.scalar_names.clone();
+    let at = |name: &str| {
+        names
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| panic!("'{name}' is drawn: {names:?}"))
+    };
+    let (heat, tag) = (&out.points.scalars[at("heat")], &out.points.scalars[at("tag")]);
+    let (ColumnBuf::F32(heats), ColumnBuf::U8(tags)) = (&heat.values, &tag.values) else {
+        panic!("heat is drawn as an f32 and tag as a u8 category");
+    };
+    let points = out
+        .points
+        .mosaica_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (*id, (heat.is_present(i).then(|| heats[i]), tags[i])))
+        .collect();
+    (names, points)
+}
+
+/// Each segment of `s0` the bundle on disc serves, by id, and whether its row tail holds `heat`.
+fn heat_lanes(root: &Path) -> BTreeMap<String, bool> {
+    let bundle = open_bundle(root).expect("the bundle opens");
+    bundle
+        .partitions
+        .values()
+        .flat_map(|partition| partition.shards.iter())
+        .filter_map(|shard| shard.views.get("s0"))
+        .flat_map(|view| view.segments.iter())
+        .map(|segment| (segment.seg_id.clone(), segment.columns.scalar("heat").is_some()))
+        .collect()
+}
+
+/// **A rendered column declared at a running service is drawn from the next flush.** A row
+/// carrying it draws its value, and an edit gives a built item one. Every other item, built or
+/// flushed before the declaration, draws no value: a null for the number, code 0 for the
+/// category. Each stays so through a merge of segments written before and after the
+/// declaration, a restart while segments without the lane are still served, a fold and a
+/// restart, and the columns filter and reach the item card at each.
+#[test]
+fn a_rendered_column_declared_at_runtime_draws_its_rows_and_earlier_rows_draw_absent() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    engine.set_merge_for_test(false);
+    // Two segments flushed before the declaration and two after, so a merge takes both kinds.
+    let mut before = Vec::new();
+    for (batch, band) in [("before-1", "low"), ("before-2", "mid")] {
+        before.extend(ingest(&engine, batch, vec![row(&engine, build_columns(band, 2.0))]));
+        publish_buffered(&engine);
+    }
+    for declared in [
+        AttributeRequest {
+            render: true,
+            ..request("heat", "f32")
+        },
+        AttributeRequest {
+            vocabulary: Some("dept".to_string()),
+            render: true,
+            ..request("tag", "category")
+        },
+    ] {
+        assert!(
+            !engine
+                .declare_attribute(declared)
+                .expect("a rendered column is declared"),
+            "a new column"
+        );
+    }
+    // Before any flush: every view's tail carries the columns, and no row a value.
+    let (names, points) = drawn(&engine);
+    assert_eq!(names, ["band", "score", "heat", "tag"]);
+    assert_eq!(points.len() as u64, N_ITEMS + 2);
+    assert!(
+        points.values().all(|v| *v == (None, 0)),
+        "a row written before the declaration draws no value"
+    );
+    let carrying = |heat: Option<f32>, tag: &str| {
+        let mut scalars = build_columns("high", 1.0);
+        scalars.extend([
+            heat.map_or(WalScalar::Null, WalScalar::F32),
+            WalScalar::Utf8(tag.to_string()),
+        ]);
+        scalars
+    };
+    let mut after = Vec::new();
+    for (batch, heat, tag) in [("after-1", Some(0.75), "ops"), ("after-2", None, "eng")] {
+        after.extend(ingest(&engine, batch, vec![row(&engine, carrying(heat, tag))]));
+        publish_buffered(&engine);
+    }
+    // A built item, named by its `id`, given both columns.
+    let edited = engine
+        .ingest(mosaica_engine::IngestRequest {
+            principal: String::new(),
+            batch_id: "edit".to_string(),
+            body_hash: [5; 32],
+            view: Some("s0".to_string()),
+            rows: vec![mosaica_lifecycle::IngestRow {
+                mosaica_id: None,
+                labels: Some(vec![b"0".to_vec()]),
+                position: Some((500.0, 500.0)),
+                scalars: vec![
+                    WalScalar::Utf8("low".to_string()),
+                    WalScalar::F32(1.0),
+                    WalScalar::U64(7),
+                    WalScalar::F32(0.25),
+                    WalScalar::Utf8("legal".to_string()),
+                ],
+                scoped: Vec::new(),
+                omitted: Vec::new(),
+            }],
+            artifacts: Default::default(),
+            strict: true,
+            mosaica_id_column: false,
+        })
+        .expect("the edit is accepted");
+    assert_eq!(edited.edited, 1, "the row names the built item");
+    let edited = edited.mosaica_ids[0].unwrap().raw();
+    publish_buffered(&engine);
+
+    let check = |engine: &Engine, stage: &str| {
+        let id = |e: EntityId| engine.mosaica_id_of(e).unwrap().raw();
+        let (names, points) = drawn(engine);
+        assert_eq!(
+            names,
+            ["band", "score", "heat", "tag"],
+            "{stage}: the rendered columns join the tail in declaration order"
+        );
+        assert_eq!(points.len() as u64, N_ITEMS + 4, "{stage}");
+        assert_eq!(points[&id(after[0])], (Some(0.75), 6), "{stage}");
+        assert_eq!(points[&id(after[1])], (None, 5), "{stage}");
+        assert_eq!(points[&edited], (Some(0.25), 7), "{stage}");
+        for entity in &before {
+            assert_eq!(points[&id(*entity)], (None, 0), "{stage}");
+        }
+        assert_eq!(
+            points.values().filter(|v| **v == (None, 0)).count() as u64,
+            N_ITEMS - 1 + 2,
+            "{stage}: every item built or flushed before the declaration, and not edited since, \
+             draws no value"
+        );
+
+        let session = session(engine);
+        assert_eq!(
+            viewport(engine, &session, Some(leaf("heat", at_least(0.0))))
+                .ids
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            [id(after[0]), edited].into_iter().collect(),
+            "{stage}: the number filters over the rows that carry it"
+        );
+        assert_eq!(
+            viewport(
+                engine,
+                &session,
+                Some(leaf("tag", FilterOperand::Equals(AttrLocalId::new(6))))
+            )
+            .ids,
+            vec![id(after[0])],
+            "{stage}: the category filters"
+        );
+        let fields = fields_of(engine, &session, after[0]);
+        assert_eq!(fields["heat"], ScalarOut::F32(0.75), "{stage}");
+        assert_eq!(fields["tag"], ScalarOut::Utf8("ops".to_string()), "{stage}");
+        let fields = fields_of(engine, &session, before[0]);
+        assert!(
+            !fields.contains_key("heat") && !fields.contains_key("tag"),
+            "{stage}: an earlier item's card carries neither: {fields:?}"
+        );
+    };
+    check(&engine, "flushed");
+
+    let before_merge = heat_lanes(&fx.root);
+    let merges = engine.write_executor_stats().merges;
+    engine.set_merge_for_test(true);
+    engine.request_flush();
+    wait_until("the merge to publish", std::time::Duration::from_secs(60), || {
+        engine.write_executor_stats().merges > merges
+    });
+    assert_eq!(engine.write_executor_stats().merge_failures, 0);
+    let after_merge = heat_lanes(&fx.root);
+    let taken: Vec<bool> = before_merge
+        .iter()
+        .filter(|(seg, _)| !after_merge.contains_key(*seg))
+        .map(|(_, lane)| *lane)
+        .collect();
+    assert!(
+        taken.contains(&false) && taken.contains(&true),
+        "the merge took segments written before and after the declaration: {before_merge:?} -> \
+         {after_merge:?}"
+    );
+    assert!(
+        after_merge
+            .iter()
+            .filter(|(seg, _)| !before_merge.contains_key(*seg))
+            .all(|(_, lane)| *lane),
+        "the merged segment holds the lane: {after_merge:?}"
+    );
+    check(&engine, "merged");
+
+    // Reopened while segments written before the declaration are still served.
+    let engine = restart(&fx, engine);
+    assert!(
+        heat_lanes(&fx.root).values().any(|lane| !lane),
+        "a segment without the lane is still live"
+    );
+    check(&engine, "restarted before the fold");
+
+    fold(&engine);
+    check(&engine, "folded");
+    let engine = restart(&fx, engine);
+    check(&engine, "restarted");
+}
+
+/// **A runtime category's vocabulary is offered from inside each principal's mask** (I2,
+/// per-point-attributes §3.3): each principal is offered the values its own visible rows carry
+/// and nothing a row outside its mask carries. The fixture's two principals hold one term each
+/// (`common::terms_of`), so a row under either label is visible to one of them only. The column
+/// has no base postings before the fold, so the answer comes from the extents alone.
+#[test]
+fn a_runtime_category_offers_a_restricted_principal_only_its_visible_values() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    engine
+        .declare_attribute(AttributeRequest {
+            vocabulary: Some("dept".to_string()),
+            index: true,
+            ..request("tag", "category")
+        })
+        .expect("the declaration is accepted");
+    let tagged = |label: &[u8], tag: &str| {
+        let mut scalars = build_columns("mid", 1.0);
+        scalars.push(WalScalar::Utf8(tag.to_string()));
+        row_under(&engine, label, scalars)
+    };
+    // `eng` only on a row under label 0, which the principal holding term 1 cannot see; `ops`
+    // only on a row under label 1, which the principal holding term 0 cannot.
+    ingest(
+        &engine,
+        "labelled",
+        vec![tagged(b"0", "eng"), tagged(b"1", "ops")],
+    );
+    publish_buffered(&engine);
+
+    let offered = |credential: &[u8]| -> Vec<String> {
+        let session = engine.authorise(credential).unwrap();
+        engine
+            .categories(
+                &session,
+                "tag",
+                CategoryQuery::Page {
+                    after: None,
+                    limit: 10,
+                },
+            )
+            .unwrap()
+            .expect("the column answers")
+            .values
+            .into_iter()
+            .map(|v| v.key)
+            .collect()
+    };
+    assert_eq!(
+        offered(&full_coverage_credential()),
+        ["eng"],
+        "a value carried only by rows outside the principal's mask is not offered"
+    );
+    assert_eq!(offered(&subset_credential()), ["ops"]);
+}
+
+/// **A declaration made while a fold is in flight survives the publication at the same tail
+/// position** (`ingest.md` §6.3): the fold's `MANIFEST.json` carries the schema as it stood at
+/// the plan, the side manifest carries the declaration made since, and the reopen appends it
+/// after the folded columns, which is where every row buffered under it holds its value.
+#[test]
+fn a_declaration_during_a_fold_survives_the_publication_at_the_same_tail_position() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("before", "f32")
+        })
+        .expect("the declaration is accepted");
+    ingest(
+        &engine,
+        "before",
+        vec![row(&engine, {
+            let mut s = build_columns("mid", 1.0);
+            s.push(WalScalar::F32(0.25));
+            s
+        })],
+    );
+    publish_buffered(&engine);
+
+    engine.set_fold_paused_for_test(true);
+    let stats_before = engine.write_executor_stats();
+    engine.request_fold().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !engine.fold_is_holding_for_test() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the fold's passes never finished"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    // Declared while the fold holds: after `before`, at position 4.
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("during", "f32")
+        })
+        .expect("a declaration during a fold is accepted");
+    let during = ingest(
+        &engine,
+        "during",
+        vec![row(&engine, {
+            let mut s = build_columns("high", 2.0);
+            s.extend([WalScalar::F32(0.5), WalScalar::F32(0.75)]);
+            s
+        })],
+    );
+    engine.set_fold_paused_for_test(false);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let now = engine.write_executor_stats();
+        assert_eq!(
+            now.fold_failures, stats_before.fold_failures,
+            "the fold published"
+        );
+        if now.folds > stats_before.folds {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the fold never published"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert_eq!(
+        declared_names(&engine),
+        ["band", "score", "id", "before", "during"],
+        "the folded column keeps its place and the one declared during the fold follows it"
+    );
+    let folded = open_bundle(&fx.root).unwrap();
+    assert_eq!(
+        folded
+            .manifest
+            .declared_scalars
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>(),
+        ["band", "score", "id", "before"],
+        "the fold's MANIFEST.json carries the schema as it stood at the plan"
+    );
+    let side: Vec<&str> = folded
+        .partitions
+        .values()
+        .flat_map(|p| p.manifest.attributes.iter().map(|d| d.name.as_str()))
+        .collect();
+    assert_eq!(
+        side,
+        ["during"],
+        "the declaration made during the fold is on the side manifest"
+    );
+
+    publish_buffered(&engine);
+    let check = |engine: &Engine| {
+        let session = session(engine);
+        assert_eq!(
+            viewport(engine, &session, None).names,
+            ["band", "score"],
+            "the render list is the build's alone"
+        );
+        let id = engine.mosaica_id_of(during[0]).unwrap().raw();
+        let fields = fields_of(engine, &session, during[0]);
+        assert_eq!(
+            fields["before"],
+            ScalarOut::F32(0.5),
+            "each value under its own name"
+        );
+        assert_eq!(fields["during"], ScalarOut::F32(0.75));
+        assert_eq!(
+            viewport(engine, &session, Some(leaf("during", at_least(0.7)))).ids,
+            vec![id]
+        );
+    };
+    check(&engine);
+    let engine = restart(&fx, engine);
+    assert_eq!(
+        declared_names(&engine),
+        ["band", "score", "id", "before", "during"]
+    );
+    check(&engine);
+}
+
+/// **An identical redeclaration answers the column that exists; a differing one is a conflict;
+/// a declaration the schema's rules refuse is refused** (`ingest.md` §1.1).
+#[test]
+fn an_identical_redeclaration_is_a_no_op_and_a_differing_one_conflicts() {
+    let fx = fixture();
+    let engine = engine_over(&fx);
+    let sentiment = AttributeRequest {
+        index: true,
+        ..request("sentiment", "f32")
+    };
+    assert!(!engine.declare_attribute(sentiment.clone()).unwrap());
+    assert!(
+        engine.declare_attribute(sentiment.clone()).unwrap(),
+        "identical: accepted with no effect"
+    );
+    assert_eq!(declared_names(&engine), ["band", "score", "id", "sentiment"]);
+
+    let conflict = |r: AttributeRequest| match engine.declare_attribute(r) {
+        Err(AcceptError::Exec(ExecError::AttributeConflict { .. })) => {}
+        other => panic!("a differing identity under a held name is a conflict: {other:?}"),
+    };
+    conflict(AttributeRequest {
+        index: false,
+        ..sentiment.clone()
+    });
+    conflict(AttributeRequest {
+        ty: "f64".to_string(),
+        ..sentiment.clone()
+    });
+    conflict(AttributeRequest {
+        render: true,
+        ..sentiment.clone()
+    });
+    // The build's own column is a held name too.
+    conflict(AttributeRequest {
+        index: true,
+        ..request("score", "f64")
+    });
+    assert!(
+        engine
+            .declare_attribute(AttributeRequest {
+                index: true,
+                ..request("sentiment", "f32")
+            })
+            .unwrap(),
+        "restating a runtime column identically is the same no-op"
+    );
+
+    let refused = |r: AttributeRequest| match engine.declare_attribute(r) {
+        Err(AcceptError::Exec(ExecError::AttributeRefused { detail })) => detail,
+        other => panic!("refused at the door: {other:?}"),
+    };
+    // The shared rules are tested in `mosaica_store::declaration`; this checks the route applies
+    // them, and adds its own: a group that exists.
+    for r in [
+        request("region", "u8"),
+        request("weird", "utf8"),
+        AttributeRequest {
+            vocabulary: Some("nothing".to_string()),
+            ..request("tag", "category")
+        },
+        AttributeRequest {
+            render: true,
+            ..request("drawn", "keyword")
+        },
+        AttributeRequest {
+            scope: LayerScope::Group("nowhere".to_string()),
+            ..request("scoped", "i32")
+        },
+    ] {
+        refused(r);
+    }
+    // A column the build declared with `render` is the one it is when restated as it stands.
+    assert!(engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            render: true,
+            ..request("score", "f32")
+        })
+        .expect("restating a held column answers it"));
+    assert_eq!(
+        declared_names(&engine),
+        ["band", "score", "id", "sentiment"],
+        "a refusal declares nothing"
+    );
+}
+
+/// **A record coalesce publishes over a blob whose only column was declared at a running
+/// service.** The build declared no blob-resident column, so the prefix has no `attrs/record`
+/// base and the stack is the flushes' extents alone — which is what `FilterColumns::open` opens
+/// at a restart. A publication that demanded a base the schema does not owe would discard every
+/// coalesce of such a bundle, so the record stack would grow one layer per flush until a fold.
+#[test]
+fn a_record_coalesce_publishes_over_a_blob_declared_at_a_running_service() {
+    let fx = fixture();
+    let mut engine = Engine::open(
+        &fx.root,
+        &fx.tmp.path().join("cache"),
+        &fx.tmp.path().join("wal.log"),
+        EngineConfig {
+            // Every flush below is one this case asked for, and two extents are enough to select
+            // a window — so the pass fires on a fixture of four.
+            flush_max_age_secs: 3600,
+            flush_max_items: usize::MAX,
+            coalesce_width: Some(2),
+            ..config_uncapped()
+        },
+    )
+    .expect("the engine opens");
+    engine.start_write_executor(8).expect("the executor starts");
+    engine.set_background_refresh_for_test(false);
+    engine.set_merge_for_test(false);
+
+    // Neither flag: blob-resident, and the only such column in the schema.
+    assert!(
+        !engine
+            .declare_attribute(request("memo", "u16"))
+            .expect("the declaration is accepted"),
+        "'memo' is a new column"
+    );
+
+    let flushes = 4u16;
+    // Taken before the flushes, since a tick between them selects the pass as readily as the one
+    // below does.
+    let stats = engine.write_executor_stats();
+    let mut ingested: Vec<EntityId> = Vec::new();
+    for i in 0..flushes {
+        let mut scalars = build_columns("mid", 1.0);
+        scalars.push(WalScalar::U16(i + 1));
+        let batch = format!("memo-{i}");
+        ingested.push(ingest(&engine, &batch, vec![row(&engine, scalars)])[0]);
+        publish_buffered(&engine);
+    }
+    engine.request_flush();
+    wait_until(
+        "a coalesce to publish or be discarded",
+        std::time::Duration::from_secs(60),
+        || {
+            let now = engine.write_executor_stats();
+            now.coalesces > stats.coalesces || now.coalesce_failures > stats.coalesce_failures
+        },
+    );
+    assert_eq!(
+        engine.write_executor_stats().coalesce_failures,
+        0,
+        "the coalesce was discarded rather than published"
+    );
+    // Held off from here, so the counts below are the ones this case set rather than a later
+    // tick's.
+    engine.set_coalesce_for_test(false);
+
+    let after = engine
+        .generation()
+        .only_shard()
+        .filter_columns
+        .record_layers();
+    assert!(
+        after < flushes as usize,
+        "the live record stack still holds a layer per flush ({after}), so the bound arrives only \
+         at the next restart"
+    );
+    let served = |engine: &Engine| {
+        let session = session(engine);
+        ingested
+            .iter()
+            .map(|entity| fields_of(engine, &session, *entity)["memo"].clone())
+            .collect::<Vec<_>>()
+    };
+    let expected: Vec<ScalarOut> = (0..flushes).map(|i| ScalarOut::U16(i + 1)).collect();
+    assert_eq!(served(&engine), expected, "a coalesced blob row reads back");
+
+    let engine = restart(&fx, engine);
+    let reopened = engine
+        .generation()
+        .only_shard()
+        .filter_columns
+        .record_layers();
+    assert!(
+        reopened <= after && reopened < flushes as usize,
+        "the reopened bundle holds {reopened} layers where the live stack held {after}"
+    );
+    assert_eq!(served(&engine), expected);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Over several shards
+// ---------------------------------------------------------------------------------------------
+
+/// The size the several-shard fixture is built at: shard 0 sealed at 70 items, shard 1 open at 50.
+const SIZE: u64 = 70;
+
+/// An engine over `fx` that writes several shards, its background refresh off.
+fn several_over(fx: &Fixture) -> Engine {
+    let engine = open_writing(
+        &fx.root,
+        &fx.tmp.path().join("cache"),
+        &fx.tmp.path().join("wal.log"),
+        config_uncapped(),
+    );
+    engine.set_background_refresh_for_test(false);
+    engine
+}
+
+/// One batch carrying `rank`: each row names the built item of its `id`, or with none creates an
+/// item.
+fn ranked(engine: &Engine, batch: &str, rows: &[(Option<u64>, f32)]) {
+    let rows = rows
+        .iter()
+        .map(|(id, rank)| mosaica_lifecycle::IngestRow {
+            mosaica_id: None,
+            labels: Some(vec![b"0".to_vec()]),
+            position: Some((500.0, 500.0)),
+            scalars: vec![
+                WalScalar::Utf8("mid".to_string()),
+                WalScalar::F32(1.0),
+                id.map_or(WalScalar::Null, WalScalar::U64),
+                WalScalar::F32(*rank),
+            ],
+            scoped: Vec::new(),
+            omitted: Vec::new(),
+        })
+        .collect();
+    engine
+        .ingest(mosaica_engine::IngestRequest {
+            principal: String::new(),
+            batch_id: batch.to_string(),
+            body_hash: [3; 32],
+            view: Some("s0".to_string()),
+            rows,
+            artifacts: Default::default(),
+            strict: true,
+            mosaica_id_column: false,
+        })
+        .unwrap_or_else(|e| panic!("batch {batch} is accepted: {e}"));
+}
+
+/// Each item a filter on `rank` matches, by id, with the value its card serves.
+fn ranks(engine: &Engine) -> Vec<(u64, Option<ScalarOut>)> {
+    let session = session(engine);
+    let mut served: Vec<(u64, Option<ScalarOut>)> =
+        viewport(engine, &session, Some(leaf("rank", at_least(0.0))))
+            .ids
+            .into_iter()
+            .map(|id| {
+                let item = engine
+                    .item(&session, mosaica_types::MosaicaId::new(id))
+                    .unwrap()
+                    .expect("the item is visible to a full principal");
+                let rank = item.fields.into_iter().find(|f| f.name == "rank");
+                (id, rank.map(|f| f.value))
+            })
+            .collect();
+    served.sort_by_key(|(id, _)| *id);
+    served
+}
+
+/// Each shard's listed runtime bases, the columns the side manifest declares, and whether the
+/// prefix's `MANIFEST.json` declares `rank`.
+fn stored(root: &Path) -> (Vec<Vec<String>>, Vec<String>, bool) {
+    let side = side_manifest(root);
+    let declared = open_bundle(root)
+        .unwrap()
+        .manifest
+        .declared_scalars
+        .iter()
+        .any(|d| d.name == "rank");
+    (
+        side.shards
+            .records
+            .iter()
+            .map(|r| r.runtime_bases.clone())
+            .collect(),
+        side.partition
+            .attributes
+            .iter()
+            .map(|d| d.name.clone())
+            .collect(),
+        declared,
+    )
+}
+
+fn rank_listed() -> Vec<String> {
+    vec!["rank".to_string()]
+}
+
+/// **A column declared at a running service leaves for `MANIFEST.json` only once every shard
+/// holds its base.** With values in both shards, shard 0's compaction alone gives shard 0 a base
+/// and leaves the declaration in the side manifest; shard 1's moves it. The column serves the same
+/// at every step and across a restart after each.
+#[test]
+fn a_runtime_column_leaves_for_the_bundle_manifest_once_every_shard_holds_its_base() {
+    let fx = fixture_at(Some(SIZE));
+    let engine = several_over(&fx);
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("rank", "f32")
+        })
+        .expect("the declaration is accepted");
+    let (zero, one) = (
+        ids_in_shard(&engine, N_ITEMS, 0)[0],
+        ids_in_shard(&engine, N_ITEMS, 1)[0],
+    );
+    ranked(
+        &engine,
+        "ranked",
+        &[(Some(zero), 0.9), (Some(one), 0.8), (None, 0.7)],
+    );
+    publish_buffered(&engine);
+    let expected = ranks(&engine);
+    assert_eq!(expected.len(), 3);
+    assert!(expected.iter().all(|(_, rank)| rank.is_some()));
+    assert_eq!(
+        stored(&fx.root),
+        (vec![Vec::new(), Vec::new()], rank_listed(), false)
+    );
+
+    compact(&engine, Some(shard(0)));
+    assert_eq!(
+        stored(&fx.root),
+        (vec![rank_listed(), Vec::new()], rank_listed(), false),
+        "shard 0 holds the base; shard 1 does not, so the side manifest still declares it"
+    );
+    assert_eq!(ranks(&engine), expected);
+    let engine = {
+        drop(engine);
+        several_over(&fx)
+    };
+    assert_eq!(ranks(&engine), expected, "after a restart");
+
+    compact(&engine, Some(shard(1)));
+    assert_eq!(
+        stored(&fx.root),
+        (vec![Vec::new(), Vec::new()], Vec::new(), true),
+        "both shards hold the base, so MANIFEST.json declares it"
+    );
+    assert_eq!(ranks(&engine), expected);
+    let engine = {
+        drop(engine);
+        several_over(&fx)
+    };
+    assert_eq!(ranks(&engine), expected, "after a restart");
+    assert_eq!(declared_names(&engine), ["band", "score", "id", "rank"]);
+}
+
+/// **A shard opened after a declaration holds the column's base from its opening**, so the
+/// declaration leaves for `MANIFEST.json` at the compactions of the shards before it, and the
+/// opened shard serves the column across a restart without being compacted.
+#[test]
+fn a_shard_opened_after_a_declaration_holds_its_base_from_its_opening() {
+    let fx = fixture_at(Some(SIZE));
+    let engine = several_over(&fx);
+    engine
+        .declare_attribute(AttributeRequest {
+            index: true,
+            ..request("rank", "f32")
+        })
+        .expect("the declaration is accepted");
+    let rows: Vec<(Option<u64>, f32)> = (0..(N_ITEMS - SIZE) / 2)
+        .map(|at| (None, at as f32))
+        .collect();
+    let folds = engine.write_executor_stats().folds;
+    ranked(&engine, "opening", &rows);
+    publish_buffered(&engine);
+    let expected = ranks(&engine);
+    assert_eq!(expected.len(), rows.len());
+    // The batch fills shard 1 and seals it; lacking the base, it is due a closing compaction.
+    tick_until(
+        &engine,
+        "the sealed shard's closing compaction",
+        std::time::Duration::from_secs(120),
+        || engine.write_executor_stats().folds > folds,
+    );
+    assert_eq!(
+        stored(&fx.root),
+        (
+            vec![Vec::new(), rank_listed(), rank_listed()],
+            rank_listed(),
+            false
+        ),
+        "the sealed shard's compaction and the shard the batch opened list the base"
+    );
+
+    compact(&engine, Some(shard(0)));
+    assert_eq!(
+        stored(&fx.root),
+        (vec![Vec::new(); 3], Vec::new(), true),
+        "every shard holds the base"
+    );
+    assert_eq!(ranks(&engine), expected);
+    let engine = {
+        drop(engine);
+        several_over(&fx)
+    };
+    assert_eq!(ranks(&engine), expected, "after a restart");
+}

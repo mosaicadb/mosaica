@@ -1,0 +1,6 @@
+[bundle]
+path = "bundle"
+
+[serve]
+viewer = "127.0.0.1:9141"
+open   = true

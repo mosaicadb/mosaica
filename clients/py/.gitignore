@@ -1,0 +1,12 @@
+# The bundle the wheel's build hook (hatch_build.py) copies here; never committed (design §7).
+mosaica/static/*.js
+mosaica/static/*.sri
+mosaica/static/*.json
+mosaica/static/*.txt
+dist/
+build/
+*.egg-info/
+.venv/
+.pytest_cache/
+# marimo's session cache, written beside a notebook it opens.
+__marimo__/

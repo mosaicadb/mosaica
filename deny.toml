@@ -1,0 +1,63 @@
+# cargo-deny's configuration: which licences, sources and crates the Rust dependency graph may
+# contain, and the advisories it may carry. `cargo deny check` runs in the gate (ci.yml) and at
+# release (release.yml); advisories read the RustSec database over the network.
+
+[graph]
+# The shipped artifacts are built with default features.
+all-features = false
+
+[licenses]
+# Every licence a dependency of the shipped binary, the Python extension or a test may be used
+# under. A crate offering a choice (`MIT OR LGPL-2.1-or-later`) passes when one of its options is
+# here. Each of these permits redistribution in a binary with the notices in THIRD_PARTY_LICENSES.
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# The workspace's own crates are Apache-2.0 and are described by the repository's LICENSE.
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+# Development-only path dependencies carry no version, which cargo publish allows and drops.
+wildcards = "allow"
+deny = [
+  # TLS is rustls throughout, so the binary links no system OpenSSL and runs on any glibc or musl
+  # host of its target.
+  { name = "openssl-sys" },
+  { name = "native-tls" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[advisories]
+# A vulnerability anywhere in the graph fails the check. An unmaintained crate fails it only where a
+# workspace crate depends on it directly, which is where it can be replaced.
+unmaintained = "workspace"
+# A crate version its authors withdrew fails the check.
+yanked = "deny"
+ignore = [
+  # The Marvin timing attack recovers an RSA private key from decryption or signing timings. The
+  # server builds RSA keys only from the identity provider's public JWKs, to verify token signatures
+  # (crates/mosaica-server/src/oidc.rs, DecodingKey::from_jwk), and never decrypts or signs, so the
+  # attack does not apply. rsa reaches the graph through jsonwebtoken.
+  { id = "RUSTSEC-2023-0071", reason = "rsa is used only to verify signatures with public JWKs; the private-key timing attack does not apply" },
+  # crypto-bigint's timing leaks matter only for operations on secret integers. It reaches the graph
+  # through jsonwebtoken's p256 and p384, which the server uses only to verify ES256 and ES384 token
+  # signatures against public JWKs: every input is public. The fix is in crypto-bigint 0.7.6, which
+  # elliptic-curve 0.13 does not accept.
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint is used only to verify signatures with public JWKs; no secret integer is involved" },
+]

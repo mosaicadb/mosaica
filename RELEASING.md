@@ -1,0 +1,108 @@
+# Releasing Mosaica
+
+One version covers everything: the `mosaica` binary, the Rust crates, the `mosaica` and
+`mosaica-native` Python packages, the four `@mosaicajs` npm packages and the container image. Its
+one source is `[workspace.package] version` in the root `Cargo.toml`. A release is a tag `vX.Y.Z`
+(or `vX.Y.Z-rc.N` for a pre-release) on a commit of `main`, and `.github/workflows/release.yml`
+does the rest after one approval.
+
+## One-time set-up
+
+These are done once, by the owner of the repository and the registry accounts.
+
+1. **The `release` environment.** In the repository's Settings, Environments, create `release`.
+   Add yourself as a required reviewer, and under deployment branches and tags allow only tags
+   matching `v*`. The publish jobs run in this environment, and only they can ask the registries
+   for a publish token.
+2. **PyPI trusted publishers.** For each of the projects `mosaica-native` and `mosaica`, open the
+   project on PyPI, then Settings, Publishing, and add a GitHub publisher with owner `mosaicadb`,
+   repository `mosaica`, workflow `release.yml` and environment `release`. No token is stored.
+3. **npm trusted publishers.** The organisation `mosaicajs` on npmjs.com owns the `@mosaicajs`
+   scope, and each of `@mosaicajs/client`, `@mosaicajs/deck`, `@mosaicajs/components` and
+   `@mosaicajs/react` exists as a 0.0.0 placeholder. On each package's Settings page, under Trusted
+   publishing, add GitHub Actions with repository `mosaicadb/mosaica`, workflow `release.yml` and
+   environment `release`. No token is stored, and npm records provenance for each publish.
+4. **crates.io trusted publishers.** All twenty published crates exist as 0.0.0 placeholders. On
+   each crate's Settings page at crates.io, under Trusted Publishing, add GitHub with repository
+   owner `mosaicadb`, repository `mosaica`, workflow `release.yml` and environment `release`. No
+   token is stored: `rust-lang/crates-io-auth-action` exchanges the job's OIDC token for a publish
+   token that lasts thirty minutes.
+5. **GHCR.** Under Settings, Actions, General, set workflow permissions so that a workflow can be
+   granted `packages: write` (the release workflow asks for it per job). After the first release,
+   open the `mosaica` package under your GitHub profile's Packages, check that it is linked to
+   `mosaicadb/mosaica`, and set its visibility to public: a new package is private.
+
+## Cutting a release
+
+1. **Choose the version.** While the version is below 1.0, a release that changes a format, the
+   HTTP API or a client's API raises the minor version (0.1.0 to 0.2.0), and any other release
+   raises the patch version.
+2. **Set it everywhere.** On a branch:
+
+   ```bash
+   python3 scripts/version.py set 0.2.0
+   python3 scripts/version.py check
+   ```
+
+   `set` writes the version into `Cargo.toml`, `Cargo.lock`, both `pyproject.toml` files, the
+   `mosaica-native==` pin, `mosaica.__version__`, the four npm manifests and
+   `package-lock.json`.
+3. **Write the changelog.** Add a section `## [0.2.0] - YYYY-MM-DD` to `CHANGELOG.md` with
+   today's date, describing what changed for a user, and a link line
+   `[0.2.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.2.0` at the bottom. The section's
+   body becomes the release notes. `python3 scripts/version.py notes` prints it.
+4. **Refresh the licence notices** if `Cargo.lock` changed since the last release:
+
+   ```bash
+   cargo install --locked --features cli cargo-about
+   python3 scripts/third-party-licenses.py
+   ```
+
+5. **Merge to `main`** and wait for the gate (`ci.yml`) to pass on the merge commit.
+6. **Tag and push the tag:**
+
+   ```bash
+   git tag -a v0.2.0 -m "Mosaica 0.2.0"
+   git push origin v0.2.0
+   ```
+
+7. **Approve.** The workflow verifies the tag, builds everything, then waits for approval in the
+   `release` environment. Open the run in the Actions tab, check that the build jobs passed, and
+   approve the waiting deployments. One approval releases them all.
+8. **Check the result:** the GitHub release with its archives, `SHA256SUMS` and wheels;
+   `pip install mosaica==0.2.0`; `npm view @mosaicajs/client version`;
+   `cargo install mosaica --version 0.2.0`; `docker pull ghcr.io/mosaicadb/mosaica:0.2.0`.
+
+## What the workflow does
+
+Every third-party action in `release.yml` and `wheels.yml` is pinned to a commit, with its release tag in a comment, and Dependabot (`.github/dependabot.yml`) proposes new pins weekly.
+
+| Job | What it does |
+|---|---|
+| `verify` | Refuses the tag unless its commit is on `main`, it is `v` and the version in `Cargo.toml`, every copy of the version agrees, `CHANGELOG.md` has its dated section, the gate passed on the commit for a push to `main`, `cargo deny check` passes including advisories, and `THIRD_PARTY_LICENSES` is current. |
+| `wheels` | Calls `wheels.yml`: six `mosaica-native` platform wheels, the pure `mosaica` wheel, the bare binaries, and a smoke test that installs both wheels in a clean virtualenv. |
+| `archives` | One `mosaica-<target>.tar.gz` per target, with no version in the name so `/releases/latest/download/` links stay fixed, with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, `README.md` and `CHANGELOG.md`, and `SHA256SUMS`. |
+| `npm-pack` | Builds the four npm packages and packs them. |
+| `pypi` | Publishes `mosaica-native`, waits until PyPI serves it, then publishes `mosaica`, through trusted publishing. |
+| `npm` | Publishes the four tarballs in dependency order through trusted publishing, with provenance; the newest release goes to `latest`, a later candidate to `next` (see below). |
+| `crates` | Packages and builds the twenty crates, then `cargo publish --workspace --no-verify` through trusted publishing, in dependency order. |
+| `image-build`, `image` | Builds the image natively on amd64 and arm64, pushes both by digest, then tags the pair as the version and `next`, the newest release also `latest`, and a full release also the minor version. |
+| `github-release` | Creates the release with the changelog section as its notes, marked latest if it is the newest release and pre-release otherwise. |
+
+The newest release is a full release, or any candidate while no full release (`vX.Y.Z`) has been tagged. Since 0.1.0, a candidate is a pre-release that only `next` follows.
+
+## When a publish fails
+
+Fix the cause, then re-run the failed jobs from the Actions tab. `pypi` and `npm` skip what an
+earlier attempt published, and pushing the image again is harmless. `crates` stops at the first
+crate crates.io already has, so publish the rest by hand from the tagged commit, after
+`cargo login` with a personal token scoped to `publish-update` on `mosaica*`:
+
+```bash
+cargo publish --workspace --locked --exclude mosaica-bench --exclude mosaica-docgen \
+  --exclude <each crate already published>
+```
+
+A version cannot be reused once any registry has it. If a release is broken, fix it in a new patch
+release; yank the broken version on crates.io (`cargo yank`) and PyPI, and deprecate it on npm
+(`npm deprecate`).

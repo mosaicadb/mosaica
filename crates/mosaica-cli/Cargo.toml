@@ -1,0 +1,78 @@
+[package]
+name = "mosaica"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Serve an interactive map over billions of points from one machine, with every view computed over what each viewer may see."
+
+[[bin]]
+name = "mosaica"
+path = "src/main.rs"
+
+[features]
+# The correctness suite's faults build (decision 0071): a `mosaica` binary whose write executor
+# carries the fault switchboard, its three publication-seam pause sites, and the bearer-gated
+# /control/faults/* arming surface. OFF by default — the default build is what every deployment
+# gets. A binary built with this goes to ITS OWN path, never target/release/mosaica, which
+# reference/oracle/harness.py builds with default features always and whose doc forbids any
+# non-default binary at that path:
+#
+#   cargo build --release -p mosaica --features fault-injection --target-dir target/faults
+#
+# The binary lands at target/faults/release/mosaica. `scripts/check-layers.sh` rule 2 asserts,
+# from the resolved feature graph, that no default-features release build reaches the
+# switchboard — and that this build does.
+fault-injection = ["mosaica-server/fault-injection"]
+
+# The measurement build: a `mosaica` binary whose write executor, flush and viewport laps are
+# recorded rather than compiled out, readable at `/control/status`. OFF by default, and it goes to
+# its own path for the same reason `fault-injection` does:
+#
+#   cargo build --release -p mosaica --features bench-timing --target-dir target/timing
+bench-timing = ["mosaica-server/bench-timing"]
+
+[dependencies]
+mosaica-build = { workspace = true }
+# The `tokenise` verb only — the conformance oracle's access to the shipped analyser, so the two
+# sides of the text differential share one pipeline (`records-and-search.md` §4.4).
+mosaica-analyse = { workspace = true }
+# The `corpus` verbs only — the correctness suite's access to the generated corpus
+# (`correctness-suite.md` §12.1), on the same drive-the-CLI precedent as `tokenise`.
+mosaica-corpus = { workspace = true }
+mosaica-spatial = { workspace = true }
+mosaica-config = { workspace = true }
+mosaica-server = { workspace = true }
+mosaica-store = { workspace = true }
+mosaica-types = { workspace = true }
+# The `items` and `artifacts` verbs: a bulk read's frames, and the zstd codec its pages may be
+# compressed with.
+mosaica-wire = { workspace = true }
+# The `corpus` verbs' output encoding: expected items and censuses leave on stdout as Arrow IPC,
+# the same encoding the suite's other Arrow surfaces speak.
+arrow = { workspace = true }
+# The `items` and `artifacts` verbs write Parquet as well as Arrow IPC.
+parquet = { workspace = true }
+# The `items` and `artifacts` verbs' HTTP client, reading each response's frames as they arrive.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+clap = { workspace = true }
+# `mosaica insert`'s batch ids: a fresh random id per request.
+rand = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+# The check verb's payload test round-trips stdout through the type `PUT /control/layers` takes:
+# a body that will not deserialise there is not a payload, whatever it looks like.
+serde_json = { workspace = true }
+# docs/reference/cli.md is rendered with its table helpers (`src/reference.rs`).
+mosaica-docgen = { path = "../mosaica-docgen" }
+

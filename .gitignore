@@ -1,0 +1,68 @@
+target/
+data/
+# The example datasets are small and tracked; every other `data/` holds local corpora.
+!/examples/data/
+*.venv
+.venv/
+__pycache__/
+/bundles/
+.superpowers/
+.claude/worktrees/
+# Phase 2 stage 2.1: the per-worktree track marker `scripts/install-hooks.sh`'s pre-commit hook
+# reads. Per WORKTREE, never committed — hooks are shared across worktrees, so a tracked marker
+# would name one track for all of them.
+.claude/track
+.vscode/
+
+# Task 14: reference oracle's isolated venv (never committed)
+reference/.venv/
+reference/.pytest_cache/
+**/__pycache__/
+node_modules/
+clients/ts/**/dist/
+clients/ts/mosaica.toml
+# Everything `run_demo.sh` produces — bundles, caches, WALs, the deployments it generates, the
+# measured presets and the dataset document naming what is actually being served. Facts about an
+# invocation rather than about the repository, which is why the demo writes none of them into the
+# source tree and why a second session can put them elsewhere with `MOSAICA_DEMO_DIR`.
+/mosaica-demo/
+# Where `publish-clusters.mjs` put the clusters it published into *this* server's WAL. Layers live
+# in the WAL rather than the bundle, so the names in it mean nothing to another server — and the
+# script is re-run per server anyway, a layer name never being reusable.
+clients/ts/viewer/public/clusters.json
+*.env.local
+clients/ts/.vite.out
+**/target/
+
+# A local notebook and its virtualenv: a scratchpad, never the repository.
+notebooks/
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
+
+#Ignore codacy configuration files
+.codacy/
+
+# The documentation site: its virtualenv and its build output.
+.venv-docs/
+/site/
+
+# The TypeScript and components reference, generated from the client sources by
+# clients/ts/scripts/reference.mjs, and the custom-elements manifest it reads.
+/docs/reference/typescript/
+/docs/reference/components/
+clients/ts/components/custom-elements.json
+
+#Ignore env variables
+.env
+
+# Local working notes and scratch files of individual sessions.
+.claude/identity-campaign/
+.claude/perf-campaign/
+.impeccable/
+clients/ts/.shot2-tmp.mjs
+
+# Local only: personal agent instructions and measurement logs.
+/CLAUDE.local.md
+/probes/

@@ -1,0 +1,392 @@
+"""Total verification at fixture size — correctness-suite §9, end to end, over a corpus-generated
+bundle.
+
+One walk (the module-scoped fixture), every test reading the same evidence: materialise the
+corpus through its own Rust materialisers, build the bundle through the CLI, serve it, ingest one
+batch drawn from the same functions beyond the built prefix, accept three denies, record the
+battery, and take one census viewport per principal. The row half then checks every row of every
+recorded response against `mosaica corpus items`, and the census half checks per-tile masked
+counts — the battery's own tiles and underlay surfaces included — against `mosaica corpus
+census`, minus the denies this harness had accepted.
+
+## The plan's shape, and why
+
+- **The ingested batch rides the walk** so the row half covers flushed rows as well as built ones
+  — the seam the suite exists for is producers above the build — and so the census's two
+  §9.2 obligations are both live: the expected `--n` is the built prefix plus the posted range
+  (prefix-stability makes that the same corpus), and the recording waits on the background
+  refresh, without which every count reads short by exactly that batch (decision 0044 D1).
+- **The denies are one of each retirement story** (write-path §5.4): a suppression, a deletion,
+  and a suppress/unsuppress pair. The first two are subtracted from every principal they were
+  visible to; the third must be subtracted from none — an unsuppression restores at acceptance,
+  and a census that still discounted it would be conflating the two removal rules.
+- **Principals span the grant spectrum** — broad (every level-0 term), mid (half the level-2
+  slots), narrow (one level-4 term) — because a census over one principal tests one mask; the
+  masked counts are per-principal quantities and the corpus prices each grant differently by
+  construction.
+
+## The negative controls
+
+Total verification that has never rejected anything is indistinguishable from a stub, so each
+half's ability to fail is asserted against real recordings. The row half must reject a corrupted
+expectation (one item's declared value moved by one, another item's position moved by one unit)
+and a zero expected where an item holds no value, on the points tail and at drill-down, naming
+each row. The census half must reject a census computed for the wrong principal. A last test
+checks that the points tail's columns are named by the render declaration, in its order: this
+corpus's `seen_at` is declared between two render columns, so a tail named from the full
+declaration would misname every column after it.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from types import SimpleNamespace
+
+import pytest
+
+from oracle import wire
+from oracle.harness import spawn_server, stop_server
+
+from .battery import Item, Viewport, build_battery, record, record_one
+from .verification import (
+    Declaration,
+    TotalVerificationFailure,
+    build_bundle,
+    check_item,
+    check_points,
+    expected_census,
+    expected_items,
+    materialise_corpus,
+    subtract_denies,
+    terms_of,
+    tile_visible,
+    underlay_counts,
+    verify_census,
+    verify_rows,
+    streams_table,
+)
+
+SEED = 20260815
+N = 4096
+INGEST = (N, N + 64)
+BBOX = (0.0, 0.0, 65536.0, 65536.0)
+VIEW_ID = "s0"
+#: Above every visible total at this fixture size, so every tile is saturated, the row half sees
+#: every visible row, and a denied row's absence is the corpus's, not the selection's.
+K = 200_000
+#: The census half's fixed depth: 256 tiles over the extent — fine enough to localise, small
+#: enough that the comparison is readable when it fails.
+CENSUS_DEPTH = 4
+
+#: The grant spectrum (module doc). Term ids are `level·64 + slot` (the corpus's term space).
+PRINCIPALS = {
+    "broad": tuple(range(0, 64)),
+    "mid": tuple(range(128, 160)),
+    "narrow": (263,),
+}
+RECORDING_PRINCIPAL = "broad"
+
+
+@pytest.fixture(scope="module")
+def run(tmp_path_factory) -> SimpleNamespace:
+    work = tmp_path_factory.mktemp("total-verification")
+    files = materialise_corpus(SEED, N, work / "corpus", ingest=INGEST)
+    declaration = Declaration.load(files.schema)
+    bundle_root = work / "bundle"
+    build_bundle(files, bundle_root)
+
+    server, proc = spawn_server(bundle_root, work)
+    try:
+        token = server.authorise([str(t) for t in PRINCIPALS[RECORDING_PRINCIPAL]])["token"]
+        meta = server.meta(token)
+
+        # The establishing viewport: served ids for the battery, and the mosaica→fx join every
+        # deny and every drill-down expectation needs (`mosaica_id` is minted per build and never
+        # persisted; `fx_key` is the identity that survives).
+        raw = server.viewport(token, VIEW_ID, 3, BBOX, k=K, underlay_offset=2)
+        points = wire.decode_viewport_points(raw)
+        fx_of_mosaica = dict(
+            zip(
+                points.column("mosaica_id").to_pylist(),
+                points.column("fx_key").to_pylist(),
+            )
+        )
+        # Three items for the denies, and one the corpus gives no weight, so the drill-down is
+        # checked against an absent rendered value.
+        served_ids = sorted(fx_of_mosaica)
+        corpus = expected_items(SEED, fx_of_mosaica.values())
+        absent_id = next(
+            t for t in served_ids[3:] if corpus[fx_of_mosaica[t]].fields["weight"] is None
+        )
+        item_ids = (*served_ids[:3], absent_id)
+        battery = build_battery(
+            meta,
+            view_id=VIEW_ID,
+            item_ids=item_ids,
+            bbox=BBOX,
+            zooms=(0, 3),
+            k=K,
+            underlay_offset=2,
+            filters={"bay": {"eq": "cedar"}},
+        )
+
+        # Ingest the corpus's own wire batch, wait until readers see it, then until the
+        # background refresh of the resident entries ends — the census's second §9.2 obligation
+        # (decision 0044 D1). A batch that lands only in a shard no entry is resident for has
+        # nothing to refresh. Sound while this is the only resident session, which is why the
+        # other principals authorise afterwards.
+        resp = server.ingest(files.ingest.read_bytes(), "total-verification-1")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["created"] == INGEST[1] - INGEST[0]
+        server.published()
+        server.refreshed()
+
+        # The denies: suppress, delete, and suppress/unsuppress (module doc). Targets are battery
+        # items, addressed by the unique field `id`, which is the item's `e` both in the built
+        # files and in the ingest batch.
+        battery_fx = [fx_of_mosaica[t] for t in item_ids]
+        battery_expected = expected_items(SEED, battery_fx)
+
+        def change(op: str, fx: int) -> None:
+            item = {"op": op, "match": {"id": str(battery_expected[fx].e)}}
+            resp = server.changes([item], strict=True)
+            assert resp.status_code == 200, f"{op} refused: {resp.text}"
+
+        change("suppress", battery_fx[0])
+        change("delete", battery_fx[1])
+        change("suppress", battery_fx[2])
+        change("unsuppress", battery_fx[2])
+        denied_fx = frozenset(battery_fx[:2])
+        denied = [battery_expected[fx] for fx in sorted(denied_fx)]
+        denied_terms = terms_of(files, [item.e for item in denied])
+
+        recorded = record(server, token, battery)
+
+        # One census viewport per principal at the fixed depth. Fresh sessions for the
+        # non-recording principals: authorised after the refresh barrier, they materialise
+        # against the current state and need no barrier of their own.
+        censuses = {}
+        for name, grant in PRINCIPALS.items():
+            grant_token = (
+                token
+                if name == RECORDING_PRINCIPAL
+                else server.authorise([str(t) for t in grant])["token"]
+            )
+            canon = record_one(
+                server, grant_token, Viewport(VIEW_ID, CENSUS_DEPTH, bbox=BBOX, k=2)
+            )
+            censuses[name] = tile_visible(canon)
+
+        yield SimpleNamespace(
+            files=files,
+            declaration=declaration,
+            recorded=recorded,
+            fx_of_mosaica=fx_of_mosaica,
+            item_ids=item_ids,
+            battery_fx=battery_fx,
+            denied_fx=denied_fx,
+            denied=denied,
+            denied_terms=denied_terms,
+            censuses=censuses,
+        )
+    finally:
+        stop_server(proc)
+
+
+def _expected_census_for(run, grant: tuple[int, ...], depth: int) -> dict[int, int]:
+    """The generator's count at the harness's own n_total, minus the harness's own denies —
+    §9.2's expected side, assembled the way the design states it."""
+    census = expected_census(SEED, run.files.n_total, depth, grant)
+    return subtract_denies(census, run.denied, run.denied_terms, grant, depth)
+
+
+# ---------------------------------------------------------------------------------------------
+# The two halves
+# ---------------------------------------------------------------------------------------------
+
+
+def test_the_row_half_verifies_every_row_of_every_response(run):
+    """§9.1: every served row compared at its own identity — code, coordinates and every declared
+    field — with one expectation call per response. The floor guards against vacuity: two
+    unfiltered full-extent viewports alone carry thousands of rows at this corpus size."""
+    rows = verify_rows(
+        run.recorded,
+        seed=SEED,
+        declaration=run.declaration,
+        denied_fx=run.denied_fx,
+        fx_of_mosaica=run.fx_of_mosaica,
+    )
+    assert rows > 4_000, f"only {rows} rows verified — the battery has stopped serving points"
+
+
+def test_the_census_half_agrees_for_every_principal(run):
+    """§9.2: per-tile masked counts at the fixed depth, per principal, against the generator —
+    n_total for the corpus the harness fed the server, minus the denies it had accepted."""
+    for name, grant in PRINCIPALS.items():
+        compared = verify_census(
+            run.censuses[name], _expected_census_for(run, grant, CENSUS_DEPTH), label=name
+        )
+        assert compared > 0 or name == "narrow", f"{name}: the census compared nothing"
+    assert sum(run.censuses["broad"].values()) > 0, "the broad principal saw an empty corpus"
+
+
+def test_the_recorded_count_surfaces_agree_with_the_census(run):
+    """The battery's own tiles and underlay surfaces, against the same expected side: the
+    underlay is the tiles claim at depth `zoom + underlay_offset` (§3 — the only other derived
+    aggregate), and both are mask-level counts, so the filtered viewport is held to the same
+    expectation as the unfiltered ones (I3/I12: filters move `matched`, never `visible`)."""
+    grant = PRINCIPALS[RECORDING_PRINCIPAL]
+    for query, canon in run.recorded.items():
+        if not isinstance(query, Viewport):
+            continue
+        label = f"viewport(zoom={query.zoom}, filters={'yes' if query.filters else 'no'})"
+        verify_census(
+            tile_visible(canon),
+            _expected_census_for(run, grant, query.zoom),
+            label=f"{label} tiles",
+        )
+        if query.underlay_offset:
+            depth = query.zoom + query.underlay_offset
+            verify_census(
+                underlay_counts(canon),
+                _expected_census_for(run, grant, depth),
+                label=f"{label} underlay at depth {depth}",
+            )
+
+
+def test_the_deny_lane_is_where_the_recording_says_it_is(run):
+    """The three denies landed as three different stories: the suppressed and deleted items'
+    drill-downs answer 404 and are subtracted from every census; the suppress/unsuppress pair
+    left no residue — its item answers 200 and the censuses that just passed did not subtract it.
+    Write-path §5.4's two removal rules, kept apart on the served surface."""
+    statuses = {
+        run.fx_of_mosaica[q.mosaica_id]: canon.payload["status"]
+        for q, canon in run.recorded.items()
+        if isinstance(q, Item)
+    }
+    suppressed, deleted, unsuppressed, absent = run.battery_fx
+    assert statuses[suppressed] == 404
+    assert statuses[deleted] == 404
+    assert statuses[unsuppressed] == 200
+    assert statuses[absent] == 200
+    assert unsuppressed not in run.denied_fx, (
+        "an unsuppressed item held in the denied set would be subtracted from the census — "
+        "conflating the two removal rules"
+    )
+
+
+# ---------------------------------------------------------------------------------------------
+# The negative controls
+# ---------------------------------------------------------------------------------------------
+
+
+def test_negative_control_a_corrupted_expectation_is_rejected(run):
+    """The row half against a deliberately corrupted expectation: one item's declared value moved
+    by one, another item's position moved by one unit. Both must be rejected, each at its own
+    row — a row half that accepted either would be comparing nothing (§8.1)."""
+    query = next(
+        q
+        for q in run.recorded
+        if isinstance(q, Viewport) and q.zoom == 3 and q.filters is None
+    )
+    canon = run.recorded[query]
+    served_fx = streams_table(canon.points).column("fx_key").to_pylist()
+    expected = expected_items(SEED, set(served_fx))
+
+    live = [fx for fx in served_fx if fx not in run.denied_fx]
+    value_fx, position_fx = live[0], live[-1]
+    tampered = dict(expected)
+    victim = tampered[value_fx]
+    tampered[value_fx] = dataclasses.replace(
+        victim, fields={**victim.fields, "weight": (victim.fields["weight"] or 0) + 1}
+    )
+    victim = tampered[position_fx]
+    tampered[position_fx] = dataclasses.replace(victim, x=victim.x + 1.0)
+
+    reasons: list[str] = []
+    check_points(
+        "control",
+        canon,
+        tampered,
+        declaration=run.declaration,
+        denied_fx=run.denied_fx,
+        reasons=reasons,
+    )
+    assert any("weight" in r and format(value_fx, "#x") in r for r in reasons), (
+        f"the corrupted value was not rejected: {reasons[:3]}"
+    )
+    assert any("code" in r and format(position_fx, "#x") in r for r in reasons), (
+        f"the corrupted position was not rejected: {reasons[:3]}"
+    )
+    assert len(reasons) == 2, f"unexpected extra disagreements: {reasons}"
+
+
+def test_negative_control_a_zero_for_an_absent_value_is_rejected(run):
+    """An item with no weight expected to hold 0 must be rejected on the points tail and at
+    drill-down: a comparator that equated null with zero would pass a server that served either
+    for the other."""
+    absent_fx = run.battery_fx[3]
+    query = next(
+        q
+        for q in run.recorded
+        if isinstance(q, Viewport) and q.zoom == 3 and q.filters is None
+    )
+    canon = run.recorded[query]
+    served_fx = streams_table(canon.points).column("fx_key").to_pylist()
+    assert absent_fx in served_fx
+    expected = expected_items(SEED, set(served_fx))
+    victim = expected[absent_fx]
+    assert victim.fields["weight"] is None
+    zeroed = dataclasses.replace(victim, fields={**victim.fields, "weight": 0})
+
+    reasons: list[str] = []
+    check_points(
+        "control",
+        canon,
+        {**expected, absent_fx: zeroed},
+        declaration=run.declaration,
+        denied_fx=run.denied_fx,
+        reasons=reasons,
+    )
+    assert len(reasons) == 1, reasons
+    assert "weight" in reasons[0] and format(absent_fx, "#x") in reasons[0], reasons
+
+    item = next(
+        q
+        for q in run.recorded
+        if isinstance(q, Item) and run.fx_of_mosaica[q.mosaica_id] == absent_fx
+    )
+    reasons = []
+    check_item(
+        "control",
+        run.recorded[item],
+        zeroed,
+        declaration=run.declaration,
+        denied=False,
+        reasons=reasons,
+    )
+    assert len(reasons) == 1, reasons
+    assert "weight" in reasons[0], reasons
+
+
+def test_negative_control_a_census_for_the_wrong_principal_is_rejected(run):
+    """The census half against the wrong principal's expectation: broad's served counts held to
+    mid's computed ones must disagree — a comparator that passed this would pass any census."""
+    assert sum(run.censuses["broad"].values()) > 0
+    with pytest.raises(TotalVerificationFailure):
+        verify_census(
+            run.censuses["broad"],
+            _expected_census_for(run, PRINCIPALS["mid"], CENSUS_DEPTH),
+            label="wrong principal",
+        )
+
+
+def test_the_points_tail_is_named_by_its_render_declaration(run):
+    query = next(
+        q
+        for q in run.recorded
+        if isinstance(q, Viewport) and q.zoom == 3 and q.filters is None
+    )
+    table = streams_table(run.recorded[query].points)
+    render_names = [c.name for c in run.declaration.render_columns()]
+    assert table.schema.names == ["mosaica_id", "code", *render_names]

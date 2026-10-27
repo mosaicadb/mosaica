@@ -1,0 +1,18 @@
+[package]
+name = "mosaica-wire"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "The framed Arrow payloads Mosaica sends to viewers. Internal crate of the mosaica binary, with no stable API."
+
+[dependencies]
+arrow = { workspace = true }
+# zstd for a records frame's buffers, and only zstd: the reader a client registers is that one
+# codec.
+arrow-ipc = { workspace = true, features = ["zstd"] }
