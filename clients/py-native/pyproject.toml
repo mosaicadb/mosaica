@@ -9,7 +9,7 @@ description = "Mosaica's platform wheel: the `mosaica` executable and the `_mosa
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Joe Ennis", email = "joe.ennis0@gmail.com" }]
+authors = [{ name = "mosaicadb" }]
 keywords = ["map", "visualisation", "spatial", "database", "server"]
 classifiers = [
   "Development Status :: 3 - Alpha",

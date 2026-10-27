@@ -24,7 +24,7 @@ One Rust workspace under [crates/](crates/), one binary (`mosaica`).
 
 - `mosaica-build` turns source files into a bundle. `mosaica-engine` opens a bundle, answers requests and takes writes. `mosaica-server` is the HTTP layer over the engine. `mosaica-store` is the on-disk formats. `mosaica-lifecycle` is the write-ahead log and the write commands.
 - [clients/py/](clients/py/) is the Python SDK and [clients/ts/](clients/ts/) the browser client. Python is a consumer and is never in a request path. [conformance/](conformance/) is a Python suite that checks a running server against an independent oracle.
-- [probes/](probes/) and `mosaica-bench` are measurements. Re-run a figure before relying on it.
+- `mosaica-bench` is measurements. Re-run a figure before relying on it.
 
 Nothing is deployed, so there is no backwards compatibility: change a format and rebuild the bundles. Bump the format version when you do, so a stale bundle is refused.
 
@@ -47,10 +47,6 @@ Refuse or withhold only where something would leak to a viewer or cannot be undo
 - Comments say what the code does not. No history, no citations, no argument for the design. An error message says what is wrong and what to write instead, in a sentence.
 - Test behaviour through the public surface: what is stored, what is served, what survives a restart. Do not assert message text or the shape of internals. A rule's tests live beside the rule.
 - [docs/writing.md](docs/writing.md) is the style for prose. British spelling.
-
-## Talking to Joe
-
-He knows the system better than you do and is usually thinking out loud. Answer what he asked, in ordinary English, and leave the decision with him. When a change alters what a user can do, ask him with short lettered options. Agreement is a complete reply.
 
 ## Checks before finishing
 

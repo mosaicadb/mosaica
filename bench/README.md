@@ -17,7 +17,7 @@ cargo build --release -p mosaica-bench   # the harness (bench-timing is ON by de
 ```
 
 The corpus must be present under `data/scaled/` — `geometry.parquet` (10⁹ rows) plus one
-`<label-set>.pairs.parquet` per label set. See [`probes/dataset.md`](../probes/dataset.md) for what
+`<label-set>.pairs.parquet` per label set. See `probes/dataset.md` for what
 it is and how it was built.
 
 The concurrency arm additionally needs the Python environment at `reference/.venv`.

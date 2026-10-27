@@ -1528,7 +1528,7 @@ pub struct TenancyBit {
 /// Honoured: the loader seeds [`crate::vocabulary::Vocabularies`] from this before WAL replay, so a
 /// binding minted between builds survives a restart and stays out of the next draw.
 ///
-/// **⊘ Written by nobody yet** ([#82](https://github.com/jennis0/tessera-index/issues/82)): nothing
+/// **⊘ Written by nobody yet** ([#82](https://github.com/mosaicadb/mosaica/issues/82)): nothing
 /// mints between builds until the commit window does, so every manifest currently carries this
 /// empty.
 #[derive(Debug, Clone, Serialize, Deserialize)]

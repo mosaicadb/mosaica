@@ -188,7 +188,7 @@ fn viewport_settling(
 }
 
 /// **A session authorised after a promoting flush must be served the post-flush visible set**
-/// ([#112](https://github.com/jennis0/tessera-index/issues/112)).
+/// ([#112](https://github.com/mosaicadb/mosaica/issues/112)).
 ///
 /// The defect this pins is not staleness in the ordinary sense — nothing later repaired it. A
 /// credential naming a descriptor the dictionary did not yet hold, re-presented *after* the flush

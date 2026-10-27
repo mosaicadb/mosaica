@@ -9,7 +9,7 @@ description = "Read and map a Mosaica database from Python, and make one from da
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "Joe Ennis", email = "joe.ennis0@gmail.com" }]
+authors = [{ name = "mosaicadb" }]
 keywords = ["map", "visualisation", "spatial", "embeddings", "access control", "notebook", "widget"]
 classifiers = [
   "Development Status :: 3 - Alpha",

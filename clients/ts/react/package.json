@@ -19,7 +19,7 @@
     "directory": "clients/ts/react"
   },
   "license": "Apache-2.0",
-  "author": "Joe Ennis",
+  "author": "mosaicadb",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
