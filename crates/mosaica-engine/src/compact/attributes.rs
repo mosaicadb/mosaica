@@ -79,8 +79,8 @@ fn column_jobs(
 }
 
 /// Pass 4a, text: each indexed text column's dictionary, postings, positions and presence merged
-/// across its layers, less the tombstone set. A suppression changes no artefact. A word whose only carriers
-/// were deleted leaves the dictionary.
+/// across its layers, less the tombstone set. A suppression changes no artefact. A word whose only
+/// carriers were deleted leaves the dictionary.
 pub(super) fn fold_text_columns(
     plan: &FoldPlan,
     ctx: &FoldContext,
@@ -100,7 +100,7 @@ pub(super) fn fold_text_columns(
 
         // Dictionaries are read sequentially; postings and positions are not, since the merge
         // interleaves layers.
-        let open_layer = |files: &mosaica_filter_write::TextIndexFiles,
+        let open_layer = |files: &mosaica_filter::TextIndexFiles,
                           what: &str|
          -> Result<OpenedText, MaintenanceFailed> {
             let unreadable = format!("pass 4a (text: {what})");
@@ -114,12 +114,13 @@ pub(super) fn fold_text_columns(
                     .map_err(failed(unreadable.clone()))?,
                 positions: mosaica_filter::ColumnPositions::open(&files.positions, true)
                     .map_err(failed(unreadable.clone()))?,
-                present: mosaica_filter::read_presence(&files.presence).map_err(failed(unreadable.clone()))?,
+                present: mosaica_filter::read_presence(&files.presence)
+                    .map_err(failed(unreadable.clone()))?,
             })
         };
         let mut layers = Vec::new();
         if job.has_base {
-            let base = mosaica_filter_write::TextIndexFiles::in_dir(&from_dir);
+            let base = mosaica_filter::TextIndexFiles::in_dir(&from_dir);
             layers.push(open_layer(&base, "the base")?);
             out.read(
                 &from_dir,
@@ -140,7 +141,7 @@ pub(super) fn fold_text_columns(
             layers.push(open_layer(&paths.files, "an extent")?);
             out.read(&ctx.from_prefix_dir, extent.files());
         }
-        let to = mosaica_filter_write::TextIndexFiles::in_dir(&to_dir);
+        let to = mosaica_filter::TextIndexFiles::in_dir(&to_dir);
         let inputs: Vec<mosaica_filter_write::TextLayerRef<'_>> = layers
             .iter()
             .map(|layer| mosaica_filter_write::TextLayerRef {

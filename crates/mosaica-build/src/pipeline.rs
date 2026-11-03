@@ -5141,7 +5141,7 @@ fn write_text_index(
         cascade_sorted_runs(column_dir, "text", spill::RunPayload::Positions, receipts)?;
 
     // ---- 3. the merge: one sorted term stream into the dictionary, postings and positions ----
-    let files = mosaica_filter_write::TextIndexFiles::in_dir(column_dir);
+    let files = mosaica_filter::TextIndexFiles::in_dir(column_dir);
     let terms = merge_text_runs(files.clone(), &receipts, plan.merge_slice_cap)?;
     mosaica_filter::write_presence(&files.presence, &values.present()?)
         .map_err(|e| BuildError::io(&files.presence, e))?;
@@ -5461,7 +5461,7 @@ fn cascade_sorted_runs(
 
 /// Merge the sorted runs into the dictionary, postings and positions, and return the term count.
 fn merge_text_runs(
-    files: mosaica_filter_write::TextIndexFiles,
+    files: mosaica_filter::TextIndexFiles,
     receipts: &[spill::SpillReceipt],
     merge_slice_cap: usize,
 ) -> Result<u64> {

@@ -374,7 +374,7 @@ impl Fixture {
             .unwrap();
         }
         let mut writer =
-            mosaica_filter_write::TextIndexWriter::create(mosaica_filter_write::TextIndexFiles {
+            mosaica_filter_write::TextIndexWriter::create(mosaica_filter::TextIndexFiles {
                 dict: self.path(&extent.dict),
                 postings: self.path(&extent.postings),
                 positions: self.path(&extent.positions),

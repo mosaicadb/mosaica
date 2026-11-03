@@ -343,7 +343,7 @@ impl TextLayer {
             false => None,
         };
         text_layer(
-            &mosaica_filter_write::TextIndexFiles::in_dir(dir),
+            &mosaica_filter::TextIndexFiles::in_dir(dir),
             access,
             column,
             "base",
@@ -386,7 +386,7 @@ fn prose_unreadable(column: &str, e: mosaica_filter::RecordError) -> ComposeErro
 }
 
 fn text_layer(
-    files: &mosaica_filter_write::TextIndexFiles,
+    files: &mosaica_filter::TextIndexFiles,
     access: mosaica_filter::Access,
     column: &str,
     which: &str,
@@ -611,7 +611,7 @@ mod tests {
     fn a_text_layer_whose_record_counts_disagree_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let write = |tag: &str, terms: &[&str], positions_records: usize| {
-            let files = mosaica_filter_write::TextIndexFiles {
+            let files = mosaica_filter::TextIndexFiles {
                 dict: dir.path().join(format!("{tag}-dict.bin")),
                 postings: dir.path().join(format!("{tag}-postings.arrow")),
                 positions: dir.path().join(format!("{tag}-positions.arrow")),

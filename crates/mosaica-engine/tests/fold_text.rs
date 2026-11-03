@@ -628,7 +628,7 @@ fn claims(engine: &Engine, tmp: &Path, tag: &str, entities: &[u32]) -> bool {
     let paths = mosaica_engine::filter::TextExtentPaths {
         column: "prose".to_string(),
         dict_rel: format!("claim-{tag}/dict.bin"),
-        files: mosaica_filter_write::TextIndexFiles::in_dir(&dir),
+        files: mosaica_filter::TextIndexFiles::in_dir(&dir),
         prose: None,
     };
     mosaica_store::empty_shard::write_empty_text_index(&dir).unwrap();

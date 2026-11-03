@@ -21,7 +21,7 @@
 //! number of runs.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use arrow::array::{Array, LargeBinaryArray};
 use bitpacking::{BitPacker, BitPacker4x};
@@ -72,6 +72,31 @@ impl std::fmt::Display for TextLayerCounts {
             "{} terms, {} postings records and {} positions records",
             self.terms, self.postings, self.positions
         )
+    }
+}
+
+/// The four files of one text layer.
+#[derive(Debug, Clone)]
+pub struct TextIndexFiles {
+    pub dict: PathBuf,
+    pub postings: PathBuf,
+    pub positions: PathBuf,
+    pub presence: PathBuf,
+}
+
+impl TextIndexFiles {
+    /// The four files under their own names in `dir`.
+    pub fn in_dir(dir: &Path) -> TextIndexFiles {
+        TextIndexFiles {
+            dict: dir.join(crate::DICT_FILE),
+            postings: dir.join(crate::POSTINGS_FILE),
+            positions: dir.join(POSITIONS_FILE),
+            presence: dir.join(crate::PRESENCE_FILE),
+        }
+    }
+
+    pub fn paths(&self) -> [&Path; 4] {
+        [&self.dict, &self.postings, &self.positions, &self.presence]
     }
 }
 

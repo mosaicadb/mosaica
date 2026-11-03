@@ -1645,7 +1645,7 @@ fn write_text_layer(
     let postings_rel = format!("{rel_dir}/{}-postings.arrow", target.seg_id);
     let positions_rel = format!("{rel_dir}/{}-positions.arrow", target.seg_id);
     let presence_rel = format!("{rel_dir}/{}-presence.roaring", target.seg_id);
-    let files = mosaica_filter_write::TextIndexFiles {
+    let files = mosaica_filter::TextIndexFiles {
         dict: target.prefix_dir.join(&dict_rel),
         postings: target.prefix_dir.join(&postings_rel),
         positions: target.prefix_dir.join(&positions_rel),

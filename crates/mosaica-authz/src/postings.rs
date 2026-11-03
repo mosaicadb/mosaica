@@ -382,7 +382,7 @@ pub enum PostingRef<'a> {
     Roaring(BitmapView<'a>),
 }
 
-impl PostingRef<'_> {
+impl<'a> PostingRef<'a> {
     /// How many entities this posting holds.
     pub fn cardinality(&self) -> u64 {
         match self {
@@ -405,6 +405,36 @@ impl PostingRef<'_> {
                 }
             }
             PostingRef::Roaring(view) => out.extend(view.iter()),
+        }
+    }
+
+    /// This posting as a bitmap: the mapped view itself, or an array posting decoded.
+    pub fn into_bitmap(self) -> PostingBitmap<'a> {
+        match self {
+            PostingRef::Roaring(view) => PostingBitmap::View(view),
+            array => {
+                let mut entities = Vec::with_capacity(array.cardinality() as usize);
+                array.extend_into(&mut entities);
+                PostingBitmap::Owned(Bitmap::of(&entities))
+            }
+        }
+    }
+}
+
+/// A posting as a bitmap, borrowed from the mapped file where its encoding allows.
+#[derive(Debug)]
+pub enum PostingBitmap<'a> {
+    View(BitmapView<'a>),
+    Owned(Bitmap),
+}
+
+impl std::ops::Deref for PostingBitmap<'_> {
+    type Target = Bitmap;
+
+    fn deref(&self) -> &Bitmap {
+        match self {
+            PostingBitmap::View(view) => view,
+            PostingBitmap::Owned(bitmap) => bitmap,
         }
     }
 }

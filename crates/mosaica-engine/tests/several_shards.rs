@@ -1276,6 +1276,100 @@ fn a_dropped_views_scoped_column_leaves_every_shards_record() {
     assert_eq!(listed(&several.root), [0, 0]);
 }
 
+/// The base a view created at a running service acquires at its first flush is digested whole:
+/// every file under the directory of its group's indexed text column, the base's positions among
+/// them, is named in the side-manifest the flush publishes.
+#[test]
+fn a_runtime_views_first_flush_digests_every_file_of_its_base() {
+    let several = two_shards();
+    let engine = several.open_writing();
+    engine
+        .create_view_group(mosaica_lifecycle::wal::ViewGroupDeclaration {
+            name: "g".into(),
+            title: None,
+            projection: "none".into(),
+            frame: mosaica_engine::DeclaredFrame {
+                x_min: 0.0,
+                x_max: 1000.0,
+                y_min: 0.0,
+                y_max: 1000.0,
+            },
+            visibility: None,
+            point_default: None,
+            members: None,
+            metadata: Vec::new(),
+        })
+        .unwrap();
+    engine
+        .declare_attribute(mosaica_engine::AttributeRequest {
+            name: "memo".into(),
+            title: None,
+            ty: "text".into(),
+            vocabulary: None,
+            analyser: Some("unicode".into()),
+            index: true,
+            render: false,
+            scope: mosaica_types::layer::LayerScope::Group("g".into()),
+            unique: false,
+        })
+        .unwrap();
+    engine
+        .create_view("g".into(), "k".into(), None, Default::default())
+        .unwrap();
+    engine
+        .ingest(mosaica_engine::IngestRequest {
+            principal: String::new(),
+            batch_id: "memo".to_string(),
+            body_hash: [9; 32],
+            view: Some("g:k".to_string()),
+            rows: vec![mosaica_lifecycle::IngestRow {
+                mosaica_id: None,
+                labels: Some(vec![b"0".to_vec()]),
+                position: Some((5.0, 5.0)),
+                scalars: keyed("memo"),
+                scoped: vec![mosaica_lifecycle::wal::WalScalar::Utf8(
+                    "the quarterly report".into(),
+                )],
+                omitted: Vec::new(),
+            }],
+            artifacts: Default::default(),
+            strict: true,
+            mosaica_id_column: false,
+        })
+        .expect("the insert is accepted");
+    publish_buffered(&engine);
+    drop(engine);
+
+    let manifest = side_manifest(&several.root);
+    let prefix_dir = several.root.join(current_prefix(&several.root));
+    let mut bases = 0;
+    for record in &manifest.shards.records {
+        let layout = mosaica_store::ShardLayout::new(PARTITION, record.id);
+        for column in &record.scoped_columns {
+            bases += 1;
+            let rel = layout.scoped_column_rel(&column.column, &column.view, column.incarnation);
+            let files: Vec<String> = files_under(&prefix_dir.join(&rel))
+                .iter()
+                .map(|path| {
+                    let rel = path.strip_prefix(&prefix_dir).unwrap();
+                    rel.to_string_lossy().into_owned()
+                })
+                .collect();
+            assert!(
+                files.contains(&format!("{rel}/{}", mosaica_filter::POSITIONS_FILE)),
+                "the base of {rel} holds positions: {files:?}"
+            );
+            for file in &files {
+                assert!(
+                    manifest.partition.files.contains_key(file),
+                    "{file} was written by the flush but is not digested"
+                );
+            }
+        }
+    }
+    assert_eq!(bases, 1, "the flush wrote one base, for `memo` of `g:k`");
+}
+
 /// A label layer whose content is served only to a viewer seeing every item it was generated from.
 fn label_layer(name: &str) -> mosaica_types::layer::LayerDeclaration {
     use mosaica_types::layer::{ContentDeclaration, SuppliedContent, SuppliedRequirement};

@@ -326,7 +326,7 @@ pub(super) fn coalesce_text_window(
             )?)
         }
     };
-    let out = mosaica_filter_write::TextIndexFiles::in_dir(&column_dir);
+    let out = mosaica_filter::TextIndexFiles::in_dir(&column_dir);
     let extent = TextExtent {
         column: column.clone(),
         view: window.view.clone(),

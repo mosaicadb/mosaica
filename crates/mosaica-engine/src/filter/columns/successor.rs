@@ -18,7 +18,7 @@ pub struct TextExtentPaths {
     /// The dictionary's manifest path, the layer's identity, distinct from `files.dict`, that
     /// path resolved against the prefix directory.
     pub dict_rel: String,
-    pub files: mosaica_filter_write::TextIndexFiles,
+    pub files: mosaica_filter::TextIndexFiles,
     /// A group-scoped column's prose.
     pub prose: Option<RecordExtentPaths>,
 }
@@ -30,7 +30,7 @@ impl TextExtentPaths {
         TextExtentPaths {
             column: crate::filter::extent_column_name(&extent.column, extent.view.as_deref()),
             dict_rel: extent.dict.clone(),
-            files: mosaica_filter_write::TextIndexFiles {
+            files: mosaica_filter::TextIndexFiles {
                 dict: prefix_dir.join(&extent.dict),
                 postings: prefix_dir.join(&extent.postings),
                 positions: prefix_dir.join(&extent.positions),

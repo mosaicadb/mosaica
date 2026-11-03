@@ -430,7 +430,7 @@ fn a_coalesced_text_layer_that_does_not_cover_its_window_is_refused() {
     let paths = |presence: &Path| mosaica_engine::filter::TextExtentPaths {
         column: "prose".to_string(),
         dict_rel: extent.dict.clone(),
-        files: mosaica_filter_write::TextIndexFiles {
+        files: mosaica_filter::TextIndexFiles {
             dict: prefix.join(&extent.dict),
             postings: prefix.join(&extent.postings),
             positions: prefix.join(&extent.positions),

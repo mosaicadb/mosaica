@@ -96,8 +96,7 @@ pub use record::{
 };
 pub use positions::Occurrences;
 pub use text::{
-    coalesce_text_extents, merge_text_layers, Posting, TextIndexFiles, TextIndexWriter,
-    TextLayerRef,
+    coalesce_text_extents, merge_text_layers, Posting, TextIndexWriter, TextLayerRef,
 };
 
 /// The vocabulary's reserved *absent* code: never drawn, never bound to a key, and carried by
@@ -549,7 +548,7 @@ pub fn write_category_postings(
 mod tests {
     use super::*;
     use arrow::buffer::ScalarBuffer;
-    use mosaica_filter::write_value_column;
+    use mosaica_filter::{write_value_column, TextIndexFiles};
 
     fn codes_u32(v: Vec<u32>) -> Codes {
         Codes::U32(ScalarBuffer::from(v))

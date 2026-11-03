@@ -105,7 +105,7 @@ pub fn write_empty_category_postings(path: &Path, column: &str) -> Result<()> {
 /// A text column's index of no term in `dir`, the base of a column no layer holds text of: its
 /// dictionary, postings and positions, and the presence of no entity. Returns the files written.
 pub fn write_empty_text_index(dir: &Path) -> Result<Vec<PathBuf>> {
-    let files = mosaica_filter_write::TextIndexFiles::in_dir(dir);
+    let files = mosaica_filter::TextIndexFiles::in_dir(dir);
     mosaica_filter_write::TextIndexWriter::create(files.clone())
         .and_then(|writer| writer.finish())
         .map_err(io(&files.postings))?;

@@ -45,12 +45,11 @@
 
 use std::fs::File;
 use std::io::{self, BufWriter};
-use std::path::{Path, PathBuf};
 
 use croaring::Bitmap;
 use mosaica_authz::PostingsSpool;
 use mosaica_filter::{
-    ColumnPositions, ColumnPostings, PositionsCursor, SortedDict, SortedDictWriter,
+    ColumnPositions, ColumnPostings, PositionsCursor, SortedDict, SortedDictWriter, TextIndexFiles,
     TextLayerCounts,
 };
 use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
@@ -65,31 +64,6 @@ pub struct TextLayerRef<'a> {
     pub postings: &'a ColumnPostings,
     pub positions: &'a ColumnPositions,
     pub present: &'a Bitmap,
-}
-
-/// The four files of one text layer.
-#[derive(Debug, Clone)]
-pub struct TextIndexFiles {
-    pub dict: PathBuf,
-    pub postings: PathBuf,
-    pub positions: PathBuf,
-    pub presence: PathBuf,
-}
-
-impl TextIndexFiles {
-    /// The four files under their own names in `dir`.
-    pub fn in_dir(dir: &Path) -> TextIndexFiles {
-        TextIndexFiles {
-            dict: dir.join(mosaica_filter::DICT_FILE),
-            postings: dir.join(mosaica_filter::POSTINGS_FILE),
-            positions: dir.join(mosaica_filter::POSITIONS_FILE),
-            presence: dir.join(mosaica_filter::PRESENCE_FILE),
-        }
-    }
-
-    pub fn paths(&self) -> [&Path; 4] {
-        [&self.dict, &self.postings, &self.positions, &self.presence]
-    }
 }
 
 /// A term's posting as its producer holds it.

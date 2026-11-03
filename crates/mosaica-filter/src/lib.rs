@@ -59,8 +59,8 @@ pub use dict::{
 };
 pub use extent::{extent_paths, open_extent, write_extent, EXTENTS_DIR};
 pub use positions::{
-    ColumnPositions, PositionsCursor, TextLayerCounts, POSITIONS_BLOCK, POSITIONS_COLUMN,
-    POSITIONS_FILE,
+    ColumnPositions, PositionsCursor, TextIndexFiles, TextLayerCounts, POSITIONS_BLOCK,
+    POSITIONS_COLUMN, POSITIONS_FILE,
 };
 pub use record::{
     encode_block_header, encode_row, encode_row_from, encode_row_with, RecordBlob, RecordError,

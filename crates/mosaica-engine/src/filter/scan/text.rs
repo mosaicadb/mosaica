@@ -1,5 +1,5 @@
-use croaring::{Bitmap, BitmapView};
-use mosaica_authz::PostingRef;
+use croaring::Bitmap;
+use mosaica_authz::PostingBitmap;
 use mosaica_filter::{ColumnPositions, ColumnPostings, PositionsCursor, SortedDict};
 use mosaica_roaring::RankedRuns;
 use mosaica_types::AttrLocalId;
@@ -126,22 +126,9 @@ pub(in crate::filter) fn phrase_match(
     cancel: &Option<CancelToken>,
 ) -> Result<Bitmap, FilterError> {
     let unreadable = |e: std::io::Error| FilterError::postings_unreadable(column, e);
-    // A posting as a bitmap: the mapped view, or a short array posting materialised.
-    enum Posting<'a> {
-        View(BitmapView<'a>),
-        Owned(Bitmap),
-    }
-    impl Posting<'_> {
-        fn bitmap(&self) -> &Bitmap {
-            match self {
-                Posting::View(view) => view,
-                Posting::Owned(bitmap) => bitmap,
-            }
-        }
-    }
     struct Word<'a> {
         ordinal: u32,
-        posting: Posting<'a>,
+        posting: PostingBitmap<'a>,
         /// Where the word stands in the phrase.
         offsets: Vec<u32>,
     }
@@ -157,28 +144,19 @@ pub(in crate::filter) fn phrase_match(
             word.offsets.push(offset);
             continue;
         }
-        let posting = match postings
+        let Some(posting) = postings
             .posting(AttrLocalId::new(ordinal))
             .map_err(unreadable)?
-        {
-            None => return Ok(Bitmap::new()),
-            Some(PostingRef::Roaring(view)) => Posting::View(view),
-            Some(PostingRef::Array(bytes)) => Posting::Owned(
-                bytes
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|e| u32::from_le_bytes(*e))
-                    .collect(),
-            ),
+        else {
+            return Ok(Bitmap::new());
         };
         words.push(Word {
             ordinal,
-            posting,
+            posting: posting.into_bitmap(),
             offsets: vec![offset],
         });
     }
-    words.sort_by_key(|word| word.posting.bitmap().cardinality());
+    words.sort_by_key(|word| word.posting.cardinality());
 
     /// One word's walk: its runs against the survivors, the run the last survivor was in, and its
     /// positions.
@@ -203,7 +181,7 @@ pub(in crate::filter) fn phrase_match(
     }
     let mut cursors = Vec::with_capacity(words.len());
     for word in &words {
-        let set = word.posting.bitmap();
+        let set: &Bitmap = &word.posting;
         cursors.push(Cursor {
             runs: RankedRuns::new(set, survivors),
             run: None,
