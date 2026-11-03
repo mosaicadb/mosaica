@@ -559,9 +559,7 @@ impl ColumnSpool {
         let file = writer
             .into_inner()
             .map_err(io::IntoInnerError::into_error)?;
-        // The bytes are about to be read back through a memory map; they must be durable and
-        // visible before the map is taken.
-        file.sync_all()?;
+        // The map reads the page cache the flush wrote to; nothing reads the spool after a crash.
         let len = file.metadata()?.len() as usize;
 
         // memmap2 rejects a zero-length map, and an empty typed array cannot be built from a

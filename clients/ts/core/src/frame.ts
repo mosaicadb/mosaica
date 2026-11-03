@@ -52,9 +52,9 @@ export const FRAME_TABLE_HEAD = 9;
  * `'aggregate'` is a `/v1/aggregate` body, which has no head of its own:
  *
  * - Kind 9, table head: JSON, before a table's first page in the response.
- * - Kind 7 and kind 8, as in a records body, each records frame after a table head.
- * - Kind 4, trailer: JSON, exactly one, last. A response cancelled before its first page is a
- *   trailer alone.
+ * - Kind 7 and kind 8, as in a records body, each records frame after a table head. Every
+ *   response a client receives carries at least one page.
+ * - Kind 4, trailer: JSON, exactly one, last. A trailer alone is read as a response of no pages.
  *
  * `'artifacts'` is a `/v1/artifacts/viewport` body:
  *

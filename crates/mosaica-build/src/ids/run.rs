@@ -132,16 +132,18 @@ impl<K: Key> RunReader<K> {
                 .read(&mut rest)
                 .map_err(|e| BuildError::io(&self.receipt.path, e))?;
             if trailing != 0 || self.anchor != self.receipt.anchor {
-                return Err(BuildError::Invalid(format!(
-                    "{} is not the run this build wrote: its entries do not add up to its \
-                     receipt. Build again",
-                    self.receipt.path.display()
-                )));
+                return Err(self.not_this_run("its entries do not add up to its receipt"));
             }
             return Ok(None);
         }
         let wide = if K::WIDTH <= 8 {
-            let gap = read_varint(&mut self.reader, &self.receipt.path, "key run", take_varint64)?;
+            let gap = read_varint(&mut self.reader, &self.receipt.path, "key run", take_varint64)
+                .map_err(|e| match e {
+                    BuildError::Invalid(_) => {
+                        self.not_this_run("a key gap is not a varint of at most 64 bits")
+                    }
+                    e => e,
+                })?;
             self.last + u128::from(gap)
         } else {
             let mut bytes = [0u8; 16];
@@ -159,6 +161,13 @@ impl<K: Key> RunReader<K> {
         self.left -= 1;
         self.anchor = self.anchor.wrapping_add(entry_anchor(wide, value));
         Ok(Some((K::narrow(wide), value)))
+    }
+
+    fn not_this_run(&self, why: &str) -> BuildError {
+        BuildError::Invalid(format!(
+            "{} is not the run this build wrote: {why}. Build again",
+            self.receipt.path.display()
+        ))
     }
 }
 
@@ -232,5 +241,30 @@ mod tests {
         std::fs::write(&path, [0xffu8; 16]).unwrap();
         let mut reader = RunReader::<u64>::open(&receipt).unwrap();
         assert!(reader.next_entry().is_err());
+    }
+
+    /// A run of one entry whose bytes are `bytes`, read back.
+    fn read_one(bytes: &[u8]) -> Result<Option<(u64, u32)>> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run");
+        let mut writer = RunWriter::<u64>::create(&path).unwrap();
+        writer.push(10, 1).unwrap();
+        let receipt = writer.finish().unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        RunReader::<u64>::open(&receipt).unwrap().next_entry()
+    }
+
+    /// **A gap of ten bytes whose last carries bits past 64 is refused**, not truncated to fit.
+    #[test]
+    fn a_gap_wider_than_64_bits_is_refused() {
+        let mut bytes = vec![0xffu8; 9];
+        bytes.push(0x02);
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        assert!(matches!(read_one(&bytes), Err(BuildError::Invalid(_))));
+    }
+
+    #[test]
+    fn a_run_that_ends_inside_a_gap_is_refused() {
+        assert!(matches!(read_one(&[0x8a]), Err(BuildError::Invalid(_))));
     }
 }

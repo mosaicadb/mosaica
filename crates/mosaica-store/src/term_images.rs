@@ -76,6 +76,7 @@ use croaring::{Bitmap, BitmapView, Frozen};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
+use mosaica_authz::PostingBitmap;
 use mosaica_types::view::ViewIncarnation;
 use mosaica_types::TermId;
 
@@ -562,7 +563,12 @@ fn read_posting(posting: PostingWalk<'_>, term: u32) -> io::Result<Posting> {
     posting(term, &mut |posting| {
         let next = posting.into_bitmap();
         match entities {
-            None => entities = Some((*next).clone()),
+            None => {
+                entities = Some(match next {
+                    PostingBitmap::Owned(bitmap) => bitmap,
+                    PostingBitmap::View(view) => view.to_bitmap(),
+                })
+            }
             Some(ref mut held) => held.or_inplace(&next),
         }
     })?;
