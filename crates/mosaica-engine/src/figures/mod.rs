@@ -54,7 +54,7 @@ mod counts;
 mod denied;
 mod field;
 mod labels;
-mod persist;
+pub(crate) mod persist;
 mod sum;
 #[cfg(test)]
 mod tests;

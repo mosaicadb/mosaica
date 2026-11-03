@@ -240,7 +240,10 @@ class Selection:
         """
         if self._n_occ is None:
             self._n_occ = occupancy.ladder(
-                self.rows_by_tile.keys(), self.depth, segments=len(self.segment.parts)
+                self.rows_by_tile.keys(),
+                self.depth,
+                segments=len(self.segment.parts),
+                visible=sum(len(rows) for rows in self.rows_by_tile.values()),
             )[self.depth]
         return self._n_occ
 

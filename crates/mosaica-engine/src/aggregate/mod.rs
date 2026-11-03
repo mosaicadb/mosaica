@@ -21,6 +21,7 @@ pub(crate) mod set;
 mod table;
 mod values;
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use arrow::record_batch::RecordBatch;
@@ -28,6 +29,7 @@ use mosaica_types::MosaicaId;
 
 use crate::cancel::CancelToken;
 use crate::engine::Engine;
+use crate::figures::MaskIdentity;
 use crate::error::{EngineError, Result};
 use crate::filter::{FilterExpr, Scalar};
 use crate::records::{
@@ -37,6 +39,7 @@ use crate::records::{
 use crate::region::RegionVerdict;
 use crate::session::Session;
 use crate::timing::Probe;
+use crate::Generation;
 use crate::viewport::{filter_refusal, SinkClosed, SinkResult};
 
 use cursor::{AggregateCursor, Position};
@@ -578,8 +581,9 @@ impl Engine {
     }
 
     /// The head, then pages until every table is sent or the response ends, then the trailer. A
-    /// page holds one table's rows. Each page opens the view and composes the sets again; the head
-    /// follows the first composition, so it carries that page's region verdict.
+    /// page holds one table's rows. Each page opens the view, and composes the sets again where the
+    /// generation or the mask has moved since the page before; the head follows the first
+    /// composition, so it carries that page's region verdict.
     fn serve_tables(
         &self,
         session: &Session,
@@ -604,6 +608,7 @@ impl Engine {
         // The table whose head this response has sent.
         let mut table_sent: Option<u32> = None;
         let mut held = None;
+        let mut composed: Option<(Arc<Generation>, MaskIdentity, set::Sets)> = None;
         let tables = req.groupings.len() as u32;
         let ended_by = loop {
             if position.table >= tables {
@@ -635,12 +640,25 @@ impl Engine {
                 Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
                 open => open?,
             };
-            let composing = Instant::now();
-            let sets = match set::compose(self, &open, req, planned.prefer_row, &clock, moved) {
-                Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
-                sets => sets?,
+            // The sets of the page before, where this page opened the same generation's same
+            // mask: nothing they were composed from has moved.
+            let sets = match composed.take() {
+                Some((at, mask, sets))
+                    if Arc::ptr_eq(&at, &generation) && mask == open.served.mask_identity =>
+                {
+                    sets
+                }
+                _ => {
+                    let composing = Instant::now();
+                    let sets =
+                        match set::compose(self, &open, req, planned.prefer_row, &clock, moved) {
+                            Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
+                            sets => sets?,
+                        };
+                    timings.compose_ns += composing.elapsed().as_nanos() as u64;
+                    sets
+                }
             };
-            timings.compose_ns += composing.elapsed().as_nanos() as u64;
             let page_region = sets.region();
             region = RegionVerdict::coarsest(region, page_region);
             if !head_sent {
@@ -701,6 +719,8 @@ impl Engine {
             };
             sink.page(grouping, &page.batch, &end)
                 .map_err(|SinkClosed| EngineError::Cancelled)?;
+            let mask = open.served.mask_identity;
+            composed = Some((generation, mask, sets));
         };
         if !head_sent {
             sink.head(&AggregateHead {

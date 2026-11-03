@@ -96,8 +96,8 @@ pub(crate) use item::{
 };
 pub(crate) use meta::{family_view, meta_of, Resolution};
 pub(crate) use row_filter::{
-    crossing_domain, filter_refusal, predicate_source, predicate_vocabulary, unique_holders,
-    FilterCandidate, ResolvedLeaves, RoutedRows,
+    crossing_domain, filter_refusal, merged_spans, predicate_source, predicate_vocabulary,
+    unique_holders, FilterCandidate, OverView, ResolvedLeaves, RoutedRows,
 };
 pub(crate) use served::{ServedSide, ServedView};
 pub(crate) use sweep::{
@@ -225,12 +225,13 @@ impl Engine {
 
         // Checkpoint before θ's anchor.
         check_cancelled(&req.cancel)?;
-        let theta = self.theta(&served, &generation, &mask, &req, &mut probe);
+        // The client may ask for less than the overplot ceiling, never more. Applying it here is
+        // free, since the served set is a prefix, and bounds the selection heap too.
+        let cap = k.min(self.config.k_max_marks);
+        let theta = self.theta(&served, &generation, &mask, &req, cap, &mut probe);
         let params = SelectParams {
             k_min: self.config.k_min,
-            // The client may ask for less than the overplot ceiling, never more. Applying it here
-            // is free, since the served set is a prefix, and bounds the selection heap too.
-            cap: k.min(self.config.k_max_marks),
+            cap,
             threshold: theta.threshold,
         };
 

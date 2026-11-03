@@ -93,6 +93,10 @@ pub struct RegionRows {
     /// Consumers intersect with the composed mask before any number is taken from it.
     pub rows: Bitmap,
     pub verdict: RegionVerdict,
+    /// The view's row ranges `rows` lies inside, ascending, disjoint and merged: every row of the
+    /// tiles and boundary cells a drawn shape decomposed into, whoever may see them. `None` for a
+    /// published shape, whose membership has no tile ranges.
+    pub domain: Option<Arc<[Range<u32>]>>,
 }
 
 /// The region cache's key: the canonical form's digest with everything the row set depends on.
@@ -135,6 +139,8 @@ pub struct RegionDecomposition {
     /// Per segment (in the request's segment order), parallel to `boundary`: the segment-local
     /// row range each boundary cell occupies.
     boundary_ranges: Vec<Vec<Range<u32>>>,
+    /// [`RegionRows::domain`]: the interior's ranges and the boundary cells', in view row space.
+    domain: Arc<[Range<u32>]>,
     verdict: RegionVerdict,
 }
 
@@ -145,7 +151,8 @@ impl CacheWeight for RegionDecomposition {
             .iter()
             .map(|b| std::mem::size_of::<BoundaryCell<PolyCtx>>() + b.ctx.edges.len() * 4)
             .sum();
-        let ranges: usize = self.boundary_ranges.iter().map(|r| r.len() * 8).sum();
+        let ranges: usize = self.boundary_ranges.iter().map(|r| r.len() * 8).sum::<usize>()
+            + self.domain.len() * 8;
         self.interior
             .get_serialized_size_in_bytes::<croaring::Portable>() as u64
             + boundary as u64
@@ -175,10 +182,12 @@ impl RegionDecomposition {
             .copied()
             .collect();
         let mut interior = Bitmap::new();
+        let mut spans = Vec::new();
         for &(segment, base) in segments {
             for range in tile_ranges_all(segment, &whole) {
                 if range.start < range.end {
                     interior.add_range(base + range.start..base + range.end);
+                    spans.push(base + range.start..base + range.end);
                 }
             }
         }
@@ -192,16 +201,25 @@ impl RegionDecomposition {
                 depth: 16,
             })
             .collect();
-        let boundary_ranges = segments
+        let boundary_ranges: Vec<Vec<Range<u32>>> = segments
             .iter()
             .map(|&(segment, _)| tile_ranges_all(segment, &cells))
             .collect();
+        for (ranges, &(_, base)) in boundary_ranges.iter().zip(segments) {
+            spans.extend(
+                ranges
+                    .iter()
+                    .filter(|range| range.start < range.end)
+                    .map(|range| base + range.start..base + range.end),
+            );
+        }
         RegionDecomposition {
             canonical,
             shape,
             interior,
             boundary,
             boundary_ranges,
+            domain: crate::viewport::merged_spans(spans).into(),
             verdict,
         }
     }
@@ -213,6 +231,11 @@ impl RegionDecomposition {
 
     pub fn verdict(&self) -> RegionVerdict {
         self.verdict
+    }
+
+    /// [`RegionRows::domain`].
+    pub fn domain(&self) -> &Arc<[Range<u32>]> {
+        &self.domain
     }
 
     /// How many boundary cells the descent held — for the traces.

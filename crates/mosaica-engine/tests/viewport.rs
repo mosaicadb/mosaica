@@ -1125,7 +1125,7 @@ fn the_background_fill_takes_the_ladder_to_twelve_in_one_walk_off_the_request() 
         &tmp.path().join("pairs.parquet"),
     );
 
-    let filled = open_engine(
+    let filled = open_live(
         &bundle_root,
         &tmp.path().join("cache_filled"),
         &tmp.path().join("wal_filled.log"),
@@ -1160,7 +1160,7 @@ fn the_background_fill_takes_the_ladder_to_twelve_in_one_walk_off_the_request() 
         "the request's own walk at depth 3, and the fill's one walk to depth 12"
     );
 
-    let unfilled = open_engine(
+    let unfilled = open_live(
         &bundle_root,
         &tmp.path().join("cache_plain"),
         &tmp.path().join("wal_plain.log"),
@@ -1201,6 +1201,101 @@ fn the_background_fill_takes_the_ladder_to_twelve_in_one_walk_off_the_request() 
     // entry, so nothing is left working on behalf of a session that no longer exists.
     filled.prune_tokens(&rustc_hash::FxHashSet::from_iter([session.token_id()]));
     assert_eq!(filled.occupancy_stages_in_flight(), 0);
+}
+
+/// An engine whose θ is a cut rather than saturated: the shared config's target reaches every
+/// item, which leaves nothing for `N_occ` to decide.
+fn open_live(bundle_root: &Path, cache: &Path, wal: &Path) -> Engine {
+    let cfg = EngineConfig {
+        theta_target_marks: 4,
+        ..config()
+    };
+    Engine::open(bundle_root, cache, wal, cfg).unwrap()
+}
+
+fn wait_for_the_fill(engine: &Engine) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while engine.occupancy_stages_in_flight() > 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background ladder fill did not settle"
+        );
+        std::thread::yield_now();
+    }
+}
+
+/// **A grant's ladder outlives a restart, and a second session of the grant shares it.** The first
+/// engine walks once for the request and once for the fill; a second session of the same grant
+/// walks nothing, and an engine reopened over the same cache directory reads the ladder back and
+/// walks nothing either, serving the same tiles and points.
+#[test]
+fn a_grants_ladder_is_read_back_after_a_restart() {
+    let tmp = TempDir::new().unwrap();
+    let bundle_root = tmp.path().join("bundle");
+    build_fixture(
+        &bundle_root,
+        &tmp.path().join("points.parquet"),
+        &tmp.path().join("pairs.parquet"),
+    );
+    let (cache, wal) = (tmp.path().join("cache"), tmp.path().join("wal.log"));
+    let request = || ViewportRequest::new("s0", 6, [0.0, 0.0, 1000.0, 1000.0], 8);
+    let served = {
+        let first = open_live(&bundle_root, &cache, &wal);
+        let session = first.authorise(&full_coverage_credential()).unwrap();
+        let served = first.viewport(&session, request()).unwrap();
+        wait_for_the_fill(&first);
+        assert_eq!(first.occupancy_walks(), 2, "the request's walk and the fill's");
+        let other = first.authorise(&full_coverage_credential()).unwrap();
+        first.viewport(&other, request()).unwrap();
+        assert_eq!(first.occupancy_walks(), 2, "a second session of the grant walks nothing");
+        served
+    };
+    let reopened = open_live(&bundle_root, &cache, &wal);
+    let session = reopened.authorise(&full_coverage_credential()).unwrap();
+    let again = reopened.viewport(&session, request()).unwrap();
+    assert_eq!(reopened.occupancy_walks(), 0, "the ladder was read back");
+    assert_eq!(again.tiles, served.tiles);
+    assert_eq!(again.points, served.points);
+    for (depth, bbox) in [(3, [0.0, 0.0, 1000.0, 1000.0]), (12, [400.0, 400.0, 420.0, 420.0])] {
+        reopened
+            .viewport(&session, ViewportRequest::new("s0", depth, bbox, 8))
+            .unwrap();
+    }
+    wait_for_the_fill(&reopened);
+    assert_eq!(reopened.occupancy_walks(), 0, "every rung to 12 was read back");
+}
+
+/// **A first read takes no occupancy walk where θ cannot change a tile's sample**: at depth 0,
+/// where one tile holds everything; under a target reaching every visible item; and where the
+/// floor reaches the cap. Each serves what a live threshold's engine serves for the same request.
+#[test]
+fn a_first_read_walks_nothing_where_theta_cannot_change_a_tile() {
+    let tmp = TempDir::new().unwrap();
+    let bundle_root = tmp.path().join("bundle");
+    build_fixture(
+        &bundle_root,
+        &tmp.path().join("points.parquet"),
+        &tmp.path().join("pairs.parquet"),
+    );
+    let whole = [0.0, 0.0, 1000.0, 1000.0];
+    let live = open_live(&bundle_root, &tmp.path().join("live"), &tmp.path().join("live.log"));
+    let live_session = live.authorise(&full_coverage_credential()).unwrap();
+    live.viewport(&live_session, ViewportRequest::new("s0", 0, whole, 8)).unwrap();
+    let floored = live.viewport(&live_session, ViewportRequest::new("s0", 9, whole, 2)).unwrap();
+    assert_eq!(live.occupancy_walks(), 0, "depth 0, and k at the floor");
+
+    let saturated = open_engine(&bundle_root, &tmp.path().join("sat"), &tmp.path().join("sat.log"));
+    let session = saturated.authorise(&full_coverage_credential()).unwrap();
+    for (depth, bbox) in [(0u8, whole), (7, whole), (16, [400.0, 400.0, 401.0, 401.0])] {
+        saturated
+            .viewport(&session, ViewportRequest::new("s0", depth, bbox, 8))
+            .unwrap();
+    }
+    assert_eq!(saturated.occupancy_walks(), 0, "the target reaches every visible item");
+    assert_eq!(
+        saturated.viewport(&session, ViewportRequest::new("s0", 9, whole, 2)).unwrap().points,
+        floored.points
+    );
 }
 
 /// **The equality `GET /v1/meta`'s disclosure argument rests on.**
@@ -1561,6 +1656,8 @@ fn f1_selection_visits_exactly_the_visible_set() {
         &tmp.path().join("wal.log"),
     );
     // Partial coverage, deliberately: see the doc above. Every third item carries SUBSET_TERM.
+    // The scan's count is the subject: the bands, which answer a saturated tile, are kept out.
+    engine.set_bands_below_zoom_for_test(0);
     let session = engine.authorise(&subset_credential()).unwrap();
 
     const K: usize = 5;

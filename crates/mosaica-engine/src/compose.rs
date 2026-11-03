@@ -283,6 +283,18 @@ impl EffectiveMask {
         base_count - minus_count + plus_count
     }
 
+    /// Whether `r` holds a visible row: [`Self::count_range`]'s arithmetic, short of counting
+    /// where a bitmap settles it.
+    pub fn holds_visible_in(&self, r: Range<u32>) -> bool {
+        if self.plus.intersect_with_range(r.clone()) {
+            return true;
+        }
+        if self.minus.is_empty() {
+            return self.base.bitmap().intersect_with_range(r);
+        }
+        self.count_range(r) > 0
+    }
+
     /// [`Self::count_range`] over each of `ranges`, each bitmap walked once
     /// ([`mosaica_roaring::RangeEnds`]).
     pub fn count_ranges(&self, ranges: &[Range<u32>]) -> Vec<u64> {

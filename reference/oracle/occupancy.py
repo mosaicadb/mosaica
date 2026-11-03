@@ -1,5 +1,5 @@
 """`N_occ(d)` — θ's second anchor — as the engine computes it: counted at one segment, estimated
-above it.
+above it, and its deep rungs estimated from chains where the viewer sees more than a walk counts.
 
 §7.2 anchors the selection threshold at `θ_d = m_target · N_occ(d) / V_total`, where `N_occ(d)` is
 the number of depth-*d* tiles holding at least one row the viewer may see. At **one segment** the
@@ -48,6 +48,19 @@ number for the same mask."""
 
 LN2_Q32 = 2977044472
 """`ln 2 · 2³²`, rounded to nearest."""
+
+EXACT_TILES = 1 << 16
+"""A ladder to depth `d` is counted, or sketched, at every rung where `min(4^d, visible)` is at most
+this; past it the rungs below the chains' start are estimated. The engine's `EXACT_TILES`."""
+
+EXACT_DEPTH = EXACT_TILES.bit_length() // 2
+"""The deepest depth whose every tile fits `EXACT_TILES`: where the chains start at the earliest."""
+
+CHAINS = 1 << 13
+"""The occupied tiles at the chains' start are sampled down to between this many and twice it."""
+
+CHAIN_SEED = 0xD1B54A32D192ED03
+"""The constant a chain's hash stirs in, fixed for `SKETCH_SEED`'s reason and distinct from it."""
 
 
 def mix64(z: int) -> int:
@@ -175,8 +188,12 @@ def exact_ladder(tiles: Iterable[int], depth: int) -> list[int]:
     one segment is once per distinct ancestor — and the two agree by that argument rather than by
     transcription.
     """
+    return _finish(_counted(tiles, depth), depth)
+
+
+def _counted(tiles: Iterable[int], depth: int) -> list[int]:
     tiles = list(tiles)
-    return _finish([len({t >> (2 * (depth - d)) for t in tiles}) for d in range(depth + 1)], depth)
+    return [len({t >> (2 * (depth - d)) for t in tiles}) for d in range(depth + 1)]
 
 
 def sketch_ladder(
@@ -190,6 +207,10 @@ def sketch_ladder(
     leaves the register arrays identical to what this loop produces. Order does not matter either:
     a register holds a maximum.
     """
+    return _finish(_sketched(tiles, depth, precision), depth)
+
+
+def _sketched(tiles: Iterable[int], depth: int, precision: int = SKETCH_PRECISION) -> list[int]:
     stride = 1 << precision
     plane = [bytearray(stride) for _ in range(depth + 1)]
     for tile in tiles:
@@ -197,18 +218,64 @@ def sketch_ladder(
             index, rank = register_of(tile >> (2 * (depth - d)), precision)
             if rank > plane[d][index]:
                 plane[d][index] = rank
-    return _finish([estimate_registers(plane[d], precision) for d in range(depth + 1)], depth)
+    return [estimate_registers(plane[d], precision) for d in range(depth + 1)]
+
+
+def descend(tile: int, start: int, bits: int, occupied: list[set[int]], depth: int) -> list[int]:
+    """The depth-`start` `tile`'s products from `start + 1` to `depth`, or nothing where the tile
+    is not in the sample of rate `2^-bits`.
+
+    The descent counts the children of the tile it stands on that hold a visible row, multiplies
+    its running product by the count, and steps to the one a hash chooses; the product at a depth
+    is an unbiased estimate of how many tiles there below `tile` hold a visible row (Knuth's
+    estimate of a tree's size). The engine's `Chains::descend`.
+    """
+    h = mix64((((tile << 5) | start) + CHAIN_SEED) & MASK64)
+    if bits and h >> (64 - bits):
+        return []
+    node, product, out = tile, 1, []
+    for d in range(start + 1, depth + 1):
+        kids = [node << 2 | k for k in range(4) if node << 2 | k in occupied[d]]
+        product *= len(kids)
+        out.append(product)
+        h = mix64((h + CHAIN_SEED) & MASK64)
+        node = kids[h % len(kids)]
+    return out
 
 
 def ladder(
-    tiles: Iterable[int], depth: int, segments: int, precision: int = SKETCH_PRECISION
+    tiles: Iterable[int],
+    depth: int,
+    segments: int,
+    visible: int,
+    precision: int = SKETCH_PRECISION,
 ) -> list[int]:
-    """`N_occ(d)` for every `d` in `0..=depth`, by the route the engine takes at `segments`.
+    """`N_occ(d)` for every `d` in `0..=depth`, by the route the engine takes at `segments`, over a
+    viewer who sees `visible` rows.
 
-    **The predicate is the engine's, verbatim**: one segment counts, two or more estimate. It lives
-    here rather than at the call site so that this module is the whole statement of the anchor, and
-    so that a change to the predicate is one edit on each side rather than one per caller.
+    **The predicates are the engine's, verbatim**: one segment counts, two or more estimate; and
+    where a walk could visit more than `EXACT_TILES` tiles the rungs below `start` are the sums of
+    a sample's descents, `start` the shallowest depth from `EXACT_DEPTH` holding at least `CHAINS`
+    occupied tiles. They live here rather than at the call site so that this module is the whole
+    statement of the anchor.
     """
-    if segments == 1:
-        return exact_ladder(tiles, depth)
-    return sketch_ladder(tiles, depth, precision)
+    tiles = set(tiles)
+    raw = _counted if segments == 1 else (lambda t, d: _sketched(t, d, precision))
+    if min(visible, 1 << (2 * depth)) <= EXACT_TILES:
+        return _finish(raw(tiles, depth), depth)
+    start = EXACT_DEPTH
+    while True:
+        walked = {t >> (2 * (depth - start)) for t in tiles}
+        rungs = raw(walked, start)
+        if rungs[start] >= CHAINS:
+            break
+        start += 1
+        if start == depth:
+            return _finish(raw(tiles, depth), depth)
+    bits = (rungs[start] // CHAINS).bit_length() - 1
+    occupied = [{t >> (2 * (depth - d)) for t in tiles} for d in range(depth + 1)]
+    sums = [0] * (depth - start)
+    for tile in walked:
+        for i, product in enumerate(descend(tile, start, bits, occupied, depth)):
+            sums[i] += product
+    return _finish(rungs + [total << bits for total in sums], depth)

@@ -667,13 +667,9 @@ fn two_principals_over_one_artifact_get_two_shapes() {
 // The pruners: what a revoked session takes with it.
 // ---------------------------------------------------------------------------------------------
 
-/// The two per-session gauges a prune must move, read together so one assertion names both: the
-/// occupancy ladder and derived geometry.
-fn per_session_entries(engine: &Engine) -> [usize; 2] {
-    [
-        engine.occupancy_cache_stats().entries,
-        engine.derived_cache_stats().entries,
-    ]
+/// The per-session gauge a prune must move: the derived geometry.
+fn per_session_entries(engine: &Engine) -> [usize; 1] {
+    [engine.derived_cache_stats().entries]
 }
 
 /// A level served row-major, which is the only shape masked counts are held for. They are keyed
@@ -704,8 +700,7 @@ fn pruning_fixture(fx: &Fixture) -> Engine {
     engine
 }
 
-/// Two requests that warm all three: the points take the occupancy ladder, and the artifacts give
-/// the masked counts and the derived geometry.
+/// Two requests that warm both: the artifacts give the masked counts and the derived geometry.
 fn warm(engine: &Engine, session: &mosaica_engine::Session) {
     engine
         .viewport(
@@ -730,12 +725,12 @@ fn warm(engine: &Engine, session: &mosaica_engine::Session) {
 
 /// **A prune drops every per-session cache the session warmed, not only its row projections.**
 ///
-/// The revoked session's occupancy rungs and derived shapes are each a large per-session
-/// structure, and nothing else holds them once the session is gone. The surviving session keeps
-/// all of its own and is still served. The level's masked counts are keyed on the term set, which
-/// another session may hold, so the prune leaves them.
+/// The revoked session's derived shapes are a large per-session structure, and nothing else holds
+/// them once the session is gone. The surviving session keeps all of its own and is still served.
+/// The level's masked counts and the occupancy ladders are keyed on the term set, which another
+/// session may hold, so the prune leaves them.
 #[test]
-fn a_prune_drops_the_tokens_occupancy_and_shapes() {
+fn a_prune_drops_the_tokens_shapes() {
     let fx = fixture();
     let engine = pruning_fixture(&fx);
 
@@ -786,7 +781,7 @@ fn a_prune_drops_the_tokens_occupancy_and_shapes() {
     );
 }
 
-/// [`a_prune_drops_the_tokens_occupancy_and_shapes`] through the sweep's batch form,
+/// [`a_prune_drops_the_tokens_shapes`] through the sweep's batch form,
 /// which walks each cache once with a set membership test rather than once per victim.
 #[test]
 fn a_batch_prune_drops_the_same_caches_as_a_single_one() {

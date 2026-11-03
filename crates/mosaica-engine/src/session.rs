@@ -446,8 +446,8 @@ impl Engine {
 
     /// Drop every cached entry belonging to any of `token_ids`, each cache walked once with a
     /// set-membership test rather than once per victim: memory hygiene when sessions end, not a
-    /// disclosure control. Row projections are their grants', and stay until the byte bound or a
-    /// publication's retention removes them. Call it off the request path.
+    /// disclosure control. Row projections and occupancy ladders are their grants', and stay until
+    /// the byte bound or a publication's retention removes them. Call it off the request path.
     pub fn prune_tokens(&self, token_ids: &FxHashSet<u64>) {
         if token_ids.is_empty() {
             return;
@@ -456,8 +456,6 @@ impl Engine {
         for token_id in token_ids {
             self.stage.cancel(*token_id);
         }
-        self.occupancy
-            .retain_keys(|key| !token_ids.contains(&key.token_id));
         self.derived_geometry.prune_tokens(token_ids);
         self.suggest_sets.prune_tokens(token_ids);
         self.figures.prune_tokens(token_ids);

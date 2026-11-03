@@ -77,32 +77,22 @@
 //! `test_the_ladder_matches_the_engine_vector_for_vector` there, which is what keeps
 //! `conformance/tests/test_i7_selection.py` an exact differential rather than one within a band.
 //!
-//! # The walk, and the two routes that were measured and rejected
+//! # The walk, and where the deep rungs are estimated
 //!
 //! Rows are stored in Morton order within a segment, so the code column ascends with the row id
-//! and a tile is a contiguous range of it. The walk takes the mask's visible runs, finds the leaf
-//! cells each run touches in the cut index, and hops from one occupied tile's code boundary to
-//! the next through those cells' codes by exponential search ([`gallop`]). Cost is
-//! `O((runs + N_occ(d)) · log)` per depth, against the oracle's one pass per visible row. It reads
-//! the cut index and the cell codes, one entry per occupied cell, and never the Morton column,
-//! which holds one per row.
+//! and a tile is a contiguous range of it. The walk asks the mask for its first visible row at or
+//! after the next uncredited tile's first row, credits the tile holding it, and gallops the cell
+//! codes ([`gallop`]) to the tile after: one seek per occupied tile, whatever the mask's runs. It
+//! reads the cut index and the cell codes, one entry per occupied cell, and never the Morton
+//! column. Over the 1.02 × 10⁸-row paperseek tier with a viewer of 8.8 × 10⁷ rows it counts depth 8
+//! in 8 ms and depth 12 in 130 ms, where the walk over every visible run it replaced took 390–430
+//! ms at every depth to 12; the cost is memory latency per tile, about 400 ns where tiles are large
+//! and 50 ns where they are small.
 //!
-//! **Endpoint arithmetic on a run is wrong.** Crediting `tile(end) − tile(start) + 1` per run
-//! counts the tile indices a run *spans*, not the occupied tiles inside it: a run's Morton codes
-//! are not dense in tile-index space, so every empty tile between two occupied ones is counted.
-//! Measured against the linear-scan oracle it is wrong by 1.6×–225× at depth 12 across four
-//! corpora. The gallop is what makes the answer exact.
-//!
-//! **A descent over the tile tree is not affordable.** Visiting occupied nodes breadth-first pays
-//! a Morton binary search per node to find that node's row range plus one mask question to decide
-//! whether it is empty, and the node count is the answer being computed: reaching depth 16 visits
-//! `Σ_d N_occ(d)` nodes where this walk visits one depth's runs. Measured over 1M–13.5M-row
-//! corpora a descent took 9.2–59 s for 17 depths against 21–191 ms for this walk, and the variant
-//! testing emptiness with a short-circuiting intersection rather than a full count stayed far
-//! behind.
-//!
-//! Both figures are from the route comparison recorded in
-//! [decision 0137](../../../docs/decisions/0137-theta-is-anchored-on-the-occupied-tile-count.md).
+//! **Past [`EXACT_TILES`] tiles the rungs below a start depth are estimated** ([`Chains`]): a walk
+//! counting 7 × 10⁷ tiles at depth 16 takes seconds, where the estimate takes 40–80 ms at every
+//! depth from 9 to 16 on that tier, within 1.1% of the count. The plan reads only the viewer's own
+//! quantities, so the route θ takes is no more a disclosure than θ is.
 //!
 //! # What it costs, measured
 //!
@@ -176,10 +166,10 @@ use mosaica_types::ShardId;
 
 use crate::compose::{EffectiveMask, ShardedMask};
 
-/// How many rows one [`EffectiveMask::for_each_visible_run`] call covers.
+/// How many rows one [`EffectiveMask::decode_source`] covers.
 ///
 /// **The walk is chunked rather than taken over the whole row space in one call.** That method
-/// walks `base` in place only while the overlay diffs are empty; with any diff present it takes
+/// hands back `base` itself only while the overlay diffs are empty; with any diff present it takes
 /// the [`EffectiveMask::rows_in_range`] fallback, which materialises the composed mask over the
 /// range it is handed. Passing the whole row space would therefore build a copy of a 233-million-
 /// row bitmap on every request that arrives after a suppression. Chunking bounds that temporary to
@@ -188,8 +178,8 @@ use crate::compose::{EffectiveMask, ShardedMask};
 /// 2²² rows is 64 croaring containers — small enough that the temporary is a few hundred
 /// kilobytes, large enough that a 233-million-row view is 56 chunks rather than thousands.
 ///
-/// Splitting a run at a chunk boundary changes no answer: [`Walk::visit_cells`] carries the last
-/// credited tile across runs, so the two halves credit their shared tile once.
+/// A tile split by a chunk boundary is credited once: the walk carries the first cell of the next
+/// uncredited tile across chunks.
 const CHUNK_ROWS: u32 = 1 << 22;
 
 /// The depth-`depth` tile index of a Morton code.
@@ -218,46 +208,15 @@ fn gallop(codes: &[u32], from: usize, target: u64) -> usize {
     base + lo + tail[lo..hi].partition_point(|&c| (c as u64) < target)
 }
 
-/// One segment's walk state: the depth, the last tile credited, and where the credits go.
-struct Walk<'a, F: FnMut(u64)> {
-    /// Each occupied cell's code, ascending.
-    codes: &'a [u32],
-    depth: u8,
-    /// The shift from a code to its depth-`depth` tile index.
-    shift: u32,
-    /// The highest tile index credited so far in this segment, or `u64::MAX` before the first.
-    /// A `u32` code cannot produce that index at any depth, so it is a sound "nothing yet".
-    last: u64,
-    emit: F,
-}
-
-impl<F: FnMut(u64)> Walk<'_, F> {
-    /// Credit every occupied tile among the cells `cells`, ascending.
-    fn visit_cells(&mut self, cells: Range<usize>) {
-        let end = cells.end;
-        let mut i = cells.start;
-        while i < end {
-            let tile = tile_of(self.codes[i], self.depth);
-            if tile != self.last {
-                self.last = tile;
-                (self.emit)(tile);
-            }
-            // The first cell at or above the next tile's low bound. At depth 0 the shift is 32 and
-            // `(tile + 1) << 32` exceeds every code, so the gallop lands on `end` and the cells
-            // finish in one step — one tile covers the grid.
-            let target = (tile + 1) << self.shift;
-            i = gallop(&self.codes[..end], i + 1, target).max(i + 1);
-        }
-    }
-}
-
 /// Credit every depth-`depth` tile of `segment` holding a row visible to `mask`, ascending and
 /// without repetition.
 ///
 /// `row_base` is where this segment's rows begin in the view's row space, which is the space the
-/// mask is over; the segment's cut index is segment-local. A run touches every cell from the one
-/// holding its first row to the one holding its last, so the tiles of those cells are the tiles
-/// of its rows.
+/// mask is over; the segment's cut index is segment-local. The walk asks the mask for its first
+/// visible row at or after the start of the next tile it has not credited, credits the tile
+/// holding that row, and gallops the cell codes to the first cell of the tile after it: one seek
+/// per occupied tile, and none for an empty one or for the visible rows of a tile already
+/// credited.
 ///
 /// **Public so a measurement prices an accumulator over the identical walk.**
 /// `mosaica-bench`'s `occupancy_sketch` compares this arm against the ones it replaced, and a
@@ -267,29 +226,46 @@ pub fn for_each_occupied_tile(
     segment: &SegmentData,
     row_base: u32,
     depth: u8,
-    emit: impl FnMut(u64),
+    mut emit: impl FnMut(u64),
+) {
+    walk_tiles(mask, segment, row_base, depth, |tile, _| emit(tile));
+}
+
+/// [`for_each_occupied_tile`], each tile with the cells it is searched for in: every cell of the
+/// tile, after those of the occupied tile before it.
+fn walk_tiles(
+    mask: &EffectiveMask,
+    segment: &SegmentData,
+    row_base: u32,
+    depth: u8,
+    mut emit: impl FnMut(u64, Range<usize>),
 ) {
     let starts = segment.cuts.starts();
-    let mut walk = Walk {
-        codes: segment.cell_codes.codes(),
-        depth,
-        shift: 32 - 2 * depth as u32,
-        last: u64::MAX,
-        emit,
-    };
+    let codes = segment.cell_codes.codes();
+    let shift = 32 - 2 * u32::from(depth);
     let rows = segment.row_count;
-    // The runs ascend, so the cell holding each one's first row is at or past the last one's.
-    let mut cell = 0usize;
+    // The first cell of the tile the walk seeks from, and that cell's first row.
+    let (mut cell, mut from) = (0usize, 0u32);
     let mut start = 0u32;
-    while start < rows {
+    while start < rows && cell < starts.len() {
         let end = start.saturating_add(CHUNK_ROWS).min(rows);
-        mask.for_each_visible_run(row_base + start..row_base + end, |run| {
-            let (first, last) = (run.start - row_base, run.end - row_base);
-            // `starts[0]` is row 0, so some cell begins at or before the run's first row.
-            cell = gallop(starts, cell, u64::from(first) + 1) - 1;
-            let through = gallop(starts, cell, u64::from(last));
-            walk.visit_cells(cell..through);
-        });
+        let source = mask.decode_source(row_base + start..row_base + end);
+        let mut cursor = source.bitmap().cursor();
+        while from < end {
+            cursor.reset_at_or_after(row_base + from.max(start));
+            let Some(row) = cursor.current().filter(|&row| row < row_base + end) else {
+                break;
+            };
+            let after = cell;
+            // `starts[cell]` is at or before `row`, so the cell holding it is at or after `cell`.
+            cell = gallop(starts, cell, u64::from(row - row_base) + 1) - 1;
+            let tile = tile_of(codes[cell], depth);
+            // At depth 0 the shift is 32 and `(tile + 1) << 32` exceeds every code, so the gallop
+            // lands past the last cell and one tile covers the grid.
+            cell = gallop(codes, cell + 1, (tile + 1) << shift);
+            emit(tile, after..cell);
+            from = starts.get(cell).copied().unwrap_or(rows);
+        }
         start = end;
     }
 }
@@ -364,7 +340,7 @@ impl OccupancyLadder {
 ///
 /// A walk at depth *d* emits that depth's occupied tiles ascending; the depth-*d'* tile holding one
 /// of them is `tile >> 2(d - d')`, so the shallower ladder is a function of the same emissions and
-/// costs no second pass over the mask. `N_occ` is memoised per `(session, view, depth)` and paid on
+/// costs no second pass over the mask. `N_occ` is memoised per `(grant, view, depth)` and paid on
 /// the first request at each new depth, so a session that reaches depth *d* by any route other than
 /// stepping down through every level pays one walk rather than one per level.
 ///
@@ -417,11 +393,275 @@ impl OccupancyLadder {
 /// **Every conformance fixture and every demo corpus is single-segment**, so the route the
 /// differential exercises is the exact one; `reference/oracle/occupancy.py` says where that leaves
 /// the estimator's coverage.
-pub fn occupied_tiles_ladder(parts: &[OccupancyPart<'_>], depth: u8) -> OccupancyLadder {
-    if parts.len() == 1 {
-        occupied_tiles_ladder_exact(parts, depth)
-    } else {
-        sketched_ladder(parts, depth, SKETCH_PRECISION)
+pub fn occupied_tiles_ladder(
+    parts: &[OccupancyPart<'_>],
+    depth: u8,
+    visible: u64,
+) -> OccupancyLadder {
+    let counted = parts.len() == 1;
+    let walked = |at: u8, tiles: Option<&mut Vec<Walked>>| {
+        let mut rungs = Rungs::new(counted, depth);
+        walk_ladder(parts, at, &mut rungs, tiles);
+        rungs
+    };
+    if visible.min(1u64 << (2 * u32::from(depth))) <= EXACT_TILES {
+        return walked(depth, None).finish(depth, None);
+    }
+    let mut from = EXACT_DEPTH;
+    loop {
+        let mut tiles = Vec::new();
+        let rungs = walked(from, Some(&mut tiles));
+        let occupied = rungs.estimate(from);
+        if occupied >= CHAINS {
+            let chains = Chains {
+                from,
+                bits: (occupied / CHAINS).ilog2(),
+            };
+            let below = chains.descend(parts, tiles, depth);
+            return rungs.finish(depth, Some((chains, below)));
+        }
+        // Fewer than `CHAINS` tiles at `from`, so at most four times as many one depth down.
+        from += 1;
+        if from == depth {
+            return walked(depth, None).finish(depth, None);
+        }
+    }
+}
+
+/// A walk is planned to count every occupied tile where it can visit at most this many: `4^d`
+/// tiles at depth `d`, and no more than the viewer can see. Past it the deep rungs are estimated
+/// from chains ([`Chains`]).
+const EXACT_TILES: u64 = 1 << 16;
+
+/// The deepest depth whose every tile fits [`EXACT_TILES`], and so the deepest a walk counts
+/// whatever the corpus holds.
+const EXACT_DEPTH: u8 = (EXACT_TILES.ilog2() / 2) as u8;
+
+/// How many chains an estimate descends: the occupied tiles at the depth the chains start from
+/// are sampled down to between this many and twice it.
+const CHAINS: u64 = 1 << 13;
+
+/// The constant a chain's hashes stir in, fixed for [`SKETCH_SEED`]'s reason and distinct from it.
+const CHAIN_SEED: u64 = 0xD1B5_4A32_D192_ED03;
+
+/// One tile a walk credited: its part, its index, and the cells it is searched for in.
+type Walked = (usize, u64, Range<usize>);
+
+/// The rungs below depth `from` estimated by descending from a sample of its occupied tiles.
+///
+/// A sampled tile descends one depth at a time: it counts the children of the tile it stands on
+/// that hold a visible row, multiplies its running product by that count, and steps to one of
+/// those children a hash chooses. The product at depth `d` is an unbiased estimate of how many
+/// tiles at `d` below the sampled tile hold a visible row (Knuth's estimate of a tree's size), and
+/// a rung is the sum of the products, scaled by the sample's rate. A descent never steps into an
+/// empty child, so a depth where the viewer's rows are sparse against the grid still has every
+/// chain's estimate behind it.
+///
+/// **Every quantity the estimate reads is the viewer's**: which tiles hold a row it can see, how
+/// many it can see, and hashes of tile indices. Whether a ladder is estimated, from which depth and
+/// at what rate, is planned from those alone, so θ says nothing about rows the viewer cannot see.
+/// Rungs at and above `from` are counted, or sketched, by the walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Chains {
+    from: u8,
+    /// `log2` of the sampling rate's inverse.
+    bits: u32,
+}
+
+impl Chains {
+    /// The first of `tile`'s hashes, whose high bits decide whether it is in the sample.
+    fn first_hash(self, tile: u64) -> Option<u64> {
+        let h = mix64((tile << 5 | u64::from(self.from)).wrapping_add(CHAIN_SEED));
+        (self.bits == 0 || h >> (64 - self.bits) == 0).then_some(h)
+    }
+
+    /// Each depth's sum of products below `from` to `depth`, over the sampled tiles of `tiles`,
+    /// the depth-`from` tiles a walk of `parts` credited. A tile several parts hold descends over
+    /// all of them, so a child holds a visible row where any part says it does.
+    fn descend(self, parts: &[OccupancyPart<'_>], mut tiles: Vec<Walked>, depth: u8) -> [u64; 17] {
+        tiles.sort_unstable_by_key(|&(part, tile, _)| (tile, part));
+        let mut sums = [0u64; 17];
+        let mut here: Vec<(usize, Range<usize>)> = Vec::new();
+        let mut kids: [Vec<(usize, Range<usize>)>; 4] = Default::default();
+        for group in tiles.chunk_by(|a, b| a.1 == b.1) {
+            let tile = group[0].1;
+            let Some(mut h) = self.first_hash(tile) else {
+                continue;
+            };
+            here.clear();
+            here.extend(group.iter().map(|(part, _, cells)| (*part, cells.clone())));
+            let (mut node, mut product) = (tile, 1u64);
+            for d in self.from + 1..=depth {
+                let shift = 32 - 2 * u32::from(d);
+                kids.iter_mut().for_each(Vec::clear);
+                for (part, cells) in &here {
+                    let codes = &parts[*part].1.cell_codes.codes()[cells.clone()];
+                    // A walked tile's cells may follow those of tiles before it it has no row in.
+                    let mut at = codes.partition_point(|&c| u64::from(c) < node << (shift + 2));
+                    for (k, kid) in kids.iter_mut().enumerate() {
+                        let child = (node << 2 | k as u64) + 1;
+                        let past = at + codes[at..].partition_point(|&c| u64::from(c) < child << shift);
+                        if at < past {
+                            kid.push((*part, cells.start + at..cells.start + past));
+                        }
+                        at = past;
+                    }
+                }
+                let held = kids.iter().filter(|kid| !kid.is_empty()).count();
+                let mut occupied = [false; 4];
+                for (k, kid) in kids.iter().enumerate() {
+                    // The tile stood on holds a visible row, so where one child holds all its
+                    // cells that child holds the row.
+                    occupied[k] = !kid.is_empty()
+                        && (held == 1 || kid.iter().any(|(part, cells)| holds_visible(parts[*part], cells)));
+                }
+                let count = occupied.iter().filter(|&&o| o).count() as u64;
+                if count == 0 {
+                    debug_assert!(false, "an occupied tile has an occupied child");
+                    break;
+                }
+                product *= count;
+                sums[d as usize] += product;
+                h = mix64(h.wrapping_add(CHAIN_SEED));
+                let pick = (h % count) as usize;
+                let k = (0..4).filter(|&k| occupied[k]).nth(pick).expect("pick < count");
+                node = node << 2 | k as u64;
+                here.clear();
+                here.append(&mut kids[k]);
+            }
+        }
+        sums
+    }
+}
+
+/// Whether `cells` of a part hold a row its mask sees.
+fn holds_visible((mask, segment, row_base): OccupancyPart<'_>, cells: &Range<usize>) -> bool {
+    let Some(mask) = mask else {
+        return false;
+    };
+    let starts = segment.cuts.starts();
+    let end = starts.get(cells.end).copied().unwrap_or(segment.row_count);
+    mask.holds_visible_in(row_base + starts[cells.start]..row_base + end)
+}
+
+/// Where a ladder's tiles are credited, a depth at a time: a counter, exact at one segment, or a
+/// sketch, the union over several.
+enum Rungs {
+    Counted([u64; 17]),
+    /// **One flat plane, not a `Vec` of sketches.** The descent is the hottest loop in the walk —
+    /// it runs `Σ_{d' <= d} N_occ_s(d')` times — and a vector of vectors would pay a second
+    /// dependent load and a second bounds check on every one of them. The plane is
+    /// `(depth + 1) · 2^precision` bytes, which at [`SKETCH_PRECISION`] is 279 kB for the whole
+    /// seventeen-rung ladder and is the arm's entire memory bound.
+    Sketched { plane: Vec<u8>, precision: u32 },
+}
+
+impl Rungs {
+    fn new(counted: bool, depth: u8) -> Rungs {
+        match counted {
+            true => Rungs::Counted([0; 17]),
+            false => Rungs::sketched(depth, SKETCH_PRECISION),
+        }
+    }
+
+    fn sketched(depth: u8, precision: u32) -> Rungs {
+        Rungs::Sketched {
+            plane: vec![0u8; (1usize << precision) * (depth as usize + 1)],
+            precision,
+        }
+    }
+
+    #[inline]
+    fn credit(&mut self, depth: u8, tile: u64) {
+        match self {
+            Rungs::Counted(counted) => counted[depth as usize] += 1,
+            Rungs::Sketched { plane, precision } => {
+                let (index, rank) = register_of(tile, *precision);
+                let slot = &mut plane[(depth as usize) << *precision | index];
+                if rank > *slot {
+                    *slot = rank;
+                }
+            }
+        }
+    }
+
+    /// The rung at `depth` as credited, before any scaling.
+    fn estimate(&self, depth: u8) -> u64 {
+        match self {
+            Rungs::Counted(counted) => counted[depth as usize],
+            Rungs::Sketched { plane, precision } => {
+                let stride = 1usize << precision;
+                let at = depth as usize * stride;
+                estimate_registers(&plane[at..at + stride], *precision)
+            }
+        }
+    }
+
+    /// The ladder, each rung below the chains' start their sum of products scaled by the sample's
+    /// rate.
+    fn finish(self, depth: u8, chains: Option<(Chains, [u64; 17])>) -> OccupancyLadder {
+        let mut rungs = [0u64; 17];
+        for d in 0..=depth {
+            rungs[d as usize] = self.estimate(d);
+        }
+        if let Some((chains, sums)) = chains {
+            for d in chains.from + 1..=depth {
+                rungs[d as usize] = sums[d as usize].saturating_mul(1u64 << chains.bits);
+            }
+        }
+        let exact = chains.is_none() && matches!(self, Rungs::Counted(_));
+        finish_ladder(rungs, depth, exact)
+    }
+}
+
+/// Credit every occupied tile of `parts` at depth `at`, and every ancestor of one, to `rungs`, and
+/// keep each depth-`at` tile in `tiles` where it is given.
+///
+/// The emissions ascend within a segment, so the descent compares against the last ancestor
+/// credited at each depth and **stops at the first match**: ancestors nest, so a depth whose
+/// ancestor is unchanged guarantees every shallower depth is unchanged too. Hashing all 17 depths
+/// per emission would cost `(d + 1) · N_occ_s(d)` updates where this costs `Σ_{d' <= d}
+/// N_occ_s(d')`. The last-seen array is deliberately **not** reset between segments: a sketch takes
+/// a repeat as idempotent, so carrying it across a boundary can only save an update, and the
+/// counted route has one segment.
+///
+/// **The counted route is sound only at one segment, and [`occupied_tiles_ladder`] owns the
+/// predicate.** One segment's walk emits ascending and without repetition, so at each depth the
+/// ancestor changes exactly once per distinct tile and the increments are that depth's tile count.
+/// Two segments break it in both directions — a tile split across segments would be counted twice,
+/// and the last-seen array carried across a boundary would drop a tile the second segment
+/// re-enters.
+fn walk_ladder(
+    parts: &[OccupancyPart<'_>],
+    at: u8,
+    rungs: &mut Rungs,
+    mut tiles: Option<&mut Vec<Walked>>,
+) {
+    debug_assert!(at <= 16, "the grid is 2^16 x 2^16, so depth 16 is the deepest");
+    // `u64::MAX` is not a tile index at any depth, so it is a sound "nothing seen yet".
+    let mut last = [u64::MAX; 17];
+    for (part, &(mask, segment, row_base)) in parts.iter().enumerate() {
+        let Some(mask) = mask else {
+            continue;
+        };
+        walk_tiles(mask, segment, row_base, at, |tile, cells| {
+            let mut d = at;
+            loop {
+                let ancestor = tile >> (2 * u32::from(at - d));
+                if ancestor == last[d as usize] {
+                    break;
+                }
+                last[d as usize] = ancestor;
+                rungs.credit(d, ancestor);
+                if d == 0 {
+                    break;
+                }
+                d -= 1;
+            }
+            if let Some(tiles) = tiles.as_mut() {
+                tiles.push((part, tile, cells));
+            }
+        });
     }
 }
 
@@ -458,48 +698,18 @@ fn one_mask<'a>(
 
 /// `N_occ(d)` for every `d` in `0..=depth`, **counted**, from one walk of a view's only segment.
 ///
-/// # Sound only at one segment, and the caller is what makes it so
-///
-/// One segment's walk emits ascending and without repetition ([`Walk::visit_cells`] carries the last
-/// tile across runs and across chunks), so at each depth the ancestor changes exactly once per
-/// distinct depth-*d* tile and the increments below are that depth's tile count. Two segments break
-/// it in both directions — a tile split across segments would be counted twice, and the last-seen
-/// array carried across a boundary would drop a tile the second segment re-enters — which is why
-/// [`occupied_tiles_ladder`] and not this function owns the predicate.
-///
 /// **Public so a measurement prices the two accumulators over the identical walk**, exactly as
 /// [`for_each_occupied_tile`] is. It asserts its own precondition rather than trusting a caller,
 /// because the failure is a wrong number rather than a crash.
 pub fn occupied_tiles_ladder_exact(parts: &[OccupancyPart<'_>], depth: u8) -> OccupancyLadder {
-    debug_assert!(depth <= 16, "the grid is 2^16 x 2^16, so depth 16 is the deepest");
     assert_eq!(
         parts.len(),
         1,
         "the counted route is sound at one segment only; `occupied_tiles_ladder` owns the predicate"
     );
-    let mut counted = [0u64; 17];
-    // `u64::MAX` is not a tile index at any depth, so it is a sound "nothing seen yet".
-    let mut last = [u64::MAX; 17];
-    let (mask, segment, row_base) = parts[0];
-    let Some(mask) = mask else {
-        return finish_ladder(counted, depth, true);
-    };
-    for_each_occupied_tile(mask, segment, row_base, depth, |tile| {
-        let mut d = depth;
-        loop {
-            let ancestor = tile >> (2 * u32::from(depth - d));
-            if ancestor == last[d as usize] {
-                break;
-            }
-            last[d as usize] = ancestor;
-            counted[d as usize] += 1;
-            if d == 0 {
-                break;
-            }
-            d -= 1;
-        }
-    });
-    finish_ladder(counted, depth, true)
+    let mut rungs = Rungs::new(true, depth);
+    walk_ladder(parts, depth, &mut rungs, None);
+    rungs.finish(depth, None)
 }
 
 /// [`occupied_tiles_ladder`]'s **sketch** route at an arbitrary precision over one mask, whatever
@@ -512,52 +722,9 @@ pub fn occupied_tiles_ladder_with_precision(
     depth: u8,
     precision: u32,
 ) -> OccupancyLadder {
-    sketched_ladder(&one_mask(mask, segments), depth, precision)
-}
-
-/// The sketch route over `parts`.
-fn sketched_ladder(parts: &[OccupancyPart<'_>], depth: u8, precision: u32) -> OccupancyLadder {
-    debug_assert!(depth <= 16, "the grid is 2^16 x 2^16, so depth 16 is the deepest");
-    // **One flat plane, not a `Vec` of sketches.** The descent below is the hottest loop in the
-    // walk — it runs `Σ_{d' <= d} N_occ_s(d')` times — and a vector of vectors would pay a second
-    // dependent load and a second bounds check on every one of them. The plane is
-    // `(depth + 1) · 2^precision` bytes, which at [`SKETCH_PRECISION`] is 279 kB for the whole
-    // seventeen-rung ladder and is the arm's entire memory bound.
-    let stride = 1usize << precision;
-    let mut plane = vec![0u8; stride * (depth as usize + 1)];
-    // `u64::MAX` is not a tile index at any depth, so it is a sound "nothing seen yet".
-    let mut last = [u64::MAX; 17];
-
-    for &(mask, segment, row_base) in parts {
-        let Some(mask) = mask else {
-            continue;
-        };
-        for_each_occupied_tile(mask, segment, row_base, depth, |tile| {
-            let mut d = depth;
-            loop {
-                let ancestor = tile >> (2 * u32::from(depth - d));
-                if ancestor == last[d as usize] {
-                    break;
-                }
-                last[d as usize] = ancestor;
-                let (index, rank) = register_of(ancestor, precision);
-                let slot = &mut plane[d as usize * stride + index];
-                if rank > *slot {
-                    *slot = rank;
-                }
-                if d == 0 {
-                    break;
-                }
-                d -= 1;
-            }
-        });
-    }
-
-    let mut estimated = [0u64; 17];
-    for (d, rung) in estimated.iter_mut().enumerate().take(depth as usize + 1) {
-        *rung = estimate_registers(&plane[d * stride..(d + 1) * stride], precision);
-    }
-    finish_ladder(estimated, depth, false)
+    let mut rungs = Rungs::sketched(depth, precision);
+    walk_ladder(&one_mask(mask, segments), depth, &mut rungs, None);
+    rungs.finish(depth, None)
 }
 
 /// The `4^d` ceiling and the running maximum, applied to raw rungs from either route.
@@ -600,7 +767,7 @@ fn finish_ladder(raw_rungs: [u64; 17], depth: u8, exact: bool) -> OccupancyLadde
 /// This discards the shallower rungs [`occupied_tiles_ladder`] filled on the way. Callers that
 /// memoise — the request path does — should take the ladder and keep them.
 pub fn occupied_tiles(mask: &EffectiveMask, segments: &[(&SegmentData, u32)], depth: u8) -> u64 {
-    occupied_tiles_ladder(&one_mask(mask, segments), depth).at(depth)
+    occupied_tiles_ladder(&one_mask(mask, segments), depth, mask.visible_total()).at(depth)
 }
 
 // ------------------------------------------------------------------------------------------
@@ -616,7 +783,7 @@ pub const SKETCH_PRECISION: u32 = 14;
 
 /// The additive constant SplitMix64 stirs into an input before its finalizer.
 ///
-/// **Fixed, never randomised.** `N_occ` is memoised per `(session, view, generation, depth)` and
+/// **Fixed, never randomised.** `N_occ` is memoised per `(grant, view, generation, depth)` and
 /// two processes serving the same bundle must answer the same number for the same mask, so a
 /// per-process seed — `RandomState`'s, or any `HashMap` default — would make θ a function of which
 /// server answered. The conformance differential reproduces this hash in Python and compares the
@@ -811,9 +978,9 @@ fn ln_q32(v: u64) -> u64 {
 ///
 /// Every term is a reason the composed mask or the row space moved:
 ///
-/// - **`token_id`** — the count is inside one principal's mask, and is never shared across
-///   principals. Never the bearer token, and never reused within a process
-///   ([`crate::cache::RowProjectionKey`]'s fact 1 is what makes that sound).
+/// - **`terms`** — the grant, [`crate::Session::terms_digest`]: every session holding one term set
+///   composes the same mask from the same projection, so they share its rungs, and no grant reads
+///   another's.
 /// - **`view`** — `N_occ` is counted over one view's rows, exactly as `V_total` is.
 /// - **`depth`** — the quantity is per depth. A session touches a handful of depths, which is why
 ///   this is evaluated per requested depth rather than for all 17 at once.
@@ -825,7 +992,7 @@ fn ln_q32(v: u64) -> u64 {
 /// composed mask (**I12**), so there is no filtered variant of this quantity to key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct OccupancyKey {
-    pub token_id: u64,
+    pub terms: [u8; 32],
     pub view: String,
     pub depth: u8,
     pub shards: [u8; 32],
@@ -839,7 +1006,7 @@ impl OccupancyKey {
         depth: u8,
     ) -> OccupancyKey {
         OccupancyKey {
-            token_id: identity.token_id,
+            terms: identity.terms,
             view: view.to_string(),
             depth,
             shards: identity.shards,
@@ -872,6 +1039,135 @@ impl OccupancyKey {
 /// `walks` is where that shows.
 pub const DEFAULT_OCCUPANCY_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 
+/// The memo's rungs `0..=ladder.depth()` under `key`'s mask and view, each filed once.
+pub(crate) fn remember(
+    memo: &mosaica_cache::SingleFlightCache<OccupancyKey, OccupiedTiles>,
+    key: &OccupancyKey,
+    ladder: &OccupancyLadder,
+) {
+    for rung in 0..=ladder.depth() {
+        let mut rung_key = key.clone();
+        rung_key.depth = rung;
+        let _ = memo.get_or_derive(rung_key, None, |_| OccupiedTiles(ladder.at(rung)));
+    }
+}
+
+/// The subdirectory of the engine's cache directory a grant's ladders are kept in, beside its
+/// fragments, so a restart reads a ladder back rather than walking again.
+pub(crate) const LADDERS_DIR: &str = "occupancy";
+
+/// The bytes the kept ladders may hold; the least recently used go first past it. A ladder is
+/// under 300 bytes, so this is tens of thousands of grants and generations.
+const LADDERS_DISK_BYTES: u64 = 16 * 1024 * 1024;
+
+const LADDER_MAGIC: &[u8; 8] = b"MSOCC001";
+
+/// What a kept ladder is a function of, as a file stem: the grant, the view, and in every shard
+/// its identity, its fragment, its segments and the composed mask's diff against the projection,
+/// read from content that is the same after a restart rather than from in-process versions.
+pub(crate) fn ladder_stem<'a>(
+    terms: &[u8; 32],
+    view: &str,
+    sides: impl Iterator<
+        Item = (
+            ShardId,
+            &'a [u8; 32],
+            &'a mosaica_authz::FrozenFragment,
+            Option<&'a EffectiveMask>,
+            &'a [(&'a SegmentData, u32)],
+        ),
+    >,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"mosaica-occupancy-ladder-v1");
+    hasher.update(terms);
+    hasher.update((view.len() as u64).to_le_bytes());
+    hasher.update(view.as_bytes());
+    for (shard, identity, fragment, mask, segments) in sides {
+        hasher.update(shard.raw().to_le_bytes());
+        hasher.update(identity);
+        hasher.update(fragment.identity);
+        hasher.update(fragment.watermark.to_le_bytes());
+        for (segment, base) in segments {
+            hasher.update((segment.seg_id.len() as u64).to_le_bytes());
+            hasher.update(segment.seg_id.as_bytes());
+            hasher.update(segment.row_count.to_le_bytes());
+            hasher.update(base.to_le_bytes());
+        }
+        match mask {
+            None => hasher.update([0u8]),
+            Some(mask) => {
+                let (base, minus, plus, _) = mask.parts();
+                hasher.update([1u8]);
+                hasher.update(base.cardinality().to_le_bytes());
+                hasher.update(minus.serialize::<croaring::Portable>());
+                hasher.update(plus.serialize::<croaring::Portable>());
+            }
+        }
+    }
+    mosaica_store::hex(&hasher.finalize())
+}
+
+/// The ladders kept in the engine's cache directory, none where it has none.
+#[derive(Debug)]
+pub(crate) struct LadderStore {
+    dir: Option<std::path::PathBuf>,
+    /// Held across a write's check and its write, so a shallower ladder written beside a deeper
+    /// one cannot replace it.
+    writing: std::sync::Mutex<()>,
+}
+
+impl LadderStore {
+    pub(crate) fn new(dir: Option<std::path::PathBuf>) -> LadderStore {
+        LadderStore {
+            dir,
+            writing: std::sync::Mutex::new(()),
+        }
+    }
+
+    /// The ladder kept under `stem`, where one is and reaches `depth`.
+    pub(crate) fn read(&self, stem: &str, depth: u8) -> Option<OccupancyLadder> {
+        let payload =
+            crate::figures::persist::read(self.dir.as_deref()?, stem, 0, "ladder", LADDER_MAGIC)?;
+        let (&held, rest) = payload.split_first()?;
+        let (&exact, rest) = rest.split_first()?;
+        if held < depth || held > 16 || rest.len() != 16 * (usize::from(held) + 1) {
+            return None;
+        }
+        let mut counts = [0u64; 17];
+        let mut raw = [0u64; 17];
+        for (d, pair) in rest.as_chunks::<16>().0.iter().enumerate() {
+            counts[d] = u64::from_le_bytes(pair[..8].try_into().ok()?);
+            raw[d] = u64::from_le_bytes(pair[8..].try_into().ok()?);
+        }
+        Some(OccupancyLadder {
+            counts,
+            raw,
+            depth: held,
+            exact: exact == 1,
+        })
+    }
+
+    /// Keep `ladder` under `stem`, unless one at least as deep is kept there already.
+    pub(crate) fn write(&self, stem: &str, ladder: &OccupancyLadder) {
+        let Some(dir) = self.dir.as_deref() else {
+            return;
+        };
+        let _writing = self.writing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.read(stem, ladder.depth).is_some() {
+            return;
+        }
+        let mut payload = vec![ladder.depth, u8::from(ladder.exact)];
+        for d in 0..=ladder.depth as usize {
+            payload.extend_from_slice(&ladder.counts[d].to_le_bytes());
+            payload.extend_from_slice(&ladder.raw[d].to_le_bytes());
+        }
+        crate::figures::persist::write(dir, stem, 0, "ladder", LADDER_MAGIC, &payload);
+        crate::figures::persist::hold_under(dir, LADDERS_DISK_BYTES);
+    }
+}
+
 /// One memoised `N_occ(d)`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OccupiedTiles(pub u64);
@@ -889,11 +1185,13 @@ mod tests {
     use super::*;
 
     /// One rung, for the memo's bound.
-    fn rung(token_id: u64, depth: u8, shards: u64) -> OccupancyKey {
+    fn rung(grant: u64, depth: u8, shards: u64) -> OccupancyKey {
         let mut digest = [0u8; 32];
         digest[..8].copy_from_slice(&shards.to_le_bytes());
+        let mut terms = [0u8; 32];
+        terms[..8].copy_from_slice(&grant.to_le_bytes());
         OccupancyKey {
-            token_id,
+            terms,
             view: "geo".to_string(),
             depth,
             shards: digest,
@@ -1153,10 +1451,13 @@ mod tests {
                 SKETCH_PRECISION,
             );
             let both = [(Some(&mask_a), &a.data, 0), (Some(&mask_b), &b.data, 0)];
-            let two = occupied_tiles_ladder(&both, depth);
+            let two = occupied_tiles_ladder(&both, depth, visible.len() as u64);
             assert_eq!(one, two, "depth {depth}");
-            let left_out =
-                occupied_tiles_ladder(&[(Some(&mask_a), &a.data, 0), (None, &b.data, 0)], depth);
+            let left_out = occupied_tiles_ladder(
+                &[(Some(&mask_a), &a.data, 0), (None, &b.data, 0)],
+                depth,
+                mask_a.visible_total(),
+            );
             assert!(!left_out.is_exact(), "depth {depth}");
             let alone = occupied_tiles_ladder_with_precision(
                 &mask_a,
@@ -1166,11 +1467,121 @@ mod tests {
             );
             assert_eq!(left_out, alone, "depth {depth}");
         }
-        let only = occupied_tiles_ladder(&[(Some(&whole_mask), &whole.data, 0)], 16);
+        let only = occupied_tiles_ladder(
+            &[(Some(&whole_mask), &whole.data, 0)],
+            16,
+            whole_mask.visible_total(),
+        );
         assert!(only.is_exact());
         assert_eq!(only.at(16), occupied_tiles(&whole_mask, &[(&whole.data, 0)], 16));
-        let unseen = occupied_tiles_ladder(&[(None, &whole.data, 0)], 16);
+        let unseen = occupied_tiles_ladder(&[(None, &whole.data, 0)], 16, 0);
         assert!(unseen.is_exact());
         assert_eq!(unseen.at(16), 0);
+    }
+
+    /// The rows of `codes`, one a code, as `codes` is dealt into `segments` segments of one shard
+    /// each by index, and each segment's mask over the rows whose code `seen` admits.
+    fn dealt(
+        codes: &[u32],
+        segments: usize,
+        seen: impl Fn(u32) -> bool,
+    ) -> Vec<(crate::select::fixture::Written, EffectiveMask)> {
+        (0..segments)
+            .map(|s| {
+                let mine: Vec<u32> = codes.iter().copied().skip(s).step_by(segments).collect();
+                let written = crate::select::fixture::segment_of_codes(&mine);
+                let rows = (0..mine.len() as u32)
+                    .filter(|&row| seen(mine[written.ids[row as usize] as usize]))
+                    .collect();
+                (written, EffectiveMask::of_rows(rows))
+            })
+            .collect()
+    }
+
+    fn rungs_of(held: &[(crate::select::fixture::Written, EffectiveMask)]) -> Vec<u64> {
+        let parts: Vec<OccupancyPart<'_>> = held
+            .iter()
+            .map(|(written, mask)| (Some(mask), &written.data, 0))
+            .collect();
+        let visible = held.iter().map(|(_, mask)| mask.visible_total()).sum();
+        let ladder = occupied_tiles_ladder(&parts, 16, visible);
+        assert!(!ladder.is_exact(), "a viewer of this many rows takes the chains");
+        (0..=16).map(|d| ladder.at(d)).collect()
+    }
+
+    /// **The chain estimate is `reference/oracle/occupancy.py`'s, vector for vector**, at one
+    /// segment and at two: `test_the_chains_match_the_engine_vector_for_vector` asserts the same
+    /// lists from the same tiles.
+    #[test]
+    fn the_chains_match_the_python_oracle_vector_for_vector() {
+        let codes: Vec<u32> = (0..100_000u64)
+            .map(|i| (i * 48_271 % (1u64 << 32)) as u32)
+            .collect();
+        assert_eq!(
+            rungs_of(&dealt(&codes, 1, |_| true)),
+            [
+                1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 92096, 98312, 98312, 98312, 98312,
+                98312, 98312, 98312
+            ]
+        );
+        assert_eq!(
+            rungs_of(&dealt(&codes, 2, |_| true)),
+            [
+                1, 4, 16, 63, 253, 1020, 4079, 16333, 65536, 92096, 98312, 98312, 98312, 98312,
+                98312, 98312, 98312
+            ]
+        );
+    }
+
+    /// **A viewer's ladder is a function of the rows it can see, and of nothing else.** The same
+    /// visible rows with and without rows the viewer cannot see among them, sharing their tiles,
+    /// give the same rungs at every depth, whether the ladder is counted, sketched or estimated
+    /// from chains: which route is taken, where the chains start and at what rate are all planned
+    /// from the viewer's own tiles.
+    #[test]
+    fn a_ladder_is_the_same_whatever_the_viewer_cannot_see() {
+        let codes: Vec<u32> = (0..180_000u64)
+            .map(|i| (i * 2_654_435_761 % (1u64 << 32)) as u32)
+            .collect();
+        let shown = |code: u32| !mix64(u64::from(code)).is_multiple_of(3);
+        let visible: Vec<u32> = codes.iter().copied().filter(|&c| shown(c)).collect();
+        for segments in [1, 2] {
+            let alone = dealt(&visible, segments, |_| true);
+            let among = dealt(&codes, segments, shown);
+            assert_eq!(rungs_of(&alone), rungs_of(&among), "{segments} segments");
+        }
+        let few = &visible[..20_000];
+        let alone = dealt(few, 1, |_| true);
+        let among = dealt(&codes, 1, |c| few.contains(&c));
+        let walked = |held: &[(crate::select::fixture::Written, EffectiveMask)]| {
+            let parts = [(Some(&held[0].1), &held[0].0.data, 0)];
+            occupied_tiles_ladder(&parts, 16, held[0].1.visible_total())
+        };
+        assert!(walked(&alone).is_exact());
+        assert_eq!(walked(&alone), walked(&among));
+    }
+
+    /// **The chains estimate every rung below their start to within a few per cent** of the count,
+    /// over a clustered set the walk would otherwise visit tile by tile. A fixed hash makes the
+    /// figure deterministic; the bound is what the sample size gives, with room.
+    #[test]
+    fn the_chains_estimate_the_deep_rungs_closely() {
+        use crate::select::fixture::{points, segment_of};
+        use rand::rngs::StdRng;
+        use rand::SeedableRng;
+        let all = points(&mut StdRng::seed_from_u64(11), 150_000);
+        let written = segment_of(&all);
+        let mask = EffectiveMask::of_rows(croaring::Bitmap::from_range(0..all.len() as u32));
+        let parts = [(Some(&mask), &written.data, 0)];
+        let estimated = occupied_tiles_ladder(&parts, 16, mask.visible_total());
+        let counted = occupied_tiles_ladder_exact(&parts, 16);
+        assert!(!estimated.is_exact());
+        for d in 0..=16 {
+            let (got, want) = (estimated.at(d) as f64, counted.at(d) as f64);
+            assert!(
+                (got - want).abs() <= want * 0.05,
+                "depth {d}: estimated {got}, counted {want}"
+            );
+        }
     }
 }

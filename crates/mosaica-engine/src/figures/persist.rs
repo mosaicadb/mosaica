@@ -142,7 +142,14 @@ pub(crate) fn bytes_under(root: &Path) -> u64 {
 }
 
 /// Write `payload` as the entry `stem` at `at`, and remove the entry's other versions.
-fn write(dir: &Path, stem: &str, at: u64, extension: &str, magic: &[u8; 8], payload: &[u8]) {
+pub(crate) fn write(
+    dir: &Path,
+    stem: &str,
+    at: u64,
+    extension: &str,
+    magic: &[u8; 8],
+    payload: &[u8],
+) {
     if !write_beside(dir, stem, at, extension, magic, payload) {
         return;
     }
@@ -189,7 +196,13 @@ fn write_beside(
 
 /// The payload of the entry `stem` at `at`, where a whole and unaltered one is on disk. A read marks
 /// the file used, so the byte bound removes it after the files nobody has read.
-fn read(dir: &Path, stem: &str, at: u64, extension: &str, magic: &[u8; 8]) -> Option<Vec<u8>> {
+pub(crate) fn read(
+    dir: &Path,
+    stem: &str,
+    at: u64,
+    extension: &str,
+    magic: &[u8; 8],
+) -> Option<Vec<u8>> {
     let path = path_of(dir, stem, at, extension);
     let bytes = std::fs::read(&path).ok()?;
     if let Ok(file) = std::fs::File::options().append(true).open(&path) {

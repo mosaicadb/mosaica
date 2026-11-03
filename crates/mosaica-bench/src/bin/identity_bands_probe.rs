@@ -1413,7 +1413,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|&(segment, base)| (Some(&mask), segment, base))
             .collect();
         let before = Counters::now();
-        let rungs = occupied_tiles_ladder(&parts, LADDER_DEPTH);
+        let rungs = occupied_tiles_ladder(&parts, LADDER_DEPTH, mask.visible_total());
         let ladder_cost = before.since(ticks);
         let ladder: Vec<u64> = (0..=LADDER_DEPTH).map(|d| rungs.at(d)).collect();
         // The depth whose expected mark count is nearest the client's budget: `16 · N_occ(d)`

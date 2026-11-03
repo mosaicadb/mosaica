@@ -182,6 +182,83 @@ impl Engine {
             }
         })
     }
+
+    /// `expr` routed in `side` and, where it routes to row space, evaluated over every row of the
+    /// view it can match: the rows of the drawn region that bounds it ([`bounding_region`]), and
+    /// the whole view where none does. Inside such a region a column with both routes takes the
+    /// row route by the viewport's rule ([`row_route_pays`]), the region's rows standing for a
+    /// request's tiles; `prefer_row` is the caller's own preference otherwise. `visible` is the
+    /// viewer's visible total in `side`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn route_over_view(
+        &self,
+        served: &ServedView<'_>,
+        side: &ServedSide<'_>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+        route: &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
+        expr: &crate::filter::FilterExpr,
+        prefer_row: bool,
+        visible: u64,
+    ) -> Result<OverView> {
+        let domain = match bounding_region(expr) {
+            Some(leaf) => self
+                .region_rows(leaf, served, side, resolved, cancel)
+                .map_err(filter_refusal)?
+                .domain,
+            None => None,
+        };
+        let total = side.data.row_space.total_rows();
+        let whole = 0..u32::try_from(total).unwrap_or(u32::MAX);
+        let (domain, rows, prefer_row): (&[Range<u32>], u64, bool) = match &domain {
+            Some(domain) => {
+                let rows = domain.iter().map(|r| u64::from(r.end - r.start)).sum();
+                (domain, rows, prefer_row || row_route_pays(rows, visible))
+            }
+            None => (std::slice::from_ref(&whole), total, prefer_row),
+        };
+        Ok(match route(expr, prefer_row)? {
+            crate::filter::RoutedFilter::Entity(entities) => OverView::Entities(entities),
+            crate::filter::RoutedFilter::Row(tree) => {
+                let region = tree.region_verdict();
+                // Exact over the whole view: every match lies inside the bounding region, whose
+                // rows the domain holds.
+                let rows = match self.evaluate_row_route(&tree, side, domain, rows, false)? {
+                    FilterRows::Complete(rows) | FilterRows::Viewport { rows, .. } => rows,
+                };
+                OverView::Rows { rows, region }
+            }
+        })
+    }
+}
+
+/// [`Engine::route_over_view`]'s answer.
+pub(crate) enum OverView {
+    /// The filter routed entirely in entity space, under the candidate.
+    Entities(croaring::Bitmap),
+    /// The filter's rows over the whole view, before the mask, and the coarsest verdict its region
+    /// leaves reached.
+    Rows {
+        rows: croaring::Bitmap,
+        region: Option<crate::region::RegionVerdict>,
+    },
+}
+
+/// The region leaf every match of `expr` lies inside: `expr` itself, or a kid of an `all_of` at
+/// its top, through any number of `all_of`s.
+fn bounding_region(expr: &crate::filter::FilterExpr) -> Option<&crate::filter::RegionLeaf> {
+    use crate::filter::FilterExpr;
+    match expr {
+        FilterExpr::Region(leaf) => Some(leaf),
+        FilterExpr::AllOf(kids) => kids.iter().find_map(bounding_region),
+        _ => None,
+    }
+}
+
+/// Whether a column with both routes is cheaper read over `rows` rows than evaluated over the
+/// `visible` entities of the viewer's candidate: the viewport's rule, a row against an entity.
+pub(crate) fn row_route_pays(rows: u64, visible: u64) -> bool {
+    rows <= visible
 }
 
 /// [`Engine::rows_of_routed`]'s answer.
@@ -772,7 +849,7 @@ pub(crate) fn crossing_domain(
 }
 
 /// `spans` sorted, and merged where adjacent or overlapping.
-pub(super) fn merged_spans(mut spans: Vec<Range<u32>>) -> Vec<Range<u32>> {
+pub(crate) fn merged_spans(mut spans: Vec<Range<u32>>) -> Vec<Range<u32>> {
     spans.sort_unstable_by_key(|r| r.start);
     let mut merged: Vec<Range<u32>> = Vec::with_capacity(spans.len());
     for span in spans {
@@ -882,7 +959,7 @@ impl Engine {
         check_cancelled(&req.cancel)?;
         // The route rule reads the request's whole extent and visible total, so a leaf takes the
         // same space in every shard.
-        let prefer_row = tiling.rows_in_ranges <= v_total;
+        let prefer_row = row_route_pays(tiling.rows_in_ranges, v_total);
         let mut region_verdict: Option<crate::region::RegionVerdict> = None;
         let mut filters = Vec::new();
         let mut highlights = Vec::new();
@@ -1200,6 +1277,7 @@ impl Engine {
                         entry.rows_under(mask, segments)
                     }),
                     verdict: entry.verdict(),
+                    domain: Some(Arc::clone(entry.domain())),
                 })
             }
             RegionLeaf::Artifact(id) => {
@@ -1221,6 +1299,7 @@ impl Engine {
                 Ok(RegionRows {
                     rows,
                     verdict: RegionVerdict::Exact,
+                    domain: None,
                 })
             }
         }

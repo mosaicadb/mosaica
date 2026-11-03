@@ -1320,6 +1320,9 @@ impl Engine {
             pool: Arc::clone(&pool),
             switches: Arc::clone(&switches),
             in_flight: Arc::new(std::sync::Mutex::new(FxHashMap::default())),
+            ladders: Arc::new(crate::occupancy::LadderStore::new(Some(
+                cache_dir.join(crate::occupancy::LADDERS_DIR),
+            ))),
         };
 
         let engine = Engine {

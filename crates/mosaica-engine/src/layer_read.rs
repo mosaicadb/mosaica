@@ -20,7 +20,7 @@ use crate::cancel::CancelToken;
 use crate::compose::{EffectiveMask, ShardedMask, WholeMask};
 use crate::derived::RowLocator;
 use crate::error::Result;
-use crate::filter::{FilterExpr, RoutedFilter};
+use crate::filter::FilterExpr;
 use crate::figures::{Geometry, LevelFigures};
 use crate::region::RegionVerdict;
 use crate::session::Session;
@@ -97,30 +97,22 @@ impl Engine {
         let mut rows = vec![Bitmap::new(); served.sides.len()];
         let mut region = None;
         let candidate = crate::viewport::FilterCandidate::Compose;
-        for (place, side, _) in served.filtered_sides(mask) {
-            let total_rows = side.data.row_space.total_rows();
+        for (place, side, leaf) in served.filtered_sides(mask) {
+            let visible = leaf.visible_total();
             let (side_rows, verdict) =
                 self.route_filters_under(served, side, candidate, &resolved, cancel, |route| {
-                    // A column with both routes takes the entity route: there are no tile ranges
-                    // here to make the row route cheaper, so only a render-only column reaches
-                    // the scan.
-                    Ok(match route(expr, false)? {
-                        RoutedFilter::Entity(entities) => {
-                            (side.data.row_space.project(&entities), None)
-                        }
-                        RoutedFilter::Row(tree) => {
-                            let region = tree.region_verdict();
-                            let whole = std::iter::once(
-                                0..u32::try_from(total_rows).unwrap_or(u32::MAX),
-                            )
-                            .collect::<Vec<_>>();
-                            let rows = self
-                                .evaluate_row_route(&tree, side, &whole, total_rows, false)?
-                                .rows()
-                                .clone();
-                            (rows, region)
-                        }
-                    })
+                    // A column with both routes takes the entity route outside a region: there are
+                    // no tile ranges here to make the row route cheaper.
+                    Ok(
+                        match self.route_over_view(
+                            served, side, &resolved, cancel, route, expr, false, visible,
+                        )? {
+                            crate::viewport::OverView::Entities(entities) => {
+                                (side.data.row_space.project(&entities), None)
+                            }
+                            crate::viewport::OverView::Rows { rows, region } => (rows, region),
+                        },
+                    )
                 })?;
             rows[place] = side_rows;
             region = RegionVerdict::coarsest(region, verdict);

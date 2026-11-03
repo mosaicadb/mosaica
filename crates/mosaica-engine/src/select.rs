@@ -203,6 +203,27 @@ impl Threshold {
         }
     }
 
+    /// θ at `depth` for tiles served under `cap` and `k_min`, taking `N_occ(depth)` from
+    /// `n_occ` only where it can change how many rows a tile serves.
+    ///
+    /// Each skip is exact. With `k_min >= cap`, or `cap = 0`, every tile serves `min(cap, V)`
+    /// whatever `C_θ` is. With `m_target >= V_total`, θ saturates at any `N_occ` of one or more,
+    /// which every view with a visible row has. At depth 0 there is one tile, so `N_occ` is 1.
+    pub fn for_tiles(
+        v_total: u64,
+        m_target: u64,
+        depth: u8,
+        k_min: usize,
+        cap: usize,
+        n_occ: impl FnOnce() -> u64,
+    ) -> Self {
+        if k_min >= cap || v_total == 0 || m_target >= v_total {
+            return Threshold::Saturated;
+        }
+        let n_occ = if depth == 0 { 1 } else { n_occ() };
+        Threshold::at_depth(v_total, m_target, n_occ)
+    }
+
     /// Does this threshold admit `id`?
     pub fn admits(&self, id: u64) -> bool {
         match *self {
@@ -1331,6 +1352,42 @@ mod tests {
         );
     }
 
+    /// **Where θ is taken without `N_occ`, every tile serves what the anchored θ serves it**,
+    /// whatever `N_occ` would have been: the floor at the cap, a target reaching every visible row,
+    /// and depth 0's one tile.
+    #[test]
+    fn a_threshold_taken_without_its_anchor_serves_what_the_anchored_one_does() {
+        let serves = |threshold: Threshold, k_min: usize, cap: usize, visible: u64, ids: &[u64]| {
+            let below = ids.iter().filter(|&&id| threshold.admits(id)).count() as u64;
+            served_count(below, &params(k_min, cap, threshold), visible)
+        };
+        let ids: Vec<u64> = (0..400u64).map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15)).collect();
+        for (v_total, m_target, depth, k_min, cap) in [
+            (10_000u64, 16u64, 7u8, 30usize, 30usize),
+            (10_000, 16, 7, 40, 30),
+            (10_000, 0, 7, 0, 0),
+            (10_000, 10_000, 9, 2, 30),
+            (10_000, 1 << 40, 16, 2, 500),
+            (10_000, 16, 0, 2, 30),
+        ] {
+            let taken = Threshold::for_tiles(v_total, m_target, depth, k_min, cap, || {
+                panic!("N_occ is not consulted here")
+            });
+            for n_occ in [1u64, 7, 400, 1 << 16] {
+                let n_occ = if depth == 0 { 1 } else { n_occ.min(v_total) };
+                let anchored = Threshold::at_depth(v_total, m_target, n_occ);
+                for visible in [1u64, 30, 400] {
+                    assert_eq!(
+                        serves(taken, k_min, cap, visible, &ids[..visible as usize]),
+                        serves(anchored, k_min, cap, visible, &ids[..visible as usize]),
+                        "v_total {v_total}, m_target {m_target}, depth {depth}, k_min {k_min}, \
+                         cap {cap}, n_occ {n_occ}, visible {visible}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn served_count_agrees_with_the_fast_path_wherever_it_fires() {
         // The serve-all branch claims to be exact, not conservative. That means: wherever
@@ -1391,6 +1448,25 @@ pub(crate) mod fixture {
         y_min: 0.0,
         y_max: 1024.0,
     };
+
+    /// A segment of one row at each of `codes`, a depth-16 cell's Morton code, with the row's index
+    /// in `codes` as its `mosaica_id`.
+    pub(crate) fn segment_of_codes(codes: &[u32]) -> Written {
+        let items = codes
+            .iter()
+            .enumerate()
+            .map(|(i, &code)| {
+                let (qx, qy) = mosaica_spatial::unsplit32(mosaica_types::MortonCode::new(code), 0);
+                TilerItem {
+                    mosaica_id: MosaicaId::new(i as u64),
+                    qx,
+                    qy,
+                    scalars: Vec::new(),
+                }
+            })
+            .collect();
+        write(items)
+    }
 
     /// A segment and the directory its mappings read from.
     pub(crate) struct Written {
@@ -1480,16 +1556,22 @@ pub(crate) mod fixture {
 
     /// The segment of `points`, sorted into row order.
     pub(crate) fn segment_of(points: &[(f32, f32, u64)]) -> Written {
+        write(
+            points
+                .iter()
+                .map(|&(x, y, id)| TilerItem {
+                    mosaica_id: MosaicaId::new(id),
+                    qx: fixed32(x as f64, EXTENT.x_min, EXTENT.x_max),
+                    qy: fixed32(y as f64, EXTENT.y_min, EXTENT.y_max),
+                    scalars: Vec::new(),
+                })
+                .collect(),
+        )
+    }
+
+    /// `items` sorted into row order and written as a segment.
+    fn write(mut items: Vec<TilerItem>) -> Written {
         let temp = TempDir::new().unwrap();
-        let mut items: Vec<TilerItem> = points
-            .iter()
-            .map(|&(x, y, id)| TilerItem {
-                mosaica_id: MosaicaId::new(id),
-                qx: fixed32(x as f64, EXTENT.x_min, EXTENT.x_max),
-                qy: fixed32(y as f64, EXTENT.y_min, EXTENT.y_max),
-                scalars: Vec::new(),
-            })
-            .collect();
         let mut entities: Vec<EntityId> = (0..items.len() as u64).map(EntityId::new).collect();
         let codes = sort_batch(&mut items, &mut entities);
         mosaica_store::write::write_segment(temp.path(), &items, &codes, &[], &[]).unwrap();

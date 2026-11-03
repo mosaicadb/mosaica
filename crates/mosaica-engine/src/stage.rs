@@ -12,7 +12,8 @@
 //! at all, every rung it will ever need can be filled without one.
 //!
 //! **One walk fills every rung at or below it** ([`crate::occupancy::occupied_tiles_ladder`]), so
-//! this is one walk per `(session, view, generation)` and not one per depth.
+//! this is one walk per `(grant, view, generation)` and not one per depth, and none after a restart
+//! that finds the grant's ladder kept on disk ([`crate::occupancy::LadderStore`]).
 //!
 //! ## Where it is triggered
 //!
@@ -117,6 +118,8 @@ pub(crate) struct StageDeps {
     /// [`crate::Engine::prune_tokens`]. Bounded by the number of fills running at once, not by the
     /// number of sessions: a fill removes its own entry when it ends.
     pub(crate) in_flight: Arc<std::sync::Mutex<FxHashMap<u64, CancelToken>>>,
+    /// The grants' ladders kept on disk, read before a walk and written after one.
+    pub(crate) ladders: Arc<crate::occupancy::LadderStore>,
 }
 
 impl StageDeps {
@@ -154,8 +157,9 @@ impl StageDeps {
         let occupancy = Arc::clone(&self.occupancy);
         let in_flight = Arc::clone(&self.in_flight);
         let counters = Arc::clone(&self.counters);
+        let ladders = Arc::clone(&self.ladders);
         self.pool.spawn(move || {
-            run(&occupancy, &counters, &task, &cancel);
+            run(&occupancy, &counters, &ladders, &task, &cancel);
             // However it ended — completion, cancellation, a view that could not be resolved —
             // this session is no longer filling and the entry must go, or the map grows by one per
             // session for the process's life.
@@ -183,11 +187,12 @@ impl StageDeps {
 fn run(
     occupancy: &mosaica_cache::SingleFlightCache<OccupancyKey, OccupiedTiles>,
     counters: &crate::status::ServeCounters,
+    ladders: &crate::occupancy::LadderStore,
     task: &LadderTask,
     cancel: &CancelToken,
 ) {
     let generation = &task.generation;
-    let mut key = OccupancyKey::of(&task.identity, &task.view, BACKGROUND_DEPTH);
+    let key = OccupancyKey::of(&task.identity, &task.view, BACKGROUND_DEPTH);
     // **The memo first, before anything is composed.** A session already served at this depth has
     // every rung below it too, so there is nothing here to do and no mask worth building.
     if cancel.is_cancelled()
@@ -201,7 +206,7 @@ fn run(
     // inputs — the request's own generation and geometries travel with the task — so the rungs are
     // exactly what that session's next zoom would have computed for itself.
     let mut leaves = Vec::with_capacity(task.geometries.len());
-    let mut segments = Vec::new();
+    let mut held = Vec::with_capacity(task.geometries.len());
     for (id, geometry) in &task.geometries {
         let Some(shard) = generation.shard(*id) else {
             return;
@@ -212,10 +217,10 @@ fn run(
         let Ok(denied) = shard.denied_in(&task.view) else {
             return;
         };
-        let Ok(held) = crate::viewport::segments_with_row_bases(&task.view, view_data) else {
+        let Ok(segments) = crate::viewport::segments_with_row_bases(&task.view, view_data) else {
             return;
         };
-        segments.extend(held.into_iter().map(|(segment, base)| (*id, segment, base)));
+        held.push((*id, segments));
         let leaf = shard.compose(
             &task.satisfied,
             Arc::clone(&geometry.projection),
@@ -229,16 +234,38 @@ fn run(
     if cancel.is_cancelled() {
         return;
     }
-    counters
-        .occupancy_walks
-        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let parts: Vec<crate::occupancy::OccupancyPart<'_>> = segments
-        .iter()
-        .map(|&(id, segment, base)| (mask.leaf(id), segment, base))
-        .collect();
-    let ladder = crate::occupancy::occupied_tiles_ladder(&parts, BACKGROUND_DEPTH);
-    for rung in 0..=BACKGROUND_DEPTH {
-        key.depth = rung;
-        let _ = occupancy.get_or_derive(key.clone(), None, |_| OccupiedTiles(ladder.at(rung)));
-    }
+    let stem = crate::occupancy::ladder_stem(
+        &task.identity.terms,
+        &task.view,
+        task.geometries
+            .iter()
+            .zip(&held)
+            .filter_map(|((id, geometry), (_, segments))| {
+                let shard = generation.shard(*id)?;
+                Some((*id, &shard.identity, &*geometry.fragment, mask.leaf(*id), &segments[..]))
+            }),
+    );
+    let ladder = match ladders.read(&stem, BACKGROUND_DEPTH) {
+        Some(kept) => kept,
+        None => {
+            counters
+                .occupancy_walks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let parts: Vec<crate::occupancy::OccupancyPart<'_>> = held
+                .iter()
+                .flat_map(|(id, segments)| {
+                    let leaf = mask.leaf(*id);
+                    segments.iter().map(move |&(segment, base)| (leaf, segment, base))
+                })
+                .collect();
+            let ladder = crate::occupancy::occupied_tiles_ladder(
+                &parts,
+                BACKGROUND_DEPTH,
+                mask.visible_total(),
+            );
+            ladders.write(&stem, &ladder);
+            ladder
+        }
+    };
+    crate::occupancy::remember(occupancy, &key, &ladder);
 }

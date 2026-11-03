@@ -13,6 +13,11 @@
 //! - Otherwise a wider band is tried, and below the widest the tile is not answered here; the
 //!   caller reads it from the identity column as the shipped scan does.
 //!
+//! A saturated threshold, a filtered request's or one whose anchor reaches every visible row,
+//! admits every identity: `C_θ` is the tile's visible count without a read, `m` is
+//! `min(cap, matched)`, and the narrowest band expected to hold `m` visible entries is read where
+//! its entries cost less than the scan's rows.
+//!
 //! The mask is applied to every entry before it is counted or kept, so the bands decide only how
 //! far the read goes, never which rows are visible: a tile with one visible row is answered by the
 //! column when the bands do not hold it, and serves it. A tile is the union of its parts in every
@@ -46,8 +51,8 @@ pub enum BandAnswer {
     /// read from the identity column. `read` where the bands were read before that was known,
     /// rather than expected from the tile's visible count.
     Sparse { read: bool },
-    /// No band holds every row below the threshold (a saturated or wide threshold), or the
-    /// request serves no point: the shipped scan answers.
+    /// No band holds every row below a wide threshold, the scan reads less than the bands would
+    /// under a saturated one, or the request serves no point: the shipped scan answers.
     Declined,
 }
 
@@ -56,28 +61,47 @@ pub enum BandAnswer {
 /// count in the set selection draws from, `Σ part.visible` over every shard, and each part's
 /// `visible` its own count, as [`crate::select::TileSelection::of`] takes them.
 pub fn select(shards: &[TileShard<'_>], params: &SelectParams, matched: u64) -> Result<BandAnswer> {
-    let Threshold::Cut(cut) = params.threshold else {
-        return Ok(BandAnswer::Declined);
-    };
     if params.cap == 0 || matched == 0 {
         return Ok(BandAnswer::Declined);
     }
-    // The narrowest band holding every identity below the cut.
-    let Some(holding) = band_below(cut) else {
-        return Ok(BandAnswer::Declined);
+    let (cut, start) = match params.threshold {
+        Threshold::Cut(cut) => {
+            // The narrowest band holding every identity below the cut.
+            let Some(holding) = band_below(cut) else {
+                return Ok(BandAnswer::Declined);
+            };
+            // Identities are uniform, so band `j` holds about `matched / 2^j` of the tile's
+            // visible rows. Start at the narrowest band expected to hold `m` of them; a wider one
+            // is always as exact.
+            let expected_below = ((u128::from(matched) * u128::from(cut)) >> 64) as u64;
+            let expected_m = served_count(expected_below, params, matched).max(1) as u64;
+            let ratio = matched / expected_m;
+            if ratio == 0 {
+                return Ok(BandAnswer::Sparse { read: false });
+            }
+            let start = holding.min(63 - ratio.leading_zeros());
+            if start < FIRST_BAND {
+                return Ok(BandAnswer::Sparse { read: false });
+            }
+            (cut, start)
+        }
+        // Every visible row is below a saturated threshold, so `m` is `min(cap, matched)` before
+        // anything is read, and a band holding `m` of the tile's visible rows holds its `m`
+        // smallest. Where that is every visible row, or the band expected to hold them is wider
+        // than the widest written, or its entries in the tile cost more to read than the scan's
+        // rows, the scan answers.
+        Threshold::Saturated => {
+            let m = served_count(matched, params, matched) as u64;
+            if m == matched {
+                return Ok(BandAnswer::Declined);
+            }
+            let start = 63 - (matched / m).leading_zeros();
+            if start < FIRST_BAND || !bands_pay(shards, start, matched) {
+                return Ok(BandAnswer::Declined);
+            }
+            (u64::MAX, start)
+        }
     };
-    // Identities are uniform, so band `j` holds about `matched / 2^j` of the tile's visible rows.
-    // Start at the narrowest band expected to hold `m` of them; a wider one is always as exact.
-    let expected_below = ((u128::from(matched) * u128::from(cut)) >> 64) as u64;
-    let expected_m = served_count(expected_below, params, matched).max(1) as u64;
-    let ratio = matched / expected_m;
-    if ratio == 0 {
-        return Ok(BandAnswer::Sparse { read: false });
-    }
-    let start = holding.min(63 - ratio.leading_zeros());
-    if start < FIRST_BAND {
-        return Ok(BandAnswer::Sparse { read: false });
-    }
 
     let mut candidates: Vec<(u64, ShardRow, u32)> = Vec::new();
     let mut entries_read = 0u64;
@@ -101,7 +125,10 @@ pub fn select(shards: &[TileShard<'_>], params: &SelectParams, matched: u64) -> 
                 )?;
             }
         }
-        let m = served_count(below, params, matched);
+        let m = match params.threshold {
+            Threshold::Cut(_) => served_count(below, params, matched),
+            Threshold::Saturated => served_count(matched, params, matched),
+        };
         if candidates.len() >= m {
             if m < candidates.len() {
                 candidates.select_nth_unstable(m);
@@ -119,6 +146,36 @@ pub fn select(shards: &[TileShard<'_>], params: &SelectParams, matched: u64) -> 
     Ok(BandAnswer::Sparse { read: true })
 }
 
+/// What one band entry costs to read against one row of the identity column's scan: a band entry
+/// is a row, an identity and a mask question at a scattered row, where the scan reads identities
+/// in row order. Measured over the 1.02 × 10⁸-row paperseek tier, filtered dense tiles at zoom 6:
+/// about 35 ns an entry against 4–6 ns a row where the filter keeps most of a tile.
+const ENTRY_COST_IN_ROWS: u64 = 8;
+
+/// Whether reading band `band`'s entries in every part of a tile costs less than scanning the
+/// tile's `matched` rows, the entries counted by the same two searches the read makes.
+fn bands_pay(shards: &[TileShard<'_>], band: u32, matched: u64) -> bool {
+    let entries: u64 = shards
+        .iter()
+        .flat_map(|held| held.parts)
+        .map(|part| band_span(part.segment, band, part.range.clone()).len() as u64)
+        .sum();
+    entries.saturating_mul(ENTRY_COST_IN_ROWS) <= matched
+}
+
+/// The entries of `segment`'s band `band` whose rows lie in `range`, segment-local.
+fn band_span(
+    segment: &mosaica_store::read::SegmentData,
+    band: u32,
+    range: std::ops::Range<u32>,
+) -> std::ops::Range<usize> {
+    let bands = &segment.bands;
+    let span = bands.band(band);
+    let rows = &bands.rows()[span.clone()];
+    span.start + rows.partition_point(|&r| r < range.start)
+        ..span.start + rows.partition_point(|&r| r < range.end)
+}
+
 /// Each entry of `segment`'s band `band` whose row lies in `range`, segment-local, and whose view
 /// row (`row_base` plus the row) `admits`, in entry order: `each(entry, view_row, mosaica_id)`.
 /// Answers how many entries were read. The mask, or a set composed under it, is what `admits`
@@ -133,10 +190,8 @@ pub(crate) fn admitted_entries(
 ) -> Result<u64> {
     let bands = &segment.bands;
     bands.advise_random();
-    let span = bands.band(band);
     let (rows, ids) = (bands.rows(), bands.ids());
-    let lo = span.start + rows[span.clone()].partition_point(|&r| r < range.start);
-    let hi = span.start + rows[span.clone()].partition_point(|&r| r < range.end);
+    let std::ops::Range { start: lo, end: hi } = band_span(segment, band, range.clone());
     bands.will_need(rows, lo..hi);
     bands.will_need(ids, lo..hi);
     for e in lo..hi {

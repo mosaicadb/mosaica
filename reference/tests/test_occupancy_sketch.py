@@ -118,8 +118,8 @@ def test_the_ladder_matches_the_engine_vector_for_vector(name):
     # And through the predicate, which is what the engine and `Selection` actually call: two
     # segments is the estimated route and one is the counted one, so a predicate written the wrong
     # way round fails here rather than only in a deployment.
-    assert occ.ladder(tiles, 16, segments=2) == want
-    assert occ.ladder(tiles, 16, segments=1) == occ.exact_ladder(tiles, 16)
+    assert occ.ladder(tiles, 16, segments=2, visible=occ.EXACT_TILES) == want
+    assert occ.ladder(tiles, 16, segments=1, visible=occ.EXACT_TILES) == occ.exact_ladder(tiles, 16)
 
 
 def test_the_counted_route_is_the_distinct_count_at_every_rung():
@@ -139,3 +139,17 @@ def test_the_counted_route_is_the_distinct_count_at_every_rung():
     assert rungs == sorted(rungs), "a count is non-decreasing in depth by the structure of the grid"
     for d, value in enumerate(rungs):
         assert value <= 4**d, f"depth {d}: {value} exceeds the {4**d} tiles the grid has"
+
+
+def test_the_chains_match_the_engine_vector_for_vector():
+    """The engine's `the_chains_match_the_python_oracle_vector_for_vector` asserts these lists:
+    a viewer of more rows than a walk counts, at one segment and at two.
+
+    Kills: any drift between the two implementations of the descents, the sample or the plan.
+    """
+    tiles = [(i * 48_271) % (1 << 32) for i in range(100_000)]
+    deep = [92096, 98312, 98312, 98312, 98312, 98312, 98312, 98312]
+    one = [1, 4, 16, 64, 256, 1024, 4096, 16384, 65536] + deep
+    two = [1, 4, 16, 63, 253, 1020, 4079, 16333, 65536] + deep
+    assert occ.ladder(tiles, 16, segments=1, visible=len(tiles)) == one
+    assert occ.ladder(tiles, 16, segments=2, visible=len(tiles)) == two

@@ -178,33 +178,35 @@ impl Engine {
         generation: &Arc<Generation>,
         mask: &ShardedMask,
         req: &ViewportRequest<'_>,
+        cap: usize,
         probe: &mut Probe,
     ) -> Theta {
         let v_total = mask.visible_total();
         probe.lap(|t| &mut t.theta_anchor_ns);
+        let mut walked = false;
         let threshold = match req.filter {
             // A filtered request serves every match up to the cap. Neither anchor is consulted:
             // anchoring on the narrower matched set would make θ move as the viewer types,
             // thinning a filtered tile in proportion to the filter's selectivity instead of
             // showing its matches.
             Some(_) => Threshold::Saturated,
-            None => Threshold::at_depth(
+            None => Threshold::for_tiles(
                 v_total,
                 self.config.theta_target_marks,
-                self.occupied_tiles(
-                    &served.mask_identity,
-                    served.name,
-                    &served.sides,
-                    mask,
-                    req.zoom,
-                ),
+                req.zoom,
+                self.config.k_min,
+                cap,
+                || {
+                    walked = true;
+                    self.occupied_tiles(served, mask, req.zoom)
+                },
             ),
         };
         probe.lap(|t| &mut t.theta_occupancy_ns);
         // Takes the ladder to `stage::BACKGROUND_DEPTH` on the pool so a zoom in and back costs
-        // nothing on the way back. Only where the anchor was taken: a filtered request consults
-        // neither anchor above, so it has nothing to warm.
-        if req.filter.is_none() && req.zoom < crate::stage::BACKGROUND_DEPTH {
+        // nothing on the way back. Only where the anchor was taken: a request that did not need
+        // it has nothing to warm.
+        if walked && req.zoom < crate::stage::BACKGROUND_DEPTH {
             self.spawn_ladder_fill(
                 &served.mask_identity,
                 served.name,
@@ -448,47 +450,48 @@ impl Engine {
         });
     }
 
-    /// `N_occ(depth)`, θ's second anchor, for this session and view, memoised. Evaluated per
-    /// requested depth, never for all seventeen: a session touches a handful of depths, and the
-    /// whole ladder eagerly costs an order of magnitude more than a request needs.
+    /// `N_occ(depth)`, θ's second anchor, for this grant and view: from the memo, else from the
+    /// ladder kept on disk beside the grant's fragments, else walked, the whole ladder to `depth`
+    /// kept in both. Evaluated per requested depth, never for all seventeen: a session touches a
+    /// handful of depths, and the whole ladder eagerly costs an order of magnitude more.
     ///
     /// The mask passed in must be the unfiltered composed one: `N_occ` is an anchor, and a
     /// filtered mask reaching it would make θ move as the viewer types.
-    pub(crate) fn occupied_tiles(
-        &self,
-        identity: &crate::figures::MaskIdentity,
-        view: &str,
-        sides: &[ServedSide<'_>],
-        mask: &ShardedMask,
-        depth: u8,
-    ) -> u64 {
-        let key = crate::occupancy::OccupancyKey::of(identity, view, depth);
+    pub(crate) fn occupied_tiles(&self, served: &ServedView<'_>, mask: &ShardedMask, depth: u8) -> u64 {
+        let key = crate::occupancy::OccupancyKey::of(&served.mask_identity, served.name, depth);
         if let mosaica_cache::Peek::Ready(hit) = self.occupancy.peek(&key) {
             return hit.0;
         }
-        // The whole ladder from one walk, with every shallower rung kept too, so a session that
-        // zooms out after reaching a depth pays nothing for the way back — a rung's value is the
-        // same however it is reached.
-        self.counters.occupancy_walks.fetch_add(1, Ordering::Relaxed);
-        let parts = crate::occupancy::occupancy_parts(
-            mask,
-            sides.iter().map(|side| (side.shard.id(), &side.segments[..])),
+        let stem = crate::occupancy::ladder_stem(
+            &served.mask_identity.terms,
+            served.name,
+            served.sides.iter().map(|side| {
+                (
+                    side.shard.id(),
+                    &side.shard.identity,
+                    &*side.geometry.fragment,
+                    mask.leaf(side.shard.id()),
+                    &side.segments[..],
+                )
+            }),
         );
-        let ladder = crate::occupancy::occupied_tiles_ladder(&parts, depth);
-        for rung in 0..depth {
-            let mut rung_key = key.clone();
-            rung_key.depth = rung;
-            let _ = self.occupancy.get_or_derive(rung_key, None, |_| {
-                crate::occupancy::OccupiedTiles(ladder.at(rung))
-            });
-        }
-        match self
-            .occupancy
-            .get_or_derive(key, None, |_| crate::occupancy::OccupiedTiles(ladder.at(depth)))
-        {
-            Ok(entry) => entry.0,
-            Err(mosaica_cache::Building) => ladder.at(depth),
-        }
+        let ladder = match self.stage.ladders.read(&stem, depth) {
+            Some(kept) => kept,
+            None => {
+                self.counters.occupancy_walks.fetch_add(1, Ordering::Relaxed);
+                let parts = crate::occupancy::occupancy_parts(
+                    mask,
+                    served.sides.iter().map(|side| (side.shard.id(), &side.segments[..])),
+                );
+                let ladder =
+                    crate::occupancy::occupied_tiles_ladder(&parts, depth, mask.visible_total());
+                let ladders = Arc::clone(&self.stage.ladders);
+                self.pool.spawn(move || ladders.write(&stem, &ladder));
+                ladder
+            }
+        };
+        crate::occupancy::remember(&self.occupancy, &key, &ladder);
+        ladder.at(depth)
     }
 
     /// `N_occ(depth)` for one session and view, by the request path's own route. A test hook,
@@ -501,13 +504,7 @@ impl Engine {
         let mut probe = Probe::new();
         let open = self.open_view(session, &generation, view, &None, &mut probe)?;
         let served = &open.served;
-        Ok(self.occupied_tiles(
-            &served.mask_identity,
-            view,
-            &served.sides,
-            &open.mask,
-            depth,
-        ))
+        Ok(self.occupied_tiles(served, &open.mask, depth))
     }
 
     /// The generation a request would be answered from, and this session's composed mask over one

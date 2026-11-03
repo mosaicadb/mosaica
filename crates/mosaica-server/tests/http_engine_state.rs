@@ -139,8 +139,7 @@ async fn an_overlay_swap_does_not_stale_a_geometry_stamp() {
 
 // --- Cache pruning, the startup bound, and check_bearer ---
 
-/// A viewport at the depth the occupancy ladder is filled to, over a box of one tile, so each
-/// session's occupied-tile rungs are taken on the request thread and none in the background.
+/// A viewport at depth 12 over a box of one tile: a read that builds its grant's projection.
 async fn deep_viewport(server: &TestServer, token: &str) {
     let resp = server
         .client
@@ -159,23 +158,19 @@ async fn deep_viewport(server: &TestServer, token: &str) {
 /// leaves its grant's row projection, which another session with the grant goes on reading.
 ///
 /// The revoked session is unusable either way (the registry removal does that, and
-/// `revocation_takes_effect_without_waiting_for_a_sweep` covers it), so the observable here is
-/// memory: the occupancy memo, which is per session, read through `TestServer::state`. A 204 and a
-/// survivor's 200 would pass against a handler that pruned nothing.
+/// `revocation_takes_effect_without_waiting_for_a_sweep` covers it). What a prune removes, the
+/// engine's per-session caches, is asserted in `mosaica-engine`'s `artifact_cache_cadence`; the
+/// observable here is the grant's projection, which the prune must leave.
 #[tokio::test]
 async fn revoke_prunes_the_session_and_leaves_its_grants_projection() {
     let tmp = TempDir::new().unwrap();
     let server = serve(&tmp).await;
-    let occupancy = || server.state.engine.occupancy_cache_stats().entries;
     let projections = || server.state.engine.row_projection_cache_stats().entries;
 
     let doomed = authorise(&server, &["0"]).await;
     let survivor = authorise(&server, &["0"]).await;
     deep_viewport(&server, doomed["token"].as_str().unwrap()).await;
-    let per_session = occupancy();
-    assert!(per_session > 0);
     deep_viewport(&server, survivor["token"].as_str().unwrap()).await;
-    assert_eq!(occupancy(), 2 * per_session);
     assert_eq!(projections(), 1, "one grant, one projection");
 
     let resp = server
@@ -188,11 +183,6 @@ async fn revoke_prunes_the_session_and_leaves_its_grants_projection() {
         .unwrap();
     assert_eq!(resp.status(), 204);
 
-    assert_eq!(
-        occupancy(),
-        per_session,
-        "the revoke handler must prune the revoked session's entries and only those"
-    );
     assert_eq!(projections(), 1, "the grant's projection outlives the session");
 
     let hits = server.state.engine.row_projection_cache_stats().hits;
@@ -210,7 +200,6 @@ async fn revoke_prunes_the_session_and_leaves_its_grants_projection() {
 async fn every_way_a_session_ends_prunes_its_caches() {
     let tmp = TempDir::new().unwrap();
     let server = serve(&tmp).await;
-    let occupancy = || server.state.engine.occupancy_cache_stats().entries;
     let projections = || server.state.engine.row_projection_cache_stats().entries;
 
     let sessions = [
@@ -219,11 +208,9 @@ async fn every_way_a_session_ends_prunes_its_caches() {
         authorise(&server, &["0", "1"]).await,
     ];
     deep_viewport(&server, sessions[0]["token"].as_str().unwrap()).await;
-    let per_session = occupancy();
     for session in &sessions[1..] {
         deep_viewport(&server, session["token"].as_str().unwrap()).await;
     }
-    assert_eq!(occupancy(), 3 * per_session);
     assert_eq!(projections(), 3);
 
     let resp = server
@@ -234,7 +221,6 @@ async fn every_way_a_session_ends_prunes_its_caches() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 204);
-    assert_eq!(occupancy(), 2 * per_session, "logout must prune the session it ends");
 
     let control = |path: &str, body: serde_json::Value| {
         server
@@ -252,11 +238,6 @@ async fn every_way_a_session_ends_prunes_its_caches() {
     .await
     .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(
-        occupancy(),
-        per_session,
-        "a catalogue change must prune the sessions it ends"
-    );
 
     let token_id = sessions[2]["token_id"].as_u64().unwrap();
     let resp = control(
@@ -266,7 +247,6 @@ async fn every_way_a_session_ends_prunes_its_caches() {
     .await
     .unwrap();
     assert_eq!(resp.status(), 200);
-    assert_eq!(occupancy(), 0, "ending a session on the control plane must prune it");
     assert_eq!(projections(), 3, "no session's end removes a grant's projection");
 }
 
@@ -427,11 +407,8 @@ async fn the_sweep_keeps_every_live_session() {
 
 /// The sweep's engine half: what the registry drops, the engine drops too.
 ///
-/// A session that has served a viewport owns occupancy rungs, and the memo holding them is keyed by
-/// `token_id` — which the registry is the only holder of. Sweeping the registry without telling the
-/// engine leaves them resident until a byte bound chooses them, which for a small entry is a long
-/// way off, and the session they belong to can never be presented again. The row projection it
-/// read is its grant's, and stays.
+/// A swept session's engine-side caches are keyed by `token_id`, which the registry is the only
+/// holder of; the row projection it read is its grant's, and stays.
 ///
 /// **This case sleeps, and the three above it do not.** They reach expiry with
 /// `token_max_lifetime_secs = 0`, which mints a session that is expired on arrival and can
@@ -455,10 +432,6 @@ async fn the_sweep_prunes_what_the_engine_holds_for_an_expired_session() {
     let doomed = authorise(&server, &["0"]).await;
     deep_viewport(&server, doomed["token"].as_str().unwrap()).await;
     let status = control_status(&server).await;
-    assert!(
-        status["occupancy"]["entries"].as_u64().unwrap() > 0,
-        "a served viewport leaves the session's occupancy rungs resident"
-    );
     assert_eq!(status["row_projection_cache"]["entries"].as_u64().unwrap(), 1);
 
     // Past the deadline, then over the sweep threshold. The sessions minted here expire on the
@@ -470,11 +443,6 @@ async fn the_sweep_prunes_what_the_engine_holds_for_an_expired_session() {
     assert!(
         status["sessions"]["swept_total"].as_u64().unwrap() > 0,
         "the sweep must have run, or this case asserts nothing"
-    );
-    assert_eq!(
-        status["occupancy"]["entries"].as_u64().unwrap(),
-        0,
-        "the swept session's engine-side entries go with it, as a revocation's do"
     );
     assert_eq!(status["row_projection_cache"]["entries"].as_u64().unwrap(), 1);
 }

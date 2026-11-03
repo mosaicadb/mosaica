@@ -238,7 +238,7 @@ fn below(field: &str, bound: f64) -> FilterExpr {
 }
 
 /// The request shapes each principal is checked under.
-const SHAPES: usize = 5;
+const SHAPES: usize = 6;
 
 /// Every request shape for `term`'s principal, answered from the bands and by the scan, compared.
 fn check(engine: &Engine, term: &str) -> Served {
@@ -251,6 +251,8 @@ fn check(engine: &Engine, term: &str) -> Served {
         for (k, point_rows, underlay, filter, highlight) in [
             (200, PointRows::Full, None, None, None),
             (3, PointRows::Full, None, None, None),
+            // `k_min` reaches the cap, so θ cannot move a tile's count and is saturated.
+            (2, PointRows::Full, None, None, None),
             (200, PointRows::Columns(&columns), (zoom <= 4).then_some(2), None, None),
             (200, PointRows::Full, None, None, Some(below("score", 0.0))),
             (200, PointRows::Full, None, Some(below("weight", 4_000.0)), None),

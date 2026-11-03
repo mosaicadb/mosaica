@@ -20,9 +20,9 @@ use crate::cells::CellSet;
 use crate::compose::{EffectiveMask, MaskedSet, WholeMask};
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
-use crate::filter::{FilterExpr, RoutedFilter};
+use crate::filter::FilterExpr;
 use crate::region::RegionVerdict;
-use crate::viewport::{FilterCandidate, OpenView, ResolvedLeaves, ServedSide};
+use crate::viewport::{FilterCandidate, OpenView, OverView, ResolvedLeaves, ServedSide};
 use crate::Generation;
 
 /// The page's set and reference set, and the entity candidates both were routed under.
@@ -273,6 +273,7 @@ pub(super) fn compose(
         let side = &served.sides[place];
         let candidate =
             engine.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
+        let visible = served.leaf(&open.mask, place).map_or(0, EffectiveMask::visible_total);
         engine.route_filters_under(
             served,
             side,
@@ -282,10 +283,17 @@ pub(super) fn compose(
             |route| {
             let route_one = |expr: &FilterExpr, into: &mut Set| -> Result<()> {
                 clock.check_ended(moved)?;
-                into.add(
-                    place,
-                    routed(engine, open, place, route(expr, prefer_row)?)?,
-                );
+                let over = engine.route_over_view(
+                    served,
+                    side,
+                    &resolved,
+                    &req.cancel,
+                    route,
+                    expr,
+                    prefer_row,
+                    visible,
+                )?;
+                into.add(place, routed(open, place, over)?);
                 Ok(())
             };
             if let Some(expr) = &req.filter {
@@ -315,37 +323,21 @@ pub(super) fn compose(
     })
 }
 
-/// One routed filter as a set's part in the side at `place`: an entity-space answer kept to
-/// the entities the leaf's rows cover, a row-space one taken under the leaf over the whole view.
-fn routed(
-    engine: &Engine,
-    open: &OpenView<'_>,
-    place: usize,
-    routed: RoutedFilter,
-) -> Result<Routed> {
-    Ok(match routed {
-        RoutedFilter::Entity(entities) => {
+/// One filter's answer over the view as a set's part in the side at `place`: an entity-space
+/// answer kept to the entities the leaf's rows cover, a row-space one taken under the leaf.
+fn routed(open: &OpenView<'_>, place: usize, over: OverView) -> Result<Routed> {
+    Ok(match over {
+        OverView::Entities(entities) => {
             let restricted = in_view(open, place, &entities)?;
             let size = restricted.cardinality();
             (Part::of(Held::Entities(restricted), size), None)
         }
-        RoutedFilter::Row(tree) => {
-            let side = &open.served.sides[place];
-            let region = tree.region_verdict();
-            let total = side.data.row_space.total_rows();
-            let whole_view = 0..u32::try_from(total).unwrap_or(u32::MAX);
-            let matched = engine.evaluate_row_route(
-                &tree,
-                side,
-                std::slice::from_ref(&whole_view),
-                total,
-                false,
-            )?;
+        OverView::Rows { rows, region } => {
             let rows = open
                 .served
                 .leaf(&open.mask, place)
                 .expect("a side the page reads")
-                .visible_rows(matched.rows());
+                .visible_rows(&rows);
             let size = rows.cardinality();
             (Part::of(Held::Rows(rows), size), region)
         }
@@ -369,8 +361,11 @@ pub(crate) fn entities_passing(
     let served = &open.served;
     let side = &served.sides[place];
     let whole = FilterCandidate::Whole(candidate);
+    let visible = served.leaf(&open.mask, place).map_or(0, EffectiveMask::visible_total);
     engine.route_filters_under(served, side, whole, resolved, cancel, |route| {
-        let (part, region) = routed(engine, open, place, route(expr, false)?)?;
+        let over =
+            engine.route_over_view(served, side, resolved, cancel, route, expr, false, visible)?;
+        let (part, region) = routed(open, place, over)?;
         check_cancelled(cancel)?;
         let entities = match part.held {
             Held::Entities(entities) => entities,

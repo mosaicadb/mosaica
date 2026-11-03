@@ -832,6 +832,44 @@ fn value_rows_are_the_oracles_on_every_route() {
     }
 }
 
+/// **A filter inside a drawn region counts what the same filter counts over the whole view.**
+/// `all_of(region, …)` evaluates its other leaves over the region's rows alone, row-routing a
+/// column with both routes there; `any_of([all_of(region, …)])` is the same set, which no region
+/// bounds, so it is evaluated over every row of the view. Both are asked as a set and as a
+/// reference, under an entity-routed filter, a row-routed one and a negation.
+#[test]
+fn a_filter_inside_a_region_counts_what_it_counts_over_the_whole_view() {
+    let fx = fixture();
+    let engine = &fx.engine;
+    let region = bbox(120.0, 80.0, 610.0, 745.0);
+    let others = [
+        fx.is_in("shade", &["x", "z"]),
+        fx.is_in("mark", &["p", "r"]),
+        FilterExpr::NoneOf(vec![fx.is_in("kind", &["a"])]),
+    ];
+    for broad in [true, false] {
+        let session = fx.session(broad);
+        for other in &others {
+            let bounded = FilterExpr::AllOf(vec![region.clone(), other.clone()]);
+            let unbounded = FilterExpr::AnyOf(vec![bounded.clone()]);
+            let groupings = [
+                field("kind", Pick::Top(3)),
+                with_cells(size(), 6),
+                size(),
+            ];
+            let tables = |filter: &FilterExpr| {
+                let mut req = request(&groupings);
+                req.filter = Some(filter.clone());
+                req.reference = Some(Reference::Filter(filter.clone()));
+                read_all(engine, &session, req)
+            };
+            let (narrowed, whole) = (tables(&bounded), tables(&unbounded));
+            assert_eq!(narrowed, whole, "broad {broad}, {other:?}");
+            assert!(narrowed[&2].1[0].count > 0, "the set holds items: {other:?}");
+        }
+    }
+}
+
 /// **A comparison set gives each row its count there and the lift**, over the same groups.
 #[test]
 fn a_reference_counts_the_same_groups_and_gives_the_lift() {
