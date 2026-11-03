@@ -52,7 +52,7 @@ mod values;
 mod values_writer;
 mod varint;
 
-pub use column::{resolve_union, ColumnPostings, PostingRanks, POSTINGS_FILE};
+pub use column::{resolve_union, ColumnPostings, POSTINGS_FILE};
 pub use dict::{
     write_sorted_dict, DictError, DictStats, KeyMatcher, SortedDict, SortedDictWriter,
     DEFAULT_RESTART_INTERVAL, DICT_FILE, DICT_FORMAT_VERSION,

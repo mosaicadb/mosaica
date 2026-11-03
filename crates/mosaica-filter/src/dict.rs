@@ -154,6 +154,7 @@ use std::ops::{Deref, Range};
 use std::path::Path;
 
 use crate::values::Access;
+use crate::varint::{put_varint, take_varint};
 
 /// The layer's dictionary file, under `attrs/<column>/` (records §7). One file per layer — an
 /// extent's ordinals are meaningful only against that extent's own dictionary.
@@ -276,6 +277,8 @@ pub struct SortedDictWriter<W: Write> {
     blocks_len: u64,
     prev: Vec<u8>,
     keys: u32,
+    /// The entry being written: its two lengths and its suffix.
+    entry: Vec<u8>,
 }
 
 impl<W: Write> SortedDictWriter<W> {
@@ -298,6 +301,7 @@ impl<W: Write> SortedDictWriter<W> {
             blocks_len: 0,
             prev: Vec::new(),
             keys: 0,
+            entry: Vec::new(),
         })
     }
 
@@ -339,11 +343,12 @@ impl<W: Write> SortedDictWriter<W> {
         };
         let suffix = &bytes[shared..];
 
-        write_varint(&mut self.out, shared as u32)?;
-        write_varint(&mut self.out, suffix.len() as u32)?;
-        self.out.write_all(suffix)?;
-        self.blocks_len +=
-            (varint_len(shared as u32) + varint_len(suffix.len() as u32) + suffix.len()) as u64;
+        self.entry.clear();
+        put_varint(shared as u32, &mut self.entry);
+        put_varint(suffix.len() as u32, &mut self.entry);
+        self.entry.extend_from_slice(suffix);
+        self.out.write_all(&self.entry)?;
+        self.blocks_len += self.entry.len() as u64;
 
         self.prev.clear();
         self.prev.extend_from_slice(bytes);
@@ -394,33 +399,6 @@ where
 
 fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).take_while(|(x, y)| x == y).count()
-}
-
-fn varint_len(v: u32) -> usize {
-    match v {
-        0..=0x7f => 1,
-        0x80..=0x3fff => 2,
-        0x4000..=0x1f_ffff => 3,
-        0x20_0000..=0x0fff_ffff => 4,
-        _ => 5,
-    }
-}
-
-fn write_varint(out: &mut impl Write, mut v: u32) -> io::Result<()> {
-    let mut buf = [0u8; 5];
-    let mut n = 0;
-    loop {
-        let byte = (v & 0x7f) as u8;
-        v >>= 7;
-        if v == 0 {
-            buf[n] = byte;
-            n += 1;
-            break;
-        }
-        buf[n] = byte | 0x80;
-        n += 1;
-    }
-    out.write_all(&buf[..n])
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1112,20 +1090,8 @@ fn read_u64_at(bytes: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(bytes[at..at + 8].try_into().expect("an eight-byte window"))
 }
 
-/// LEB128, refusing at `limit` rather than at the end of the file, so an entry cannot read its
-/// neighbour's bytes when its own block is malformed.
+/// One varint of the entry at `at`, refusing at `limit` rather than at the end of the file, so an
+/// entry cannot read its neighbour's bytes when its own block is malformed.
 fn read_varint(bytes: &[u8], at: &mut usize, limit: usize) -> Option<u32> {
-    let mut result: u64 = 0;
-    for i in 0..5 {
-        if *at >= limit {
-            return None;
-        }
-        let byte = bytes[*at];
-        *at += 1;
-        result |= ((byte & 0x7f) as u64) << (7 * i);
-        if byte & 0x80 == 0 {
-            return u32::try_from(result).ok();
-        }
-    }
-    None
+    take_varint(bytes.get(..limit)?, at).ok()
 }
