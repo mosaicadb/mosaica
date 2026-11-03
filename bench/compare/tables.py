@@ -138,7 +138,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
                      lambda r, w=w: f"{r['errors'][w]['points_sent']:,} ({r['errors'][w]['points_dense']:,})"))
         rows.append((f"Bytes received, {w}", lambda r, w=w: size(r["errors"][w]["bytes"])))
     rows += [("Error versus oracle, aggregation", lambda r: agg_error_cell(r["errors"]["aggregation"])),
-             ("Timed responses differing from the oracle where the check was right",
+             ("Timed responses wrong (against the oracle, or the untimed answer where that was wrong)",
               lambda r: timed_cell(r["errors"]["timed"])),
              ("Viewer's visible fraction", lambda r: f"{r['viewer']['visible_rows']:,} of "
               f"{r['viewer']['tier_rows']:,} ({r['viewer']['visible_fraction']:.1%})"),
