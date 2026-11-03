@@ -199,11 +199,9 @@ pub fn coalesce_attr_extents(
     )
 }
 
-/// The non-empty layers with their entity sets, and the presence the merged column carries.
-///
-/// Refuses layers that claim one entity twice: the reader takes the layers as a partition of
-/// entity space, and once they collapse into one file the overlap could not be seen again. An
-/// empty layer is dropped; a flush writes one for a column none of its entities carried.
+/// The non-empty layers with their entity sets, and the presence the merged column carries,
+/// refusing layers that overlap ([`disjoint_union`]). An empty layer is dropped; a flush writes one
+/// for a column none of its entities carried.
 pub(crate) fn merge_order(
     layers: &[&ValueColumn],
     tombstones: &Bitmap,
@@ -220,9 +218,21 @@ pub(crate) fn merge_order(
         .enumerate()
         .map(|(i, layer)| (i, layer.present()))
         .collect();
+    let union = disjoint_union(present.iter().map(|(_, p)| p), pass)?;
+    present.retain(|(_, p)| !p.is_empty());
+    Ok((present, union.andnot(tombstones)))
+}
+
+/// The entities a column's layers hold between them, refusing layers that claim one entity twice:
+/// the reader takes the layers as a partition of entity space, and once they collapse into one
+/// file the overlap could not be seen again.
+pub(crate) fn disjoint_union<'a>(
+    presences: impl IntoIterator<Item = &'a Bitmap>,
+    pass: &str,
+) -> io::Result<Bitmap> {
     let mut union = Bitmap::new();
     let mut sum = 0u64;
-    for (_, p) in &present {
+    for p in presences {
         sum += p.cardinality();
         union |= p;
     }
@@ -234,8 +244,7 @@ pub(crate) fn merge_order(
             union.cardinality()
         )));
     }
-    present.retain(|(_, p)| !p.is_empty());
-    Ok((present, union.andnot(tombstones)))
+    Ok(union)
 }
 
 /// Stream the layers into one column in entity order, skipping `tombstones`.
@@ -641,6 +650,78 @@ mod tests {
         )
         .expect_err("an overlap is refused");
         assert!(err.to_string().contains("twice"), "{err}");
+    }
+
+    fn layer<'a>(
+        (dict, postings): &'a (mosaica_filter::SortedDict, mosaica_filter::ColumnPostings),
+        present: &'a Bitmap,
+    ) -> TextLayerRef<'a> {
+        TextLayerRef {
+            dict,
+            postings,
+            present,
+        }
+    }
+
+    /// One text layer's dictionary and postings under `dir`, each term carried by its entities.
+    fn text_layer(
+        dir: &Path,
+        tag: &str,
+        terms: &[(&str, &[u32])],
+    ) -> (mosaica_filter::SortedDict, mosaica_filter::ColumnPostings) {
+        let dict = dir.join(format!("{tag}-dict.bin"));
+        let postings = dir.join(format!("{tag}-postings.arrow"));
+        mosaica_filter::write_sorted_dict(&dict, terms.iter().map(|(term, _)| *term)).unwrap();
+        let per_term: Vec<Vec<u32>> = terms.iter().map(|(_, carriers)| carriers.to_vec()).collect();
+        mosaica_authz::postings::write_postings(&postings, &per_term, 32).unwrap();
+        (
+            mosaica_filter::SortedDict::open(&dict, mosaica_filter::Access::Read).unwrap(),
+            mosaica_filter::ColumnPostings::open(&postings, false).unwrap(),
+        )
+    }
+
+    /// **Text layers holding one entity between them are refused by the fold and the coalesce
+    /// alike**, through the check the value merge makes; disjoint ones merge, and the merged
+    /// layer's presence is every entity they held, an entity whose text has no terms included,
+    /// less the tombstones.
+    #[test]
+    fn text_layers_claiming_one_entity_are_refused_and_disjoint_ones_merge() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = dir.path();
+        let a = text_layer(dir, "a", &[("alpha", &[1, 2])]);
+        let a_present = bitmap([1, 2, 3]);
+        let b = text_layer(dir, "b", &[("alpha", &[5]), ("beta", &[5, 6])]);
+        let b_present = bitmap([5, 6]);
+        let c = text_layer(dir, "c", &[("beta", &[2])]);
+        let c_present = bitmap([2]);
+        let out = |tag: &str| {
+            ["dict.bin", "postings.arrow", "presence.roaring", "spool"]
+                .map(|name| dir.join(format!("{tag}-out-{name}")))
+        };
+        let fold = |inputs: &[TextLayerRef<'_>], tombstones: &Bitmap, tag: &str| {
+            let [dict, postings, presence, spool] = out(tag);
+            merge_text_layers(inputs, tombstones, &dict, &postings, &presence, &spool)
+                .map(|()| mosaica_filter::read_presence(&presence).unwrap())
+        };
+        let coalesce = |inputs: &[TextLayerRef<'_>], tag: &str| {
+            let [dict, postings, presence, spool] = out(tag);
+            coalesce_text_extents(inputs, &dict, &postings, &presence, &spool)
+                .map(|()| mosaica_filter::read_presence(&presence).unwrap())
+        };
+
+        let overlapping = [layer(&a, &a_present), layer(&c, &c_present)];
+        assert!(fold(&overlapping, &Bitmap::new(), "fold-overlap").is_err());
+        assert!(coalesce(&overlapping, "coalesce-overlap").is_err());
+
+        let disjoint = [layer(&a, &a_present), layer(&b, &b_present)];
+        assert_eq!(
+            fold(&disjoint, &bitmap([3, 6]), "fold").unwrap(),
+            bitmap([1, 2, 5])
+        );
+        assert_eq!(
+            coalesce(&disjoint, "coalesce").unwrap(),
+            bitmap([1, 2, 3, 5, 6])
+        );
     }
 
     /// Coalesce `inputs` into one extent and open it back.

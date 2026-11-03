@@ -283,10 +283,7 @@ pub(super) fn coalesce_text_window(
     let presences: Vec<croaring::Bitmap> = window
         .extents
         .iter()
-        .map(|extent| {
-            std::fs::read(ctx.prefix_dir.join(&extent.presence))
-                .map(|bytes| croaring::Bitmap::deserialize::<croaring::Portable>(&bytes))
-        })
+        .map(|extent| mosaica_filter::read_presence(&ctx.prefix_dir.join(&extent.presence)))
         .collect::<std::io::Result<_>>()
         .map_err(failed(format!("text presence for '{column}'")))?;
     let inputs: Vec<mosaica_filter_write::TextLayerRef<'_>> = dicts
@@ -297,7 +294,7 @@ pub(super) fn coalesce_text_window(
             |((dict, postings), present)| mosaica_filter_write::TextLayerRef {
                 dict,
                 postings,
-                present: Some(present),
+                present,
             },
         )
         .collect();
@@ -330,8 +327,8 @@ pub(super) fn coalesce_text_window(
         view: window.view.clone(),
         incarnation: window.incarnation,
         dict: format!("{column_rel}/{}", mosaica_filter::DICT_FILE),
-        postings: format!("{column_rel}/postings.arrow"),
-        presence: format!("{column_rel}/presence.roaring"),
+        postings: format!("{column_rel}/{}", mosaica_filter::POSTINGS_FILE),
+        presence: format!("{column_rel}/{}", mosaica_filter::PRESENCE_FILE),
         prose,
     };
     let dict_path = ctx.prefix_dir.join(&extent.dict);

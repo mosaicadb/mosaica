@@ -52,20 +52,12 @@ pub(super) fn open_scoped_column(
     let declared_index = usize::MAX;
     if scoped_family == Family::Text {
         let analyser = resolve_analyser(&family.name, family.analyser.as_deref())?;
-        let text = match based {
-            true => vec![TextLayer::open_base(
-                &name,
-                &dir,
-                true,
-                request_access(mmap),
-            )?],
-            false => Vec::new(),
-        };
-        return Ok((
-            name,
-            placement,
-            Column::text(declared_index, filterable, analyser, text),
-        ));
+        let mut column = Column::text(declared_index, filterable, analyser);
+        if based {
+            let base = TextLayer::open_base(&name, &dir, true, request_access(mmap))?;
+            column.push_text_layers(&name, [base])?;
+        }
+        return Ok((name, placement, column));
     }
     if !based {
         return Ok((
@@ -116,7 +108,9 @@ fn open_value_base(
         .then(|| SortedDict::open_dir(dir, request_access(mmap)).map(Arc::new))
         .transpose()?;
     let postings = owes_postings
-        .then(|| ColumnPostings::open_keyed(&dir.join("postings.arrow")).map(Arc::new))
+        .then(|| {
+            ColumnPostings::open_keyed(&dir.join(mosaica_filter::POSTINGS_FILE)).map(Arc::new)
+        })
         .transpose()?;
     let route = if postings.is_some() && visibility == Some(Visibility::Public) {
         Route::Postings
@@ -234,12 +228,7 @@ pub(super) fn runtime_layers(
             return Ok(None);
         }
         let analyser = resolve_analyser(&scalar.name, scalar.analyser.as_deref())?;
-        return Ok(Some(Column::text(
-            declared_index,
-            filterable,
-            analyser,
-            Vec::new(),
-        )));
+        return Ok(Some(Column::text(declared_index, filterable, analyser)));
     }
     if !scalar.owes_value_column(vocabularies) {
         return Ok(None);
@@ -332,13 +321,11 @@ impl FilterColumns {
             // column's with the attribute extents below.
             if unfolded.iter().any(|name| name == &scalar.name) {
                 if let Some(mut column) = runtime_layers(scalar, declared_index, vocabularies)? {
-                    if let Some(text) = column.text_layers_mut() {
-                        text.extend(entity_text_layers(
-                            prefix_dir,
-                            extents.texts,
+                    if family == Family::Text {
+                        column.push_text_layers(
                             &scalar.name,
-                            mmap,
-                        )?);
+                            entity_text_layers(prefix_dir, extents.texts, &scalar.name, mmap)?,
+                        )?;
                     }
                     columns.insert(scalar.name.clone(), column);
                 }
@@ -351,23 +338,19 @@ impl FilterColumns {
                     continue;
                 }
                 let dir = prefix_dir.join(layout.column_rel(&scalar.name));
-                let mut text_layers = vec![TextLayer::open_base(
-                    &scalar.name,
-                    &dir,
-                    false,
-                    request_access(mmap),
-                )?];
-                text_layers.extend(entity_text_layers(
-                    prefix_dir,
-                    extents.texts,
-                    &scalar.name,
-                    mmap,
-                )?);
+                let base = TextLayer::open_base(&scalar.name, &dir, false, request_access(mmap))?;
                 let analyser = resolve_analyser(&scalar.name, scalar.analyser.as_deref())?;
-                columns.insert(
-                    scalar.name.clone(),
-                    Column::text(declared_index, true, analyser, text_layers),
-                );
+                let mut column = Column::text(declared_index, true, analyser);
+                column.push_text_layers(
+                    &scalar.name,
+                    std::iter::once(base).chain(entity_text_layers(
+                        prefix_dir,
+                        extents.texts,
+                        &scalar.name,
+                        mmap,
+                    )?),
+                )?;
+                columns.insert(scalar.name.clone(), column);
                 continue;
             }
             if !scalar.owes_value_column(vocabularies) {
@@ -419,8 +402,8 @@ impl FilterColumns {
                     mmap,
                     based,
                 )?;
-                if let Some(text) = column.text_layers_mut() {
-                    text.extend(text_extent_layers(
+                if column.family == Family::Text {
+                    let layers = text_extent_layers(
                         prefix_dir,
                         extents.texts.iter().filter(|e| {
                             e.column == family.name
@@ -432,7 +415,8 @@ impl FilterColumns {
                                 )
                         }),
                         mmap,
-                    )?);
+                    )?;
+                    column.push_text_layers(&name, layers)?;
                 }
                 if scoped_is_filterable(family) {
                     placements.insert(name.clone(), placement);

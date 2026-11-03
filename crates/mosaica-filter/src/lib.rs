@@ -50,7 +50,7 @@ mod record_stack;
 mod values;
 mod values_writer;
 
-pub use column::{resolve_union, ColumnPostings};
+pub use column::{resolve_union, ColumnPostings, POSTINGS_FILE};
 pub use dict::{
     write_sorted_dict, DictError, DictStats, KeyMatcher, SortedDict, SortedDictWriter,
     DEFAULT_RESTART_INTERVAL, DICT_FILE, DICT_FORMAT_VERSION,
@@ -65,6 +65,6 @@ pub use record_stack::{RecordExtentPaths, RecordStack};
 pub use values::{
     base_numbers,
     as_f64, narrow_hi, narrow_lo, take_scan_work, Access, CodeSet, Codes, Endpoint, Narrowed,
-    NativeBound, Scalar, ScanWork, ValueColumn, PRESENCE_FILE, VALUES_FILE,
+    NativeBound, Scalar, ScanWork, ValueColumn, PRESENCE_FILE, VALUES_FILE, read_presence,
 };
-pub use values_writer::{write_value_column, ColumnKind, ValueColumnWriter};
+pub use values_writer::{write_presence, write_value_column, ColumnKind, ValueColumnWriter};

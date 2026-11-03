@@ -404,8 +404,9 @@ const RUN_BUF: usize = 64;
 
 /// The value column's file name within a column's directory.
 pub const VALUES_FILE: &str = "values.arrow";
-/// The presence bitmap's, written only where presence is partial — its **absence is the signal**
-/// that the entity id is the array index.
+/// The presence bitmap's. A value column writes one only where presence is partial, so its
+/// **absence is the signal** that the entity id is the array index; a text column always writes
+/// one.
 pub const PRESENCE_FILE: &str = "presence.roaring";
 
 /// A column's values, at the declared width.
@@ -1287,21 +1288,23 @@ impl ValueColumn {
         let codes = read_values(values_path, access)?;
         match presence_path {
             None => Ok(ValueColumn::universal(codes)),
-            Some(path) => {
-                let bytes = std::fs::read(path)?;
-                let presence = Bitmap::try_deserialize::<Portable>(&bytes).ok_or_else(|| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "presence bitmap at {} is not portable Roaring",
-                            path.display()
-                        ),
-                    )
-                })?;
-                ValueColumn::partial(codes, presence)
-            }
+            Some(path) => ValueColumn::partial(codes, read_presence(path)?),
         }
     }
+}
+
+/// The entities a layer holds a value for, from its presence file.
+pub fn read_presence(path: &Path) -> io::Result<Bitmap> {
+    let bytes = std::fs::read(path)?;
+    Bitmap::try_deserialize::<Portable>(&bytes).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "presence bitmap at {} is not portable Roaring",
+                path.display()
+            ),
+        )
+    })
 }
 
 /// How a value column's bytes are obtained, and what the caller promises about its access pattern.

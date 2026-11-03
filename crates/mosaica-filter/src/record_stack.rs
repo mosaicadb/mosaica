@@ -35,8 +35,8 @@ pub struct RecordExtentPaths {
 /// **Layers are `Arc` so a live generation can be extended without reopening the base.** A flush
 /// publishes one more extent; reopening the whole stack for it would remap a base that at 10⁹ is
 /// the largest artefact in the bundle, and the successor generation shares every layer the
-/// predecessor already had. Appending is sound because a layer is only ever added and an entity
-/// id is never reused.
+/// predecessor already had. Appending is sound because a layer is only ever added, and an entity
+/// id is reused only after a fold has removed it from every layer.
 pub struct RecordStack {
     layers: Vec<std::sync::Arc<RecordBlob>>,
     /// How many rows [`Self::fields_of`] has decoded from a layer, over this stack's life.

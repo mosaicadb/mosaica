@@ -127,6 +127,11 @@ fn presence_bytes(presence: &Bitmap) -> Vec<u8> {
     normalised.serialize::<Portable>()
 }
 
+/// Write the entities a layer holds a value for, read back by [`crate::read_presence`].
+pub fn write_presence(path: &Path, presence: &Bitmap) -> io::Result<()> {
+    std::fs::write(path, presence_bytes(presence))
+}
+
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
@@ -228,7 +233,7 @@ pub fn write_value_column(
     write_value_array(values_path, array, ty)?;
 
     if let Some(p) = presence {
-        std::fs::write(presence_path, presence_bytes(p))?;
+        write_presence(presence_path, p)?;
     }
     Ok(())
 }
@@ -447,7 +452,7 @@ impl ValueColumnWriter {
         write_value_array(&self.values_path, array, self.kind.arrow_type())?;
         std::fs::remove_file(&values_spool)?;
         if let Some(p) = presence {
-            std::fs::write(&self.presence_path, presence_bytes(p))?;
+            write_presence(&self.presence_path, p)?;
         }
         Ok(())
     }

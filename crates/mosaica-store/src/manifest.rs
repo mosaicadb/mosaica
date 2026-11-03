@@ -2497,10 +2497,10 @@ pub struct ShardRecord {
     /// and is opened from the column's own directory, exactly as `record_extents` treats the base
     /// blob.
     ///
-    /// The layers are **disjoint in entity space** (**I9**), so a `match` unions across them and
-    /// order decides nothing. That disjointness is why this list needs no coverage check of the
-    /// kind [`ShardRecord::attr_extents`] carries: an entity id is never reused, so no two
-    /// text layers can hold the same entity's terms.
+    /// The layers are **disjoint in entity space** (**I9**), base included, so a `match` unions
+    /// across them and order decides nothing. Each layer's presence is checked against the layers
+    /// before it at composition, as [`ShardRecord::attr_extents`]' are: an entity id is reused
+    /// only after a fold has removed it from every layer.
     pub text_extents: Vec<TextExtent>,
     /// The runs of each column in [`PartitionManifest::unique_columns`] ([`crate::unique`]).
     pub unique_indexes: Vec<UniqueIndexRuns>,

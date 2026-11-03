@@ -262,9 +262,11 @@ pub struct GenerationStamp {
 // none on a group sharing its views; neither stores its group's gate. A 46 bundle is refused.
 // 48: a registered layer, and the log record that registers one, carry the names its views were
 // declared with where one names a view group. A 47 bundle is refused.
+// 49: every text index, a base as well as an extent, carries `presence.roaring`. A 48 bundle is
+// refused.
 // Each bump makes a stale local bundle a loud refusal rather than a silent misread — a fail-closed
 // guard, not compatibility.
-pub const BUNDLE_FORMAT: u32 = 48;
+pub const BUNDLE_FORMAT: u32 = 49;
 pub const API_VERSION: u32 = 1;
 pub const ABI_VERSION: u32 = 1;
 pub const ROW_ABSENT: u32 = 0xFFFF_FFFF;

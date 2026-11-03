@@ -418,7 +418,7 @@ fn the_folded_prefix_lists_no_text_extent_and_holds_no_orphan() {
         );
     }
     // And every file the new manifest *does* name is there and digest-clean, which is what
-    // `open_bundle` checks — including the two the text pass wrote.
+    // `open_bundle` checks — including the three the text pass wrote.
     let bundle = open_bundle(&root).expect("the folded prefix opens and verifies");
     let named: Vec<&String> = bundle
         .manifest
@@ -428,8 +428,9 @@ fn the_folded_prefix_lists_no_text_extent_and_holds_no_orphan() {
         .collect();
     assert_eq!(
         named.len(),
-        2,
-        "the folded prefix should name exactly the merged dictionary and its postings: {named:?}"
+        3,
+        "the folded prefix should name exactly the merged dictionary, its postings and its \
+         presence: {named:?}"
     );
     // The corpus is still searchable through the artefacts the fold wrote.
     let index = base_index(&root);
@@ -615,4 +616,92 @@ fn a_flush_with_no_text_value_publishes_no_text_layer() {
         "an entity whose prose is the empty string carries a value and must be in the layer's \
          presence, where no posting can name it"
     );
+}
+
+/// Compose onto the live generation a text layer holding no term that claims `entities`, answering
+/// whether the column takes it. `tag` names its files under `tmp`.
+fn claims(engine: &Engine, tmp: &Path, tag: &str, entities: &[u32]) -> bool {
+    let dir = tmp.join(format!("claim-{tag}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let paths = mosaica_engine::filter::TextExtentPaths {
+        column: "prose".to_string(),
+        dict_rel: format!("claim-{tag}/dict.bin"),
+        dict: dir.join(mosaica_filter::DICT_FILE),
+        postings: dir.join(mosaica_filter::POSTINGS_FILE),
+        presence: dir.join(mosaica_filter::PRESENCE_FILE),
+        prose: None,
+    };
+    mosaica_filter::write_sorted_dict(&paths.dict, std::iter::empty::<&str>()).unwrap();
+    mosaica_authz::write_postings(&paths.postings, &[], 32).unwrap();
+    mosaica_filter::write_presence(&paths.presence, &croaring::Bitmap::of(entities)).unwrap();
+    let generation = engine.generation();
+    match generation
+        .only_shard()
+        .filter_columns
+        .with_extents(&[], &[], &[], &[paths])
+    {
+        Ok(_) => true,
+        Err(mosaica_engine::filter::ComposeError::Overlap { column }) => {
+            assert_eq!(column, "prose");
+            false
+        }
+        Err(other) => panic!("a claim is taken or refused as an overlap: {other:?}"),
+    }
+}
+
+/// **A text layer claiming an entity another layer holds text for is refused, the base included,
+/// and the base's coverage survives a fold and a restart.** The build's base covers every built
+/// item, a flush's layer the items it placed, and the folded base both, less what the fold
+/// deleted, whose entities a later layer may then claim.
+#[test]
+fn a_text_layer_claiming_an_entity_another_holds_is_refused_through_a_fold_and_a_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("bundle");
+    build_text_fixture(&root, tmp.path());
+    let mut engine = engine_over(tmp.path(), &root);
+    let built = source_to_new_map(&root, "v00000");
+    let flushed = ingest_and_flush(&engine, &root);
+    let built_kept = built[&3] as u32;
+    let built_gone = built[&7] as u32;
+    let flushed_kept = flushed[0].raw() as u32;
+    let flushed_gone = flushed[1].raw() as u32;
+    let unheld = flushed.iter().map(|e| e.raw() as u32).max().unwrap() + 1_000;
+
+    for (entity, held) in [
+        (built_kept, true),
+        (built_gone, true),
+        (flushed_kept, true),
+        (flushed_gone, true),
+        (unheld, false),
+    ] {
+        assert_eq!(
+            claims(&engine, tmp.path(), &format!("before-{entity}"), &[entity]),
+            !held,
+            "entity {entity} before the fold"
+        );
+    }
+
+    for entity in [built_gone, flushed_gone] {
+        engine
+            .accept_change(EntityId::new(u64::from(entity)), ChangeOp::Delete)
+            .unwrap();
+    }
+    fold(&engine);
+    assert!(text_extents(&root).is_empty(), "the fold merged every layer");
+    for pass in ["the fold", "a restart"] {
+        for (entity, held) in [
+            (built_kept, true),
+            (flushed_kept, true),
+            (built_gone, false),
+            (flushed_gone, false),
+        ] {
+            assert_eq!(
+                claims(&engine, tmp.path(), &format!("{pass}-{entity}"), &[entity]),
+                !held,
+                "entity {entity} after {pass}"
+            );
+        }
+        drop(engine);
+        engine = engine_over(tmp.path(), &root);
+    }
 }

@@ -130,7 +130,7 @@ pub(crate) fn category_column(
                     .push(entity as u32);
             }
         }
-        let path = dir.join("postings.arrow");
+        let path = dir.join(mosaica_filter::POSTINGS_FILE);
         let records: Vec<(u32, Vec<u32>)> = by_code.into_iter().collect();
         mosaica_authz::write_delta_tier_at(&path, &records, 32).expect("postings write");
         Arc::new(ColumnPostings::open_keyed(&path).expect("postings open"))

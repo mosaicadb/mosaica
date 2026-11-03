@@ -752,7 +752,7 @@ fn execute_flush_stages(
             mosaica_filter::VALUES_FILE.to_string(),
             mosaica_filter::PRESENCE_FILE.to_string(),
             mosaica_filter::DICT_FILE.to_string(),
-            "postings.arrow".to_string(),
+            mosaica_filter::POSTINGS_FILE.to_string(),
             prose(mosaica_filter::RECORD_BLOCKS_FILE),
             prose(mosaica_filter::RECORD_HASROW_FILE),
             prose(mosaica_filter::RECORD_DIRECTORY_FILE),
@@ -1675,11 +1675,8 @@ fn write_text_layer(
     )
     .map_err(|e| MaintenanceFailed(format!("{postings_rel}: {e}")))?;
     text_lap(&mut sub, FlushStage::TextPostings);
-    std::fs::write(
-        target.prefix_dir.join(&presence_rel),
-        presence.serialize::<croaring::Portable>(),
-    )
-    .map_err(|e| MaintenanceFailed(format!("{presence_rel}: {e}")))?;
+    mosaica_filter::write_presence(&target.prefix_dir.join(&presence_rel), &presence)
+        .map_err(|e| MaintenanceFailed(format!("{presence_rel}: {e}")))?;
     text_lap(&mut sub, FlushStage::TextPresence);
     // A group-scoped column's prose, which its postings cannot give back.
     let prose = match view {
@@ -1815,18 +1812,24 @@ fn write_empty_scoped_base(
         MaintenanceFailed(format!("scoped base for '{}' ({what}): {e}", spec.name))
     };
     if spec.analyser.is_some() {
-        // Text: a dictionary of no terms and postings over it, and no value column at all.
+        // Text: a dictionary of no terms, postings over it and the presence of no entity, and no
+        // value column at all.
         mosaica_filter::write_sorted_dict(
             &column_dir.join(mosaica_filter::DICT_FILE),
             std::iter::empty::<&str>(),
         )
         .map_err(|e| failed("the token dictionary", &e))?;
         mosaica_authz::postings::write_postings(
-            &column_dir.join("postings.arrow"),
+            &column_dir.join(mosaica_filter::POSTINGS_FILE),
             &[],
             mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT,
         )
         .map_err(|e| failed("the token postings", &e))?;
+        mosaica_filter::write_presence(
+            &column_dir.join(mosaica_filter::PRESENCE_FILE),
+            &croaring::Bitmap::new(),
+        )
+        .map_err(|e| failed("the presence", &e))?;
         let prose = column_dir.join(mosaica_store::manifest::SCOPED_PROSE_DIR);
         std::fs::create_dir_all(&prose).map_err(|e| failed("the prose", &e))?;
         mosaica_filter_write::write_prose(
@@ -1861,7 +1864,7 @@ fn write_empty_scoped_base(
             mosaica_filter::open_extent(&values_path, &presence_path, mosaica_filter::Access::Read)
                 .map_err(|e| failed("reopening the values", &e))?;
         mosaica_filter_write::write_category_postings(
-            &column_dir.join("postings.arrow"),
+            &column_dir.join(mosaica_filter::POSTINGS_FILE),
             &spec.name,
             &empty,
             mosaica_filter_write::POSTINGS_BAND_ROWS,

@@ -142,10 +142,12 @@ enum ColumnLayers {
     },
     /// A `text` column's layers: the base build's index first, then one per flush extent. A
     /// [`Layer`] is a value column and its dictionary, and this family has neither: its terms are
-    /// postings and its prose is a blob row. Disjoint in entity space, so `match` unions across
-    /// them with no coverage check to keep.
+    /// postings and its prose is a blob row. Disjoint in entity space, checked as each layer is
+    /// added, so `match` unions across them.
     Text {
         layers: Vec<TextLayer>,
+        /// Every entity any layer holds text for, checked in [`Column::push_text_layers`].
+        covered: Bitmap,
         /// The analyser this column was indexed with. A query is analysed with it, keeping the
         /// two token streams the same one.
         analyser: Arc<mosaica_analyse::Analyser>,
@@ -180,18 +182,22 @@ impl Column {
         }
     }
 
-    /// A column served from a text index.
+    /// A column served from a text index, holding no layer. Every layer arrives through
+    /// [`Column::push_text_layers`].
     fn text(
         declared_index: usize,
         filterable: bool,
         analyser: Arc<mosaica_analyse::Analyser>,
-        layers: Vec<TextLayer>,
     ) -> Column {
         Column {
             declared_index,
             filterable,
             family: Family::Text,
-            layers: ColumnLayers::Text { layers, analyser },
+            layers: ColumnLayers::Text {
+                layers: Vec::new(),
+                covered: Bitmap::new(),
+                analyser,
+            },
         }
     }
 
@@ -227,13 +233,34 @@ impl Column {
         }
     }
 
-    /// The text layers, for a flush to append to or a coalesce to replace, `None` for a value
-    /// column.
+    /// The text layers, for a coalesce to replace, `None` for a value column.
     fn text_layers_mut(&mut self) -> Option<&mut Vec<TextLayer>> {
         match &mut self.layers {
             ColumnLayers::Text { layers, .. } => Some(layers),
             ColumnLayers::Values { .. } => None,
         }
+    }
+
+    /// Add text layers, oldest first, refusing one that holds an entity an earlier layer already
+    /// holds text for, as [`Column::push_extent`] refuses a value.
+    fn push_text_layers(
+        &mut self,
+        column: &str,
+        added: impl IntoIterator<Item = TextLayer>,
+    ) -> Result<(), ComposeError> {
+        let ColumnLayers::Text {
+            layers, covered, ..
+        } = &mut self.layers
+        else {
+            return Err(ComposeError::UnknownColumn {
+                column: column.to_string(),
+            });
+        };
+        for layer in added {
+            cover(covered, &layer.present, column)?;
+            layers.push(layer);
+        }
+        Ok(())
     }
 
     /// Add one flush's extent, refusing an entity an earlier layer already holds a value for:
@@ -256,13 +283,7 @@ impl Column {
                 column: column.to_string(),
             });
         };
-        let present = extent.present();
-        if covered.and_cardinality(&present) != 0 {
-            return Err(ComposeError::Overlap {
-                column: column.to_string(),
-            });
-        }
-        *covered |= present;
+        cover(covered, &extent.present(), column)?;
         layers.push(Layer {
             values_rel: Some(values_rel.to_string()),
             values: extent,
@@ -270,6 +291,18 @@ impl Column {
         });
         Ok(())
     }
+}
+
+/// Add a layer's entities to a column's coverage, refusing an entity an earlier layer already holds
+/// a value for: layers are disjoint in entity space, checked here rather than assumed.
+fn cover(covered: &mut Bitmap, present: &Bitmap, column: &str) -> Result<(), ComposeError> {
+    if covered.and_cardinality(present) != 0 {
+        return Err(ComposeError::Overlap {
+            column: column.to_string(),
+        });
+    }
+    *covered |= present;
+    Ok(())
 }
 
 /// One `text` layer: its own dictionary, its own postings over that dictionary, and the entities
@@ -281,10 +314,9 @@ struct TextLayer {
     postings: Arc<ColumnPostings>,
     /// The entities this layer holds a value for, stored rather than derived from the postings:
     /// text analysing to no terms, an empty string or pure punctuation, carries a value and
-    /// appears in no posting. Read by the coalesce's replacement rule
+    /// appears in no posting. Read by [`cover`] and by the coalesce's replacement rule
     /// ([`FilterColumns::with_coalesced`]) to check a replacement stands for exactly the entities
-    /// its inputs did. Empty for the base, which writes no presence file, so this is a layer's
-    /// coverage, not the column's.
+    /// its inputs did.
     present: Bitmap,
     /// The manifest path that named this layer, or `None` for the base build's index.
     dict_rel: Option<String>,
@@ -296,9 +328,8 @@ struct TextLayer {
 /// postings file short of its dictionary would report every word past the gap as carried by
 /// nobody, an under-report with no symptom.
 impl TextLayer {
-    /// A text column's base index: the token dictionary and the positional postings over it, and
-    /// for a group-scoped column its prose. The base writes no presence file of its own, so
-    /// nothing here can say which entities carry a value. See [`TextLayer::present`].
+    /// A text column's base index: the token dictionary, the postings over it and the entities it
+    /// holds a value for, and for a group-scoped column its prose.
     fn open_base(
         column: &str,
         dir: &Path,
@@ -318,12 +349,12 @@ impl TextLayer {
         text_layer(
             SortedDict::open_dir(dir, access)?,
             ColumnPostings::open(
-                &dir.join("postings.arrow"),
+                &dir.join(mosaica_filter::POSTINGS_FILE),
                 access != mosaica_filter::Access::Read,
             )?,
             column,
             "base",
-            Bitmap::new(),
+            mosaica_filter::read_presence(&dir.join(mosaica_filter::PRESENCE_FILE))?,
             None,
             prose,
         )
@@ -347,7 +378,7 @@ impl TextLayer {
             ColumnPostings::open(&paths.postings, access != mosaica_filter::Access::Read)?,
             &paths.column,
             &paths.dict_rel,
-            Bitmap::deserialize::<croaring::Portable>(&std::fs::read(&paths.presence)?),
+            mosaica_filter::read_presence(&paths.presence)?,
             Some(paths.dict_rel.clone()),
             prose,
         )

@@ -78,9 +78,9 @@ fn column_jobs(
     jobs
 }
 
-/// Pass 4a, text: each indexed text column's dictionary and postings merged across its layers,
-/// less the tombstone set. A suppression changes no artefact. A word whose only carriers were
-/// deleted leaves the dictionary. The folded base carries no presence bitmap.
+/// Pass 4a, text: each indexed text column's dictionary, postings and presence merged across its
+/// layers, less the tombstone set. A suppression changes no artefact. A word whose only carriers
+/// were deleted leaves the dictionary.
 pub(super) fn fold_text_columns(
     plan: &FoldPlan,
     ctx: &FoldContext,
@@ -107,10 +107,22 @@ pub(super) fn fold_text_columns(
                     mosaica_filter::Access::MappedSequential,
                 )
                 .map_err(failed("pass 4a (text: the base dictionary)"))?,
-                mosaica_filter::ColumnPostings::open(&from_dir.join("postings.arrow"), true)
-                    .map_err(failed("pass 4a (text: the base postings)"))?,
+                mosaica_filter::ColumnPostings::open(
+                    &from_dir.join(mosaica_filter::POSTINGS_FILE),
+                    true,
+                )
+                .map_err(failed("pass 4a (text: the base postings)"))?,
+                mosaica_filter::read_presence(&from_dir.join(mosaica_filter::PRESENCE_FILE))
+                    .map_err(failed("pass 4a (text: the base presence)"))?,
             ));
-            out.read(&from_dir, [mosaica_filter::DICT_FILE, "postings.arrow"]);
+            out.read(
+                &from_dir,
+                [
+                    mosaica_filter::DICT_FILE,
+                    mosaica_filter::POSTINGS_FILE,
+                    mosaica_filter::PRESENCE_FILE,
+                ],
+            );
         }
         for extent in plan
             .text_extents
@@ -128,21 +140,25 @@ pub(super) fn fold_text_columns(
                     true,
                 )
                 .map_err(failed("pass 4a (text: an extent's postings)"))?,
+                mosaica_filter::read_presence(&ctx.from_prefix_dir.join(&extent.presence))
+                    .map_err(failed("pass 4a (text: an extent's presence)"))?,
             ));
             out.read(&ctx.from_prefix_dir, extent.files());
         }
         let dict_rel = format!("{column_rel}/{}", mosaica_filter::DICT_FILE);
-        let postings_rel = format!("{column_rel}/postings.arrow");
+        let postings_rel = format!("{column_rel}/{}", mosaica_filter::POSTINGS_FILE);
+        let presence_rel = format!("{column_rel}/{}", mosaica_filter::PRESENCE_FILE);
         let dict_path = ctx.to_prefix_dir.join(&dict_rel);
         let postings_path = ctx.to_prefix_dir.join(&postings_rel);
+        let presence_path = ctx.to_prefix_dir.join(&presence_rel);
         let spool_path = to_dir.join("postings.spool");
 
         let inputs: Vec<mosaica_filter_write::TextLayerRef<'_>> = layers
             .iter()
-            .map(|(dict, postings)| mosaica_filter_write::TextLayerRef {
+            .map(|(dict, postings, present)| mosaica_filter_write::TextLayerRef {
                 dict,
                 postings,
-                present: None,
+                present,
             })
             .collect();
         remove_spool_on_error(
@@ -151,6 +167,7 @@ pub(super) fn fold_text_columns(
                 &plan.tombstones,
                 &dict_path,
                 &postings_path,
+                &presence_path,
                 &spool_path,
             ),
             &spool_path,
@@ -159,6 +176,7 @@ pub(super) fn fold_text_columns(
 
         out.wrote(dict_rel, dict_path);
         out.wrote(postings_rel, postings_path);
+        out.wrote(presence_rel, presence_path);
         if job.view.is_some() {
             fold_scoped_prose(plan, ctx, job, out)?;
         }
@@ -389,7 +407,7 @@ fn fold_value_column(
         mosaica_filter::Access::Mapped,
     )
     .map_err(failed("pass 4a (attributes: reopening the folded column)"))?;
-    let postings_rel = format!("{column_rel}/postings.arrow");
+    let postings_rel = format!("{column_rel}/{}", mosaica_filter::POSTINGS_FILE);
     let postings_path = ctx.to_prefix_dir.join(&postings_rel);
     mosaica_filter_write::write_category_postings(
         &postings_path,

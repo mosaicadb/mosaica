@@ -3156,7 +3156,7 @@ fn write_scoped_column(
     // so a build interrupted between the two leaves the record without its accelerator rather than
     // the reverse.
     if scoped_postings_are_owed(attribute) {
-        let path = column_dir.join("postings.arrow");
+        let path = column_dir.join(mosaica_filter::POSTINGS_FILE);
         write_category_postings(&path, &attribute.name, values, POSTINGS_BAND_ROWS)?;
         fsync_file(&path)?;
         paths.push(path);
@@ -3559,7 +3559,7 @@ fn write_filter_postings_banded(
             continue;
         }
 
-        let path = column_dir.join("postings.arrow");
+        let path = column_dir.join(mosaica_filter::POSTINGS_FILE);
         write_category_postings(&path, &attribute.name, values, POSTINGS_BAND_ROWS)?;
         fsync_file(&path)?;
         paths.push(path);
@@ -5091,7 +5091,7 @@ fn write_text_index(
     // the cost the type exists to amortise — and it holds no per-document state, so it is `Sync`
     // and the workers borrow it. What each worker does hold of its own is the normalisation
     // scratch, which is per document by nature.
-    let receipts: Vec<Vec<spill::SpillReceipt>> = chunks
+    let indexed: Vec<(Vec<spill::SpillReceipt>, croaring::Bitmap)> = chunks
         .par_iter()
         .enumerate()
         .map(|(chunk, &window)| {
@@ -5106,17 +5106,20 @@ fn write_text_index(
             )
         })
         .collect::<Result<Vec<_>>>()?;
-    // Flattened in chunk order, and each chunk's own runs in the order it wrote them: the merge
-    // concatenates a term's entity lists in exactly this order, and it is ascending in entity only
-    // because this order is.
-    let receipts: Vec<spill::SpillReceipt> = receipts.into_iter().flatten().collect();
+    let mut presence = croaring::Bitmap::new();
+    let mut receipts: Vec<spill::SpillReceipt> = Vec::new();
+    for (chunk_receipts, chunk_presence) in indexed {
+        receipts.extend(chunk_receipts);
+        presence |= chunk_presence;
+    }
 
     // ---- 2. the cascade, where a corpus produced more runs than one merge may hold open ------
     let receipts = cascade_sorted_runs(column_dir, "text", receipts)?;
 
     // ---- 3. the merge: one sorted term stream into both files -------------------------------
     let dict_path = column_dir.join(mosaica_filter::DICT_FILE);
-    let postings_path = column_dir.join("postings.arrow");
+    let postings_path = column_dir.join(mosaica_filter::POSTINGS_FILE);
+    let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
     // Beside the file it assembles, and removed by `finish` — the spool-then-assemble discipline
     // this repo applies to every file whose records are sized as they are written. A build that
     // fails here leaves the spool behind with the rest of the half-written partition.
@@ -5128,19 +5131,23 @@ fn write_text_index(
         &receipts,
         plan.merge_slice_cap,
     )?;
+    mosaica_filter::write_presence(&presence_path, &presence)
+        .map_err(|e| BuildError::io(&presence_path, e))?;
     fsync_file(&dict_path)?;
     fsync_file(&postings_path)?;
+    fsync_file(&presence_path)?;
     for receipt in &receipts {
         std::fs::remove_file(&receipt.path).map_err(|e| BuildError::io(&receipt.path, e))?;
     }
 
     Ok(WrittenTextIndex {
-        paths: vec![dict_path, postings_path],
+        paths: vec![dict_path, postings_path, presence_path],
         terms,
     })
 }
 
-/// Index one contiguous **arena window**, spilling one or more sorted runs.
+/// Index one contiguous **arena window**, spilling one or more sorted runs, and answer the runs and
+/// the entities the window holds a value for.
 ///
 /// The worker's whole residency is `terms` and the window's read buffer, and the budget bounds the
 /// first: the tracked figure is an estimate ([`TEXT_TERM_ENTRY_BYTES`]) rather than an allocator
@@ -5161,8 +5168,9 @@ fn index_text_chunk(
     _attribute: &crate::config::Attribute,
     analyser: &mosaica_analyse::Analyser,
     worker_bytes: usize,
-) -> Result<Vec<spill::SpillReceipt>> {
+) -> Result<(Vec<spill::SpillReceipt>, croaring::Bitmap)> {
     let mut receipts = Vec::new();
+    let mut presence = croaring::Bitmap::new();
     let mut terms: std::collections::HashMap<Box<[u8]>, Vec<u32>> =
         std::collections::HashMap::new();
     let mut bytes = 0usize;
@@ -5171,6 +5179,7 @@ fn index_text_chunk(
     let mut scratch = mosaica_analyse::TokenScratch::default();
     values.for_each_record_in(window, &mut |entity, prose| {
         let entity = entity as u32;
+        presence.add(entity);
         analyser.for_each_token(prose, &mut scratch, &mut |token| {
             // Looked up before it is owned: a term already seen costs no allocation, which over a
             // corpus is every occurrence but the first of every word.
@@ -5195,7 +5204,7 @@ fn index_text_chunk(
         Ok(())
     })?;
     spill_text_run(column_dir, chunk, &mut seq, &mut terms, &mut receipts)?;
-    Ok(receipts)
+    Ok((receipts, presence))
 }
 
 /// Sort a worker's accumulator by term and write it out as one run, leaving the accumulator empty.
@@ -6610,7 +6619,8 @@ mod tests {
                 assert!(left.is_empty(), "plan {k} source {source} left {left:?}");
                 files.push((
                     std::fs::read(column_dir.join(mosaica_filter::DICT_FILE)).expect("dict"),
-                    std::fs::read(column_dir.join("postings.arrow")).expect("postings"),
+                    std::fs::read(column_dir.join(mosaica_filter::POSTINGS_FILE))
+                        .expect("postings"),
                 ));
             }
             let column_dir = dir.path().join(format!("plan-{k}"));
@@ -6632,7 +6642,7 @@ mod tests {
             assert!(left.is_empty(), "plan {k} left {left:?} behind");
             files.push((
                 std::fs::read(column_dir.join(mosaica_filter::DICT_FILE)).expect("dict"),
-                std::fs::read(column_dir.join("postings.arrow")).expect("postings"),
+                std::fs::read(column_dir.join(mosaica_filter::POSTINGS_FILE)).expect("postings"),
             ));
         }
         let (dict, postings) = files.first().expect("at least one plan").clone();
@@ -6672,7 +6682,7 @@ mod tests {
         )
         .expect("the token dictionary opens");
         let postings = mosaica_authz::postings::PostingsReader::open(
-            &dir.path().join("postings.arrow"),
+            &dir.path().join(mosaica_filter::POSTINGS_FILE),
             false,
         )
         .expect("the postings open");

@@ -51,6 +51,10 @@ impl BaseTier {
     }
 }
 
+/// A column's postings file within its directory: a category's per-value postings, or a text
+/// column's per-term ones.
+pub const POSTINGS_FILE: &str = "postings.arrow";
+
 /// One column's postings.
 ///
 /// Each column owns its own identifier space, so an `AttrLocalId` means nothing without the column

@@ -1882,19 +1882,19 @@ pub(crate) fn disk(
             continue;
         }
         if attribute.ty == ScalarType::Text {
-            // A `text` column's index is a token index: one posting per `(token, entity)` pair and
-            // a dictionary of the tokens, and no value column at all — its `entity → value` answer
-            // is the record blob's. [`TEXT_INDEX_SHARE_PERCENT`] carries the figure and what it
-            // rests on.
+            // A `text` column's index is a token index: one posting per `(token, entity)` pair, a
+            // dictionary of the tokens and a presence bitmap, and no value column at all — its
+            // `entity → value` answer is the record blob's. [`TEXT_INDEX_SHARE_PERCENT`] carries
+            // the figure and what it rests on; the presence bitmap is charged at a bit an item.
             push(
                 format!(
                     "attribute '{}': the text index's postings.arrow and dict.bin, at an \
                      estimate of {TEXT_INDEX_SHARE_PERCENT}% of the column's {} MiB of \
-                     characters",
+                     characters, and its presence bitmap",
                     attribute.name,
                     characters >> 20
                 ),
-                characters.saturating_mul(TEXT_INDEX_SHARE_PERCENT) / 100,
+                characters.saturating_mul(TEXT_INDEX_SHARE_PERCENT) / 100 + n.div_ceil(8),
                 Phases::INDEX.onwards(),
             );
             continue;

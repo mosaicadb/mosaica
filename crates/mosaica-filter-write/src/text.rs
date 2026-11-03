@@ -11,9 +11,10 @@
 //!   carrier was blanked is not written at all, so the word leaves the corpus with the documents
 //!   that used it. A coalesce **retires nothing** — removal is Rule F's alone (write-path §5.4) —
 //!   so it passes an empty tombstone set and there is no parameter that could spell anything else.
-//! - The fold writes **no presence bitmap**, because its output is a *base* and the base build
-//!   writes none. A coalesced extent always writes one: it is a layer, and a reader must be able to
-//!   say which entities it stands for.
+//!
+//! Both write the presence of what they merged, less the tombstones, and both refuse inputs that
+//! hold one entity twice: an entity's text is in exactly one layer of a column, and a union of
+//! postings would hide a second copy where no later pass could find it.
 //!
 //! # Why a text column may be coalesced where a keyword column may not
 //!
@@ -50,15 +51,11 @@ use mosaica_filter::{ColumnPostings, SortedDict, SortedDictWriter};
 use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 
 /// One input layer: its dictionary, its postings over that dictionary, and the entities it holds a
-/// value for.
-///
-/// **The three travel together because an ordinal is a position in *this* dictionary.** `present`
-/// is `None` for the build's base layer, which writes no presence file at all — a fold takes one
-/// and a coalesce never does, which is why the field is an option here and required there.
+/// value for. The three travel together because an ordinal is a position in *this* dictionary.
 pub struct TextLayerRef<'a> {
     pub dict: &'a SortedDict,
     pub postings: &'a ColumnPostings,
-    pub present: Option<&'a Bitmap>,
+    pub present: &'a Bitmap,
 }
 
 fn invalid(message: String) -> io::Error {
@@ -77,9 +74,11 @@ pub fn merge_text_layers(
     tombstones: &Bitmap,
     dict_path: &Path,
     postings_path: &Path,
+    presence_path: &Path,
     spool_path: &Path,
 ) -> io::Result<()> {
-    merge(inputs, tombstones, dict_path, postings_path, spool_path)
+    let pass = "the fold's text pass";
+    merge(inputs, tombstones, dict_path, postings_path, presence_path, spool_path, pass)
 }
 
 /// The coalesce's pass: a window of a column's extents merged into one extent.
@@ -90,9 +89,7 @@ pub fn merge_text_layers(
 /// the wrong set.
 ///
 /// Refuses fewer than two inputs: this collapses a window into one extent and there is nothing to
-/// collapse below two. Refuses an input carrying no presence, which is the build's base — a pass
-/// that consumed the base would be rewriting a file the bundle manifest names, which is compaction
-/// under another name (`crate::coalesce`'s module doc in the engine).
+/// collapse below two.
 pub fn coalesce_text_extents(
     inputs: &[TextLayerRef<'_>],
     dict_path: &Path,
@@ -108,30 +105,23 @@ pub fn coalesce_text_extents(
             inputs.len()
         )));
     }
-    let mut union = Bitmap::new();
-    for (i, input) in inputs.iter().enumerate() {
-        let Some(present) = input.present else {
-            return Err(invalid(format!(
-                "{PASS}: input layer {i} carries no presence bitmap, so it is the build's base \
-                 index; a coalesce takes extents only, the base being named in MANIFEST.files and \
-                 rewritable by a fold alone"
-            )));
-        };
-        union |= present;
-    }
-    merge(inputs, &Bitmap::new(), dict_path, postings_path, spool_path)?;
-    std::fs::write(presence_path, union.serialize::<croaring::Portable>())
+    let none = Bitmap::new();
+    merge(inputs, &none, dict_path, postings_path, presence_path, spool_path, PASS)
 }
 
 /// The k-way merge itself: every term of every layer, in sorted order, with `tombstones` subtracted
-/// from each one's postings and an emptied term dropped.
+/// from each one's postings and an emptied term dropped, and the presence of every input less
+/// `tombstones`.
 fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     dict_path: &Path,
     postings_path: &Path,
+    presence_path: &Path,
     spool_path: &Path,
+    pass: &str,
 ) -> io::Result<()> {
+    let presence = crate::disjoint_union(inputs.iter().map(|input| input.present), pass)?;
     for (i, input) in inputs.iter().enumerate() {
         if input.dict.len() != input.postings.record_count() {
             return Err(invalid(format!(
@@ -215,7 +205,7 @@ fn merge(
 
     writer.finish()?;
     spool.finish(postings_path)?;
-    Ok(())
+    mosaica_filter::write_presence(presence_path, &presence.andnot(tombstones))
 }
 
 /// The key at `ordinal`, owned, or `None` where the ordinal is past the dictionary's end.

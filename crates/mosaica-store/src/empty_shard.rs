@@ -267,7 +267,7 @@ impl Written<'_> {
             self.wrote(column_rel, path);
         }
         if postings {
-            let path = dir.join("postings.arrow");
+            let path = dir.join(mosaica_filter::POSTINGS_FILE);
             mosaica_filter_write::write_category_postings(
                 &path,
                 column_rel,
@@ -275,7 +275,7 @@ impl Written<'_> {
                 mosaica_filter_write::POSTINGS_BAND_ROWS,
             )
             .map_err(io(&path))?;
-            self.push(format!("{column_rel}/postings.arrow"));
+            self.wrote(column_rel, path);
         }
         Ok(())
     }
@@ -286,16 +286,21 @@ impl Written<'_> {
         Ok(())
     }
 
-    /// A text column's index of no term: its dictionary and its postings.
+    /// A text column's index of no term: its dictionary, its postings and the presence of no
+    /// entity.
     fn text_index(&mut self, column_rel: &str) -> Result<()> {
         let dir = self.dir(column_rel)?;
         self.dictionary(column_rel)?;
-        let postings = dir.join("postings.arrow");
+        let postings = dir.join(mosaica_filter::POSTINGS_FILE);
         let spool = postings.with_extension("spool");
         mosaica_authz::postings::PostingsSpool::create(&spool)
             .and_then(|spool| spool.finish(&postings))
             .map_err(io(&postings))?;
-        self.push(format!("{column_rel}/postings.arrow"));
+        self.wrote(column_rel, postings);
+        let presence = dir.join(mosaica_filter::PRESENCE_FILE);
+        mosaica_filter::write_presence(&presence, &croaring::Bitmap::new())
+            .map_err(io(&presence))?;
+        self.wrote(column_rel, presence);
         Ok(())
     }
 

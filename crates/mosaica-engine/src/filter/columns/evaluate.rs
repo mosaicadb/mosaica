@@ -40,7 +40,9 @@ impl FilterColumns {
 
         // Text answers from postings only: no value column and no scan.
         let (layers, postings, route) = match &column.layers {
-            ColumnLayers::Text { layers, analyser } => {
+            ColumnLayers::Text {
+                layers, analyser, ..
+            } => {
                 let declared_index = column.declared_index;
                 return self
                     .resolve_text(name, declared_index, layers, analyser, operand, candidate);

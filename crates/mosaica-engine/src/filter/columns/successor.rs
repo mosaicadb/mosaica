@@ -283,16 +283,12 @@ impl FilterColumns {
         // A text extent appends a layer: a published layer the live generation does not hold
         // answers no `match` until the next fold.
         for text in texts {
-            let Some(layers) = next
-                .columns
-                .get_mut(text.column.as_str())
-                .and_then(super::Column::text_layers_mut)
-            else {
+            let Some(column) = next.columns.get_mut(text.column.as_str()) else {
                 return Err(ComposeError::UnknownColumn {
                     column: text.column.clone(),
                 });
             };
-            layers.push(TextLayer::open(text, self.access)?);
+            column.push_text_layers(&text.column, [TextLayer::open(text, self.access)?])?;
         }
         for extent in extents {
             next.push_opened(extent)?;
