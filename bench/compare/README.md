@@ -455,7 +455,9 @@ one's, so under `counts` it sends K from each dense tile, as it did.
   taken over the viewer's visible set, not the filtered set, while the tiles' `matched` counts do
   follow the filter. So for a filtered frame whose grid is deeper than its tiles, the adapter
   sends the viewport request without the underlay and a `/v1/aggregate` request for the filtered
-  cells at the same time, and the latency covers both. Every other frame is the viewport request
+  cells at the same time, and the latency covers both. That request's filter is the frame's with
+  the screen's tiles as a `region` beside it, as a map client sends it, so the server can narrow
+  the filter to the screen. Every other frame is the viewport request
   alone: an unfiltered one, whose underlay is the grid, and a filtered one at zoom 16, whose grid
   is its tiles.
 - **Filters where the data permits.** A type filter names one type or an `in` set of up to three,

@@ -15,7 +15,8 @@ grid is the tiles), the filter in Mosaica's grammar, and `point_rows: []` so eac
 its position alone. The viewport's grid counts the viewer's visible set and not the filtered one,
 so a filtered frame whose grid is deeper than its tiles sends the viewport request without the
 underlay and, at the same time, a `POST /v1/aggregate` counting the filtered set in the cells at
-`grid_depth` over the camera's tiles; the latency covers both.
+`grid_depth` over the camera's tiles, its filter the frame's with the tiles as a `region` beside
+it; the latency covers both.
 
 Each tile serves the `min(matched, K)` of its matching items with the lowest `mosaica_id`
 (`mosaica_engine::select`), since `k_min = K` raises every tile's floor to `K`. The
@@ -145,27 +146,30 @@ def tiles_area(camera: Camera, inset: float) -> list[float]:
             EXTENT[0] + (tx1 + 1) * size - inset, EXTENT[2] + (ty1 + 1) * size - inset]
 
 
+def tiles_region(camera: Camera) -> dict:
+    """A `region` leaf of the camera's tiles, half a 32-bit step inside each edge, so after
+    quantisation it is closed on exactly the tiles' positions."""
+    return {"region": {"bbox": tiles_area(camera, (EXTENT[1] - EXTENT[0]) / FIXED_SPAN / 2)}}
+
+
 def aggregate_request(camera: Camera, filt: Filter | None, depth: int) -> dict:
     """The `/v1/aggregate` body counting the filtered set in the cells at `depth` over the
-    camera's tiles. The area's corners sit half a cell inside the tiles' edges, so exactly the
-    tiles' cells intersect it."""
+    camera's tiles, with the screen's tiles as a region beside the filter, as a map client sends
+    it. The area's corners sit half a cell inside the tiles' edges, so exactly the tiles' cells
+    intersect it."""
     area = tiles_area(camera, (EXTENT[1] - EXTENT[0]) / (1 << depth) / 2)
-    body = {"view": VIEW, "groupings": [{"count": True, "cells": {"depth": depth, "area": area}}]}
-    f = combine(filter_leaves(filt))
-    if f is not None:
-        body["filters"] = f
-    return body
+    return {"view": VIEW, "filters": combine([tiles_region(camera)] + filter_leaves(filt)),
+            "groupings": [{"count": True, "cells": {"depth": depth, "area": area}}]}
 
 
 def tables_request(camera: Camera, filt: Filter | None) -> dict:
-    """The aggregation workload's body. The region is the camera's tiles, half a 32-bit step inside
-    each edge, so after quantisation it is closed on exactly the tiles' positions."""
-    region = {"region": {"bbox": tiles_area(camera, (EXTENT[1] - EXTENT[0]) / FIXED_SPAN / 2)}}
+    """The aggregation workload's body, over the camera's tiles and the filter."""
     lo, hi = YEAR_BINS
-    return {"view": VIEW, "filters": combine([region] + filter_leaves(filt)), "groupings": [
-        {"count": True, "by": {"field": "type", "top": TYPE_TOP}},
-        {"count": True, "by": {"field": "publication_year", "bins": hi - lo, "range": [lo, hi]}},
-    ]}
+    return {"view": VIEW, "filters": combine([tiles_region(camera)] + filter_leaves(filt)),
+            "groupings": [
+                {"count": True, "by": {"field": "type", "top": TYPE_TOP}},
+                {"count": True, "by": {"field": "publication_year", "bins": hi - lo,
+                                       "range": [lo, hi]}}]}
 
 
 def reported(status: dict) -> dict:
