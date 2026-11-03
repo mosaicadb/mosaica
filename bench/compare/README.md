@@ -46,7 +46,7 @@ docker pull postgis/postgis@sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c6
 
 # 6. One run per system; each appends a record to results/dev.jsonl
 cd bench/compare
-for s in mosaica mosaica+aggregate clickhouse postgis postgis+leakproof; do
+for s in mosaica mosaica+aggregate clickhouse postgis postgis+leakproof postgis+integer; do
   for c in compute defaults; do
     .venv/bin/python run.py --system $s --caches $c \
         --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
@@ -115,25 +115,39 @@ each record lists them. Its filter predicates (`adapters/clickhouse.py`, `filter
 same SQL shapes as the oracle's; the oracle is DuckDB over the Parquet file, so the two share no
 code and no engine, but a mistake in a predicate's shape would be made in both.
 
-PostGIS is PostgreSQL 18.6 with PostGIS 3.6.4 (`adapters/postgis.py`). Its build streams the tier
-from pyarrow's CSV writer into `COPY points FROM STDIN`, in the transaction that creates the table,
-since `COPY` is the bulk load PostgreSQL documents and the Parquet file is on the client's side.
-PostgreSQL quantises each position as it stores the row, in generated columns, by the frame's rule
-with every operand a `float8`. Each position is stored twice: as `qx` and `qy`, `bigint` since
-PostgreSQL has no unsigned 32-bit integer, for the grid's `GROUP BY`; and as `geom`, a point in
-quantised space, which carries the GiST index PostGIS's documentation recommends. The build then
-clusters the table on that index, runs `VACUUM ANALYZE`, a `CHECKPOINT` and an `fsync` of the data
-directory, and its time runs from the `CREATE TABLE` to the end of the `fsync`; `initdb`, which
-the image runs at the container's first start, is the server's setup and falls outside it, as
-ClickHouse's start does. Size on disk is the whole data directory by `du`: at 10⁶, 110 MiB of
-table and 40 MiB of index, beside about 240 MiB of WAL segments the server keeps for reuse and the
-template databases; each record gives the table's, the index's and the WAL's sizes. The loader
-runs in the harness's process, in a thread at the build's niceness, so the build's cgroup peak is
-the server's alone. Every query selects the camera's tiles
-with `geom && ST_MakeEnvelope(...)` and the same bounds on `qx` and `qy`, because PostGIS compares
-boxes in single precision, rounded outwards, and `&&` alone admits points just outside a tile.
-Server start ends when the superuser's `SELECT 1 FROM points LIMIT 1` answers; session start holds
-the viewer's two connections, each authenticated by SCRAM, and its first frame.
+PostGIS is PostgreSQL 18.6 with PostGIS 3.6.4 (`adapters/postgis.py`), run as three arms that
+share the adapter, the table's columns, the viewer's policy and every query but the condition that
+selects the camera's tiles:
+
+- **`postgis`** indexes `geom`, each position as a point in quantised space, with GiST, the index
+  PostGIS's documentation recommends, and stores the table in `geom`'s order, which PostGIS sorts
+  along a Hilbert curve. Under row-level security the viewer's queries cannot use that index, so
+  each scans the whole table. This is what a deployment that follows PostGIS's documentation and
+  restricts its viewers with row-level security gets.
+- **`postgis+leakproof`** is the same table and index, and the superuser marks `&&`'s function
+  leakproof, so the viewer's queries use the index.
+- **`postgis+integer`** has no geometry: a B-tree on `(qx, qy)`, with the table in that order. A
+  B-tree compares `bigint`, which PostgreSQL marks leakproof, so the viewer's queries use it under
+  the same policy with no claim made.
+
+The build streams the tier from pyarrow's CSV writer into `COPY staging FROM STDIN`, since `COPY`
+is the bulk load PostgreSQL documents and the Parquet file is on the client's side. Binary `COPY`
+would mean psycopg encoding each row in Python, which took three times as long as CSV. Then
+`CREATE TABLE points AS SELECT ... ORDER BY` the arm's key quantises each position by the frame's
+rule, with every operand a `float8`, into `qx` and `qy`, `bigint` since PostgreSQL has no unsigned
+32-bit integer; one index build, statistics on the cells, `VACUUM ANALYZE`, a `CHECKPOINT` and an
+`fsync` of the data directory follow. The build time runs from creating the staging table to the
+end of the `fsync`; `initdb`, which the image runs at the container's first start, is the
+server's setup and falls outside it, as ClickHouse's start does. The loader runs in the harness's
+process, in a thread at the build's niceness, so the build's cgroup peak is the server's alone.
+Size on disk is the data directory by `du`, less `pg_wal` and the template databases, as
+ClickHouse's is less the parts it replaced; each record also gives the WAL's, the templates', the
+table's and the index's sizes. The GiST arms select the camera's tiles with `geom &&
+ST_MakeEnvelope(...)` and the same bounds on `qx` and `qy`, because PostGIS compares boxes in
+single precision, rounded outwards, and `&&` alone admits points just outside a tile; the integer
+arm uses the bounds alone. Server start ends when the superuser's `SELECT 1 FROM points LIMIT 1`
+answers; session start holds the viewer's two connections, each authenticated by SCRAM, and its
+first frame.
 
 PostGIS is tuned as PostgreSQL's documentation recommends for reads, under the 16 GiB cap; every
 setting is in `SETTINGS` and each record lists them with the server's values:
@@ -142,41 +156,41 @@ setting is in `SETTINGS` and each record lists them with the server's values:
 |---|---|---|---|
 | `shared_buffers` | 4 GB | 128 MB | A quarter of the memory, the documentation's starting point |
 | `effective_cache_size` | 12 GB | 4 GB | `shared_buffers` and the page cache the cap leaves |
-| `work_mem` | 64 MB | 4 MB | Each sort and hash in a query may use this much; at 10⁶ the largest grid's hash table took about 20 MB, which the default would spill to disc |
-| `max_worker_processes`, `max_parallel_workers` | 12, the machine's CPUs | 8 | Parallel query may use every CPU |
-| `max_parallel_workers_per_gather` | 6 | 2 | Half the CPUs, since a frame sends two queries at once |
+| `work_mem` | 64 MB | 4 MB | Each sort and hash in a query may use this much; the largest grid's hash table needs more than the default |
+| `max_worker_processes`, `max_parallel_workers` | the machine's CPUs, which each record gives | 8 | Parallel query may use every CPU |
+| `max_parallel_workers_per_gather` | half the CPUs | 2 | A frame sends two queries at once |
 | `jit` | off | on | JIT pays for long CPU-bound queries and costs more than it saves on short ones, which a frame's are |
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
-| `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | The planner cannot estimate how many cells a grid or a tile grouping has from the columns' statistics; at zoom 0 it guessed 850,000 cells for 8,318, and did not aggregate in parallel. With them the warm zoom-0 frame fell from about 290 ms to 110 ms in a trial |
+| `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | From the columns' statistics alone the planner overestimates the cells of a grid or tile grouping many times over, and does not then aggregate in parallel |
 
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
-`wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` into a table created in its
-transaction, the index build and `CLUSTER` may skip the WAL; `maintenance_work_mem = 2GB`; and
-`max_wal_size = 16GB` (`BULK`). The serving server runs without them. `/dev/shm` is 2 GB, since
-the image's documentation warns that Docker's 64 MB may be too small for parallel query.
+`wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` and the table and index made in
+the same transaction may skip the WAL; `maintenance_work_mem = 2GB`; and `max_wal_size = 16GB`
+(`BULK`). The serving server runs without them. `/dev/shm` is 2 GB, since the image's
+documentation warns that Docker's 64 MB may be too small for parallel query.
 
 The viewer's restriction is row-level security: the superuser builds and owns the table, enables
 and forces row-level security on it, and creates a policy `FOR SELECT TO viewer USING (licence IN
 (...))`; the login role `viewer` owns nothing and is granted `SELECT` on the table alone. Forcing
-applies the policy to the table's owner too; a superuser bypasses it regardless. **Under the policy
-the GiST index is never used.** PostgreSQL evaluates a policy's condition before any condition of
-the query that is not marked leakproof, and will not use such a condition to scan an index.
-PostGIS 3.6.4 marks none of its 776 functions leakproof, `&&` included, while PostgreSQL's own
-comparisons of integers and text are. Every viewer query therefore scans the whole table, in
-parallel where the planner chooses to, with the leakproof bounds on `qx` and `qy` evaluated first; `EXPLAIN` shows it, and each record keeps the
-plan of the whole map's grid and whether `&&` is leakproof. The superuser's identical query uses
-the index. Marking the operator's function leakproof (`ALTER FUNCTION geometry_overlaps(geometry,
-geometry) LEAKPROOF`, a superuser's assertion that it reveals nothing about its arguments) lets the
-viewer's queries use the index too, with the same answers: at 10⁶ the median warm frame at zooms
-12 and 16 fell from about 57 ms to 0.8 ms in a trial.
+applies the policy to the table's owner too; a superuser bypasses it regardless. PostgreSQL
+evaluates a policy's condition before any condition of the query that is not marked leakproof,
+and will not use such a condition to scan an index, so that a function cannot reveal, by its
+result or an error, anything about rows the policy hides. PostGIS 3.6.4 marks none of its 776
+functions leakproof, `&&` included, while PostgreSQL's own comparisons of integers and text are.
+So GiST, PostGIS's recommended index, is unusable under row-level security, and an index on
+integers is usable. `EXPLAIN` shows it: the viewer's query in the `postgis` arm scans the table, in
+parallel where the planner chooses to, and the superuser's identical query uses the index. Each
+record keeps the viewer's plan of one grid and whether `&&` is leakproof.
 
-PostGIS therefore runs as two arms, which share the adapter and differ in that one step of the
-setup. `postgis` is as built, the behaviour a deployment gets under row-level security. In
-`postgis+leakproof` the superuser marks `geometry_overlaps` leakproof. That is the superuser's
-claim, which PostGIS's maintainers have not made, that the function reveals nothing about its
-arguments beyond its result, by an error or otherwise; an operator who has read the function, a
-comparison of two bounding boxes, might make it so that row-level security and a spatial index can
-work together, which without it they cannot.
+In `postgis+leakproof` the superuser runs `ALTER FUNCTION geometry_overlaps(geometry, geometry)
+LEAKPROOF`. That is the superuser's claim, which PostGIS's maintainers have not made, that the
+function reveals nothing about its arguments beyond its result. An operator who has read it, a
+comparison of two bounding boxes, might make the claim so that row-level security and the spatial
+index can work together. One way it could fail is an error that depends on a hidden row, such as
+one for mixed SRIDs; in PostGIS 3.6.4 `&&` raises none, which this harness checked for mixed SRIDs,
+empty points and mixed dimensions. The column is declared `geometry(Point, 0)` and every row is
+written by the build with SRID 0, though a typmod of SRID 0 means an unspecified SRID and does not
+by itself refuse others.
 
 ## Files
 

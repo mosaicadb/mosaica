@@ -40,6 +40,7 @@ from oracle import VIEWER
 
 from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree,
                    wait_for)
+from .sql import filter_sql
 
 IMAGE = "clickhouse/clickhouse-server:26.8.34.13"
 IMAGE_DIGEST = "sha256:8b28eb09479c36c4533eec7a6268917d04ba3a6fd90e3f4205f70e761b6d7779"
@@ -80,34 +81,6 @@ def tile_ranges(tiles: list[tuple[int, int]], z: int) -> str:
         p = interleave(tx, ty)
         out.append(f"m BETWEEN {p << shift} AND {((p + 1) << shift) - 1}")
     return "(" + " OR ".join(out) + ")"
-
-
-def filter_sql(filt: Filter | None, quantise=quantise) -> str:
-    """The filter as SQL conditions, each led by `AND`; a box is quantised by `quantise`, so a
-    dialect whose other conditions read the same passes its own."""
-    terms = []
-    for leaf in (filt.leaves if filt else []):
-        col, value = leaf.get("col"), leaf["value"]
-        if leaf["op"] == "eq" and col == "type":
-            terms.append(f"type = '{value}'")
-        elif leaf["op"] == "in" and col == "type":
-            terms.append("type IN (" + ", ".join(f"'{v}'" for v in value) + ")")
-        elif leaf["op"] == "eq" and col == "is_oa":
-            terms.append(f"is_oa = {'true' if value else 'false'}")
-        elif leaf["op"] == "range":
-            if "gte" in value:
-                terms.append(f"{col} >= {int(value['gte'])}")
-            if "lt" in value:
-                terms.append(f"{col} < {int(value['lt'])}")
-        elif leaf["op"] == "bbox":
-            x0, y0, x1, y1 = (float(v) for v in leaf["value"])
-            terms.append(f"qx BETWEEN {quantise(repr(x0), EXTENT[0], EXTENT[1])} AND "
-                         f"{quantise(repr(x1), EXTENT[0], EXTENT[1])}")
-            terms.append(f"qy BETWEEN {quantise(repr(y0), EXTENT[2], EXTENT[3])} AND "
-                         f"{quantise(repr(y1), EXTENT[2], EXTENT[3])}")
-        else:
-            raise ValueError(leaf)
-    return "".join(f" AND {t}" for t in terms)
 
 
 class ClickHouse(Adapter):
@@ -281,7 +254,7 @@ class ClickHouse(Adapter):
     def frame(self, camera: Camera, filt: Filter | None) -> tuple[Frame, float]:
         z, dg = camera.zoom, grid_depth(camera.zoom)
         tiles = camera.tiles()
-        where = tile_ranges(tiles, z) + filter_sql(filt)
+        where = tile_ranges(tiles, z) + filter_sql(filt, quantise)
         grid_q = (f"SELECT bitShiftRight(m, {64 - 2 * dg}) AS cell, count() AS n FROM points "
                   f"WHERE {where} GROUP BY cell FORMAT ArrowStream")
         tile_expr = f"bitShiftRight(m, {64 - 2 * z})" if z else "0"
@@ -296,7 +269,7 @@ class ClickHouse(Adapter):
         return self._decode(grid_raw, points_raw, z, dg), elapsed
 
     def tables(self, camera: Camera, filt: Filter | None) -> tuple[dict, float]:
-        where = tile_ranges(camera.tiles(), camera.zoom) + filter_sql(filt)
+        where = tile_ranges(camera.tiles(), camera.zoom) + filter_sql(filt, quantise)
         lo, hi = YEAR_BINS
         type_q = (f"SELECT ifNull(type, 'none'), count() FROM points WHERE {where} "
                   f"GROUP BY type FORMAT TSV")

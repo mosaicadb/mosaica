@@ -210,12 +210,11 @@ def make_adapter(args):
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
         return ClickHouse(args.tier, work, nice=args.nice, caches=args.caches)
-    if args.system in ("postgis", "postgis+leakproof"):
+    if args.system in ("postgis", "postgis+leakproof", "postgis+integer"):
         from adapters.postgis import PostGIS
-        return PostGIS(args.tier, work, nice=args.nice, caches=args.caches,
-                       leakproof=args.system == "postgis+leakproof")
-    sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate, clickhouse, postgis "
-             f"or postgis+leakproof")
+        return PostGIS(args.tier, work, nice=args.nice, caches=args.caches, arm=args.system)
+    sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate, clickhouse, postgis, "
+             f"postgis+leakproof or postgis+integer")
 
 
 def main() -> None:

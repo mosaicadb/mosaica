@@ -55,8 +55,8 @@ def latest(records: list[dict]) -> dict[tuple[str, str], dict]:
 
 
 def check_comparable(tier: str, runs: dict[str, dict]) -> None:
-    """Refuse records whose harness, cameras or tier differ, or Mosaica columns from different
-    images."""
+    """Refuse records whose harness, cameras or tier differ, or columns of one system from
+    different images."""
     checks = {k: (lambda r, k=k: r[k], lambda r: True)
               for k in ("harness_commit", "cameras_sha256", "tier_sha256")}
     for f in {family(r) for r in runs.values()}:
@@ -118,7 +118,8 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             ("Build time", lambda r: f"{r['build']['build_s']:.1f} s"),
             ("Build peak RSS", lambda r: size(r["build"]["peak_rss_bytes"])),
             ("Build peak cgroup memory (incl. page cache)", lambda r: size(r["build"]["cgroup_peak_bytes"])),
-            ("Size on disk (Mosaica: bundle; others: data directory)", lambda r: size(r["build"]["disk_bytes"])),
+            ("Size on disk (Mosaica: bundle; ClickHouse: data directory less replaced parts; "
+              "PostGIS: data directory less WAL and template databases)", lambda r: size(r["build"]["disk_bytes"])),
             ("Serve peak RSS", lambda r: size(r["serve_memory"]["peak_rss_bytes"])),
             ("Serve peak cgroup memory (incl. page cache)", lambda r: size(r["serve_memory"]["cgroup_peak_bytes"])),
             ("Serve cgroup memory after a cold restart and one frame",

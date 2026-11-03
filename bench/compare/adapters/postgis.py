@@ -1,35 +1,39 @@
-"""PostGIS: a pinned PostgreSQL and PostGIS image, one table clustered on a GiST index of its points,
-and the frame in SQL.
+"""PostGIS: a pinned PostgreSQL and PostGIS image, one table in spatial order with one index, and
+the frame in SQL, as a role under row-level security.
 
-The build streams the tier's `x`, `y`, `licence`, `publication_year`, `type` and `is_oa` (never the
-oracle's `qx` and `qy`) from pyarrow as CSV into `COPY points FROM STDIN`, in the transaction that
-creates the table. The quantised position is computed by PostgreSQL as the row is stored, in
-generated columns by the frame's rule: `qx` and `qy` as `bigint`, since PostgreSQL has no unsigned
-32-bit integer, and `geom`, the same position as a PostGIS point in quantised space. Once loaded,
-the generated columns become plain ones and `x` and `y` are dropped. Then a GiST index on `geom`,
-`CLUSTER` on it, which rewrites the table in the index's order and leaves out the dropped columns,
-extended statistics on the cells at each depth, `VACUUM ANALYZE`, a `CHECKPOINT` and an `fsync` of the data directory: all in the build time.
+Three arms share this adapter and differ in the table's order, its index and one setup step:
 
-The camera's tiles form a rectangle, and every query selects it with `geom && ST_MakeEnvelope(...)`,
-which the GiST index answers, and the same bounds on `qx` and `qy`. The second is needed: PostGIS
-compares boxes in single precision, rounded outwards, so near a tile's edge `&&` can admit a point
-outside it.
+* `postgis`: a GiST index on `geom`, the index PostGIS's documentation recommends, with the
+  table in `geom`'s order (PostGIS sorts points along a Hilbert curve). Under the policy the
+  viewer's queries cannot use it (see "Access" below), so each scans the table.
+* `postgis+leakproof`: the same, and the superuser marks `geometry_overlaps`, the function behind
+  `&&`, leakproof, so the viewer's queries can use the index.
+* `postgis+integer`: no geometry; a B-tree on `(qx, qy)`, with the table in that order. The
+  camera's rectangle is a range of `qx` and a range of `qy` within it, and comparisons of
+  `bigint` are leakproof, so the viewer's queries use the index with no claim made.
 
-A frame is two queries sent at once on two connections, each a `COPY (...) TO STDOUT` in the binary
-format: the count grid (`GROUP BY` the cell, `qx` and `qy` shifted right), and every position in the
-tiles whose count is at most K. The aggregation workload is two `GROUP BY` queries sent at once.
-PostgreSQL keeps no result cache, so `--caches compute` and `defaults` run the same server.
+The build streams the tier's `x`, `y`, `licence`, `publication_year`, `type` and `is_oa` (never
+the oracle's `qx` and `qy`) from pyarrow as CSV into `COPY staging FROM STDIN`. CSV rather than
+binary: psycopg encodes binary `COPY` a row at a time in Python, 2.7 s against CSV's 0.8 s at 10⁶.
+Then `CREATE TABLE points AS SELECT ... ORDER BY` the arm's key, in which PostgreSQL quantises
+each position by the frame's rule, the arm's index and statistics on the cells at each depth, all
+in the load's transaction; then `VACUUM ANALYZE`, a `CHECKPOINT` and an `fsync` of the data
+directory, all in the build time. Positions are `bigint`, since PostgreSQL has no unsigned 32-bit
+integer, and `geom` is the same position as a point in quantised space.
+
+A frame is two queries sent at once on two connections, each a `COPY (...) TO STDOUT` in the
+binary format: the count grid (`GROUP BY` the cell, `qx` and `qy` shifted right), and every
+position in the tiles whose count is at most K. The aggregation workload is two `GROUP BY`
+queries sent at once. PostgreSQL keeps no result cache, so `--caches compute` and `defaults` run
+the same server.
 
 Access: after the build, the superuser creates the login role `viewer`, which owns nothing and is
 granted `SELECT` on the table alone, enables and forces row-level security on the table, and
 creates a policy for `viewer` keeping the rows whose `licence` is one of the viewer's terms. Every
 frame and table is queried as `viewer`, and no query names a licence. The setup is not counted in
-the build time.
-
-The policy's condition is evaluated before any of the query's that is not leakproof, and such a
-condition cannot scan an index. PostGIS marks no function leakproof, so as built the viewer's
-queries never use the GiST index. The `postgis+leakproof` arm differs in one setup step: the
-superuser marks `geometry_overlaps`, the function behind `&&`, leakproof.
+the build time. PostgreSQL evaluates the policy's condition before any of the query's that is not
+leakproof, and does not scan an index by such a condition; PostGIS marks none of its functions
+leakproof.
 
 `SETTINGS` holds every server setting the adapter writes, and `BULK` the ones added for the build
 alone; the README gives the reason for each.
@@ -56,7 +60,7 @@ from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_
 from oracle import VIEWER
 
 from .base import MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree, wait_for
-from .clickhouse import filter_sql
+from .sql import filter_sql
 
 IMAGE = "postgis/postgis:18-3.6"
 IMAGE_DIGEST = "sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a2390989c4"
@@ -79,6 +83,9 @@ BULK = {"wal_level": "minimal", "max_wal_senders": "0", "maintenance_work_mem": 
         "max_wal_size": "16GB"}
 SHM = "2g"
 COLUMNS = ("x", "y", "licence", "publication_year", "type", "is_oa")
+#: Each arm's index and whether `&&` is marked leakproof.
+ARMS = {"postgis": ("gist", False), "postgis+leakproof": ("gist", True),
+        "postgis+integer": ("btree", False)}
 
 
 def quantise(expr: str, lo: float, hi: float) -> str:
@@ -93,32 +100,44 @@ def pg_quantise(expr: str, lo: float, hi: float) -> str:
     return f"({quantise(expr, lo, hi)})::bigint"
 
 
-DDL = (f"CREATE TABLE points (x float8 NOT NULL, y float8 NOT NULL, licence text NOT NULL, "
-       f"publication_year integer, type text, is_oa boolean, "
-       f"qx bigint GENERATED ALWAYS AS ({pg_quantise('x', EXTENT[0], EXTENT[1])}) STORED, "
-       f"qy bigint GENERATED ALWAYS AS ({pg_quantise('y', EXTENT[2], EXTENT[3])}) STORED, "
-       f"geom geometry(Point) GENERATED ALWAYS AS (ST_MakePoint({quantise('x', EXTENT[0], EXTENT[1])}, "
-       f"{quantise('y', EXTENT[2], EXTENT[3])})) STORED)")
-AFTER_LOAD = ("ALTER TABLE points ALTER qx DROP EXPRESSION, ALTER qy DROP EXPRESSION, "
-              "ALTER geom DROP EXPRESSION, DROP COLUMN x, DROP COLUMN y",
-              "CREATE INDEX points_geom ON points USING gist (geom)",
-              "CLUSTER points USING points_geom",
-              # The cells at each depth a grid or a tile is grouped by, whose count the planner
-              # cannot estimate from the columns' statistics; overestimated, it does not
-              # aggregate in parallel.
-              *(f"CREATE STATISTICS points_cells_{d} ON (qx >> {32 - d}), (qy >> {32 - d}) FROM points"
-                for d in range(MAX_DEPTH + 1)),
-              "VACUUM ANALYZE points",
-              "CHECKPOINT")
+STAGING = ("CREATE TABLE staging (x float8 NOT NULL, y float8 NOT NULL, licence text NOT NULL, "
+           "publication_year integer, type text, is_oa boolean)")
+QUANTISED = (f"SELECT {pg_quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
+             f"{pg_quantise('y', EXTENT[2], EXTENT[3])} AS qy, licence, publication_year, type, is_oa "
+             f"FROM staging")
+ATTRIBUTES = "licence, publication_year, type, is_oa"
+#: Each index's table, as `CREATE TABLE points AS`, and the index on it.
+TABLES = {
+    "gist": (f"SELECT qx, qy, ST_MakePoint(qx, qy)::geometry(Point, 0) AS geom, {ATTRIBUTES} "
+             f"FROM ({QUANTISED}) q ORDER BY geom",
+             "CREATE INDEX points_geom ON points USING gist (geom)"),
+    "btree": (f"SELECT qx, qy, {ATTRIBUTES} FROM ({QUANTISED}) q ORDER BY qx, qy",
+              "CREATE INDEX points_qx_qy ON points (qx, qy)"),
+}
 
 
-def tiles_sql(camera: Camera) -> str:
-    """The rectangle of the camera's tiles, by the GiST index and exactly."""
+def statements(index: str) -> tuple[str, ...]:
+    """The build after the load, in order."""
+    select, create_index = TABLES[index]
+    return (f"CREATE TABLE points AS {select}", "DROP TABLE staging", create_index,
+            # The cells at each depth a grid or a tile is grouped by, whose count the planner
+            # cannot estimate from the columns' statistics; overestimated, it does not aggregate
+            # in parallel.
+            *(f"CREATE STATISTICS points_cells_{d} ON (qx >> {32 - d}), (qy >> {32 - d}) FROM points"
+              for d in range(MAX_DEPTH + 1)))
+
+
+def tiles_sql(camera: Camera, index: str) -> str:
+    """The rectangle of the camera's tiles, exactly by the bounds on `qx` and `qy`. For GiST, also
+    by `&&`, which the index answers; PostGIS compares boxes in single precision, rounded
+    outwards, so `&&` alone admits points just outside the rectangle."""
     tx0, tx1, ty0, ty1 = camera.tile_range()
     s = 32 - camera.zoom
     x0, x1, y0, y1 = tx0 << s, ((tx1 + 1) << s) - 1, ty0 << s, ((ty1 + 1) << s) - 1
-    return (f"geom && ST_MakeEnvelope({x0}, {y0}, {x1}, {y1}) "
-            f"AND qx BETWEEN {x0} AND {x1} AND qy BETWEEN {y0} AND {y1}")
+    exact = f"qx BETWEEN {x0} AND {x1} AND qy BETWEEN {y0} AND {y1}"
+    if index == "btree":
+        return exact
+    return f"geom && ST_MakeEnvelope({x0}, {y0}, {x1}, {y1}, 0) AND {exact}"
 
 
 def from_binary_copy(raw: bytes, ncols: int) -> np.ndarray:
@@ -135,20 +154,17 @@ def from_binary_copy(raw: bytes, ncols: int) -> np.ndarray:
 
 
 class PostGIS(Adapter):
-    name = "postgis"
-    access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO {VIEWER_ROLE} "
-              f"USING (licence IN (the viewer's terms)); {VIEWER_ROLE} owns nothing and has SELECT "
-              f"on points alone; every frame and table queried as {VIEWER_ROLE}")
-
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
-                 leakproof: bool = False):
+                 arm: str = "postgis"):
         super().__init__(tier, work, nice, caches)
-        #: Whether the superuser marks `&&` on geometries leakproof, so the viewer's queries,
-        #: under the policy, may use the GiST index.
-        self.leakproof = leakproof
-        if leakproof:
-            self.name = "postgis+leakproof"
-            self.access += "; geometry_overlaps(geometry, geometry) marked LEAKPROOF by the superuser"
+        self.name = arm
+        self.index, self.leakproof = ARMS[arm]
+        self.access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO "
+                       f"{VIEWER_ROLE} USING (licence IN (the viewer's terms)); {VIEWER_ROLE} owns "
+                       f"nothing and has SELECT on points alone; every frame and table queried as "
+                       f"{VIEWER_ROLE}"
+                       + ("; geometry_overlaps(geometry, geometry) marked LEAKPROOF by the superuser"
+                          if self.leakproof else ""))
         self.table_made = False
         self.container = Container(f"bench-compare-pg-{os.getpid()}")
         self.root = self.work / "pg"
@@ -221,14 +237,14 @@ class PostGIS(Adapter):
     def version(self) -> dict:
         return {"version": self.sql("SHOW server_version")[0][0],
                 "postgis": self.sql("SELECT postgis_full_version()")[0][0],
-                "full": self.sql("SELECT version()")[0][0],
+                "full": self.sql("SELECT version()")[0][0], "psycopg": psycopg.__version__,
                 "image": IMAGE, "digest": IMAGE_DIGEST, "docker": docker_info()}
 
     def config(self) -> dict:
-        names = [*SETTINGS, *BULK, "max_connections", "effective_io_concurrency", "huge_pages",
-                 "shared_memory_type", "dynamic_shared_memory_type", "parallel_setup_cost",
-                 "parallel_tuple_cost", "min_parallel_table_scan_size", "fsync", "synchronous_commit",
-                 "data_checksums"]
+        names = [*SETTINGS, *BULK, "max_connections", "effective_io_concurrency", "io_method",
+                 "io_workers", "huge_pages", "shared_memory_type", "dynamic_shared_memory_type",
+                 "parallel_setup_cost", "parallel_tuple_cost", "min_parallel_table_scan_size",
+                 "fsync", "synchronous_commit", "data_checksums"]
         settings = dict(self.sql("SELECT name, current_setting(name) FROM pg_settings WHERE name IN ("
                                  + ", ".join(f"'{n}'" for n in names) + ")"))
         rls = self.sql("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'points'")[0]
@@ -238,18 +254,18 @@ class PostGIS(Adapter):
             "SELECT p.oid::regprocedure::text, p.proleakproof FROM pg_operator o "
             "JOIN pg_proc p ON p.oid = o.oprcode WHERE o.oprname = '&&' "
             "AND o.oprleft = 'geometry'::regtype AND o.oprright = 'geometry'::regtype"))
-        whole = Camera(0, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2)
-        return {"ddl": DDL, "after_load": AFTER_LOAD, "settings_written": SETTINGS,
-                "build_settings_written": BULK, "settings": settings, "shm_size": SHM,
-                "caches": self.caches,
+        mid = Camera(8, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2)
+        return {"arm": self.name, "index": self.index, "build": [STAGING, *statements(self.index)],
+                "settings_written": SETTINGS, "build_settings_written": BULK, "settings": settings,
+                "shm_size": SHM, "caches": self.caches,
                 "cache_settings": {"result cache": "none in PostgreSQL",
                                    "shared_buffers": settings.get("shared_buffers"),
                                    "client prepared statements": "off (prepare_threshold=None)"},
                 "row_level_security": {"enabled": rls[0], "forced": rls[1]},
                 "policy": [list(p) for p in policy], "geometry_overlaps_leakproof": leakproof,
-                "plan_whole_map_grid": self.explain(self._grid_sql(whole, None)),
-                "container_memory": MEMORY, "load": "COPY points FROM STDIN (FORMAT csv), "
-                "streamed from pyarrow's CSV writer, in the transaction that creates the table"}
+                "plan_zoom8_grid_at_centre": self.explain(self._grid_sql(mid, None)),
+                "container_memory": MEMORY, "load": "COPY staging FROM STDIN (FORMAT csv), "
+                "streamed from pyarrow's CSV writer, in the build's transaction"}
 
     def explain(self, query: str) -> list[str]:
         """The plan of `query` as the viewer, as its first connection runs it."""
@@ -263,16 +279,22 @@ class PostGIS(Adapter):
         self.start()
         self.sql("SELECT 1")  # the superuser's connection, opened outside the build time
         t0 = time.monotonic()
+        phases = {}
+        # One transaction, so that under `wal_level = minimal` the tables it creates skip the WAL.
         with self.admin.transaction():
-            self.sql(DDL)
+            self.sql(STAGING)
             with ThreadPoolExecutor(1) as loader:
                 loader.submit(self._load).result()
-        phases = {"load": time.monotonic() - t0}
-        for statement in AFTER_LOAD:
+            phases["load"] = time.monotonic() - t0
+            for statement in statements(self.index):
+                t = time.monotonic()
+                self.sql(statement)
+                phase = " ".join(statement.split()[:2]).lower()
+                phases[phase] = phases.get(phase, 0) + time.monotonic() - t
+        for statement in ("VACUUM ANALYZE points", "CHECKPOINT"):
             t = time.monotonic()
             self.sql(statement)
-            phase = " ".join(statement.split()[:2]).lower()
-            phases[phase] = phases.get(phase, 0) + time.monotonic() - t
+            phases[statement.split()[0].lower()] = time.monotonic() - t
         t = time.monotonic()
         fsync_tree(self.data)
         phases["fsync"] = time.monotonic() - t
@@ -280,6 +302,7 @@ class PostGIS(Adapter):
         self.table_made = True
         mem = self.serve_memory()
         sizes = self.sql("SELECT pg_table_size('points'), pg_indexes_size('points'), count(*) FROM points")[0]
+        templates = [f"base/{oid}" for (oid,) in self.sql("SELECT oid FROM pg_database WHERE datistemplate")]
         terms = ", ".join(f"'{t}'" for t in VIEWER["terms"])
         for statement in (
                 f"CREATE ROLE {VIEWER_ROLE} LOGIN PASSWORD '{self.viewer_password}'",
@@ -292,22 +315,26 @@ class PostGIS(Adapter):
                 "CHECKPOINT"):
             self.sql(statement)
         self.stop()
-        disk = du_bytes(self.data)
+        directory = du_bytes(self.data)
+        wal = du_bytes(self.data / "pg_wal")
+        template_bytes = sum(du_bytes(self.data / t) for t in templates)
         self._create(SETTINGS)
-        return {"build_s": build_s, "phases_s": phases, **mem, "disk_bytes": disk,
-                "wal_bytes": du_bytes(self.data / "pg_wal"), "disk": "du of the data directory",
+        return {"build_s": build_s, "phases_s": phases, **mem,
+                "disk_bytes": directory - wal - template_bytes,
+                "disk": "du of the data directory less pg_wal and the template databases",
+                "directory_bytes": directory, "wal_bytes": wal, "template_bytes": template_bytes,
                 "table_bytes": sizes[0], "index_bytes": sizes[1], "rows": sizes[2], "nice": self.nice,
-                "boundary": "from the CREATE TABLE to the end of CHECKPOINT and an fsync of every "
-                            "file and directory in the data directory, on a running server; the "
-                            "loader, which reads the Parquet file and writes CSV, runs in the "
-                            "harness's process, outside the container's cgroup"}
+                "boundary": "from the CREATE TABLE staging to the end of CHECKPOINT and an fsync "
+                            "of every file and directory in the data directory, on a running "
+                            "server; the loader, which reads the Parquet file and writes CSV, runs "
+                            "in the harness's process, outside the container's cgroup"}
 
     def _load(self) -> None:
         """Stream the tier into `COPY` at the build's niceness: this thread's alone, so the harness
         keeps its own."""
         os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), self.nice)
         options = pacsv.WriteOptions(include_header=False)
-        with self.admin.cursor().copy(f"COPY points ({', '.join(COLUMNS)}) FROM STDIN (FORMAT csv)") as cp:
+        with self.admin.cursor().copy(f"COPY staging ({', '.join(COLUMNS)}) FROM STDIN (FORMAT csv)") as cp:
             for batch in pq.ParquetFile(self.tier).iter_batches(1 << 16, columns=list(COLUMNS),
                                                                  use_threads=False):
                 buf = io.BytesIO()
@@ -316,9 +343,8 @@ class PostGIS(Adapter):
 
     # -- a frame -----------------------------------------------------------------------------------
 
-    @staticmethod
-    def _where(camera: Camera, filt: Filter | None) -> str:
-        return tiles_sql(camera) + filter_sql(filt, pg_quantise)
+    def _where(self, camera: Camera, filt: Filter | None) -> str:
+        return tiles_sql(camera, self.index) + filter_sql(filt, pg_quantise)
 
     def _grid_sql(self, camera: Camera, filt: Filter | None) -> str:
         s = 32 - grid_depth(camera.zoom)
