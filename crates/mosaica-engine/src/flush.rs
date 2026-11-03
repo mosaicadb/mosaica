@@ -732,6 +732,7 @@ fn execute_flush_stages(
         extents: scoped_extents,
         texts: scoped_texts,
         created: scoped_columns,
+        bases,
     } = write_scoped_extents(&plan, &ctx)?;
     for extent in &scoped_extents {
         for rel in [&extent.extent.values, &extent.extent.presence]
@@ -742,26 +743,7 @@ fn execute_flush_stages(
         }
     }
     // A base a view acquired at this flush is digested too: the build never wrote it.
-    for (column, view) in &scoped_columns {
-        // The writer's own derivation, so the base is digested at the exact path it was written to.
-        let rel = ctx
-            .layout()
-            .scoped_column_rel(column, view, ctx.scoped_incarnation);
-        let prose = |name: &str| format!("{}/{name}", mosaica_store::manifest::SCOPED_PROSE_DIR);
-        for name in [
-            mosaica_filter::VALUES_FILE.to_string(),
-            mosaica_filter::PRESENCE_FILE.to_string(),
-            mosaica_filter::DICT_FILE.to_string(),
-            mosaica_filter::POSTINGS_FILE.to_string(),
-            prose(mosaica_filter::RECORD_BLOCKS_FILE),
-            prose(mosaica_filter::RECORD_HASROW_FILE),
-            prose(mosaica_filter::RECORD_DIRECTORY_FILE),
-        ] {
-            if ctx.prefix_dir.join(&rel).join(&name).exists() {
-                to_digest.push(format!("{rel}/{name}"));
-            }
-        }
-    }
+    to_digest.extend(bases);
     let filter_extents = {
         let mut all = filter_extents;
         all.extend(scoped_extents);
@@ -1748,6 +1730,7 @@ fn write_scoped_extents(
     let mut extents = Vec::new();
     let mut texts = Vec::new();
     let mut created = Vec::new();
+    let mut bases = Vec::new();
     for spec in &ctx.scoped_schema {
         // A view left off `scoped_scalars[..].views` renders nothing and is opened for nothing.
         let owes_extent = spec.filterable || spec.has_value_column;
@@ -1765,7 +1748,15 @@ fn write_scoped_extents(
             .map_err(|e| MaintenanceFailed(format!("scoped column dir '{column_rel}': {e}")))?;
 
         if !spec.has_base {
-            write_empty_scoped_base(&column_dir, spec)?;
+            for path in write_empty_scoped_base(&column_dir, spec)? {
+                let rel = path.strip_prefix(&ctx.prefix_dir).map_err(|_| {
+                    MaintenanceFailed(format!(
+                        "scoped base file {} is outside the prefix directory",
+                        path.display()
+                    ))
+                })?;
+                bases.push(rel.to_string_lossy().into_owned());
+            }
         }
 
         if let Some(analyser) = &spec.analyser {
@@ -1807,44 +1798,47 @@ fn write_scoped_extents(
         extents,
         texts,
         created,
+        bases,
     })
 }
 
 /// What [`write_scoped_extents`] produced: this flush's extents for the families of its view's
-/// group, their text layers, and the `(family, view)` pairs whose base it had to write.
+/// group, their text layers, the `(family, view)` pairs whose base it had to write, and the
+/// prefix-relative files of those bases.
 pub(crate) struct ScopedWrite {
     pub(crate) extents: Vec<crate::filter::OpenedExtent>,
     pub(crate) texts: Vec<mosaica_store::manifest::TextExtent>,
     pub(crate) created: Vec<(String, String)>,
+    pub(crate) bases: Vec<String>,
 }
 
 /// The base a view of a group acquires at its first flush carrying values: every artefact the
-/// family's declaration owes, holding nothing, as an empty shard writes it.
+/// family's declaration owes, holding nothing, as an empty shard writes it. Returns the files
+/// written.
 fn write_empty_scoped_base(
     column_dir: &std::path::Path,
     spec: &ScopedColumnSpec,
-) -> Result<(), MaintenanceFailed> {
+) -> Result<Vec<std::path::PathBuf>, MaintenanceFailed> {
     use mosaica_store::empty_shard as empty;
     let failed = |e: mosaica_store::StoreError| {
         MaintenanceFailed(format!("scoped base for '{}': {e}", spec.name))
     };
     if spec.analyser.is_some() {
-        empty::write_empty_text_index(column_dir).map_err(failed)?;
+        let mut written = empty::write_empty_text_index(column_dir).map_err(failed)?;
         let prose = column_dir.join(mosaica_store::manifest::SCOPED_PROSE_DIR);
         std::fs::create_dir_all(&prose)
             .map_err(|e| MaintenanceFailed(format!("scoped base for '{}': {e}", spec.name)))?;
-        empty::write_empty_record_blob(&prose).map_err(failed)?;
-        return Ok(());
+        written.extend(empty::write_empty_record_blob(&prose).map_err(failed)?);
+        return Ok(written);
     }
-    empty::write_empty_value_column(column_dir, spec.ty, spec.category).map_err(failed)?;
+    let mut written =
+        empty::write_empty_value_column(column_dir, spec.ty, spec.category).map_err(failed)?;
     if spec.category {
-        empty::write_empty_category_postings(
-            &column_dir.join(mosaica_filter::POSTINGS_FILE),
-            &spec.name,
-        )
-        .map_err(failed)?;
+        let postings = column_dir.join(mosaica_filter::POSTINGS_FILE);
+        empty::write_empty_category_postings(&postings, &spec.name).map_err(failed)?;
+        written.push(postings);
     }
-    Ok(())
+    Ok(written)
 }
 
 /// This flush's slice of `entities/terms/`: the term lists of the entities it minted, in the
