@@ -620,6 +620,7 @@ fn rows(engine: &Engine, session: &Session) -> Vec<(MosaicaId, Vec<String>)> {
                     max_page_bytes: 1 << 20,
                     response_bytes: 1 << 24,
                     response_time: std::time::Duration::from_secs(60),
+                    stream_deadline: std::time::Duration::from_secs(60),
                 },
                 cancel: None,
             },

@@ -845,8 +845,6 @@ fn a_filter_adds_a_count_per_row_and_moves_nothing_else() {
     }
 }
 
-/// **A negation's count per row is the row's visible members it keeps**, and leaves out a
-/// suppressed member it would keep and a member outside the viewer's grant.
 /// **A filtered browse whose client has gone gives no answer**: it ends with `Cancelled`, and the
 /// same request under a token nobody flips answers.
 #[test]
@@ -883,6 +881,8 @@ fn a_filtered_browse_whose_client_has_gone_gives_no_answer() {
     ));
 }
 
+/// **A negation's count per row is the row's visible members it keeps**, and leaves out a
+/// suppressed member it would keep and a member outside the viewer's grant.
 #[test]
 fn a_negations_count_per_row_is_the_visible_members_it_keeps() {
     let fx = fixture(None);

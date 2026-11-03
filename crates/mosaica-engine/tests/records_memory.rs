@@ -128,6 +128,7 @@ fn read(
             max_page_bytes,
             response_bytes: 1 << 40,
             response_time: Duration::from_secs(600),
+            stream_deadline: Duration::from_secs(600),
         },
         cancel: None,
     };

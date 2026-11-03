@@ -193,7 +193,7 @@ pub enum FilterError {
     /// item would leave a phrase short, and widen a `none_of` over it.
     RecordUnreadable { column: String, detail: String },
     /// The request's client went away before the evaluation finished. Neither an answer nor a
-    /// refusal: the request ends with [`crate::EngineError::Cancelled`].
+    /// refusal: it becomes [`crate::EngineError::Cancelled`].
     Cancelled,
 }
 

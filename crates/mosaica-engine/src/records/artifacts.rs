@@ -1047,25 +1047,20 @@ fn drawn_shape(
 impl Pager for ArtifactsPager<'_> {
     /// The artifacts the request selects that this viewer is served, and of them the ones with a
     /// visible member matching the filter, over the whole layer under the first page's mask.
-    /// Cancellation ends it, and the response with it.
+    /// `clock` ending it ends the response.
     fn count(
         &mut self,
         engine: &Engine,
         open: &OpenView<'_>,
         generation: &Arc<Generation>,
+        clock: &Clock,
     ) -> Result<Counted> {
         let counted = self.with_scope(engine, open, generation, |pager, scope| {
             let (mut served_count, mut matched) = (0u64, 0u64);
             for (walked, (level, ordinal, named)) in pager.positions(scope, None).enumerate() {
-                // The count runs before the first page, so only cancellation ends it.
-                if walked % CHUNK as usize == 0
-                    && pager
-                        .req
-                        .cancel
-                        .as_ref()
-                        .is_some_and(CancelToken::is_cancelled)
-                {
-                    return Err(EngineError::Cancelled);
+                // The count runs before the first page, so no time budget ends it.
+                if walked % CHUNK as usize == 0 {
+                    clock.check()?;
                 }
                 let Some(served) = scope.served(level, ordinal) else {
                     continue;

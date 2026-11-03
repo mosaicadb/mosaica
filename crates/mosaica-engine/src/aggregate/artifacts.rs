@@ -184,7 +184,7 @@ impl Layer {
                             cut.budget,
                             &self.name,
                             &dependency_served,
-                            cx.cancel,
+                            &cx.clock.cancel,
                         )?;
                         if let Some(drawn) = drawn {
                             let listed = match layer.declaration.hierarchy.prune_children {

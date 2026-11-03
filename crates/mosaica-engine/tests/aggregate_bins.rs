@@ -505,6 +505,7 @@ fn request(groupings: &[Grouping]) -> AggregateRequest<'_> {
             max_page_bytes: 64 << 20,
             response_bytes: 256 << 20,
             response_time: Duration::from_secs(60),
+            stream_deadline: Duration::from_secs(60),
         },
         caps: caps(),
         cancel: None,

@@ -541,11 +541,7 @@ impl Interest {
     /// Every caller that wanted this build has gone.
     fn abandoned(&self) -> bool {
         let callers = self.callers.lock().unwrap_or_else(PoisonError::into_inner);
-        callers.iter().all(|(_, cancel)| {
-            cancel
-                .as_ref()
-                .is_some_and(crate::CancelToken::is_cancelled)
-        })
+        callers.iter().all(|(_, cancel)| crate::cancel::gone(cancel))
     }
 }
 

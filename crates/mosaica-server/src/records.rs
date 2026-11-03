@@ -5,10 +5,10 @@
 //!
 //! Both run under their own admission limit, `serve.bulk_admission`, so a long read takes no slot
 //! from the viewport and item routes, and on a blocking thread that streams each page as it is
-//! built. A client that goes away cancels the engine through the body's guard. The stream deadline
-//! cancels it too, and the engine then ends the response with a short page and a trailer, so a
-//! read cut by the deadline resumes from that trailer's cursor. `POST /v1/aggregate` is served by
-//! the same machinery under the viewport's admission.
+//! built. A client that goes away cancels the engine through the body's guard. The engine reads
+//! the stream deadline as a time and ends the response with a short page and a trailer, so a read
+//! cut by the deadline resumes from that trailer's cursor. `POST /v1/aggregate` is served by the
+//! same machinery under the viewport's admission.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -170,15 +170,6 @@ impl RecordsSink for FrameSink {
     }
 }
 
-/// Aborts the stream-deadline timer when the response ends before it.
-struct AbortOnDrop(tokio::task::AbortHandle);
-
-impl Drop for AbortOnDrop {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 /// `POST /v1/items`.
 pub(crate) async fn items(
     State(state): State<Arc<AppState>>,
@@ -239,18 +230,8 @@ pub(crate) async fn bulk_read(
     let (permits, admission_us) = gate.admit().await?;
     let start = Instant::now();
 
-    // The stream deadline cancels the engine, which ends the response with a trailer; the sender
-    // itself never refuses a frame for time, so that trailer can go out.
-    let deadline = Duration::from_millis(state.limits.stream_deadline_ms);
-    let timer = {
-        let cancel = cancel.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(deadline).await;
-            cancel.cancel();
-        })
-    };
-    let timer = AbortOnDrop(timer.abort_handle());
-
+    // The engine ends the response by the stream deadline itself, `RecordsLimits::stream_deadline`,
+    // with a trailer; the sender never refuses a frame for time, so that trailer can go out.
     let (producer, pending) = crate::stream::channel(
         permits,
         cancel_guard,
@@ -269,7 +250,6 @@ pub(crate) async fn bulk_read(
     };
     let closure_state = Arc::clone(&state);
     drop(tokio::task::spawn_blocking(move || {
-        let _timer = timer;
         match read(&closure_state, &session, cancel, &mut sink) {
             Read::Refused(e) => sink.producer.refuse(e),
             Read::Ran {
@@ -384,6 +364,7 @@ pub(crate) fn limits(state: &AppState) -> RecordsLimits {
         max_page_bytes: state.limits.max_page_bytes,
         response_bytes: state.limits.bulk_response_bytes,
         response_time: Duration::from_millis(state.limits.bulk_response_ms),
+        stream_deadline: Duration::from_millis(state.limits.stream_deadline_ms),
     }
 }
 

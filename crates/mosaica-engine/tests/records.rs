@@ -2275,6 +2275,46 @@ fn a_response_ends_at_its_pages_its_bytes_and_cancellation_and_the_read_resumes(
     assert_eq!(ids, everything);
 }
 
+/// **A stream deadline that has passed before a stretch's filter is evaluated does not interrupt
+/// it**: the response ends with a trailer by `deadline` and a cursor that moved on, never with an
+/// error, and the read resumed from it returns each matching item once.
+#[test]
+fn a_stream_deadline_never_interrupts_a_stretchs_filter() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let fields: Vec<String> = Vec::new();
+    let mut req = request("s0", &fields);
+    req.order = Some(RecordsOrder::Map);
+    req.page_rows = Some(10);
+    req.filter = Some(leaf(
+        "prose",
+        FilterOperand::Phrase {
+            query: "prose group1".into(),
+        },
+    ));
+    let saying = fx.tids(
+        &fx.map_order(0..N, "s0")
+            .into_iter()
+            .filter(|s| s % 3 == 1)
+            .collect::<Vec<_>>(),
+    );
+
+    let mut late = req.clone();
+    late.limits.stream_deadline = Duration::ZERO;
+    let (sink, trailer) = respond(&fx.engine, &session, late).expect("a trailer, not an error");
+    assert_eq!(trailer.ended_by, ResponseEndedBy::Deadline);
+    let first: Vec<u64> = sink.pages.iter().flat_map(|(b, _)| ids_of(b)).collect();
+    assert!(!first.is_empty(), "the response moved the cursor on");
+    let mut ids = first;
+    ids.extend(continue_read(
+        &fx.engine,
+        &session,
+        &req,
+        trailer.next.expect("a cursor to resume from"),
+    ));
+    assert_eq!(ids, saying);
+}
+
 /// **A response whose token is cancelled before it starts is a head and a trailer**: the trailer
 /// ends by the deadline, carries no rows, and resumes from the start.
 #[test]

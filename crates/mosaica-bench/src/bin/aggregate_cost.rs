@@ -215,6 +215,7 @@ fn read(
                     max_page_bytes: 64 << 20,
                     response_bytes: 1 << 30,
                     response_time: Duration::from_secs(600),
+                    stream_deadline: Duration::from_secs(600),
                 },
                 caps: AggregateCaps {
                     groupings: 8,

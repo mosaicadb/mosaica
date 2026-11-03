@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 
-use crate::cancel::CancelToken;
+use crate::cancel::{gone, CancelToken};
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
 use crate::filter::FilterExpr;
@@ -78,6 +78,10 @@ pub struct RecordsLimits {
     /// the cursor on, so every response advances the read, and a response runs past it by at most
     /// one stretch's filter evaluation and one chunk of the scan.
     pub response_time: Duration,
+    /// Time after which a response ends by `deadline`, read where `response_time` is and also
+    /// between chunks of a count before the first page. It does not interrupt a stretch's filter
+    /// evaluation.
+    pub stream_deadline: Duration,
 }
 
 /// One `POST /v1/items` response, as the engine sees it.
@@ -344,9 +348,14 @@ struct Response<'r> {
 /// One route's part of a response: its counts, its pages and its cursor. The loop that calls
 /// these, the budgets it keeps and the head, page ends and trailer it sends are shared.
 trait Pager {
-    /// The head's counts, under the first page's view.
-    fn count(&mut self, engine: &Engine, open: &OpenView<'_>, generation: &Arc<Generation>)
-        -> Result<Counted>;
+    /// The head's counts, under the first page's view. `clock` ending it ends the response.
+    fn count(
+        &mut self,
+        engine: &Engine,
+        open: &OpenView<'_>,
+        generation: &Arc<Generation>,
+        clock: &Clock,
+    ) -> Result<Counted>;
     /// The next page under `open`, moving the position to its end.
     fn page(
         &mut self,
@@ -485,7 +494,12 @@ impl Engine {
         sink: &mut dyn RecordsSink,
     ) -> Result<RecordsTrailer> {
         let limits = &response.limits;
-        let mut clock = Clock::new(started, limits.response_time, response.cancel.clone());
+        let mut clock = Clock::new(
+            started,
+            limits.response_time,
+            limits.stream_deadline,
+            response.cancel.clone(),
+        );
         let mut counted: Option<Counted> = None;
         let mut head_sent = false;
         let mut send_head = |pager: &dyn Pager,
@@ -524,7 +538,9 @@ impl Engine {
                     break ResponseEndedBy::BudgetTime;
                 }
             }
-            if clock.cancelled() {
+            // Before the first page only a client that has gone ends the response here: the walk
+            // honours the deadline once its scan has moved, so every response moves the cursor on.
+            if clock.ended() && (pages > 0 || gone(&response.cancel)) {
                 break ResponseEndedBy::Deadline;
             }
             // Each page reads the latest generation and composes the view's mask for itself; the
@@ -543,7 +559,7 @@ impl Engine {
             };
             if response.count && counted.is_none() {
                 // A count cancelled before the first page ends the response as one seen above.
-                counted = match pager.count(self, &open, &generation) {
+                counted = match pager.count(self, &open, &generation, &clock) {
                     Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
                     counted => Some(counted?),
                 };
@@ -618,6 +634,7 @@ impl Pager for ItemsPager<'_> {
         engine: &Engine,
         open: &OpenView<'_>,
         generation: &Arc<Generation>,
+        clock: &Clock,
     ) -> Result<Counted> {
         let cx = PageCx::new(engine, open, generation);
         let req = &self.planned.req;
@@ -631,7 +648,7 @@ impl Pager for ItemsPager<'_> {
                 None,
             ));
         }
-        let (matched, region) = self.walk.count(&cx, &req.cancel)?;
+        let (matched, region) = self.walk.count(&cx, &clock.cancel)?;
         Ok((
             RecordsCounts {
                 served: visible,

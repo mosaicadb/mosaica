@@ -15,6 +15,7 @@ use croaring::Bitmap;
 
 use super::{AggregateRequest, Reference};
 use crate::cancel::{check_cancelled, CancelToken};
+use crate::records::Clock;
 use crate::cells::CellSet;
 use crate::compose::{EffectiveMask, MaskedSet, WholeMask};
 use crate::engine::Engine;
@@ -251,8 +252,9 @@ pub(super) fn compose(
     open: &OpenView<'_>,
     req: &AggregateRequest<'_>,
     prefer_row: bool,
+    clock: &Clock,
 ) -> Result<Sets> {
-    check_cancelled(&req.cancel)?;
+    clock.check()?;
     let served = &open.served;
     let sides = served.sides.len();
     let reads: Vec<usize> = served
@@ -272,7 +274,7 @@ pub(super) fn compose(
             engine.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
         engine.route_filters_under(served, side, &candidate, &resolved, &req.cancel, |route| {
             let route_one = |expr: &FilterExpr, into: &mut Set| -> Result<()> {
-                check_cancelled(&req.cancel)?;
+                clock.check()?;
                 into.add(
                     place,
                     routed(engine, open, place, route(expr, prefer_row)?)?,
@@ -377,7 +379,7 @@ pub(super) struct Cx<'a> {
     pub(super) open: &'a OpenView<'a>,
     pub(super) generation: &'a Arc<Generation>,
     pub(super) sets: &'a Sets,
-    pub(super) cancel: &'a Option<CancelToken>,
+    pub(super) clock: &'a Clock,
 }
 
 impl<'a> Cx<'a> {
@@ -386,14 +388,14 @@ impl<'a> Cx<'a> {
         open: &'a OpenView<'a>,
         generation: &'a Arc<Generation>,
         sets: &'a Sets,
-        cancel: &'a Option<CancelToken>,
+        clock: &'a Clock,
     ) -> Cx<'a> {
         Cx {
             engine,
             open,
             generation,
             sets,
-            cancel,
+            clock,
         }
     }
 
@@ -429,7 +431,9 @@ impl<'a> Cx<'a> {
             .sum()
     }
 
+    /// `Err(EngineError::Cancelled)` once the client has gone or the stream deadline has passed,
+    /// which the response loop reads as an end by `deadline`.
     pub(super) fn check_cancelled(&self) -> Result<()> {
-        check_cancelled(self.cancel)
+        self.clock.check()
     }
 }

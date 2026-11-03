@@ -3,9 +3,9 @@
 //! [`CancelToken`] is a newtype over `Arc<AtomicBool>` with no `tokio` dependency, so the engine API
 //! stays synchronous. `mosaica-server` mints one per request, moves a clone into the blocking call,
 //! and flips the original from a drop-guard wired to client disconnect (`mosaica-server`'s
-//! `CancelGuard`). The engine polls it at checkpoints, filter evaluation among them, and ends the
-//! request with [`crate::EngineError::Cancelled`] the moment it observes the flip, never with a
-//! partial answer.
+//! `CancelGuard`), and nothing else flips it. The engine polls it at checkpoints, filter
+//! evaluation among them, and stops the request at the first that observes the flip: with
+//! [`crate::EngineError::Cancelled`], or on a paged read sometimes with an end by `deadline`.
 //!
 //! **Ordering: `Relaxed` for both the flip and the check.** The flag carries no payload, so nothing
 //! needs publishing alongside it, and no ordering bounds *when* another thread observes the flip.

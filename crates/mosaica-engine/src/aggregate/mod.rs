@@ -589,7 +589,12 @@ impl Engine {
     ) -> Result<AggregateTrailer> {
         let req = &planned.req;
         let limits = &req.limits;
-        let clock = Clock::new(started, limits.response_time, req.cancel.clone());
+        let clock = Clock::new(
+            started,
+            limits.response_time,
+            limits.stream_deadline,
+            req.cancel.clone(),
+        );
         let mut timings = AggregateTimings::default();
         let (mut pages, mut rows, mut bytes) = (0u64, 0u64, 0usize);
         let mut region: Option<RegionVerdict> = None;
@@ -614,7 +619,7 @@ impl Engine {
                     break ResponseEndedBy::BudgetTime;
                 }
             }
-            if clock.cancelled() {
+            if clock.ended() {
                 break ResponseEndedBy::Deadline;
             }
             let generation = self.generation.load_full();
@@ -629,7 +634,7 @@ impl Engine {
                 open => open?,
             };
             let composing = Instant::now();
-            let sets = match set::compose(self, &open, req, planned.prefer_row) {
+            let sets = match set::compose(self, &open, req, planned.prefer_row, &clock) {
                 Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
                 sets => sets?,
             };
@@ -657,7 +662,7 @@ impl Engine {
 
             let grouping = position.table;
             let plan = &planned.plans[grouping as usize];
-            let cx = set::Cx::new(self, &open, &generation, &sets, &req.cancel);
+            let cx = set::Cx::new(self, &open, &generation, &sets, &clock);
             let budget = table::Budget {
                 deadline: (pages > 0).then(|| started + limits.response_time),
                 page_rows: planned.page_rows,

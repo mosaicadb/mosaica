@@ -40,10 +40,10 @@ use mosaica_types::{EntityId, IdentityKey, ShardId};
 
 use super::cursor::{Key, Position};
 use super::{RecordsOrder, ResponseEndedBy};
-use crate::cancel::CancelToken;
+use crate::cancel::{gone, CancelToken};
 use crate::compose::{EffectiveMask, FilterRows, MaskedSet};
 use crate::engine::Engine;
-use crate::error::Result;
+use crate::error::{EngineError, Result};
 use crate::filter::{FilterExpr, RegionLeaf};
 use crate::figures::MaskIdentity;
 use crate::region::RegionVerdict;
@@ -370,28 +370,48 @@ pub(super) struct Collected {
     pub(super) position: Position,
 }
 
-/// A response's time budget and cancellation, read before each chunk of a walk's scan and never
-/// per row. A walk honours either only where stopping moves the position past the one the
-/// response started from, so every response the walk begins moves the scan on. The scan gathers
-/// the least key it has not reached first, so one chunk moves it; a response runs past its
-/// deadline by at most one stretch's filter evaluation, which is not interrupted, and one chunk.
+/// A response's time budget, its stream deadline and its client, read before each chunk of a
+/// walk's scan and never per row. A walk honours any of them only where stopping moves the position
+/// past the one the response started from, so every response the walk begins moves the scan on. The
+/// scan gathers the least key it has not reached first, so one chunk moves it; a response runs past
+/// its budget or its deadline by at most one stretch's filter evaluation, which neither interrupts,
+/// and one chunk. A client that has gone does interrupt that evaluation, and the response ends
+/// without a trailer.
 pub(crate) struct Clock {
     started: Instant,
     budget: Duration,
-    pub(super) cancel: Option<CancelToken>,
+    deadline: Duration,
+    pub(crate) cancel: Option<CancelToken>,
 }
 
 impl Clock {
-    pub(crate) fn new(started: Instant, budget: Duration, cancel: Option<CancelToken>) -> Clock {
+    pub(crate) fn new(
+        started: Instant,
+        budget: Duration,
+        deadline: Duration,
+        cancel: Option<CancelToken>,
+    ) -> Clock {
         Clock {
             started,
             budget,
+            deadline,
             cancel,
         }
     }
 
-    pub(crate) fn cancelled(&self) -> bool {
-        self.cancel.as_ref().is_some_and(CancelToken::is_cancelled)
+    /// Whether the client has gone or the stream deadline has passed, either of which ends the
+    /// response by `deadline`.
+    pub(crate) fn ended(&self) -> bool {
+        gone(&self.cancel) || self.started.elapsed() >= self.deadline
+    }
+
+    /// `Err(EngineError::Cancelled)` where [`Self::ended`], which the response loop reads as an end
+    /// by `deadline`.
+    pub(crate) fn check(&self) -> Result<()> {
+        if self.ended() {
+            return Err(EngineError::Cancelled);
+        }
+        Ok(())
     }
 
     pub(crate) fn out_of_time(&self) -> bool {
@@ -400,7 +420,7 @@ impl Clock {
 
     /// Why the scan would stop here.
     pub(super) fn stop(&self) -> Option<ResponseEndedBy> {
-        if self.cancelled() {
+        if self.ended() {
             return Some(ResponseEndedBy::Deadline);
         }
         self.out_of_time().then_some(ResponseEndedBy::BudgetTime)
@@ -1551,7 +1571,8 @@ mod tests {
     ) -> (Vec<Page>, u32) {
         let mut walk = Walk::new(filter.cloned(), keep_unmatched, stretch, BYTES, position);
         walk.target = stretch;
-        let mut clock = Clock::new(Instant::now(), Duration::from_secs(3600), None);
+        let hour = Duration::from_secs(3600);
+        let mut clock = Clock::new(Instant::now(), hour, hour, None);
         let mut pages = Vec::new();
         loop {
             let collected = walk.collect(cx, need, &mut clock).unwrap();
