@@ -360,9 +360,9 @@ struct RawServe {
     region_cache_bytes: Option<u64>,
     /// Bytes of the items each `match` and `phrase` filter matches, kept for reuse by every viewer
     /// with the same access until the next flush, coalesce or compaction, so panning and zooming
-    /// with a search does not run it again. One entry is a bitmap over a shard's items, about 12 MB at 10⁸ items
-    /// for a phrase that half of them contain. Each request in flight can hold one evicted entry
-    /// beside the bound. `0` keeps none.
+    /// with a search does not run it again. One entry is a bitmap over a shard's items, about
+    /// 12 MB at 10⁸ items for a phrase that half of them contain. Each request in flight can hold
+    /// one evicted entry beside the bound. `0` keeps none.
     ///
     /// Default: `268435456` (256 MiB).
     text_filter_cache_bytes: Option<u64>,

@@ -352,9 +352,9 @@ fn routed(
 }
 
 /// The members of `candidate`, the side's whole [`Engine::filter_candidate`] set at `place`'s
-/// shard, holding a row in `open`'s view that pass `expr`, and the coarsest verdict its region leaves reached: one filtered set's part,
-/// composed as [`compose`] composes a page's, for a caller counting by entity alone. `resolved`
-/// is the request's, under `open`'s mask.
+/// shard, holding a row in `open`'s view that pass `expr`, and the coarsest verdict its region
+/// leaves reached: one filtered set's part, composed as [`compose`] composes a page's, for a
+/// caller counting by entity alone. `resolved` is the request's, under `open`'s mask.
 pub(crate) fn entities_passing(
     engine: &Engine,
     open: &OpenView<'_>,
@@ -367,7 +367,8 @@ pub(crate) fn entities_passing(
     check_cancelled(cancel)?;
     let served = &open.served;
     let side = &served.sides[place];
-    engine.route_filters_under(served, side, FilterCandidate::Whole(candidate), resolved, cancel, |route| {
+    let whole = FilterCandidate::Whole(candidate);
+    engine.route_filters_under(served, side, whole, resolved, cancel, |route| {
         let (part, region) = routed(engine, open, place, route(expr, false)?)?;
         check_cancelled(cancel)?;
         let entities = match part.held {

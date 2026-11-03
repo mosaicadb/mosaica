@@ -96,10 +96,11 @@ impl Engine {
         let resolved = ResolvedLeaves::new(mask);
         let mut rows = vec![Bitmap::new(); served.sides.len()];
         let mut region = None;
+        let candidate = crate::viewport::FilterCandidate::Compose;
         for (place, side, _) in served.filtered_sides(mask) {
             let total_rows = side.data.row_space.total_rows();
             let (side_rows, verdict) =
-                self.route_filters_under(served, side, crate::viewport::FilterCandidate::Compose, &resolved, cancel, |route| {
+                self.route_filters_under(served, side, candidate, &resolved, cancel, |route| {
                     // A column with both routes takes the entity route: there are no tile ranges
                     // here to make the row route cheaper, so only a render-only column reaches
                     // the scan.

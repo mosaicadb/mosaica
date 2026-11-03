@@ -887,10 +887,11 @@ impl Engine {
         let mut filters = Vec::new();
         let mut highlights = Vec::new();
         let resolved = ResolvedLeaves::new(&mask);
+        let candidate = FilterCandidate::Compose;
         for (place, side, _) in served.filtered_sides(&mask) {
             let (domain, rows_in_ranges) = tiling.domain_in(place);
             let (filter_rows, highlight_rows) =
-                self.route_filters_under(served, side, FilterCandidate::Compose, &resolved, &req.cancel, |route| {
+                self.route_filters_under(served, side, candidate, &resolved, &req.cancel, |route| {
                     // `count_matched` excludes the highlight from the `filter_matched` probe: its
                     // cardinality is not the filter's.
                     let mut evaluate = |expr: &crate::filter::FilterExpr,
@@ -1265,7 +1266,6 @@ impl Engine {
     }
 }
 
-/// An artifact a leaf named, as one request's gate answered it.
 /// The set a request's filter is evaluated under in one side.
 #[derive(Clone, Copy)]
 pub(crate) enum FilterCandidate<'c> {
@@ -1279,15 +1279,16 @@ pub(crate) enum FilterCandidate<'c> {
     Within(&'c croaring::Bitmap),
 }
 
+/// An artifact a leaf named, as one request's gate answered it.
 type Gated = Option<std::rc::Rc<super::artifacts::GatedArtifact>>;
 
 /// A key a leaf named, as `(layer, level, key)`.
 type KeyAt = (String, u32, String);
 
 /// The region and `member_of` leaves answered for one request under one view: each artifact a
-/// leaf names, by identifier or by key, gated once over every shard under the request's mask before any filter narrows it,
-/// and each leaf's rows in each shard it was evaluated in, so a leaf evaluated again is resolved
-/// once.
+/// leaf names, by identifier or by key, gated once over every shard under the request's mask
+/// before any filter narrows it, and each leaf's rows in each shard it was evaluated in, so a leaf
+/// evaluated again is resolved once.
 pub(crate) struct ResolvedLeaves<'m> {
     mask: &'m ShardedMask,
     gates: std::cell::RefCell<Vec<(MosaicaId, Gated)>>,
