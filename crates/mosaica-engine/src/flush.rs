@@ -2336,19 +2336,12 @@ mod tests {
         .expect("the postings reopen");
         assert_eq!(postings.term_count() as usize, expected_terms.len());
         for (ordinal, (term, expected)) in expected_terms.iter().enumerate() {
-            let entities: Vec<u32> = match postings
+            let entities: Vec<u32> = postings
                 .posting_at(ordinal as u32)
                 .expect("the record decodes")
                 .expect("every term has a record")
-            {
-                mosaica_authz::postings::PostingRef::Array(bytes) => bytes
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|b| u32::from_le_bytes(*b))
-                    .collect(),
-                mosaica_authz::postings::PostingRef::Roaring(view) => view.iter().collect(),
-            };
+                .iter()
+                .collect();
             assert_eq!(&entities, expected, "the posting of '{term}'");
         }
 

@@ -6720,15 +6720,7 @@ mod tests {
                 .posting_at(ordinal as u32)
                 .expect("a readable posting")
                 .expect("every term in the dictionary has a posting");
-            let got: Vec<u32> = match posting {
-                mosaica_authz::postings::PostingRef::Array(bytes) => bytes
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|c| u32::from_le_bytes(*c))
-                    .collect(),
-                mosaica_authz::postings::PostingRef::Roaring(view) => view.iter().collect(),
-            };
+            let got: Vec<u32> = posting.iter().collect();
             assert_eq!(got, entities, "term {term:?} carries the wrong entities");
             let mut cursor = positions
                 .cursor(mosaica_types::AttrLocalId::new(ordinal as u32), items.len() as u64)
@@ -7173,15 +7165,7 @@ mod tests {
                 assert!(posting.is_none(), "the absent code earns no posting");
                 continue;
             }
-            let got = match posting.expect("carried") {
-                mosaica_authz::PostingRef::Roaring(view) => view.iter().collect::<Vec<_>>(),
-                mosaica_authz::PostingRef::Array(bytes) => bytes
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|c| u32::from_le_bytes(*c))
-                    .collect(),
-            };
+            let got: Vec<u32> = posting.expect("carried").iter().collect();
             assert_eq!(got, expected, "code {code}");
         }
     }

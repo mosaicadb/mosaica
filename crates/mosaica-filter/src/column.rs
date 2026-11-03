@@ -11,8 +11,8 @@
 use std::io;
 use std::path::Path;
 
-use croaring::{Bitmap, BitmapView};
-use mosaica_authz::{DeltaTier, PostingRef, PostingsReader};
+use croaring::Bitmap;
+use mosaica_authz::{union_postings, DeltaTier, PostingRef, PostingsReader};
 use mosaica_types::AttrLocalId;
 
 /// A column's postings file, in whichever record format its identifier domain wants.
@@ -119,16 +119,7 @@ impl ColumnPostings {
         Ok(match self.base.posting_at(value.raw())? {
             None => Bitmap::new(),
             Some(PostingRef::Roaring(view)) => candidate.and(&view),
-            Some(PostingRef::Array(bytes)) => {
-                let mut out = Bitmap::new();
-                for chunk in bytes.as_chunks::<4>().0 {
-                    let entity = u32::from_le_bytes(*chunk);
-                    if candidate.contains(entity) {
-                        out.add(entity);
-                    }
-                }
-                out
-            }
+            Some(array) => array.iter().filter(|&e| candidate.contains(e)).collect(),
         })
     }
 
@@ -163,12 +154,7 @@ impl ColumnPostings {
         Ok(match self.base.posting_at(value.raw())? {
             None => 0,
             Some(PostingRef::Roaring(view)) => candidate.and_cardinality(&view),
-            Some(PostingRef::Array(bytes)) => bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .filter(|chunk| candidate.contains(u32::from_le_bytes(**chunk)))
-                .count() as u64,
+            Some(array) => array.iter().filter(|&e| candidate.contains(e)).count() as u64,
         })
     }
 
@@ -188,14 +174,7 @@ impl ColumnPostings {
         }
         match self.base.posting_at(value.raw())? {
             None => live.clear(),
-            Some(PostingRef::Roaring(view)) => live.and_inplace(&view),
-            Some(PostingRef::Array(bytes)) => {
-                let mut small = Bitmap::new();
-                for chunk in bytes.as_chunks::<4>().0 {
-                    small.add(u32::from_le_bytes(*chunk));
-                }
-                live.and_inplace(&small);
-            }
+            Some(posting) => live.and_inplace(&posting.into_bitmap()),
         }
         Ok(())
     }
@@ -240,11 +219,7 @@ impl ColumnPostings {
 fn hits(posting: &PostingRef<'_>, candidate: &Bitmap) -> bool {
     match posting {
         PostingRef::Roaring(view) => candidate.intersect(view),
-        PostingRef::Array(bytes) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|chunk| candidate.contains(u32::from_le_bytes(*chunk))),
+        array => array.iter().any(|e| candidate.contains(e)),
     }
 }
 
@@ -254,42 +229,13 @@ fn hits(posting: &PostingRef<'_>, candidate: &Bitmap) -> bool {
 /// Composition with other operands is intersection and happens above this (§8.2); a union here and
 /// an intersection there is what keeps every filter an order-independent set producer.
 pub fn resolve_union(column: &ColumnPostings, values: &[AttrLocalId]) -> io::Result<Bitmap> {
-    let mut views: Vec<BitmapView<'_>> = Vec::new();
-    let mut small: Vec<u32> = Vec::new();
-
-    for value in values.iter().copied() {
-        // `None` is a value bound since the build (positional) or a code with no members (keyed).
-        if let Some(posting) = column.base.posting_at(value.raw())? {
-            match posting {
-                PostingRef::Roaring(view) => views.push(view),
-                PostingRef::Array(bytes) => {
-                    // Tag-0 payload lengths are validated as a multiple of 4 once, at
-                    // `PostingsReader::open`. A violation here would mean that validation was
-                    // bypassed, not that this site needs its own fail-closed handling.
-                    debug_assert!(
-                        bytes.len() % 4 == 0,
-                        "tag-0 posting payload length must be a multiple of 4 (validated at \
-                         PostingsReader::open)"
-                    );
-                    for chunk in bytes.as_chunks::<4>().0 {
-                        small.push(u32::from_le_bytes(*chunk));
-                    }
-                }
-            }
-        }
-    }
-
-    let refs: Vec<&Bitmap> = views.iter().map(|view| &**view).collect();
-    let mut out = if refs.is_empty() {
-        Bitmap::new()
-    } else {
-        Bitmap::fast_or(&refs)
-    };
-
-    small.sort_unstable();
-    out.add_many(&small);
+    // `None` is a value bound since the build (positional) or a code with no members (keyed).
+    let postings = values
+        .iter()
+        .filter_map(|value| column.base.posting_at(value.raw()).transpose())
+        .collect::<io::Result<Vec<_>>>()?;
+    let mut out = union_postings(postings);
     out.run_optimize();
-
     Ok(out)
 }
 

@@ -178,15 +178,7 @@ fn an_indexed_text_column_writes_a_token_index_and_a_blob_row() {
             .posting_at(ordinal as u32)
             .expect("a readable posting")
             .expect("the term has one");
-        let mut got: Vec<u32> = match posting {
-            mosaica_authz::postings::PostingRef::Array(bytes) => bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| u32::from_le_bytes(*c))
-                .collect(),
-            mosaica_authz::postings::PostingRef::Roaring(view) => view.iter().collect(),
-        };
+        let mut got: Vec<u32> = posting.iter().collect();
         got.sort_unstable();
         let mut want: Vec<u32> = (0..N)
             .filter(|&e| {

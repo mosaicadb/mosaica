@@ -47,7 +47,7 @@ use std::time::Instant;
 
 use croaring::{Bitmap, Portable};
 
-use mosaica_authz::{PostingRef, PostingsReader};
+use mosaica_authz::PostingsReader;
 use mosaica_store::manifest::Manifest;
 use mosaica_store::permutation::Permutation;
 use mosaica_store::read::{ColumnsRef, ScalarSlice};
@@ -59,21 +59,7 @@ fn to_bitmap(postings: &PostingsReader, term: TermId) -> Bitmap {
     let Some(posting) = postings.posting(term).expect("posting") else {
         return Bitmap::new();
     };
-    match posting {
-        PostingRef::Roaring(view) => (*view).clone(),
-        PostingRef::Array(bytes) => {
-            let mut values: Vec<u32> = bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| u32::from_le_bytes(*c))
-                .collect();
-            values.sort_unstable();
-            let mut bitmap = Bitmap::new();
-            bitmap.add_many(&values);
-            bitmap
-        }
-    }
+    posting.into_bitmap().clone()
 }
 
 /// Containers a bitmap touches — `mosaica_bench::metrics::containers`, inlined. Roaring iteration

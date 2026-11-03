@@ -17,8 +17,7 @@ pub use fragment::{
 pub use label::{index_keys, LabelIndex};
 pub use postings::{
     decode_single_batch, encode_posting, encode_posting_bitmap, open_record_column,
-    write_posting_records,
-    write_postings, PostingBitmap, PostingRef, PostingsReader, PostingsSpool,
+    union_postings, write_posting_records, write_postings, PostingBitmap, PostingRef, PostingsReader, PostingsSpool,
 };
 pub use term_sweep::sweep_term_postings;
 pub use tier::{

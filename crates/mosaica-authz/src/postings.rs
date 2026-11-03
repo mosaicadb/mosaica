@@ -398,21 +398,27 @@ impl<'a> PostingRef<'a> {
         }
     }
 
-    /// Append this posting's entities to `out`, ascending.
-    pub fn extend_into(&self, out: &mut Vec<u32>) {
-        match self {
+    /// This posting's entities, ascending.
+    pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
+        let (array, view) = match self {
             PostingRef::Array(bytes) => {
                 // Validated as a multiple of 4 once, at open time; not re-checked per lookup.
                 debug_assert!(
                     bytes.len() % 4 == 0,
                     "tag-0 posting payload length must be a multiple of 4 (validated at open)"
                 );
-                for chunk in bytes.as_chunks::<4>().0 {
-                    out.push(u32::from_le_bytes(*chunk));
-                }
+                (bytes.as_chunks::<4>().0, None)
             }
-            PostingRef::Roaring(view) => out.extend(view.iter()),
-        }
+            PostingRef::Roaring(view) => (&[][..], Some(view.iter())),
+        };
+        let array = array.iter().map(|chunk| u32::from_le_bytes(*chunk));
+        array.chain(view.into_iter().flatten())
+    }
+
+    /// Append this posting's entities to `out`, ascending.
+    pub fn extend_into(&self, out: &mut Vec<u32>) {
+        out.reserve(self.cardinality() as usize);
+        out.extend(self.iter());
     }
 
     /// This posting as a bitmap: the mapped view itself, or an array posting decoded.
@@ -449,7 +455,7 @@ impl std::ops::Deref for PostingBitmap<'_> {
 /// Union `postings` into one bitmap: Roaring sources through [`Bitmap::fast_or`], tag-0 arrays
 /// decoded, concatenated, sorted and folded in with `add_many`. Not `run_optimize`d; a caller
 /// that persists the result does that itself.
-pub(crate) fn union_postings<'a>(postings: impl IntoIterator<Item = PostingRef<'a>>) -> Bitmap {
+pub fn union_postings<'a>(postings: impl IntoIterator<Item = PostingRef<'a>>) -> Bitmap {
     let mut views: Vec<BitmapView<'a>> = Vec::new();
     let mut small: Vec<u32> = Vec::new();
     for posting in postings {

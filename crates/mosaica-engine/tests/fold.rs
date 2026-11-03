@@ -18,7 +18,7 @@ use arrow::array::{UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use common::*;
-use mosaica_authz::{PostingRef, PostingsReader};
+use mosaica_authz::PostingsReader;
 use mosaica_build::{build, BuildArgs};
 use mosaica_engine::viewport::ViewportRequest;
 use mosaica_engine::{Engine, EngineConfig};
@@ -237,15 +237,10 @@ fn entity_of_source(root: &Path, prefix: &str, source_id: u64) -> EntityId {
 /// retirement would then re-expose the item.
 fn postings_name(postings: &PostingsReader, term: TermId, entity: EntityId) -> bool {
     let entity = entity.raw() as u32;
-    match postings.posting(term).expect("the postings file reads") {
-        None => false,
-        Some(PostingRef::Roaring(view)) => view.contains(entity),
-        Some(PostingRef::Array(bytes)) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|c| u32::from_le_bytes(*c) == entity),
-    }
+    postings
+        .posting(term)
+        .expect("the postings file reads")
+        .is_some_and(|posting| posting.into_bitmap().contains(entity))
 }
 
 fn base_postings_of(root: &Path, prefix: &str) -> PostingsReader {

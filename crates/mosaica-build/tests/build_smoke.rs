@@ -147,21 +147,15 @@ fn read_arrow_ipc(path: &Path) -> Vec<RecordBatch> {
 }
 
 fn posting_entities(path: &Path, term: TermId) -> BTreeSet<u64> {
-    use mosaica_authz::{PostingRef, PostingsReader};
+    use mosaica_authz::PostingsReader;
     let reader = PostingsReader::open(path, false).unwrap();
-    let out = match reader
+    let out = reader
         .posting(term)
         .unwrap()
         .expect("the term is present in this file")
-    {
-        PostingRef::Array(bytes) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| u32::from_le_bytes(*c) as u64)
-            .collect(),
-        PostingRef::Roaring(view) => view.iter().map(|v| v as u64).collect(),
-    };
+        .iter()
+        .map(u64::from)
+        .collect();
     out
 }
 

@@ -33,15 +33,7 @@ fn tier(
 }
 
 fn entities_of(posting: PostingRef<'_>) -> Vec<u32> {
-    match posting {
-        PostingRef::Roaring(view) => view.iter().collect(),
-        PostingRef::Array(bytes) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| u32::from_le_bytes(*c))
-            .collect(),
-    }
+    posting.iter().collect()
 }
 
 /// Sweep `base`/`tiers` over `dict_len` and `tombstones`. Returns `(term -> entities from the

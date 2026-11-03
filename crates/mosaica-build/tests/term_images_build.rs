@@ -22,7 +22,7 @@ use arrow::record_batch::RecordBatch;
 use croaring::Bitmap;
 use parquet::arrow::ArrowWriter;
 
-use mosaica_authz::postings::{PostingRef, PostingsReader};
+use mosaica_authz::postings::PostingsReader;
 use mosaica_build::{build, build_in_memory, BuildArgs};
 use mosaica_spatial::Bounds;
 use mosaica_store::manifest::DECLARED_INCARNATION;
@@ -193,17 +193,10 @@ fn built(
 }
 
 fn posting_bitmap(postings: &PostingsReader, term: u32) -> Option<Bitmap> {
-    match postings.posting_at(term).expect("the postings read") {
-        None => None,
-        Some(PostingRef::Array(bytes)) => {
-            let mut bitmap = Bitmap::new();
-            for chunk in bytes.as_chunks::<4>().0 {
-                bitmap.add(u32::from_le_bytes(*chunk));
-            }
-            Some(bitmap)
-        }
-        Some(PostingRef::Roaring(view)) => Some(view.clone()),
-    }
+    postings
+        .posting_at(term)
+        .expect("the postings read")
+        .map(|posting| posting.into_bitmap().clone())
 }
 
 /// The one term-image file of a bundle with one view, and the row space it was projected through.

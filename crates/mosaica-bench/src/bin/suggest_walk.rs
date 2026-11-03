@@ -180,14 +180,7 @@ fn container_count(posting: &PostingRef<'_>) -> usize {
             n += 1;
         }
     };
-    match posting {
-        PostingRef::Roaring(view) => view.iter().for_each(&mut note),
-        PostingRef::Array(bytes) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .for_each(|c| note(u32::from_le_bytes(*c))),
-    }
+    posting.iter().for_each(&mut note);
     n
 }
 

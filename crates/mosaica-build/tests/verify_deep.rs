@@ -730,15 +730,7 @@ fn a_source_binding_request_is_refused_until_the_contract_carries_the_field() {
 fn read_base_postings(path: &Path) -> Vec<Vec<u32>> {
     let reader = mosaica_authz::PostingsReader::open(path, false).unwrap();
     (0..reader.term_count())
-        .map(|t| match reader.posting_at(t).unwrap().unwrap() {
-            mosaica_authz::PostingRef::Array(bytes) => bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| u32::from_le_bytes(*c))
-                .collect(),
-            mosaica_authz::PostingRef::Roaring(view) => view.iter().collect(),
-        })
+        .map(|t| reader.posting_at(t).unwrap().unwrap().iter().collect())
         .collect()
 }
 

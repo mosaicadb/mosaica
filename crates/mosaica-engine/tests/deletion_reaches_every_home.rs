@@ -37,7 +37,7 @@ use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
 
 use common::*;
-use mosaica_authz::{PostingRef, PostingsReader};
+use mosaica_authz::PostingsReader;
 use mosaica_build::config::Config;
 use mosaica_build::{build, BuildArgs};
 use mosaica_engine::{Engine, EngineConfig, ViewportRequest};
@@ -562,15 +562,10 @@ fn term_names(root: &Path, term: TermId, entity: EntityId) -> bool {
     let entity = entity.raw() as u32;
     // Bound rather than returned as the tail expression, which would drop `postings` before the
     // `PostingRef` borrowing it.
-    let named = match postings.posting(term).expect("the postings file reads") {
-        None => false,
-        Some(PostingRef::Roaring(view)) => view.contains(entity),
-        Some(PostingRef::Array(bytes)) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .any(|c| u32::from_le_bytes(*c) == entity),
-    };
+    let named = postings
+        .posting(term)
+        .expect("the postings file reads")
+        .is_some_and(|posting| posting.into_bitmap().contains(entity));
     named
 }
 

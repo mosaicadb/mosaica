@@ -6,15 +6,7 @@ use mosaica_authz::{write_delta_tier_at, DeltaTier, KeyedPostingsSpool, PostingR
 const SMALL: u32 = 32;
 
 fn entities(posting: PostingRef<'_>) -> Vec<u32> {
-    match posting {
-        PostingRef::Roaring(view) => view.iter().collect(),
-        PostingRef::Array(bytes) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| u32::from_le_bytes(*c))
-            .collect(),
-    }
+    posting.iter().collect()
 }
 
 /// Entries spanning both encodings: below the threshold (tag 0) and far above it (tag 1).

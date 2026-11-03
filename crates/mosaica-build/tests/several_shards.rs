@@ -15,7 +15,7 @@ use arrow::array::{
 
 use common::write;
 use croaring::Bitmap;
-use mosaica_authz::{PostingRef, PostingsReader};
+use mosaica_authz::PostingsReader;
 use mosaica_build::{build, build_routed, BuildArgs, ExtentRoute};
 use mosaica_filter::{Access, RecordBlob, RecordValue, SortedDict, ValueColumn};
 use mosaica_spatial::Bounds;
@@ -402,15 +402,11 @@ impl Shard<'_> {
     fn postings(&self, path: &str) -> Vec<Vec<u32>> {
         let reader = PostingsReader::open(&self.dir(path.to_string()), false).unwrap();
         (0..reader.term_count())
-            .map(|term| match reader.posting_at(term).unwrap() {
-                None => Vec::new(),
-                Some(PostingRef::Array(bytes)) => bytes
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|chunk| u32::from_le_bytes(*chunk))
-                    .collect(),
-                Some(PostingRef::Roaring(view)) => view.iter().collect(),
+            .map(|term| {
+                reader
+                    .posting_at(term)
+                    .unwrap()
+                    .map_or_else(Vec::new, |posting| posting.iter().collect())
             })
             .collect()
     }

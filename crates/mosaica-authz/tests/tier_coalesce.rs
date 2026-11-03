@@ -19,15 +19,7 @@ fn tier_at(dir: &std::path::Path, name: &str, entries: &[(u32, &[u32])]) -> Path
 
 fn posting(path: &std::path::Path, term: u32) -> Option<Vec<u32>> {
     let tier = DeltaTier::open(path).unwrap();
-    tier.posting(TermId::new(term)).unwrap().map(|p| match p {
-        mosaica_authz::PostingRef::Roaring(view) => view.iter().collect(),
-        mosaica_authz::PostingRef::Array(bytes) => bytes
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|c| u32::from_le_bytes(*c))
-            .collect(),
-    })
+    tier.posting(TermId::new(term)).unwrap().map(|posting| posting.iter().collect())
 }
 
 /// The same pairs, concatenated, deduplicated, re-sorted. The dedup is required: `encode_posting`

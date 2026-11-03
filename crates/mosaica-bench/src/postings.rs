@@ -7,7 +7,7 @@
 
 use croaring::Bitmap;
 
-use mosaica_authz::{PostingRef, PostingsReader};
+use mosaica_authz::PostingsReader;
 use mosaica_types::TermId;
 
 /// One term's postings as an owned bitmap.
@@ -21,21 +21,7 @@ pub fn to_bitmap(postings: &PostingsReader, term: TermId) -> std::io::Result<Bit
         // Absent means the file carries no record for this term — an empty posting, not an error.
         return Ok(Bitmap::new());
     };
-    Ok(match posting {
-        PostingRef::Roaring(view) => (*view).clone(),
-        PostingRef::Array(bytes) => {
-            let mut values: Vec<u32> = bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| u32::from_le_bytes(*c))
-                .collect();
-            values.sort_unstable();
-            let mut bitmap = Bitmap::new();
-            bitmap.add_many(&values);
-            bitmap
-        }
-    })
+    Ok(posting.into_bitmap().clone())
 }
 
 /// The union of several terms' postings — the same set `build_fragment` produces, used where a

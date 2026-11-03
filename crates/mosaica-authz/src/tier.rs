@@ -359,15 +359,7 @@ mod tests {
     use rand::{Rng, SeedableRng};
 
     fn entities_of(tier: &DeltaTier, code: u32) -> Option<Vec<u32>> {
-        tier.posting_at(code).unwrap().map(|posting| match posting {
-            PostingRef::Roaring(view) => view.iter().collect(),
-            PostingRef::Array(bytes) => bytes
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|c| u32::from_le_bytes(*c))
-                .collect(),
-        })
+        tier.posting_at(code).unwrap().map(|posting| posting.iter().collect())
     }
 
     /// The bucket table changes the search's bounds and nothing else. An off-by-one here would
