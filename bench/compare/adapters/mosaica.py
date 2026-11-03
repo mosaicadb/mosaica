@@ -18,7 +18,7 @@ underlay and, at the same time, a `POST /v1/aggregate` counting the filtered set
 `grid_depth` over the camera's tiles; the latency covers both.
 
 Each tile serves the `min(matched, K)` of its matching items with the lowest `mosaica_id`
-(`mosaica_engine::select`), since `theta_target_marks` saturates the density threshold. The
+(`mosaica_engine::select`), since `k_min = K` raises every tile's floor to `K`. The
 `mosaica_id` is a keyed permutation of each item's internal number under a key the build draws at
 random, so the sample is a uniform random one, different at each build. Mosaica has no request
 that sends a sparse tile's points and none from a dense one, so under the `counts` frame it sends
@@ -61,7 +61,7 @@ VIEW = "papers"
 SERVE = {
     "k_max_marks": K,
     "max_k": 1000,
-    "theta_target_marks": 1 << 40,
+    "k_min": K,
     "max_underlay_offset": GRID_OFFSET,
     "max_underlay_cells": 20 << (2 * GRID_OFFSET),
     "max_aggregate_cells": 20 << (2 * GRID_OFFSET),

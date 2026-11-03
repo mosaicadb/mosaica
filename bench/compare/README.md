@@ -381,8 +381,8 @@ grid that Mosaica's build quantises to (`frame.fixed32`), so an exact frame has 
 count is over the viewer's visible items.
 
 Mosaica serves the K matching items of each tile with the lowest `mosaica_id`
-(`crates/mosaica-engine/src/select.rs`, whose module comment defines it), once
-`theta_target_marks` saturates its density threshold. A `mosaica_id` is a keyed Feistel
+(`crates/mosaica-engine/src/select.rs`, whose module comment defines it), since `k_min = K`
+makes each tile's floor `K`. A `mosaica_id` is a keyed Feistel
 permutation of the item's internal number, under a key each build draws at random, so the sample
 is uniform and differs from build to build. Every other system takes the K with the lowest `rank`,
 a column `prepare.py` writes as `splitmix64(entity_id ^ RANK_SEED) >> 1`, which is the same
@@ -427,7 +427,7 @@ one's, so under `counts` it sends K from each dense tile, as it did.
 
   | Setting | Value | Default | Why |
   |---|---|---|---|
-  | `theta_target_marks` | 2⁴⁰ | 16 | Every tile serves `min(matched, K)` points; by default a sparse tile may serve fewer, by design |
+  | `k_min` | 500 | 2 | Every tile serves `min(cap, max(k_min, C_θ))`, which is `min(matched, K)` at `k_min = K`, so a sparse tile serves every point; by default it may serve fewer, by design. `theta_target_marks` stays at its default, 16: raised to 2⁴⁰ it gave the same points but saturated the density threshold, and an unfiltered dense tile was then read by a scan rather than from the identity bands, 214 ms against 1.4 ms at zoom 0 over the full tier. A filtered request scans either way |
   | `max_underlay_offset` | 8 | 4 | The grid is 8 levels below the tiles |
   | `max_underlay_cells` | 1,310,720 | 8,192 | 20 tiles at an offset of 8 |
   | `max_aggregate_cells` | 1,310,720 | 1,048,576 | The same cells through `/v1/aggregate` |
