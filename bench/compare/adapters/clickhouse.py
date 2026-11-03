@@ -154,11 +154,14 @@ class ClickHouse(Adapter):
         wait_for(self._ready, 600, f"ClickHouse answering; see {self.work / 'ch-logs'}")
 
     def _ready(self) -> bool:
+        """One probe on a connection of its own, closed after it: a pooled connection opened
+        while the server starts holds its next shutdown for its 30-second wait."""
+        close = {"Connection": "close"}
         try:
             if not self.table_made:
-                return requests.get(f"http://127.0.0.1:{PORT}/ping", timeout=60).ok
-            return self.admin.post(f"http://127.0.0.1:{PORT}/", data=b"SELECT 1 FROM points LIMIT 1",
-                                   timeout=60).ok
+                return requests.get(f"http://127.0.0.1:{PORT}/ping", headers=close, timeout=60).ok
+            return requests.post(f"http://127.0.0.1:{PORT}/", data=b"SELECT 1 FROM points LIMIT 1",
+                                 headers=close, timeout=60).ok
         except requests.RequestException:
             return False
 
@@ -238,7 +241,10 @@ class ClickHouse(Adapter):
         self.sql(f"INSERT INTO points SELECT mortonEncode(qx, qy) AS m, qx, qy, {columns} "
                  f"FROM ({quantised})")
         self.sql("OPTIMIZE TABLE points FINAL")
-        fsync_tree(self.data)
+        # The parts OPTIMIZE replaced stay on disc, inactive, for `old_parts_lifetime`; they are
+        # neither flushed nor counted.
+        replaced = self._inactive_parts()
+        fsync_tree(self.data, set(replaced))
         build_s = time.monotonic() - t0
         self.table_made = True
         mem = self.serve_memory()
@@ -249,13 +255,24 @@ class ClickHouse(Adapter):
         self.sql(f"GRANT SELECT ON default.points TO {VIEWER_USER}")
         self.sql(f"CREATE ROW POLICY viewer_terms ON default.points FOR SELECT "
                  f"USING licence IN ({terms}) AS permissive TO {VIEWER_USER}")
-        disk = du_bytes(self.data)
+        replaced = self._inactive_parts()
+        replaced_bytes = sum(du_bytes(p) for p in replaced)
+        disk = du_bytes(self.data) - replaced_bytes
         self.stop()
         self._create()
-        return {"build_s": build_s, **mem, "disk_bytes": disk, "disk": "du of the data directory",
+        return {"build_s": build_s, **mem, "disk_bytes": disk,
+                "disk": "du of the data directory less the inactive parts OPTIMIZE replaced",
+                "inactive_parts": len(replaced), "inactive_part_bytes": replaced_bytes,
                 "table_bytes": table_bytes, "rows": rows, "nice": self.nice,
                 "boundary": "from the CREATE TABLE to the end of OPTIMIZE and an fsync of every "
-                            "file in the data directory, on a running server"}
+                            "file and directory in the data directory but the inactive parts, on "
+                            "a running server"}
+
+    def _inactive_parts(self) -> list[Path]:
+        """The host directories of the table's inactive parts."""
+        paths = self.sql("SELECT path FROM system.parts WHERE table = 'points' AND NOT active "
+                         "FORMAT TSV").decode().split()
+        return [self.data / Path(p).relative_to("/var/lib/clickhouse") for p in paths]
 
     # -- a frame -----------------------------------------------------------------------------------
 

@@ -164,6 +164,20 @@ def tables_request(camera: Camera, filt: Filter | None) -> dict:
     ]}
 
 
+def reported(status: dict) -> dict:
+    """The admission limits and cache bounds the server reports in `/control/status`. It does not
+    report `compute_threads`, whose default is the CPUs the process may use and whose
+    `compute_admission` default is four times that."""
+    out = {f"{k}_admission": status[k]["admission"] for k in ("compute", "bulk", "artifacts")}
+    out["compute_queue"] = status["compute"]["queue"]
+    for k in ("row_projection_cache", "fragment_cache", "region_cache", "occupancy"):
+        out[f"{k}_bound_bytes"] = status[k]["bound_bytes"]
+    mc = status["masked_count_cache"]
+    out["masked_count_disk_bound_bytes"] = mc["disk_bound_bytes"]
+    out["masked_count_labels_bound_bytes"] = mc["labels_bound_bytes"]
+    return out
+
+
 def cells(table) -> dict:
     """A table of `cell` codes and their `count`, by (x, y)."""
     gx, gy = deinterleave(table["cell"].to_numpy())
@@ -210,21 +224,11 @@ class Mosaica(Adapter):
                 "docker": docker_info()}
 
     def config(self) -> dict:
-        cpus = os.cpu_count()
+        status = self._status()
         return {"serve": self._serve(), "caches": self.caches, "corpus": CORPUS, "point_rows": [],
-                "grid": self.grid, "container_memory": MEMORY, "container_cpus": cpus,
-                # Left at their defaults, which derive from the CPUs the container may use.
-                "serve_defaults": {"compute_threads": cpus, "compute_admission": 4 * cpus,
-                                   "compute_queue": 8 * cpus, "artifact_admission": cpus,
-                                   "admission_timeout_ms": 250, "bulk_admission": 2,
-                                   "row_projection_cache_bytes": 2 << 30,
-                                   "fragment_cache_bytes": 1 << 30,
-                                   "occupancy_cache_bytes": 32 << 20,
-                                   **({} if self.caches == "compute" else {
-                                       "region_cache_bytes": 256 << 20,
-                                       "masked_count_cache_bytes": 1 << 30,
-                                       "figures_disk_bytes": 8 << 30})},
-                "status": self._status(), "region_answers": sorted(self.regions),
+                "grid": self.grid, "container_memory": MEMORY, "container_cpus": os.cpu_count(),
+                "serve_reported": reported(status), "status": status,
+                "region_answers": sorted(self.regions),
                 "routes": ["/v1/login", "/v1/viewport", "/v1/aggregate"]}
 
     def _status(self) -> dict:

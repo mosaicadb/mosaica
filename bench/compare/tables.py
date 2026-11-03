@@ -18,7 +18,14 @@ from oracle import COUNT_ERRORS, POINT_ERRORS
 GIB = 1 << 30
 #: The fields a record must carry to be tabled; an older record without them is refused.
 REQUIRED = ("system", "caches", "tier", "tier_sha256", "harness_commit", "cameras_sha256",
-            "version", "build", "warm", "errors", "session_start", "serve_memory")
+            "repeats", "cold_runs", "version", "build", "warm", "errors", "serve_memory")
+#: Each system's image, which every record must name and every column of one table must share.
+IMAGE = {"mosaica": lambda r: (r["version"]["image_id"], r["version"]["version"]),
+         "clickhouse": lambda r: r["version"]["digest"]}
+
+
+def image_of(r: dict):
+    return IMAGE["clickhouse" if r["system"] == "clickhouse" else "mosaica"](r)
 
 
 def column(r: dict) -> str:
@@ -29,6 +36,11 @@ def latest(records: list[dict]) -> dict[tuple[str, str], dict]:
     out = {}
     for r in records:
         missing = [k for k in REQUIRED if k not in r]
+        if not missing:
+            try:
+                image_of(r)
+            except KeyError:
+                missing = ["version.image_id or version.digest"]
         if missing:
             raise SystemExit(f"a record of {r.get('system', '?')} from {r.get('started_at', '?')} "
                              f"lacks {', '.join(missing)}: it predates this harness; pass only "
@@ -40,21 +52,34 @@ def latest(records: list[dict]) -> dict[tuple[str, str], dict]:
 def check_comparable(tier: str, runs: dict[str, dict]) -> None:
     """Refuse records whose harness, cameras or tier differ, or Mosaica columns from different
     images."""
-    checks = {k: lambda r, k=k: r[k] for k in ("harness_commit", "cameras_sha256", "tier_sha256")}
-    checks["Mosaica image"] = lambda r: (r["version"]["image_id"], r["version"]["version"])
-    for name, get in checks.items():
-        seen = {get(r) for r in runs.values() if name != "Mosaica image" or r["system"].startswith("mosaica")}
+    checks = {k: (lambda r, k=k: r[k], lambda r: True)
+              for k in ("harness_commit", "cameras_sha256", "tier_sha256")}
+    checks["Mosaica image"] = (image_of, lambda r: r["system"] != "clickhouse")
+    checks["ClickHouse image"] = (image_of, lambda r: r["system"] == "clickhouse")
+    for name, (get, applies) in checks.items():
+        seen = {get(r) for r in runs.values() if applies(r)}
         if len(seen) > 1:
             raise SystemExit(f"the {tier} records come from different {name} values {sorted(seen)}; "
                              f"rerun the older systems, or pass only the records of one run")
 
 
 def ms(s: dict) -> str:
-    return f"{s['p50_ms']:.1f} / {s['p99_ms']:.1f}"
+    """p50 / p99, or median / max where a figure has five samples or fewer."""
+    tail = s["max_ms"] if s["n"] <= 5 else s["p99_ms"]
+    return f"{s['p50_ms']:.1f} / {tail:.1f}"
 
 
-def median_max(s: dict) -> str:
-    return f"{s['p50_ms']:.1f} / {s['max_ms']:.1f}"
+def latency(name: str, get, runs: dict[str, dict]) -> tuple:
+    """A latency row, labelled by its samples, which the columns must share."""
+    ns = set()
+    for r in runs.values():
+        try:
+            ns.add(get(r)["n"])
+        except KeyError:
+            pass
+    n = "/".join(str(v) for v in sorted(ns)) or "0"
+    stat = "median / max" if ns and max(ns) <= 5 else "p50 / p99"
+    return (f"{name}, {stat} of {n} (ms)", lambda r: ms(get(r)))
 
 
 def size(b: int | None) -> str:
@@ -83,10 +108,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
     systems = sorted(runs)
     dev = any(r.get("development_only", True) for r in runs.values())
     head = f"### {tier}" + (" (development only: not for publication)" if dev else "")
-    repeats = sorted({r["repeats"] for r in runs.values()})
-    n = "/".join(map(str, repeats))
-    # Rows that may be blank: a run with --no-cold has no cold figures.
-    optional = {"Cold battery p50 / p99 (ms)", "Serve cgroup memory after a cold restart and one frame"}
+    lat = lambda name, get: latency(name, get, runs)
     rows = [("Version", lambda r: r["version"]["version"]),
             ("Build time", lambda r: f"{r['build']['build_s']:.1f} s"),
             ("Build peak RSS", lambda r: size(r["build"]["peak_rss_bytes"])),
@@ -96,18 +118,20 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             ("Serve peak cgroup memory (incl. page cache)", lambda r: size(r["serve_memory"]["cgroup_peak_bytes"])),
             ("Serve cgroup memory after a cold restart and one frame",
              lambda r: size(r["serve_memory_after_cold"]["cgroup_peak_bytes"]))]
+    # The rows a run with --no-cold has no figure for.
+    cold_rows = {rows[-1][0]}
     for what, key in (("Server start to ready", "server"), ("Session start to first frame", "session")):
         for mode in ("warm", "cold"):
-            rows.append((f"{what}, {mode}, median / max of {n} (ms)",
-                         lambda r, k=key, m=mode: median_max(r["session_start"][m][k])))
-    rows.append(("Cold battery p50 / p99 (ms)", lambda r: ms(r["cold"]["battery"])))
+            rows.append(lat(f"{what}, {mode}", lambda r, k=key, m=mode: r["session_start"][m][k]))
+            cold_rows.add(rows[-1][0])
+    rows.append(lat("Cold battery", lambda r: r["cold"]["battery"]))
+    cold_rows.add(rows[-1][0])
     zooms = sorted({z for r in runs.values() for z in r["warm_battery_by_zoom"]}, key=int)
     for z in zooms:
-        rows.append((f"Warm battery, zoom {z}, p50 / p99 (ms)",
-                     lambda r, z=z: ms(r["warm_battery_by_zoom"][z])))
-    rows += [("Warm camera script p50 / p99 (ms)", lambda r: ms(r["warm"]["script"])),
-             ("Warm filter change p50 / p99 (ms)", lambda r: ms(r["warm"]["filters"])),
-             ("Warm aggregation p50 / p99 (ms)", lambda r: ms(r["warm"]["aggregation"]))]
+        rows.append(lat(f"Warm battery, zoom {z}", lambda r, z=z: r["warm_battery_by_zoom"][z]))
+    rows += [lat("Warm camera script", lambda r: r["warm"]["script"]),
+             lat("Warm filter change", lambda r: r["warm"]["filters"]),
+             lat("Warm aggregation", lambda r: r["warm"]["aggregation"])]
     for w in ("battery", "script", "filters"):
         rows.append((f"Error versus oracle, {w}", lambda r, w=w: error_cell(r["errors"][w])))
         rows.append((f"Points sent, {w} (from dense tiles)",
@@ -129,7 +153,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             try:
                 cells.append(str(f(runs[s])))
             except KeyError:
-                if name not in optional:
+                if name not in cold_rows or runs[s]["cold_runs"]:
                     raise SystemExit(f"the {s} record has no figure for '{name}'; it was not "
                                      f"written by this harness, or its run failed")
                 cells.append("–")

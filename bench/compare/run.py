@@ -101,58 +101,77 @@ def step_key(camera: Camera, filt: Filter | None) -> str:
     return repr((camera.zoom, camera.cx, camera.cy, filt.leaves if filt else None))
 
 
+#: Each part of a frame, and the comparison figures that say it is wrong.
+PARTS = {"tiles": ("tile_abs_err",), "grid": ("grid_abs_err",), "points": POINT_ERRORS}
+
+
+def same_points(a: dict, b: dict) -> bool:
+    """Whether two frames sent the same positions from every tile, in any order."""
+    keys = {t for t, p in a.items() if len(p)} | {t for t, p in b.items() if len(p)}
+    order = lambda p: np.sort(np.ascontiguousarray(p).view(np.uint64).ravel())
+    none = np.empty((0, 2), np.uint32)
+    return all(np.array_equal(order(a.get(t, none)), order(b.get(t, none))) for t in keys)
+
+
 class TimedCheck:
-    """Every timed response compared with the oracle's memoised answer on its cheap parts: each
-    tile's count, the count grid, and the number of points from each sparse tile, and for the
-    aggregation each table. A part the untimed check found wrong for that step is already in its
-    errors, so a timed response is a mismatch only where it differs in a part that was right."""
+    """Every timed frame and table checked as the untimed pass checks it. Where the untimed answer
+    to a step was right in a part (a frame's tile counts, its grid or its points, or a table), the
+    timed answer is compared with the oracle's in that part, with every point check `compare`
+    and `Oracle.dense_invalid` make; where the untimed answer was wrong, which its errors already
+    count, the timed answer is compared with the untimed one, so the figure is repeatability."""
 
     def __init__(self, oracle: Oracle):
         self.oracle = oracle
-        self.right: dict[str, dict[str, bool]] = {}
+        self.untimed: dict[str, tuple] = {}
         self.counts = {"frames": 0, "frames_mismatched": 0, "tables": 0, "tables_mismatched": 0}
         self.examples: list[str] = []
 
-    def parts(self, camera: Camera, filt: Filter | None, got) -> dict[str, bool]:
+    def errors(self, camera: Camera, filt: Filter | None, got) -> dict:
         truth = self.oracle.frame(camera, filt)
-        return {"tiles": got.tiles == truth.tiles,
-                "grid": {c: n for c, n in got.grid.items() if n} == truth.grid,
-                "points": all(len(got.points.get(t, ())) == n for t, n in truth.tiles.items() if n <= K)}
+        cmp = compare(got, truth, camera)
+        cmp["dense_points_invalid"] = self.oracle.dense_invalid(camera, filt, got, truth)
+        return cmp
 
-    def learn(self, camera: Camera, filt: Filter | None, got) -> None:
-        self.right[step_key(camera, filt)] = self.parts(camera, filt, got)
+    def learn(self, camera: Camera, filt: Filter | None, got, cmp: dict) -> None:
+        right = {part: not any(cmp[k] for k in keys) for part, keys in PARTS.items()}
+        self.untimed[step_key(camera, filt)] = (got, right)
 
-    def learn_tables(self, camera: Camera, filt: Filter | None, exact: bool) -> None:
-        self.right[step_key(camera, filt) + "/tables"] = {"tables": exact}
+    def learn_tables(self, camera: Camera, filt: Filter | None, got: dict) -> None:
+        self.untimed[step_key(camera, filt) + "/tables"] = got
 
     def frame(self, camera: Camera, filt: Filter | None, got) -> None:
-        right = self.right.get(step_key(camera, filt))
-        if right is None:
-            right = {"tiles": True, "grid": True, "points": True}
-        now = self.parts(camera, filt, got)
+        before, right = self.untimed.get(step_key(camera, filt), (None, dict.fromkeys(PARTS, True)))
+        cmp = self.errors(camera, filt, got)
+        nonzero = lambda grid: {c: n for c, n in grid.items() if n}
+        repeat = {"tiles": lambda: got.tiles == before.tiles,
+                  "grid": lambda: nonzero(got.grid) == nonzero(before.grid),
+                  "points": lambda: same_points(got.points, before.points)}
+        wrong = [part for part, keys in PARTS.items()
+                 if (any(cmp[k] for k in keys) if right[part] else not repeat[part]())]
         self.counts["frames"] += 1
-        wrong = [p for p, ok in now.items() if right[p] and not ok]
         if wrong:
             self.counts["frames_mismatched"] += 1
             self.examples.append(f"{camera.label}/{filt.label if filt else 'none'}: {', '.join(wrong)}")
 
     def tables(self, camera: Camera, filt: Filter | None, got: dict) -> None:
+        before = self.untimed[step_key(camera, filt) + "/tables"]
         truth = self.oracle.tables(camera, filt)
-        self.counts["tables"] += 2
-        if not self.right[step_key(camera, filt) + "/tables"]["tables"]:
-            return
-        bad = sum(1 for n in truth if {k: v for k, v in got.get(n, {}).items() if v} != truth[n])
-        if bad:
-            self.counts["tables_mismatched"] += bad
-            self.examples.append(f"{camera.label}/{filt.label}: tables")
+        nonzero = lambda t: {k: v for k, v in t.items() if v}
+        for name in truth:
+            want = truth[name] if nonzero(before.get(name, {})) == truth[name] else nonzero(before[name])
+            self.counts["tables"] += 1
+            if nonzero(got.get(name, {})) != want:
+                self.counts["tables_mismatched"] += 1
+                self.examples.append(f"{camera.label}/{filt.label}: {name} table")
 
     def record(self) -> dict:
-        return {**self.counts, "examples": self.examples[:10]}
+        return {**self.counts, "examples": self.examples[:10],
+                "method": "every timed frame and table, with dense_invalid on every timed frame"}
 
 
 def session_start(adapter, repeats: int, check: TimedCheck) -> dict:
-    """Warm and cold, two figures from a stopped server: `server`, from starting it to its
-    answering the viewer's queries, and `session`, from opening the viewer's session or
+    """Warm and cold, two figures from a stopped server: `server`, from starting it until its data
+    is loaded and it answers a request that is not the viewer's, and `session`, from opening the viewer's session or
     connections to the end of its first whole-map frame, which for Mosaica includes building the
     viewer's visible set on its first read."""
     whole = Camera(0, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2, "whole")
@@ -245,6 +264,7 @@ def main() -> None:
         "load_before": load_before,
         "foreign_mosaica_processes": foreign,
         "repeats": args.repeats,
+        "cold_runs": not args.no_cold,
         "viewer": {**VIEWER, "visible_rows": visible, "tier_rows": rows,
                    "visible_fraction": visible / rows},
         "access": adapter.access,
@@ -265,10 +285,8 @@ def main() -> None:
             per = []
             for camera, filt in steps:
                 got, _ = adapter.frame(camera, filt)
-                truth = oracle.frame(camera, filt)
-                cmp = compare(got, truth, camera)
-                cmp["dense_points_invalid"] = oracle.dense_invalid(camera, filt, got, truth)
-                check.learn(camera, filt, got)
+                cmp = check.errors(camera, filt, got)
+                check.learn(camera, filt, got, cmp)
                 cmp["label"] = camera.label + (f"/{filt.label}" if filt else "")
                 cmp["bytes"] = got.bytes
                 per.append(cmp)
@@ -284,7 +302,7 @@ def main() -> None:
         for camera, filt in workloads["filters"]:
             got, _ = adapter.tables(camera, filt)
             cmp = compare_tables(got, oracle.tables(camera, filt))
-            check.learn_tables(camera, filt, not (cmp["type_abs_err"] or cmp["year_abs_err"]))
+            check.learn_tables(camera, filt, got)
             cmp["label"] = camera.label + f"/{filt.label}"
             per.append(cmp)
         keys = [k for k in per[0] if k != "label"]

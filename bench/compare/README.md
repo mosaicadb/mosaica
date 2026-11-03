@@ -74,11 +74,13 @@ both link only to the C library, and a run checks that they start in each image 
 
 Build time excludes each server's start in the same way, and ends with the data on disc.
 ClickHouse's is from `CREATE TABLE` to the end of `OPTIMIZE` and an `fsync` of every file in its
-data directory, on a running server; Mosaica's build syncs its own files before it exits. Mosaica's build runs by `docker exec` in a container kept
+data directory, on a running server, leaving out those inactive parts; Mosaica's build syncs its own files
+before it exits. Mosaica's build runs by `docker exec` in a container kept
 alive for it, so its cgroup's peak can be read once the build has ended, and its time is the
 exec's wall time less the median of three empty execs in that container; both figures are in the
-record. Size on disk is ClickHouse's whole data directory and Mosaica's bundle directory, each by
-`du`.
+record. Size on disk is ClickHouse's data directory, less the inactive parts that `OPTIMIZE` replaced
+and that ClickHouse keeps for `old_parts_lifetime` (their count and size are in the record), and
+Mosaica's bundle directory, each by `du`.
 
 Each system runs twice. With `--caches compute`, every cache of a request's result or of a
 resolved filter is off, and the state a system keeps for a session or a grant stays as it is by
@@ -96,7 +98,9 @@ default. The table gives each its own column, and each record lists every cache 
 | Mosaica | `fragment_cache_bytes` | each grant's visibility masks in memory: state | default | 1 GiB |
 | Mosaica | `occupancy_cache_bytes` | each viewer's occupied-tile counts, from which sampling is set: state | default | 32 MiB |
 
-Mosaica also writes each grant's visibility masks to its cache directory, which no setting
+Each Mosaica record holds the admission limits and cache bounds the server reports in
+`/control/status`; it does not report `compute_threads`, which defaults to the CPUs the container
+may use. Mosaica also writes each grant's visibility masks to its cache directory, which no setting
 bounds; they are grant state, kept in both modes, and deleted by a cold start.
 
 ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache settings above
@@ -197,12 +201,13 @@ has zero error. Every count is over the viewer's visible items.
 - **Server start and session start are two figures**, divided at the same point for both systems.
   Server start runs from starting the container until the data is loaded and the server answers a
   request that is not the viewer's: Mosaica's `/readyz`, and for ClickHouse a query against the
-  table as its default user. Session start runs from opening the viewer's session to the end of
+  table as its default user, which reads one granule. Session start runs from opening the viewer's session to the end of
   its first whole-map frame, so it holds every cost of the viewer's first use: for Mosaica the
   login and the first read, which builds the viewer's visible set; for ClickHouse, whose HTTP
   interface sends the viewer's user and password with every query, the first frame, which
   authenticates the viewer and resolves its rights and row policy.
-- **Timed responses are checked too.** Every timed frame and table is compared with the oracle's
-  answer for its tile counts, count grid, number of points from each sparse tile and tables. A
-  part the untimed check already found wrong is in that check's errors, so the timed figure
-  counts only responses that differ where the untimed answer was right.
+- **Timed responses are checked too.** Every timed frame is checked as the untimed pass checks
+  it, tile counts, grid and every point check including the dense tiles', and every timed table
+  likewise. Where the untimed answer to a step was wrong in a part, which its errors already
+  count, the timed answer is compared with the untimed one in that part instead, so the figure
+  there measures repeatability.

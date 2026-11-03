@@ -47,7 +47,8 @@ class Adapter(ABC):
 
     @abstractmethod
     def start(self) -> None:
-        """Start the server and return once it answers the viewer's queries."""
+        """Start the server and return once its data is loaded and it answers a request that is
+        not the viewer's; everything the viewer's first use costs falls after `connect`."""
 
     @abstractmethod
     def connect(self) -> None:
@@ -106,15 +107,14 @@ def evict_files(root: Path) -> int:
     return n
 
 
-def fsync_tree(root: Path) -> int:
-    """Flush every file under `root` to disc. Returns the files flushed."""
+def fsync_tree(root: Path, skip: set[Path] = frozenset()) -> int:
+    """Flush every file and directory under `root` to disc, leaving out the trees in `skip`.
+    Returns the entries flushed; a file that cannot be opened is an error."""
     n = 0
-    for dirpath, _, files in os.walk(root):
-        for name in files:
-            try:
-                fd = os.open(os.path.join(dirpath, name), os.O_RDONLY)
-            except OSError:
-                continue
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if Path(dirpath, d) not in skip]
+        for path in [*(os.path.join(dirpath, f) for f in files), dirpath]:
+            fd = os.open(path, os.O_RDONLY)
             try:
                 os.fsync(fd)
                 n += 1
