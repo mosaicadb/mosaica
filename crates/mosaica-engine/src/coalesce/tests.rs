@@ -513,8 +513,11 @@ impl Fixture {
                     .extend(entities.iter());
             })
             .unwrap();
-            let bytes = std::fs::read(self.path(&extent.presence)).unwrap();
-            present.extend(croaring::Bitmap::deserialize::<croaring::Portable>(&bytes).iter());
+            present.extend(
+                mosaica_filter::read_presence(&self.path(&extent.presence))
+                    .unwrap()
+                    .iter(),
+            );
         }
         out
     }

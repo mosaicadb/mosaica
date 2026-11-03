@@ -89,8 +89,8 @@ impl OpenedExtent {
 
 impl FilterColumns {
     /// The next generation's columns before anything is added: this generation's, with every
-    /// layer shared rather than re-opened. Cheap by construction, since the base columns and the
-    /// two stacks are `Arc`s.
+    /// layer shared rather than re-opened. What is copied is each column's list of layers and a
+    /// value column's coverage bitmap; the layers and the two stacks are `Arc`s.
     fn successor(&self) -> FilterColumns {
         FilterColumns {
             columns: self.columns.clone(),
@@ -239,8 +239,8 @@ impl FilterColumns {
         next
     }
 
-    /// This generation's columns with one flush's extents added, the successor generation's,
-    /// cheap by construction since the base columns are `Arc`s.
+    /// This generation's columns with one flush's extents added, the successor generation's: the
+    /// layers held are shared, as [`FilterColumns::successor`] says.
     ///
     /// A keyword column's extent carries the dictionary the flush minted beside the values it
     /// numbers, so the pair composes as one (see [`FilterColumns::compose`], which refuses either
@@ -405,7 +405,7 @@ impl WindowLayer for TextLayer {
     }
 
     fn presence(&self) -> Bitmap {
-        self.present.clone()
+        (*self.present).clone()
     }
 }
 

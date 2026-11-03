@@ -226,6 +226,7 @@ impl ExtentColumn {
             blobs,
             duplicates,
             bounds,
+            hasrows: self.extents.clone(),
             entities: 0..u32::MAX,
         })
     }
@@ -281,6 +282,8 @@ pub(crate) struct OpenExtents {
     pub(crate) blobs: Vec<RecordBlob>,
     pub(crate) duplicates: DuplicateMap,
     bounds: Vec<Bounds>,
+    /// Each extent's files, for its has-row bitmap.
+    hasrows: Vec<ExtentPaths>,
     /// The entities the readers yield, each at its entity less the start: every one until
     /// [`OpenExtents::window`] narrows them to one shard's.
     entities: std::ops::Range<u32>,
@@ -428,6 +431,17 @@ impl OpenExtents {
     /// Yield entities `[lo, hi)` alone, each at its entity less `lo`: one shard's items.
     pub(crate) fn window(&mut self, lo: u32, hi: u32) {
         self.entities = lo..hi;
+    }
+
+    /// The entities the readers yield, as they yield them: every extent's has-row bitmap read in
+    /// turn and released, and the union narrowed to the window.
+    pub(crate) fn present(&self) -> Result<Bitmap> {
+        let mut union = Bitmap::new();
+        for paths in &self.hasrows {
+            union.or_inplace(&read_hasrow(paths)?);
+        }
+        union.and_inplace(&Bitmap::from_range(self.entities.clone()));
+        Ok(union.add_offset(-i64::from(self.entities.start)))
     }
 
     /// Whether extent `extent` holds any entity of the window.

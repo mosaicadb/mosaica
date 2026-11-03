@@ -91,6 +91,52 @@ pub fn write_empty_value_column(
     Ok(written)
 }
 
+/// A category's postings over no entity at `path`, for the column `column`.
+pub fn write_empty_category_postings(path: &Path, column: &str) -> Result<()> {
+    mosaica_filter_write::write_category_postings(
+        path,
+        column,
+        &NoCodes,
+        mosaica_filter_write::POSTINGS_BAND_ROWS,
+    )
+    .map_err(io(path))
+}
+
+/// A text column's index of no term in `dir`, the base of a column no layer holds text of: its
+/// dictionary, its postings and the presence of no entity. Returns the files written.
+pub fn write_empty_text_index(dir: &Path) -> Result<Vec<PathBuf>> {
+    let dict = dir.join(mosaica_filter::DICT_FILE);
+    write_empty_dictionary(&dict)?;
+    let postings = dir.join(mosaica_filter::POSTINGS_FILE);
+    let spool = postings.with_extension("spool");
+    mosaica_authz::postings::PostingsSpool::create(&spool)
+        .and_then(|spool| spool.finish(&postings))
+        .map_err(io(&postings))?;
+    let presence = dir.join(mosaica_filter::PRESENCE_FILE);
+    mosaica_filter::write_presence(&presence, &croaring::Bitmap::new()).map_err(io(&presence))?;
+    Ok(vec![dict, postings, presence])
+}
+
+/// A record blob of no row in `dir`. Returns the files written.
+pub fn write_empty_record_blob(dir: &Path) -> Result<Vec<PathBuf>> {
+    let paths = [
+        mosaica_filter::RECORD_BLOCKS_FILE,
+        mosaica_filter::RECORD_HASROW_FILE,
+        mosaica_filter::RECORD_DIRECTORY_FILE,
+    ]
+    .map(|name| dir.join(name));
+    let [blocks, hasrow, directory] = &paths;
+    mosaica_filter_write::RecordBlobWriter::create(
+        blocks,
+        hasrow,
+        directory,
+        mosaica_filter::RECORD_BLOCK_TARGET,
+    )
+    .and_then(|writer| writer.finish())
+    .map_err(io(blocks))?;
+    Ok(paths.into())
+}
+
 /// A sorted dictionary of no term at `path`.
 fn write_empty_dictionary(path: &Path) -> Result<()> {
     let file = std::fs::File::create(path).map_err(io(path))?;
@@ -268,61 +314,26 @@ impl Written<'_> {
         }
         if postings {
             let path = dir.join(mosaica_filter::POSTINGS_FILE);
-            mosaica_filter_write::write_category_postings(
-                &path,
-                column_rel,
-                &NoCodes,
-                mosaica_filter_write::POSTINGS_BAND_ROWS,
-            )
-            .map_err(io(&path))?;
+            write_empty_category_postings(&path, column_rel)?;
             self.wrote(column_rel, path);
         }
         Ok(())
     }
 
-    fn dictionary(&mut self, column_rel: &str) -> Result<()> {
-        write_empty_dictionary(&self.path(&format!("{column_rel}/{}", mosaica_filter::DICT_FILE)))?;
-        self.push(format!("{column_rel}/{}", mosaica_filter::DICT_FILE));
-        Ok(())
-    }
-
-    /// A text column's index of no term: its dictionary, its postings and the presence of no
-    /// entity.
+    /// A text column's index of no term.
     fn text_index(&mut self, column_rel: &str) -> Result<()> {
         let dir = self.dir(column_rel)?;
-        self.dictionary(column_rel)?;
-        let postings = dir.join(mosaica_filter::POSTINGS_FILE);
-        let spool = postings.with_extension("spool");
-        mosaica_authz::postings::PostingsSpool::create(&spool)
-            .and_then(|spool| spool.finish(&postings))
-            .map_err(io(&postings))?;
-        self.wrote(column_rel, postings);
-        let presence = dir.join(mosaica_filter::PRESENCE_FILE);
-        mosaica_filter::write_presence(&presence, &croaring::Bitmap::new())
-            .map_err(io(&presence))?;
-        self.wrote(column_rel, presence);
+        for path in write_empty_text_index(&dir)? {
+            self.wrote(column_rel, path);
+        }
         Ok(())
     }
 
     /// A record blob of no row under `dir_rel`.
     fn record_blob(&mut self, dir_rel: &str) -> Result<()> {
         let dir = self.dir(dir_rel)?;
-        let names = [
-            mosaica_filter::RECORD_BLOCKS_FILE,
-            mosaica_filter::RECORD_HASROW_FILE,
-            mosaica_filter::RECORD_DIRECTORY_FILE,
-        ];
-        let [blocks, hasrow, directory] = names.map(|name| dir.join(name));
-        mosaica_filter_write::RecordBlobWriter::create(
-            &blocks,
-            &hasrow,
-            &directory,
-            mosaica_filter::RECORD_BLOCK_TARGET,
-        )
-        .and_then(|writer| writer.finish())
-        .map_err(io(&blocks))?;
-        for name in names {
-            self.push(format!("{dir_rel}/{name}"));
+        for path in write_empty_record_blob(&dir)? {
+            self.wrote(dir_rel, path);
         }
         Ok(())
     }

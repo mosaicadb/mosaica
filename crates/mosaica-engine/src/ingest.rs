@@ -213,6 +213,7 @@ impl Engine {
         }
         let generation = self.generation();
         let unique_seq = generation.unique_live.seq();
+        let segments_version = generation.segments_version;
         let planned = self
             .resolver(&generation, &scope)
             .plan_ingest(&request, Prepared::default())?;
@@ -229,6 +230,7 @@ impl Engine {
             scope,
             planned,
             unique_seq,
+            segments_version,
         };
         let ingested = self.write.accept_ingest(submission)?;
         Ok(IngestReceipt::of(

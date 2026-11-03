@@ -198,7 +198,7 @@ impl<'a> ShardLayout<'a> {
     }
 
     pub fn postings_rel(self) -> String {
-        format!("{}/postings.arrow", self.terms_rel())
+        format!("{}/{}", self.terms_rel(), mosaica_filter::POSTINGS_FILE)
     }
 
     pub fn pairs_rel(self) -> String {

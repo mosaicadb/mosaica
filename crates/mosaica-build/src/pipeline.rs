@@ -3125,8 +3125,8 @@ fn write_scoped_column(
         paths.extend(write_scoped_prose(&column_dir, values)?);
         return Ok(paths);
     }
-    let values_path = column_dir.join("values.arrow");
-    let presence_path = column_dir.join("presence.roaring");
+    let values_path = column_dir.join(mosaica_filter::VALUES_FILE);
+    let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
     let written = write_column_values(
         &column_dir,
         &values_path,
@@ -3522,8 +3522,8 @@ fn write_filter_postings_banded(
         let extents = spilled
             .iter()
             .find(|column_extents| column_extents.column == column);
-        let values_path = column_dir.join("values.arrow");
-        let presence_path = column_dir.join("presence.roaring");
+        let values_path = column_dir.join(mosaica_filter::VALUES_FILE);
+        let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
         let written = write_column_values(
             &column_dir,
             &values_path,
@@ -5024,6 +5024,17 @@ impl TextValues<'_> {
         }
     }
 
+    /// The entities the column holds a value for, as [`Self::for_each_record_in`] yields them.
+    fn present(&self) -> Result<croaring::Bitmap> {
+        match self {
+            TextValues::Arena(values) => Ok(values
+                .present_entities()
+                .map(|entity| entity as u32)
+                .collect()),
+            TextValues::Extents(extents) => extents.present(),
+        }
+    }
+
     /// Every value in one window, as `(entity, prose)`.
     fn for_each_record_in(
         &self,
@@ -5091,7 +5102,7 @@ fn write_text_index(
     // the cost the type exists to amortise — and it holds no per-document state, so it is `Sync`
     // and the workers borrow it. What each worker does hold of its own is the normalisation
     // scratch, which is per document by nature.
-    let indexed: Vec<(Vec<spill::SpillReceipt>, croaring::Bitmap)> = chunks
+    let receipts: Vec<Vec<spill::SpillReceipt>> = chunks
         .par_iter()
         .enumerate()
         .map(|(chunk, &window)| {
@@ -5106,12 +5117,7 @@ fn write_text_index(
             )
         })
         .collect::<Result<Vec<_>>>()?;
-    let mut presence = croaring::Bitmap::new();
-    let mut receipts: Vec<spill::SpillReceipt> = Vec::new();
-    for (chunk_receipts, chunk_presence) in indexed {
-        receipts.extend(chunk_receipts);
-        presence |= chunk_presence;
-    }
+    let receipts: Vec<spill::SpillReceipt> = receipts.into_iter().flatten().collect();
 
     // ---- 2. the cascade, where a corpus produced more runs than one merge may hold open ------
     let receipts = cascade_sorted_runs(column_dir, "text", receipts)?;
@@ -5131,7 +5137,7 @@ fn write_text_index(
         &receipts,
         plan.merge_slice_cap,
     )?;
-    mosaica_filter::write_presence(&presence_path, &presence)
+    mosaica_filter::write_presence(&presence_path, &values.present()?)
         .map_err(|e| BuildError::io(&presence_path, e))?;
     fsync_file(&dict_path)?;
     fsync_file(&postings_path)?;
@@ -5146,8 +5152,7 @@ fn write_text_index(
     })
 }
 
-/// Index one contiguous **arena window**, spilling one or more sorted runs, and answer the runs and
-/// the entities the window holds a value for.
+/// Index one contiguous **arena window**, spilling one or more sorted runs.
 ///
 /// The worker's whole residency is `terms` and the window's read buffer, and the budget bounds the
 /// first: the tracked figure is an estimate ([`TEXT_TERM_ENTRY_BYTES`]) rather than an allocator
@@ -5168,9 +5173,8 @@ fn index_text_chunk(
     _attribute: &crate::config::Attribute,
     analyser: &mosaica_analyse::Analyser,
     worker_bytes: usize,
-) -> Result<(Vec<spill::SpillReceipt>, croaring::Bitmap)> {
+) -> Result<Vec<spill::SpillReceipt>> {
     let mut receipts = Vec::new();
-    let mut presence = croaring::Bitmap::new();
     let mut terms: std::collections::HashMap<Box<[u8]>, Vec<u32>> =
         std::collections::HashMap::new();
     let mut bytes = 0usize;
@@ -5179,7 +5183,6 @@ fn index_text_chunk(
     let mut scratch = mosaica_analyse::TokenScratch::default();
     values.for_each_record_in(window, &mut |entity, prose| {
         let entity = entity as u32;
-        presence.add(entity);
         analyser.for_each_token(prose, &mut scratch, &mut |token| {
             // Looked up before it is owned: a term already seen costs no allocation, which over a
             // corpus is every occurrence but the first of every word.
@@ -5204,7 +5207,7 @@ fn index_text_chunk(
         Ok(())
     })?;
     spill_text_run(column_dir, chunk, &mut seq, &mut terms, &mut receipts)?;
-    Ok((receipts, presence))
+    Ok(receipts)
 }
 
 /// Sort a worker's accumulator by term and write it out as one run, leaving the accumulator empty.

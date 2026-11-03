@@ -72,12 +72,12 @@ fn flushed_prose(i: u64) -> String {
 
 const FLUSHED: u64 = 4;
 
-fn write_points(path: &Path, n: u64) {
+fn write_points(path: &Path, n: u64, prose: impl Fn(u64) -> Option<String>) {
     let schema = Arc::new(ArrowSchema::new(vec![
         Field::new("entity_id", DataType::UInt64, false),
         Field::new("x", DataType::Float64, false),
         Field::new("y", DataType::Float64, false),
-        Field::new("prose", DataType::Utf8, false),
+        Field::new("prose", DataType::Utf8, true),
     ]));
     let ids: Vec<u64> = (0..n).collect();
     let batch = RecordBatch::try_new(
@@ -95,7 +95,7 @@ fn write_points(path: &Path, n: u64) {
                     .collect::<Vec<_>>(),
             )),
             Arc::new(StringArray::from(
-                ids.iter().map(|e| built_prose(*e)).collect::<Vec<_>>(),
+                ids.iter().map(|e| prose(*e)).collect::<Vec<_>>(),
             )),
         ],
     )
@@ -106,9 +106,14 @@ fn write_points(path: &Path, n: u64) {
 }
 
 fn build_text_fixture(out: &Path, tmp: &Path) {
+    build_text_fixture_with(out, tmp, |source| Some(built_prose(source)));
+}
+
+/// [`build_text_fixture`] with each built item's prose given by `prose`, `None` for none.
+fn build_text_fixture_with(out: &Path, tmp: &Path, prose: impl Fn(u64) -> Option<String>) {
     let points = tmp.join("points.parquet");
     let pairs = tmp.join("pairs.parquet");
-    write_points(&points, N);
+    write_points(&points, N, prose);
     write_pairs_n(&pairs, N);
     let schema_path = tmp.join("schema.toml");
     std::fs::write(&schema_path, SCHEMA_TOML).unwrap();
@@ -703,5 +708,43 @@ fn a_text_layer_claiming_an_entity_another_holds_is_refused_through_a_fold_and_a
         }
         drop(engine);
         engine = engine_over(tmp.path(), &root);
+    }
+}
+
+/// **The build's base covers every item carrying text, an empty string and text with no terms
+/// included, and no item carrying none.** A layer claiming any of the first is refused, before
+/// and after a fold and a restart; one claiming an item with no text is taken.
+#[test]
+fn the_built_base_covers_an_item_whose_text_has_no_terms() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("bundle");
+    build_text_fixture_with(&root, tmp.path(), |source| match source % 4 {
+        0 => Some(String::new()),
+        1 => Some("!!! ... ?".to_string()),
+        2 => None,
+        _ => Some(built_prose(source)),
+    });
+    let mut engine = engine_over(tmp.path(), &root);
+    let built = source_to_new_map(&root, "v00000");
+    for pass in ["the build", "a fold", "a restart"] {
+        if pass == "a fold" {
+            engine
+                .accept_change(EntityId::new(built[&3]), ChangeOp::Delete)
+                .unwrap();
+            fold(&engine);
+        }
+        for source in [4, 5, 6, 7] {
+            let entity = built[&source] as u32;
+            let held = source % 4 != 2;
+            assert_eq!(
+                claims(&engine, tmp.path(), &format!("{pass}-{source}"), &[entity]),
+                !held,
+                "source {source} after {pass}"
+            );
+        }
+        if pass == "a fold" {
+            drop(engine);
+            engine = engine_over(tmp.path(), &root);
+        }
     }
 }

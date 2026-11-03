@@ -1803,101 +1803,32 @@ pub(crate) struct ScopedWrite {
 }
 
 /// The base a view of a group acquires at its first flush carrying values: every artefact the
-/// family's declaration owes, holding nothing. Matches what `FilterColumns::open` will demand.
+/// family's declaration owes, holding nothing, as an empty shard writes it.
 fn write_empty_scoped_base(
     column_dir: &std::path::Path,
     spec: &ScopedColumnSpec,
 ) -> Result<(), MaintenanceFailed> {
-    let failed = |what: &str, e: &dyn std::fmt::Display| {
-        MaintenanceFailed(format!("scoped base for '{}' ({what}): {e}", spec.name))
+    use mosaica_store::empty_shard as empty;
+    let failed = |e: mosaica_store::StoreError| {
+        MaintenanceFailed(format!("scoped base for '{}': {e}", spec.name))
     };
     if spec.analyser.is_some() {
-        // Text: a dictionary of no terms, postings over it and the presence of no entity, and no
-        // value column at all.
-        mosaica_filter::write_sorted_dict(
-            &column_dir.join(mosaica_filter::DICT_FILE),
-            std::iter::empty::<&str>(),
-        )
-        .map_err(|e| failed("the token dictionary", &e))?;
-        mosaica_authz::postings::write_postings(
-            &column_dir.join(mosaica_filter::POSTINGS_FILE),
-            &[],
-            mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT,
-        )
-        .map_err(|e| failed("the token postings", &e))?;
-        mosaica_filter::write_presence(
-            &column_dir.join(mosaica_filter::PRESENCE_FILE),
-            &croaring::Bitmap::new(),
-        )
-        .map_err(|e| failed("the presence", &e))?;
+        empty::write_empty_text_index(column_dir).map_err(failed)?;
         let prose = column_dir.join(mosaica_store::manifest::SCOPED_PROSE_DIR);
-        std::fs::create_dir_all(&prose).map_err(|e| failed("the prose", &e))?;
-        mosaica_filter_write::write_prose(
-            &prose.join(mosaica_filter::RECORD_BLOCKS_FILE),
-            &prose.join(mosaica_filter::RECORD_HASROW_FILE),
-            &prose.join(mosaica_filter::RECORD_DIRECTORY_FILE),
-            std::iter::empty(),
-        )
-        .map_err(|e| failed("the prose", &e))?;
+        std::fs::create_dir_all(&prose)
+            .map_err(|e| MaintenanceFailed(format!("scoped base for '{}': {e}", spec.name)))?;
+        empty::write_empty_record_blob(&prose).map_err(failed)?;
         return Ok(());
     }
-    let codes = empty_codes(spec.ty, spec.category);
-    let values_path = column_dir.join(mosaica_filter::VALUES_FILE);
-    let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
-    // Presence is written, empty: no presence file means every entity is present.
-    mosaica_filter::write_value_column(
-        &values_path,
-        &presence_path,
-        &codes,
-        Some(&croaring::Bitmap::new()),
-    )
-    .map_err(|e| failed("the values", &e))?;
-    if spec.ty == ScalarType::Keyword {
-        mosaica_filter::write_sorted_dict(
-            &column_dir.join(mosaica_filter::DICT_FILE),
-            std::iter::empty::<&str>(),
-        )
-        .map_err(|e| failed("the dictionary", &e))?;
-    }
+    empty::write_empty_value_column(column_dir, spec.ty, spec.category).map_err(failed)?;
     if spec.category {
-        let empty =
-            mosaica_filter::open_extent(&values_path, &presence_path, mosaica_filter::Access::Read)
-                .map_err(|e| failed("reopening the values", &e))?;
-        mosaica_filter_write::write_category_postings(
+        empty::write_empty_category_postings(
             &column_dir.join(mosaica_filter::POSTINGS_FILE),
             &spec.name,
-            &empty,
-            mosaica_filter_write::POSTINGS_BAND_ROWS,
         )
-        .map_err(|e| failed("the postings", &e))?;
+        .map_err(failed)?;
     }
     Ok(())
-}
-
-/// An empty `Codes` at a column's storage width, matching the width of the extents beside it.
-fn empty_codes(ty: ScalarType, category: bool) -> mosaica_filter::Codes {
-    use mosaica_filter::Codes;
-    if category || ty == ScalarType::Keyword {
-        return match ty {
-            ScalarType::U8 => Codes::U8(Vec::new().into()),
-            ScalarType::U16 => Codes::U16(Vec::new().into()),
-            _ => Codes::U32(Vec::new().into()),
-        };
-    }
-    match ty {
-        ScalarType::Bool | ScalarType::U8 => Codes::U8(Vec::new().into()),
-        ScalarType::U16 => Codes::U16(Vec::new().into()),
-        ScalarType::U32 => Codes::U32(Vec::new().into()),
-        ScalarType::U64 => Codes::U64(Vec::new().into()),
-        ScalarType::I8 => Codes::I8(Vec::new().into()),
-        ScalarType::I16 => Codes::I16(Vec::new().into()),
-        ScalarType::I32 => Codes::I32(Vec::new().into()),
-        ScalarType::I64 | ScalarType::TimestampUs => Codes::I64(Vec::new().into()),
-        ScalarType::F32 => Codes::F32(Vec::new().into()),
-        ScalarType::F64 => Codes::F64(Vec::new().into()),
-        // Neither reaches here: text is handled above and `utf8` is not declarable.
-        ScalarType::Keyword | ScalarType::Text | ScalarType::Utf8 => Codes::U32(Vec::new().into()),
-    }
 }
 
 /// This flush's slice of `entities/terms/`: the term lists of the entities it minted, in the
@@ -2405,9 +2336,8 @@ mod tests {
             assert_eq!(&entities, expected, "the posting of '{term}'");
         }
 
-        let presence = croaring::Bitmap::deserialize::<croaring::Portable>(
-            &std::fs::read(dir.path().join(&extent.presence)).expect("the presence reads"),
-        );
+        let presence = mosaica_filter::read_presence(&dir.path().join(&extent.presence))
+            .expect("the presence reads");
         assert_eq!(
             presence.iter().collect::<Vec<_>>(),
             expected_presence,

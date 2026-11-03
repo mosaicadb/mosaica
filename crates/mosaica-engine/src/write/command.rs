@@ -182,6 +182,9 @@ pub(crate) struct IngestSubmission {
     /// The live unique entries' sequence number the handler resolved the batch at; the
     /// executor re-checks the created rows' values against the entries added since.
     pub(crate) unique_seq: u64,
+    /// The `segments_version` the handler resolved the batch at: while it stands, nothing has
+    /// flushed since, and a value given meanwhile is still in the buffer.
+    pub(crate) segments_version: u64,
 }
 
 /// One item an ingest batch edits, and what the handler read of it: the executor resolves the
@@ -375,6 +378,7 @@ mod tests {
                 scope: crate::resolver::WriteScope::All,
                 planned: Default::default(),
                 unique_seq: 0,
+                segments_version: 0,
             },
             reply,
         };

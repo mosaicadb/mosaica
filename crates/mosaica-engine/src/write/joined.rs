@@ -284,30 +284,46 @@ pub(crate) fn held_scoped_value(
     declared: &mosaica_store::manifest::DeclaredScalar,
     owner_view: &str,
 ) -> Result<Option<mosaica_lifecycle::WalScalar>, crate::write::AcceptError> {
-    let manifest = &generation.bundle.manifest;
-    let shard = generation.shard_of(item.shard);
-    let entity = item.entity;
-    let held = |value: mosaica_lifecycle::WalScalar| {
-        (!scalar_is_absent(&value, declared)).then_some(value)
-    };
-    let buffered = shard
-        .buffer
-        .rows_of(entity)
-        .filter(|item| crate::write::scoped_owner_view_of(manifest, &item.view) == owner_view)
-        .find_map(|item| item.scoped.get(at).cloned().and_then(held));
-    match buffered {
+    match buffered_scoped_value(generation, item, at, declared, owner_view) {
         Some(value) => Ok(Some(value)),
-        None => Ok(flushed_scoped_of(shard, entity, family, owner_view)?.and_then(held)),
+        None => Ok(
+            flushed_scoped_of(generation.shard_of(item.shard), item.entity, family, owner_view)?
+                .filter(|value| !scalar_is_absent(value, declared)),
+        ),
     }
+}
+
+/// [`held_scoped_value`] from the cell's buffered rows alone.
+fn buffered_scoped_value(
+    generation: &Generation,
+    item: ItemAt,
+    at: usize,
+    declared: &mosaica_store::manifest::DeclaredScalar,
+    owner_view: &str,
+) -> Option<mosaica_lifecycle::WalScalar> {
+    let manifest = &generation.bundle.manifest;
+    generation
+        .shard_of(item.shard)
+        .buffer
+        .rows_of(item.entity)
+        .filter(|row| crate::write::scoped_owner_view_of(manifest, &row.view) == owner_view)
+        .find_map(|row| {
+            row.scoped
+                .get(at)
+                .filter(|value| !scalar_is_absent(value, declared))
+                .cloned()
+        })
 }
 
 /// Whether a row adding `item` to a view carries a group-scoped value for a cell that holds one
 /// now. The resolver lets such a row keep its value only where the cell was empty, so a cell
-/// filled since is a cell another write gave a value.
+/// filled since is a cell another write gave a value. Unless `flushed_since`, such a value is
+/// still buffered, and the flushed layers are not read.
 pub(crate) fn scoped_cell_filled(
     generation: &Generation,
     item: ItemAt,
     row: &mosaica_lifecycle::UnallocatedRow,
+    flushed_since: bool,
 ) -> bool {
     let manifest = &generation.bundle.manifest;
     let families = crate::write::scoped_families_of_view(manifest, &row.view);
@@ -318,10 +334,16 @@ pub(crate) fn scoped_cell_filled(
         .enumerate()
         .any(|(at, (value, family))| {
             let declared = declared_of_scoped(family);
+            if scalar_is_absent(value, &declared) {
+                return false;
+            }
+            if !flushed_since {
+                return buffered_scoped_value(generation, item, at, &declared, &owner_view)
+                    .is_some();
+            }
             // An unreadable cell counts as filled: resolving the batch again reports the failure.
-            !scalar_is_absent(value, &declared)
-                && held_scoped_value(generation, item, at, family, &declared, &owner_view)
-                    .map_or(true, |held| held.is_some())
+            held_scoped_value(generation, item, at, family, &declared, &owner_view)
+                .map_or(true, |held| held.is_some())
         })
 }
 

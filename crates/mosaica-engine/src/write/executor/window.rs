@@ -576,10 +576,12 @@ impl Executor {
         }
     }
 
-    /// Whether anything the handler resolved `submission` against has moved since, from memory: a
-    /// named item deleted, edited, joined to the row's view or its entity issued again, a value
-    /// the batch carries given a holder, a group-scoped cell a row fills given a value through
-    /// another view of its key, or the holder of a value a row was refused for gone.
+    /// Whether anything the handler resolved `submission` against has moved since: a named item
+    /// deleted, edited, joined to the row's view or its entity issued again, a value the batch
+    /// carries given a holder, a group-scoped cell a row fills given a value through another view
+    /// of its key, or the holder of a value a row was refused for gone. Everything is read from
+    /// memory but that cell, which is read from its flushed layers where a flush has published
+    /// since the batch was resolved.
     fn moved_since_resolved(&self, submission: &IngestSubmission) -> bool {
         let crate::ingest::Planned {
             rows,
@@ -592,6 +594,7 @@ impl Executor {
         } = &submission.planned;
         let unique_seq = &submission.unique_seq;
         let generation = self.generation.load();
+        let flushed_since = generation.segments_version != submission.segments_version;
         let creates = rows.iter().any(|row| row.join.is_none()) || !edits.is_empty();
         // Each item is read in its own shard; one in a shard the generation no longer holds is
         // gone.
@@ -620,7 +623,12 @@ impl Executor {
                             item.entity,
                             &row.view,
                         )
-                        || crate::write::joined::scoped_cell_filled(&generation, item, row)
+                        || crate::write::joined::scoped_cell_filled(
+                            &generation,
+                            item,
+                            row,
+                            flushed_since,
+                        )
                 }
                 None => false,
             });
@@ -711,6 +719,7 @@ impl Executor {
             scope,
             planned,
             unique_seq: generation.unique_live.seq(),
+            segments_version: generation.segments_version,
         })
     }
 

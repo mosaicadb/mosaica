@@ -143,11 +143,9 @@ enum ColumnLayers {
     /// A `text` column's layers: the base build's index first, then one per flush extent. A
     /// [`Layer`] is a value column and its dictionary, and this family has neither: its terms are
     /// postings and its prose is a blob row. Disjoint in entity space, checked as each layer is
-    /// added, so `match` unions across them.
+    /// added ([`Column::push_text_layers`]), so `match` unions across them.
     Text {
         layers: Vec<TextLayer>,
-        /// Every entity any layer holds text for, checked in [`Column::push_text_layers`].
-        covered: Bitmap,
         /// The analyser this column was indexed with. A query is analysed with it, keeping the
         /// two token streams the same one.
         analyser: Arc<mosaica_analyse::Analyser>,
@@ -195,7 +193,6 @@ impl Column {
             family: Family::Text,
             layers: ColumnLayers::Text {
                 layers: Vec::new(),
-                covered: Bitmap::new(),
                 analyser,
             },
         }
@@ -248,16 +245,13 @@ impl Column {
         column: &str,
         added: impl IntoIterator<Item = TextLayer>,
     ) -> Result<(), ComposeError> {
-        let ColumnLayers::Text {
-            layers, covered, ..
-        } = &mut self.layers
-        else {
+        let ColumnLayers::Text { layers, .. } = &mut self.layers else {
             return Err(ComposeError::UnknownColumn {
                 column: column.to_string(),
             });
         };
         for layer in added {
-            cover(covered, &layer.present, column)?;
+            refuse_overlap(layers.iter().map(|l| &*l.present), &layer.present, column)?;
             layers.push(layer);
         }
         Ok(())
@@ -283,7 +277,9 @@ impl Column {
                 column: column.to_string(),
             });
         };
-        cover(covered, &extent.present(), column)?;
+        let present = extent.present();
+        refuse_overlap([&*covered], &present, column)?;
+        *covered |= present;
         layers.push(Layer {
             values_rel: Some(values_rel.to_string()),
             values: extent,
@@ -293,15 +289,21 @@ impl Column {
     }
 }
 
-/// Add a layer's entities to a column's coverage, refusing an entity an earlier layer already holds
-/// a value for: layers are disjoint in entity space, checked here rather than assumed.
-fn cover(covered: &mut Bitmap, present: &Bitmap, column: &str) -> Result<(), ComposeError> {
-    if covered.and_cardinality(present) != 0 {
+/// Refuse a layer holding an entity that `earlier` already holds a value for: a column's layers are
+/// disjoint in entity space, checked here rather than assumed.
+fn refuse_overlap<'a>(
+    earlier: impl IntoIterator<Item = &'a Bitmap>,
+    present: &Bitmap,
+    column: &str,
+) -> Result<(), ComposeError> {
+    if earlier
+        .into_iter()
+        .any(|held| held.and_cardinality(present) != 0)
+    {
         return Err(ComposeError::Overlap {
             column: column.to_string(),
         });
     }
-    *covered |= present;
     Ok(())
 }
 
@@ -314,10 +316,10 @@ struct TextLayer {
     postings: Arc<ColumnPostings>,
     /// The entities this layer holds a value for, stored rather than derived from the postings:
     /// text analysing to no terms, an empty string or pure punctuation, carries a value and
-    /// appears in no posting. Read by [`cover`] and by the coalesce's replacement rule
+    /// appears in no posting. Read by [`refuse_overlap`] and by the coalesce's replacement rule
     /// ([`FilterColumns::with_coalesced`]) to check a replacement stands for exactly the entities
-    /// its inputs did.
-    present: Bitmap,
+    /// its inputs did. Shared, because every publication's successor copies the layer list.
+    present: Arc<Bitmap>,
     /// The manifest path that named this layer, or `None` for the base build's index.
     dict_rel: Option<String>,
     /// A group-scoped column's prose for the entities this layer holds.
@@ -414,7 +416,7 @@ fn text_layer(
     Ok(TextLayer {
         dict: Arc::new(dict),
         postings: Arc::new(postings),
-        present,
+        present: Arc::new(present),
         dict_rel,
         prose: prose.map(Arc::new),
     })
