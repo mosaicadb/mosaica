@@ -29,7 +29,7 @@ use crate::session::Session;
 use crate::viewport::DependencyContext;
 use crate::Generation;
 
-/// How many ordinals the verdict walk takes between two readings of the cancellation token.
+/// How many ordinals the verdict walk takes between two readings of the clock.
 const CHUNK: u32 = 1024;
 
 /// One level of a layer as one request counts it.
@@ -204,7 +204,7 @@ impl Layer {
                         let runs = &layer.runs[self.level as usize];
                         for ordinal in 0..read.forms.first().len() as u32 {
                             if ordinal % CHUNK == 0 {
-                                cx.check_cancelled()?;
+                                cx.check_clock()?;
                             }
                             let Some(entity) =
                                 runs.entity_of(u64::from(ordinal)).map(EntityId::new)
@@ -649,7 +649,7 @@ impl Served {
         cx: &'c Cx<'_>,
         cells: impl Fn(usize) -> CellSet<'c>,
     ) -> Result<Vec<u64>> {
-        cx.check_cancelled()?;
+        cx.check_clock()?;
         let mut sizes = vec![0u64; self.listed.len() + 2];
         let Some(table) = self.label_table() else {
             return Ok(sizes);

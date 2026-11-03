@@ -471,7 +471,7 @@ impl Plan {
             pages_left,
             response_bytes_left,
         } = *budget;
-        cx.check_cancelled()?;
+        cx.check_clock()?;
         if !self.figures.is_empty() {
             return self.figures_page(cx, position, timings).map(Some);
         }
@@ -1249,7 +1249,7 @@ impl Walk<'_> {
         let mut out: Vec<Vec<Columns>> = groups.clone().map(|_| Vec::new()).collect();
         let mut rows = 0usize;
         while at < chunks.len() && rows < need {
-            self.cx.check_cancelled()?;
+            self.cx.check_clock()?;
             if at > start
                 && self
                     .deadline

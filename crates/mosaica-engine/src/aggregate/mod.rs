@@ -63,8 +63,9 @@ pub struct AggregateRequest<'a> {
     pub cursor: Option<&'a str>,
     pub limits: RecordsLimits,
     pub caps: AggregateCaps,
-    /// As [`crate::ItemsRequest::cancel`]: cancelled before the first page, the response ends with
-    /// no rows and the cursor it was given.
+    /// Flipped when the client goes away. The response stops at its next check with a trailer
+    /// whose `ended_by` is `deadline`; flipped before the first page, it ends with no rows and the
+    /// cursor it was given.
     pub cancel: Option<CancelToken>,
 }
 

@@ -481,7 +481,7 @@ impl Numbers {
         plan: &SamplePlan,
         empty: impl Fn() -> T + Sync + Send,
     ) -> Result<(T, u64, u64)> {
-        cx.check_cancelled()?;
+        cx.check_clock()?;
         let SamplePlan { band, cut, .. } = *plan;
         let column = self.column.as_str();
         let segments = cx.segments(place);
@@ -594,7 +594,7 @@ impl Numbers {
         place: usize,
         empty: impl Fn() -> T + Sync + Send,
     ) -> Result<(T, u64)> {
-        cx.check_cancelled()?;
+        cx.check_clock()?;
         if self.held && (!self.drawn || (set.has_entities(place) && !set.is_whole())) {
             let entities = set.entities(cx, place)?;
             return Ok(cx
@@ -989,7 +989,7 @@ impl Reader<'_> {
         keep: usize,
     ) -> Result<FieldTally> {
         let cx = self.cx;
-        cx.check_cancelled()?;
+        cx.check_clock()?;
         if rows.is_empty() {
             return Ok(FieldTally::default());
         }

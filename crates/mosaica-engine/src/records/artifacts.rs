@@ -1060,7 +1060,7 @@ impl Pager for ArtifactsPager<'_> {
             for (walked, (level, ordinal, named)) in pager.positions(scope, None).enumerate() {
                 // The count runs before the first page, so no time budget ends it.
                 if walked % CHUNK as usize == 0 {
-                    clock.check()?;
+                    clock.check_ended()?;
                 }
                 let Some(served) = scope.served(level, ordinal) else {
                     continue;

@@ -177,7 +177,7 @@ impl Field {
     pub(super) fn counts(&self, cx: &Cx<'_>, set: &Set) -> Result<Counts> {
         let mut sides = Vec::new();
         for place in cx.reads() {
-            cx.check_cancelled()?;
+            cx.check_clock()?;
             sides.push(match self.held && (set.has_entities(place) || !self.drawn) {
                 true => self.counts_by_entity(cx, place, set.entities(cx, place)?)?,
                 false => cx

@@ -405,9 +405,9 @@ impl Clock {
         gone(&self.cancel) || self.started.elapsed() >= self.deadline
     }
 
-    /// `Err(EngineError::Cancelled)` where [`Self::ended`], which the response loop reads as an end
-    /// by `deadline`.
-    pub(crate) fn check(&self) -> Result<()> {
+    /// `Err(EngineError::Cancelled)` where [`Self::ended`], whether the client has gone or only the
+    /// deadline has passed. A caller maps it to an end by `deadline`, never to a refusal.
+    pub(crate) fn check_ended(&self) -> Result<()> {
         if self.ended() {
             return Err(EngineError::Cancelled);
         }

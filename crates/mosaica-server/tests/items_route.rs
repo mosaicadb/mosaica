@@ -764,8 +764,8 @@ async fn the_time_budget_ends_a_response_that_the_next_resumes() {
     assert_eq!(ids.len() as u64, visible);
 }
 
-/// **The stream deadline cancels the engine rather than cutting the body**: a response that
-/// outlives it ends with a trailer saying so, and a cursor to resume from.
+/// **The stream deadline ends a response with a trailer rather than cutting the body**: a response
+/// that outlives it ends with a trailer saying so, and a cursor to resume from.
 #[tokio::test]
 async fn the_stream_deadline_ends_a_response_with_a_trailer() {
     let f = fixture_with(N, 16, generous_test_gate(), generous_bulk_gate(), |limits| {
@@ -773,17 +773,6 @@ async fn the_stream_deadline_ends_a_response_with_a_trailer() {
     })
     .await;
     let token = token_for(&f.server, &["0"]).await;
-    // The session's geometry is built by a viewport first, so the cancellation meets the read
-    // and not that build. The same deadline cuts the viewport's own response after its first
-    // flush, by which time the geometry is built, so how that response ends is not read.
-    let _ = f
-        .server
-        .client
-        .post(f.server.viewer_url("/v1/viewport"))
-        .bearer_auth(&token)
-        .json(&json!({ "view": "s0", "zoom": 0, "bbox": [0.0, 0.0, 1000.0, 1000.0], "k": 0 }))
-        .send()
-        .await;
     let decoded = items_ok(
         &f.server,
         &token,

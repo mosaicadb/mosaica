@@ -254,7 +254,7 @@ pub(super) fn compose(
     prefer_row: bool,
     clock: &Clock,
 ) -> Result<Sets> {
-    clock.check()?;
+    clock.check_ended()?;
     let served = &open.served;
     let sides = served.sides.len();
     let reads: Vec<usize> = served
@@ -274,7 +274,7 @@ pub(super) fn compose(
             engine.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
         engine.route_filters_under(served, side, &candidate, &resolved, &req.cancel, |route| {
             let route_one = |expr: &FilterExpr, into: &mut Set| -> Result<()> {
-                clock.check()?;
+                clock.check_ended()?;
                 into.add(
                     place,
                     routed(engine, open, place, route(expr, prefer_row)?)?,
@@ -431,9 +431,9 @@ impl<'a> Cx<'a> {
             .sum()
     }
 
-    /// `Err(EngineError::Cancelled)` once the client has gone or the stream deadline has passed,
-    /// which the response loop reads as an end by `deadline`.
-    pub(super) fn check_cancelled(&self) -> Result<()> {
-        self.clock.check()
+    /// [`Clock::check_ended`]: `Err(EngineError::Cancelled)` once the client has gone or the
+    /// stream deadline has passed, which a caller maps to an end by `deadline`.
+    pub(super) fn check_clock(&self) -> Result<()> {
+        self.clock.check_ended()
     }
 }

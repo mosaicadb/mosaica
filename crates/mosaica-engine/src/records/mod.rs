@@ -78,9 +78,11 @@ pub struct RecordsLimits {
     /// the cursor on, so every response advances the read, and a response runs past it by at most
     /// one stretch's filter evaluation and one chunk of the scan.
     pub response_time: Duration,
-    /// Time after which a response ends by `deadline`, read where `response_time` is and also
-    /// between chunks of a count before the first page. It does not interrupt a stretch's filter
-    /// evaluation.
+    /// Time after which a response ends by `deadline`. A records read honours it between pages,
+    /// and within a page's walk once stopping moves the cursor on, so it does not interrupt a
+    /// stretch's filter evaluation; an artifacts read's count honours it between chunks before the
+    /// first page, ending the response with no rows. An aggregate honours it at every check, the
+    /// first page included.
     pub stream_deadline: Duration,
 }
 
@@ -109,12 +111,10 @@ pub struct ItemsRequest<'a> {
     /// A previous response's `next`, unchanged.
     pub cursor: Option<&'a str>,
     pub limits: RecordsLimits,
-    /// Cancellation ends the response with a trailer whose `ended_by` is `deadline`, after a
-    /// page holding whatever rows the page under way had reached. The walk honours it only once
-    /// stopping moves the cursor on, so it may run on for one stretch's filter evaluation and one
-    /// chunk of the scan after it. A token cancelled before the response walks its first page,
-    /// by the stream deadline or because the client has gone, ends the response with no rows, no
-    /// counts and the cursor it was given.
+    /// Flipped when the client goes away. The response stops at its next check: in a stretch's
+    /// filter evaluation with [`crate::EngineError::Cancelled`], and elsewhere with a trailer whose
+    /// `ended_by` is `deadline`. Flipped before the first page, the response ends with no rows,
+    /// no counts and the cursor it was given.
     pub cancel: Option<CancelToken>,
 }
 
@@ -187,7 +187,7 @@ pub enum ResponseEndedBy {
     Pages,
     BudgetBytes,
     BudgetTime,
-    /// Cancelled.
+    /// The client went away, or the stream deadline, [`RecordsLimits::stream_deadline`], passed.
     Deadline,
 }
 
@@ -546,7 +546,7 @@ impl Engine {
             // Each page reads the latest generation and composes the view's mask for itself; the
             // first also counts under them, when the request asked for counts.
             let generation = self.generation.load_full();
-            // A cancellation that lands while the view opens ends the response as one seen above.
+            // A client that goes away while the view opens ends the response by `deadline`.
             let open = match self.open_view(
                 response.session,
                 &generation,
@@ -558,7 +558,7 @@ impl Engine {
                 open => open?,
             };
             if response.count && counted.is_none() {
-                // A count cancelled before the first page ends the response as one seen above.
+                // A count the clock ends before the first page ends the response by `deadline`.
                 counted = match pager.count(self, &open, &generation, &clock) {
                     Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
                     counted => Some(counted?),
