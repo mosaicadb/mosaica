@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataset import DATASET
 from frame import EXTENT, Filter
 
 
@@ -12,12 +13,12 @@ def filter_sql(filt: Filter | None, quantise) -> str:
     terms = []
     for leaf in (filt.leaves if filt else []):
         col, value = leaf.get("col"), leaf["value"]
-        if leaf["op"] == "eq" and col == "type":
-            terms.append(f"type = '{value}'")
-        elif leaf["op"] == "in" and col == "type":
-            terms.append("type IN (" + ", ".join(f"'{v}'" for v in value) + ")")
-        elif leaf["op"] == "eq" and col == "is_oa":
-            terms.append(f"is_oa = {'true' if value else 'false'}")
+        if leaf["op"] == "eq" and col == DATASET.category:
+            terms.append(f"{col} = '{value}'")
+        elif leaf["op"] == "in" and col == DATASET.category:
+            terms.append(f"{col} IN (" + ", ".join(f"'{v}'" for v in value) + ")")
+        elif leaf["op"] == "eq" and col == DATASET.flag:
+            terms.append(f"{col} = {'true' if value else 'false'}")
         elif leaf["op"] == "range":
             if "gte" in value:
                 terms.append(f"{col} >= {int(value['gte'])}")

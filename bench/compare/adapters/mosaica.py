@@ -3,7 +3,8 @@
 The build and the server run in containers of an image built from the repository's Dockerfile,
 under the same memory cap and with the same cold-start treatment as every other system.
 
-The view declares `licence` as its `point_visibility`, so each row's licence is its access label.
+The view declares the data set's access column as its `point_visibility`, so each row's licence,
+or each term of its access list, is an access label; a viewer satisfying any one sees the row.
 After the first start the adapter creates the viewer as a principal in the catalogue, grants it
 `read` and exactly the terms of `viewer.json`, and issues it an API key; every start then logs in
 with that key at `POST /v1/login`, and every request carries the session token. No request
@@ -25,8 +26,8 @@ random, so the sample is a uniform random one, different at each build. Mosaica 
 that sends a sparse tile's points and none from a dense one, so under the `counts` frame it sends
 `K` from each dense tile, as before.
 
-The aggregation workload is one `POST /v1/aggregate` with two groupings, the counts by `type` and
-the `publication_year` histogram, over the filter and a `region` box of the camera's tiles.
+The aggregation workload is one `POST /v1/aggregate` with two groupings, the counts by the
+category and the year histogram, over the filter and a `region` box of the camera's tiles.
 
 `SERVE` holds every server setting the adapter writes, and the README's "Departures" lists each
 against its default and why. Each is recorded with the result.
@@ -48,9 +49,10 @@ import numpy as np
 import pyarrow.ipc as ipc
 import requests
 
+from dataset import DATASET
 from frame import (EXTENT, FIXED_SPAN, GRID_OFFSET, K, TYPE_TOP, TYPES, YEAR_BINS, Camera, Filter,
                    Frame, deinterleave, grid_depth, interleave, points_by_tile)
-from oracle import VIEWER
+from oracle import TABLES, VIEWER
 
 from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    image_id, wait_for)
@@ -58,7 +60,7 @@ from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, evi
 #: The viewer, session and control listeners inside the container.
 INNER_PORTS = (8080, 8081, 8082)
 CRED_ENV = "BENCH_COMPARE_OPERATOR"
-VIEW = "papers"
+VIEW = {"paperseek": "papers", "gbif": "geo"}[DATASET.name]
 SERVE = {
     "k_max_marks": K,
     "max_k": 1000,
@@ -76,6 +78,9 @@ COMPUTE_CACHES = {
     "masked_count_cache_bytes": 0,
     "figures_disk_bytes": 0,
 }
+#: Each data set's access default, which no row of either takes since every row has a term, and
+#: its year's type.
+_DECLARED = {"paperseek": ("unlicensed", "i32"), "gbif": ("UNRECORDED", "u16")}[DATASET.name]
 CORPUS = f"""
 [sources]
 points = "points.parquet"
@@ -87,34 +92,34 @@ source = "points"
 name             = "{VIEW}"
 projection       = "none"
 extent           = {{ x = [{EXTENT[0]!r}, {EXTENT[1]!r}], y = [{EXTENT[2]!r}, {EXTENT[3]!r}] }}
-point_visibility = {{ field = "licence", default = "unlicensed" }}
+point_visibility = {{ field = "{DATASET.access}", default = "{_DECLARED[0]}" }}
 
 [[vocabulary]]
-name       = "type"
+name       = "{DATASET.category}"
 width      = "u8"
 value_set  = "closed"
 visibility = "public"
 values     = {json.dumps(list(TYPES))}
 
 [[attribute]]
-name       = "type"
+name       = "{DATASET.category}"
 type       = "category"
-vocabulary = "type"
+vocabulary = "{DATASET.category}"
 index      = true
 render     = true
 
 [[attribute]]
-name   = "publication_year"
-type   = "i32"
+name   = "{DATASET.year}"
+type   = "{_DECLARED[1]}"
 index  = true
 render = true
-
+""" + ("" if DATASET.flag is None else f"""
 [[attribute]]
-name   = "is_oa"
+name   = "{DATASET.flag}"
 type   = "bool"
 index  = true
 render = true
-"""
+""")
 
 
 def filter_leaves(filt: Filter | None) -> list:
@@ -167,8 +172,8 @@ def tables_request(camera: Camera, filt: Filter | None) -> dict:
     lo, hi = YEAR_BINS
     return {"view": VIEW, "filters": combine([tiles_region(camera)] + filter_leaves(filt)),
             "groupings": [
-                {"count": True, "by": {"field": "type", "top": TYPE_TOP}},
-                {"count": True, "by": {"field": "publication_year", "bins": hi - lo,
+                {"count": True, "by": {"field": DATASET.category, "top": TYPE_TOP}},
+                {"count": True, "by": {"field": DATASET.year, "bins": hi - lo,
                                        "range": [lo, hi]}}]}
 
 
@@ -205,7 +210,7 @@ def split_frames(body: bytes):
 
 
 class Mosaica(Adapter):
-    access = ("view point_visibility = the licence field; a catalogue principal granted read and "
+    access = (f"view point_visibility = the {DATASET.access} field; a catalogue principal granted read and "
               "exactly the viewer's terms, logged in with its API key at /v1/login; requests "
               "carry its session token and no access condition")
 
@@ -461,7 +466,7 @@ operator_credential_env = "{CRED_ENV}"
         """The two tables in the oracle's shape: listed rows by key or lower edge, then `rest`
         and `none`."""
         out = {}
-        for index, name, column in ((0, "type", "key"), (1, "year", "lower")):
+        for index, name, column in ((0, TABLES[0], "key"), (1, TABLES[1], "lower")):
             rows: dict[str, int] = {}
             for table in cls._records(raw).get(index, []):
                 for r in table.select(["group", column, "count"]).to_pylist():

@@ -13,10 +13,11 @@ Three workloads, each a list of (camera, filter) steps, all drawn from the items
   of that depth inside the previous one; a pan east by half a screen at 6, 9 and 14, and south too
   at 14; then back out through 12, 9, 6 and 3.
 * `filters`: at the script's zoom-6 and zoom-9 screens of the densest region, a fixed sequence of
-  filter changes: none; the work type, or set of up to three, nearest 50%, 5% and 0.1% of the
-  viewer's items by ratio, each set an `in` and no type in two sets; a year
-  below which about 50%, 5% and 0.1% lie; `is_oa` true and false; the commonest type with
-  `is_oa` true and the 50% year onwards; boxes centred on the screen holding about 50%, 5% and
+  filter changes: none; the category value (PaperSeek's work type), or set of up to three,
+  nearest 50%, 5% and 0.1% of the viewer's items by ratio, each set an `in` and no value in two
+  sets; a year below which about 50%, 5% and 0.1% lie; where the data set has a flag (`is_oa`),
+  true and false; the commonest value with the flag true, where there is one, and the 50% year
+  onwards; boxes centred on the screen holding about 50%, 5% and
   0.1% of the screen's items; and none. Each step records the share of the viewer's items in the
   screen's tiles it matches. The aggregation workload runs over the same steps.
 """
@@ -31,9 +32,9 @@ from pathlib import Path
 
 import numpy as np
 
+from dataset import DATASET
 from frame import EXTENT, SCREEN, TILE_PX, Camera, Filter, fixed32
-from oracle import VIEWER, Oracle, visible_sql
-from oracle import where as oracle_where
+from oracle import VIEWER, Oracle
 
 BATTERY_ZOOMS = (0, 4, 8, 12, 16)
 SCRIPT_ZOOMS = (3, 6, 9, 12, 14)
@@ -46,15 +47,15 @@ def tile_centre(tx: int, ty: int, z: int) -> tuple[float, float]:
     return EXTENT[0] + (tx + 0.5) * size, EXTENT[2] + (ty + 0.5) * size
 
 
-def tile_counts(con, tier: str, z: int, within: tuple[int, int, int] | None = None):
+def tile_counts(oracle: Oracle, z: int, within: tuple[int, int, int] | None = None):
     shift = 32 - z
-    where = f"WHERE {visible_sql()}"
+    where = f"WHERE {oracle.visible_where}"
     if within is not None:
         pz, ptx, pty = within
         s = 32 - pz
         where += f" AND qx::UBIGINT >> {s} = {ptx} AND qy::UBIGINT >> {s} = {pty}"
-    return con.execute(
-        f"SELECT qx::UBIGINT >> {shift} AS tx, qy::UBIGINT >> {shift} AS ty, count(*) AS n FROM read_parquet('{tier}') "
+    return oracle.con.execute(
+        f"SELECT qx::UBIGINT >> {shift} AS tx, qy::UBIGINT >> {shift} AS ty, count(*) AS n FROM {oracle.src} "
         f"{where} GROUP BY ALL ORDER BY n, tx, ty"
     ).fetchall()
 
@@ -63,10 +64,10 @@ def cam(z: int, cx: float, cy: float, label: str) -> dict:
     return {"zoom": z, "cx": cx, "cy": cy, "label": label}
 
 
-def battery(con, tier: str) -> list[dict]:
+def battery(oracle: Oracle) -> list[dict]:
     steps, seen = [], set()
     for z in BATTERY_ZOOMS:
-        rows = tile_counts(con, tier, z)
+        rows = tile_counts(oracle, z)
         for d in range(10):
             tx, ty, n = rows[min(len(rows) - 1, int((d + 0.5) / 10 * len(rows)))]
             if (z, tx, ty) in seen:
@@ -78,8 +79,8 @@ def battery(con, tier: str) -> list[dict]:
     return steps
 
 
-def script(con, tier: str) -> tuple[list[dict], dict[tuple[int, int], dict]]:
-    regions = tile_counts(con, tier, 3)[::-1][:2]
+def script(oracle: Oracle) -> tuple[list[dict], dict[tuple[int, int], dict]]:
+    regions = tile_counts(oracle, 3)[::-1][:2]
     steps = [{"camera": cam(0, *tile_centre(0, 0, 0), "whole"), "filter": None}]
     anchors = {}
     for r, (tx, ty, _) in enumerate(regions):
@@ -87,7 +88,7 @@ def script(con, tier: str) -> tuple[list[dict], dict[tuple[int, int], dict]]:
         path = []
         for z in SCRIPT_ZOOMS:
             if z > 3:
-                best = tile_counts(con, tier, z, parent)[-1]
+                best = tile_counts(oracle, z, parent)[-1]
                 parent = (z, best[0], best[1])
             cx, cy = tile_centre(parent[1], parent[2], z)
             c = cam(z, cx, cy, f"r{r}-z{z}")
@@ -105,7 +106,7 @@ def script(con, tier: str) -> tuple[list[dict], dict[tuple[int, int], dict]]:
 
 
 TARGETS = (0.5, 0.05, 0.001)
-#: The most work types one type filter names.
+#: The most values one category filter names.
 TYPE_SET_MAX = 3
 
 
@@ -115,15 +116,16 @@ def closest(fractions: dict, target: float, taken: set) -> object:
                key=lambda k: (abs(math.log(fractions[k] / target)), str(k)))
 
 
-def attribute_filters(con, tier: str) -> list[tuple[str, list[dict]]]:
+def attribute_filters(oracle: Oracle) -> list[tuple[str, list[dict]]]:
     """The filters on attributes, chosen from the viewer's visible items over the whole tier: the
-    work type nearest each target fraction, the year below which each target fraction lies, both
-    values of `is_oa`, and one combination."""
-    src = f"read_parquet('{tier}') WHERE {visible_sql()}"
+    category value nearest each target fraction, the year below which each target fraction lies,
+    both values of the flag where there is one, and one combination."""
+    con, category, year, flag = oracle.con, DATASET.category, DATASET.year, DATASET.flag
+    src = f"{oracle.src} WHERE {oracle.visible_where}"
     total = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
     types = {t: n / total for t, n in con.execute(
-        f"SELECT type, count(*) FROM {src} AND type IS NOT NULL GROUP BY 1").fetchall()}
-    years = con.execute(f"SELECT publication_year, count(*) FROM {src} AND publication_year IS NOT NULL "
+        f"SELECT {category}, count(*) FROM {src} AND {category} IS NOT NULL GROUP BY 1").fetchall()}
+    years = con.execute(f"SELECT {year}, count(*) FROM {src} AND {year} IS NOT NULL "
                         f"GROUP BY 1 ORDER BY 1").fetchall()
     below, acc = {}, 0
     for y, n in years:
@@ -137,21 +139,21 @@ def attribute_filters(con, tier: str) -> list[tuple[str, list[dict]]]:
         c = min((c for c in sets if not taken & set(c)),
                 key=lambda c: (round(abs(math.log(sets[c] / target)), 3), len(c), c))
         taken |= set(c)
-        leaf = ({"col": "type", "op": "eq", "value": c[0]} if len(c) == 1
-                else {"col": "type", "op": "in", "value": list(c)})
-        out.append((f"type in {','.join(c)}" if len(c) > 1 else f"type={c[0]}", [leaf]))
+        leaf = ({"col": category, "op": "eq", "value": c[0]} if len(c) == 1
+                else {"col": category, "op": "in", "value": list(c)})
+        out.append((f"{category} in {','.join(c)}" if len(c) > 1 else f"{category}={c[0]}", [leaf]))
     cuts = []
     for target in TARGETS:
         y = closest(below, target, set(cuts))
         cuts.append(y)
-        out.append((f"year<{y}", [{"col": "publication_year", "op": "range", "value": {"lt": int(y)}}]))
-    for v in (True, False):
-        out.append((f"is_oa={str(v).lower()}", [{"col": "is_oa", "op": "eq", "value": v}]))
+        out.append((f"year<{y}", [{"col": year, "op": "range", "value": {"lt": int(y)}}]))
+    for v in (True, False) if flag else ():
+        out.append((f"{flag}={str(v).lower()}", [{"col": flag, "op": "eq", "value": v}]))
     commonest = max(types, key=types.get)
-    out.append((f"type={commonest}&is_oa=true&year>={cuts[0]}", [
-        {"col": "type", "op": "eq", "value": commonest},
-        {"col": "is_oa", "op": "eq", "value": True},
-        {"col": "publication_year", "op": "range", "value": {"gte": int(cuts[0])}}]))
+    out.append((f"{category}={commonest}" + (f"&{flag}=true" if flag else "") + f"&year>={cuts[0]}", [
+        {"col": category, "op": "eq", "value": commonest},
+        *([{"col": flag, "op": "eq", "value": True}] if flag else []),
+        {"col": year, "op": "range", "value": {"gte": int(cuts[0])}}]))
     return out
 
 
@@ -159,8 +161,8 @@ def boxes(oracle: Oracle, c: dict) -> list[tuple[str, list[dict]]]:
     """Boxes centred on the screen, with its aspect, holding about each target fraction of the
     viewer's items in the screen's tiles."""
     camera = Camera(c["zoom"], c["cx"], c["cy"])
-    pts = oracle.con.execute(f"SELECT qx, qy FROM read_parquet('{oracle.tier}') "
-                             f"WHERE {oracle_where(camera, None)}").fetchnumpy()
+    pts = oracle.con.execute(f"SELECT qx, qy FROM {oracle.src} "
+                             f"WHERE {oracle.where(camera, None)}").fetchnumpy()
     qx, qy = pts["qx"].astype(np.int64), pts["qy"].astype(np.int64)
     x0, y0, x1, y1 = camera.bbox()
     hw, hh = (x1 - x0) / 2, (y1 - y0) / 2
@@ -206,15 +208,16 @@ def main() -> None:
     ap.add_argument("--tier", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
-    tier = str(args.tier.resolve())
-    oracle = Oracle(tier)
-    con = oracle.con
-    steps, anchors = script(con, tier)
-    attributes = attribute_filters(con, tier)
+    if not args.tier.name.startswith(DATASET.name + "-"):
+        raise SystemExit(f"{args.tier.name} is not a {DATASET.name} tier; set BENCH_DATASET to its "
+                         f"data set")
+    oracle = Oracle(str(args.tier.resolve()), copy=DATASET.oracle_copy)
+    steps, anchors = script(oracle)
+    attributes = attribute_filters(oracle)
     out = {
         "tier": args.tier.name,
         "viewer": VIEWER,
-        "battery": battery(con, tier),
+        "battery": battery(oracle),
         "script": steps,
         "filters": (filter_sequence(oracle, anchors[(0, 6)], attributes)
                     + filter_sequence(oracle, anchors[(0, 9)], attributes)),

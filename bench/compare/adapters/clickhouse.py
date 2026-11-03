@@ -1,7 +1,7 @@
 """ClickHouse: a pinned server image, one MergeTree table sorted by Morton code, and the frame in SQL.
 
-The build reads the tier's `x`, `y`, `licence`, `publication_year`, `type`, `is_oa` and `rank`
-(never the oracle's `qx` and `qy`),
+The build reads the tier's `x`, `y`, `rank` and the data set's attributes and access column
+(`COLUMNS`; never the oracle's `qx` and `qy`),
 quantises the coordinates in SQL by the frame's rule, and stores `m = mortonEncode(qx, qy)` as the
 sorting key, so that a tile is a contiguous range of `m` as it is in Mosaica. `OPTIMIZE TABLE ...
 FINAL` merges the table to one part and is counted in the build.
@@ -17,11 +17,12 @@ of the timings.
 
 Access: after the build, the default user (given `access_management` for this) creates the user
 `viewer`, grants it `SELECT` on the table, and creates a row policy on the table for it keeping
-the rows whose `licence` is one of the viewer's terms. Every frame and table is queried as
-`viewer`, and no query names a licence. The setup is not counted in the build time.
+the rows whose access term is one of the viewer's terms (`licence IN (...)`), or for a list of
+terms, whose list holds any of them (`hasAny(access, [...])`). Every frame and table is queried as
+`viewer`, and no query names a term. The setup is not counted in the build time.
 
 The aggregation workload is two `GROUP BY` queries sent at once, over the frame's tile ranges and
-the filter: counts by `type`, and by year bin with `rest` and `none` folded in by `multiIf`.
+the filter: counts by the category, and by year bin with `rest` and `none` folded in by `multiIf`.
 """
 
 from __future__ import annotations
@@ -37,9 +38,10 @@ from pathlib import Path
 import pyarrow.ipc as ipc
 import requests
 
+from dataset import DATASET
 from frame import (EXTENT, K, YEAR_BINS, Camera, Filter, Frame, deinterleave, grid_depth, interleave,
                    points_by_tile)
-from oracle import VIEWER
+from oracle import TABLES, VIEWER
 
 from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
@@ -59,9 +61,20 @@ ACCESS_MANAGEMENT = """<clickhouse>
   <users><default><access_management>1</access_management></default></users>
 </clickhouse>
 """
-DDL = ("CREATE TABLE points (m UInt64, qx UInt32, qy UInt32, licence LowCardinality(String), "
-       "publication_year Nullable(Int32), type LowCardinality(Nullable(String)), is_oa Nullable(Bool), "
-       "rank Int64) "
+#: Each data set's columns beside the position and `rank`: the stored type, and the type read from
+#: the Parquet file. GBIF's access terms are a plain `Array(String)`: about 1.4 million distinct
+#: terms is far past the 10,000 under which ClickHouse's documentation recommends `LowCardinality`.
+COLUMNS = {
+    "paperseek": {"licence": ("LowCardinality(String)", "String"),
+                  "publication_year": ("Nullable(Int32)", "Nullable(Int32)"),
+                  "type": ("LowCardinality(Nullable(String))", "Nullable(String)"),
+                  "is_oa": ("Nullable(Bool)", "Nullable(Bool)")},
+    "gbif": {"kingdom": ("LowCardinality(String)", "String"),
+             "year": ("Nullable(UInt16)", "Nullable(UInt16)"),
+             "access": ("Array(String)", "Array(String)")},
+}[DATASET.name]
+DDL = ("CREATE TABLE points (m UInt64, qx UInt32, qy UInt32, "
+       + "".join(f"{c} {t}, " for c, (t, _) in COLUMNS.items()) + "rank Int64) "
        "ENGINE = MergeTree ORDER BY m")
 VIEWER_USER = "viewer"
 #: Every cache kept between queries that serves a result or a filter's result, off for the
@@ -88,8 +101,10 @@ def tile_ranges(tiles: list[tuple[int, int]], z: int) -> str:
 
 class ClickHouse(Adapter):
     name = "clickhouse"
-    access = (f"ROW POLICY on points FOR SELECT USING licence IN (the viewer's terms) TO "
-              f"{VIEWER_USER}; every frame and table queried as {VIEWER_USER}")
+    access = (f"ROW POLICY on points FOR SELECT USING "
+              + (f"hasAny({DATASET.access}, [the viewer's terms])" if DATASET.access_is_list
+                 else f"{DATASET.access} IN (the viewer's terms)")
+              + f" TO {VIEWER_USER}; every frame and table queried as {VIEWER_USER}")
 
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
                  dense: str = "points"):
@@ -211,10 +226,9 @@ class ClickHouse(Adapter):
         self.start()
         if self.sql("SELECT mortonEncode(toUInt32(1), toUInt32(0))").strip() != b"1":
             raise RuntimeError("mortonEncode does not put its first argument on the even bits")
-        columns = "licence, publication_year, type, is_oa, rank"
-        src = (f"file('tiers/{self.tier.name}', Parquet, 'x Float64, y Float64, licence String, "
-               f"publication_year Nullable(Int32), type Nullable(String), is_oa Nullable(Bool), "
-               f"rank Int64')")
+        columns = ", ".join([*COLUMNS, "rank"])
+        src = (f"file('tiers/{self.tier.name}', Parquet, 'x Float64, y Float64, "
+               + "".join(f"{c} {t}, " for c, (_, t) in COLUMNS.items()) + "rank Int64')")
         quantised = (f"SELECT {quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
                      f"{quantise('y', EXTENT[2], EXTENT[3])} AS qy, {columns} FROM {src}")
         t0 = time.monotonic()
@@ -232,10 +246,12 @@ class ClickHouse(Adapter):
         table_bytes = int(self.sql("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND table = 'points'"))
         rows = int(self.sql("SELECT count() FROM points"))
         terms = ", ".join(f"'{t}'" for t in VIEWER["terms"])
+        policy = (f"hasAny({DATASET.access}, [{terms}])" if DATASET.access_is_list
+                  else f"{DATASET.access} IN ({terms})")
         self.sql(f"CREATE USER {VIEWER_USER} IDENTIFIED WITH sha256_password BY '{self.viewer_password}'")
         self.sql(f"GRANT SELECT ON default.points TO {VIEWER_USER}")
         self.sql(f"CREATE ROW POLICY viewer_terms ON default.points FOR SELECT "
-                 f"USING licence IN ({terms}) AS permissive TO {VIEWER_USER}")
+                 f"USING {policy} AS permissive TO {VIEWER_USER}")
         replaced = self._inactive_parts()
         replaced_bytes = sum(du_bytes(p) for p in replaced)
         disk = du_bytes(self.data) - replaced_bytes
@@ -281,10 +297,11 @@ class ClickHouse(Adapter):
     def tables(self, camera: Camera, filt: Filter | None) -> tuple[dict, float]:
         where = tile_ranges(camera.tiles(), camera.zoom) + filter_sql(filt, quantise)
         lo, hi = YEAR_BINS
-        type_q = (f"SELECT ifNull(type, 'none'), count() FROM points WHERE {where} "
-                  f"GROUP BY type FORMAT TSV")
-        year_q = (f"SELECT multiIf(publication_year IS NULL, 'none', publication_year < {lo} OR "
-                  f"publication_year >= {hi}, 'rest', toString(publication_year)) AS bin, count() "
+        category, year = DATASET.category, DATASET.year
+        type_q = (f"SELECT ifNull({category}, 'none'), count() FROM points WHERE {where} "
+                  f"GROUP BY {category} FORMAT TSV")
+        year_q = (f"SELECT multiIf({year} IS NULL, 'none', {year} < {lo} OR "
+                  f"{year} >= {hi}, 'rest', toString({year})) AS bin, count() "
                   f"FROM points WHERE {where} GROUP BY bin FORMAT TSV")
         t0 = time.perf_counter()
         ft = self.pool.submit(self.sql, type_q, 0)
@@ -292,7 +309,7 @@ class ClickHouse(Adapter):
         type_raw, year_raw = ft.result(), fy.result()
         elapsed = time.perf_counter() - t0
         parse = lambda raw: {k: int(n) for k, n in (l.split("\t") for l in raw.decode().splitlines())}
-        return {"type": parse(type_raw), "year": parse(year_raw)}, elapsed
+        return {TABLES[0]: parse(type_raw), TABLES[1]: parse(year_raw)}, elapsed
 
     @staticmethod
     def _decode(grid_raw: bytes, points_raw: bytes, z: int, dg: int) -> Frame:

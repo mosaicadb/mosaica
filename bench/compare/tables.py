@@ -13,7 +13,7 @@ import argparse
 import json
 from pathlib import Path
 
-from oracle import COUNT_ERRORS, POINT_ERRORS, chi2_z
+from oracle import COUNT_ERRORS, POINT_ERRORS, TABLES, chi2_z
 
 GIB = 1 << 30
 #: The fields a record must carry to be tabled; an older record without them is refused.
@@ -100,9 +100,9 @@ def error_cell(e: dict) -> str:
 
 
 def agg_error_cell(e: dict) -> str:
-    wrong = e["type_abs_err"] + e["year_abs_err"]
+    wrong = sum(e[f"{t}_abs_err"] for t in TABLES)
     return (f"{e['tables_exact']}/{e['tables']} exact; count err {wrong:,} of "
-            f"{e['type_total_true'] + e['year_total_true']:,}")
+            f"{sum(e[f'{t}_total_true'] for t in TABLES):,}")
 
 
 #: Beyond these the spread is marked: coverage off 1 by more than this share, or a chi-square

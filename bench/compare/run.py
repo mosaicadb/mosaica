@@ -46,9 +46,10 @@ import numpy as np
 import pyarrow
 import requests
 
+from dataset import DATASET
 from frame import (DENSE, EXTENT, GRID_OFFSET, K, SCREEN, SUBCELL_OFFSET, TILE_PX, TYPE_TOP,
                    YEAR_BINS, Camera, Filter)
-from oracle import COUNT_ERRORS, POINT_ERRORS, VIEWER, Oracle, compare, compare_tables
+from oracle import COUNT_ERRORS, POINT_ERRORS, TABLES, VIEWER, Oracle, compare, compare_tables
 from prepare import sha256
 
 HERE = Path(__file__).resolve().parent
@@ -74,11 +75,13 @@ def foreign_mosaica(own: set[int]) -> list[str]:
 
 
 def check_tier(tier: Path) -> str:
-    """The tier's SHA-256, refused unless `tiers-manifest.json` records the same for its name."""
-    manifest = json.loads((HERE / "tiers-manifest.json").read_text())
+    """The tier's SHA-256, refused unless the data set's committed manifest records the same for
+    its name."""
+    manifest = json.loads((HERE / DATASET.manifest).read_text())
     want = next((t["sha256"] for t in manifest["tiers"].values() if t["file"] == tier.name), None)
     if want is None:
-        sys.exit(f"{tier.name} is not in tiers-manifest.json; derive it with prepare.py")
+        sys.exit(f"{tier.name} is not in {DATASET.manifest}; derive it with the data set's prepare "
+                 f"script, or set BENCH_DATASET to its data set")
     got = sha256(tier)
     if got != want:
         sys.exit(f"{tier} has SHA-256 {got}, not the manifest's {want}; derive it again "
@@ -220,6 +223,9 @@ def make_adapter(args):
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
         return ClickHouse(args.tier, work, **common)
+    if DATASET.name != "paperseek":
+        sys.exit(f"the {args.system} adapter has no schema for {DATASET.name}; run mosaica or "
+                 f"clickhouse")
     if args.system in ("postgis", "postgis+leakproof", "postgis+integer"):
         from adapters.postgis import PostGIS
         return PostGIS(args.tier, work, arm=args.system, **common)
@@ -263,13 +269,14 @@ def main() -> None:
     if cameras["tier"] != args.tier.name:
         sys.exit(f"{args.cameras} was made for {cameras['tier']}, not {args.tier.name}; make the "
                  f"cameras for this tier with cameras.py")
-    oracle = Oracle(str(args.tier.resolve()))
+    oracle = Oracle(str(args.tier.resolve()), copy=DATASET.oracle_copy)
     visible, rows = oracle.visible()
     adapter = make_adapter(args)
     record: dict = {
         "system": adapter.name,
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "development_only": not args.publishable,
+        "dataset": DATASET.name,
         "tier": args.tier.name,
         "tier_sha256": tier_sha256,
         "caches": args.caches,
@@ -332,9 +339,9 @@ def main() -> None:
         keys = [k for k in per[0] if k != "label"]
         errors["aggregation"] = {
             "tables": 2 * len(per),
-            "tables_exact": sum((c["type_abs_err"] == 0) + (c["year_abs_err"] == 0) for c in per),
+            "tables_exact": sum(c[f"{t}_abs_err"] == 0 for c in per for t in TABLES),
             **{k: int(sum(c[k] for c in per)) for k in keys},
-            "worst": sorted(per, key=lambda c: -(c["type_abs_err"] + c["year_abs_err"]))[:3],
+            "worst": sorted(per, key=lambda c: -sum(c[f"{t}_abs_err"] for t in TABLES))[:3],
         }
 
         print(f"[{adapter.name}] warm runs", file=sys.stderr, flush=True)

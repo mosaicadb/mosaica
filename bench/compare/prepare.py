@@ -73,12 +73,12 @@ def splitmix64(v: np.ndarray) -> np.ndarray:
         return z ^ (z >> np.uint64(31))
 
 
-def threshold(n: int) -> int | None:
-    return None if n >= SOURCE_ROWS else (n << 64) // SOURCE_ROWS
+def threshold(n: int, source_rows: int = SOURCE_ROWS) -> int | None:
+    return None if n >= source_rows else (n << 64) // source_rows
 
 
-def tier_name(n: int) -> str:
-    return "full" if n >= SOURCE_ROWS else f"{n:.0e}".replace("+0", "")
+def tier_name(n: int, source_rows: int = SOURCE_ROWS) -> str:
+    return "full" if n >= source_rows else f"{n:.0e}".replace("+0", "")
 
 
 def sha256(path: Path) -> str:

@@ -13,6 +13,12 @@ OpenAlex. Tiers of 10⁶, 10⁷ and every work are nested samples drawn by a has
 so a larger tier holds every row of a smaller one. Every system builds from the same tier file and
 quantises over the same square extent, fixed once from the full data's bounds.
 
+A second data set is GBIF's occurrence records, about 3.5 × 10⁹ observations of where a species
+was recorded, placed on the map by Web Mercator, with each record's kingdom, year and a list of
+access terms. Its tiers of 5 × 10⁸ and 10⁹ are drawn by the same hash of GBIF's record id, and
+its extent is Web Mercator's world square. README.md, "GBIF", says how the access list decides
+visibility and where its workloads depart from PaperSeek's.
+
 ## The viewer
 
 Every request is made as one viewer, and every system computes its answers over that viewer's

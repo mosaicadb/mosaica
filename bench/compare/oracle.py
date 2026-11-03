@@ -2,10 +2,16 @@
 tier's Parquet file for the viewer in `viewer.json`, and the comparison of a system's answer with
 them.
 
-The oracle reads only the tier file, `viewer.json` and `frame.py`'s definitions: the positions `qx`
-and `qy` that `prepare.py` quantised, the attributes, and the frame's tile and grid rules. It
-shares no code with any adapter's query. The viewer's restriction is a plain `licence IN (...)`
-here; every system must reach the same rows through its own access control.
+The oracle reads only the tier file, the data set's viewer file and `frame.py`'s definitions: the
+positions `qx` and `qy` that the prepare script quantised, the attributes, and the frame's tile
+and grid rules. It shares no code with any adapter's query. The viewer's restriction is a plain
+`licence IN (...)` here, or for a list of terms `list_has_any(access, [...])`, a row being visible
+where the viewer holds any of its terms; every system must reach the same rows through its own
+access control.
+
+With `copy`, the oracle first copies the viewer's visible rows' positions and attributes into a
+DuckDB table ordered by position, kept beside the tier and reused while the tier and the viewer
+are unchanged, and answers from it: at 10⁹ rows a scan of the tier for every query is too slow.
 """
 
 from __future__ import annotations
@@ -18,10 +24,13 @@ import duckdb
 import numpy as np
 import pyarrow as pa
 
+from dataset import DATASET
 from frame import (EXTENT, K, SUBCELL_OFFSET, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32,
                    grid_depth, points_by_tile)
 
-VIEWER = json.loads(Path(__file__).with_name("viewer.json").read_text())
+VIEWER = json.loads(Path(__file__).with_name(DATASET.viewer).read_text())
+#: The aggregation workload's two tables: the category's counts and the year histogram.
+TABLES = (DATASET.category, "year")
 #: The frame figures that count against an exact frame: the count errors, then the point errors.
 COUNT_ERRORS = ("tile_abs_err", "grid_abs_err")
 POINT_ERRORS = ("sparse_points_missing", "sparse_points_extra", "points_outside_tile",
@@ -29,17 +38,21 @@ POINT_ERRORS = ("sparse_points_missing", "sparse_points_extra", "points_outside_
 
 
 def visible_sql() -> str:
-    return "licence IN (" + ", ".join(f"'{t}'" for t in VIEWER["terms"]) + ")"
+    terms = ", ".join(f"'{t}'" for t in VIEWER["terms"])
+    if DATASET.access_is_list:
+        return f"list_has_any({DATASET.access}, [{terms}])"
+    return f"{DATASET.access} IN ({terms})"
 
 
-def where(camera: Camera, filt: Filter | None) -> str:
-    """The SQL predicate for the viewer, the camera's tiles and the filter."""
+def where(camera: Camera, filt: Filter | None, visible: str | None = None) -> str:
+    """The SQL predicate for the viewer (`visible`, by default `visible_sql()`), the camera's tiles
+    and the filter."""
     z = camera.zoom
     tx0, tx1, ty0, ty1 = camera.tile_range()
     s = 32 - z
     lo = lambda t: t << s
     hi = lambda t: ((t + 1) << s) - 1
-    terms = [visible_sql(), f"qx BETWEEN {lo(tx0)} AND {hi(tx1)}", f"qy BETWEEN {lo(ty0)} AND {hi(ty1)}"]
+    terms = [visible or visible_sql(), f"qx BETWEEN {lo(tx0)} AND {hi(tx1)}", f"qy BETWEEN {lo(ty0)} AND {hi(ty1)}"]
     for leaf in (filt.leaves if filt else []):
         terms.append(leaf_sql(leaf))
     return " AND ".join(terms)
@@ -47,12 +60,12 @@ def where(camera: Camera, filt: Filter | None) -> str:
 
 def leaf_sql(leaf: dict) -> str:
     op, col, value = leaf["op"], leaf.get("col"), leaf["value"]
-    if op == "eq" and col == "type":
-        return f"type = '{value}'"
-    if op == "in" and col == "type":
-        return "type IN (" + ", ".join(f"'{v}'" for v in value) + ")"
-    if op == "eq" and col == "is_oa":
-        return f"is_oa = {'true' if value else 'false'}"
+    if op == "eq" and col == DATASET.category:
+        return f"{col} = '{value}'"
+    if op == "in" and col == DATASET.category:
+        return f"{col} IN (" + ", ".join(f"'{v}'" for v in value) + ")"
+    if op == "eq" and col == DATASET.flag:
+        return f"{col} = {'true' if value else 'false'}"
     if op == "range":
         parts = []
         if "gte" in value:
@@ -67,23 +80,78 @@ def leaf_sql(leaf: dict) -> str:
     raise ValueError(f"unknown filter leaf {leaf}")
 
 
+def _spread16(v: str) -> str:
+    """A 16-bit value's bits on the even bits of a 32-bit one, in DuckDB."""
+    for shift, mask in ((8, 0x00FF00FF), (4, 0x0F0F0F0F), (2, 0x33333333), (1, 0x55555555)):
+        v = f"(({v}) | (({v}) << {shift})) & {mask}"
+    return v
+
+
+#: The Morton code of a position's top 16 bits of each axis, x on the even bits, in DuckDB.
+MORTON16 = f"({_spread16('qx::UBIGINT >> 16')}) | (({_spread16('qy::UBIGINT >> 16')}) << 1)"
+
+
 class Oracle:
-    def __init__(self, tier_path: str, threads: int = 4):
-        self.con = duckdb.connect()
-        self.con.execute(f"SET threads = {threads}")
+    def __init__(self, tier_path: str, threads: int = 4, copy: bool = False):
         self.tier = tier_path
+        #: The relation every query reads, and the viewer's predicate over it.
+        self.src, self.visible_where = f"read_parquet('{tier_path}')", visible_sql()
+        if copy:
+            self.con = duckdb.connect(self._copy(threads), read_only=True)
+            self.con.execute("SET memory_limit = '8GB'")
+            self.src, self.visible_where = "visible", "TRUE"
+        else:
+            self.con = duckdb.connect()
+        self.con.execute(f"SET threads = {threads}")
         self._cache: dict[str, Frame] = {}
         self._tables: dict[str, dict] = {}
         self._subcells: dict[str, dict] = {}
+        self._invalid: dict[tuple, int] = {}
+
+    def _copy(self, threads: int) -> str:
+        """The DuckDB file holding the viewer's visible rows ordered by `MORTON16`, made where the
+        one beside the tier was made from another tier file or another viewer."""
+        path = Path(self.tier).with_suffix(".oracle.duckdb")
+        stat = Path(self.tier).stat()
+        made_from = json.dumps({"tier": Path(self.tier).name, "bytes": stat.st_size,
+                                "mtime_ns": stat.st_mtime_ns, "visible": visible_sql()})
+        if path.exists():
+            with duckdb.connect(str(path), read_only=True) as con:
+                try:
+                    if con.execute("SELECT made_from FROM meta").fetchone()[0] == made_from:
+                        return str(path)
+                except duckdb.Error:
+                    pass
+            path.unlink()
+        columns = ", ".join(["qx", "qy", DATASET.category, DATASET.year] + [DATASET.flag] * bool(DATASET.flag))
+        tmp = path.with_suffix(".tmp")
+        tmp.unlink(missing_ok=True)
+        with duckdb.connect(str(tmp)) as con:
+            con.execute(f"SET threads = {threads}")
+            con.execute("SET memory_limit = '8GB'")
+            con.execute("SET preserve_insertion_order = false")
+            con.execute(f"CREATE TABLE visible AS SELECT {columns} FROM read_parquet('{self.tier}') "
+                        f"WHERE {visible_sql()} ORDER BY {MORTON16}")
+            rows = con.execute(f"SELECT count(*) FROM read_parquet('{self.tier}')").fetchone()[0]
+            con.execute("CREATE TABLE meta (made_from VARCHAR, tier_rows BIGINT)")
+            con.execute("INSERT INTO meta VALUES (?, ?)", [made_from, rows])
+        tmp.rename(path)
+        return str(path)
+
+    def where(self, camera: Camera, filt: Filter | None) -> str:
+        return where(camera, filt, self.visible_where)
 
     def count(self, camera: Camera, filt: Filter | None) -> int:
         return int(self.con.execute(
-            f"SELECT count(*) FROM read_parquet('{self.tier}') WHERE {where(camera, filt)}").fetchone()[0])
+            f"SELECT count(*) FROM {self.src} WHERE {self.where(camera, filt)}").fetchone()[0])
 
     def visible(self) -> tuple[int, int]:
         """The viewer's visible rows, and all rows."""
+        if self.src == "visible":
+            return (int(self.con.execute("SELECT count(*) FROM visible").fetchone()[0]),
+                    int(self.con.execute("SELECT tier_rows FROM meta").fetchone()[0]))
         return tuple(int(v) for v in self.con.execute(
-            f"SELECT count(*) FILTER (WHERE {visible_sql()}), count(*) FROM read_parquet('{self.tier}')"
+            f"SELECT count(*) FILTER (WHERE {visible_sql()}), count(*) FROM {self.src}"
         ).fetchone())
 
     def frame(self, camera: Camera, filt: Filter | None) -> Frame:
@@ -91,9 +159,9 @@ class Oracle:
         if key in self._cache:
             return self._cache[key]
         z, dg = camera.zoom, grid_depth(camera.zoom)
-        w = where(camera, filt)
+        w = self.where(camera, filt)
         rows = self.con.execute(
-            f"SELECT qx >> {32 - dg} AS gx, qy >> {32 - dg} AS gy, count(*) FROM read_parquet('{self.tier}') "
+            f"SELECT qx >> {32 - dg} AS gx, qy >> {32 - dg} AS gy, count(*) FROM {self.src} "
             f"WHERE {w} GROUP BY ALL"
         ).fetchall()
         grid = {(int(gx), int(gy)): int(n) for gx, gy, n in rows}
@@ -109,7 +177,7 @@ class Oracle:
             pick = " OR ".join(f"(qx::UBIGINT >> {s} = {tx} AND qy::UBIGINT >> {s} = {ty})"
                                for tx, ty in sparse)
             pts = self.con.execute(
-                f"SELECT qx, qy FROM read_parquet('{self.tier}') WHERE {w} AND ({pick})"
+                f"SELECT qx, qy FROM {self.src} WHERE {w} AND ({pick})"
             ).fetchnumpy()
             points = points_by_tile(pts["qx"], pts["qy"], z)
         frame = Frame(tiles=tiles, grid=grid, points=points)
@@ -124,17 +192,24 @@ class Oracle:
         if not sent:
             return 0
         pts = np.concatenate(sent)
+        # The same positions sent again for the same step, as the timed passes send them, have
+        # the same answer.
+        key = (repr((camera.zoom, camera.cx, camera.cy, filt.leaves if filt else None)),
+               np.sort(np.ascontiguousarray(pts).view(np.uint64).ravel()).tobytes())
+        if key in self._invalid:
+            return self._invalid[key]
         positions = pa.table({"qx": pts[:, 0], "qy": pts[:, 1]})
         self.con.register("sent", positions)
         try:
-            return int(self.con.execute(
+            self._invalid[key] = int(self.con.execute(
                 f"WITH s AS (SELECT qx, qy, count(*) AS n FROM sent GROUP BY ALL), "
-                f"t AS (SELECT qx, qy, count(*) AS n FROM read_parquet('{self.tier}') "
-                f"WHERE {where(camera, filt)} AND (qx, qy) IN (SELECT (qx, qy) FROM s) GROUP BY ALL) "
+                f"t AS (SELECT qx, qy, count(*) AS n FROM {self.src} "
+                f"WHERE {self.where(camera, filt)} AND (qx, qy) IN (SELECT (qx, qy) FROM s) GROUP BY ALL) "
                 f"SELECT coalesce(sum(greatest(s.n - coalesce(t.n, 0), 0)), 0) FROM s "
                 f"LEFT JOIN t USING (qx, qy)").fetchone()[0])
         finally:
             self.con.unregister("sent")
+        return self._invalid[key]
 
     def coverage(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame) -> dict:
         """How the positions sent from dense tiles spread over the sub-cells `SUBCELL_OFFSET`
@@ -160,7 +235,7 @@ class Oracle:
         if key not in self._subcells:
             rows = self.con.execute(
                 f"SELECT qx::UBIGINT >> {32 - d}, qy::UBIGINT >> {32 - d}, count(*) "
-                f"FROM read_parquet('{self.tier}') WHERE {where(camera, filt)} GROUP BY ALL").fetchall()
+                f"FROM {self.src} WHERE {self.where(camera, filt)} GROUP BY ALL").fetchall()
             per: dict[tuple[int, int], dict[tuple[int, int], int]] = {}
             for sx, sy, n in rows:
                 per.setdefault((int(sx) >> (d - z), int(sy) >> (d - z)), {})[(int(sx), int(sy))] = int(n)
@@ -190,23 +265,24 @@ class Oracle:
 
     def tables(self, camera: Camera, filt: Filter | None) -> dict[str, dict[str, int]]:
         """The aggregation workload's two tables over the viewer's matching items in the camera's
-        tiles: `type`, each type's count and `none` for no type (every type is listed, since
-        there are `TYPE_TOP` of them), and `year`, each one-year bin's count by its lower edge,
-        `rest` for a year outside `YEAR_BINS` and `none` for no year. Zero counts are left out."""
+        tiles, named by `TABLES`: the category's, each value's count and `none` for no value
+        (every value is listed, since there are `TYPE_TOP` of them), and `year`, each one-year
+        bin's count by its lower edge, `rest` for a year outside `YEAR_BINS` and `none` for no
+        year. Zero counts are left out."""
         key = repr((camera.zoom, camera.cx, camera.cy, filt.leaves if filt else None))
         if key in self._tables:
             return self._tables[key]
-        w = where(camera, filt)
-        src = f"read_parquet('{self.tier}')"
+        w = self.where(camera, filt)
+        src, category, year = self.src, DATASET.category, DATASET.year
         types = self.con.execute(
-            f"SELECT coalesce(type, 'none'), count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
+            f"SELECT coalesce({category}, 'none'), count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
         lo, hi = YEAR_BINS
         years = self.con.execute(
-            f"SELECT CASE WHEN publication_year IS NULL THEN 'none' "
-            f"WHEN publication_year < {lo} OR publication_year >= {hi} THEN 'rest' "
-            f"ELSE publication_year::VARCHAR END, count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
+            f"SELECT CASE WHEN {year} IS NULL THEN 'none' "
+            f"WHEN {year} < {lo} OR {year} >= {hi} THEN 'rest' "
+            f"ELSE {year}::VARCHAR END, count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
         assert len(types) <= TYPE_TOP + 1
-        out = {"type": {k: int(n) for k, n in types}, "year": {k: int(n) for k, n in years}}
+        out = {TABLES[0]: {k: int(n) for k, n in types}, TABLES[1]: {k: int(n) for k, n in years}}
         self._tables[key] = out
         return out
 

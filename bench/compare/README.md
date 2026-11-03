@@ -526,3 +526,66 @@ one's, so under `counts` it sends K from each dense tile, as it did.
 - **PostGIS without Martin.** The method names PostGIS with Martin, which serves vector tiles from
   it. The frame is a count grid and positions, not a vector tile, so the PostGIS adapter queries
   PostgreSQL directly and Martin is not run.
+
+## GBIF
+
+The second data set is GBIF's occurrence records, at 5 × 10⁸ and 10⁹ points, for Mosaica and
+ClickHouse alone. `BENCH_DATASET=gbif` selects it in every script (`dataset.py`), so the tier,
+the viewer (`viewer-gbif.json`), the committed manifest (`tiers-manifest-gbif.json`) and each
+adapter's schema are GBIF's; run without it, every script works on PaperSeek as above.
+
+```bash
+# The tiers, from the gbif-terms rung's points file (74 GB, 3,495,729,729 placed occurrences),
+# about 15 minutes for one pass. The tiers nest, so 1e6 and 5e8 come from one pass and 1e9 from
+# another, written when its runs are about to start
+cd bench/compare && nice -n 19 .venv/bin/python prepare_gbif.py --tiers 1e6,5e8 && cd -
+
+# The cameras; the first use of a tier also writes the oracle's copy of it (below)
+cd bench/compare && BENCH_DATASET=gbif nice -n 19 .venv/bin/python cameras.py \
+    --tier $DATA/bench-compare/tiers/gbif-5e8.parquet --out cameras/gbif-5e8.json && cd -
+
+# One run per system
+cd bench/compare && for s in mosaica clickhouse; do
+  BENCH_DATASET=gbif BENCH_MEMORY=24g .venv/bin/python run.py --system $s --nice 19 \
+      --tier $DATA/bench-compare/tiers/gbif-5e8.parquet --cameras cameras/gbif-5e8.json
+done
+```
+
+`prepare_gbif.py`'s docstring defines the tiers. Each keeps a row by the same splitmix64 threshold
+as PaperSeek's, on GBIF's `gbifid`, which is also its `entity_id`, and stores `rank` by the same
+rule. Positions are projected to Web Mercator in metres once, by `prepare_gbif.py`, with the
+latitude clamped at ±85.0511° as the GBIF rung's view clamps it, so the 66,037 polar records of
+the full file lie on the extent's edges. Every system and the oracle read the projected `x` and
+`y`: Mosaica's view declares `projection = "none"` over the world square, `±π · 6,378,137` on
+both axes, as for PaperSeek, and ClickHouse quantises the same doubles by the same rule.
+
+A tier keeps `kingdom`, the category, which has nine values; `year`, an unsigned 16-bit year
+with no value for about 2.5% of the rows; and `access`, the rung's list of up to three access
+terms a row: its country (`UNRECORDED` where GBIF has none), `y:` and its year, and `s:` and its
+species key. GBIF's species, names and country columns are not kept, and no system builds a
+taxonomy layer. The aggregation tables are the counts by kingdom and the year histogram over
+1900 to 2029.
+
+A row is visible to a viewer who holds any one of its access terms, which is how Mosaica reads a
+list-valued `point_visibility`. ClickHouse's row policy is `hasAny(access, [the viewer's
+terms])` and the oracle's predicate `list_has_any(access, [the viewer's terms])`, which is the
+same rule. No row's list is empty, which `prepare_gbif.py` checks, so the view's default term
+never applies. The viewer holds every country term but `GB` and `CA`, and also `y:2024` and
+`y:2025`, so it sees those two countries' records of 2024 and 2025 through the year term:
+890,985 of the 1,000,313 rows of the 10⁶ tier (89.1%). ClickHouse stores `access` as
+`Array(String)`, since its documentation recommends `LowCardinality` under 10,000 distinct
+values and the column holds about 1.4 million.
+
+The oracle answers from its own copy of each tier (`Oracle(copy=True)`): a DuckDB file beside the
+tier holding the viewer's visible rows' positions, kingdom and year, ordered by the Morton code
+of each position's top 16 bits, so that a query over a small screen reads few of DuckDB's row
+groups. The copy is made with the same visibility predicate, once for each tier and viewer, because
+otherwise every one of a run's thousand or so oracle queries would scan the whole Parquet tier,
+which at 10⁹ rows takes many seconds each. A
+dense tile's validity check is also kept per step and per set of positions, since the timed
+passes send the same sample again.
+
+The filters follow PaperSeek's rules where the data permits. `Animalia` is about 79% of the
+viewer's records, and no set of kingdoms comes nearer 50%, so the 50% kingdom filter is
+`Animalia`; GBIF has no boolean column, so there are no flag filters, and the combined filter is
+`Animalia` from the 50% year onwards.

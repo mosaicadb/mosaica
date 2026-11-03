@@ -29,12 +29,14 @@ from pathlib import Path
 
 import numpy as np
 
+from dataset import DATASET
+
 #: The square every system quantises over, as `(x_min, x_max, y_min, y_max)`: fixed once by
-#: `prepare.py` from the full source's bounds and recorded in the committed manifest.
-_MANIFEST = json.loads((Path(__file__).with_name("tiers-manifest.json")).read_text())
+#: the data set's `prepare` script and recorded in its committed manifest.
+_MANIFEST = json.loads((Path(__file__).with_name(DATASET.manifest)).read_text())
 if "extent" not in _MANIFEST:
-    raise SystemExit("tiers-manifest.json records no extent; run prepare.py, which fixes it from "
-                     "the source's bounds")
+    raise SystemExit(f"{DATASET.manifest} records no extent; run the data set's prepare script, "
+                     f"which fixes it")
 EXTENT = tuple(_MANIFEST["extent"])
 FIXED_SPAN = 4294967296.0
 
@@ -49,18 +51,16 @@ K = 500
 SUBCELL_OFFSET = 4
 #: The two frames: `points` sends `K` positions from each dense tile, `counts` none required.
 DENSE = ("points", "counts")
-#: The work types of the PaperSeek vocabulary, the values a `type` filter may name.
-TYPES = ("article", "book", "book-chapter", "dataset", "dissertation", "editorial", "erratum",
-         "grant", "letter", "libguides", "other", "paratext", "peer-review", "preprint",
-         "reference-entry", "report", "retraction", "review", "standard", "supplementary-materials")
+#: The values of the data set's category (PaperSeek's work types), which a category filter may name.
+TYPES = DATASET.categories
 #: The licence terms, which are the access terms: every row carries exactly one.
 LICENCES = ("unlicensed", "cc-by", "cc-by-nc-nd", "cc-by-nc", "other-oa", "cc-by-sa", "cc-by-nc-sa",
             "public-domain", "cc-by-nd", "publisher-specific-oa", "mit")
-#: The `publication_year` histogram of the aggregation workload: one-year bins over
+#: The year histogram of the aggregation workload: one-year bins over
 #: `[YEAR_BINS[0], YEAR_BINS[1])`. A year outside it is counted as `rest`, no year as `none`.
-YEAR_BINS = (1900, 2030)
-#: The most types the `type` table lists, which is every one.
-TYPE_TOP = 20
+YEAR_BINS = DATASET.year_bins
+#: The most values the category table lists, which is every one.
+TYPE_TOP = len(TYPES)
 
 
 def fixed32(v: float, lo: float = EXTENT[0], hi: float = EXTENT[1]) -> int:
@@ -155,10 +155,11 @@ def is_year(v) -> bool:
 
 @dataclass
 class Filter:
-    """A conjunction of leaves, each `{"col", "op", "value"}`: `eq` on `type` (a value of `TYPES`)
-    or on `is_oa` (a bool), `in` on `type` (a list of values of `TYPES`), `range` on
-    `publication_year` (`{"gte": y}`, `{"lt": y}` or both, a null year matching neither), or
-    `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every side after quantisation."""
+    """A conjunction of leaves, each `{"col", "op", "value"}`, naming the data set's columns: `eq`
+    on the category (a value of `TYPES`) or on the flag (a bool), `in` on the category (a list of
+    values of `TYPES`), `range` on the year (`{"gte": y}`, `{"lt": y}` or both, a null year
+    matching neither), or `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every side after
+    quantisation."""
 
     leaves: list[dict] = field(default_factory=list)
     label: str = "none"
@@ -167,22 +168,23 @@ class Filter:
         """Refuse a leaf outside that grammar, since adapters write its values into SQL."""
         for leaf in self.leaves:
             op, col, value = leaf.get("op"), leaf.get("col"), leaf.get("value")
-            if op == "eq" and col == "type" and value in TYPES:
+            if op == "eq" and col == DATASET.category and value in TYPES:
                 continue
-            if op == "eq" and col == "is_oa" and type(value) is bool:
+            if op == "eq" and col is not None and col == DATASET.flag and type(value) is bool:
                 continue
-            if (op == "in" and col == "type" and isinstance(value, list) and value
+            if (op == "in" and col == DATASET.category and isinstance(value, list) and value
                     and all(v in TYPES for v in value)):
                 continue
-            if (op == "range" and col == "publication_year" and isinstance(value, dict) and value
+            if (op == "range" and col == DATASET.year and isinstance(value, dict) and value
                     and set(value) <= {"gte", "lt"} and all(is_year(v) for v in value.values())):
                 continue
             if (op == "bbox" and col is None and isinstance(value, list) and len(value) == 4
                     and all(type(v) in (int, float) and math.isfinite(v) for v in value)):
                 continue
-            raise ValueError(f"filter leaf {leaf!r} is not one this harness takes; write type eq "
-                             f"one of TYPES or in a list of them, is_oa eq a bool, publication_year range with gte "
-                             f"and lt integers, or bbox four numbers")
+            raise ValueError(f"filter leaf {leaf!r} is not one this harness takes; write "
+                             f"{DATASET.category} eq one of TYPES or in a list of them, "
+                             f"{DATASET.flag} eq a bool, {DATASET.year} range with gte and lt "
+                             f"integers, or bbox four numbers")
 
 
 @dataclass

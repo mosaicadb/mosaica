@@ -1,0 +1,63 @@
+{
+  "source": {
+    "path": "data/ladder/gbif-terms/points.parquet",
+    "bytes": 74364111468,
+    "rows": 3495729729,
+    "columns": [
+      "gbifid",
+      "lon",
+      "lat",
+      "kingdom",
+      "year",
+      "access"
+    ],
+    "origin": "The gbif-terms rung of the Mosaica test ladder: GBIF occurrences (gbif/2026-06-01) with a position, each with its access terms: country, y:<year> and s:<species key>"
+  },
+  "sample_seed": 7885648334766170417,
+  "rank_seed": 7885648334766170418,
+  "extent": [
+    -20037508.342789244,
+    20037508.342789244,
+    -20037508.342789244,
+    20037508.342789244
+  ],
+  "projection": "Web Mercator in metres: x = R lon pi/180, y = R ln(tan(pi/4 + lat pi/360)), R = 6378137.0, lat clamped to +-85.0511287798066; the extent is the world square",
+  "tiers": {
+    "1e6": {
+      "file": "gbif-1e6.parquet",
+      "nominal_rows": 1000000,
+      "rows": 1000313,
+      "threshold": 5276936577984960,
+      "rows_by_kingdom": {
+        "Animalia": 794923,
+        "Plantae": 144701,
+        "Bacteria": 27449,
+        "Fungi": 13793,
+        "Chromista": 12810,
+        "incertae sedis": 2955,
+        "Archaea": 2839,
+        "Protozoa": 823,
+        "Viruses": 20
+      },
+      "sha256": "8812604e9a509a0a596e62e780281bf18f092057c04d06542fcbe71983c18f64"
+    },
+    "5e8": {
+      "file": "gbif-5e8.parquet",
+      "nominal_rows": 500000000,
+      "rows": 500051935,
+      "threshold": 2638468288992480004,
+      "rows_by_kingdom": {
+        "Animalia": 397573893,
+        "Plantae": 72282332,
+        "Bacteria": 13689282,
+        "Fungi": 6833139,
+        "Chromista": 6309709,
+        "incertae sedis": 1510869,
+        "Archaea": 1424154,
+        "Protozoa": 418260,
+        "Viruses": 10297
+      },
+      "sha256": "cefed99fc2123993553b13c5abc032497cb22bbf0c8404a6fa82452e77e846e9"
+    }
+  }
+}
