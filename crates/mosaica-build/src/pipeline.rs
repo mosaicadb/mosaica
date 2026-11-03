@@ -4845,13 +4845,27 @@ const TEXT_BUDGET_MIN: u64 = 128 << 20;
 /// spills a run per document.
 const TEXT_MIN_WORKER_BYTES: usize = 8 << 20;
 
-/// What one distinct term costs the accumulator beyond its characters: the hash table's slot for
-/// a `Box<[u8]>` and a `Vec<u32>`, the allocator's rounding on both, and the load factor the table
-/// keeps. **A conservative estimate, not a measurement** — it is the input to a memory bound, so
-/// erring high spills a run early and erring low is the failure the bound exists to prevent. The
-/// characters are charged at twice their length for the same reason (malloc rounding on a short
-/// key is most of the key).
-const TEXT_TERM_ENTRY_BYTES: usize = 80;
+/// What one distinct term costs the accumulator beyond its characters, derived from the types:
+///
+/// - its slot in the hash table, a `Box<[u8]>` key and an [`mosaica_filter_write::Occurrences`],
+///   with a control byte, at the table's 7/8 load factor and doubled, since a table that has just
+///   grown is half empty: 148 B;
+/// - the first allocation of each of the two vectors an `Occurrences` holds, four elements apiece,
+///   and the key's own allocation, each at malloc's 16-byte header and rounding: 96 B.
+///
+/// 244 B in all. Measured at 165–213 B a term beside an 8-byte key's 32, over 10³ to 1.3×10⁵
+/// terms. **Erring high spills a run early, and erring low is the failure the bound exists to
+/// prevent.** The characters are charged at twice their length for the same reason (malloc rounding
+/// on a short key is most of the key).
+const TEXT_TERM_ENTRY_BYTES: usize = {
+    const fn chunk(requested: usize) -> usize {
+        (requested + 16).next_multiple_of(16)
+    }
+    let slot = std::mem::size_of::<(Box<[u8]>, mosaica_filter_write::Occurrences)>() + 1;
+    let first_items = chunk(4 * std::mem::size_of::<(u32, u32)>());
+    let first_positions = chunk(4 * std::mem::size_of::<u32>());
+    2 * slot * 8 / 7 + first_items + first_positions + 16
+};
 
 /// What one posting costs: eight bytes of item and position count charged at sixteen, because a
 /// `Vec` grows by doubling and is on average half empty.

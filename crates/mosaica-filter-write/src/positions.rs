@@ -45,6 +45,14 @@ impl Occurrences {
         &self,
         mut visit: impl FnMut(u32, &[u32]) -> Result<(), E>,
     ) -> Result<(), E> {
+        if self.items.is_sorted_by_key(|(entity, _)| *entity) {
+            let mut at = 0usize;
+            for &(entity, count) in &self.items {
+                visit(entity, &self.positions[at..at + count as usize])?;
+                at += count as usize;
+            }
+            return Ok(());
+        }
         let mut starts = Vec::with_capacity(self.items.len());
         let mut at = 0usize;
         for &(_, count) in &self.items {
@@ -52,15 +60,10 @@ impl Occurrences {
             at += count as usize;
         }
         let mut order: Vec<usize> = (0..self.items.len()).collect();
-        if !self.items.is_sorted_by_key(|(entity, _)| *entity) {
-            order.sort_unstable_by_key(|&i| self.items[i].0);
-        }
+        order.sort_unstable_by_key(|&i| self.items[i].0);
         for i in order {
             let (entity, count) = self.items[i];
-            visit(
-                entity,
-                &self.positions[starts[i]..starts[i] + count as usize],
-            )?;
+            visit(entity, &self.positions[starts[i]..starts[i] + count as usize])?;
         }
         Ok(())
     }
@@ -277,6 +280,22 @@ mod tests {
             }
             assert!(cursor.positions(items.len() as u64).is_err());
         }
+    }
+
+    /// **Gaps at every width read back**: a packed run 32 bits wide, whose last position is
+    /// `u32::MAX`, and gaps past 2¹⁶ in a packed run and in a varint tail.
+    #[test]
+    fn wide_gaps_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut widest: Vec<u32> = (0..127).collect();
+        widest.push(u32::MAX);
+        let sparse: Vec<u32> = (0..200).map(|k| k * 70_000).collect();
+        let terms = vec![vec![widest.clone(), sparse.clone(), vec![1 << 20]]];
+        let file = write(dir.path(), &terms);
+        let mut cursor = file.cursor(AttrLocalId::new(0), 3).unwrap();
+        assert_eq!(cursor.positions(0).unwrap(), widest.as_slice());
+        assert_eq!(cursor.positions(1).unwrap(), sparse.as_slice());
+        assert_eq!(cursor.positions(2).unwrap(), &[1 << 20]);
     }
 
     /// **A run shorter than 128 values is varints**: one item holding a term once is two bytes,
