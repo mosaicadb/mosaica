@@ -198,6 +198,14 @@ fn engine_over(tmp: &Path, root: &Path) -> Engine {
 
 /// Ingest the item of `source` and wait for the flush that publishes it.
 fn ingest_and_flush(engine: &Engine, source: u64) -> EntityId {
+    let entity = ingest_one(engine, source);
+    flush(engine);
+    entity
+}
+
+/// Ingest the item of `source` and wait for the commit window that buffers it.
+fn ingest_one(engine: &Engine, source: u64) -> EntityId {
+    let buffered = engine.write_executor_stats().buffered_items;
     let row = UnallocatedRow {
         view: "s0".to_string(),
         join: None,
@@ -211,6 +219,16 @@ fn ingest_and_flush(engine: &Engine, source: u64) -> EntityId {
     let entity = engine
         .ingest_rows(vec![row], format!("fresh-{source}"), [0u8; 32])
         .expect("an ingest carrying prose is accepted")[0];
+    wait_until(
+        "the commit window's publication",
+        std::time::Duration::from_secs(60),
+        || engine.write_executor_stats().buffered_items > buffered,
+    );
+    entity
+}
+
+/// Wait for a flush of everything buffered.
+fn flush(engine: &Engine) {
     let before = engine.write_executor_stats().flushes;
     engine.request_flush();
     wait_until(
@@ -218,7 +236,6 @@ fn ingest_and_flush(engine: &Engine, source: u64) -> EntityId {
         std::time::Duration::from_secs(60),
         || engine.write_executor_stats().flushes > before,
     );
-    entity
 }
 
 fn live_text_layers(engine: &Engine) -> usize {
@@ -503,8 +520,8 @@ fn a_text_filter_answers_each_grant_its_own_items() {
     assert_eq!(stats.hits, 3, "and read from its own entry after");
 }
 
-/// **A suppression, a lift, a deletion and an ingest each reach the next request** with a text
-/// filter whose answer the cache held before it.
+/// **A suppression, a lift, a deletion and a commit window each reach the next request from the
+/// kept answer, and a flush evaluates it again** with the flushed item in it.
 #[test]
 fn a_change_reaches_the_next_text_filter_after_a_kept_answer() {
     let tmp = tempfile::tempdir().unwrap();
@@ -516,46 +533,60 @@ fn a_change_reaches_the_next_text_filter_after_a_kept_answer() {
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     let answer = || matched(&engine, &session, phrase("the quick"));
     let want = |items: &BTreeMap<u32, String>| saying(items, "the quick").len() as u64;
+    // The answer after a change, and that it was read from the kept entry.
+    let answer_kept = |step: &str| {
+        let before = cache(&engine);
+        let got = answer();
+        let after = cache(&engine);
+        assert_eq!(after.misses, before.misses, "{step} is answered from the kept entry");
+        assert!(after.hits > before.hits, "{step} is answered from the kept entry");
+        got
+    };
 
     let held = want(&items);
     let mut saying_it = saying(&items, "the quick").into_iter();
     let (suppressed, deleted) = (saying_it.next().unwrap(), saying_it.next().unwrap());
     assert_eq!(answer(), held);
-    assert_eq!(answer(), held);
-    assert!(cache(&engine).hits > 0, "the answer is kept");
 
     engine
         .accept_change(EntityId::new(u64::from(suppressed)), ChangeOp::Suppress)
         .expect("a suppression is accepted");
-    assert_eq!(answer(), held - 1, "a suppression reaches the next request");
-    assert_eq!(answer(), held - 1);
+    assert_eq!(answer_kept("a suppression"), held - 1);
 
     engine
         .accept_change(EntityId::new(u64::from(suppressed)), ChangeOp::Unsuppress)
         .expect("a lift is accepted");
-    assert_eq!(answer(), held, "a lift reaches the next request");
+    assert_eq!(answer_kept("a lift"), held);
 
     engine
         .accept_change(EntityId::new(u64::from(deleted)), ChangeOp::Delete)
         .expect("a deletion is accepted");
     items.remove(&deleted);
-    assert_eq!(answer(), want(&items), "a deletion reaches the next request");
+    assert_eq!(answer_kept("a deletion"), want(&items));
 
     let source = (N + FLUSHES..N + 1_000)
         .find(|source| !saying(&BTreeMap::from([(0, prose_of(*source))]), "the quick").is_empty())
         .expect("some source past the build says the phrase");
-    let entity = ingest_and_flush(&engine, source);
+    let entity = ingest_one(&engine, source);
+    assert_eq!(
+        answer_kept("a commit window"),
+        want(&items),
+        "a buffered item has no text to match"
+    );
+
+    flush(&engine);
     items.insert(entity.raw() as u32, prose_of(source));
     // With the background refresh off, a session already served the view is served its previous
     // geometry, which has no row for the item; a session not yet served it sees the item.
     let fresh = engine.authorise(&full_coverage_credential()).unwrap();
-    let answer = || matched(&engine, &fresh, phrase("the quick"));
+    let before = cache(&engine);
     assert_eq!(
-        answer(),
+        matched(&engine, &fresh, phrase("the quick")),
         want(&items),
-        "an ingested item is matched once it is visible"
+        "a flushed item is matched once it is visible"
     );
-    assert_eq!(answer(), want(&items));
+    assert_eq!(cache(&engine).misses, before.misses + 1, "a flush evaluates again");
+    assert_eq!(matched(&engine, &fresh, phrase("the quick")), want(&items));
 }
 
 /// **A text leaf narrowed by its siblings keeps nothing a later bare leaf could read.** The phrase

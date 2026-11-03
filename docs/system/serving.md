@@ -46,7 +46,7 @@ Viewers who hold the same access labels share a **grant**, and Mosaica keeps its
 
 Every later request, from any session with the grant, reuses them, and each request corrects them for whatever has been deleted, suppressed or ingested since they were built. The figures and the visible set's list of items are written to disc and read back after a restart. The visible set's arrangement over the rows is held in memory only, so each grant's first request after a restart builds that again.
 
-Mosaica also keeps, in memory, the items each `match` and `phrase` filter matches for a grant, so a viewer who pans and zooms with a search does not wait for the search to run again. A kept answer is used only until the items it was taken over next change, by an ingest, a flush, a deletion or a suppression, after which the next request runs the search again.
+Mosaica also keeps, in memory, the items each `match` and `phrase` filter matches among those a grant covers, so a viewer who pans and zooms with a search does not wait for the search to run again. Each request takes out of the kept answer whatever is deleted or suppressed when it starts, so ingests, deletions and suppressions leave the answer in use. It is used until the indexed text changes at the next flush, coalesce or compaction, after which the next request runs the search again.
 
 So the first request from a new grant is the slow one, and its cost grows with how much of the data the grant may see. You pay it once for each grant, so a few groups of viewers cost a few first requests, while users who each hold attributes of their own cost one each. [Size and tune a deployment](../guides/sizing.md#annotation-layers-and-new-viewers) explains how to plan for it.
 

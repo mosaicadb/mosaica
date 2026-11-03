@@ -985,9 +985,10 @@ impl Engine {
     /// Route this request's filter expressions in one side under `candidate`. Every scan returns a
     /// subset of the candidate. A region or `member_of` leaf `resolved` holds is answered from it,
     /// and one it does not is resolved and kept there; the caller holds it only while `served` and
-    /// its mask are the ones it was filled under. A text leaf's answer is kept for later requests
-    /// only when it is evaluated under the whole set ([`crate::text_filter_cache`]). `body` is
-    /// handed a `route` that puts one expression through them.
+    /// its mask are the ones it was filled under. A text leaf is answered from the text filter
+    /// cache, whose entry is computed over the session's fragment only when the leaf is evaluated
+    /// under the whole candidate ([`crate::text_filter_cache`]). `body` is handed a `route` that
+    /// puts one expression through them.
     pub(crate) fn route_filters_under<T>(
         &self,
         served: &ServedView<'_>,
@@ -999,14 +1000,19 @@ impl Engine {
             &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
         ) -> Result<T>,
     ) -> Result<T> {
+        // The fragment a text leaf's kept answer is taken over, where the whole candidate is known.
+        let fragment = match candidate {
+            FilterCandidate::Within(_) => None,
+            FilterCandidate::Compose | FilterCandidate::Whole(_) => Some(self.fragment_for(
+                served.session,
+                side.shard,
+                Some(&side.geometry.fragment),
+            )?),
+        };
         let composed;
         let (candidate, whole) = match candidate {
             FilterCandidate::Compose => {
-                composed = self.filter_candidate(
-                    served.session,
-                    side.shard,
-                    Some(&side.geometry.fragment),
-                )?;
+                composed = self.filter_candidate(served.session, side.shard, fragment.as_ref())?;
                 (&composed, Some(&composed))
             }
             FilterCandidate::Whole(whole) => (whole, Some(whole)),
@@ -1021,28 +1027,24 @@ impl Engine {
         let unique = |column: &str, keys: &[mosaica_store::unique::UniqueKey]| {
             unique_holders(served.generation, side.shard, column, keys)
         };
-        let shard = served
-            .generation
-            .shard_arc(side.shard.id())
-            .filter(|shard| std::ptr::eq(shard.as_ref(), side.shard));
-        let text: &crate::filter::TextResolver<'_> =
-            &|column, query, at, evaluate| match shard {
-                Some(shard) => crate::text_filter_cache::answer(
-                    &self.text_filter_cache,
-                    shard,
-                    crate::text_filter_cache::key_of(
-                        shard,
-                        served.session.terms_digest(),
-                        column,
-                        query,
-                    ),
-                    whole,
-                    at,
-                    cancel,
-                    evaluate,
+        let fragment = fragment.as_ref().map(|fragment| fragment.view());
+        let text: &crate::filter::TextResolver<'_> = &|column, query, at, evaluate| {
+            let at_whole = whole.is_some_and(|whole| std::ptr::eq(whole, at) || whole == at);
+            crate::text_filter_cache::answer(
+                &self.text_filter_cache,
+                side.shard,
+                crate::text_filter_cache::key_of(
+                    side.shard,
+                    served.session.terms_digest(),
+                    column,
+                    query,
                 ),
-                None => evaluate(at),
-            };
+                fragment.as_deref().filter(|_| at_whole),
+                at,
+                cancel,
+                evaluate,
+            )
+        };
         let resolvers = crate::filter::RowLeafResolvers {
             regions: &regions,
             members: &members,

@@ -2,18 +2,26 @@
 //! `match` or `phrase` sends it again with every viewport, and over a large corpus a common phrase
 //! costs the same each time.
 //!
-//! # What an answer is a function of
+//! # What an entry holds, and why a request may read it
 //!
-//! A text leaf evaluated under a candidate answers the candidate's members whose value in one of the
-//! column's layers carries the query, so its answer is `P ∩ C`: `P` read from the shard's text
-//! layers and `C` the candidate. The entry holds `P ∩ C` for the candidate
-//! [`crate::Engine::filter_candidate`] composes, and that candidate is the session's fragment less
-//! the shard's overlay, plus the buffered entities whose verdict passes. Every request's candidate
-//! is that set or a subset of it, and the answer under a subset `S` is `P ∩ S`, so an entry
-//! intersected with the request's candidate is that request's answer exactly.
+//! A text leaf evaluated under a candidate `C` answers `C ∩ M`, where `M` is the set of entities
+//! whose value in one of the column's text layers carries the query: every posting it reads is
+//! narrowed to `C` before anything is counted, and a phrase then tests each survivor's positions
+//! alone. An entry holds `F ∩ M`, with `F` the session's fragment, the items the grant covers before
+//! the overlay's deletions and suppressions are taken out and the buffered entities whose verdict
+//! passes are put in. A request's candidate is a subset of `F` plus buffered entities, and a
+//! buffered entity has no value in any text layer, since the layers hold flushed entities and the
+//! fold that frees an id removes its values. So `C ∩ M` is `C ∩ (F ∩ M)`, and a request reads an
+//! entry by intersecting it with its own candidate.
 //!
-//! That needs the entry's candidate to be the one the request's is a subset of, and `P` to be the
-//! one the request would read. [`TextLeafKey`] names both.
+//! That makes an entry independent of the overlay and the buffer, so it outlives a window close, a
+//! deletion, a suppression and a lift. [`TextLeafKey`] names what it does depend on: the column's
+//! layers and the fragment.
+//!
+//! An entry holds entities a deny hides from the grant. Nothing read from them reaches a response
+//! except through that intersection: the evaluation over `F` counts nothing a request sees, and one
+//! that fails is evaluated again under the request's own candidate, whose answer or refusal is the
+//! one the request gets.
 //!
 //! # Bound and peak
 //!
@@ -37,39 +45,42 @@ use mosaica_cache::{
 use mosaica_types::ShardId;
 
 use crate::cancel::CancelToken;
-use crate::filter::{FilterError, TextQuery};
+use crate::filter::{FilterColumns, FilterError, TextQuery};
 use crate::{Generation, Shard};
 
 /// `serve.text_filter_cache_bytes` where it is not set.
 pub const DEFAULT_TEXT_FILTER_CACHE_BYTES: u64 = 256 << 20;
 
-/// What one text leaf's answer in one shard is a function of.
+/// What one text leaf's entry in one shard is a function of.
 ///
-/// - `snapshot`: the address of the shard as the request's generation holds it
-///   ([`Generation::shard_arc`]). Its text layers, its overlay, its buffer, its watermark and its
-///   identity are all held in that one immutable value, and a publication that changes any of them
-///   holds a new one. The entry keeps a [`Weak`] to it, so while the entry exists no other shard
-///   can be allocated at that address.
-/// - `grant`: the session's grant ([`crate::Session::terms_digest`]), which the fragment is the
-///   union of. A session's satisfied keys are the keys of its grant, or every key for a `read-all`
-///   grant, so this names them too.
+/// - `columns`: the address of the shard's filter columns, which hold its text layers. They are
+///   immutable: a flush, a coalesce, a fold and a schema change each publish new ones, and a window
+///   close, a deny and a lift keep them. The entry keeps a [`Weak`] to them, so while the entry
+///   exists nothing else can be allocated at that address.
+/// - `identity`, `watermark` and `grant`: the fragment, which [`crate::Engine::fragment_for`]
+///   takes at the shard's identity and watermark for the session's grant
+///   ([`crate::Session::terms_digest`]). A window close, a deny and a lift move neither. A
+///   session's satisfied keys are the keys of its grant, or every key for a `read-all` grant, so
+///   the grant names them too.
 /// - `digest`: of the leaf's [`canonical`] bytes, its column and its operand as the column's
 ///   analyser reads it. The bytes themselves are held in the entry, where the bound counts them,
 ///   and compared on every hit.
 ///
-/// `shard` is carried beside the address so a prune can find the shard the entry is for.
+/// `shard` is carried beside the rest so a prune can find the shard the entry is for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct TextLeafKey {
     pub shard: ShardId,
-    pub snapshot: usize,
+    pub columns: usize,
+    pub identity: [u8; 32],
+    pub watermark: u64,
     pub grant: [u8; 32],
     pub digest: [u8; 16],
 }
 
-/// One text leaf's answer under the whole candidate of its key.
+/// One text leaf's matches within the fragment its key names.
 pub(crate) struct TextLeaf {
     canonical: Vec<u8>,
-    snapshot: Weak<Shard>,
+    columns: Weak<FilterColumns>,
     entities: Bitmap,
 }
 
@@ -99,17 +110,21 @@ fn canonical(column: &str, query: &TextQuery) -> Vec<u8> {
 
 pub(crate) type TextFilterCache = SingleFlightCache<TextLeafKey, TextLeaf>;
 
-/// Drop every answer taken over a shard `live` does not hold: no request can name it again.
+/// Drop every entry over filter columns or a fragment `live` no longer holds: no request can name
+/// it again.
 pub(crate) fn prune_superseded(cache: &TextFilterCache, live: &Generation) -> usize {
     cache.retain_keys(|key| {
-        live.shard_arc(key.shard)
-            .is_some_and(|shard| Arc::as_ptr(shard) as usize == key.snapshot)
+        live.shard(key.shard).is_some_and(|shard| {
+            Arc::as_ptr(&shard.filter_columns) as usize == key.columns
+                && shard.identity == key.identity
+                && shard.watermark == key.watermark
+        })
     })
 }
 
 /// The key of `column`'s leaf `query` in `shard` for `grant`, and the leaf's canonical bytes.
 pub(crate) fn key_of(
-    shard: &Arc<Shard>,
+    shard: &Shard,
     grant: [u8; 32],
     column: &str,
     query: &TextQuery,
@@ -117,25 +132,28 @@ pub(crate) fn key_of(
     let canonical = canonical(column, query);
     let key = TextLeafKey {
         shard: shard.id(),
-        snapshot: Arc::as_ptr(shard) as usize,
+        columns: Arc::as_ptr(&shard.filter_columns) as usize,
+        identity: shard.identity,
+        watermark: shard.watermark,
         grant,
         digest: crate::region::digest_of(&canonical),
     };
     (key, canonical)
 }
 
-/// `evaluate(candidate)`, read from `cache` under `leaf`'s key where it holds the answer.
+/// `evaluate(candidate)`, from `cache`'s entry for `leaf` in `shard` intersected with `candidate`.
 ///
-/// `whole` is the candidate the key names, where the caller composed it. Only an answer under it
-/// is kept, and concurrent requests for it compute it once; a request waiting on another's
-/// computation stops when `cancel` reports it gone. A smaller candidate reads an answer already
-/// kept, intersected with it, and computes its own otherwise. An entry whose canonical bytes are
-/// not the leaf's is a digest collision, and the leaf is evaluated instead.
+/// `fragment` is the grant's fragment in `shard`, given where `candidate` is the request's whole
+/// candidate. Only then is a missing entry computed, as `evaluate(fragment)`, and kept; concurrent
+/// requests for it compute it once, and a request waiting on another's computation stops when
+/// `cancel` reports it gone. A smaller candidate reads an entry already kept and is evaluated
+/// otherwise. An evaluation over the fragment that fails, and an entry whose canonical bytes are
+/// not the leaf's, which is a digest collision, are answered by evaluating under `candidate`.
 pub(crate) fn answer(
     cache: &TextFilterCache,
-    shard: &Arc<Shard>,
+    shard: &Shard,
     (key, canonical): (TextLeafKey, Vec<u8>),
-    whole: Option<&Bitmap>,
+    fragment: Option<&Bitmap>,
     candidate: &Bitmap,
     cancel: &Option<CancelToken>,
     evaluate: &dyn Fn(&Bitmap) -> Result<Bitmap, FilterError>,
@@ -143,25 +161,27 @@ pub(crate) fn answer(
     if cache.bound_bytes() == 0 {
         return evaluate(candidate);
     }
-    let is_whole = whole.is_some_and(|whole| std::ptr::eq(whole, candidate) || whole == candidate);
-    let entry = if is_whole {
+    let entry = if let Some(fragment) = fragment {
         let waiting: &dyn Cancel = match cancel {
             Some(token) => token,
             None => &NeverCancelled,
         };
         let built = cache.get_or_try_build_waiting(key, waiting, || {
-            let mut entities = evaluate(candidate)?;
+            let mut entities = evaluate(fragment)?;
             entities.run_optimize();
             entities.shrink_to_fit();
             Ok(TextLeaf {
                 canonical: canonical.clone(),
-                snapshot: Arc::downgrade(shard),
+                columns: Arc::downgrade(&shard.filter_columns),
                 entities,
             })
         });
         match built {
             Ok(entry) => entry,
-            Err(WaitingBuildError::Build(e)) => return Err(e),
+            Err(WaitingBuildError::Build(FilterError::Cancelled)) => {
+                return Err(FilterError::Cancelled)
+            }
+            Err(WaitingBuildError::Build(_)) => return evaluate(candidate),
             Err(WaitingBuildError::Wait(WaitEnded::Cancelled)) => {
                 return Err(FilterError::Cancelled)
             }
@@ -176,11 +196,11 @@ pub(crate) fn answer(
     if entry.canonical != canonical {
         return evaluate(candidate);
     }
-    debug_assert!(std::ptr::eq(entry.snapshot.as_ptr(), Arc::as_ptr(shard)));
-    Ok(match is_whole {
-        true => entry.entities.clone(),
-        false => entry.entities.and(candidate),
-    })
+    debug_assert!(std::ptr::eq(
+        entry.columns.as_ptr(),
+        Arc::as_ptr(&shard.filter_columns)
+    ));
+    Ok(entry.entities.and(candidate))
 }
 
 #[cfg(test)]
@@ -191,24 +211,46 @@ mod tests {
 
     use super::*;
 
-    /// **An evaluation that fails leaves nothing kept**, so the next request evaluates again, and
-    /// a kept answer is read under a smaller candidate as its intersection with it.
+    /// **An entry is computed over the fragment and read under each candidate as its intersection
+    /// with it**, an evaluation that is cancelled leaves nothing kept, one that fails over the
+    /// fragment is answered under the candidate, and a digest collision is evaluated.
     #[test]
-    fn a_failed_evaluation_is_not_kept_and_a_kept_one_is_read_under_any_candidate() {
+    fn an_entry_is_read_under_each_candidate_and_only_a_good_evaluation_is_kept() {
         let generation = Generation::synthetic("v00000", 1, 0, Overlay::new(), IngestBuffer::new());
-        let shard = generation.shard_arc(ShardId::ZERO).expect("one shard");
+        let shard = generation.only_shard();
         let cache = TextFilterCache::new(1 << 20);
         let query = TextQuery::Phrase {
             words: vec!["of".to_string(), "the".to_string()],
         };
         let key = || key_of(shard, [7; 32], "prose", &query);
+        // 10..20 are the grant's but denied, so in the fragment and not the candidate.
+        let fragment = Bitmap::from_range(0..20);
         let whole = Bitmap::from_range(0..10);
+        let ask = |leaf, candidate: &Bitmap, evaluate: &dyn Fn(&Bitmap) -> _| {
+            answer(
+                &cache,
+                shard,
+                leaf,
+                Some(&fragment),
+                candidate,
+                &None,
+                evaluate,
+            )
+        };
 
-        let cancelled = answer(&cache, shard, key(), Some(&whole), &whole, &None, &|_| {
-            Err(FilterError::Cancelled)
-        });
+        let cancelled = ask(key(), &whole, &|_| Err(FilterError::Cancelled));
         assert_eq!(cancelled, Err(FilterError::Cancelled));
         assert_eq!(cache.len(), 0, "a cancelled evaluation is not kept");
+
+        let unreadable = |candidate: &Bitmap| match candidate.contains(15) {
+            true => Err(FilterError::UniqueUnreadable {
+                column: "prose".to_string(),
+                detail: "a hidden entity's entry".to_string(),
+            }),
+            false => Ok(candidate.and(&Bitmap::of(&[2]))),
+        };
+        assert_eq!(ask(key(), &whole, &unreadable), Ok(Bitmap::of(&[2])));
+        assert_eq!(cache.len(), 0, "a failed evaluation is not kept");
 
         let evaluations = Cell::new(0);
         let evaluate = |candidate: &Bitmap| {
@@ -216,27 +258,16 @@ mod tests {
             Ok(candidate.and(&Bitmap::of(&[2, 3, 12])))
         };
         for _ in 0..2 {
-            let got = answer(&cache, shard, key(), Some(&whole), &whole, &None, &evaluate);
-            assert_eq!(got, Ok(Bitmap::of(&[2, 3])));
+            assert_eq!(ask(key(), &whole, &evaluate), Ok(Bitmap::of(&[2, 3])));
         }
-        assert_eq!(evaluations.get(), 1, "the repeat is the kept answer");
+        assert_eq!(evaluations.get(), 1, "the repeat is the kept entry");
 
+        let lifted = Bitmap::from_range(0..13);
+        assert_eq!(ask(key(), &lifted, &evaluate), Ok(Bitmap::of(&[2, 3, 12])));
         let smaller = Bitmap::of(&[3, 4]);
-        let got = answer(
-            &cache,
-            shard,
-            key(),
-            Some(&whole),
-            &smaller,
-            &None,
-            &evaluate,
-        );
+        let got = answer(&cache, shard, key(), None, &smaller, &None, &evaluate);
         assert_eq!(got, Ok(Bitmap::of(&[3])));
-        assert_eq!(
-            evaluations.get(),
-            1,
-            "a smaller candidate reads the kept answer"
-        );
+        assert_eq!(evaluations.get(), 1, "every candidate reads the kept entry");
 
         // Another leaf's bytes under this leaf's digest stand for a collision.
         let other = TextQuery::Match {
@@ -244,15 +275,7 @@ mod tests {
             minimum: 1,
         };
         let colliding = (key().0, key_of(shard, [7; 32], "prose", &other).1);
-        let got = answer(
-            &cache,
-            shard,
-            colliding,
-            Some(&whole),
-            &whole,
-            &None,
-            &|_| Ok(Bitmap::of(&[9])),
-        );
+        let got = ask(colliding, &whole, &|_| Ok(Bitmap::of(&[9])));
         assert_eq!(got, Ok(Bitmap::of(&[9])), "a collision is evaluated");
     }
 }

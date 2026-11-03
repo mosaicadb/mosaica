@@ -8770,7 +8770,7 @@ components:
           allOf:
             - $ref: "#/components/schemas/SharedCacheStatus"
         text_filter_cache:
-          description: The items each `match` and `phrase` filter matches, per shard and set of access attributes, kept while the corpus is unchanged.
+          description: The items each `match` and `phrase` filter matches, per shard and set of access attributes, kept until the next flush, coalesce or compaction.
           allOf:
             - $ref: "#/components/schemas/SharedCacheStatus"
         derived_cache:
