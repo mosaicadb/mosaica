@@ -358,12 +358,13 @@ impl Files for Home {
             ],
             Home::CategoryPostings => vec![attrs.join("band/postings.arrow")],
             Home::KeywordDictionary => vec![attrs.join("tag").join(mosaica_filter::DICT_FILE)],
-            // Both halves, because they are one record: a posting is a position in *this*
-            // dictionary, so a fold that rewrote one and carried the other forward answers every
-            // `match` from the wrong words with no symptom.
+            // All three, because they are one record: a posting and a positions record are
+            // positions in *this* dictionary, so a fold that rewrote one and carried another
+            // forward answers every `match` or `phrase` from the wrong words with no symptom.
             Home::TextIndex => vec![
                 attrs.join("prose").join(mosaica_filter::DICT_FILE),
-                attrs.join("prose/postings.arrow"),
+                attrs.join("prose").join(mosaica_filter::POSTINGS_FILE),
+                attrs.join("prose").join(mosaica_filter::POSITIONS_FILE),
             ],
             Home::RecordBlob => files_under(&attrs.join("record")),
             Home::TermPostings => vec![shard.join("terms/postings.arrow")],

@@ -685,6 +685,36 @@ async fn a_scoped_text_column_matches_per_view() {
     assert!(!pinned.is_empty());
 }
 
+/// **A text family answers `phrase` from the view's own positions**: the words in order where
+/// that quarter's prose says them, nothing in the other order, and one entity for the phrase only
+/// its prose holds.
+#[tokio::test]
+async fn a_scoped_text_column_answers_a_phrase_per_view() {
+    let served = Served::build(build_families).await;
+    for (slot, (key, _)) in QUARTERS.iter().enumerate() {
+        let view = format!("quarter:{key}");
+        let word = WORDS[slot];
+        let saying = |phrase: String| ids(&served, &view, Some(json!({"note": {"phrase": phrase}})));
+        let own = saying(format!("the {word} report")).await;
+        assert_eq!(
+            own.len(),
+            with_word(slot, word).len(),
+            "{view} must find its own prose's phrase"
+        );
+        assert!(!own.is_empty());
+        assert!(
+            saying(format!("report {word} the")).await.is_empty(),
+            "{view} matched the words in another order"
+        );
+        let entity = *with_word(slot, word).first().expect("a quarter has prose");
+        assert_eq!(
+            saying(format!("for entity {entity}")).await.len(),
+            1,
+            "{view}: only entity {entity}'s prose says this"
+        );
+    }
+}
+
 /// **A family with its own `source` is routed by `fields.view`.** One file carries every
 /// `(entity, view)` row interleaved; each view's column is the rows whose discriminator is that
 /// view's key, and the per-view answers differ.
