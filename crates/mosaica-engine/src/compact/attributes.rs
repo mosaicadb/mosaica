@@ -78,8 +78,8 @@ fn column_jobs(
     jobs
 }
 
-/// Pass 4a, text: each indexed text column's dictionary, postings and presence merged across its
-/// layers, less the tombstone set. A suppression changes no artefact. A word whose only carriers
+/// Pass 4a, text: each indexed text column's dictionary, postings, positions and presence merged
+/// across its layers, less the tombstone set. A suppression changes no artefact. A word whose only carriers
 /// were deleted leaves the dictionary.
 pub(super) fn fold_text_columns(
     plan: &FoldPlan,
@@ -136,13 +136,8 @@ pub(super) fn fold_text_columns(
             .iter()
             .filter(|e| job.holds(&e.column, e.view.as_deref(), e.incarnation))
         {
-            let files = mosaica_filter_write::TextIndexFiles {
-                dict: ctx.from_prefix_dir.join(&extent.dict),
-                postings: ctx.from_prefix_dir.join(&extent.postings),
-                positions: ctx.from_prefix_dir.join(&extent.positions),
-                presence: ctx.from_prefix_dir.join(&extent.presence),
-            };
-            layers.push(open_layer(&files, "an extent")?);
+            let paths = crate::filter::TextExtentPaths::of(&ctx.from_prefix_dir, extent);
+            layers.push(open_layer(&paths.files, "an extent")?);
             out.read(&ctx.from_prefix_dir, extent.files());
         }
         let to = mosaica_filter_write::TextIndexFiles::in_dir(&to_dir);

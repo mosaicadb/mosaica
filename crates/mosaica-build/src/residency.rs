@@ -924,8 +924,9 @@ pub(crate) fn entity_order_residency(
         // than at a constant of their own. The runs spill while the column is resident, so the two
         // stand on the disk together; and a run spends a varint on a `(term, entity)` pair and one
         // on each occurrence's position gap, where the prose spent the term's whole characters
-        // and a separator on every occurrence of it, so the column is a ceiling over them. Charging them the column's arithmetic rather than a second copy of
-        // it is also what keeps the two from drifting apart.
+        // and a separator on every occurrence of it, so the column is a ceiling over them.
+        // Charging them the column's arithmetic rather than a second copy of it is also what
+        // keeps the two from drifting apart.
         //
         // ⊘ The ceiling is modelled, not measured, and it is loose: the one corpus with a run
         // figure — 7.4×10⁷ Overture names — spilled 555 MB against the 2.58 GB this charges. The

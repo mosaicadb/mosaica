@@ -16,8 +16,9 @@
 //!   item order, as runs of 128 with a shorter one last.
 //!
 //! A run of 128 values is one byte holding the bit width and then `BitPacker4x`'s 16 bytes per bit.
-//! A run of fewer values, which is the last block's counts and the last run of each block's gaps,
-//! is each value as a LEB128 varint.
+//! A run of fewer values is each value as a LEB128 varint. That is the counts of a last block
+//! holding fewer than 128 items, and the last run of a block's gaps where they are not a whole
+//! number of runs.
 
 use std::io;
 use std::path::Path;

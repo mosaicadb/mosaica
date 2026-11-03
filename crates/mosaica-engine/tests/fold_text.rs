@@ -628,14 +628,11 @@ fn claims(engine: &Engine, tmp: &Path, tag: &str, entities: &[u32]) -> bool {
     let paths = mosaica_engine::filter::TextExtentPaths {
         column: "prose".to_string(),
         dict_rel: format!("claim-{tag}/dict.bin"),
-        dict: dir.join(mosaica_filter::DICT_FILE),
-        postings: dir.join(mosaica_filter::POSTINGS_FILE),
-        positions: dir.join(mosaica_filter::POSITIONS_FILE),
-        presence: dir.join(mosaica_filter::PRESENCE_FILE),
+        files: mosaica_filter_write::TextIndexFiles::in_dir(&dir),
         prose: None,
     };
     mosaica_store::empty_shard::write_empty_text_index(&dir).unwrap();
-    mosaica_filter::write_presence(&paths.presence, &croaring::Bitmap::of(entities)).unwrap();
+    mosaica_filter::write_presence(&paths.files.presence, &croaring::Bitmap::of(entities)).unwrap();
     let generation = engine.generation();
     match generation
         .only_shard()

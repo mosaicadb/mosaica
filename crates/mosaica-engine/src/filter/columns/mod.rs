@@ -342,14 +342,11 @@ impl TextLayer {
             ),
             false => None,
         };
-        let mmap = access != mosaica_filter::Access::Read;
         text_layer(
-            SortedDict::open_dir(dir, access)?,
-            ColumnPostings::open(&dir.join(mosaica_filter::POSTINGS_FILE), mmap)?,
-            ColumnPositions::open(&dir.join(mosaica_filter::POSITIONS_FILE), mmap)?,
+            &mosaica_filter_write::TextIndexFiles::in_dir(dir),
+            access,
             column,
             "base",
-            mosaica_filter::read_presence(&dir.join(mosaica_filter::PRESENCE_FILE))?,
             None,
             prose,
         )
@@ -368,14 +365,11 @@ impl TextLayer {
                     .map_err(|e| prose_unreadable(&paths.column, e))
             })
             .transpose()?;
-        let mmap = access != mosaica_filter::Access::Read;
         text_layer(
-            SortedDict::open(&paths.dict, access)?,
-            ColumnPostings::open(&paths.postings, mmap)?,
-            ColumnPositions::open(&paths.positions, mmap)?,
+            &paths.files,
+            access,
             &paths.column,
             &paths.dict_rel,
-            mosaica_filter::read_presence(&paths.presence)?,
             Some(paths.dict_rel.clone()),
             prose,
         )
@@ -391,17 +385,19 @@ fn prose_unreadable(column: &str, e: mosaica_filter::RecordError) -> ComposeErro
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn text_layer(
-    dict: SortedDict,
-    postings: ColumnPostings,
-    positions: ColumnPositions,
+    files: &mosaica_filter_write::TextIndexFiles,
+    access: mosaica_filter::Access,
     column: &str,
     which: &str,
-    present: Bitmap,
     dict_rel: Option<String>,
     prose: Option<mosaica_filter::RecordBlob>,
 ) -> Result<TextLayer, ComposeError> {
+    let mmap = access != mosaica_filter::Access::Read;
+    let dict = SortedDict::open(&files.dict, access)?;
+    let postings = ColumnPostings::open(&files.postings, mmap)?;
+    let positions = ColumnPositions::open(&files.positions, mmap)?;
+    let present = mosaica_filter::read_presence(&files.presence)?;
     let counts = TextLayerCounts::of(&dict, &postings, &positions);
     if !counts.agree() {
         return Err(ComposeError::TextCountsDisagree {
@@ -646,10 +642,7 @@ mod tests {
             crate::filter::TextExtentPaths {
                 column: "prose".to_string(),
                 dict_rel: format!("{tag}-dict.bin"),
-                dict: files.dict,
-                postings: files.postings,
-                positions: files.positions,
-                presence: files.presence,
+                files,
                 prose: None,
             }
         };

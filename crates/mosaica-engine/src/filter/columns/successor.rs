@@ -15,13 +15,10 @@ use crate::filter::{
 #[derive(Debug, Clone)]
 pub struct TextExtentPaths {
     pub column: String,
-    /// The manifest path, the layer's identity, distinct from `dict` below, that path resolved
-    /// against the prefix directory.
+    /// The dictionary's manifest path, the layer's identity, distinct from `files.dict`, that
+    /// path resolved against the prefix directory.
     pub dict_rel: String,
-    pub dict: std::path::PathBuf,
-    pub postings: std::path::PathBuf,
-    pub positions: std::path::PathBuf,
-    pub presence: std::path::PathBuf,
+    pub files: mosaica_filter_write::TextIndexFiles,
     /// A group-scoped column's prose.
     pub prose: Option<RecordExtentPaths>,
 }
@@ -33,10 +30,12 @@ impl TextExtentPaths {
         TextExtentPaths {
             column: crate::filter::extent_column_name(&extent.column, extent.view.as_deref()),
             dict_rel: extent.dict.clone(),
-            dict: prefix_dir.join(&extent.dict),
-            postings: prefix_dir.join(&extent.postings),
-            positions: prefix_dir.join(&extent.positions),
-            presence: prefix_dir.join(&extent.presence),
+            files: mosaica_filter_write::TextIndexFiles {
+                dict: prefix_dir.join(&extent.dict),
+                postings: prefix_dir.join(&extent.postings),
+                positions: prefix_dir.join(&extent.positions),
+                presence: prefix_dir.join(&extent.presence),
+            },
             prose: extent
                 .prose
                 .as_ref()

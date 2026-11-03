@@ -76,7 +76,7 @@ pub(crate) fn plan_coalesce(
         }
     }
 
-    // A text extent's dictionary, postings and presence all count toward the input cap.
+    // A text extent's dictionary, postings, positions and presence all count toward the input cap.
     plan.texts = column_windows(&record.text_extents, policy, is_live, |extent| {
         extent.files().map(&size_of).sum()
     });

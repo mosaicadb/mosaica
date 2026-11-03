@@ -617,7 +617,7 @@ pub fn decode_single_batch(buffer: &Buffer, what: &str) -> io::Result<RecordBatc
 
     if let Some(dictionaries) = footer.dictionaries() {
         for block in dictionaries.iter() {
-            let (offset, block_len) = checked_block_range(block, buffer.len())?;
+            let (offset, block_len) = checked_block_range(block, buffer.len(), what)?;
             let data = buffer.slice_with_length(offset, block_len);
             decoder
                 .read_dictionary(block, &data)
@@ -636,7 +636,7 @@ pub fn decode_single_batch(buffer: &Buffer, what: &str) -> io::Result<RecordBatc
     }
 
     let block = batches.get(0);
-    let (offset, block_len) = checked_block_range(block, buffer.len())?;
+    let (offset, block_len) = checked_block_range(block, buffer.len(), what)?;
     let data = buffer.slice_with_length(offset, block_len);
 
     decoder
@@ -649,22 +649,26 @@ pub fn decode_single_batch(buffer: &Buffer, what: &str) -> io::Result<RecordBatc
 /// returning them as checked `usize`s. A corrupt footer could report a negative value or an
 /// overflowing sum, and `Buffer::slice_with_length` panics on out-of-bounds input, so every
 /// field is checked here first.
-fn checked_block_range(block: &arrow::ipc::Block, buffer_len: usize) -> io::Result<(usize, usize)> {
+fn checked_block_range(
+    block: &arrow::ipc::Block,
+    buffer_len: usize,
+    what: &str,
+) -> io::Result<(usize, usize)> {
     let offset = usize::try_from(block.offset())
-        .map_err(|_| invalid_data("postings.arrow: block offset is negative"))?;
+        .map_err(|_| invalid_data(format!("{what}: block offset is negative")))?;
     let body_len = usize::try_from(block.bodyLength())
-        .map_err(|_| invalid_data("postings.arrow: block bodyLength is negative"))?;
+        .map_err(|_| invalid_data(format!("{what}: block bodyLength is negative")))?;
     let meta_len = usize::try_from(block.metaDataLength())
-        .map_err(|_| invalid_data("postings.arrow: block metaDataLength is negative"))?;
+        .map_err(|_| invalid_data(format!("{what}: block metaDataLength is negative")))?;
     let block_len = body_len
         .checked_add(meta_len)
-        .ok_or_else(|| invalid_data("postings.arrow: block length overflows"))?;
+        .ok_or_else(|| invalid_data(format!("{what}: block length overflows")))?;
     let end = offset
         .checked_add(block_len)
-        .ok_or_else(|| invalid_data("postings.arrow: block offset + length overflows"))?;
+        .ok_or_else(|| invalid_data(format!("{what}: block offset + length overflows")))?;
     if end > buffer_len {
         return Err(invalid_data(format!(
-            "postings.arrow: block range [{offset}, {end}) exceeds file length {buffer_len}"
+            "{what}: block range [{offset}, {end}) exceeds file length {buffer_len}"
         )));
     }
     Ok((offset, block_len))
