@@ -560,9 +560,9 @@ const TEXT_INDEX_SHARE_PERCENT: u64 = 35;
 /// What a `text` column's `positions.arrow` costs against its characters, in hundredths.
 ///
 /// ⊘ **An estimate, not a ceiling.** A position is a gap packed to its run's width, a byte or less
-/// for every word but the rarest, and a token with the space after it is about six characters of
-/// English prose. Measured at 0.46 GB over the 2.4×10⁶ arXiv abstracts, about a fifth of their
-/// characters; charged a quarter.
+/// for every word but the rarest. Measured on the 2.4×10⁶ arXiv sample: 0.204 of the characters on
+/// `abstract` (471 MB over 2.31 GB), 0.137 on `title`, 0.227 on `authors`. Charged a little above
+/// the largest.
 const TEXT_POSITIONS_SHARE_PERCENT: u64 = 25;
 
 /// What one `dict.bin` entry costs beyond the characters it holds, in tenths of a byte: two
