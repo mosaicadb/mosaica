@@ -121,7 +121,9 @@ ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache
 and its system log tables, which are off. A dense tile's sample is its K matching rows of lowest
 `rank`, by `ORDER BY tile, rank LIMIT K BY tile`, ClickHouse's documented way to take the first
 rows of each group; one query answers sparse and dense tiles alike. `rank` is a plain column,
-outside the sort key, since no query filters by it. `SAMPLE` was not used: it needs a sampling
+outside the sort key, since no query filters by it; ClickHouse has no secondary index that
+returns rows in an order (its skipping indexes only skip granules), and reading in order applies
+to the sort key alone. `SAMPLE` was not used: it needs a sampling
 key in the table's sort key, samples a fraction of the whole table rather than K a tile, and so
 cannot give exactly K from each dense tile. It leaves `index_granularity` (8192),
 `max_insert_threads` and `max_threads` (both `auto`, 12 on this machine) at their defaults, and
@@ -177,15 +179,35 @@ setting is in `SETTINGS` and each record lists them with the server's values:
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
 | `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | From the columns' statistics alone the planner overestimates the cells of a grid or tile grouping many times over, and does not then aggregate in parallel |
 
-A dense tile's sample is its K matching rows of lowest `rank`, by `row_number() OVER (PARTITION BY`
-the tile `ORDER BY rank)` over the camera's matching rows, kept where the row number is at most K;
-one query answers sparse and dense tiles alike. The window reads the rows the arm's tile condition
-selects, by the index where the arm can use it, and sorts them; `rank` has no index, since a
-per-tile top K over an index on `rank` alone would walk that index past every other tile's rows,
-and an index on the tile and `rank` would serve one zoom only. `TABLESAMPLE` was not used: it
-samples pages or rows of the whole table by a fraction, before the policy and the filter, so it
-cannot give exactly K matching rows a tile. Each record keeps the viewer's plan of one points
-query.
+A dense tile's sample is its K matching rows of lowest `rank`. Three ways of asking for it were
+measured, each exact, over every frame of the three workloads, warm, as the viewer (median ms by
+zoom). Each record's `config` keeps the viewer's plan of the arm's query at zoom 0 and at
+zoom 8:
+
+| Query | Arm | Zoom 0 | 3 | 4 | 6 | 8 | 12 | 16 | All frames |
+|---|---|---|---|---|---|---|---|---|---|
+| `row_number() OVER (PARTITION BY` tile `ORDER BY rank)` over the camera's rows | `postgis+integer` | 1,316 | 661 | 168 | 42 | 4.9 | 0.7 | 0.6 | 7.6 s |
+| | `postgis+leakproof` | 1,169 | 759 | 80 | 31 | 2.2 | 0.7 | 0.7 | 6.9 s |
+| | **`postgis` (used)** | 996 | 636 | 77 | 44 | 26 | 25 | 26 | **7.9 s** |
+| One `ORDER BY rank LIMIT K` subquery a tile, `UNION ALL`, with a B-tree on `rank` | **`postgis+integer` (used)** | 1.6 | 146 | 56 | 39 | 7.2 | 2.3 | 1.8 | **2.7 s** |
+| | **`postgis+leakproof` (used)** | 1.2 | 108 | 77 | 21 | 3.2 | 2.0 | 1.9 | **1.7 s** |
+| | `postgis` | 1.1 | 256 | 332 | 355 | 374 | 332 | 322 | 32.3 s |
+| `CROSS JOIN LATERAL` the same subquery over a `VALUES` list of the tiles | `postgis+integer` | 1.3 | 267 | 80 | 36 | 6.1 | 1.1 | 0.6 | 2.6 s |
+| | `postgis+leakproof` | 1.6 | 1,452 | 1,316 | 1,096 | 1,452 | 1,243 | 1,221 | 111 s |
+| | `postgis` | 1.4 | 1,333 | 1,287 | 1,118 | 1,233 | 1,226 | 1,277 | 107 s |
+
+The window sorts every matching row in the camera, 860,000 of them at zoom 0, spilling to disc.
+With a subquery a tile, each with the tile's bounds as constants, the planner chooses for each
+tile: it walks the `rank` index and stops after K matching rows where the tile holds a large
+share of the table, and reads the tile from the spatial index and keeps the K lowest ranks with a
+top-N sort where it holds few. A comparison of `rank` is leakproof, so the index serves the
+viewer under the policy. The lateral form gets one plan for every tile, since its bounds are
+parameters; in the GiST arms it cannot use `&&`, whose box must be a constant here, and walks
+the `rank` index across the whole table. So `postgis+integer` and `postgis+leakproof` use a
+subquery a tile and build the `rank` index, and `postgis`, whose viewer cannot use the spatial
+index and scans the table for each subquery, uses the window over one scan and builds no `rank`
+index. `TABLESAMPLE` was not used: it samples pages or rows of the whole table by a fraction,
+before the policy and the filter, so it cannot give exactly K matching rows a tile.
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
 `wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` and the table and index made in
 the same transaction may skip the WAL; `maintenance_work_mem = 2GB`; and `max_wal_size = 16GB`

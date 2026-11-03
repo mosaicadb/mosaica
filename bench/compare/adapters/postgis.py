@@ -23,9 +23,11 @@ integer, and `geom` is the same position as a point in quantised space.
 
 A frame is two queries sent at once on two connections, each a `COPY (...) TO STDOUT` in the
 binary format: the count grid (`GROUP BY` the cell, `qx` and `qy` shifted right), and the
-positions. Under the `points` frame those are each tile's K matching rows of lowest `rank`, by
-`row_number() OVER (PARTITION BY` the tile `ORDER BY rank)`, which is every row of a sparse tile;
-under `counts`, every position in the tiles whose count is at most K. The aggregation workload is two `GROUP BY`
+positions. Under the `points` frame those are each tile's K matching rows of lowest `rank`,
+every row of a sparse tile: where the arm's spatial index serves the viewer, one `ORDER BY rank
+LIMIT K` subquery a tile, joined by `UNION ALL`, over a B-tree on `rank` beside the spatial index;
+in `postgis`, whose viewer scans the table, `row_number() OVER (PARTITION BY` the tile `ORDER BY
+rank)` over one scan. Under `counts`, every position in the tiles whose count is at most K. The aggregation workload is two `GROUP BY`
 queries sent at once. PostgreSQL keeps no result cache, so `--caches compute` and `defaults` run
 the same server.
 
@@ -120,10 +122,13 @@ TABLES = {
 }
 
 
-def statements(index: str) -> tuple[str, ...]:
+def statements(index: str, rank_index: bool) -> tuple[str, ...]:
     """The build after the load, in order."""
     select, create_index = TABLES[index]
     return (f"CREATE TABLE points AS {select}", "DROP TABLE staging", create_index,
+            # Each tile's K lowest ranks, walked in rank order where a tile holds enough of the
+            # table that K matching rows come soon.
+            *(["CREATE INDEX points_rank ON points (rank)"] if rank_index else []),
             # The cells at each depth a grid or a tile is grouped by, whose count the planner
             # cannot estimate from the columns' statistics; overestimated, it does not aggregate
             # in parallel.
@@ -131,11 +136,11 @@ def statements(index: str) -> tuple[str, ...]:
               for d in range(MAX_DEPTH + 1)))
 
 
-def tiles_sql(camera: Camera, index: str) -> str:
-    """The rectangle of the camera's tiles, exactly by the bounds on `qx` and `qy`. For GiST, also
-    by `&&`, which the index answers; PostGIS compares boxes in single precision, rounded
-    outwards, so `&&` alone admits points just outside the rectangle."""
-    tx0, tx1, ty0, ty1 = camera.tile_range()
+def tiles_sql(camera: Camera, index: str, tile: tuple[int, int] | None = None) -> str:
+    """The rectangle of the camera's tiles, or of the one `tile`, exactly by the bounds on `qx` and
+    `qy`. For GiST, also by `&&`, which the index answers; PostGIS compares boxes in single
+    precision, rounded outwards, so `&&` alone admits points just outside the rectangle."""
+    tx0, tx1, ty0, ty1 = camera.tile_range() if tile is None else (tile[0], tile[0], tile[1], tile[1])
     s = 32 - camera.zoom
     x0, x1, y0, y1 = tx0 << s, ((tx1 + 1) << s) - 1, ty0 << s, ((ty1 + 1) << s) - 1
     exact = f"qx BETWEEN {x0} AND {x1} AND qy BETWEEN {y0} AND {y1}"
@@ -163,6 +168,8 @@ class PostGIS(Adapter):
         super().__init__(tier, work, nice, caches, dense)
         self.name = arm
         self.index, self.leakproof = ARMS[arm]
+        #: Whether the viewer's tile condition can scan the spatial index under the policy.
+        self.index_under_policy = self.index == "btree" or self.leakproof
         self.access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO "
                        f"{VIEWER_ROLE} USING (licence IN (the viewer's terms)); {VIEWER_ROLE} owns "
                        f"nothing and has SELECT on points alone; every frame and table queried as "
@@ -260,7 +267,8 @@ class PostGIS(Adapter):
             "JOIN pg_proc p ON p.oid = o.oprcode WHERE o.oprname = '&&' "
             "AND o.oprleft = 'geometry'::regtype AND o.oprright = 'geometry'::regtype"))
         mid = Camera(8, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2)
-        return {"arm": self.name, "index": self.index, "build": [STAGING, *statements(self.index)],
+        return {"arm": self.name, "index": self.index,
+                "build": [STAGING, *statements(self.index, self.index_under_policy)],
                 "settings_written": SETTINGS, "build_settings_written": BULK, "settings": settings,
                 "shm_size": SHM, "caches": self.caches,
                 "cache_settings": {"result cache": "none in PostgreSQL",
@@ -270,6 +278,7 @@ class PostGIS(Adapter):
                 "policy": [list(p) for p in policy], "geometry_overlaps_leakproof": leakproof,
                 "plan_zoom8_grid_at_centre": self.explain(self._grid_sql(mid, None)),
                 "plan_zoom8_points_at_centre": self.explain(self._points_sql(mid, None)),
+                "plan_zoom0_points": self.explain(self._points_sql(Camera(0, mid.cx, mid.cy), None)),
                 "container_memory": MEMORY, "load": "COPY staging FROM STDIN (FORMAT csv), "
                 "streamed from pyarrow's CSV writer, in the build's transaction"}
 
@@ -292,7 +301,7 @@ class PostGIS(Adapter):
             with ThreadPoolExecutor(1) as loader:
                 loader.submit(self._load).result()
             phases["load"] = time.monotonic() - t0
-            for statement in statements(self.index):
+            for statement in statements(self.index, self.index_under_policy):
                 t = time.monotonic()
                 self.sql(statement)
                 phase = " ".join(statement.split()[:2]).lower()
@@ -359,7 +368,15 @@ class PostGIS(Adapter):
 
     def _points_sql(self, camera: Camera, filt: Filter | None) -> str:
         where, s = self._where(camera, filt), 32 - camera.zoom
+        if self.dense == "points" and self.index_under_policy:
+            # One subquery a tile, each with its own bounds, so the planner chooses for each
+            # between walking the rank index and sorting the tile's rows from the spatial index.
+            filters = filter_sql(filt, pg_quantise)
+            return " UNION ALL ".join(
+                f"(SELECT qx, qy FROM points WHERE {tiles_sql(camera, self.index, tile)}{filters} "
+                f"ORDER BY rank LIMIT {K})" for tile in camera.tiles())
         if self.dense == "points":
+            # The table is scanned whatever the query, so once, with every tile's rows numbered.
             return (f"SELECT qx, qy FROM (SELECT qx, qy, row_number() OVER (PARTITION BY qx >> {s}, "
                     f"qy >> {s} ORDER BY rank) AS r FROM points WHERE {where}) ranked WHERE r <= {K}")
         return (f"SELECT qx, qy FROM points WHERE {where} AND (qx >> {s}, qy >> {s}) IN ("
