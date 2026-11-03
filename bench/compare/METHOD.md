@@ -44,7 +44,8 @@ screen touches, and holds, for each tile:
   a sample.
 
 A second frame, `counts`, asks a dense tile for no positions, so that figures taken before the
-dense tiles were sampled stay comparable.
+dense tiles were sampled can be compared in shape. They cannot be compared exactly: the tiers
+gained the `rank` column, so their checksums changed, and every build but Mosaica's loads it.
 
 Positions are compared on one grid. Each coordinate is quantised onto 2³² steps across a fixed
 square extent by `floor((v − min) / (max − min) · 2³²)`, clamped to the grid, computed in IEEE
@@ -63,7 +64,9 @@ short of K or past it and those that are not the viewer's matching items or are 
 dense tile's sample cannot be checked item by item, since each system draws its own, so its
 spread is measured instead: the cells 16 times finer than the tile in each direction that the
 sample falls in, against the number that a uniform random sample of as many of the tile's
-matching items falls in on average.
+matching items falls in on average, and a chi-square of the sample's count in each of those cells
+against a uniform sample's. A sample spread more evenly than chance is marked as well as one
+spread less.
 A system that drops points at build time, as precomputed tiles do, has a non-zero error, and the
 error is published with its speed.
 

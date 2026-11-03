@@ -120,7 +120,19 @@ bounds; they are grant state, kept in both modes, and deleted by a cold start.
 ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache settings above
 and its system log tables, which are off. A dense tile's sample is its K matching rows of lowest
 `rank`, by `ORDER BY tile, rank LIMIT K BY tile`, ClickHouse's documented way to take the first
-rows of each group; one query answers sparse and dense tiles alike. `rank` is a plain column,
+rows of each group; one query answers sparse and dense tiles alike. Its pipeline sorts every
+matching row, in parallel, and cuts each stream to K a tile before merging them. Three shapes,
+each sending the same points, were measured once over every frame of the three workloads at 10⁷,
+warm, on a loaded machine (median ms by zoom):
+
+| Query | Zoom 0 | 3 | 4 | 6 | 8 | 12 | 16 | All frames |
+|---|---|---|---|---|---|---|---|---|
+| **`ORDER BY tile, rank LIMIT K BY tile` (used)** | 29 | 269 | 35 | 24 | 10 | 7.2 | 7.2 | **2.6 s** |
+| `arrayJoin(groupArraySorted(K)((rank, qx, qy)))` `GROUP BY` tile | 117 | 158 | 40 | 38 | 13 | 5.5 | 6.2 | 2.6 s |
+| `row_number() OVER (PARTITION BY` tile `ORDER BY rank) <= K` | 844 | 451 | 63 | 31 | 7.9 | 6.2 | 5.9 | 5.3 s |
+
+The aggregation was faster at zoom 3 and slower at zoom 0, and level overall, so `LIMIT BY`
+stays. `rank` is a plain column,
 outside the sort key, since no query filters by it; ClickHouse has no secondary index that
 returns rows in an order (its skipping indexes only skip granules), and reading in order applies
 to the sort key alone. `SAMPLE` was not used: it needs a sampling
@@ -408,13 +420,22 @@ makes each tile's floor `K`. A `mosaica_id` is a keyed Feistel
 permutation of the item's internal number, under a key each build draws at random, so the sample
 is uniform and differs from build to build. Every other system takes the K with the lowest `rank`,
 a column `prepare.py` writes as `splitmix64(entity_id ^ RANK_SEED) >> 1`, which is the same
-method over a stored random value. The samples are therefore different items, and the oracle
-cannot check one item by item. It checks what holds for any correct sample: exactly K positions
+method over a stored random value. `rank` is computed by
+`prepare.py`, outside every build, where Mosaica assigns its `mosaica_id`s inside its timed
+build; the column costs 7.5 ms at 10⁶ rows (7.5 ns a row), so leaving it out of the other builds'
+times changes them by less than their noise. The samples are therefore different items, and the
+oracle cannot check one item by item. It checks what holds for any correct sample: exactly K positions
 from each dense tile, each one of the viewer's matching items there, none sent twice (all three
 point errors), and the sample's spread, as the sub-cells four levels below the tile
 (`SUBCELL_OFFSET` in `frame.py`) that it covers against the number a uniform random sample of the
-same size covers on average. The table gives that ratio. A uniform sample scores about 1, and the
-first K of each tile ordered by position scored 0.18 to 0.42 over the camera script's first frames.
+same size covers on average, and Pearson's chi-square of the sample's count in each of those sub-cells
+against a uniform sample's expectation, corrected for drawing without replacement, as its value a
+degree of freedom and a normal deviate. A uniform sample scores about 1 on both; the table marks
+a column whose coverage is off 1 by more than 3%, either way, or whose deviate is past 5 either
+way. Over the battery and the camera script, the tier's `rank`, three Feistel keys and a numpy
+permutation gave coverage 0.995 to 1.001 and deviates −1.7 to +2.7, and the first K of each tile
+ordered by x gave coverage 0.19 and a deviate of +1,369. A timed frame must also send the same
+sample as the untimed one, since the oracle cannot tell two valid samples apart.
 
 The `counts` frame (`--dense counts`) is the earlier definition, in which a dense tile need send
 nothing and may send up to K, each counted and checked as above; ClickHouse, PostGIS and

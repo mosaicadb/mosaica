@@ -122,7 +122,7 @@ class TimedCheck:
     """Every timed frame and table checked as the untimed pass checks it. Where the untimed answer
     to a step was right in a part (a frame's tile counts, its grid or its points, or a table), the
     timed answer is compared with the oracle's in that part, with every point check `compare`
-    and `Oracle.dense_invalid` make; where the untimed answer was wrong, which its errors already
+    and `Oracle.dense_invalid` make, and its points must also be the untimed answer's; where the untimed answer was wrong, which its errors already
     count, the timed answer is compared with the untimed one, so the figure is repeatability."""
 
     def __init__(self, oracle: Oracle, dense: str):
@@ -152,8 +152,12 @@ class TimedCheck:
         repeat = {"tiles": lambda: got.tiles == before.tiles,
                   "grid": lambda: nonzero(got.grid) == nonzero(before.grid),
                   "points": lambda: same_points(got.points, before.points)}
+        # A right untimed sample must also come back the same: the oracle cannot tell one valid
+        # sample of a dense tile from another.
         wrong = [part for part, keys in PARTS.items()
-                 if (any(cmp[k] for k in keys) if right[part] else not repeat[part]())]
+                 if (any(cmp[k] for k in keys)
+                     or (part == "points" and before is not None and not repeat[part]())
+                     if right[part] else not repeat[part]())]
         self.counts["frames"] += 1
         if wrong:
             self.counts["frames_mismatched"] += 1
@@ -313,8 +317,9 @@ def main() -> None:
                 "frames_exact": sum(1 for c in per if not any(c[k] for k in COUNT_ERRORS + POINT_ERRORS)),
                 **{k: int(sum(c[k] for c in per)) for k in (
                     "matched_true", *COUNT_ERRORS, *POINT_ERRORS, "grid_cells_wrong", "grid_cells_true",
-                    "points_dense", "points_sent", "bytes", "dense_tiles_sampled", "dense_cover")},
-                "dense_cover_expected": float(sum(c["dense_cover_expected"] for c in per)),
+                    "points_dense", "points_sent", "bytes", "dense_tiles_sampled", "dense_cover",
+                    "dense_chi2_df")},
+                **{k: float(sum(c[k] for c in per)) for k in ("dense_cover_expected", "dense_chi2")},
                 "worst": sorted(per, key=lambda c: -sum(c[k] for k in COUNT_ERRORS + POINT_ERRORS))[:3],
             }
         per = []

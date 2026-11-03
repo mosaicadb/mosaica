@@ -170,6 +170,8 @@ class PostGIS(Adapter):
         self.index, self.leakproof = ARMS[arm]
         #: Whether the viewer's tile condition can scan the spatial index under the policy.
         self.index_under_policy = self.index == "btree" or self.leakproof
+        #: Whether each tile's top K walks a B-tree on `rank`, which is then built.
+        self.rank_index = self.index_under_policy and self.dense == "points"
         self.access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO "
                        f"{VIEWER_ROLE} USING (licence IN (the viewer's terms)); {VIEWER_ROLE} owns "
                        f"nothing and has SELECT on points alone; every frame and table queried as "
@@ -268,7 +270,7 @@ class PostGIS(Adapter):
             "AND o.oprleft = 'geometry'::regtype AND o.oprright = 'geometry'::regtype"))
         mid = Camera(8, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2)
         return {"arm": self.name, "index": self.index,
-                "build": [STAGING, *statements(self.index, self.index_under_policy)],
+                "build": [STAGING, *statements(self.index, self.rank_index)],
                 "settings_written": SETTINGS, "build_settings_written": BULK, "settings": settings,
                 "shm_size": SHM, "caches": self.caches,
                 "cache_settings": {"result cache": "none in PostgreSQL",
@@ -301,7 +303,7 @@ class PostGIS(Adapter):
             with ThreadPoolExecutor(1) as loader:
                 loader.submit(self._load).result()
             phases["load"] = time.monotonic() - t0
-            for statement in statements(self.index, self.index_under_policy):
+            for statement in statements(self.index, self.rank_index):
                 t = time.monotonic()
                 self.sql(statement)
                 phase = " ".join(statement.split()[:2]).lower()
@@ -368,7 +370,7 @@ class PostGIS(Adapter):
 
     def _points_sql(self, camera: Camera, filt: Filter | None) -> str:
         where, s = self._where(camera, filt), 32 - camera.zoom
-        if self.dense == "points" and self.index_under_policy:
+        if self.rank_index:
             # One subquery a tile, each with its own bounds, so the planner chooses for each
             # between walking the rank index and sorting the tile's rows from the spatial index.
             filters = filter_sql(filt, pg_quantise)

@@ -13,7 +13,7 @@ import argparse
 import json
 from pathlib import Path
 
-from oracle import COUNT_ERRORS, POINT_ERRORS
+from oracle import COUNT_ERRORS, POINT_ERRORS, chi2_z
 
 GIB = 1 << 30
 #: The fields a record must carry to be tabled; an older record without them is refused.
@@ -29,7 +29,7 @@ def image_of(r: dict):
 
 
 def family(r: dict) -> str:
-    """The system an arm belongs to: `mosaica` for both Mosaica arms."""
+    """The system an arm belongs to, the name before any `+`: `postgis` for every PostGIS arm."""
     return r["system"].split("+")[0]
 
 
@@ -105,11 +105,24 @@ def agg_error_cell(e: dict) -> str:
             f"{e['type_total_true'] + e['year_total_true']:,}")
 
 
+#: Beyond these the spread is marked: coverage off 1 by more than this share, or a chi-square
+#: deviate past this many standard deviations either way. Frames share tiles, so the sums vary
+#: more than independent ones would; uniform orders measured gave deviates up to 2.7.
+COVER_TOLERANCE = 0.03
+CHI2_Z_LIMIT = 5.0
+
+
 def cover_cell(e: dict) -> str:
+    """Coverage against a uniform sample's, and the chi-square per degree of freedom with its
+    deviate; marked where either is unlike a uniform sample, above or below."""
     if not e["dense_tiles_sampled"]:
         return "–"
-    return (f"{e['dense_cover'] / e['dense_cover_expected']:.3f} ({e['dense_cover']:,} of "
-            f"{e['dense_cover_expected']:,.0f}, {e['dense_tiles_sampled']} tiles)")
+    ratio = e["dense_cover"] / e["dense_cover_expected"]
+    z = chi2_z(e["dense_chi2"], e["dense_chi2_df"])
+    odd = abs(ratio - 1) > COVER_TOLERANCE or abs(z) > CHI2_Z_LIMIT
+    return (f"{'**unlike uniform** ' if odd else ''}cover {ratio:.3f} ({e['dense_cover']:,} of "
+            f"{e['dense_cover_expected']:,.0f}); chi² {e['dense_chi2'] / e['dense_chi2_df']:.3f} a df "
+            f"on {e['dense_chi2_df']:,}, z {z:+.1f}; {e['dense_tiles_sampled']} tiles")
 
 
 def timed_cell(e: dict) -> str:
@@ -151,7 +164,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
         rows.append((f"Points sent, {w} (from dense tiles)",
                      lambda r, w=w: f"{r['errors'][w]['points_sent']:,} ({r['errors'][w]['points_dense']:,})"))
         rows.append((f"Bytes received, {w}", lambda r, w=w: size(r["errors"][w]["bytes"])))
-        rows.append((f"Dense-tile samples, {w}: sub-cells covered against a uniform random sample",
+        rows.append((f"Dense-tile samples, {w}: spread against a uniform random sample",
                      lambda r, w=w: cover_cell(r["errors"][w])))
     rows += [("Error versus oracle, aggregation", lambda r: agg_error_cell(r["errors"]["aggregation"])),
              ("Timed responses wrong (against the oracle, or the untimed answer where that was wrong)",

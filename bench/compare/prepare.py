@@ -47,7 +47,8 @@ REPO = HERE.parents[1]
 SOURCE = REPO / "data/ladder/paperseek/points.parquet"
 SOURCE_ROWS = 102117343
 SAMPLE_SEED = 0x6D6F736169636131
-RANK_SEED = 0x6D6F736169636132
+#: The fifth word of SHA-512's initial hash value, unrelated to SAMPLE_SEED.
+RANK_SEED = 0x510E527FADE682D1
 COLUMNS = ["entity_id", "x", "y", "licence", "publication_year", "type", "is_oa"]
 
 SCHEMA = pa.schema([

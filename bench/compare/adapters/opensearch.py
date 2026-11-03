@@ -5,7 +5,8 @@ The build creates an ingest pipeline that quantises `x` and `y` by the frame's r
 drops them, and stores `m16`, the Morton code of the top 16 bits of `qx` and `qy` (x on the even
 bits); and an index of one shard and no replicas with `_source` disabled: `qx`, `qy` and `m16` as
 `long`, `licence` and `type` as `keyword`, `publication_year` as `integer`, `is_oa` as
-`boolean` and `rank` as `long`, each with doc values. Worker processes read the tier's Parquet and send it through the
+`boolean` and `rank` as `long`, each with doc values; `rank` is only sorted by, so it is not
+indexed. Worker processes read the tier's Parquet and send it through the
 pipeline in bulk requests while the index does not refresh; the index is then refreshed,
 force-merged to at most six segments, given back its default refresh interval and flushed, and
 every file in its data directory synced. All of that is timed. The index is sorted by `m16`, so a
@@ -93,7 +94,7 @@ MAPPING = {
     "properties": {"qx": {"type": "long"}, "qy": {"type": "long"}, "m16": {"type": "long"},
                    "licence": {"type": "keyword"}, "type": {"type": "keyword"},
                    "publication_year": {"type": "integer"}, "is_oa": {"type": "boolean"},
-                   "rank": {"type": "long"}},
+                   "rank": {"type": "long", "index": False, "doc_values": True}},
 }
 QUANTISE = """
 for (String a : ['x', 'y']) {
@@ -162,15 +163,15 @@ def frame_requests(camera: Camera, filt: Filter | None, dense: str) -> tuple[dic
     top = lambda sort: {"top_hits": {"size": K, "sort": sort, "_source": False,
                                      "docvalue_fields": ["qx", "qy"]}}
     if dense == "points":
-        sparse = {"top": top([{"rank": "asc"}])}
+        per_tile = {"top": top([{"rank": "asc"}])}
     else:
-        sparse = {"top": top(["_doc"]),
-                  "sparse": {"bucket_selector": {"buckets_path": {"n": "_count"},
-                                                 "script": f"params.n <= {K}"}}}
+        per_tile = {"top": top(["_doc"]),
+                    "sparse": {"bucket_selector": {"buckets_path": {"n": "_count"},
+                                                   "script": f"params.n <= {K}"}}}
     search = lambda aggs: {"size": 0, "track_total_hits": False, "query": where(camera, filt),
                            "aggs": aggs}
     return (search({"grid": cells(grid_depth(camera.zoom))}),
-            search({"tiles": cells(camera.zoom, sparse)}))
+            search({"tiles": cells(camera.zoom, per_tile)}))
 
 
 def tables_request(camera: Camera, filt: Filter | None) -> dict:

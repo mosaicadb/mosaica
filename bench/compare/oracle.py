@@ -137,37 +137,56 @@ class Oracle:
             self.con.unregister("sent")
 
     def coverage(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame) -> dict:
-        """How representative the positions sent from dense tiles are: the sub-cells
-        `SUBCELL_OFFSET` levels below each tile that they fall in, against the number a uniform
-        random sample of as many of the tile's matching items covers on average. A sample spread
-        like a random one scores about 1; one taken from a corner of the tile, far less."""
+        """How the positions sent from dense tiles spread over the sub-cells `SUBCELL_OFFSET`
+        levels below each tile, against a uniform random sample of as many of the tile's matching
+        items, drawn without replacement. Two figures, summed over the dense tiles:
+
+        * `dense_cover` against `dense_cover_expected`: the sub-cells the sample falls in, and the
+          number a uniform sample falls in on average. A sample taken from a corner of the tile
+          covers far fewer; one spread more evenly than chance, more.
+        * `dense_chi2` on `dense_chi2_df` degrees of freedom: Pearson's statistic of the sample's
+          count in each sub-cell against its expectation, `k * n / N` for a sub-cell holding `n` of
+          the tile's `N` items, scaled by `(N - 1) / (N - k)` for drawing without replacement. A
+          uniform sample gives about one a degree of freedom, a clumped one more and one spread
+          evenly less; the statistic is approximate where a sub-cell expects few points."""
         z = camera.zoom
         dense = [t for t, n in truth.tiles.items() if n > K and len(got.points.get(t, ()))]
+        out = {"dense_tiles_sampled": len(dense), "dense_cover": 0, "dense_cover_expected": 0.0,
+               "dense_chi2": 0.0, "dense_chi2_df": 0}
         if not dense:
-            return {"dense_tiles_sampled": 0, "dense_cover": 0, "dense_cover_expected": 0.0}
+            return out
         d = min(z + SUBCELL_OFFSET, 32)
         key = repr((z, camera.cx, camera.cy, filt.leaves if filt else None))
         if key not in self._subcells:
             rows = self.con.execute(
                 f"SELECT qx::UBIGINT >> {32 - d}, qy::UBIGINT >> {32 - d}, count(*) "
                 f"FROM read_parquet('{self.tier}') WHERE {where(camera, filt)} GROUP BY ALL").fetchall()
-            per: dict[tuple[int, int], list[int]] = {}
+            per: dict[tuple[int, int], dict[tuple[int, int], int]] = {}
             for sx, sy, n in rows:
-                per.setdefault((int(sx) >> (d - z), int(sy) >> (d - z)), []).append(int(n))
+                per.setdefault((int(sx) >> (d - z), int(sy) >> (d - z)), {})[(int(sx), int(sy))] = int(n)
             self._subcells[key] = per
         per = self._subcells[key]
-        covered, expected = 0, 0.0
         for t in dense:
             sent = got.points[t].astype(np.uint64) >> np.uint64(32 - d)
-            covered += len({(int(a), int(b)) for a, b in sent})
-            total, k = truth.tiles[t], min(len(sent), truth.tiles[t])
-            for n in per.get(t, []):
+            counts: dict[tuple[int, int], int] = {}
+            for a, b in sent.tolist():
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+            cells = per.get(t, {})
+            total = truth.tiles[t]
+            k = min(len(sent), total)
+            out["dense_cover"] += len(counts)
+            chi2 = 0.0
+            for cell, n in cells.items():
                 rest = total - n
                 # The chance that none of k items drawn without replacement falls in this cell.
                 miss = 0.0 if rest < k else math.exp(math.lgamma(rest + 1) - math.lgamma(rest - k + 1)
                                                      - math.lgamma(total + 1) + math.lgamma(total - k + 1))
-                expected += 1 - miss
-        return {"dense_tiles_sampled": len(dense), "dense_cover": covered, "dense_cover_expected": expected}
+                out["dense_cover_expected"] += 1 - miss
+                want = k * n / total
+                chi2 += (counts.get(cell, 0) - want) ** 2 / want
+            out["dense_chi2"] += chi2 * (total - 1) / (total - k)
+            out["dense_chi2_df"] += len(cells) - 1
+        return out
 
     def tables(self, camera: Camera, filt: Filter | None) -> dict[str, dict[str, int]]:
         """The aggregation workload's two tables over the viewer's matching items in the camera's
@@ -190,6 +209,15 @@ class Oracle:
         out = {"type": {k: int(n) for k, n in types}, "year": {k: int(n) for k, n in years}}
         self._tables[key] = out
         return out
+
+
+def chi2_z(chi2: float, df: int) -> float:
+    """The standard normal deviate of `chi2` on `df` degrees of freedom, by Wilson and Hilferty's
+    cube-root approximation: beyond about 3 either way, the sample is unlike a uniform one."""
+    if df <= 0:
+        return 0.0
+    v = 2 / (9 * df)
+    return ((chi2 / df) ** (1 / 3) - (1 - v)) / math.sqrt(v)
 
 
 def compare_tables(got: dict[str, dict[str, int]], truth: dict[str, dict[str, int]]) -> dict:
