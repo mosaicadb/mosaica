@@ -79,7 +79,7 @@ use sha2::{Digest, Sha256};
 use mosaica_types::view::ViewIncarnation;
 use mosaica_types::TermId;
 
-use crate::derived::{PostingSlice, PostingWalk};
+use crate::derived::PostingWalk;
 use crate::permutation::{ProjectScratch, RowSpace};
 use crate::{le_u32, le_u64};
 
@@ -559,23 +559,10 @@ fn write_term_images(
 /// Read one term's posting into a bitmap the workers can project without holding the walk.
 fn read_posting(posting: PostingWalk<'_>, term: u32) -> io::Result<Posting> {
     let mut entities: Option<Bitmap> = None;
-    posting(term, &mut |slice| {
-        let next = match slice {
-            PostingSlice::Array(bytes) => {
-                let values: Vec<u32> = bytes
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|chunk| u32::from_le_bytes(*chunk))
-                    .collect();
-                let mut bitmap = Bitmap::new();
-                bitmap.add_many(&values);
-                bitmap
-            }
-            PostingSlice::Roaring(view) => view.clone(),
-        };
+    posting(term, &mut |posting| {
+        let next = posting.into_bitmap();
         match entities {
-            None => entities = Some(next),
+            None => entities = Some((*next).clone()),
             Some(ref mut held) => held.or_inplace(&next),
         }
     })?;
@@ -1187,8 +1174,11 @@ pub fn chooser_inputs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mosaica_types::EntityId;
+    use mosaica_authz::{write_postings, PostingRef, PostingsReader};
+    use mosaica_types::{EntityId, SMALL_TERM_THRESHOLD_DEFAULT};
     use std::sync::Arc;
+
+    use crate::derived::walk_posting;
 
     use crate::permutation::Permutation;
 
@@ -1213,13 +1203,17 @@ mod tests {
         RowSpace::new(Arc::new(perm), bound as u32)
     }
 
+    /// `postings` written as a postings file beside `out`, term *t* the *t*-th, and opened.
+    fn postings_file(out: &Path, postings: &[Bitmap]) -> PostingsReader {
+        let path = out.with_extension("postings.arrow");
+        let per_term: Vec<Vec<u32>> = postings.iter().map(Bitmap::to_vec).collect();
+        write_postings(&path, &per_term, SMALL_TERM_THRESHOLD_DEFAULT).expect("write_postings");
+        PostingsReader::open(&path, false).expect("the postings open")
+    }
+
     fn derive(space: &RowSpace, postings: &[Bitmap], out: &Path) -> TermImageSummary {
-        let walk = |term: u32, visit: &mut dyn FnMut(PostingSlice<'_>)| -> io::Result<()> {
-            if let Some(posting) = postings.get(term as usize) {
-                visit(PostingSlice::Roaring(posting));
-            }
-            Ok(())
-        };
+        let reader = postings_file(out, postings);
+        let walk = |term: u32, visit: &mut dyn FnMut(PostingRef<'_>)| walk_posting(&reader, term, visit);
         derive_term_images(
             space,
             postings.len() as u32,
@@ -1301,7 +1295,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let space = identity_space(dir.path(), 1 << 17);
         let walk =
-            |_term: u32, _visit: &mut dyn FnMut(PostingSlice<'_>)| -> io::Result<()> { Ok(()) };
+            |_term: u32, _visit: &mut dyn FnMut(PostingRef<'_>)| -> io::Result<()> { Ok(()) };
         let out = dir.path().join("absent.timg");
         let summary = derive_term_images(
             &space,
@@ -1334,7 +1328,7 @@ mod tests {
         let mut stamp = stamp_of(&space);
         stamp.base_rows += 1;
         let walk =
-            |_term: u32, _visit: &mut dyn FnMut(PostingSlice<'_>)| -> io::Result<()> { Ok(()) };
+            |_term: u32, _visit: &mut dyn FnMut(PostingRef<'_>)| -> io::Result<()> { Ok(()) };
         let out = dir.path().join("mismatched.timg");
         let refused = derive_term_images(&space, 1, &walk, &stamp, &out, DeriveOptions::default());
         assert!(refused.is_err());
@@ -1347,15 +1341,15 @@ mod tests {
         let space = identity_space(dir.path(), 1 << 17);
         let mut dense = Bitmap::new();
         dense.add_range(0..4000);
-        let walk = |term: u32, visit: &mut dyn FnMut(PostingSlice<'_>)| -> io::Result<()> {
+        let out = dir.path().join("interrupted.timg");
+        let reader = postings_file(&out, &[dense.clone(), dense]);
+        let walk = |term: u32, visit: &mut dyn FnMut(PostingRef<'_>)| -> io::Result<()> {
             if term < 2 {
-                visit(PostingSlice::Roaring(&dense));
-                Ok(())
+                walk_posting(&reader, term, visit)
             } else {
                 Err(io::Error::other("the postings file stopped answering"))
             }
         };
-        let out = dir.path().join("interrupted.timg");
         let refused = derive_term_images(
             &space,
             8,
@@ -1390,15 +1384,10 @@ mod tests {
         for i in 0..5u32 {
             small.add(i);
         }
-        let postings = [dense, scattered, small];
-        let walk = |term: u32, visit: &mut dyn FnMut(PostingSlice<'_>)| -> io::Result<()> {
-            if let Some(posting) = postings.get(term as usize) {
-                visit(PostingSlice::Roaring(posting));
-            }
-            Ok(())
-        };
         let stamp = stamp_of(&space);
         let out = dir.join("valid.timg");
+        let reader = postings_file(&out, &[dense, scattered, small]);
+        let walk = |term: u32, visit: &mut dyn FnMut(PostingRef<'_>)| walk_posting(&reader, term, visit);
         let summary = derive_term_images(&space, 4, &walk, &stamp, &out, DeriveOptions::default())
             .expect("derive");
         assert_eq!(summary.kept, 2, "the fixture needs two kept images");

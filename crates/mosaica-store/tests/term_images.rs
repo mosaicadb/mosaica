@@ -17,7 +17,8 @@ use proptest::prelude::*;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use mosaica_store::derived::PostingSlice;
+use mosaica_authz::{write_postings, PostingRef, PostingsReader};
+use mosaica_store::derived::walk_posting;
 use mosaica_store::permutation::Permutation;
 use mosaica_store::term_images::{
     chooser_inputs, derive_term_images, DeriveOptions, TermImageStamp, TermImages,
@@ -25,7 +26,7 @@ use mosaica_store::term_images::{
 };
 use mosaica_store::write::write_permutation;
 use mosaica_store::RowSpace;
-use mosaica_types::{EntityId, TermId};
+use mosaica_types::{EntityId, TermId, SMALL_TERM_THRESHOLD_DEFAULT};
 
 /// Entities in row order, ascending in entity id, taken from `[0, bound)` at `density`, with the
 /// entities in `absent_page` left out altogether so one whole permutation page is missing.
@@ -64,34 +65,19 @@ fn stamp_of(space: &RowSpace) -> TermImageStamp {
     }
 }
 
-/// Ascending little-endian `u32`s, the array form a posting file stores a small term in.
-fn array_bytes(posting: &Bitmap) -> Vec<u8> {
-    posting
-        .iter()
-        .flat_map(|entity| entity.to_le_bytes())
-        .collect()
-}
-
-/// Serve `postings` through a posting walk, every third term as an `Array` slice and the rest as a
-/// `Roaring` one, so both decodes run in every derivation.
+/// Serve `postings` through a posting walk over a postings file holding them, which stores the
+/// small ones as arrays and the rest as Roaring, so both encodings run in every derivation.
 fn derive(
     space: &RowSpace,
     postings: &[Bitmap],
     out: &Path,
     threads: usize,
 ) -> std::io::Result<()> {
-    let arrays: Vec<Vec<u8>> = postings.iter().map(array_bytes).collect();
-    let walk = |term: u32, visit: &mut dyn FnMut(PostingSlice<'_>)| -> std::io::Result<()> {
-        let Some(posting) = postings.get(term as usize) else {
-            return Ok(());
-        };
-        if term.is_multiple_of(3) {
-            visit(PostingSlice::Array(&arrays[term as usize]));
-        } else {
-            visit(PostingSlice::Roaring(posting));
-        }
-        Ok(())
-    };
+    let path = out.with_extension("postings.arrow");
+    let per_term: Vec<Vec<u32>> = postings.iter().map(Bitmap::to_vec).collect();
+    write_postings(&path, &per_term, SMALL_TERM_THRESHOLD_DEFAULT)?;
+    let reader = PostingsReader::open(&path, false)?;
+    let walk = |term: u32, visit: &mut dyn FnMut(PostingRef<'_>)| walk_posting(&reader, term, visit);
     derive_term_images(
         space,
         postings.len() as u32,

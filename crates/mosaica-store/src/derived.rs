@@ -82,7 +82,8 @@ pub type PairWalk<'a> = &'a dyn Fn(&mut dyn FnMut(u32, u32));
 /// One term's postings, handed to a visitor: the shape [`SignatureIndex::build`] walks the
 /// postings through. A callback, because a stored Roaring posting is a view that lives only for
 /// the call.
-pub type PostingWalk<'a> = &'a dyn Fn(u32, &mut dyn FnMut(PostingSlice<'_>)) -> std::io::Result<()>;
+pub type PostingWalk<'a> =
+    &'a dyn Fn(u32, &mut dyn FnMut(mosaica_authz::PostingRef<'_>)) -> std::io::Result<()>;
 
 /// One level's generating sets, visited in ascending ordinal — rank order within each artifact.
 ///
@@ -879,25 +880,14 @@ pub fn sweep_row_column_scratch(scratch: &Path) {
 // The containment partition
 // ---------------------------------------------------------------------------------------------
 
-/// One term's posting, in either stored shape. [`walk_posting`] reads one from a postings file; a
-/// test may hand over an in-memory set.
-pub enum PostingSlice<'a> {
-    /// Ascending little-endian `u32` entity ids.
-    Array(&'a [u8]),
-    /// A Roaring bitmap of entity ids.
-    Roaring(&'a Bitmap),
-}
-
-/// `postings`' record for `term`, handed to `visit` in its stored shape; nothing where it has none.
+/// `postings`' record for `term`, handed to `visit`; nothing where it has none.
 pub fn walk_posting(
     postings: &mosaica_authz::PostingsReader,
     term: u32,
-    visit: &mut dyn FnMut(PostingSlice<'_>),
+    visit: &mut dyn FnMut(mosaica_authz::PostingRef<'_>),
 ) -> std::io::Result<()> {
-    match postings.posting_at(term)? {
-        Some(mosaica_authz::PostingRef::Array(bytes)) => visit(PostingSlice::Array(bytes)),
-        Some(mosaica_authz::PostingRef::Roaring(view)) => visit(PostingSlice::Roaring(&view)),
-        None => {}
+    if let Some(posting) = postings.posting_at(term)? {
+        visit(posting);
     }
     Ok(())
 }
@@ -930,22 +920,18 @@ impl SignatureIndex {
             return Ok(SignatureIndex { by_entity });
         }
         for term in 0..term_count {
-            posting(term, &mut |slice| match slice {
-                // Ascending `u32` little-endian, so the walk is the decode. Tested against
-                // `wanted` one at a time because the array form is the *small* terms, and
-                // materialising a bitmap to intersect would cost more than the probe.
-                PostingSlice::Array(bytes) => {
-                    for chunk in bytes.as_chunks::<4>().0 {
-                        let entity = u32::from_le_bytes(*chunk);
-                        if wanted.contains(entity) {
-                            by_entity.entry(entity).or_default().push(term);
-                        }
-                    }
-                }
+            posting(term, &mut |posting| match posting {
                 // The intersection first: a large term's posting may be the whole corpus, and
                 // `and` is O(containers touched) against a generating-set union that is not.
-                PostingSlice::Roaring(view) => {
+                mosaica_authz::PostingRef::Roaring(view) => {
                     for entity in view.and(wanted).iter() {
+                        by_entity.entry(entity).or_default().push(term);
+                    }
+                }
+                // Tested against `wanted` one at a time because the array form is the *small*
+                // terms, and materialising a bitmap to intersect would cost more than the probe.
+                array => {
+                    for entity in array.iter().filter(|&e| wanted.contains(e)) {
                         by_entity.entry(entity).or_default().push(term);
                     }
                 }
