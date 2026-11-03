@@ -2,7 +2,7 @@ use mosaica_spatial::tiler::ScalarType;
 use mosaica_store::manifest::{AttrExtent, DeclaredScalar, ScopedScalar};
 use mosaica_types::view::ViewIncarnation;
 
-use crate::flush::{failed, remove_spool_on_error, MaintenanceFailed};
+use crate::flush::{failed, MaintenanceFailed};
 
 use super::execute::{FoldContext, FoldOutput};
 use super::plan::FoldPlan;
@@ -98,28 +98,35 @@ pub(super) fn fold_text_columns(
         let to_dir = ctx.to_prefix_dir.join(&column_rel);
         std::fs::create_dir_all(&to_dir).map_err(failed("pass 4a (text)"))?;
 
-        // Dictionaries are read sequentially; postings are not, since the merge interleaves layers.
-        let mut layers = Vec::new();
-        if job.has_base {
-            layers.push((
-                mosaica_filter::SortedDict::open_dir(
-                    &from_dir,
+        // Dictionaries are read sequentially; postings and positions are not, since the merge
+        // interleaves layers.
+        let open_layer = |files: &mosaica_filter_write::TextIndexFiles,
+                          what: &str|
+         -> Result<OpenedText, MaintenanceFailed> {
+            let unreadable = format!("pass 4a (text: {what})");
+            Ok(OpenedText {
+                dict: mosaica_filter::SortedDict::open(
+                    &files.dict,
                     mosaica_filter::Access::MappedSequential,
                 )
-                .map_err(failed("pass 4a (text: the base dictionary)"))?,
-                mosaica_filter::ColumnPostings::open(
-                    &from_dir.join(mosaica_filter::POSTINGS_FILE),
-                    true,
-                )
-                .map_err(failed("pass 4a (text: the base postings)"))?,
-                mosaica_filter::read_presence(&from_dir.join(mosaica_filter::PRESENCE_FILE))
-                    .map_err(failed("pass 4a (text: the base presence)"))?,
-            ));
+                .map_err(failed(unreadable.clone()))?,
+                postings: mosaica_filter::ColumnPostings::open(&files.postings, true)
+                    .map_err(failed(unreadable.clone()))?,
+                positions: mosaica_filter::ColumnPositions::open(&files.positions, true)
+                    .map_err(failed(unreadable.clone()))?,
+                present: mosaica_filter::read_presence(&files.presence).map_err(failed(unreadable.clone()))?,
+            })
+        };
+        let mut layers = Vec::new();
+        if job.has_base {
+            let base = mosaica_filter_write::TextIndexFiles::in_dir(&from_dir);
+            layers.push(open_layer(&base, "the base")?);
             out.read(
                 &from_dir,
                 [
                     mosaica_filter::DICT_FILE,
                     mosaica_filter::POSTINGS_FILE,
+                    mosaica_filter::POSITIONS_FILE,
                     mosaica_filter::PRESENCE_FILE,
                 ],
             );
@@ -129,59 +136,52 @@ pub(super) fn fold_text_columns(
             .iter()
             .filter(|e| job.holds(&e.column, e.view.as_deref(), e.incarnation))
         {
-            layers.push((
-                mosaica_filter::SortedDict::open(
-                    &ctx.from_prefix_dir.join(&extent.dict),
-                    mosaica_filter::Access::MappedSequential,
-                )
-                .map_err(failed("pass 4a (text: an extent's dictionary)"))?,
-                mosaica_filter::ColumnPostings::open(
-                    &ctx.from_prefix_dir.join(&extent.postings),
-                    true,
-                )
-                .map_err(failed("pass 4a (text: an extent's postings)"))?,
-                mosaica_filter::read_presence(&ctx.from_prefix_dir.join(&extent.presence))
-                    .map_err(failed("pass 4a (text: an extent's presence)"))?,
-            ));
+            let files = mosaica_filter_write::TextIndexFiles {
+                dict: ctx.from_prefix_dir.join(&extent.dict),
+                postings: ctx.from_prefix_dir.join(&extent.postings),
+                positions: ctx.from_prefix_dir.join(&extent.positions),
+                presence: ctx.from_prefix_dir.join(&extent.presence),
+            };
+            layers.push(open_layer(&files, "an extent")?);
             out.read(&ctx.from_prefix_dir, extent.files());
         }
-        let dict_rel = format!("{column_rel}/{}", mosaica_filter::DICT_FILE);
-        let postings_rel = format!("{column_rel}/{}", mosaica_filter::POSTINGS_FILE);
-        let presence_rel = format!("{column_rel}/{}", mosaica_filter::PRESENCE_FILE);
-        let dict_path = ctx.to_prefix_dir.join(&dict_rel);
-        let postings_path = ctx.to_prefix_dir.join(&postings_rel);
-        let presence_path = ctx.to_prefix_dir.join(&presence_rel);
-        let spool_path = to_dir.join("postings.spool");
-
+        let to = mosaica_filter_write::TextIndexFiles::in_dir(&to_dir);
         let inputs: Vec<mosaica_filter_write::TextLayerRef<'_>> = layers
             .iter()
-            .map(|(dict, postings, present)| mosaica_filter_write::TextLayerRef {
-                dict,
-                postings,
-                present,
+            .map(|layer| mosaica_filter_write::TextLayerRef {
+                dict: &layer.dict,
+                postings: &layer.postings,
+                positions: &layer.positions,
+                present: &layer.present,
             })
             .collect();
-        remove_spool_on_error(
-            mosaica_filter_write::merge_text_layers(
-                &inputs,
-                &plan.tombstones,
-                &dict_path,
-                &postings_path,
-                &presence_path,
-                &spool_path,
-            ),
-            &spool_path,
-        )
-        .map_err(failed(format!("pass 4a (text: column '{}')", job.name)))?;
+        mosaica_filter_write::merge_text_layers(&inputs, &plan.tombstones, to.clone())
+            .map_err(failed(format!("pass 4a (text: column '{}')", job.name)))?;
 
-        out.wrote(dict_rel, dict_path);
-        out.wrote(postings_rel, postings_path);
-        out.wrote(presence_rel, presence_path);
+        for (name, path) in [
+            mosaica_filter::DICT_FILE,
+            mosaica_filter::POSTINGS_FILE,
+            mosaica_filter::POSITIONS_FILE,
+            mosaica_filter::PRESENCE_FILE,
+        ]
+        .into_iter()
+        .zip(to.paths())
+        {
+            out.wrote(format!("{column_rel}/{name}"), path.to_path_buf());
+        }
         if job.view.is_some() {
             fold_scoped_prose(plan, ctx, job, out)?;
         }
     }
     Ok(())
+}
+
+/// One text layer the fold reads, opened.
+struct OpenedText {
+    dict: mosaica_filter::SortedDict,
+    postings: mosaica_filter::ColumnPostings,
+    positions: mosaica_filter::ColumnPositions,
+    present: croaring::Bitmap,
 }
 
 /// Pass 4a, a group-scoped text column's prose: its base and every extent's merged into a new base

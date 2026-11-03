@@ -403,6 +403,36 @@ fn a_category_filter_agrees_with_the_corpus_under_a_real_mask() {
     assert!(got.andnot(&cand).is_empty());
 }
 
+/// **A phrase names only the items its principal sees.** Each item says its own phrase; under the
+/// subset principal a phrase finds its item exactly where that principal sees it, and under the
+/// wider one everywhere, so the answer is the corpus's restricted to the mask and never more.
+#[test]
+fn a_phrase_names_only_what_its_principal_sees() {
+    let fx = fixture();
+    for (credential, term) in [
+        (subset_credential(), SUBSET_TERM),
+        (full_coverage_credential(), ALL_TERM),
+    ] {
+        let (_engine, cand) = candidate_for(&fx, &credential);
+        let mut total = 0;
+        for e in 0..N {
+            let phrase = |query: String| {
+                fx.columns
+                    .resolve("prose", &FilterOperand::Phrase { query }, &cand)
+                    .expect("prose is filterable")
+            };
+            let got = phrase(prose_of(e));
+            assert_eq!(as_vec(&got), expected(&fx, &[term], |s| s == e), "item {e}");
+            total += got.cardinality();
+            assert!(
+                phrase(format!("p{e:02} shared")).is_empty(),
+                "the words in the other order"
+            );
+        }
+        assert_eq!(total, cand.cardinality(), "one match for each item the principal sees");
+    }
+}
+
 /// The **same operand under a wider principal returns a strict superset**, and the narrower result
 /// is exactly the wider one intersected with the narrower mask. A filter that leaked would break
 /// this by returning something the subset principal cannot account for.

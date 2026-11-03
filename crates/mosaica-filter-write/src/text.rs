@@ -4,8 +4,9 @@
 //!
 //! **One merge, two obligations**, exactly as the value and keyword families are arranged here. The
 //! k-way walk below is the whole of both passes: every term of every layer in sorted order, its
-//! posting the union of the layers that hold it, written into one dictionary and one postings file.
-//! What differs is small, and getting either wrong is silent:
+//! posting the union of the layers that hold it and its positions theirs in item order, written
+//! into one dictionary, one postings file and one positions file. What differs is small, and
+//! getting either wrong is silent:
 //!
 //! - The fold **retires**: `D₀`'s entities are subtracted from every posting and a term whose every
 //!   carrier was blanked is not written at all, so the word leaves the corpus with the documents
@@ -24,38 +25,201 @@
 //! is composed as *values alone*, so the merged dictionary would have nowhere to be installed and
 //! the extent's ordinals would resolve against dictionaries that no longer number them.
 //!
-//! A text layer has no such gap: its dictionary, its postings and its presence are **one manifest
-//! record** (`TextExtent`), composed together and replaced together. So the renumbering never
-//! escapes the layer, and no remap of anything outside it is owed — which is why this merge carries
-//! no counterpart to the keyword module's [`crate::coalesce_keyword_extents`] remap guard. There is
-//! nothing stored per entity to remap: a text column's index is postings over terms, and its values
-//! are record-blob rows the pass never touches.
+//! A text layer has no such gap: its dictionary, its postings, its positions and its presence are
+//! **one manifest record** (`TextExtent`), composed together and replaced together. So the
+//! renumbering never escapes the layer, and no remap of anything outside it is owed — which is why
+//! this merge carries no counterpart to the keyword module's [`crate::coalesce_keyword_extents`]
+//! remap guard. There is nothing stored per entity to remap: a text column's index is postings and
+//! positions over terms, and its values are record-blob rows the pass never touches.
 //!
 //! # What the merge checks
 //!
-//! **Posting *i* is term *i*'s, and nothing else says so.** A layer whose postings file is short of
-//! its dictionary answers "carried by nobody" for every ordinal past the gap, so merging it would
-//! write that under-report into the output where no later pass could find it. Each input's two
-//! halves are checked against each other before a term is read — the same check the reader makes
-//! before serving a layer, and the writer's consumer refusing what the reader refuses.
+//! **Posting *i* and positions record *i* are term *i*'s, and nothing else says so.** A layer whose
+//! postings file is short of its dictionary answers "carried by nobody" for every ordinal past the
+//! gap, so merging it would write that under-report into the output where no later pass could find
+//! it. Each input's three counts are checked against each other before a term is read — the check
+//! the reader makes before serving a layer, [`TextLayerCounts`].
 //!
 //! The dictionary writer refuses a key that does not ascend strictly, so a merge that lost its
 //! order stops there rather than publishing a dictionary whose ordinals mean nothing.
 
-use std::io;
-use std::path::Path;
+use std::fs::File;
+use std::io::{self, BufWriter};
+use std::path::{Path, PathBuf};
 
 use croaring::Bitmap;
 use mosaica_authz::PostingsSpool;
-use mosaica_filter::{ColumnPostings, SortedDict, SortedDictWriter};
-use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
+use mosaica_filter::{
+    ColumnPositions, ColumnPostings, PositionsCursor, SortedDict, SortedDictWriter,
+    TextLayerCounts,
+};
+use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
 
-/// One input layer: its dictionary, its postings over that dictionary, and the entities it holds a
-/// value for. The three travel together because an ordinal is a position in *this* dictionary.
+use crate::positions::PositionsWriter;
+
+/// One input layer: its dictionary, its postings and positions over that dictionary, and the
+/// entities it holds a value for. They travel together because an ordinal is a position in *this*
+/// dictionary.
 pub struct TextLayerRef<'a> {
     pub dict: &'a SortedDict,
     pub postings: &'a ColumnPostings,
+    pub positions: &'a ColumnPositions,
     pub present: &'a Bitmap,
+}
+
+/// The four files of one text layer.
+#[derive(Debug, Clone)]
+pub struct TextIndexFiles {
+    pub dict: PathBuf,
+    pub postings: PathBuf,
+    pub positions: PathBuf,
+    pub presence: PathBuf,
+}
+
+impl TextIndexFiles {
+    /// The four files under their own names in `dir`.
+    pub fn in_dir(dir: &Path) -> TextIndexFiles {
+        TextIndexFiles {
+            dict: dir.join(mosaica_filter::DICT_FILE),
+            postings: dir.join(mosaica_filter::POSTINGS_FILE),
+            positions: dir.join(mosaica_filter::POSITIONS_FILE),
+            presence: dir.join(mosaica_filter::PRESENCE_FILE),
+        }
+    }
+
+    pub fn paths(&self) -> [&Path; 4] {
+        [&self.dict, &self.postings, &self.positions, &self.presence]
+    }
+}
+
+/// A term's posting as its producer holds it.
+pub enum Posting<'a> {
+    /// Entities, ascending.
+    Ascending(&'a [u32]),
+    Set(&'a Bitmap),
+}
+
+/// Writes one text layer's dictionary, postings and positions a term at a time and in step, so
+/// record *i* of each is term *i*'s. The postings and positions are spooled beside the files they
+/// assemble, and a writer dropped before [`Self::finish`] removes its spools. The presence is the
+/// caller's to write.
+pub struct TextIndexWriter {
+    files: TextIndexFiles,
+    open: Option<OpenFiles>,
+    items: u64,
+    terms: u64,
+}
+
+struct OpenFiles {
+    dict: SortedDictWriter<BufWriter<File>>,
+    postings: PostingsSpool,
+    positions: PositionsWriter,
+}
+
+impl TextIndexWriter {
+    pub fn create(files: TextIndexFiles) -> io::Result<TextIndexWriter> {
+        let opened = (|| -> io::Result<OpenFiles> {
+            Ok(OpenFiles {
+                postings: PostingsSpool::create(&files.postings.with_extension("spool"))?,
+                positions: PositionsWriter::create(&files.positions.with_extension("spool"))?,
+                dict: SortedDictWriter::new(BufWriter::new(File::create(&files.dict)?))?,
+            })
+        })();
+        let mut writer = TextIndexWriter {
+            files,
+            open: None,
+            items: 0,
+            terms: 0,
+        };
+        match opened {
+            Ok(open) => {
+                writer.open = Some(open);
+                Ok(writer)
+            }
+            Err(e) => {
+                writer.remove_spools();
+                Err(e)
+            }
+        }
+    }
+
+    fn files(&mut self) -> &mut OpenFiles {
+        self.open
+            .as_mut()
+            .expect("a writer holds its files until it finishes")
+    }
+
+    /// Begin `term`, held by `items` items, and return its ordinal. Terms must ascend strictly.
+    pub fn begin_term(&mut self, term: &str, items: u64) -> io::Result<u32> {
+        let open = self.files();
+        let ordinal = open.dict.push(term)?;
+        open.positions.begin(items)?;
+        self.items = items;
+        Ok(ordinal)
+    }
+
+    /// The positions of the term's next item, its items in ascending order.
+    pub fn push_item(&mut self, positions: &[u32]) -> io::Result<()> {
+        self.files().positions.push(positions)
+    }
+
+    /// End the term with its posting, which holds the items whose positions were pushed.
+    pub fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()> {
+        let (held, record) = match posting {
+            Posting::Ascending(entities) => (
+                entities.len() as u64,
+                mosaica_authz::encode_posting(
+                    self.terms as usize,
+                    entities,
+                    SMALL_TERM_THRESHOLD_DEFAULT,
+                )?,
+            ),
+            Posting::Set(entities) => (
+                entities.cardinality(),
+                mosaica_authz::encode_posting_bitmap(entities, SMALL_TERM_THRESHOLD_DEFAULT)?,
+            ),
+        };
+        if held != self.items {
+            return Err(invalid(format!(
+                "term {} was begun for {} items and its posting holds {held}",
+                self.terms, self.items
+            )));
+        }
+        let open = self.files();
+        open.positions.end()?;
+        open.postings.append(&record)?;
+        self.terms += 1;
+        Ok(())
+    }
+
+    /// Assemble the postings and positions, and return the number of terms.
+    pub fn finish(mut self) -> io::Result<u64> {
+        let open = self.open.take().expect("a writer finishes once");
+        let finished = open
+            .dict
+            .finish()
+            .map_err(io::Error::from)
+            .and_then(|_| open.postings.finish(&self.files.postings))
+            .and_then(|()| open.positions.finish(&self.files.positions));
+        if finished.is_err() {
+            self.remove_spools();
+        }
+        finished?;
+        Ok(self.terms)
+    }
+
+    fn remove_spools(&self) {
+        let _ = std::fs::remove_file(self.files.postings.with_extension("spool"));
+        let _ = std::fs::remove_file(self.files.positions.with_extension("spool"));
+    }
+}
+
+impl Drop for TextIndexWriter {
+    fn drop(&mut self) {
+        if self.open.take().is_some() {
+            self.remove_spools();
+        }
+    }
 }
 
 fn invalid(message: String) -> io::Error {
@@ -63,22 +227,12 @@ fn invalid(message: String) -> io::Error {
 }
 
 /// The fold's pass: every layer merged into one base index, with `tombstones` subtracted.
-///
-/// `spool_path` is the pass's own scratch — the postings are spooled and assembled, this repo's
-/// discipline for a file whose records are sized as they are written. **The caller owns its
-/// removal on every exit path** (compaction §8), which is why it is a parameter rather than a
-/// temporary this function makes and unlinks: a fold that failed halfway must leave nothing behind,
-/// and the one place that knows every exit path is the caller.
 pub fn merge_text_layers(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
-    dict_path: &Path,
-    postings_path: &Path,
-    presence_path: &Path,
-    spool_path: &Path,
+    out: TextIndexFiles,
 ) -> io::Result<()> {
-    let pass = "the fold's text pass";
-    merge(inputs, tombstones, dict_path, postings_path, presence_path, spool_path, pass)
+    merge(inputs, tombstones, out, "the fold's text pass")
 }
 
 /// The coalesce's pass: a window of a column's extents merged into one extent.
@@ -90,13 +244,7 @@ pub fn merge_text_layers(
 ///
 /// Refuses fewer than two inputs: this collapses a window into one extent and there is nothing to
 /// collapse below two.
-pub fn coalesce_text_extents(
-    inputs: &[TextLayerRef<'_>],
-    dict_path: &Path,
-    postings_path: &Path,
-    presence_path: &Path,
-    spool_path: &Path,
-) -> io::Result<()> {
+pub fn coalesce_text_extents(inputs: &[TextLayerRef<'_>], out: TextIndexFiles) -> io::Result<()> {
     const PASS: &str = "the text coalesce";
     if inputs.len() < 2 {
         return Err(invalid(format!(
@@ -105,39 +253,40 @@ pub fn coalesce_text_extents(
             inputs.len()
         )));
     }
-    let none = Bitmap::new();
-    merge(inputs, &none, dict_path, postings_path, presence_path, spool_path, PASS)
+    merge(inputs, &Bitmap::new(), out, PASS)
+}
+
+/// One input's share of the term being merged: the entities its posting holds and a cursor over
+/// their positions, read in step.
+struct Share<'a> {
+    entities: croaring::bitmap::BitmapIterator<'a>,
+    head: Option<u32>,
+    rank: u64,
+    positions: PositionsCursor<'a>,
 }
 
 /// The k-way merge itself: every term of every layer, in sorted order, with `tombstones` subtracted
-/// from each one's postings and an emptied term dropped, and the presence of every input less
-/// `tombstones`.
+/// from each one's postings and positions and an emptied term dropped, and the presence of every
+/// input less `tombstones`.
 fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
-    dict_path: &Path,
-    postings_path: &Path,
-    presence_path: &Path,
-    spool_path: &Path,
+    out: TextIndexFiles,
     pass: &str,
 ) -> io::Result<()> {
     let presence = crate::disjoint_union(inputs.iter().map(|input| input.present), pass)?;
     for (i, input) in inputs.iter().enumerate() {
-        if input.dict.len() != input.postings.record_count() {
+        let counts = TextLayerCounts::of(input.dict, input.postings, input.positions);
+        if !counts.agree() {
             return Err(invalid(format!(
-                "text layer {i} holds {} terms but {} postings records; an ordinal names a \
-                 position in its own layer's dictionary, so merging these would attribute terms to \
-                 the wrong words",
-                input.dict.len(),
-                input.postings.record_count()
+                "text layer {i} holds {counts}; an ordinal names a record of each, so merging \
+                 these would attribute terms to the wrong words"
             )));
         }
     }
 
-    let mut writer = SortedDictWriter::new(std::io::BufWriter::new(std::fs::File::create(
-        dict_path,
-    )?))?;
-    let mut spool = PostingsSpool::create(spool_path)?;
+    let presence_path = out.presence.clone();
+    let mut writer = TextIndexWriter::create(out)?;
 
     // One decode buffer for the whole merge, and one owned key per layer: `key_of` borrows the
     // scratch it decodes into, and a cursor has to hold its key across the comparisons that pick
@@ -150,6 +299,7 @@ fn merge(
     }
 
     let mut least = String::new();
+    let mut holding: Vec<(usize, AttrLocalId, Bitmap)> = Vec::with_capacity(inputs.len());
     loop {
         // Linear over the layers rather than through a heap: the layer count is one base plus the
         // flush extents published since the last fold, so it is small, and a heap would cost a
@@ -171,41 +321,65 @@ fn merge(
 
         // **Every layer holding this term, not the first**: a word in two layers is one term of the
         // merged index, and its posting is the union of theirs.
+        holding.clear();
         let mut entities = Bitmap::new();
         for i in 0..inputs.len() {
             if current[i].as_deref() != Some(least.as_str()) {
                 continue;
             }
-            entities |= inputs[i]
-                .postings
-                .entities(mosaica_types::AttrLocalId::new(at[i]))?;
+            let ordinal = AttrLocalId::new(at[i]);
+            let held = inputs[i].postings.entities(ordinal)?;
+            entities |= &held;
+            holding.push((i, ordinal, held));
             at[i] += 1;
             current[i] = cursor_key(inputs[i].dict, at[i], &mut scratch)?;
         }
         entities.andnot_inplace(tombstones);
         // **The retention statement.** A term every one of whose carriers was blanked is not
-        // written — not as an empty posting, not as a dictionary key — so the word leaves the
-        // corpus with the documents that used it. With an empty tombstone set, as a coalesce
-        // passes, nothing here can fire: no input posting is empty, the writers never emit one.
+        // written — not as an empty posting, not as a dictionary key, not as a positions record —
+        // so the word leaves the corpus with the documents that used it. With an empty tombstone
+        // set, as a coalesce passes, nothing here can fire: no input posting is empty, the writers
+        // never emit one.
         if entities.is_empty() {
             continue;
         }
         // The writer refuses a key that does not ascend strictly, so a merge that lost its order
         // stops here rather than publishing a dictionary whose ordinals mean nothing.
-        writer.push(&least)?;
-        // **The default threshold, not the bundle's `small_term_threshold`.** That field is the
-        // term dictionary's, chosen for authorisation postings; the writers that produce a text
-        // index — the build, the flush, the fold and the coalesce — all take the crate default, and
-        // one that took the other would re-tag every posting on the boundary and stop reproducing
-        // the build it is supposed to agree with.
-        let record =
-            mosaica_authz::postings::encode_posting_bitmap(&entities, SMALL_TERM_THRESHOLD_DEFAULT)?;
-        spool.append(&record)?;
+        writer.begin_term(&least, entities.cardinality())?;
+        let mut shares: Vec<Share<'_>> = Vec::with_capacity(holding.len());
+        for (i, ordinal, held) in &holding {
+            let mut iter = held.iter();
+            shares.push(Share {
+                head: iter.next(),
+                entities: iter,
+                rank: 0,
+                positions: inputs[*i].positions.cursor(*ordinal, held.cardinality())?,
+            });
+        }
+        // The inputs' items in item order, each kept item's positions copied across.
+        loop {
+            let mut next: Option<usize> = None;
+            for (s, share) in shares.iter().enumerate() {
+                let Some(head) = share.head else { continue };
+                if next.is_none_or(|n| head < shares[n].head.expect("a chosen share has a head")) {
+                    next = Some(s);
+                }
+            }
+            let Some(next) = next else { break };
+            let share = &mut shares[next];
+            let entity = share.head.expect("the chosen share has a head");
+            if !tombstones.contains(entity) {
+                writer.push_item(share.positions.positions(share.rank)?)?;
+            }
+            share.rank += 1;
+            share.head = share.entities.next();
+        }
+        drop(shares);
+        writer.end_term(Posting::Set(&entities))?;
     }
 
     writer.finish()?;
-    spool.finish(postings_path)?;
-    mosaica_filter::write_presence(presence_path, &presence.andnot(tombstones))
+    mosaica_filter::write_presence(&presence_path, &presence.andnot(tombstones))
 }
 
 /// The key at `ordinal`, owned, or `None` where the ordinal is past the dictionary's end.

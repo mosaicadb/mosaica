@@ -1147,7 +1147,9 @@ fn fingerprint(bytes: &[u8]) -> u64 {
 ///
 /// **On disk:** no header, then one record per term —
 /// `varint(shared) ‖ varint(suffix_len) ‖ suffix ‖ varint(count) ‖ varint(entity₀) ‖
-/// varint(entityᵢ − entityᵢ₋₁)…`. `shared` is the term's common prefix with its predecessor *in
+/// varint(entityᵢ − entityᵢ₋₁)…`. A text index's run ([`RunPayload::Positions`]) follows each
+/// entity with `varint(occurrences) ‖ varint(position₀) ‖ varint(positionⱼ − positionⱼ₋₁)…`, the
+/// term's positions in that item. `shared` is the term's common prefix with its predecessor *in
 /// this file*, which is the same front coding the dictionary itself uses and for the same reason:
 /// a sorted term stream repeats its prefixes, and the corpus that makes this file large is exactly
 /// the one whose terms share them. Integrity is external, via the [`SpillReceipt`].
@@ -1160,6 +1162,7 @@ fn fingerprint(bytes: &[u8]) -> u64 {
 /// record.
 pub(crate) struct TextRunWriter {
     path: PathBuf,
+    payload: RunPayload,
     writer: BufWriter<File>,
     prev: Vec<u8>,
     terms: u64,
@@ -1177,11 +1180,20 @@ pub(crate) struct TextRunWriter {
     mark: u64,
 }
 
+/// What a run carries for each entity of a term: nothing more, as the keyword column's runs, or the
+/// term's positions in it, as the text index's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunPayload {
+    Rows,
+    Positions,
+}
+
 impl TextRunWriter {
-    pub(crate) fn create(path: &Path) -> Result<TextRunWriter> {
+    pub(crate) fn create(path: &Path, payload: RunPayload) -> Result<TextRunWriter> {
         let file = File::create(path).map_err(|e| BuildError::io(path, e))?;
         Ok(TextRunWriter {
             path: path.to_path_buf(),
+            payload,
             writer: BufWriter::with_capacity(SPILL_BUF_BYTES, file),
             prev: Vec::new(),
             terms: 0,
@@ -1251,9 +1263,11 @@ impl TextRunWriter {
         Ok(())
     }
 
-    /// Append one entity to the open record. Entities must ascend strictly within a term — refused
-    /// here, at the write site, rather than decoded into a wrong posting a stage later.
-    pub(crate) fn push_entity(&mut self, entity: u32) -> Result<()> {
+    /// Append one entity to the open record, with the term's positions in it for a
+    /// [`RunPayload::Positions`] run and none for a [`RunPayload::Rows`] one. Entities must ascend
+    /// strictly within a term, and positions within an entity — refused here, at the write site,
+    /// rather than decoded into a wrong posting a stage later.
+    pub(crate) fn push_entity(&mut self, entity: u32, positions: &[u32]) -> Result<()> {
         if self.owed == 0 {
             return Err(BuildError::Invalid(format!(
                 "text run {}: entity {entity} arrives with no open term",
@@ -1276,29 +1290,38 @@ impl TextRunWriter {
         } else {
             entity
         };
+        let positioned = match self.payload {
+            RunPayload::Rows => positions.is_empty(),
+            RunPayload::Positions => {
+                !positions.is_empty() && positions.is_sorted_by(|a, b| a < b)
+            }
+        };
+        if !positioned {
+            return Err(BuildError::Invalid(format!(
+                "text run {}: term {:?}'s entity {entity} carries positions {positions:?}, which a \
+                 {:?} run cannot hold: none in a run of rows, and some, strictly ascending, in a \
+                 run of positions",
+                self.path.display(),
+                String::from_utf8_lossy(&self.prev),
+                self.payload
+            )));
+        }
         write_varint(&mut self.writer, &self.path, delta)?;
         self.last_entity = entity;
         self.started = true;
         self.owed -= 1;
         self.count += 1;
         self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ entity as u64));
-        Ok(())
-    }
-
-    /// One whole record — [`Self::begin`] and its entities — for the caller that holds the list.
-    /// Written in terms of the streaming pair so there is one encoding rule rather than two that
-    /// could drift.
-    pub(crate) fn push(&mut self, term: &[u8], entities: &[u32]) -> Result<()> {
-        let count = u32::try_from(entities.len()).map_err(|_| {
-            BuildError::Invalid(format!(
-                "text run {}: term {:?} carries more entities than a u32 can count",
-                self.path.display(),
-                String::from_utf8_lossy(term)
-            ))
-        })?;
-        self.begin(term, count)?;
-        for &entity in entities {
-            self.push_entity(entity)?;
+        if self.payload == RunPayload::Positions {
+            write_varint(&mut self.writer, &self.path, positions.len() as u32)?;
+            let mut previous = 0;
+            for &position in positions {
+                write_varint(&mut self.writer, &self.path, position - previous)?;
+                previous = position;
+                self.anchor = self
+                    .anchor
+                    .wrapping_add(mix64(self.mark ^ entity as u64 ^ ((position as u64 + 1) << 32)));
+            }
         }
         Ok(())
     }
@@ -1349,7 +1372,10 @@ fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
 /// sum can only be checked once the stream ends — and the merge drains every run to completion.
 pub(crate) struct TextRunReader {
     path: PathBuf,
+    payload: RunPayload,
     reader: BufReader<File>,
+    /// The term's positions in the entity [`Self::next_entity`] last returned.
+    positions: Vec<u32>,
     /// The head term, front-decoded against its predecessor.
     term: Vec<u8>,
     /// [`fingerprint`] of `term`, held so the anchor costs one fold per record and not one per
@@ -1370,10 +1396,12 @@ pub(crate) struct TextRunReader {
 }
 
 impl TextRunReader {
-    pub(crate) fn open(receipt: &SpillReceipt) -> Result<TextRunReader> {
+    pub(crate) fn open(receipt: &SpillReceipt, payload: RunPayload) -> Result<TextRunReader> {
         let file = File::open(&receipt.path).map_err(|e| BuildError::io(&receipt.path, e))?;
         Ok(TextRunReader {
             path: receipt.path.clone(),
+            payload,
+            positions: Vec::new(),
             reader: BufReader::with_capacity(SPILL_BUF_BYTES, file),
             term: Vec::new(),
             mark: 0,
@@ -1462,6 +1490,12 @@ impl TextRunReader {
         self.pending
     }
 
+    /// The term's positions in the entity [`Self::next_entity`] last returned: empty in a
+    /// [`RunPayload::Rows`] run.
+    pub(crate) fn positions(&self) -> &[u32] {
+        &self.positions
+    }
+
     /// The head's next entity, or `None` once it is drained.
     ///
     /// **One at a time, because the merge is now a merge.** A run's entities ascend within its own
@@ -1494,6 +1528,31 @@ impl TextRunReader {
         self.pending -= 1;
         self.count += 1;
         self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ entity as u64));
+        self.positions.clear();
+        if self.payload == RunPayload::Positions {
+            let occurrences = {
+                let byte = self.require_byte()?;
+                self.decode_varint(byte)?
+            };
+            if occurrences == 0 {
+                return Err(self.malformed("an entity holding its term at no position"));
+            }
+            let mut position = 0u32;
+            for j in 0..occurrences {
+                let byte = self.require_byte()?;
+                let gap = self.decode_varint(byte)?;
+                if j > 0 && gap == 0 {
+                    return Err(self.malformed("a position gap of 0 repeats a position"));
+                }
+                position = position
+                    .checked_add(gap)
+                    .ok_or_else(|| self.malformed("a position overflows u32"))?;
+                self.positions.push(position);
+                self.anchor = self
+                    .anchor
+                    .wrapping_add(mix64(self.mark ^ entity as u64 ^ ((position as u64 + 1) << 32)));
+            }
+        }
         Ok(entity)
     }
 
@@ -2672,16 +2731,74 @@ mod tests {
 
     // ---- text run files ---------------------------------------------------------------
 
+    /// One whole record of a run of rows.
+    fn push(writer: &mut TextRunWriter, term: &[u8], entities: &[u32]) -> Result<()> {
+        writer.begin(term, entities.len() as u32)?;
+        for &entity in entities {
+            writer.push_entity(entity, &[])?;
+        }
+        Ok(())
+    }
+
+    /// **A run of positions gives back each entity's positions** beside it, a repeated position
+    /// and a run of rows carrying positions are refused, and the anchor covers the positions: a
+    /// file whose positions differ from the receipt's fails at its end.
+    #[test]
+    fn a_text_run_carries_each_entitys_positions() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("positions.spill");
+        let records = [
+            (b"alpha".as_slice(), vec![(3u32, vec![0u32, 7, 200]), (9, vec![4])]),
+            (b"beta".as_slice(), vec![(1, vec![1_000_000])]),
+        ];
+        let mut writer = TextRunWriter::create(&path, RunPayload::Positions).unwrap();
+        for (term, items) in &records {
+            writer.begin(term, items.len() as u32).unwrap();
+            for (entity, positions) in items {
+                writer.push_entity(*entity, positions).unwrap();
+            }
+        }
+        let receipt = writer.finish().unwrap();
+        let mut reader = TextRunReader::open(&receipt, RunPayload::Positions).unwrap();
+        for (term, items) in &records {
+            assert!(reader.advance().unwrap());
+            assert_eq!(reader.term(), *term);
+            for (entity, positions) in items {
+                assert_eq!(reader.next_entity().unwrap(), Some(*entity));
+                assert_eq!(reader.positions(), positions.as_slice());
+            }
+        }
+        assert!(!reader.advance().unwrap());
+
+        // The last byte is the last position's gap: changed, the anchor no longer agrees.
+        let mut bytes = fs::read(&path).unwrap();
+        *bytes.last_mut().unwrap() ^= 1;
+        fs::write(&path, &bytes).unwrap();
+        let mut reader = TextRunReader::open(&receipt, RunPayload::Positions).unwrap();
+        assert!((|| -> Result<()> { while reader.advance()? {} Ok(()) })().is_err());
+
+        let mut writer =
+            TextRunWriter::create(&temp.path().join("refused.spill"), RunPayload::Positions)
+                .unwrap();
+        writer.begin(b"gamma", 3).unwrap();
+        assert!(writer.push_entity(1, &[]).is_err(), "no position");
+        assert!(writer.push_entity(1, &[4, 4]).is_err(), "a repeated position");
+        let mut rows =
+            TextRunWriter::create(&temp.path().join("rows.spill"), RunPayload::Rows).unwrap();
+        rows.begin(b"delta", 1).unwrap();
+        assert!(rows.push_entity(1, &[0]).is_err(), "positions in a run of rows");
+    }
+
     fn write_text_run(path: &Path, records: &[(&str, Vec<u32>)]) -> SpillReceipt {
-        let mut writer = TextRunWriter::create(path).unwrap();
+        let mut writer = TextRunWriter::create(path, RunPayload::Rows).unwrap();
         for (term, entities) in records {
-            writer.push(term.as_bytes(), entities).unwrap();
+            push(&mut writer, term.as_bytes(), entities).unwrap();
         }
         writer.finish().unwrap()
     }
 
     fn read_text_run(receipt: &SpillReceipt) -> Result<Vec<(String, Vec<u32>)>> {
-        let mut reader = TextRunReader::open(receipt)?;
+        let mut reader = TextRunReader::open(receipt, RunPayload::Rows)?;
         let mut out = Vec::new();
         while reader.advance()? {
             let term = String::from_utf8(reader.term().to_vec()).unwrap();
@@ -2789,9 +2906,9 @@ mod tests {
         ];
         for (i, (what, term, entities)) in refused.into_iter().enumerate() {
             let path = temp.path().join(format!("refused-{i}.spill"));
-            let mut writer = TextRunWriter::create(&path).unwrap();
-            writer.push(b"bravo", &[1, 2]).unwrap();
-            assert!(writer.push(term, entities).is_err(), "{what}");
+            let mut writer = TextRunWriter::create(&path, RunPayload::Rows).unwrap();
+            push(&mut writer, b"bravo", &[1, 2]).unwrap();
+            assert!(push(&mut writer, term, entities).is_err(), "{what}");
         }
     }
 
@@ -2817,13 +2934,13 @@ mod tests {
 
             let temp = tempfile::TempDir::new().unwrap();
             let path = temp.path().join("text-run.spill");
-            let mut writer = TextRunWriter::create(&path).unwrap();
+            let mut writer = TextRunWriter::create(&path, RunPayload::Rows).unwrap();
             for (term, entities) in &records {
-                writer.push(term, entities).unwrap();
+                push(&mut writer, term, entities).unwrap();
             }
             let receipt = writer.finish().unwrap();
 
-            let mut reader = TextRunReader::open(&receipt).unwrap();
+            let mut reader = TextRunReader::open(&receipt, RunPayload::Rows).unwrap();
             let mut read: Vec<(Vec<u8>, Vec<u32>)> = Vec::new();
             while reader.advance().unwrap() {
                 let term = reader.term().to_vec();

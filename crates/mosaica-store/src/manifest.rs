@@ -1676,6 +1676,8 @@ pub struct TextExtent {
     pub dict: String,
     /// Prefix-relative path of the extent's postings over that dictionary.
     pub postings: String,
+    /// Prefix-relative path of the extent's word positions, one record per posting.
+    pub positions: String,
     /// Prefix-relative path of the entities this extent holds a value for.
     ///
     /// **Not derivable from the postings**, which is why it is stored: an entity whose text
@@ -1696,6 +1698,7 @@ impl TextExtent {
         [
             self.dict.as_str(),
             self.postings.as_str(),
+            self.positions.as_str(),
             self.presence.as_str(),
         ]
         .into_iter()

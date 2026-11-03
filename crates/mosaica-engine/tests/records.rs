@@ -1935,6 +1935,56 @@ fn a_group_scoped_field_resolves_as_a_filter_leaf_does() {
     ));
 }
 
+/// **A phrase over a group-scoped text column answers from that view's own text**, exactly as a
+/// `match` over it does: the items of the view whose `blurb` says the words adjacent and in order.
+#[test]
+fn a_phrase_over_a_group_scoped_text_column_matches_its_items() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&both_credential()).unwrap();
+    let analyser = mosaica_analyse::Analyser::new();
+    let fields: Vec<String> = Vec::new();
+    let served = |operand: FilterOperand| -> BTreeSet<u64> {
+        let mut req = request(Q1, &fields);
+        req.order = Some(RecordsOrder::Map);
+        req.page_rows = Some(500);
+        req.filter = Some(leaf(&format!("blurb@{Q1}"), operand));
+        read_all(&fx.engine, &session, &req).ids().into_iter().collect()
+    };
+    let saying = |phrase: &str| -> BTreeSet<u64> {
+        let words = analyser.tokens(phrase);
+        let sources: Vec<u64> = QUARTERS[0]
+            .1
+            .clone()
+            .filter(|&s| {
+                analyser
+                    .tokens(&format!("blurb {s}"))
+                    .windows(words.len())
+                    .any(|w| w == words.as_slice())
+            })
+            .collect();
+        fx.tids(&sources).into_iter().collect()
+    };
+    for phrase in ["blurb 5", "blurb 1199", "5 blurb", "blurb 1500"] {
+        assert_eq!(
+            served(FilterOperand::Phrase {
+                query: phrase.to_string()
+            }),
+            saying(phrase),
+            "phrase {phrase:?}"
+        );
+    }
+    assert_eq!(
+        served(FilterOperand::Phrase {
+            query: "blurb 5".to_string()
+        }),
+        served(FilterOperand::Match {
+            query: "blurb 5".to_string(),
+            minimum: None,
+        }),
+        "every item saying both words says them in this order"
+    );
+}
+
 /// **An item joined into a second view is returned there before its own ingest is flushed, with
 /// its record fields null**, as its item card shows them.
 #[test]

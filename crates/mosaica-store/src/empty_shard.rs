@@ -103,18 +103,15 @@ pub fn write_empty_category_postings(path: &Path, column: &str) -> Result<()> {
 }
 
 /// A text column's index of no term in `dir`, the base of a column no layer holds text of: its
-/// dictionary, its postings and the presence of no entity. Returns the files written.
+/// dictionary, postings and positions, and the presence of no entity. Returns the files written.
 pub fn write_empty_text_index(dir: &Path) -> Result<Vec<PathBuf>> {
-    let dict = dir.join(mosaica_filter::DICT_FILE);
-    write_empty_dictionary(&dict)?;
-    let postings = dir.join(mosaica_filter::POSTINGS_FILE);
-    let spool = postings.with_extension("spool");
-    mosaica_authz::postings::PostingsSpool::create(&spool)
-        .and_then(|spool| spool.finish(&postings))
-        .map_err(io(&postings))?;
-    let presence = dir.join(mosaica_filter::PRESENCE_FILE);
-    mosaica_filter::write_presence(&presence, &croaring::Bitmap::new()).map_err(io(&presence))?;
-    Ok(vec![dict, postings, presence])
+    let files = mosaica_filter_write::TextIndexFiles::in_dir(dir);
+    mosaica_filter_write::TextIndexWriter::create(files.clone())
+        .and_then(|writer| writer.finish())
+        .map_err(io(&files.postings))?;
+    mosaica_filter::write_presence(&files.presence, &croaring::Bitmap::new())
+        .map_err(io(&files.presence))?;
+    Ok(files.paths().map(Path::to_path_buf).into())
 }
 
 /// A record blob of no row in `dir`. Returns the files written.

@@ -73,7 +73,6 @@ pub(crate) fn keyword_column(
     let (base_rel, base_values, base_dict) = layers.next().expect("a column has at least a base");
     assert!(base_rel.is_none(), "the first layer is the base");
     let mut column = Column::values(
-        0,
         true,
         Family::Keyword,
         Some(Layer {
@@ -136,7 +135,6 @@ pub(crate) fn category_column(
         Arc::new(ColumnPostings::open_keyed(&path).expect("postings open"))
     });
     let mut held = Column::values(
-        0,
         true,
         Family::Category,
         Some(Layer {

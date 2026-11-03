@@ -73,6 +73,7 @@
 //! producers' emit rather than each holding its own.
 
 mod keyword;
+mod positions;
 mod record;
 mod text;
 
@@ -93,7 +94,11 @@ pub use record::{
     coalesce_record_extents, fold_record_blob, merge_record_rows, write_prose, write_text_rows,
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
-pub use text::{coalesce_text_extents, merge_text_layers, TextLayerRef};
+pub use positions::Occurrences;
+pub use text::{
+    coalesce_text_extents, merge_text_layers, Posting, TextIndexFiles, TextIndexWriter,
+    TextLayerRef,
+};
 
 /// The vocabulary's reserved *absent* code: never drawn, never bound to a key, and carried by
 /// exactly the entities that carry no value.
@@ -652,38 +657,85 @@ mod tests {
         assert!(err.to_string().contains("twice"), "{err}");
     }
 
-    fn layer<'a>(
-        (dict, postings): &'a (mosaica_filter::SortedDict, mosaica_filter::ColumnPostings),
-        present: &'a Bitmap,
-    ) -> TextLayerRef<'a> {
-        TextLayerRef {
-            dict,
-            postings,
-            present,
+    /// Each term of a layer, with the entities holding it and the positions each holds it at.
+    type Contents = Vec<(String, Vec<(u32, Vec<u32>)>)>;
+
+    /// One text layer's files, opened.
+    struct Layer {
+        dict: mosaica_filter::SortedDict,
+        postings: mosaica_filter::ColumnPostings,
+        positions: mosaica_filter::ColumnPositions,
+    }
+
+    impl Layer {
+        fn open(files: &TextIndexFiles) -> Layer {
+            Layer {
+                dict: mosaica_filter::SortedDict::open(&files.dict, mosaica_filter::Access::Read)
+                    .unwrap(),
+                postings: mosaica_filter::ColumnPostings::open(&files.postings, false).unwrap(),
+                positions: mosaica_filter::ColumnPositions::open(&files.positions, false).unwrap(),
+            }
+        }
+
+        fn as_ref<'a>(&'a self, present: &'a Bitmap) -> TextLayerRef<'a> {
+            TextLayerRef {
+                dict: &self.dict,
+                postings: &self.postings,
+                positions: &self.positions,
+                present,
+            }
+        }
+
+        /// Every term, with each entity carrying it and the positions it carries it at.
+        fn contents(&self) -> Contents {
+            let mut out = Vec::new();
+            for ordinal in 0..self.dict.len() {
+                let id = mosaica_types::AttrLocalId::new(ordinal);
+                let entities = self.postings.entities(id).unwrap();
+                let mut cursor = self.positions.cursor(id, entities.cardinality()).unwrap();
+                let items = entities
+                    .iter()
+                    .enumerate()
+                    .map(|(rank, e)| (e, cursor.positions(rank as u64).unwrap().to_vec()))
+                    .collect();
+                let term = self.dict.key_of(ordinal, &mut Vec::new()).unwrap().to_string();
+                out.push((term, items));
+            }
+            out
         }
     }
 
-    /// One text layer's dictionary and postings under `dir`, each term carried by its entities.
-    fn text_layer(
-        dir: &Path,
-        tag: &str,
-        terms: &[(&str, &[u32])],
-    ) -> (mosaica_filter::SortedDict, mosaica_filter::ColumnPostings) {
-        let dict = dir.join(format!("{tag}-dict.bin"));
-        let postings = dir.join(format!("{tag}-postings.arrow"));
-        mosaica_filter::write_sorted_dict(&dict, terms.iter().map(|(term, _)| *term)).unwrap();
-        let per_term: Vec<Vec<u32>> = terms.iter().map(|(_, carriers)| carriers.to_vec()).collect();
-        mosaica_authz::postings::write_postings(&postings, &per_term, 32).unwrap();
-        (
-            mosaica_filter::SortedDict::open(&dict, mosaica_filter::Access::Read).unwrap(),
-            mosaica_filter::ColumnPostings::open(&postings, false).unwrap(),
-        )
+    /// The files of a text layer named `tag` under `dir`.
+    fn text_files(dir: &Path, tag: &str) -> TextIndexFiles {
+        TextIndexFiles {
+            dict: dir.join(format!("{tag}-dict.bin")),
+            postings: dir.join(format!("{tag}-postings.arrow")),
+            positions: dir.join(format!("{tag}-positions.arrow")),
+            presence: dir.join(format!("{tag}-presence.roaring")),
+        }
+    }
+
+    /// One text layer under `dir`, each term carried by its entities, entity `e` holding it at
+    /// positions `e` and `e + 3`.
+    fn text_layer(dir: &Path, tag: &str, terms: &[(&str, &[u32])]) -> Layer {
+        let files = text_files(dir, tag);
+        let mut writer = TextIndexWriter::create(files.clone()).unwrap();
+        for (term, carriers) in terms {
+            writer.begin_term(term, carriers.len() as u64).unwrap();
+            for &e in *carriers {
+                writer.push_item(&[e, e + 3]).unwrap();
+            }
+            writer.end_term(Posting::Ascending(carriers)).unwrap();
+        }
+        writer.finish().unwrap();
+        Layer::open(&files)
     }
 
     /// **Text layers holding one entity between them are refused by the fold and the coalesce
     /// alike**, through the check the value merge makes; disjoint ones merge, and the merged
     /// layer's presence is every entity they held, an entity whose text has no terms included,
-    /// less the tombstones.
+    /// less the tombstones. Each merged term's items carry the positions their layer held them at,
+    /// and a tombstoned item's positions go with it.
     #[test]
     fn text_layers_claiming_one_entity_are_refused_and_disjoint_ones_merge() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -694,26 +746,21 @@ mod tests {
         let b_present = bitmap([5, 6]);
         let c = text_layer(dir, "c", &[("beta", &[2])]);
         let c_present = bitmap([2]);
-        let out = |tag: &str| {
-            ["dict.bin", "postings.arrow", "presence.roaring", "spool"]
-                .map(|name| dir.join(format!("{tag}-out-{name}")))
-        };
+        let out = |tag: &str| text_files(dir, &format!("{tag}-out"));
         let fold = |inputs: &[TextLayerRef<'_>], tombstones: &Bitmap, tag: &str| {
-            let [dict, postings, presence, spool] = out(tag);
-            merge_text_layers(inputs, tombstones, &dict, &postings, &presence, &spool)
-                .map(|()| mosaica_filter::read_presence(&presence).unwrap())
+            merge_text_layers(inputs, tombstones, out(tag))
+                .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
         let coalesce = |inputs: &[TextLayerRef<'_>], tag: &str| {
-            let [dict, postings, presence, spool] = out(tag);
-            coalesce_text_extents(inputs, &dict, &postings, &presence, &spool)
-                .map(|()| mosaica_filter::read_presence(&presence).unwrap())
+            coalesce_text_extents(inputs, out(tag))
+                .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
 
-        let overlapping = [layer(&a, &a_present), layer(&c, &c_present)];
+        let overlapping = [a.as_ref(&a_present), c.as_ref(&c_present)];
         assert!(fold(&overlapping, &Bitmap::new(), "fold-overlap").is_err());
         assert!(coalesce(&overlapping, "coalesce-overlap").is_err());
 
-        let disjoint = [layer(&a, &a_present), layer(&b, &b_present)];
+        let disjoint = [a.as_ref(&a_present), b.as_ref(&b_present)];
         assert_eq!(
             fold(&disjoint, &bitmap([3, 6]), "fold").unwrap(),
             bitmap([1, 2, 5])
@@ -722,6 +769,35 @@ mod tests {
             coalesce(&disjoint, "coalesce").unwrap(),
             bitmap([1, 2, 3, 5, 6])
         );
+        let held = |e: u32| (e, vec![e, e + 3]);
+        assert_eq!(
+            Layer::open(&out("coalesce")).contents(),
+            vec![
+                ("alpha".to_string(), vec![held(1), held(2), held(5)]),
+                ("beta".to_string(), vec![held(5), held(6)]),
+            ]
+        );
+        assert_eq!(
+            Layer::open(&out("fold")).contents(),
+            vec![
+                ("alpha".to_string(), vec![held(1), held(2), held(5)]),
+                ("beta".to_string(), vec![held(5)]),
+            ]
+        );
+        // A term every carrier of which is tombstoned leaves all three files.
+        assert_eq!(
+            fold(&disjoint, &bitmap([5, 6]), "fold-beta").unwrap(),
+            bitmap([1, 2, 3])
+        );
+        let folded = Layer::open(&out("fold-beta"));
+        assert_eq!(
+            folded.contents(),
+            vec![("alpha".to_string(), vec![held(1), held(2)])]
+        );
+        assert_eq!(folded.positions.record_count(), 1);
+        for spool in ["postings.spool", "positions.spool"] {
+            assert!(!dir.join(format!("fold-beta-out-{spool}")).exists());
+        }
     }
 
     /// Coalesce `inputs` into one extent and open it back.

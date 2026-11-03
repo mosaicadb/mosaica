@@ -1,25 +1,10 @@
 use croaring::Bitmap;
-use mosaica_filter::{ColumnPostings, SortedDict};
+use mosaica_filter::{ColumnPositions, ColumnPostings, PositionsCursor, PostingRanks, SortedDict};
 use mosaica_types::AttrLocalId;
 
 use crate::cancel::CancelToken;
 use crate::filter::error::FilterError;
 use crate::filter::{check_cancelled, CANCEL_EVERY};
-
-/// Does `document`'s token sequence contain `phrase`'s contiguously and in order?
-///
-/// Both sides come from the same analyser, so this compares the index's own units rather than raw
-/// text: a phrase found here is one whose words the index holds adjacent. A repeated word is not
-/// collapsed on either side: `"the the"` matches a document that says it twice in a row and not
-/// one that says it once, which distinguishes a phrase from the word-bag `match` already answers.
-pub(in crate::filter) fn contains_phrase(document: &[String], phrase: &[String]) -> bool {
-    // An empty phrase is refused upstream. `windows` panics on a zero length and yields nothing
-    // past the document's end, so both are stated here rather than left to it.
-    if phrase.is_empty() || phrase.len() > document.len() {
-        return false;
-    }
-    document.windows(phrase.len()).any(|w| w == phrase)
-}
 
 /// `match` over one layer of text column `column`: intersect the tokens' postings inside the
 /// candidate, or count them where fewer than all are required.
@@ -122,55 +107,86 @@ pub(in crate::filter) fn text_match(
     Ok(out)
 }
 
-#[cfg(test)]
-mod phrase_tests {
-    use super::contains_phrase;
-
-    fn t(words: &str) -> Vec<String> {
-        if words.is_empty() {
-            return Vec::new();
+/// The survivors of a phrase's conjunction in one layer that hold its words adjacent and in order,
+/// read from the layer's positions rather than from the text.
+///
+/// Survivors ascend, so each distinct word keeps one forward cursor into its posting's ranks and
+/// its positions record, and reads each survivor's entry once however often the word occurs in the
+/// phrase. The rarest word is read first, and each further word is read only while some start could
+/// still fit.
+pub(in crate::filter) fn phrase_match(
+    column: &str,
+    dict: &SortedDict,
+    postings: &ColumnPostings,
+    positions: &ColumnPositions,
+    phrase: &[String],
+    survivors: &Bitmap,
+    cancel: &Option<CancelToken>,
+) -> Result<Bitmap, FilterError> {
+    let unreadable = |e: std::io::Error| FilterError::postings_unreadable(column, e);
+    struct Word<'a> {
+        ranks: PostingRanks<'a>,
+        positions: PositionsCursor<'a>,
+        /// Where the word stands in the phrase.
+        offsets: Vec<u32>,
+    }
+    let mut words: Vec<(u32, Word<'_>)> = Vec::new();
+    for (offset, token) in (0u32..).zip(phrase) {
+        let resolved = dict
+            .resolve(token)
+            .map_err(|e| FilterError::postings_unreadable(column, e))?;
+        let Some(ordinal) = resolved else {
+            return Ok(Bitmap::new());
+        };
+        if let Some((_, word)) = words.iter_mut().find(|(o, _)| *o == ordinal) {
+            word.offsets.push(offset);
+            continue;
         }
-        words.split(' ').map(str::to_string).collect()
+        let id = AttrLocalId::new(ordinal);
+        let ranks = postings.ranks(id).map_err(unreadable)?;
+        let word = Word {
+            positions: positions.cursor(id, ranks.len()).map_err(unreadable)?,
+            ranks,
+            offsets: vec![offset],
+        };
+        words.push((ordinal, word));
     }
+    words.sort_by_key(|(_, word)| word.ranks.len());
 
-    /// Adjacency and order, at the two boundaries and past them. Runs over the token sequence
-    /// rather than through the analyser, so a segmentation change cannot make this fail.
-    #[test]
-    fn a_phrase_is_a_contiguous_run_in_order() {
-        let doc = t("the quick brown fox jumps");
-        assert!(contains_phrase(&doc, &t("quick brown")));
-        assert!(contains_phrase(&doc, &t("the quick")), "at the start");
-        assert!(contains_phrase(&doc, &t("jumps")), "the last word alone");
-        assert!(contains_phrase(&doc, &t("fox jumps")), "at the end");
-        assert!(contains_phrase(&doc, &doc), "the whole document");
-
-        assert!(!contains_phrase(&doc, &t("brown quick")), "order is a term");
-        assert!(
-            !contains_phrase(&doc, &t("quick fox")),
-            "both words, not adjacent — the conjunction's answer and not this one"
-        );
-        assert!(!contains_phrase(&doc, &t("the fox")));
+    let mut out = Bitmap::new();
+    // Where the phrase could start in the current survivor's token sequence.
+    let mut starts: Vec<u32> = Vec::new();
+    for (walked, entity) in survivors.iter().enumerate() {
+        if walked % CANCEL_EVERY == 0 {
+            check_cancelled(cancel)?;
+        }
+        starts.clear();
+        for (w, (_, word)) in words.iter_mut().enumerate() {
+            let rank = word.ranks.rank_of(entity).ok_or_else(|| {
+                FilterError::postings_unreadable(
+                    column,
+                    "a phrase survivor is missing from the posting of one of its words",
+                )
+            })?;
+            let held = word.positions.positions(rank).map_err(unreadable)?;
+            let mut offsets = word.offsets.iter().copied();
+            if w == 0 {
+                let first = offsets.next().expect("a word stands somewhere in the phrase");
+                starts.extend(held.iter().filter_map(|p| p.checked_sub(first)));
+            }
+            for offset in offsets {
+                starts.retain(|s| {
+                    s.checked_add(offset)
+                        .is_some_and(|p| held.binary_search(&p).is_ok())
+                });
+            }
+            if starts.is_empty() {
+                break;
+            }
+        }
+        if !starts.is_empty() {
+            out.add(entity);
+        }
     }
-
-    /// A repeated word is evidence twice over, on both sides: this separates a phrase from the
-    /// deduplicated word-bag `match` resolves.
-    #[test]
-    fn a_repeated_word_is_not_collapsed() {
-        assert!(contains_phrase(&t("had had had had"), &t("had had")));
-        assert!(!contains_phrase(&t("the cat the hat"), &t("the the")));
-        assert!(contains_phrase(&t("the the cat"), &t("the the")));
-    }
-
-    /// A phrase longer than the document, and an empty one on either side. `windows(0)` panics and
-    /// `windows(n > len)` yields nothing, so both are decided before the walk rather than by it.
-    #[test]
-    fn the_degenerate_shapes_are_decided_before_the_walk() {
-        assert!(!contains_phrase(&t("one two"), &t("one two three")));
-        assert!(!contains_phrase(&[], &t("anything")));
-        assert!(
-            !contains_phrase(&t("a document"), &[]),
-            "an empty phrase is not everywhere"
-        );
-        assert!(!contains_phrase(&[], &[]));
-    }
+    Ok(out)
 }

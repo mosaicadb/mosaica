@@ -27,8 +27,8 @@ pub enum FilterOperand {
     /// must appear, `None` meaning all. The query is carried unanalysed so the column's own
     /// analyser segments it. Duplicate tokens collapse before counting.
     Match { query: String, minimum: Option<u32> },
-    /// Exact phrase: the postings narrow to items carrying every word, then each survivor's own
-    /// prose is re-analysed and checked for the sequence, exact, at no extra storage.
+    /// Exact phrase: the postings narrow to items carrying every word, then each survivor's word
+    /// positions are checked for the sequence.
     Phrase { query: String },
     /// Numeric equality.
     NumEquals(Scalar),

@@ -1,5 +1,5 @@
 use croaring::Bitmap;
-use mosaica_filter::{resolve_union, RecordValue};
+use mosaica_filter::resolve_union;
 use mosaica_types::AttrLocalId;
 
 use super::{ColumnLayers, FilterColumns, Route, TextLayer};
@@ -11,9 +11,9 @@ use crate::filter::expr::{
     MEMBER_OF_COLUMN, REGION_COLUMN,
 };
 use mosaica_store::unique::{key_of_integer, UniqueKey};
-use crate::filter::scan::text::{contains_phrase, text_match};
+use crate::filter::scan::text::{phrase_match, text_match};
 use crate::filter::scan::{scan, scan_layer};
-use crate::filter::{check_cancelled, CANCEL_EVERY};
+use crate::filter::check_cancelled;
 
 /// The space a sub-tree evaluates in: [`FilterColumns::space_of`]'s answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,16 +57,7 @@ impl FilterColumns {
             ColumnLayers::Text {
                 layers, analyser, ..
             } => {
-                let declared_index = column.declared_index;
-                return self.resolve_text(
-                    name,
-                    declared_index,
-                    layers,
-                    analyser,
-                    operand,
-                    candidate,
-                    cancel,
-                );
+                return resolve_text(name, layers, analyser, operand, candidate, cancel);
             }
             ColumnLayers::Values {
                 layers,
@@ -97,50 +88,6 @@ impl FilterColumns {
             out |= scan_layer(name, layer, operand, candidate)?;
         }
         Ok(out)
-    }
-
-    /// A `match` or a `phrase` over one text column's layers: [`FilterColumns::resolve`]'s text
-    /// half.
-    #[allow(clippy::too_many_arguments)]
-    fn resolve_text(
-        &self,
-        name: &str,
-        declared_index: usize,
-        text: &[TextLayer],
-        analyser: &mosaica_analyse::Analyser,
-        operand: &FilterOperand,
-        candidate: &Bitmap,
-        cancel: &Option<CancelToken>,
-    ) -> Result<Bitmap, FilterError> {
-        let (query, minimum, phrase) = match operand {
-            FilterOperand::Match { query, minimum } => (query, *minimum, false),
-            FilterOperand::Phrase { query } => (query, None, true),
-            _ => return Ok(Bitmap::new()),
-        };
-        // `ordered` keeps the original order and duplicates, which a phrase needs.
-        let ordered = analyser.tokens(query);
-        let mut tokens = ordered.clone();
-        tokens.sort();
-        tokens.dedup();
-        let minimum = minimum.unwrap_or(tokens.len() as u32);
-        let mut out = Bitmap::new();
-        for layer in text {
-            out |= text_match(
-                name,
-                &layer.dict,
-                &layer.postings,
-                &tokens,
-                minimum,
-                candidate,
-                cancel,
-            )?;
-        }
-        // A one-word phrase is a `match`, so short-circuit it before the verify decompresses a
-        // block per survivor.
-        if !phrase || ordered.len() < 2 {
-            return Ok(out);
-        }
-        self.verify_phrase(name, declared_index, analyser, &ordered, out, candidate, cancel)
     }
 
     /// Evaluate a filter expression against `candidate`.
@@ -225,7 +172,7 @@ impl FilterColumns {
     /// awaits the row-space leaves, which need the request's tile ranges.
     ///
     /// Once the request holding `cancel` has gone, the evaluation ends with
-    /// [`FilterError::Cancelled`] at the next leaf, or within [`CANCEL_EVERY`] entities of a walk
+    /// [`FilterError::Cancelled`] at the next leaf, or within [`crate::filter::CANCEL_EVERY`] entities of a walk
     /// inside one. `None` is never cancelled, which is what [`Self::evaluate`] passes.
     pub fn evaluate_routed(
         &self,
@@ -399,69 +346,6 @@ impl FilterColumns {
         }
     }
 
-    /// Keep only the entities whose prose actually carries the phrase, by reading it.
-    ///
-    /// The postings answer which items use all these words, a superset of which items say them
-    /// adjacent and in order, so the conjunction over-approximates but is never short. This pass
-    /// reads each survivor's own prose out of the record blob, runs it through the same analyser
-    /// the index was built with, and looks for the query's token sequence contiguously, with no
-    /// positional payload, no bigram terms, no second artefact (bigram terms were measured at
-    /// 61.7 B/entity over 2.4M titles, 2.7 times the unigram index).
-    ///
-    /// One record-block decompression and one analysis per surviving entity, result-bound, not
-    /// corpus-bound: 236 to 270 µs per block on selective phrases, unbounded on an unselective
-    /// one since `of the` survives the conjunction almost everywhere.
-    ///
-    /// A survivor outside the candidate would be a block read for an entity this principal may
-    /// not see. `text_match` intersects with the candidate as it reads each posting, so this
-    /// cannot happen, and it is checked anyway before a single block is touched.
-    #[allow(clippy::too_many_arguments)]
-    fn verify_phrase(
-        &self,
-        name: &str,
-        declared_index: usize,
-        analyser: &mosaica_analyse::Analyser,
-        phrase: &[String],
-        survivors: Bitmap,
-        candidate: &Bitmap,
-        cancel: &Option<CancelToken>,
-    ) -> Result<Bitmap, FilterError> {
-        if survivors.andnot(candidate).cardinality() != 0 {
-            return Err(FilterError::postings_unreadable(
-                name,
-                "the phrase conjunction named an entity outside the candidate",
-            ));
-        }
-        let tag = u16::try_from(declared_index).unwrap_or(u16::MAX);
-        let mut out = Bitmap::new();
-        for (walked, entity) in survivors.iter().enumerate() {
-            if walked % CANCEL_EVERY == 0 {
-                check_cancelled(cancel)?;
-            }
-            // A record that will not read refuses the request: skipping it would leave the phrase
-            // short, and widen a `none_of` over it. An item with no record holds no prose.
-            let Some(fields) =
-                self.records
-                    .fields_of(entity)
-                    .map_err(|e| FilterError::RecordUnreadable {
-                        column: name.to_string(),
-                        detail: e.to_string(),
-                    })?
-            else {
-                continue;
-            };
-            let Some(RecordValue::Utf8(prose)) =
-                fields.into_iter().find(|f| f.tag == tag).map(|f| f.value)
-            else {
-                continue;
-            };
-            if contains_phrase(&analyser.tokens(&prose), phrase) {
-                out.add(entity);
-            }
-        }
-        Ok(out)
-    }
-
     fn eval(
         &self,
         expr: &FilterExpr,
@@ -506,6 +390,66 @@ impl FilterColumns {
             }
         }
     }
+}
+
+/// A `match` or a `phrase` over one text column's layers: [`FilterColumns::resolve`]'s text half.
+///
+/// A phrase of two or more words is the conjunction of its words in each layer, narrowed by that
+/// layer's positions to the items saying them adjacent and in order.
+fn resolve_text(
+    name: &str,
+    text: &[TextLayer],
+    analyser: &mosaica_analyse::Analyser,
+    operand: &FilterOperand,
+    candidate: &Bitmap,
+    cancel: &Option<CancelToken>,
+) -> Result<Bitmap, FilterError> {
+    let (query, minimum, phrase) = match operand {
+        FilterOperand::Match { query, minimum } => (query, *minimum, false),
+        FilterOperand::Phrase { query } => (query, None, true),
+        _ => return Ok(Bitmap::new()),
+    };
+    // `ordered` keeps the original order and duplicates, which a phrase needs.
+    let ordered = analyser.tokens(query);
+    let mut tokens = ordered.clone();
+    tokens.sort();
+    tokens.dedup();
+    let minimum = minimum.unwrap_or(tokens.len() as u32);
+    let mut out = Bitmap::new();
+    for layer in text {
+        let survivors = text_match(
+            name,
+            &layer.dict,
+            &layer.postings,
+            &tokens,
+            minimum,
+            candidate,
+            cancel,
+        )?;
+        // A one-word phrase is a `match`.
+        if !phrase || ordered.len() < 2 {
+            out |= survivors;
+            continue;
+        }
+        // `text_match` intersects with the candidate as it reads each posting, so this cannot
+        // fire; it is checked before any positions are read on a survivor's behalf.
+        if !survivors.is_subset(candidate) {
+            return Err(FilterError::postings_unreadable(
+                name,
+                "the phrase conjunction named an entity outside the candidate",
+            ));
+        }
+        out |= phrase_match(
+            name,
+            &layer.dict,
+            &layer.postings,
+            &layer.positions,
+            &ordered,
+            &survivors,
+            cancel,
+        )?;
+    }
+    Ok(out)
 }
 
 /// An operand's operator, as a filter spells it.

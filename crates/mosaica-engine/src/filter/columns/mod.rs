@@ -10,7 +10,10 @@ use std::path::Path;
 use std::sync::Arc;
 
 use croaring::Bitmap;
-use mosaica_filter::{ColumnPostings, RecordStack, RecordValue, SortedDict, ValueColumn};
+use mosaica_filter::{
+    ColumnPositions, ColumnPostings, RecordStack, RecordValue, SortedDict, TextLayerCounts,
+    ValueColumn,
+};
 
 use super::declared::{Family, Placement};
 use super::error::ComposeError;
@@ -113,9 +116,6 @@ pub(in crate::filter) enum Route {
 /// from. Built only by [`Column::values`] and [`Column::text`].
 #[derive(Debug, Clone)]
 pub(in crate::filter) struct Column {
-    /// This column's position in the manifest's `declared_scalars`, the record blob's addressing
-    /// key a blob row tags each field by. Never serialised.
-    declared_index: usize,
     /// Declared `index = true`. A column may be held without being filterable: a
     /// `visibility = "derived"` category owes membership postings whatever its `index` says.
     filterable: bool,
@@ -156,7 +156,6 @@ impl Column {
     /// A column served from value columns, holding its base alone. Every extent arrives through
     /// [`Column::push_extent`].
     pub(in crate::filter) fn values(
-        declared_index: usize,
         filterable: bool,
         family: Family,
         base: Option<Layer>,
@@ -168,7 +167,6 @@ impl Column {
             .map(|layer| layer.values.present())
             .unwrap_or_default();
         Column {
-            declared_index,
             filterable,
             family,
             layers: ColumnLayers::Values {
@@ -182,13 +180,8 @@ impl Column {
 
     /// A column served from a text index, holding no layer. Every layer arrives through
     /// [`Column::push_text_layers`].
-    fn text(
-        declared_index: usize,
-        filterable: bool,
-        analyser: Arc<mosaica_analyse::Analyser>,
-    ) -> Column {
+    fn text(filterable: bool, analyser: Arc<mosaica_analyse::Analyser>) -> Column {
         Column {
-            declared_index,
             filterable,
             family: Family::Text,
             layers: ColumnLayers::Text {
@@ -307,13 +300,14 @@ fn refuse_overlap<'a>(
     Ok(())
 }
 
-/// One `text` layer: its own dictionary, its own postings over that dictionary, and the entities
-/// it holds a value for. The three travel together: an ordinal is a position in this dictionary,
-/// so postings read against another layer's terms would answer from the wrong words.
+/// One `text` layer: its own dictionary, its own postings and positions over that dictionary, and
+/// the entities it holds a value for. They travel together: an ordinal is a position in this
+/// dictionary, so postings read against another layer's terms would answer from the wrong words.
 #[derive(Debug, Clone)]
 struct TextLayer {
     dict: Arc<SortedDict>,
     postings: Arc<ColumnPostings>,
+    positions: Arc<ColumnPositions>,
     /// The entities this layer holds a value for, stored rather than derived from the postings:
     /// text analysing to no terms, an empty string or pure punctuation, carries a value and
     /// appears in no posting. Read by [`refuse_overlap`] and by the coalesce's replacement rule
@@ -326,12 +320,12 @@ struct TextLayer {
     prose: Option<Arc<mosaica_filter::RecordBlob>>,
 }
 
-/// One text layer's two halves, checked against each other before the layer is served: a
-/// postings file short of its dictionary would report every word past the gap as carried by
-/// nobody, an under-report with no symptom.
+/// One text layer's files, checked against each other before the layer is served: a postings
+/// file short of its dictionary would report every word past the gap as carried by nobody, an
+/// under-report with no symptom.
 impl TextLayer {
-    /// A text column's base index: the token dictionary, the postings over it and the entities it
-    /// holds a value for, and for a group-scoped column its prose.
+    /// A text column's base index: the token dictionary, the postings and positions over it and
+    /// the entities it holds a value for, and for a group-scoped column its prose.
     fn open_base(
         column: &str,
         dir: &Path,
@@ -348,12 +342,11 @@ impl TextLayer {
             ),
             false => None,
         };
+        let mmap = access != mosaica_filter::Access::Read;
         text_layer(
             SortedDict::open_dir(dir, access)?,
-            ColumnPostings::open(
-                &dir.join(mosaica_filter::POSTINGS_FILE),
-                access != mosaica_filter::Access::Read,
-            )?,
+            ColumnPostings::open(&dir.join(mosaica_filter::POSTINGS_FILE), mmap)?,
+            ColumnPositions::open(&dir.join(mosaica_filter::POSITIONS_FILE), mmap)?,
             column,
             "base",
             mosaica_filter::read_presence(&dir.join(mosaica_filter::PRESENCE_FILE))?,
@@ -375,9 +368,11 @@ impl TextLayer {
                     .map_err(|e| prose_unreadable(&paths.column, e))
             })
             .transpose()?;
+        let mmap = access != mosaica_filter::Access::Read;
         text_layer(
             SortedDict::open(&paths.dict, access)?,
-            ColumnPostings::open(&paths.postings, access != mosaica_filter::Access::Read)?,
+            ColumnPostings::open(&paths.postings, mmap)?,
+            ColumnPositions::open(&paths.positions, mmap)?,
             &paths.column,
             &paths.dict_rel,
             mosaica_filter::read_presence(&paths.presence)?,
@@ -396,26 +391,29 @@ fn prose_unreadable(column: &str, e: mosaica_filter::RecordError) -> ComposeErro
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn text_layer(
     dict: SortedDict,
     postings: ColumnPostings,
+    positions: ColumnPositions,
     column: &str,
     which: &str,
     present: Bitmap,
     dict_rel: Option<String>,
     prose: Option<mosaica_filter::RecordBlob>,
 ) -> Result<TextLayer, ComposeError> {
-    if dict.len() != postings.record_count() {
-        return Err(ComposeError::TermsAndPostingsDisagree {
+    let counts = TextLayerCounts::of(&dict, &postings, &positions);
+    if !counts.agree() {
+        return Err(ComposeError::TextCountsDisagree {
             column: column.to_string(),
             layer: which.to_string(),
-            terms: dict.len(),
-            postings: postings.record_count(),
+            counts,
         });
     }
     Ok(TextLayer {
         dict: Arc::new(dict),
         postings: Arc::new(postings),
+        positions: Arc::new(positions),
         present: Arc::new(present),
         dict_rel,
         prose: prose.map(Arc::new),
@@ -610,6 +608,67 @@ fn stored_in(column: &Column, entity: u32, scratch: &mut Vec<u8>) -> Option<Reco
 mod tests {
     use super::*;
     use crate::filter::test_support::*;
+
+    /// **A text layer whose dictionary, postings and positions disagree in record count is refused
+    /// at open**, whichever of the three is out, and one whose counts agree opens.
+    #[test]
+    fn a_text_layer_whose_record_counts_disagree_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |tag: &str, terms: &[&str], positions_records: usize| {
+            let files = mosaica_filter_write::TextIndexFiles {
+                dict: dir.path().join(format!("{tag}-dict.bin")),
+                postings: dir.path().join(format!("{tag}-postings.arrow")),
+                positions: dir.path().join(format!("{tag}-positions.arrow")),
+                presence: dir.path().join(format!("{tag}-presence.roaring")),
+            };
+            let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).unwrap();
+            for (entity, term) in (0u32..).zip(terms) {
+                writer.begin_term(term, 1).unwrap();
+                writer.push_item(&[0]).unwrap();
+                writer
+                    .end_term(mosaica_filter_write::Posting::Ascending(&[entity]))
+                    .unwrap();
+            }
+            writer.finish().unwrap();
+            mosaica_filter::write_presence(&files.presence, &Bitmap::from_range(0..3)).unwrap();
+            // A positions file of another length, as a writer that lost step would leave.
+            if positions_records != terms.len() {
+                let mut spool = mosaica_authz::PostingsSpool::for_column(
+                    &files.positions.with_extension("spool"),
+                    mosaica_filter::POSITIONS_COLUMN,
+                )
+                .unwrap();
+                for _ in 0..positions_records {
+                    spool.append(&[0, 0]).unwrap();
+                }
+                spool.finish(&files.positions).unwrap();
+            }
+            crate::filter::TextExtentPaths {
+                column: "prose".to_string(),
+                dict_rel: format!("{tag}-dict.bin"),
+                dict: files.dict,
+                postings: files.postings,
+                positions: files.positions,
+                presence: files.presence,
+                prose: None,
+            }
+        };
+        let open = |paths| TextLayer::open(&paths, mosaica_filter::Access::Read);
+        assert!(open(write("agree", &["a", "b", "c"], 3)).is_ok());
+        for (tag, records) in [("short", 2), ("long", 4)] {
+            match open(write(tag, &["a", "b", "c"], records)) {
+                Err(ComposeError::TextCountsDisagree { counts, .. }) => assert_eq!(
+                    counts,
+                    TextLayerCounts {
+                        terms: 3,
+                        postings: 3,
+                        positions: records as u32
+                    }
+                ),
+                other => panic!("{tag}: {other:?}"),
+            }
+        }
+    }
 
     /// Drill-down is served the key, never the ordinal: decoded against the layer that holds the
     /// entity, so two layers' clashing numbering still comes out right.

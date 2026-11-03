@@ -250,13 +250,21 @@ impl PositionsCursor<'_> {
     }
 
     fn refuse(&self, detail: String) -> io::Error {
-        malformed(format!("term {}'s positions record: {detail}", self.ordinal))
+        malformed(format!(
+            "term {}'s positions record: {detail}",
+            self.ordinal
+        ))
     }
 }
 
 /// Decode a run of `len` values from `bytes` at `cursor` onto `out`: bit-packed when `len` is a
 /// whole run, varints otherwise.
-fn take_run(bytes: &[u8], cursor: &mut usize, len: usize, out: &mut Vec<u32>) -> Result<(), String> {
+fn take_run(
+    bytes: &[u8],
+    cursor: &mut usize,
+    len: usize,
+    out: &mut Vec<u32>,
+) -> Result<(), String> {
     if len < POSITIONS_BLOCK {
         for _ in 0..len {
             out.push(take_varint(bytes, cursor).map_err(|e| e.to_string())?);
@@ -280,7 +288,10 @@ fn take_run(bytes: &[u8], cursor: &mut usize, len: usize, out: &mut Vec<u32>) ->
 }
 
 fn malformed(detail: String) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, format!("{POSITIONS_FILE}: {detail}"))
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("{POSITIONS_FILE}: {detail}"),
+    )
 }
 
 #[cfg(test)]
@@ -291,9 +302,11 @@ mod tests {
     fn file_of(records: &[Vec<u8>]) -> (tempfile::TempDir, ColumnPositions) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(POSITIONS_FILE);
-        let mut spool =
-            mosaica_authz::PostingsSpool::for_column(&path.with_extension("spool"), POSITIONS_COLUMN)
-                .unwrap();
+        let mut spool = mosaica_authz::PostingsSpool::for_column(
+            &path.with_extension("spool"),
+            POSITIONS_COLUMN,
+        )
+        .unwrap();
         for record in records {
             spool.append(record).unwrap();
         }
@@ -340,10 +353,19 @@ mod tests {
         assert!(read(0, 1, 0).is_err(), "truncated");
         assert!(read(1, 1, 0).is_err(), "trailing bytes");
         assert!(read(2, 1, 0).is_err(), "a repeated position");
-        assert!(read(3, 200, 150).is_err(), "a block offset outside the record");
-        assert!(read(3, 1_000_000, 0).is_err(), "a table longer than the record");
+        assert!(
+            read(3, 200, 150).is_err(),
+            "a block offset outside the record"
+        );
+        assert!(
+            read(3, 1_000_000, 0).is_err(),
+            "a table longer than the record"
+        );
         assert!(read(4, 1, 0).is_err(), "more positions than bytes");
         assert!(read(9, 1, 0).is_err(), "a term past the file");
-        assert_eq!(read(1, 1, 0).err().unwrap().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            read(1, 1, 0).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 }

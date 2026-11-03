@@ -352,6 +352,7 @@ impl Fixture {
             incarnation: view.map(|(_, i)| i),
             dict: format!("{dir}/{seg}-dict.bin"),
             postings: format!("{dir}/{seg}-postings.arrow"),
+            positions: format!("{dir}/{seg}-positions.arrow"),
             presence: format!("{dir}/{seg}-presence.roaring"),
             prose: view.map(|_| RecordExtent {
                 blocks: format!("{dir}/{seg}-prose.blocks.bin"),
@@ -372,15 +373,24 @@ impl Fixture {
             )
             .unwrap();
         }
-        let words = terms.keys().map(String::as_str);
-        mosaica_filter::write_sorted_dict(&self.path(&extent.dict), words).unwrap();
-        let per_term: Vec<Vec<u32>> = terms.into_values().collect();
-        mosaica_authz::write_postings(
-            &self.path(&extent.postings),
-            &per_term,
-            SMALL_TERM_THRESHOLD,
-        )
-        .unwrap();
+        let mut writer =
+            mosaica_filter_write::TextIndexWriter::create(mosaica_filter_write::TextIndexFiles {
+                dict: self.path(&extent.dict),
+                postings: self.path(&extent.postings),
+                positions: self.path(&extent.positions),
+                presence: self.path(&extent.presence),
+            })
+            .unwrap();
+        for (word, carriers) in &terms {
+            writer.begin_term(word, carriers.len() as u64).unwrap();
+            for _ in carriers {
+                writer.push_item(&[0]).unwrap();
+            }
+            writer
+                .end_term(mosaica_filter_write::Posting::Ascending(carriers))
+                .unwrap();
+        }
+        writer.finish().unwrap();
         let presence: croaring::Bitmap = entities.iter().copied().collect();
         std::fs::write(
             self.path(&extent.presence),

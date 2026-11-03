@@ -413,17 +413,14 @@ fn the_folded_prefix_lists_no_text_extent_and_holds_no_orphan() {
     );
     // The consumed extent's files are not under the new prefix — nothing linked them forward, and
     // nothing names them.
-    for rel in extents
-        .iter()
-        .flat_map(|e| [&e.dict, &e.postings, &e.presence])
-    {
+    for rel in extents.iter().flat_map(|e| e.files()) {
         assert!(
             !root.join(&new_prefix).join(rel).exists(),
             "a consumed text extent was hard-linked into the folded prefix: {rel}"
         );
     }
     // And every file the new manifest *does* name is there and digest-clean, which is what
-    // `open_bundle` checks — including the three the text pass wrote.
+    // `open_bundle` checks — including the four the text pass wrote.
     let bundle = open_bundle(&root).expect("the folded prefix opens and verifies");
     let named: Vec<&String> = bundle
         .manifest
@@ -433,9 +430,9 @@ fn the_folded_prefix_lists_no_text_extent_and_holds_no_orphan() {
         .collect();
     assert_eq!(
         named.len(),
-        3,
-        "the folded prefix should name exactly the merged dictionary, its postings and its \
-         presence: {named:?}"
+        4,
+        "the folded prefix should name exactly the merged dictionary, its postings, its positions \
+         and its presence: {named:?}"
     );
     // The corpus is still searchable through the artefacts the fold wrote.
     let index = base_index(&root);
@@ -633,11 +630,11 @@ fn claims(engine: &Engine, tmp: &Path, tag: &str, entities: &[u32]) -> bool {
         dict_rel: format!("claim-{tag}/dict.bin"),
         dict: dir.join(mosaica_filter::DICT_FILE),
         postings: dir.join(mosaica_filter::POSTINGS_FILE),
+        positions: dir.join(mosaica_filter::POSITIONS_FILE),
         presence: dir.join(mosaica_filter::PRESENCE_FILE),
         prose: None,
     };
-    mosaica_filter::write_sorted_dict(&paths.dict, std::iter::empty::<&str>()).unwrap();
-    mosaica_authz::write_postings(&paths.postings, &[], 32).unwrap();
+    mosaica_store::empty_shard::write_empty_text_index(&dir).unwrap();
     mosaica_filter::write_presence(&paths.presence, &croaring::Bitmap::of(entities)).unwrap();
     let generation = engine.generation();
     match generation

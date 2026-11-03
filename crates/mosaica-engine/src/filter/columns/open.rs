@@ -47,12 +47,9 @@ pub(super) fn open_scoped_column(
         row: false,
         family: scoped_family,
     };
-    // No position in `declared_scalars`, since it is not one of them and a scoped column is never
-    // blob-resident.
-    let declared_index = usize::MAX;
     if scoped_family == Family::Text {
         let analyser = resolve_analyser(&family.name, family.analyser.as_deref())?;
-        let mut column = Column::text(declared_index, filterable, analyser);
+        let mut column = Column::text(filterable, analyser);
         if based {
             let base = TextLayer::open_base(&name, &dir, true, request_access(mmap))?;
             column.push_text_layers(&name, [base])?;
@@ -63,7 +60,7 @@ pub(super) fn open_scoped_column(
         return Ok((
             name,
             placement,
-            Column::values(declared_index, filterable, scoped_family, None, None, Route::Scan),
+            Column::values(filterable, scoped_family, None, None, Route::Scan),
         ));
     }
     // The same artefacts and routing the entity-scoped family takes: a `derived` vocabulary's
@@ -80,7 +77,6 @@ pub(super) fn open_scoped_column(
         name,
         placement,
         Column::values(
-            declared_index,
             filterable,
             scoped_family,
             Some(base),
@@ -218,7 +214,6 @@ pub(crate) fn open_entity_terms_stack(
 /// postings, the extents composed later. `None` for a column with no entity-space home.
 pub(super) fn runtime_layers(
     scalar: &mosaica_store::manifest::DeclaredScalar,
-    declared_index: usize,
     vocabularies: &[mosaica_store::manifest::ManifestVocabulary],
 ) -> Result<Option<Column>, ComposeError> {
     let family = Family::of(scalar);
@@ -228,13 +223,12 @@ pub(super) fn runtime_layers(
             return Ok(None);
         }
         let analyser = resolve_analyser(&scalar.name, scalar.analyser.as_deref())?;
-        return Ok(Some(Column::text(declared_index, filterable, analyser)));
+        return Ok(Some(Column::text(filterable, analyser)));
     }
     if !scalar.owes_value_column(vocabularies) {
         return Ok(None);
     }
     Ok(Some(Column::values(
-        declared_index,
         filterable,
         family,
         None,
@@ -309,7 +303,7 @@ impl FilterColumns {
         let view_incarnation = &|view: &str| manifest.incarnation_of(view);
         let mut columns = BTreeMap::new();
         let mut placements = BTreeMap::new();
-        for (declared_index, scalar) in declared.iter().enumerate() {
+        for scalar in declared {
             let family = Family::of(scalar);
             let placement = Placement::of(scalar, vocabularies);
             let entity = placement.is_some_and(|placement| placement.entity);
@@ -320,7 +314,7 @@ impl FilterColumns {
             // starts empty and its extents compose onto it, a text column's here and a value
             // column's with the attribute extents below.
             if unfolded.iter().any(|name| name == &scalar.name) {
-                if let Some(mut column) = runtime_layers(scalar, declared_index, vocabularies)? {
+                if let Some(mut column) = runtime_layers(scalar, vocabularies)? {
                     if family == Family::Text {
                         column.push_text_layers(
                             &scalar.name,
@@ -340,7 +334,7 @@ impl FilterColumns {
                 let dir = prefix_dir.join(layout.column_rel(&scalar.name));
                 let base = TextLayer::open_base(&scalar.name, &dir, false, request_access(mmap))?;
                 let analyser = resolve_analyser(&scalar.name, scalar.analyser.as_deref())?;
-                let mut column = Column::text(declared_index, true, analyser);
+                let mut column = Column::text(true, analyser);
                 column.push_text_layers(
                     &scalar.name,
                     std::iter::once(base).chain(entity_text_layers(
@@ -366,7 +360,7 @@ impl FilterColumns {
             )?;
             columns.insert(
                 scalar.name.clone(),
-                Column::values(declared_index, entity, family, Some(base), postings, route),
+                Column::values(entity, family, Some(base), postings, route),
             );
         }
         // ---- the group-scoped column families ------------------------------------------------

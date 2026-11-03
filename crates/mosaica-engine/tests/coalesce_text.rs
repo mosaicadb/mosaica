@@ -432,6 +432,7 @@ fn a_coalesced_text_layer_that_does_not_cover_its_window_is_refused() {
         dict_rel: extent.dict.clone(),
         dict: prefix.join(&extent.dict),
         postings: prefix.join(&extent.postings),
+        positions: prefix.join(&extent.positions),
         presence: presence.to_path_buf(),
         prose: None,
     };

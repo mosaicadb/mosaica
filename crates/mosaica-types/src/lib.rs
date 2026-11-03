@@ -264,9 +264,11 @@ pub struct GenerationStamp {
 // declared with where one names a view group. A 47 bundle is refused.
 // 49: every text index, a base as well as an extent, carries `presence.roaring`. A 48 bundle is
 // refused.
+// 50: every text index, a base as well as an extent, carries `positions.arrow`, and a text extent
+// names it. A 49 bundle is refused.
 // Each bump makes a stale local bundle a loud refusal rather than a silent misread — a fail-closed
 // guard, not compatibility.
-pub const BUNDLE_FORMAT: u32 = 49;
+pub const BUNDLE_FORMAT: u32 = 50;
 pub const API_VERSION: u32 = 1;
 pub const ABI_VERSION: u32 = 1;
 pub const ROW_ABSENT: u32 = 0xFFFF_FFFF;

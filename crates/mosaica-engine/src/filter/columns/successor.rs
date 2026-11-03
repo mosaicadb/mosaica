@@ -11,7 +11,7 @@ use crate::filter::{
     scoped_column_name, scoped_has_value_column, scoped_is_filterable, Placement, PIN,
 };
 
-/// The three files one published text extent names, resolved to paths.
+/// The files one published text extent names, resolved to paths.
 #[derive(Debug, Clone)]
 pub struct TextExtentPaths {
     pub column: String,
@@ -20,6 +20,7 @@ pub struct TextExtentPaths {
     pub dict_rel: String,
     pub dict: std::path::PathBuf,
     pub postings: std::path::PathBuf,
+    pub positions: std::path::PathBuf,
     pub presence: std::path::PathBuf,
     /// A group-scoped column's prose.
     pub prose: Option<RecordExtentPaths>,
@@ -34,6 +35,7 @@ impl TextExtentPaths {
             dict_rel: extent.dict.clone(),
             dict: prefix_dir.join(&extent.dict),
             postings: prefix_dir.join(&extent.postings),
+            positions: prefix_dir.join(&extent.positions),
             presence: prefix_dir.join(&extent.presence),
             prose: extent
                 .prose
@@ -55,7 +57,7 @@ pub struct CoalescedWindow {
 }
 
 /// One text column's window of extents, and the coalesced extent that replaces them, named by
-/// dictionary path on both sides. The replacement carries its three files rather than an opened
+/// dictionary path on both sides. The replacement carries its files rather than an opened
 /// layer because a text layer is composed from paths wherever it enters.
 #[derive(Debug, Clone)]
 pub struct CoalescedTextWindow {
@@ -158,7 +160,6 @@ impl FilterColumns {
     pub(crate) fn with_runtime_column(
         &self,
         scalar: &mosaica_store::manifest::DeclaredScalar,
-        declared_index: usize,
         vocabularies: &[mosaica_store::manifest::ManifestVocabulary],
     ) -> Result<FilterColumns, ComposeError> {
         let mut next = self.successor();
@@ -168,7 +169,7 @@ impl FilterColumns {
         if scalar.unique {
             next.unique.insert(scalar.name.clone(), scalar.arrow_type);
         }
-        if let Some(column) = runtime_layers(scalar, declared_index, vocabularies)? {
+        if let Some(column) = runtime_layers(scalar, vocabularies)? {
             next.columns.insert(scalar.name.clone(), column);
         }
         Ok(next)

@@ -996,12 +996,10 @@ impl Executor {
         for shard in generation.shards() {
             let columns = match &compiled {
                 crate::attributes::CompiledAttribute::Entity(d) => {
-                    let declared_index = manifest.declared_scalars.len() - 1;
-                    match shard.filter_columns.with_runtime_column(
-                        d,
-                        declared_index,
-                        &manifest.vocabularies,
-                    ) {
+                    match shard
+                        .filter_columns
+                        .with_runtime_column(d, &manifest.vocabularies)
+                    {
                         Ok(columns) => Arc::new(columns),
                         Err(e) => {
                             reply.fail(ExecError::AttributeRefused {

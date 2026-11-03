@@ -4438,7 +4438,7 @@ impl KeywordChunk {
         pairs.sort_unstable_by(|a, b| keyword_key_order(a, b, text));
 
         let path = column_dir.join(format!("keyword-run-{seq:05}.spill"));
-        let mut writer = spill::TextRunWriter::create(&path)?;
+        let mut writer = spill::TextRunWriter::create(&path, spill::RunPayload::Rows)?;
         let mut start = 0usize;
         while start < pairs.len() {
             let head = pairs[start];
@@ -4462,7 +4462,7 @@ impl KeywordChunk {
             })?;
             writer.begin(key, count)?;
             for &row in rows.iter() {
-                writer.push_entity(row)?;
+                writer.push_entity(row, &[])?;
             }
             start = end;
         }
@@ -4575,7 +4575,7 @@ fn write_keyword_column(
     drop(chunk);
 
     // ---- 3. the cascade, where a column produced more runs than one merge may hold open ------
-    let receipts = cascade_sorted_runs(column_dir, "keyword", receipts)?;
+    let receipts = cascade_sorted_runs(column_dir, "keyword", spill::RunPayload::Rows, receipts)?;
 
     // ---- 4. the merge: the dictionary, and each row's ordinal ---------------------------------
     let dict_path = column_dir.join(mosaica_filter::DICT_FILE);
@@ -4651,7 +4651,7 @@ fn merge_keyword_runs(
     let dict_file = std::fs::File::create(dict_path).map_err(|e| BuildError::io(dict_path, e))?;
     let mut dict = mosaica_filter::SortedDictWriter::new(std::io::BufWriter::new(dict_file))
         .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
-    let mut merge = TextRunMerge::open(receipts)?;
+    let mut merge = TextRunMerge::open(receipts, spill::RunPayload::Rows)?;
     let mut keys = 0u64;
     let mut emitted = 0u64;
     // The selected key, copied out of the merge so that the rows it carries may be drained while
@@ -4679,7 +4679,7 @@ fn merge_keyword_runs(
             )));
         }
         keys += 1;
-        merge.drain(&mut |row| {
+        merge.drain(&mut |row, _| {
             if row as u64 >= rows {
                 return Err(BuildError::Invalid(format!(
                     "attribute '{}': the key {key:?} is carried by row {row}, which is past the \
@@ -4853,9 +4853,12 @@ const TEXT_MIN_WORKER_BYTES: usize = 8 << 20;
 /// key is most of the key).
 const TEXT_TERM_ENTRY_BYTES: usize = 80;
 
-/// What one posting costs: four bytes of `u32` charged at eight, because a `Vec` grows by doubling
-/// and is on average half empty.
-const TEXT_POSTING_BYTES: usize = 8;
+/// What one posting costs: eight bytes of item and position count charged at sixteen, because a
+/// `Vec` grows by doubling and is on average half empty.
+const TEXT_POSTING_BYTES: usize = 16;
+
+/// What one occurrence costs: four bytes of position, charged at eight for the same reason.
+const TEXT_POSITION_BYTES: usize = 8;
 
 /// Entities held as a `u32` slice for one merged term before the encode switches to Roaring.
 ///
@@ -5120,34 +5123,23 @@ fn write_text_index(
     let receipts: Vec<spill::SpillReceipt> = receipts.into_iter().flatten().collect();
 
     // ---- 2. the cascade, where a corpus produced more runs than one merge may hold open ------
-    let receipts = cascade_sorted_runs(column_dir, "text", receipts)?;
+    let receipts =
+        cascade_sorted_runs(column_dir, "text", spill::RunPayload::Positions, receipts)?;
 
-    // ---- 3. the merge: one sorted term stream into both files -------------------------------
-    let dict_path = column_dir.join(mosaica_filter::DICT_FILE);
-    let postings_path = column_dir.join(mosaica_filter::POSTINGS_FILE);
-    let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
-    // Beside the file it assembles, and removed by `finish` — the spool-then-assemble discipline
-    // this repo applies to every file whose records are sized as they are written. A build that
-    // fails here leaves the spool behind with the rest of the half-written partition.
-    let spool_path = postings_path.with_extension("spool");
-    let terms = merge_text_runs(
-        &dict_path,
-        &postings_path,
-        &spool_path,
-        &receipts,
-        plan.merge_slice_cap,
-    )?;
-    mosaica_filter::write_presence(&presence_path, &values.present()?)
-        .map_err(|e| BuildError::io(&presence_path, e))?;
-    fsync_file(&dict_path)?;
-    fsync_file(&postings_path)?;
-    fsync_file(&presence_path)?;
+    // ---- 3. the merge: one sorted term stream into the dictionary, postings and positions ----
+    let files = mosaica_filter_write::TextIndexFiles::in_dir(column_dir);
+    let terms = merge_text_runs(files.clone(), &receipts, plan.merge_slice_cap)?;
+    mosaica_filter::write_presence(&files.presence, &values.present()?)
+        .map_err(|e| BuildError::io(&files.presence, e))?;
+    for path in files.paths() {
+        fsync_file(path)?;
+    }
     for receipt in &receipts {
         std::fs::remove_file(&receipt.path).map_err(|e| BuildError::io(&receipt.path, e))?;
     }
 
     Ok(WrittenTextIndex {
-        paths: vec![dict_path, postings_path, presence_path],
+        paths: files.paths().map(Path::to_path_buf).into(),
         terms,
     })
 }
@@ -5175,7 +5167,7 @@ fn index_text_chunk(
     worker_bytes: usize,
 ) -> Result<Vec<spill::SpillReceipt>> {
     let mut receipts = Vec::new();
-    let mut terms: std::collections::HashMap<Box<[u8]>, Vec<u32>> =
+    let mut terms: std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences> =
         std::collections::HashMap::new();
     let mut bytes = 0usize;
     let mut seq = 0usize;
@@ -5183,22 +5175,26 @@ fn index_text_chunk(
     let mut scratch = mosaica_analyse::TokenScratch::default();
     values.for_each_record_in(window, &mut |entity, prose| {
         let entity = entity as u32;
+        let mut position = 0u32;
         analyser.for_each_token(prose, &mut scratch, &mut |token| {
             // Looked up before it is owned: a term already seen costs no allocation, which over a
             // corpus is every occurrence but the first of every word.
-            if let Some(postings) = terms.get_mut(token.as_bytes()) {
-                // A term repeated *within one document* is still the last entry, because a
-                // document is one record: that is the duplicate a posting-as-a-set has to
-                // collapse, and it is the only one — an entity appears in exactly one live arena
-                // record, so no two documents in this window carry the same entity.
-                if postings.last() != Some(&entity) {
-                    postings.push(entity);
+            if let Some(occurrences) = terms.get_mut(token.as_bytes()) {
+                // A term repeated *within one document* adds a position to the item it already
+                // has, because a document is one record and its tokens arrive together: an entity
+                // appears in exactly one live arena record, so no two documents in this window
+                // carry the same entity.
+                if occurrences.add(entity, position) {
                     bytes += TEXT_POSTING_BYTES;
                 }
             } else {
-                terms.insert(token.as_bytes().into(), vec![entity]);
+                let mut occurrences = mosaica_filter_write::Occurrences::default();
+                occurrences.add(entity, position);
+                terms.insert(token.as_bytes().into(), occurrences);
                 bytes += TEXT_TERM_ENTRY_BYTES + 2 * token.len() + TEXT_POSTING_BYTES;
             }
+            bytes += TEXT_POSITION_BYTES;
+            position += 1;
         });
         if bytes >= worker_bytes {
             spill_text_run(column_dir, chunk, &mut seq, &mut terms, &mut receipts)?;
@@ -5221,27 +5217,32 @@ fn spill_text_run(
     column_dir: &Path,
     chunk: usize,
     seq: &mut usize,
-    terms: &mut std::collections::HashMap<Box<[u8]>, Vec<u32>>,
+    terms: &mut std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences>,
     receipts: &mut Vec<spill::SpillReceipt>,
 ) -> Result<()> {
     if terms.is_empty() {
         return Ok(());
     }
     let path = column_dir.join(format!("text-run-{chunk:05}-{seq:04}.spill"));
-    let mut writer = spill::TextRunWriter::create(&path)?;
+    let mut writer = spill::TextRunWriter::create(&path, spill::RunPayload::Positions)?;
     {
-        // **Sorted here, because the window walked the arena and not entity space.** A run's
-        // entities must ascend strictly within a term (`spill::TextRunWriter::push_entity`
+        // **Visited in item order, because the window walked the arena and not entity space.** A
+        // run's entities must ascend strictly within a term (`spill::TextRunWriter::push_entity`
         // refuses otherwise), and they arrive in the order the documents sit in the arena. The
         // sort is over one worker's accumulator, which the byte budget bounds, so it is a bounded
         // cost per run rather than a term-sized one at the merge.
-        for postings in terms.values_mut() {
-            postings.sort_unstable();
-        }
         let mut order: Vec<&[u8]> = terms.keys().map(|key| &**key).collect();
         order.sort_unstable();
         for term in order {
-            writer.push(term, &terms[term])?;
+            let occurrences = &terms[term];
+            let count = u32::try_from(occurrences.items()).map_err(|_| {
+                BuildError::Invalid(format!(
+                    "text run {}: a term carries more entities than a u32 can count",
+                    path.display()
+                ))
+            })?;
+            writer.begin(term, count)?;
+            occurrences.for_each_item(|entity, positions| writer.push_entity(entity, positions))?;
         }
     }
     receipts.push(writer.finish()?);
@@ -5278,11 +5279,11 @@ struct TextRunMerge {
 }
 
 impl TextRunMerge {
-    fn open(receipts: &[spill::SpillReceipt]) -> Result<TextRunMerge> {
+    fn open(receipts: &[spill::SpillReceipt], payload: spill::RunPayload) -> Result<TextRunMerge> {
         let mut cursors: Vec<spill::TextRunReader> = Vec::with_capacity(receipts.len());
         let mut heap: Vec<usize> = Vec::with_capacity(receipts.len());
         for receipt in receipts {
-            let mut reader = spill::TextRunReader::open(receipt)?;
+            let mut reader = spill::TextRunReader::open(receipt, payload)?;
             // A run with no terms at all — an empty chunk — verifies its receipt here and takes no
             // place in the heap.
             if reader.advance()? {
@@ -5341,7 +5342,8 @@ impl TextRunMerge {
         self.postings
     }
 
-    /// Feed the selected term's entities to `sink`, ascending, checking the ascent as it goes.
+    /// Feed the selected term's entities to `sink`, ascending, each with the term's positions in it
+    /// (none in a run of rows), checking the ascent as it goes.
     ///
     /// The check is over the *merged* list, not each run's: a run's own ascent is the writer's
     /// business, and what could go wrong here is the merge. It is also what catches a position
@@ -5350,7 +5352,7 @@ impl TextRunMerge {
     /// one walk — and is exactly the failure a silent `>=` would hide. `encode_posting` re-checks
     /// the slice path, but the bitmap path has no such check to make — a `Bitmap` is a set — which
     /// is why the test lives here rather than there.
-    fn drain(&mut self, sink: &mut impl FnMut(u32) -> Result<()>) -> Result<()> {
+    fn drain(&mut self, sink: &mut impl FnMut(u32, &[u32]) -> Result<()>) -> Result<()> {
         self.heads.clear();
         for i in 0..self.selected.len() {
             let run = self.selected[i];
@@ -5369,7 +5371,8 @@ impl TextRunMerge {
                 }
             }
             last = Some(entity);
-            sink(entity)?;
+            // A run's head entity is the last it decoded, so its positions are still the reader's.
+            sink(entity, self.cursors[run].positions())?;
             if let Some(next) = self.cursors[run].next_entity()? {
                 self.heads.push(std::cmp::Reverse((next, run)));
             }
@@ -5407,6 +5410,7 @@ const RUN_MERGE_FAN_IN: usize = 128;
 fn cascade_sorted_runs(
     column_dir: &Path,
     family: &str,
+    payload: spill::RunPayload,
     mut receipts: Vec<spill::SpillReceipt>,
 ) -> Result<Vec<spill::SpillReceipt>> {
     let mut pass = 0usize;
@@ -5414,8 +5418,8 @@ fn cascade_sorted_runs(
         let mut merged = Vec::with_capacity(receipts.len().div_ceil(RUN_MERGE_FAN_IN));
         for (group, runs) in receipts.chunks(RUN_MERGE_FAN_IN).enumerate() {
             let path = column_dir.join(format!("{family}-merge-{pass:02}-{group:05}.spill"));
-            let mut merge = TextRunMerge::open(runs)?;
-            let mut writer = spill::TextRunWriter::create(&path)?;
+            let mut merge = TextRunMerge::open(runs, payload)?;
+            let mut writer = spill::TextRunWriter::create(&path, payload)?;
             while merge.next_term()? {
                 let count = u32::try_from(merge.postings()).map_err(|_| {
                     BuildError::Invalid(format!(
@@ -5424,7 +5428,7 @@ fn cascade_sorted_runs(
                     ))
                 })?;
                 writer.begin(merge.term(), count)?;
-                merge.drain(&mut |entity| writer.push_entity(entity))?;
+                merge.drain(&mut |entity, positions| writer.push_entity(entity, positions))?;
             }
             merged.push(writer.finish()?);
             // Deleted per group rather than per pass: a corpus that reaches the cascade at all is
@@ -5441,25 +5445,19 @@ fn cascade_sorted_runs(
     Ok(receipts)
 }
 
-/// Merge the sorted runs into the dictionary and the postings, and return the term count.
+/// Merge the sorted runs into the dictionary, postings and positions, and return the term count.
 fn merge_text_runs(
-    dict_path: &Path,
-    postings_path: &Path,
-    spool_path: &Path,
+    files: mosaica_filter_write::TextIndexFiles,
     receipts: &[spill::SpillReceipt],
     merge_slice_cap: usize,
 ) -> Result<u64> {
-    let mut merge = TextRunMerge::open(receipts)?;
-
-    let dict_file = std::fs::File::create(dict_path).map_err(|e| BuildError::io(dict_path, e))?;
-    let mut dict = mosaica_filter::SortedDictWriter::new(std::io::BufWriter::new(dict_file))
-        .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
-    let mut spool = mosaica_authz::postings::PostingsSpool::create(spool_path)
-        .map_err(|e| BuildError::io(spool_path, e))?;
+    let mut merge = TextRunMerge::open(receipts, spill::RunPayload::Positions)?;
+    let dict_path = files.dict.clone();
+    let failed = |e: std::io::Error| BuildError::io(&dict_path, e);
+    let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).map_err(failed)?;
 
     let mut entities: Vec<u32> = Vec::new();
     let mut staged: Vec<u32> = Vec::new();
-    let mut written = 0u64;
 
     while merge.next_term()? {
         let term = std::str::from_utf8(merge.term()).map_err(|e| {
@@ -5468,54 +5466,41 @@ fn merge_text_runs(
                  is a corrupted run rather than a corpus value"
             ))
         })?;
-        let ordinal = dict
-            .push(term)
-            .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
+        writer.begin_term(term, merge.postings()).map_err(failed)?;
 
-        let record = if merge.postings() <= merge_slice_cap as u64 {
+        if merge.postings() <= merge_slice_cap as u64 {
             entities.clear();
-            merge.drain(&mut |entity| {
+            merge.drain(&mut |entity, positions| {
                 entities.push(entity);
-                Ok(())
+                writer.push_item(positions).map_err(failed)
             })?;
-            mosaica_authz::postings::encode_posting(
-                ordinal as usize,
-                &entities,
-                SMALL_TERM_THRESHOLD_DEFAULT,
-            )
-            .map_err(|e| BuildError::io(postings_path, e))?
+            writer
+                .end_term(mosaica_filter_write::Posting::Ascending(&entities))
+                .map_err(failed)?;
         } else {
             // The cap's other side: a term this large is one record, and holding it as `u32`s
             // would be the only term in the pass whose residency the plan does not bound.
             let mut bitmap = croaring::Bitmap::new();
             staged.clear();
-            merge.drain(&mut |entity| {
+            merge.drain(&mut |entity, positions| {
                 staged.push(entity);
                 if staged.len() >= TEXT_MERGE_STAGE_ENTITIES {
                     bitmap.add_many(&staged);
                     staged.clear();
                 }
-                Ok(())
+                writer.push_item(positions).map_err(failed)
             })?;
             if !staged.is_empty() {
                 bitmap.add_many(&staged);
                 staged.clear();
             }
-            mosaica_authz::postings::encode_posting_bitmap(&bitmap, SMALL_TERM_THRESHOLD_DEFAULT)
-                .map_err(|e| BuildError::io(postings_path, e))?
-        };
-        spool
-            .append(&record)
-            .map_err(|e| BuildError::io(spool_path, e))?;
-        written += 1;
+            writer
+                .end_term(mosaica_filter_write::Posting::Set(&bitmap))
+                .map_err(failed)?;
+        }
     }
 
-    dict.finish()
-        .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
-    spool
-        .finish(postings_path)
-        .map_err(|e| BuildError::io(postings_path, e))?;
-    Ok(written)
+    writer.finish().map_err(failed)
 }
 
 /// Entities staged before each hand-off to croaring in the merge's bitmap arm — the same batching
@@ -6579,7 +6564,7 @@ mod tests {
             .chain(open.iter().map(TextValues::Extents))
             .collect();
 
-        let mut files: Vec<[Vec<u8>; 3]> = Vec::new();
+        let mut files: Vec<[Vec<u8>; 4]> = Vec::new();
         for (k, plan) in [
             TextIndexPlan::explicit(4_096, 1 << 30, 1 << 22),
             TextIndexPlan::explicit(1, 1 << 30, 1 << 22),
@@ -6641,28 +6626,32 @@ mod tests {
             assert!(left.is_empty(), "plan {k} left {left:?} behind");
             files.push(index_files(&column_dir));
         }
-        let [dict, postings, presence] = files.first().expect("at least one plan").clone();
-        for (k, [d, p, e]) in files.iter().enumerate().skip(1) {
+        let [dict, postings, positions, presence] =
+            files.first().expect("at least one plan").clone();
+        for (k, [d, p, q, e]) in files.iter().enumerate().skip(1) {
             assert_eq!(d, &dict, "plan {k}'s dictionary differs");
             assert_eq!(p, &postings, "plan {k}'s postings differ");
+            assert_eq!(q, &positions, "plan {k}'s positions differ");
             assert_eq!(e, &presence, "plan {k}'s presence differs");
         }
     }
 
-    /// A text index's dictionary, postings and presence, as bytes.
-    fn index_files(column_dir: &Path) -> [Vec<u8>; 3] {
+    /// A text index's dictionary, postings, positions and presence, as bytes.
+    fn index_files(column_dir: &Path) -> [Vec<u8>; 4] {
         [
             mosaica_filter::DICT_FILE,
             mosaica_filter::POSTINGS_FILE,
+            mosaica_filter::POSITIONS_FILE,
             mosaica_filter::PRESENCE_FILE,
         ]
         .map(|name| std::fs::read(column_dir.join(name)).expect(name))
     }
 
-    /// And the index says what the column says: every term the analyser produces is a key, and its
-    /// posting is exactly the entities whose prose carries it — read back through the readers that
-    /// will serve it, over a plan of many chunks and many runs apiece, so what is asserted is the
-    /// merge's output and not one worker's accumulator.
+    /// And the index says what the column says: every term the analyser produces is a key, its
+    /// posting is exactly the entities whose prose carries it, and its positions in each are where
+    /// the analyser put it — read back through the readers that will serve it, over a plan of many
+    /// chunks and many runs apiece, so what is asserted is the merge's output and not one worker's
+    /// accumulator.
     #[test]
     fn the_merged_text_index_holds_every_term_and_the_entities_carrying_it() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -6693,11 +6682,21 @@ mod tests {
             false,
         )
         .expect("the postings open");
+        let positions = mosaica_filter::ColumnPositions::open(
+            &dir.path().join(mosaica_filter::POSITIONS_FILE),
+            false,
+        )
+        .expect("the positions open");
 
         let expected = expected_text_postings();
+        assert!(
+            expected.iter().any(|(_, items)| items.len() > 3 * mosaica_filter::POSITIONS_BLOCK),
+            "a term spans several blocks of positions"
+        );
         assert_eq!(dict.len() as usize, expected.len());
         assert_eq!(postings.term_count() as usize, expected.len());
-        for (ordinal, (term, entities)) in expected.iter().enumerate() {
+        for (ordinal, (term, items)) in expected.iter().enumerate() {
+            let entities: Vec<u32> = items.iter().map(|(entity, _)| *entity).collect();
             assert_eq!(
                 dict.resolve(term).expect("a readable dictionary"),
                 Some(ordinal as u32),
@@ -6716,7 +6715,17 @@ mod tests {
                     .collect(),
                 mosaica_authz::postings::PostingRef::Roaring(view) => view.iter().collect(),
             };
-            assert_eq!(&got, entities, "term {term:?} carries the wrong entities");
+            assert_eq!(got, entities, "term {term:?} carries the wrong entities");
+            let mut cursor = positions
+                .cursor(mosaica_types::AttrLocalId::new(ordinal as u32), items.len() as u64)
+                .expect("every term has a positions record");
+            for (rank, (entity, want)) in items.iter().enumerate() {
+                assert_eq!(
+                    cursor.positions(rank as u64).expect("a readable entry"),
+                    want.as_slice(),
+                    "term {term:?} in entity {entity}"
+                );
+            }
         }
     }
 
@@ -7067,21 +7076,26 @@ mod tests {
         ScalarValue::Utf8(prose)
     }
 
-    /// The expected `(term, entities)` set, derived from the fixture through the analyser itself —
-    /// the same route `mosaica tokenise` gives the conformance oracle, so this asserts the index
-    /// against the analyser rather than against a second tokeniser that could drift.
-    fn expected_text_postings() -> Vec<(String, Vec<u32>)> {
+    /// One entity holding a term, and the positions it holds it at.
+    type Held = (u32, Vec<u32>);
+
+    /// The expected terms, each with its entities and its positions in each, derived from the
+    /// fixture through the analyser itself — the same route `mosaica tokenise` gives the
+    /// conformance oracle, so this asserts the index against the analyser rather than against a
+    /// second tokeniser that could drift.
+    fn expected_text_postings() -> Vec<(String, Vec<Held>)> {
         let analyser = mosaica_analyse::analyser(mosaica_analyse::UNICODE).expect("the analyser");
-        let mut terms: std::collections::BTreeMap<String, Vec<u32>> = Default::default();
+        let mut terms: std::collections::BTreeMap<String, Vec<Held>> = Default::default();
         for entity in 0..N_TEXT {
             let ScalarValue::Utf8(prose) = text_fixture_prose(entity) else {
                 continue;
             };
-            for token in analyser.tokens(&prose) {
-                let postings = terms.entry(token).or_default();
-                if postings.last() != Some(&(entity as u32)) {
-                    postings.push(entity as u32);
+            for (position, token) in analyser.tokens(&prose).into_iter().enumerate() {
+                let items = terms.entry(token).or_default();
+                if items.last().map(|(e, _)| *e) != Some(entity as u32) {
+                    items.push((entity as u32, Vec::new()));
                 }
+                items.last_mut().expect("just pushed").1.push(position as u32);
             }
         }
         terms.into_iter().collect()

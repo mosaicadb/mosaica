@@ -12,7 +12,7 @@ use mosaica_store::manifest::{
 
 use super::{coalesced_column_rel, CoalesceContext, ColumnWindow, OpenedTier};
 use crate::flush::{
-    digest_of, failed, remove_spool_on_error, MaintenanceFailed, SMALL_TERM_THRESHOLD,
+    digest_of, failed, MaintenanceFailed, SMALL_TERM_THRESHOLD,
 };
 
 fn digest_outputs<'r>(
@@ -248,7 +248,7 @@ fn coalesce_record_blobs(
     Ok(extent)
 }
 
-/// Nothing per entity stores a text ordinal, so the merge changes only the extent's three files.
+/// Nothing per entity stores a text ordinal, so the merge changes only the extent's own files.
 pub(super) fn coalesce_text_window(
     window: &ColumnWindow<TextExtent>,
     ctx: &CoalesceContext,
@@ -280,23 +280,27 @@ pub(super) fn coalesce_text_window(
         })
         .collect::<std::io::Result<_>>()
         .map_err(failed(format!("text extent for '{column}'")))?;
+    let positions: Vec<mosaica_filter::ColumnPositions> = window
+        .extents
+        .iter()
+        .map(|extent| {
+            mosaica_filter::ColumnPositions::open(&ctx.prefix_dir.join(&extent.positions), true)
+        })
+        .collect::<std::io::Result<_>>()
+        .map_err(failed(format!("text extent for '{column}'")))?;
     let presences: Vec<croaring::Bitmap> = window
         .extents
         .iter()
         .map(|extent| mosaica_filter::read_presence(&ctx.prefix_dir.join(&extent.presence)))
         .collect::<std::io::Result<_>>()
         .map_err(failed(format!("text presence for '{column}'")))?;
-    let inputs: Vec<mosaica_filter_write::TextLayerRef<'_>> = dicts
-        .iter()
-        .zip(&postings)
-        .zip(&presences)
-        .map(
-            |((dict, postings), present)| mosaica_filter_write::TextLayerRef {
-                dict,
-                postings,
-                present,
-            },
-        )
+    let inputs: Vec<mosaica_filter_write::TextLayerRef<'_>> = (0..window.extents.len())
+        .map(|i| mosaica_filter_write::TextLayerRef {
+            dict: &dicts[i],
+            postings: &postings[i],
+            positions: &positions[i],
+            present: &presences[i],
+        })
         .collect();
 
     // A group-scoped column's prose, merged as the record blob is.
@@ -322,46 +326,43 @@ pub(super) fn coalesce_text_window(
             )?)
         }
     };
+    let out = mosaica_filter_write::TextIndexFiles::in_dir(&column_dir);
     let extent = TextExtent {
         column: column.clone(),
         view: window.view.clone(),
         incarnation: window.incarnation,
         dict: format!("{column_rel}/{}", mosaica_filter::DICT_FILE),
         postings: format!("{column_rel}/{}", mosaica_filter::POSTINGS_FILE),
+        positions: format!("{column_rel}/{}", mosaica_filter::POSITIONS_FILE),
         presence: format!("{column_rel}/{}", mosaica_filter::PRESENCE_FILE),
         prose,
     };
-    let dict_path = ctx.prefix_dir.join(&extent.dict);
-    let postings_path = ctx.prefix_dir.join(&extent.postings);
-    let spool_path = column_dir.join("postings.spool");
-    remove_spool_on_error(
-        mosaica_filter_write::coalesce_text_extents(
-            &inputs,
-            &dict_path,
-            &postings_path,
-            &ctx.prefix_dir.join(&extent.presence),
-            &spool_path,
-        ),
-        &spool_path,
-    )
-    .map_err(failed(format!("text coalesce for '{column}'")))?;
+    mosaica_filter_write::coalesce_text_extents(&inputs, out.clone())
+        .map_err(failed(format!("text coalesce for '{column}'")))?;
     digest_outputs(
         files,
         ctx,
-        [&extent.dict, &extent.postings, &extent.presence].map(String::as_str),
+        [
+            &extent.dict,
+            &extent.postings,
+            &extent.positions,
+            &extent.presence,
+        ]
+        .map(String::as_str),
     )?;
 
-    // A dictionary and postings that disagree would give ordinals that name the wrong words.
+    // Files whose counts disagree would give ordinals that name the wrong words.
     let no_reopen = "the coalesced text extent does not reopen";
-    let reopened_dict = mosaica_filter::SortedDict::open(&dict_path, mosaica_filter::Access::Read)
-        .map_err(failed(no_reopen))?;
-    let reopened_postings =
-        mosaica_filter::ColumnPostings::open(&postings_path, false).map_err(failed(no_reopen))?;
-    if reopened_dict.len() != reopened_postings.record_count() {
+    let counts = mosaica_filter::TextLayerCounts::of(
+        &mosaica_filter::SortedDict::open(&out.dict, mosaica_filter::Access::Read)
+            .map_err(failed(no_reopen))?,
+        &mosaica_filter::ColumnPostings::open(&out.postings, false).map_err(failed(no_reopen))?,
+        &mosaica_filter::ColumnPositions::open(&out.positions, false)
+            .map_err(failed(no_reopen))?,
+    );
+    if !counts.agree() {
         return Err(MaintenanceFailed(format!(
-            "the coalesced text extent for '{column}' holds {} terms and {} postings records",
-            reopened_dict.len(),
-            reopened_postings.record_count()
+            "the coalesced text extent for '{column}' holds {counts}"
         )));
     }
     Ok(extent)

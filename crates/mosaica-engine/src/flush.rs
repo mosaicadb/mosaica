@@ -101,9 +101,9 @@ pub enum FlushStage {
     TextRows,
     /// Tokenising each row's prose and inserting each token into the term-to-postings map.
     TextTokeniseTerms,
-    /// `write_sorted_dict` over the term map's already-ordered keys.
+    /// Writing each term's dictionary key, posting and positions, in step.
     TextDict,
-    /// Collecting and encoding the posting lists and writing `postings.arrow`.
+    /// Assembling `postings.arrow` and `positions.arrow` from their spools.
     TextPostings,
     /// Serialising and writing the presence bitmap.
     TextPresence,
@@ -1620,7 +1620,8 @@ fn write_text_layer(
         .map_err(|e| MaintenanceFailed(format!("{}: {e}", dir.display())))?;
     text_lap(&mut sub, FlushStage::TextRows);
 
-    let mut terms: std::collections::BTreeMap<String, Vec<u32>> = std::collections::BTreeMap::new();
+    let mut terms: std::collections::BTreeMap<String, mosaica_filter_write::Occurrences> =
+        std::collections::BTreeMap::new();
     let mut presence = croaring::Bitmap::new();
     let mut prose_rows: Vec<(u32, &str)> = Vec::new();
     let mut scratch = mosaica_analyse::TokenScratch::default();
@@ -1638,20 +1639,20 @@ fn write_text_layer(
         if view.is_some() {
             prose_rows.push((entity, prose));
         }
-        analyser.for_each_token(
-            prose,
-            &mut scratch,
-            &mut |token| match terms.get_mut(token) {
-                Some(postings) => {
-                    if postings.last() != Some(&entity) {
-                        postings.push(entity);
-                    }
+        let mut position = 0u32;
+        analyser.for_each_token(prose, &mut scratch, &mut |token| {
+            match terms.get_mut(token) {
+                Some(occurrences) => {
+                    occurrences.add(entity, position);
                 }
                 None => {
-                    terms.insert(token.to_string(), vec![entity]);
+                    let mut occurrences = mosaica_filter_write::Occurrences::default();
+                    occurrences.add(entity, position);
+                    terms.insert(token.to_string(), occurrences);
                 }
-            },
-        );
+            }
+            position += 1;
+        });
         text_lap(&mut sub, FlushStage::TextTokeniseTerms);
     }
     if presence.is_empty() {
@@ -1660,20 +1661,34 @@ fn write_text_layer(
 
     let dict_rel = format!("{rel_dir}/{}-dict.bin", target.seg_id);
     let postings_rel = format!("{rel_dir}/{}-postings.arrow", target.seg_id);
+    let positions_rel = format!("{rel_dir}/{}-positions.arrow", target.seg_id);
     let presence_rel = format!("{rel_dir}/{}-presence.roaring", target.seg_id);
-    mosaica_filter::write_sorted_dict(
-        &target.prefix_dir.join(&dict_rel),
-        terms.keys().map(String::as_str),
-    )
-    .map_err(|e| MaintenanceFailed(format!("{dict_rel}: {e}")))?;
+    let files = mosaica_filter_write::TextIndexFiles {
+        dict: target.prefix_dir.join(&dict_rel),
+        postings: target.prefix_dir.join(&postings_rel),
+        positions: target.prefix_dir.join(&positions_rel),
+        presence: target.prefix_dir.join(&presence_rel),
+    };
+    let failed = |e: std::io::Error| MaintenanceFailed(format!("{dict_rel}: {e}"));
+    let mut writer = mosaica_filter_write::TextIndexWriter::create(files).map_err(failed)?;
+    let mut entities: Vec<u32> = Vec::new();
+    for (term, occurrences) in &terms {
+        writer
+            .begin_term(term, occurrences.items() as u64)
+            .map_err(failed)?;
+        entities.clear();
+        occurrences
+            .for_each_item(|entity, positions| {
+                entities.push(entity);
+                writer.push_item(positions)
+            })
+            .map_err(failed)?;
+        writer
+            .end_term(mosaica_filter_write::Posting::Ascending(&entities))
+            .map_err(failed)?;
+    }
     text_lap(&mut sub, FlushStage::TextDict);
-    let per_term: Vec<Vec<u32>> = terms.into_values().collect();
-    mosaica_authz::postings::write_postings(
-        &target.prefix_dir.join(&postings_rel),
-        &per_term,
-        mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT,
-    )
-    .map_err(|e| MaintenanceFailed(format!("{postings_rel}: {e}")))?;
+    writer.finish().map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextPostings);
     mosaica_filter::write_presence(&target.prefix_dir.join(&presence_rel), &presence)
         .map_err(|e| MaintenanceFailed(format!("{presence_rel}: {e}")))?;
@@ -1706,6 +1721,7 @@ fn write_text_layer(
         view,
         dict: dict_rel,
         postings: postings_rel,
+        positions: positions_rel,
         presence: presence_rel,
         prose,
     }))
@@ -1753,7 +1769,7 @@ fn write_scoped_extents(
         }
 
         if let Some(analyser) = &spec.analyser {
-            // Text: the same three files `write_text_extents` writes, in this view's directory.
+            // Text: the same files `write_text_extents` writes, in this view's directory.
             if let Some(extent) = write_text_layer(
                 &format!("{column_rel}/{}", mosaica_filter::EXTENTS_DIR),
                 &spec.name,
@@ -2237,15 +2253,15 @@ mod tests {
         assert_eq!(ids, vec![3, 7, 9]);
     }
 
-    // ---- the text layer's three files (write-path §4.3) -----------------------------------
+    // ---- the text layer's files (write-path §4.3) -----------------------------------------
 
-    /// **The three files reconstruct the batch's terms, through the readers that serve them.**
-    /// The expectation is computed here from `Analyser::tokens` a row at a time, so the writer's
-    /// borrowed-token loop is checked against the owned-token segmentation it must agree with:
-    /// the dictionary is the sorted distinct term set, each term's posting is the ascending list
-    /// of the entities whose prose contains it (once, however often the row repeats it), and the
-    /// presence bitmap holds every entity that carried prose, the one whose prose analyses to no
-    /// term included.
+    /// **The files reconstruct the batch's terms, through the readers that serve them.** The
+    /// expectation is computed here from `Analyser::tokens` a row at a time, so the writer's
+    /// borrowed-token loop is checked against the owned-token segmentation it must agree with: the
+    /// dictionary is the sorted distinct term set, each term's posting is the ascending list of the
+    /// entities whose prose contains it (once, however often the row repeats it), each entity's
+    /// positions are where the row says the term, and the presence bitmap holds every entity that
+    /// carried prose, the one whose prose analyses to no term included.
     #[test]
     fn a_text_layer_round_trips_through_the_files_it_writes() {
         let analyser = mosaica_analyse::Analyser::default();
@@ -2259,16 +2275,22 @@ mod tests {
 
         // The expectation, from the owned-token analyser one row at a time.
         let mut expected_terms: std::collections::BTreeMap<String, Vec<u32>> = Default::default();
+        let mut expected_positions: std::collections::BTreeMap<String, Vec<Vec<u32>>> =
+            Default::default();
         let mut expected_presence = Vec::new();
         for (entity, value) in &prose {
             let WalScalar::Utf8(text) = value else {
                 continue;
             };
             expected_presence.push(*entity);
-            let distinct: std::collections::BTreeSet<String> =
-                analyser.tokens(text).into_iter().collect();
-            for term in distinct {
-                expected_terms.entry(term).or_default().push(*entity);
+            for (position, term) in (0u32..).zip(analyser.tokens(text)) {
+                let entities = expected_terms.entry(term.clone()).or_default();
+                let positions = expected_positions.entry(term).or_default();
+                if entities.last() != Some(entity) {
+                    entities.push(*entity);
+                    positions.push(Vec::new());
+                }
+                positions.last_mut().expect("just pushed").push(position);
             }
         }
         assert!(
@@ -2334,6 +2356,25 @@ mod tests {
                 mosaica_authz::postings::PostingRef::Roaring(view) => view.iter().collect(),
             };
             assert_eq!(&entities, expected, "the posting of '{term}'");
+        }
+
+        let positions = mosaica_filter::ColumnPositions::open(
+            &dir.path().join(&extent.positions),
+            false,
+        )
+        .expect("the positions reopen");
+        assert_eq!(positions.record_count() as usize, expected_terms.len());
+        for (ordinal, (term, items)) in expected_positions.iter().enumerate() {
+            let mut cursor = positions
+                .cursor(mosaica_types::AttrLocalId::new(ordinal as u32), items.len() as u64)
+                .expect("every term has a record");
+            for (rank, want) in items.iter().enumerate() {
+                assert_eq!(
+                    cursor.positions(rank as u64).expect("the entry decodes"),
+                    want.as_slice(),
+                    "the positions of '{term}'"
+                );
+            }
         }
 
         let presence = mosaica_filter::read_presence(&dir.path().join(&extent.presence))

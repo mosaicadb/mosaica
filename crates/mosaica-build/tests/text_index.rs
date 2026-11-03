@@ -514,11 +514,11 @@ fn a_negation_over_a_text_column_is_the_complement_of_its_match() {
 
 /// **A phrase is where the words are adjacent and in order — the conjunction only narrows to it.**
 ///
-/// The two-stage route (§4.5): the tokens' postings intersect inside the candidate to an exact
-/// over-approximation, then each survivor's own prose is read out of the record blob, re-analysed
-/// and searched for the query's token sequence. What this pins is that the second stage does
-/// something — a route that returned the conjunction would pass every `match` assertion in this
-/// file and answer `phrase` wrongly wherever a document happens to use the words apart.
+/// The two-stage route: the tokens' postings intersect inside the candidate to an exact
+/// over-approximation, then each survivor's word positions are searched for the query's token
+/// sequence. What this pins is that the second stage does something — a route that returned the
+/// conjunction would pass every `match` assertion in this file and answer `phrase` wrongly wherever
+/// a document happens to use the words apart.
 ///
 /// The fixture carries both separating shapes. Source 0 says *the quick brown fox*; source 1 says
 /// *quick silver fox brown*, which holds the same two words at a distance and holds `fox brown` in
@@ -648,12 +648,12 @@ fn a_phrase_matches_only_where_the_words_are_adjacent_and_in_order() {
     );
 }
 
-/// **The candidate bounds a phrase's answer, and the verify never reads outside it.**
+/// **The candidate bounds a phrase's answer, and the positions check never reads outside it.**
 ///
-/// The verify decompresses a record block per survivor, so an entity outside the candidate reaching
-/// it would be a block read on behalf of an item the principal may not see — a different and worse
-/// thing than a wrong answer. The route checks that before it touches a block rather than trusting
-/// the intersection two functions above, and this is the case that would notice if both were wrong
+/// The check reads positions per survivor, so an entity outside the candidate reaching it would be
+/// a read on behalf of an item the principal may not see — a different and worse thing than a
+/// wrong answer. The route checks that before it reads any positions rather than trusting the
+/// intersection two functions above, and this is the case that would notice if both were wrong
 /// together.
 #[test]
 fn a_phrase_never_answers_or_reads_outside_the_candidate() {

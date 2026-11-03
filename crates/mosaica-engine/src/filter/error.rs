@@ -25,12 +25,11 @@ pub enum ComposeError {
     KeywordWithoutDictionary { column: String },
     /// A dictionary arrived on a layer of a column the schema does not call a keyword.
     DictionaryOnOtherFamily { column: String },
-    /// A text layer's dictionary and its postings are different lengths.
-    TermsAndPostingsDisagree {
+    /// A text layer's dictionary, postings and positions are different lengths.
+    TextCountsDisagree {
         column: String,
         layer: String,
-        terms: u32,
-        postings: u32,
+        counts: mosaica_filter::TextLayerCounts,
     },
     /// A text column whose manifest records no analyser identity.
     NoAnalyserRecorded { column: String },
@@ -91,16 +90,11 @@ impl std::fmt::Display for ComposeError {
                 "a layer for column '{column}' carries a sorted dictionary and the schema does \
                  not declare the column a keyword"
             ),
-            ComposeError::TermsAndPostingsDisagree {
+            ComposeError::TextCountsDisagree {
                 column,
                 layer,
-                terms,
-                postings,
-            } => write!(
-                f,
-                "the {layer} text layer of column '{column}' holds {terms} terms and {postings} \
-                 postings records"
-            ),
+                counts,
+            } => write!(f, "the {layer} text layer of column '{column}' holds {counts}"),
             ComposeError::NoAnalyserRecorded { column } => write!(
                 f,
                 "column '{column}' is text and the manifest records no analyser identity for it"

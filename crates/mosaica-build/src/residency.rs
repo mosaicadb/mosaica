@@ -111,7 +111,8 @@
 //! half the characters ([`EXTENT_SHARE`]), a published member entry at three bytes
 //! ([`MAPPED_BYTES_PER_MEMBER_ENTRY`]), the member spill's pair of files at four
 //! ([`SPILLED_BYTES_PER_MEMBER_ENTRY`]), and a text index at 35% of its column
-//! ([`TEXT_INDEX_SHARE_PERCENT`]). Each term's own doc says whether it is an exact width, a
+//! ([`TEXT_INDEX_SHARE_PERCENT`]) with its positions at 25% more
+//! ([`TEXT_POSITIONS_SHARE_PERCENT`]). Each term's own doc says whether it is an exact width, a
 //! ceiling or an estimate, and a term that is not exact says so where the forecast prints it.
 //!
 //! ⊘ **Measured at 1.66, 1.49, 1.39 and 1.34 times the peak**, at 16.3×10⁶, 30.1×10⁶, 64.7×10⁶ and
@@ -556,6 +557,14 @@ const ORACLE_BYTES_PER_PAIR_TENTHS: u64 = 42;
 /// column will be.
 const TEXT_INDEX_SHARE_PERCENT: u64 = 35;
 
+/// What a `text` column's `positions.arrow` costs against its characters, in hundredths.
+///
+/// ⊘ **An estimate, not a ceiling.** A position is a gap packed to its run's width, a byte or less
+/// for every word but the rarest, and a token with the space after it is about six characters of
+/// English prose. Measured at 0.46 GB over the 2.4×10⁶ arXiv abstracts, about a fifth of their
+/// characters; charged a quarter.
+const TEXT_POSITIONS_SHARE_PERCENT: u64 = 25;
+
 /// What one `dict.bin` entry costs beyond the characters it holds, in tenths of a byte: two
 /// varints a key — the shared prefix length and the suffix length — and 8 bytes of restart offset
 /// a block of 16 keys (`mosaica_filter::dict`'s format and its `DEFAULT_RESTART_INTERVAL`).
@@ -913,9 +922,9 @@ pub(crate) fn entity_order_residency(
         }
         // The text index's sorted runs, **charged at the column they are tokenised from** rather
         // than at a constant of their own. The runs spill while the column is resident, so the two
-        // stand on the disk together; and a run spends one varint on a `(term, entity)` pair where
-        // the prose spent the term's whole characters on every occurrence of it, so the column is
-        // a ceiling over them. Charging them the column's arithmetic rather than a second copy of
+        // stand on the disk together; and a run spends a varint on a `(term, entity)` pair and one
+        // on each occurrence's position gap, where the prose spent the term's whole characters
+        // and a separator on every occurrence of it, so the column is a ceiling over them. Charging them the column's arithmetic rather than a second copy of
         // it is also what keeps the two from drifting apart.
         //
         // ⊘ The ceiling is modelled, not measured, and it is loose: the one corpus with a run
@@ -1883,18 +1892,23 @@ pub(crate) fn disk(
         }
         if attribute.ty == ScalarType::Text {
             // A `text` column's index is a token index: one posting per `(token, entity)` pair, a
-            // dictionary of the tokens and a presence bitmap, and no value column at all — its
-            // `entity → value` answer is the record blob's. [`TEXT_INDEX_SHARE_PERCENT`] carries
-            // the figure and what it rests on; the presence bitmap is charged at a bit an item.
+            // dictionary of the tokens, each occurrence's position and a presence bitmap, and no
+            // value column at all — its `entity → value` answer is the record blob's.
+            // [`TEXT_INDEX_SHARE_PERCENT`] and [`TEXT_POSITIONS_SHARE_PERCENT`] carry the figures
+            // and what they rest on; the presence bitmap is charged at a bit an item.
             push(
                 format!(
                     "attribute '{}': the text index's postings.arrow and dict.bin, at an \
                      estimate of {TEXT_INDEX_SHARE_PERCENT}% of the column's {} MiB of \
-                     characters, and its presence bitmap",
+                     characters, its positions.arrow at {TEXT_POSITIONS_SHARE_PERCENT}%, and its \
+                     presence bitmap",
                     attribute.name,
                     characters >> 20
                 ),
-                characters.saturating_mul(TEXT_INDEX_SHARE_PERCENT) / 100 + n.div_ceil(8),
+                characters
+                    .saturating_mul(TEXT_INDEX_SHARE_PERCENT + TEXT_POSITIONS_SHARE_PERCENT)
+                    / 100
+                    + n.div_ceil(8),
                 Phases::INDEX.onwards(),
             );
             continue;
