@@ -213,8 +213,11 @@ def make_adapter(args):
     if args.system in ("postgis", "postgis+leakproof", "postgis+integer"):
         from adapters.postgis import PostGIS
         return PostGIS(args.tier, work, nice=args.nice, caches=args.caches, arm=args.system)
+    if args.system == "opensearch":
+        from adapters.opensearch import OpenSearch
+        return OpenSearch(args.tier, work, nice=args.nice, caches=args.caches)
     sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate, clickhouse, postgis, "
-             f"postgis+leakproof or postgis+integer")
+             f"postgis+leakproof, postgis+integer or opensearch")
 
 
 def main() -> None:

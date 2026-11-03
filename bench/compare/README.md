@@ -10,7 +10,7 @@ at 10⁶ points for development only. Mosaica runs as two arms: `mosaica+aggrega
 request with the count grid from `/v1/aggregate` beside it, which is how Mosaica's own map asks
 and the arm that represents it; and `mosaica`, one viewport request alone, whose sub-cell grid
 counts the visible set and ignores the filter (see "Departures"). Runs write to `results/`, which
-is not tracked. **No figure from this directory is fit to publish yet**: every record carries
+is not tracked. OpenSearch is a third system, described under "OpenSearch" below. **No figure from this directory is fit to publish yet**: every record carries
 `"development_only": true`, and the machine it ran on was shared with other work.
 
 ## Running it from scratch
@@ -44,9 +44,12 @@ docker pull clickhouse/clickhouse-server@sha256:8b28eb09479c36c4533eec7a6268917d
 #    and the PostGIS image (PostgreSQL 18.6, PostGIS 3.6.4), by the digest adapters/postgis.py runs
 docker pull postgis/postgis@sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a2390989c4
 
+# 5a. The OpenSearch image (3.9.0), by the digest adapters/opensearch.py runs
+docker pull opensearchproject/opensearch@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
+
 # 6. One run per system; each appends a record to results/dev.jsonl
 cd bench/compare
-for s in mosaica mosaica+aggregate clickhouse postgis postgis+leakproof postgis+integer; do
+for s in mosaica mosaica+aggregate clickhouse postgis postgis+leakproof postgis+integer opensearch; do
   for c in compute defaults; do
     .venv/bin/python run.py --system $s --caches $c \
         --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
@@ -102,6 +105,9 @@ default. The table gives each its own column, and each record lists every cache 
 | PostGIS | none | PostgreSQL keeps no cache of results, so its two modes run the same server | – | – |
 | PostGIS | `shared_buffers`, and the machine's page cache | the table's and index's pages: state | 4 GB | 4 GB |
 | PostGIS | each connection's catalogue and plan caches | the schema, and statements a client prepares; the adapter prepares none (`prepare_threshold=None`): state | default | default |
+| OpenSearch | `index.requests.cache.enable` | the shard request cache: whole results of `size: 0` searches. The security plugin bypasses it for a search under document-level security, so it never serves the viewer in either mode | off | on |
+| OpenSearch | `index.queries.cache.enabled` | the node query cache: which documents a filter clause matched, per segment | off | on |
+| OpenSearch | field-data cache, the security plugin's cache of authenticated users and their roles (`plugins.security.cache.ttl_minutes`), compiled scripts | state; this index has no `text` field, so field data holds nothing | default | default |
 
 Each Mosaica record holds the admission limits and cache bounds the server reports in
 `/control/status`; it does not report `compute_threads`, which defaults to the CPUs the container
@@ -191,6 +197,74 @@ one for mixed SRIDs; in PostGIS 3.6.4 `&&` raises none, which this harness check
 empty points and mixed dimensions. The column is declared `geometry(Point, 0)` and every row is
 written by the build with SRID 0, though a typmod of SRID 0 means an unspecified SRID and does not
 by itself refuse others.
+
+## OpenSearch
+
+OpenSearch 3.9.0 runs as one node from the official image, pinned by digest, with its security
+plugin on, since document-level security is what restricts the viewer. Elasticsearch is not used
+because its document-level security is a paid feature. The plugin runs with the image's demo
+configuration: its demo TLS certificates, which the adapter does not verify, and the `admin` user
+with a password made for the run. That is fit for a local run and for nothing else.
+
+The build (`adapters/opensearch.py`) creates an ingest pipeline that quantises `x` and `y` in
+Painless by `frame.fixed32`'s rule, in the same order of operations as ClickHouse's SQL, and an
+index of one shard and no replicas, with `qx` and `qy` as `long`, `licence` and `type` as
+`keyword`, `publication_year` as `integer` and `is_oa` as `boolean`, and `_source` disabled, so
+positions are read from doc values and nothing else is stored. Six client processes read the
+tier's Parquet on the host and send it through the pipeline in bulk requests of 50,000 documents
+(about 7 MB), with the refresh interval at `-1`; the index is then refreshed, force-merged to one
+segment, returned to the default refresh interval (one second) and flushed, and every file in its
+data directory is synced. Build time runs from creating the pipeline to the end of that sync, on a
+running server; size on disk is the whole data directory, which also holds the security plugin's
+own index.
+
+Access: after the build the admin creates the internal user `viewer`, a role `viewer_read` with
+`read` on the index and the document-level security query `{"terms": {"licence": [the viewer's
+terms]}}`, and a mapping of the role to the user. Every frame and table is a search sent with the
+viewer's credentials over basic authentication, and no search names a licence. Each record's
+`config.access_checks` holds what the running server did: an aggregation over the whole index
+counts every row as the admin and only the rows of the viewer's terms as the viewer, and a run
+stops if it does not. The same aggregation sent twice as the admin hits the shard request cache
+on the second (with default caches); sent twice as the viewer it neither hits nor misses,
+because the security plugin turns the request cache off for a search under document-level
+security, so the admin's cached result cannot reach the viewer.
+
+A frame is one search: two ranges on `qx` and `qy` for the camera's tiles and the filter's terms
+and ranges, all in filter context, and two aggregations. The grid is a `histogram` on `qx` with a
+`histogram` on `qy` inside it, at interval 2^(32 − depth) and `min_doc_count` 1; the tiles are the
+same pair at the tile depth, each with a `top_hits` of K positions from doc values sorted by
+`_doc`, and a `bucket_selector` that keeps only the tiles of at most K, so no dense tile's
+positions are sent. Tile counts are the grid's sums, as for ClickHouse. A histogram's counts are
+exact: a value falls in bucket `floor(value / interval)`, exact in double precision for a power
+of two and a value below 2^53, and with one shard no bucket is cut. The aggregation workload is one
+search with a `terms` aggregation on `type` (size 21, so every type and `none` for a missing one;
+exact with one shard, where no shard's top buckets are merged with another's), a year `histogram`
+at interval 1 inside a `filter` on the binned range, a `filter` for the years outside it and a
+`missing` aggregation for no year.
+
+Tuning, every setting the adapter writes against its default, from OpenSearch's documentation on
+indexing speed and search performance:
+
+| Setting | Value | Default | Why |
+|---|---|---|---|
+| Heap (`-Xms`, `-Xmx`) | 8 GiB | 1 GiB (the image's `jvm.options`) | Half the container's memory, up to 31 GB |
+| `discovery.type` | `single-node` | multi-node discovery | One node |
+| `index.number_of_shards` | 1 | 1 | Stated: one shard keeps every aggregation exact |
+| `index.number_of_replicas` | 0 | 1 | One node, and no replicas during a bulk load |
+| `index.refresh_interval` | `-1` during the load, then the default | 1 s | No refreshes during a bulk load |
+| `_source` | disabled | enabled | Positions come from doc values; nothing reads the source |
+| Force-merge | to one segment | none | A read-only index merged to one segment |
+| `index.max_inner_result_window` | 500 | 100 | A `top_hits` of K |
+| `search.max_buckets` | 2,097,152 | 65,535 | The largest grid: 20 tiles of 256 × 256 cells and their columns |
+| Bulk requests | 50,000 documents from 6 processes | – | The documentation's 5 to 15 MB a request, from several clients |
+| Performance analyzer agent | off | on | A monitoring process beside the server, kept out of the timings as ClickHouse's log tables are |
+| `index.requests.cache.enable`, `index.queries.cache.enabled` | off with compute caches | on | See the cache table |
+
+Every other setting is the image's default, and each record lists the index's settings, the
+node's cache settings, the concurrent segment search mode, `http.compression`, the role and the
+access checks. The security plugin caches an authenticated user for
+an hour, so the viewer's first search after a start, which session start times, pays for its
+password check and the resolution of its role, and later searches do not.
 
 ## Files
 
@@ -288,6 +362,18 @@ has zero error. Every count is over the viewer's visible items.
   login and the first read, which builds the viewer's visible set; for ClickHouse, whose HTTP
   interface sends the viewer's user and password with every query, the first frame, which
   authenticates the viewer and resolves its rights and row policy.
+- **OpenSearch loads through a client.** OpenSearch has no reader for Parquet, so the bulk clients
+  run on the host, outside the container: their CPU and memory are in neither the build's cgroup
+  peak nor its RSS, while ClickHouse reads the file inside its server. They run at the build's
+  niceness. The quantisation is still the server's, in its ingest pipeline.
+- **OpenSearch's host settings.** Its documentation asks for `vm.max_map_count` of at least
+  262,144, and this machine has 65,530; single-node discovery turns that bootstrap check into a
+  warning, and one merged segment maps few files. `bootstrap.memory_lock` is not set, since the
+  container has no swap.
+- **OpenSearch speaks TLS.** Its responses are encrypted with the demo certificates and are not
+  compressed (`http.compression` is off by default in this release), where ClickHouse's
+  and Mosaica's are plain HTTP. A `bbox` filter's corners are quantised by the adapter with
+  `frame.fixed32`, since a range query has no arithmetic.
 - **Timed responses are checked too.** Every timed frame is checked as the untimed pass checks
   it, tile counts, grid and every point check including the dense tiles', and every timed table
   likewise. Where the untimed answer to a step was wrong in a part, which its errors already

@@ -119,7 +119,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             ("Build peak RSS", lambda r: size(r["build"]["peak_rss_bytes"])),
             ("Build peak cgroup memory (incl. page cache)", lambda r: size(r["build"]["cgroup_peak_bytes"])),
             ("Size on disk (Mosaica: bundle; ClickHouse: data directory less replaced parts; "
-              "PostGIS: data directory less WAL and template databases)", lambda r: size(r["build"]["disk_bytes"])),
+              "PostGIS: data directory less WAL and template databases; OpenSearch: data directory)", lambda r: size(r["build"]["disk_bytes"])),
             ("Serve peak RSS", lambda r: size(r["serve_memory"]["peak_rss_bytes"])),
             ("Serve peak cgroup memory (incl. page cache)", lambda r: size(r["serve_memory"]["cgroup_peak_bytes"])),
             ("Serve cgroup memory after a cold restart and one frame",
