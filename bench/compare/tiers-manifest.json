@@ -61,6 +61,46 @@
         "mit": 4
       },
       "sha256": "95b868b1f6a56690038c86c45d4b77bff19ec217d36aca0794c3aa41d9c7dd07"
+    },
+    "5e7": {
+      "file": "paperseek-5e7.parquet",
+      "nominal_rows": 50000000,
+      "rows": 49998613,
+      "threshold": 9032130846622963748,
+      "rows_by_licence": {
+        "unlicensed": 38829207,
+        "cc-by": 6865919,
+        "cc-by-nc-nd": 1402864,
+        "cc-by-nc": 1042503,
+        "other-oa": 736060,
+        "cc-by-sa": 442712,
+        "cc-by-nc-sa": 392268,
+        "public-domain": 227448,
+        "cc-by-nd": 55443,
+        "publisher-specific-oa": 4156,
+        "mit": 33
+      },
+      "sha256": "3fef942769496d59b31a81ccb97503b8a13438825100c3e38053d646cab62f43"
+    },
+    "full": {
+      "file": "paperseek-full.parquet",
+      "nominal_rows": 102117343,
+      "rows": 102117343,
+      "threshold": null,
+      "rows_by_licence": {
+        "unlicensed": 79302453,
+        "cc-by": 14028593,
+        "cc-by-nc-nd": 2864246,
+        "cc-by-nc": 2127041,
+        "other-oa": 1503856,
+        "cc-by-sa": 904691,
+        "cc-by-nc-sa": 800620,
+        "public-domain": 464518,
+        "cc-by-nd": 112934,
+        "publisher-specific-oa": 8329,
+        "mit": 62
+      },
+      "sha256": "a1ad52463d4b34492ae9e935fc8d50186acf92de8f9e625f0790850bbcca896b"
     }
   }
 }
