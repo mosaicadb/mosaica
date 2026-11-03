@@ -565,7 +565,7 @@ fn term_names(root: &Path, term: TermId, entity: EntityId) -> bool {
     let named = postings
         .posting(term)
         .expect("the postings file reads")
-        .is_some_and(|posting| posting.into_bitmap().contains(entity));
+        .is_some_and(|posting| posting.iter().any(|e| e == entity));
     named
 }
 

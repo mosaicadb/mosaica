@@ -240,7 +240,7 @@ fn postings_name(postings: &PostingsReader, term: TermId, entity: EntityId) -> b
     postings
         .posting(term)
         .expect("the postings file reads")
-        .is_some_and(|posting| posting.into_bitmap().contains(entity))
+        .is_some_and(|posting| posting.iter().any(|e| e == entity))
 }
 
 fn base_postings_of(root: &Path, prefix: &str) -> PostingsReader {
