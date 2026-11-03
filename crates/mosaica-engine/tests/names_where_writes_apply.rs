@@ -5,6 +5,7 @@ mod common;
 #[path = "homes/fixture.rs"]
 mod homes;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,7 +13,8 @@ use std::time::Duration;
 use common::*;
 use homes::*;
 use mosaica_engine::{
-    AddressTable, AddressValue, Engine, MemberNames, MemberSet, NamedList, ScalarOut, WriteScope,
+    AddressTable, AddressValue, Engine, IngestReceipt, MemberNames, MemberSet, NamedList,
+    ScalarOut, WriteScope,
 };
 use mosaica_lifecycle::membership::{IncomingArtifact, IncomingGrowth};
 use mosaica_lifecycle::wal::{ChangeOp, WalScalar};
@@ -364,4 +366,186 @@ fn a_growths_member_moved_by_an_edit_and_a_fold_reaches_the_item_where_it_is() {
     drop(engine);
     let engine = open(tmp.path(), &root);
     assert_eq!(members(&engine, 0), expected, "after a restart");
+}
+
+/// The homes engine with a group sharing `quarter`'s views and a key created at the running
+/// service, so the key has two views, [`OWNER`] and [`DOOR`], addressing one cell of each scoped
+/// family per item.
+fn open_with_a_shared_key(tmp: &Path) -> (std::path::PathBuf, Engine) {
+    let (root, engine) = open_homes(tmp);
+    let e = extent();
+    engine
+        .create_view_group(mosaica_lifecycle::wal::ViewGroupDeclaration {
+            name: "quarter_alt".to_string(),
+            title: None,
+            projection: "none".to_string(),
+            frame: mosaica_engine::DeclaredFrame {
+                x_min: e.x_min,
+                x_max: e.x_max,
+                y_min: e.y_min,
+                y_max: e.y_max,
+            },
+            visibility: None,
+            point_default: None,
+            members: Some("quarter".to_string()),
+            metadata: Vec::new(),
+        })
+        .expect("the sharing group is declared");
+    engine
+        .create_view("quarter".into(), "q3".into(), None, Default::default())
+        .expect("the key is created");
+    (root, engine)
+}
+
+const OWNER: &str = "quarter:q3";
+const DOOR: &str = "quarter_alt:q3";
+
+/// A row adding the item `tid` names to a view at its built position, with `heat` and `memo` for
+/// the key's cell.
+fn adding(tid: MosaicaId, heat: f32, memo: &str) -> IngestRow {
+    let mut row = bare(Some(tid));
+    row.position = Some(position(X));
+    row.scoped = vec![WalScalar::F32(heat), WalScalar::Utf8(memo.to_string())];
+    row.omitted.retain(|at| *at < DECLARED);
+    row
+}
+
+/// How two batches adding one item to two views of a key are interleaved. Each is resolved before
+/// the other applies.
+#[derive(Clone, Copy, Debug)]
+enum Race {
+    /// Both wait in the executor's queue, so they are admitted to one commit window.
+    OneWindow,
+    /// The second is held after it is resolved while the first is accepted and served.
+    FirstServed,
+}
+
+/// Send `first` to [`DOOR`] and `second` to [`OWNER`], each resolved before the other applies.
+fn race(
+    engine: &Engine,
+    how: Race,
+    first: IngestRow,
+    second: IngestRow,
+) -> (IngestReceipt, IngestReceipt) {
+    let wait = Duration::from_secs(30);
+    std::thread::scope(|scope| match how {
+        Race::OneWindow => {
+            engine.set_work_pass_paused_for_test(true);
+            let enqueued = engine.work_enqueued_for_test();
+            let a = scope.spawn(|| ingest_to(engine, "first", DOOR, vec![first]));
+            wait_until("the first is queued", wait, || {
+                engine.work_enqueued_for_test() > enqueued
+            });
+            let b = scope.spawn(|| ingest_to(engine, "second", OWNER, vec![second]));
+            wait_until("the second is queued", wait, || {
+                engine.work_enqueued_for_test() > enqueued + 1
+            });
+            engine.set_work_pass_paused_for_test(false);
+            (a.join().unwrap().unwrap(), b.join().unwrap().unwrap())
+        }
+        Race::FirstServed => {
+            engine.hold_next_write_check_for_test();
+            let b = scope.spawn(|| ingest_to(engine, "second", OWNER, vec![second]));
+            wait_until("the second holds", wait, || {
+                engine.write_check_is_holding_for_test()
+            });
+            let a = ingest_to(engine, "first", DOOR, vec![first]).unwrap();
+            publish_buffered(engine);
+            engine.release_write_check_for_test();
+            (a, b.join().unwrap().unwrap())
+        }
+    })
+}
+
+/// What `tid` is served with under the key: the items `memo` matching `word` names, whether it is
+/// in each of the key's views, and its `heat`.
+fn under_the_key(engine: &Engine, tid: MosaicaId, word: &str) -> (bool, bool, bool, ScalarOut) {
+    let full = engine.authorise(&full_coverage_credential()).unwrap();
+    let matched = served(
+        engine,
+        &full,
+        OWNER,
+        leaf(
+            &format!("memo@{OWNER}"),
+            mosaica_engine::filter::FilterOperand::Match {
+                query: word.to_string(),
+                minimum: None,
+            },
+        ),
+    );
+    let card = engine.item(&full, tid).unwrap().expect("the item is served");
+    let heat = card
+        .scoped
+        .iter()
+        .find(|s| s.name == "heat")
+        .and_then(|s| s.values.iter().find(|(key, _)| key == "q3"))
+        .map(|(_, value)| value.clone())
+        .expect("the item holds a heat under q3");
+    (
+        matched == BTreeSet::from([tid.raw()]),
+        served(engine, &full, OWNER, None).contains(&tid.raw()),
+        served(engine, &full, DOOR, None).contains(&tid.raw()),
+        heat,
+    )
+}
+
+/// **Two batches adding one item to two views of a key, each with the key's scoped values, leave
+/// the cell one value.** Each batch is resolved while the cell is empty. The one applied second is
+/// resolved again where it applies: with the same values it adds the item to its view and repeats
+/// them, and with different ones it edits the item to hold its own. The item is in both views and
+/// is served the one value, through the flush, a restart and a fold, whether the batches share a
+/// commit window or the first is served before the second applies.
+#[test]
+fn two_views_of_a_key_adding_one_item_at_once_leave_its_cell_one_value() {
+    for how in [Race::OneWindow, Race::FirstServed] {
+        for same in [true, false] {
+            let tmp = tempfile::tempdir().unwrap();
+            let (root, engine) = open_with_a_shared_key(tmp.path());
+            let tid = engine
+                .mosaica_id_of(mosaica_types::EntityId::new(
+                    source_to_new_map(&root, "v00000")[&X],
+                ))
+                .unwrap();
+            let (heat, word) = if same {
+                (61.5, "firstword")
+            } else {
+                (62.5, "secondword")
+            };
+            let (first, second) = race(
+                &engine,
+                how,
+                adding(tid, 61.5, "memo firstword"),
+                adding(tid, heat, &format!("memo {word}")),
+            );
+            let case = format!("{how:?}, same values {same}");
+            assert_eq!(first.added, 1, "{case}: {first:?}");
+            match same {
+                true => assert_eq!((second.added, second.edited), (1, 0), "{case}: {second:?}"),
+                false => assert_eq!((second.added, second.edited), (0, 1), "{case}: {second:?}"),
+            }
+            publish_buffered(&engine);
+
+            let expected = (true, true, true, ScalarOut::F32(heat));
+            let check = |engine: &Engine, after: &str| {
+                assert_eq!(
+                    under_the_key(engine, tid, word),
+                    expected,
+                    "{case}, after {after}"
+                );
+                if !same {
+                    assert!(
+                        !under_the_key(engine, tid, "firstword").0,
+                        "{case}: the first value is replaced, after {after}"
+                    );
+                }
+            };
+            check(&engine, "the flush");
+            drop(engine);
+            let engine = open(tmp.path(), &root);
+            check(&engine, "a restart");
+            fold(&engine);
+            publish_buffered(&engine);
+            check(&engine, "a fold");
+        }
+    }
 }

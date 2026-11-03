@@ -578,7 +578,8 @@ impl Executor {
 
     /// Whether anything the handler resolved `submission` against has moved since, from memory: a
     /// named item deleted, edited, joined to the row's view or its entity issued again, a value
-    /// the batch carries given a holder, or the holder of a value a row was refused for gone.
+    /// the batch carries given a holder, a group-scoped cell a row fills given a value through
+    /// another view of its key, or the holder of a value a row was refused for gone.
     fn moved_since_resolved(&self, submission: &IngestSubmission) -> bool {
         let crate::ingest::Planned {
             rows,
@@ -619,6 +620,7 @@ impl Executor {
                             item.entity,
                             &row.view,
                         )
+                        || crate::write::joined::scoped_cell_filled(&generation, item, row)
                 }
                 None => false,
             });

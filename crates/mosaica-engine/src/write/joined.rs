@@ -301,6 +301,30 @@ pub(crate) fn held_scoped_value(
     }
 }
 
+/// Whether a row adding `item` to a view carries a group-scoped value for a cell that holds one
+/// now. The resolver lets such a row keep its value only where the cell was empty, so a cell
+/// filled since is a cell another write gave a value.
+pub(crate) fn scoped_cell_filled(
+    generation: &Generation,
+    item: ItemAt,
+    row: &mosaica_lifecycle::UnallocatedRow,
+) -> bool {
+    let manifest = &generation.bundle.manifest;
+    let families = crate::write::scoped_families_of_view(manifest, &row.view);
+    let owner_view = crate::write::scoped_owner_view_of(manifest, &row.view);
+    row.scoped
+        .iter()
+        .zip(families)
+        .enumerate()
+        .any(|(at, (value, family))| {
+            let declared = declared_of_scoped(family);
+            // An unreadable cell counts as filled: resolving the batch again reports the failure.
+            !scalar_is_absent(value, &declared)
+                && held_scoped_value(generation, item, at, family, &declared, &owner_view)
+                    .map_or(true, |held| held.is_some())
+        })
+}
+
 /// Every view `entity` holds a row in, flushed or buffered, sorted: what an edit carries, and
 /// what the executor compares with what the handler read.
 pub(crate) fn views_holding(shard: &Shard, entity: EntityId) -> Vec<String> {
