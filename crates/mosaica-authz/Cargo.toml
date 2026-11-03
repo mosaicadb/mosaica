@@ -29,9 +29,9 @@ rustc-hash = "1"
 arrow = { workspace = true }
 memmap2 = { workspace = true }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 croaring = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }

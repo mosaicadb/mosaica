@@ -161,13 +161,16 @@ pub(crate) fn mapped_buffer(file: &File) -> io::Result<Buffer> {
 
 /// The spool file behind [`PostingsSpool`] and [`crate::KeyedPostingsSpool`], so a build does not
 /// hold every record in memory at once: encoded records are appended to a temporary file as they
-/// arrive, and only the Arrow offset table is held. [`Self::finish`] maps the spool as the
-/// column's values buffer, byte-for-byte what a buffered writer would produce.
+/// arrive, and the Arrow offset table to an unnamed file beside it. [`Self::finish`] maps both as
+/// the column's buffers, byte-for-byte what a buffered writer would produce.
 pub(crate) struct RecordSpool {
     spool_path: PathBuf,
     writer: BufWriter<File>,
-    // Arrow LargeBinary offsets: offsets[i]..offsets[i + 1] bounds record i; leading 0.
-    offsets: Vec<i64>,
+    /// Arrow LargeBinary offsets as native-endian `i64`s with a leading 0: entries `i` and `i + 1`
+    /// bound record `i`. The file has no name, so it goes however the spool ends.
+    offsets: BufWriter<File>,
+    last: i64,
+    records: usize,
     /// A record being written in pieces: the bytes written since it began, and the length of the
     /// head its end writes back over its first bytes.
     open: Option<(usize, usize)>,
@@ -183,10 +186,18 @@ impl RecordSpool {
             .create(true)
             .truncate(true)
             .open(spool_path)?;
+        let dir = match spool_path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir,
+            _ => Path::new("."),
+        };
+        let mut offsets = BufWriter::new(tempfile::tempfile_in(dir)?);
+        offsets.write_all(&0i64.to_ne_bytes())?;
         Ok(RecordSpool {
             spool_path: spool_path.to_path_buf(),
             writer: BufWriter::new(file),
-            offsets: vec![0],
+            offsets,
+            last: 0,
+            records: 0,
             open: None,
         })
     }
@@ -195,17 +206,16 @@ impl RecordSpool {
         if self.open.is_some() {
             return Err(invalid_input("a record was appended while another was being written"));
         }
-        let next = next_offset(self.last_offset(), record.len())?;
+        let next = next_offset(self.last, record.len())?;
         self.writer.write_all(record)?;
-        self.offsets.push(next);
-        Ok(())
+        self.push_offset(next)
     }
 
-    fn last_offset(&self) -> i64 {
-        *self
-            .offsets
-            .last()
-            .expect("offsets holds a leading 0 from create")
+    fn push_offset(&mut self, next: i64) -> io::Result<()> {
+        self.offsets.write_all(&next.to_ne_bytes())?;
+        self.last = next;
+        self.records += 1;
+        Ok(())
     }
 
     /// Begin a record written in pieces, with `head_len` bytes at its head that
@@ -240,18 +250,17 @@ impl RecordSpool {
                 head.len()
             )));
         }
-        let last = self.last_offset();
+        let last = self.last;
         if !head.is_empty() {
             let start = u64::try_from(last).map_err(|_| invalid_data("negative spool offset"))?;
             self.writer.seek(SeekFrom::Start(start))?;
             self.writer.write_all(head)?;
             self.writer.seek(SeekFrom::End(0))?;
         }
-        self.offsets.push(next_offset(last, written)?);
-        Ok(())
+        self.push_offset(next_offset(last, written)?)
     }
 
-    /// Flush and fsync the spool, build the posting column over a map of it, hand that column to
+    /// Build the posting column over maps of the spool and its offsets, hand that column to
     /// `write`, and delete the spool file once `write` has succeeded.
     pub(crate) fn finish(
         self,
@@ -260,37 +269,12 @@ impl RecordSpool {
         if self.open.is_some() {
             return Err(invalid_input("the spool finished while a record was being written"));
         }
-        let file = self
-            .writer
-            .into_inner()
-            .map_err(io::IntoInnerError::into_error)?;
-        // The spool is read back through a memory map; its bytes must be durable before the map
-        // is taken. The mapping outlives this file handle, dropped below.
-        file.sync_all()?;
-
-        let total = *self
-            .offsets
-            .last()
-            .expect("offsets holds a leading 0 from create");
-        let total = usize::try_from(total)
+        let total = usize::try_from(self.last)
             .map_err(|_| invalid_data("postings spool total exceeds usize on this platform"))?;
-
-        let values = if total == 0 {
-            // memmap2 rejects zero-length maps.
-            Buffer::from_vec(Vec::<u8>::new())
-        } else {
-            let buffer = mapped_buffer(&file)?;
-            if buffer.len() != total {
-                return Err(invalid_data(format!(
-                    "postings spool is {} bytes but the offset table accounts for {total}",
-                    buffer.len()
-                )));
-            }
-            buffer
-        };
-        drop(file);
-
-        let offsets = OffsetBuffer::new(ScalarBuffer::from(self.offsets));
+        let values = map_spooled(self.writer, total)?;
+        let entries = self.records + 1;
+        let offsets = map_spooled(self.offsets, entries * std::mem::size_of::<i64>())?;
+        let offsets = OffsetBuffer::new(ScalarBuffer::new(offsets, 0, entries));
         let array = LargeBinaryArray::try_new(offsets, values, None)
             .map_err(|e| invalid_data(e.to_string()))?;
         write(array)?;
@@ -298,10 +282,33 @@ impl RecordSpool {
     }
 }
 
-/// Streaming counterpart to [`write_posting_records`]: encoded records are spooled to a
-/// temporary file as they arrive, record ordinal = term id, with only the Arrow offset table
-/// held in memory. `finish` writes `postings.arrow` byte-for-byte the same as
-/// [`write_posting_records`] would from the same records.
+/// Flush and fsync a spool file and map it as a buffer, which must be `len` bytes. The mapping
+/// outlives the file handle.
+fn map_spooled(writer: BufWriter<File>, len: usize) -> io::Result<Buffer> {
+    let file = writer
+        .into_inner()
+        .map_err(io::IntoInnerError::into_error)?;
+    // The spool is read back through a memory map; its bytes must be durable before the map is
+    // taken.
+    file.sync_all()?;
+    if len == 0 {
+        // memmap2 rejects zero-length maps.
+        return Ok(Buffer::from_vec(Vec::<u8>::new()));
+    }
+    let buffer = mapped_buffer(&file)?;
+    if buffer.len() != len {
+        return Err(invalid_data(format!(
+            "postings spool is {} bytes but the offset table accounts for {len}",
+            buffer.len()
+        )));
+    }
+    Ok(buffer)
+}
+
+/// Streaming counterpart to [`write_posting_records`]: encoded records and their Arrow offsets
+/// are spooled to temporary files as they arrive, record ordinal = term id. `finish` writes
+/// `postings.arrow` byte-for-byte the same as [`write_posting_records`] would from the same
+/// records.
 ///
 /// [`Self::for_column`] spools any file of that shape, one record per term in a column of another
 /// name, and [`Self::begin_record`] writes a record larger than is worth holding.
