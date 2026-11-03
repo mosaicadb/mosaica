@@ -273,4 +273,13 @@ if grep -n 'run_ratio\|postings_per_container\|fragmentation' \
   fail=1
 fi
 
+# The shipped builds parse JSON numbers to the correctly rounded double. No test can see this:
+# a dev-dependency turns the feature on in every test build.
+for p in mosaica mosaica-python; do
+  if ! cargo tree -p "$p" -e features,normal -i serde_json | grep -q 'feature "float_roundtrip"'; then
+    echo "FAIL: $p builds serde_json without float_roundtrip; set it on the workspace dependency."
+    fail=1
+  fi
+done
+
 exit $fail
