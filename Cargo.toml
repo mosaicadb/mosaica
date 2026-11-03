@@ -63,6 +63,9 @@ mosaica-build = { path = "crates/mosaica-build", version = "=0.1.0" }
 mosaica-corpus = { path = "crates/mosaica-corpus", version = "=0.1.0" }
 
 croaring = "2.8.0"
+# The text index's positions are bit-packed in runs of 128 by its `BitPacker4x`, the packer Tantivy
+# uses.
+bitpacking = { version = "0.9.3", default-features = false, features = ["bitpacker4x"] }
 rayon = "1"
 proptest = "1"
 # **Pinned exactly.** `mosaica_store::columns` writes `columns.arrow` in place by learning the

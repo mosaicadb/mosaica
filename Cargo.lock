@@ -469,6 +469,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "bitpacking"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96a7139abd3d9cebf8cd6f920a389cf3dc9576172e32f4563f188cae3c3eb019"
+dependencies = [
+ "crunchy",
+]
+
+[[package]]
 name = "blake2"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2264,6 +2273,7 @@ name = "mosaica-filter"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "bitpacking",
  "croaring",
  "memchr",
  "memmap2",
@@ -2279,6 +2289,7 @@ name = "mosaica-filter-write"
 version = "0.1.0"
 dependencies = [
  "arrow",
+ "bitpacking",
  "croaring",
  "mosaica-authz",
  "mosaica-filter",

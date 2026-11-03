@@ -45,17 +45,23 @@ mod column;
 mod dict;
 mod extent;
 mod pack;
+mod positions;
 mod record;
 mod record_stack;
 mod values;
 mod values_writer;
+mod varint;
 
-pub use column::{resolve_union, ColumnPostings, POSTINGS_FILE};
+pub use column::{resolve_union, ColumnPostings, PostingRanks, POSTINGS_FILE};
 pub use dict::{
     write_sorted_dict, DictError, DictStats, KeyMatcher, SortedDict, SortedDictWriter,
     DEFAULT_RESTART_INTERVAL, DICT_FILE, DICT_FORMAT_VERSION,
 };
 pub use extent::{extent_paths, open_extent, write_extent, EXTENTS_DIR};
+pub use positions::{
+    ColumnPositions, PositionsCursor, TextLayerCounts, POSITIONS_BLOCK, POSITIONS_COLUMN,
+    POSITIONS_FILE,
+};
 pub use record::{
     encode_block_header, encode_row, encode_row_from, encode_row_with, RecordBlob, RecordError,
     RecordField, RecordFieldRef, RecordRowCursor, RecordValue, RecordValueRef, RowFields,
@@ -68,3 +74,4 @@ pub use values::{
     NativeBound, Scalar, ScanWork, ValueColumn, PRESENCE_FILE, VALUES_FILE, read_presence,
 };
 pub use values_writer::{write_presence, write_value_column, ColumnKind, ValueColumnWriter};
+pub use varint::{put_varint, take_varint, VarintError};

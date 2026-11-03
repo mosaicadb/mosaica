@@ -29,6 +29,7 @@ mosaica-roaring = { workspace = true }
 # than the other way round.
 mosaica-authz = { workspace = true }
 croaring.workspace = true
+bitpacking = { workspace = true }
 # The value column is an Arrow IPC file, as every other columnar artefact in the bundle is
 # (contracts §2.1). Reading it here rather than through `mosaica-store` is what keeps the layer
 # rule intact: `check-layers.sh` denies filter → store, so this crate stays entity-space and never

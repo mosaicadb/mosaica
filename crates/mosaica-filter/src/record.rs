@@ -143,6 +143,7 @@ use arrow::buffer::{Buffer, ScalarBuffer};
 use croaring::{Bitmap, Portable};
 
 use crate::values::Access;
+use crate::varint::{put_varint, take_varint, VarintError};
 
 /// Uncompressed target bytes per block, for every producer: build, flush, coalesce and fold.
 pub const RECORD_BLOCK_TARGET: usize = 32 * 1024;
@@ -364,50 +365,9 @@ const KIND_LIST: u8 = 13;
 /// The per-row entity gaps follow it, and the rows follow those.
 const BLOCK_HEADER_FIXED: usize = 12;
 
-fn put_varint(mut value: u32, out: &mut Vec<u8>) {
-    loop {
-        let byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value == 0 {
-            out.push(byte);
-            return;
-        }
-        out.push(byte | 0x80);
-    }
-}
-
-/// One LEB128 varint out of `bytes`, refusing a truncated or over-wide one. The caller passes the
-/// bound the varint may not cross: the whole block while the gap section's own end is still being
-/// found, the end of that section once it is known, and the whole block again for the length that
-/// heads a row.
-fn take_varint(bytes: &[u8], cursor: &mut usize) -> Result<u32, RecordError> {
-    let mut value: u32 = 0;
-    let mut shift = 0u32;
-    loop {
-        let Some(byte) = bytes.get(*cursor).copied() else {
-            return Err(malformed("a block ends in the middle of a varint"));
-        };
-        *cursor += 1;
-        let payload = u32::from(byte & 0x7f);
-        let Some(shifted) = payload
-            .checked_shl(shift)
-            .filter(|v| (v >> shift) == payload)
-        else {
-            return Err(malformed("a block's varint does not fit u32"));
-        };
-        value |= shifted;
-        if byte & 0x80 == 0 {
-            if shift > 0 && byte == 0 {
-                return Err(malformed(
-                    "a block's varint is padded with a redundant continuation byte",
-                ));
-            }
-            return Ok(value);
-        }
-        shift += 7;
-        if shift >= 32 {
-            return Err(malformed("a block's varint does not fit u32"));
-        }
+impl From<VarintError> for RecordError {
+    fn from(e: VarintError) -> RecordError {
+        malformed(format!("a block {e}"))
     }
 }
 

@@ -9,7 +9,7 @@
 //! Postings are entity-space only; `RowId` never appears here.
 
 use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -112,7 +112,7 @@ pub fn write_posting_records(path: &Path, records: &[Vec<u8>]) -> io::Result<()>
     for record in records {
         builder.append_value(record);
     }
-    write_posting_array(path, builder.finish())
+    write_record_array(path, POSTING_COLUMN_NAME, builder.finish())
 }
 
 /// The single schema/batch/IPC-writer invocation behind every file this crate writes, so a
@@ -135,11 +135,12 @@ pub(crate) fn write_single_batch(
     Ok(())
 }
 
-/// [`write_single_batch`] with the positional postings schema. The column carries no validity
-/// buffer: a spurious all-valid buffer would change the file bytes.
-fn write_posting_array(path: &Path, array: LargeBinaryArray) -> io::Result<()> {
+/// [`write_single_batch`] with one non-null `LargeBinary` column named `column`, record *i* the
+/// *i*-th term's. The column carries no validity buffer: a spurious all-valid buffer would change
+/// the file bytes.
+fn write_record_array(path: &Path, column: &str, array: LargeBinaryArray) -> io::Result<()> {
     let schema = Arc::new(Schema::new(vec![Field::new(
-        POSTING_COLUMN_NAME,
+        column,
         DataType::LargeBinary,
         false,
     )]));
@@ -167,6 +168,9 @@ pub(crate) struct RecordSpool {
     writer: BufWriter<File>,
     // Arrow LargeBinary offsets: offsets[i]..offsets[i + 1] bounds record i; leading 0.
     offsets: Vec<i64>,
+    /// A record being written in pieces: the bytes written since it began, and the length of the
+    /// head its end writes back over its first bytes.
+    open: Option<(usize, usize)>,
 }
 
 impl RecordSpool {
@@ -183,17 +187,67 @@ impl RecordSpool {
             spool_path: spool_path.to_path_buf(),
             writer: BufWriter::new(file),
             offsets: vec![0],
+            open: None,
         })
     }
 
     pub(crate) fn append(&mut self, record: &[u8]) -> io::Result<()> {
-        let last = *self
-            .offsets
-            .last()
-            .expect("offsets holds a leading 0 from create");
-        let next = next_offset(last, record.len())?;
+        if self.open.is_some() {
+            return Err(invalid_input("a record was appended while another was being written"));
+        }
+        let next = next_offset(self.last_offset(), record.len())?;
         self.writer.write_all(record)?;
         self.offsets.push(next);
+        Ok(())
+    }
+
+    fn last_offset(&self) -> i64 {
+        *self
+            .offsets
+            .last()
+            .expect("offsets holds a leading 0 from create")
+    }
+
+    /// Begin a record written in pieces, with `head_len` bytes at its head that
+    /// [`Self::end_record`] fills once the rest is written.
+    pub(crate) fn begin_record(&mut self, head_len: usize) -> io::Result<()> {
+        if self.open.is_some() {
+            return Err(invalid_input("a record began while another was being written"));
+        }
+        self.writer.write_all(&vec![0u8; head_len])?;
+        self.open = Some((head_len, head_len));
+        Ok(())
+    }
+
+    /// Append `bytes` to the record [`Self::begin_record`] began.
+    pub(crate) fn extend_record(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let Some((written, _)) = self.open.as_mut() else {
+            return Err(invalid_input("record bytes arrived with no record begun"));
+        };
+        self.writer.write_all(bytes)?;
+        *written += bytes.len();
+        Ok(())
+    }
+
+    /// Close the record [`Self::begin_record`] began, writing `head` over its first bytes.
+    pub(crate) fn end_record(&mut self, head: &[u8]) -> io::Result<()> {
+        let Some((written, head_len)) = self.open.take() else {
+            return Err(invalid_input("a record ended with no record begun"));
+        };
+        if head.len() != head_len {
+            return Err(invalid_input(format!(
+                "a record's head is {} bytes where {head_len} were reserved",
+                head.len()
+            )));
+        }
+        let last = self.last_offset();
+        if !head.is_empty() {
+            let start = u64::try_from(last).map_err(|_| invalid_data("negative spool offset"))?;
+            self.writer.seek(SeekFrom::Start(start))?;
+            self.writer.write_all(head)?;
+            self.writer.seek(SeekFrom::End(0))?;
+        }
+        self.offsets.push(next_offset(last, written)?);
         Ok(())
     }
 
@@ -203,6 +257,9 @@ impl RecordSpool {
         self,
         write: impl FnOnce(LargeBinaryArray) -> io::Result<()>,
     ) -> io::Result<()> {
+        if self.open.is_some() {
+            return Err(invalid_input("the spool finished while a record was being written"));
+        }
         let file = self
             .writer
             .into_inner()
@@ -245,15 +302,25 @@ impl RecordSpool {
 /// temporary file as they arrive, record ordinal = term id, with only the Arrow offset table
 /// held in memory. `finish` writes `postings.arrow` byte-for-byte the same as
 /// [`write_posting_records`] would from the same records.
+///
+/// [`Self::for_column`] spools any file of that shape, one record per term in a column of another
+/// name, and [`Self::begin_record`] writes a record larger than is worth holding.
 pub struct PostingsSpool {
     spool: RecordSpool,
+    column: &'static str,
 }
 
 impl PostingsSpool {
     /// Create (truncating) the spool file at `spool_path`.
     pub fn create(spool_path: &Path) -> io::Result<Self> {
+        PostingsSpool::for_column(spool_path, POSTING_COLUMN_NAME)
+    }
+
+    /// [`Self::create`] for a file whose one column is named `column`.
+    pub fn for_column(spool_path: &Path, column: &'static str) -> io::Result<Self> {
         Ok(PostingsSpool {
             spool: RecordSpool::create(spool_path)?,
+            column,
         })
     }
 
@@ -263,11 +330,28 @@ impl PostingsSpool {
         self.spool.append(record)
     }
 
-    /// Flush and fsync the spool, write `postings.arrow` at `postings_path` from it, and delete
-    /// the spool file on success.
-    pub fn finish(self, postings_path: &Path) -> io::Result<()> {
+    /// Begin the next term's record, to be written in pieces after `head_len` bytes that
+    /// [`Self::end_record`] fills.
+    pub fn begin_record(&mut self, head_len: usize) -> io::Result<()> {
+        self.spool.begin_record(head_len)
+    }
+
+    /// Append `bytes` to the record [`Self::begin_record`] began.
+    pub fn extend_record(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.spool.extend_record(bytes)
+    }
+
+    /// Close the record [`Self::begin_record`] began, its head now `head`.
+    pub fn end_record(&mut self, head: &[u8]) -> io::Result<()> {
+        self.spool.end_record(head)
+    }
+
+    /// Flush and fsync the spool, write the file at `path` from it, and delete the spool file on
+    /// success.
+    pub fn finish(self, path: &Path) -> io::Result<()> {
+        let column = self.column;
         self.spool
-            .finish(|array| write_posting_array(postings_path, array))
+            .finish(|array| write_record_array(path, column, array))
     }
 }
 
@@ -361,40 +445,8 @@ impl PostingsReader {
     /// the map; when `false`, it is read into an owned buffer and decoded zero-copy from that.
     /// Either way, no per-record copy happens on open or on lookup.
     pub fn open(path: &Path, mmap: bool) -> io::Result<Self> {
-        let buffer = if mmap {
-            mapped_buffer(&File::open(path)?)?
-        } else {
-            let data = std::fs::read(path)?;
-            Buffer::from_vec(data)
-        };
-
-        let batch = decode_single_batch(&buffer, "postings.arrow")?;
-
-        if batch.num_columns() != 1 {
-            return Err(invalid_data(format!(
-                "postings.arrow: expected exactly one column, found {}",
-                batch.num_columns()
-            )));
-        }
-        let field = batch.schema_ref().field(0).clone();
-        if field.name() != POSTING_COLUMN_NAME || field.data_type() != &DataType::LargeBinary {
-            return Err(invalid_data(format!(
-                "postings.arrow: expected LargeBinary column named '{POSTING_COLUMN_NAME}', \
-                 found '{}' ({:?})",
-                field.name(),
-                field.data_type()
-            )));
-        }
-
-        let array = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<LargeBinaryArray>()
-            .ok_or_else(|| invalid_data("postings.arrow: column 0 is not a LargeBinaryArray"))?
-            .clone();
-
+        let array = open_record_column(path, mmap, POSTING_COLUMN_NAME)?;
         validate_records(&array)?;
-
         Ok(PostingsReader { array })
     }
 
@@ -421,6 +473,42 @@ impl PostingsReader {
         }
         read_posting(&self.array, idx).map(Some)
     }
+}
+
+/// Open a file of one non-null `LargeBinary` column named `column`, as [`PostingsSpool`] writes
+/// it, and return that column without copying its records. When `mmap` is `true` the file is
+/// memory-mapped, and otherwise read into an owned buffer.
+pub fn open_record_column(path: &Path, mmap: bool, column: &str) -> io::Result<LargeBinaryArray> {
+    let buffer = if mmap {
+        mapped_buffer(&File::open(path)?)?
+    } else {
+        Buffer::from_vec(std::fs::read(path)?)
+    };
+    let what = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    let batch = decode_single_batch(&buffer, &what)?;
+    if batch.num_columns() != 1 {
+        return Err(invalid_data(format!(
+            "{what}: expected exactly one column, found {}",
+            batch.num_columns()
+        )));
+    }
+    let field = batch.schema_ref().field(0).clone();
+    if field.name() != column || field.data_type() != &DataType::LargeBinary {
+        return Err(invalid_data(format!(
+            "{what}: expected LargeBinary column named '{column}', found '{}' ({:?})",
+            field.name(),
+            field.data_type()
+        )));
+    }
+    batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<LargeBinaryArray>()
+        .cloned()
+        .ok_or_else(|| invalid_data(format!("{what}: column 0 is not a LargeBinaryArray")))
 }
 
 /// Decode record `idx` of a validated posting column into a borrowed [`PostingRef`]. Shared by
@@ -584,6 +672,10 @@ fn checked_block_range(block: &arrow::ipc::Block, buffer_len: usize) -> io::Resu
 
 pub(crate) fn invalid_data(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.into())
+}
+
+fn invalid_input(msg: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, msg.into())
 }
 
 #[cfg(test)]

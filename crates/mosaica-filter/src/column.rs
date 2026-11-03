@@ -172,6 +172,15 @@ impl ColumnPostings {
         })
     }
 
+    /// The ranks of entities in `value`'s posting, asked in ascending order.
+    pub fn ranks(&self, value: AttrLocalId) -> io::Result<PostingRanks<'_>> {
+        Ok(PostingRanks {
+            posting: self.base.posting_at(value.raw())?,
+            from: 0,
+            below: 0,
+        })
+    }
+
     /// [`Self::narrow`] with the running set narrowed in place: `live ∩= the value's entities`.
     ///
     /// Chaining `narrow` allocates a fresh bitmap at every step, and over a conjunction of common
@@ -224,6 +233,48 @@ impl ColumnPostings {
     #[cfg(feature = "bench-timing")]
     pub fn bench_hits(posting: &PostingRef<'_>, candidate: &Bitmap) -> bool {
         hits(posting, candidate)
+    }
+}
+
+/// Where entities sit in one posting: an entity's rank is how many entities the posting holds
+/// below it. Asked of ascending entities, each answer counts only the stretch since the last.
+pub struct PostingRanks<'a> {
+    posting: Option<PostingRef<'a>>,
+    /// The entity the count in `below` reaches up to.
+    from: u32,
+    below: u64,
+}
+
+impl PostingRanks<'_> {
+    /// How many entities the posting holds.
+    pub fn len(&self) -> u64 {
+        self.posting.as_ref().map_or(0, PostingRef::cardinality)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// `entity`'s rank, or `None` where the posting does not hold it. Cheapest when each entity
+    /// asked is at or above the one before.
+    pub fn rank_of(&mut self, entity: u32) -> Option<u64> {
+        match self.posting.as_ref()? {
+            PostingRef::Array(bytes) => {
+                let entries = bytes.as_chunks::<4>().0;
+                let rank = entries.partition_point(|e| u32::from_le_bytes(*e) < entity);
+                (entries.get(rank).map(|e| u32::from_le_bytes(*e)) == Some(entity))
+                    .then_some(rank as u64)
+            }
+            PostingRef::Roaring(view) => {
+                if entity < self.from {
+                    self.from = 0;
+                    self.below = 0;
+                }
+                self.below += view.range_cardinality(self.from..entity);
+                self.from = entity;
+                view.contains(entity).then_some(self.below)
+            }
+        }
     }
 }
 
@@ -461,6 +512,31 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **A rank is the entity's index in its posting**, over both encodings, asked ascending as
+    /// the phrase check asks and out of order, and `None` for an entity the posting lacks.
+    #[test]
+    fn ranks_are_positions_in_the_posting() {
+        let dir = tempfile::tempdir().unwrap();
+        let wide: Vec<u32> = (0..200_000).map(|i| i * 3).collect();
+        let column = column_with(&[vec![4, 9, 30], wide.clone()], dir.path());
+        for (value, held) in [(0u32, vec![4u32, 9, 30]), (1, wide)] {
+            let mut ranks = column.ranks(AttrLocalId::new(value)).unwrap();
+            assert_eq!(ranks.len(), held.len() as u64);
+            let asked: Vec<u32> = held
+                .iter()
+                .step_by(7)
+                .copied()
+                .chain([held[0], held[held.len() - 1], held[1]])
+                .collect();
+            for entity in asked {
+                let want = held.binary_search(&entity).ok().map(|r| r as u64);
+                assert_eq!(ranks.rank_of(entity), want, "value {value} entity {entity}");
+                assert_eq!(ranks.rank_of(entity + 1), None);
+            }
+        }
+        assert!(column.ranks(AttrLocalId::new(7)).unwrap().is_empty());
     }
 
     #[test]
