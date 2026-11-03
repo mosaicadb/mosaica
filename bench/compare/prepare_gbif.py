@@ -15,7 +15,8 @@ The steps are deterministic, so two runs write the same rows, and they follow `p
    The extent is Web Mercator's world square, `±π · R` on each axis.
 3. A row is in the tier of nominal size N where `splitmix64(gbifid ^ SAMPLE_SEED) < floor(N ·
    2^64 / 3,495,729,729)`, so the tiers nest. `entity_id` is the `gbifid`.
-4. `qx`, `qy` and `rank` are as `prepare.py` writes them.
+4. `qx` and `qy` are as `prepare.py` writes them, and `rank` by the same rule with this file's
+   `RANK_SEED`.
 5. `access` is the row's list of access terms as the rung wrote it: its country (`UNRECORDED`
    where GBIF has none), `y:` and its year, and `s:` and its species key. A row is visible to a
    viewer who holds any one of them. No list is empty, which the run checks, so the view's
@@ -44,7 +45,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from prepare import RANK_SEED, SAMPLE_SEED, sha256, splitmix64, threshold, tier_name
+from prepare import SAMPLE_SEED, sha256, splitmix64, threshold, tier_name
 
 HERE = Path(__file__).resolve().parent
 #: The checkout that holds `data/`, which a worktree shares with the main one.
@@ -56,6 +57,9 @@ SOURCE_ROWS = 3495729729
 COLUMNS = ["gbifid", "lon", "lat", "kingdom", "year", "access"]
 RADIUS = 6378137.0
 MAX_LATITUDE = 85.0511287798066
+#: The seed of `rank`, fixed here for GBIF: it is the seed the GBIF tiers were derived with,
+#: before PaperSeek's changed, so the committed tiers' checksums still hold.
+RANK_SEED = 0x6D6F736169636132
 EXTENT = [-math.pi * RADIUS, math.pi * RADIUS, -math.pi * RADIUS, math.pi * RADIUS]
 
 SCHEMA = pa.schema([

@@ -553,7 +553,11 @@ done
 
 `prepare_gbif.py`'s docstring defines the tiers. Each keeps a row by the same splitmix64 threshold
 as PaperSeek's, on GBIF's `gbifid`, which is also its `entity_id`, and stores `rank` by the same
-rule. Positions are projected to Web Mercator in metres once, by `prepare_gbif.py`, with the
+rule with its own seed, `0x6D6F736169636132`. That is the seed the GBIF tiers were derived with,
+and it is pinned in `prepare_gbif.py` so the committed checksums hold without writing the tiers
+again. It differs from `SAMPLE_SEED` in two low bits, and splitmix64 mixes those inputs into
+unrelated outputs, so the rank is independent of the sampling hash; the dense-tile coverage
+figures measure the sample's spread either way. Positions are projected to Web Mercator in metres once, by `prepare_gbif.py`, with the
 latitude clamped at ±85.0511° as the GBIF rung's view clamps it, so the 66,037 polar records of
 the full file lie on the extent's edges. Every system and the oracle read the projected `x` and
 `y`: Mosaica's view declares `projection = "none"` over the world square, `±π · 6,378,137` on
