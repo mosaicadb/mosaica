@@ -8,7 +8,7 @@ generated columns by the frame's rule: `qx` and `qy` as `bigint`, since PostgreS
 32-bit integer, and `geom`, the same position as a PostGIS point in quantised space. Once loaded,
 the generated columns become plain ones and `x` and `y` are dropped. Then a GiST index on `geom`,
 `CLUSTER` on it, which rewrites the table in the index's order and leaves out the dropped columns,
-`VACUUM ANALYZE`, a `CHECKPOINT` and an `fsync` of the data directory: all in the build time.
+extended statistics on the cells at each depth, `VACUUM ANALYZE`, a `CHECKPOINT` and an `fsync` of the data directory: all in the build time.
 
 The camera's tiles form a rectangle, and every query selects it with `geom && ST_MakeEnvelope(...)`,
 which the GiST index answers, and the same bounds on `qx` and `qy`. The second is needed: PostGIS
@@ -25,6 +25,11 @@ granted `SELECT` on the table alone, enables and forces row-level security on th
 creates a policy for `viewer` keeping the rows whose `licence` is one of the viewer's terms. Every
 frame and table is queried as `viewer`, and no query names a licence. The setup is not counted in
 the build time.
+
+The policy's condition is evaluated before any of the query's that is not leakproof, and such a
+condition cannot scan an index. PostGIS marks no function leakproof, so as built the viewer's
+queries never use the GiST index. The `postgis+leakproof` arm differs in one setup step: the
+superuser marks `geometry_overlaps`, the function behind `&&`, leakproof.
 
 `SETTINGS` holds every server setting the adapter writes, and `BULK` the ones added for the build
 alone; the README gives the reason for each.
@@ -46,7 +51,8 @@ import psycopg
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 
-from frame import EXTENT, K, YEAR_BINS, Camera, Filter, Frame, grid_depth, points_by_tile
+from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_depth,
+                   points_by_tile)
 from oracle import VIEWER
 
 from .base import MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree, wait_for
@@ -97,6 +103,11 @@ AFTER_LOAD = ("ALTER TABLE points ALTER qx DROP EXPRESSION, ALTER qy DROP EXPRES
               "ALTER geom DROP EXPRESSION, DROP COLUMN x, DROP COLUMN y",
               "CREATE INDEX points_geom ON points USING gist (geom)",
               "CLUSTER points USING points_geom",
+              # The cells at each depth a grid or a tile is grouped by, whose count the planner
+              # cannot estimate from the columns' statistics; overestimated, it does not
+              # aggregate in parallel.
+              *(f"CREATE STATISTICS points_cells_{d} ON (qx >> {32 - d}), (qy >> {32 - d}) FROM points"
+                for d in range(MAX_DEPTH + 1)),
               "VACUUM ANALYZE points",
               "CHECKPOINT")
 
@@ -129,8 +140,15 @@ class PostGIS(Adapter):
               f"USING (licence IN (the viewer's terms)); {VIEWER_ROLE} owns nothing and has SELECT "
               f"on points alone; every frame and table queried as {VIEWER_ROLE}")
 
-    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
+    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
+                 leakproof: bool = False):
         super().__init__(tier, work, nice, caches)
+        #: Whether the superuser marks `&&` on geometries leakproof, so the viewer's queries,
+        #: under the policy, may use the GiST index.
+        self.leakproof = leakproof
+        if leakproof:
+            self.name = "postgis+leakproof"
+            self.access += "; geometry_overlaps(geometry, geometry) marked LEAKPROOF by the superuser"
         self.table_made = False
         self.container = Container(f"bench-compare-pg-{os.getpid()}")
         self.root = self.work / "pg"
@@ -253,7 +271,8 @@ class PostGIS(Adapter):
         for statement in AFTER_LOAD:
             t = time.monotonic()
             self.sql(statement)
-            phases[statement.split(" ", 1)[0].lower()] = time.monotonic() - t
+            phase = " ".join(statement.split()[:2]).lower()
+            phases[phase] = phases.get(phase, 0) + time.monotonic() - t
         t = time.monotonic()
         fsync_tree(self.data)
         phases["fsync"] = time.monotonic() - t
@@ -269,6 +288,7 @@ class PostGIS(Adapter):
                 "ALTER TABLE points FORCE ROW LEVEL SECURITY",
                 f"CREATE POLICY viewer_terms ON points FOR SELECT TO {VIEWER_ROLE} "
                 f"USING (licence IN ({terms}))",
+                *(["ALTER FUNCTION geometry_overlaps(geometry, geometry) LEAKPROOF"] if self.leakproof else []),
                 "CHECKPOINT"):
             self.sql(statement)
         self.stop()

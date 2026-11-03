@@ -46,7 +46,7 @@ docker pull postgis/postgis@sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c6
 
 # 6. One run per system; each appends a record to results/dev.jsonl
 cd bench/compare
-for s in mosaica mosaica+aggregate clickhouse postgis; do
+for s in mosaica mosaica+aggregate clickhouse postgis postgis+leakproof; do
   for c in compute defaults; do
     .venv/bin/python run.py --system $s --caches $c \
         --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
@@ -147,6 +147,7 @@ setting is in `SETTINGS` and each record lists them with the server's values:
 | `max_parallel_workers_per_gather` | 6 | 2 | Half the CPUs, since a frame sends two queries at once |
 | `jit` | off | on | JIT pays for long CPU-bound queries and costs more than it saves on short ones, which a frame's are |
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
+| `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | The planner cannot estimate how many cells a grid or a tile grouping has from the columns' statistics; at zoom 0 it guessed 850,000 cells for 8,318, and did not aggregate in parallel. With them the warm zoom-0 frame fell from about 290 ms to 110 ms in a trial |
 
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
 `wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` into a table created in its
@@ -167,8 +168,15 @@ plan of the whole map's grid and whether `&&` is leakproof. The superuser's iden
 the index. Marking the operator's function leakproof (`ALTER FUNCTION geometry_overlaps(geometry,
 geometry) LEAKPROOF`, a superuser's assertion that it reveals nothing about its arguments) lets the
 viewer's queries use the index too, with the same answers: at 10⁶ the median warm frame at zooms
-12 and 16 fell from about 57 ms to 0.8 ms in a trial. The runs do not do it, since PostGIS's
-maintainers have not made that assertion.
+12 and 16 fell from about 57 ms to 0.8 ms in a trial.
+
+PostGIS therefore runs as two arms, which share the adapter and differ in that one step of the
+setup. `postgis` is as built, the behaviour a deployment gets under row-level security. In
+`postgis+leakproof` the superuser marks `geometry_overlaps` leakproof. That is the superuser's
+claim, which PostGIS's maintainers have not made, that the function reveals nothing about its
+arguments beyond its result, by an error or otherwise; an operator who has read the function, a
+comparison of two bounding boxes, might make it so that row-level security and a spatial index can
+work together, which without it they cannot.
 
 ## Files
 
