@@ -27,7 +27,7 @@ use parquet::arrow::ArrowWriter;
 use common::*;
 use mosaica_build::config::Config;
 use mosaica_build::{build, BuildArgs};
-use mosaica_engine::filter::{FilterExpr, FilterOperand};
+use mosaica_engine::filter::{FilterExpr, FilterOperand, Scalar};
 use mosaica_engine::{CacheStats, Engine, Session, ViewportRequest};
 use mosaica_lifecycle::wal::{ChangeOp, WalScalar};
 use mosaica_lifecycle::UnallocatedRow;
@@ -556,6 +556,50 @@ fn a_change_reaches_the_next_text_filter_after_a_kept_answer() {
         "an ingested item is matched once it is visible"
     );
     assert_eq!(answer(), want(&items));
+}
+
+/// **A text leaf narrowed by its siblings keeps nothing a later bare leaf could read.** The phrase
+/// is evaluated after a unique `id` leaf in an `all_of` and in a `none_of`, under fewer items than
+/// the grant sees, and the bare phrase after them answers every item that says it.
+#[test]
+fn a_text_leaf_narrowed_by_its_siblings_keeps_nothing_the_bare_leaf_reads() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("bundle");
+    build_fixture(&root, tmp.path());
+    let (items, sources) = built_items(&root);
+    let even: BTreeSet<u32> = sources
+        .iter()
+        .filter(|(_, source)| *source % 2 == 0)
+        .map(|(entity, _)| *entity)
+        .collect();
+    let ids = FilterExpr::Leaf {
+        column: "id".to_string(),
+        operand: FilterOperand::NumIn(
+            sources
+                .values()
+                .filter(|source| *source % 2 == 0)
+                .map(|source| Scalar::Int(i128::from(*source)))
+                .collect(),
+        ),
+    };
+    let all = saying(&items, "the quick");
+    let both = all.intersection(&even).count() as u64;
+    let neither = items.len() as u64 - all.union(&even).count() as u64;
+    assert!(both > 0 && both < all.len() as u64);
+
+    let engine = engine_over(tmp.path(), &root);
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let narrowed = FilterExpr::AllOf(vec![ids.clone(), phrase("the quick")]);
+    let excluded = FilterExpr::NoneOf(vec![ids, phrase("the quick")]);
+    assert_eq!(matched(&engine, &session, narrowed), both);
+    assert_eq!(matched(&engine, &session, excluded), neither);
+    assert_eq!(cache(&engine).entries, 0, "a narrowed leaf is not kept");
+    for _ in 0..2 {
+        assert_eq!(
+            matched(&engine, &session, phrase("the quick")),
+            all.len() as u64
+        );
+    }
 }
 
 /// **A bound of zero keeps nothing and answers as the cache does.**

@@ -97,7 +97,7 @@ pub(crate) use item::{
 pub(crate) use meta::{family_view, meta_of, Resolution};
 pub(crate) use row_filter::{
     crossing_domain, filter_refusal, predicate_source, predicate_vocabulary, unique_holders,
-    ResolvedLeaves, RoutedRows,
+    FilterCandidate, ResolvedLeaves, RoutedRows,
 };
 pub(crate) use served::{ServedSide, ServedView};
 pub(crate) use sweep::{

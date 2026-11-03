@@ -265,7 +265,8 @@ struct RawServe {
     /// Default: one per compute thread.
     artifact_admission: Option<usize>,
     /// Milliseconds a request waits for another request's build of a shared cached structure
-    /// before it is refused with 429.
+    /// before it is refused with 429. A request waiting for another's `match` or `phrase` filter
+    /// evaluates the filter itself instead.
     ///
     /// Default: `6000`.
     single_flight_wait_ms: Option<u64>,
@@ -360,8 +361,8 @@ struct RawServe {
     /// Bytes of the items each `match` and `phrase` filter matches, kept for reuse by every viewer
     /// with the same access while the corpus is unchanged, so panning and zooming with a search
     /// does not run it again. One entry is a bitmap over a shard's items, about 12 MB at 10⁸ items
-    /// for a phrase half of them say. Each request in flight can hold one evicted entry beside the
-    /// bound. `0` keeps none.
+    /// for a phrase that half of them contain. Each request in flight can hold one evicted entry
+    /// beside the bound. `0` keeps none.
     ///
     /// Default: `268435456` (256 MiB).
     text_filter_cache_bytes: Option<u64>,

@@ -256,7 +256,7 @@ pub type UniqueResolver<'a> =
 
 /// A `match` or `phrase` operand as its column's analyser reads it. Two operands that read alike
 /// answer alike over the same layers.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextQuery {
     /// Items holding at least `minimum` of `tokens`, which are sorted and distinct. A phrase of
     /// fewer than two words is one of these.

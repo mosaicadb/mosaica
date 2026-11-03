@@ -890,7 +890,7 @@ impl Engine {
         for (place, side, _) in served.filtered_sides(&mask) {
             let (domain, rows_in_ranges) = tiling.domain_in(place);
             let (filter_rows, highlight_rows) =
-                self.route_filters_under(served, side, None, &resolved, &req.cancel, |route| {
+                self.route_filters_under(served, side, FilterCandidate::Compose, &resolved, &req.cancel, |route| {
                     // `count_matched` excludes the highlight from the `filter_matched` probe: its
                     // cardinality is not the filter's.
                     let mut evaluate = |expr: &crate::filter::FilterExpr,
@@ -982,21 +982,17 @@ impl Engine {
         ))
     }
 
-    /// Route this request's filter expressions in one side under `candidate`, a subset of
-    /// [`Self::filter_candidate`]'s set that the caller composed, or under that set itself where
-    /// `candidate` is `None`, composed over the session's fragment at the shard's watermark: an
-    /// earlier one, such as a stale-served projection's, would omit every entity flushed since.
-    /// Every scan returns a subset of the candidate. A region or `member_of` leaf `resolved` holds
-    /// is answered from it, and one it does not is resolved and kept there; the caller holds it
-    /// only while `served` and its mask are the ones it was filled under. A text leaf's answer is
-    /// kept for later requests only when it is evaluated under the whole set
-    /// ([`crate::text_filter_cache`]). `body` is handed a `route` that puts one expression through
-    /// them.
+    /// Route this request's filter expressions in one side under `candidate`. Every scan returns a
+    /// subset of the candidate. A region or `member_of` leaf `resolved` holds is answered from it,
+    /// and one it does not is resolved and kept there; the caller holds it only while `served` and
+    /// its mask are the ones it was filled under. A text leaf's answer is kept for later requests
+    /// only when it is evaluated under the whole set ([`crate::text_filter_cache`]). `body` is
+    /// handed a `route` that puts one expression through them.
     pub(crate) fn route_filters_under<T>(
         &self,
         served: &ServedView<'_>,
         side: &ServedSide<'_>,
-        candidate: Option<&croaring::Bitmap>,
+        candidate: FilterCandidate<'_>,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         body: impl FnOnce(
@@ -1005,8 +1001,7 @@ impl Engine {
     ) -> Result<T> {
         let composed;
         let (candidate, whole) = match candidate {
-            Some(candidate) => (candidate, None),
-            None => {
+            FilterCandidate::Compose => {
                 composed = self.filter_candidate(
                     served.session,
                     side.shard,
@@ -1014,6 +1009,8 @@ impl Engine {
                 )?;
                 (&composed, Some(&composed))
             }
+            FilterCandidate::Whole(whole) => (whole, Some(whole)),
+            FilterCandidate::Within(within) => (within, None),
         };
         let regions = |leaf: &crate::filter::RegionLeaf| {
             self.region_rows(leaf, served, side, resolved, cancel)
@@ -1267,6 +1264,19 @@ impl Engine {
 }
 
 /// An artifact a leaf named, as one request's gate answered it.
+/// The set a request's filter is evaluated under in one side.
+#[derive(Clone, Copy)]
+pub(crate) enum FilterCandidate<'c> {
+    /// [`Engine::filter_candidate`]'s set, composed over the session's fragment at the shard's
+    /// watermark: an earlier one, such as a stale-served projection's, would omit every entity
+    /// flushed since.
+    Compose,
+    /// That set, as the caller composed it with [`Engine::filter_candidate`].
+    Whole(&'c croaring::Bitmap),
+    /// A subset of that set the caller composed, never wider.
+    Within(&'c croaring::Bitmap),
+}
+
 type Gated = Option<std::rc::Rc<super::artifacts::GatedArtifact>>;
 
 /// A key a leaf named, as `(layer, level, key)`.

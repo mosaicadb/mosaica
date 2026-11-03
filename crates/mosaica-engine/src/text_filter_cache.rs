@@ -24,8 +24,9 @@
 //! peak ≈ text_filter_cache_bytes + compute_admission × the largest answer
 //! ```
 //!
-//! An answer is a bitmap over the shard's entities: about 12 MB at 10⁸ entities for a phrase half
-//! of them say, and kilobytes for a topical one.
+//! An answer is a bitmap over the shard's entities: about 12 MB at 10⁸ entities for a phrase that
+//! half of them contain, and kilobytes for a topical one. The leaf's canonical bytes are held and
+//! counted beside it.
 
 use std::sync::{Arc, Weak};
 
@@ -52,7 +53,9 @@ pub const DEFAULT_TEXT_FILTER_CACHE_BYTES: u64 = 256 << 20;
 /// - `grant`: the session's grant ([`crate::Session::terms_digest`]), which the fragment is the
 ///   union of. A session's satisfied keys are the keys of its grant, or every key for a `read-all`
 ///   grant, so this names them too.
-/// - `column` and `query`: the leaf, with its operand as the column's analyser reads it.
+/// - `digest`: of the leaf's [`canonical`] bytes, its column and its operand as the column's
+///   analyser reads it. The bytes themselves are held in the entry, where the bound counts them,
+///   and compared on every hit.
 ///
 /// `shard` is carried beside the address so a prune can find the shard the entry is for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -60,12 +63,12 @@ pub(crate) struct TextLeafKey {
     pub shard: ShardId,
     pub snapshot: usize,
     pub grant: [u8; 32],
-    pub column: String,
-    pub query: TextQuery,
+    pub digest: [u8; 16],
 }
 
 /// One text leaf's answer under the whole candidate of its key.
 pub(crate) struct TextLeaf {
+    canonical: Vec<u8>,
     snapshot: Weak<Shard>,
     entities: Bitmap,
 }
@@ -73,7 +76,25 @@ pub(crate) struct TextLeaf {
 impl CacheWeight for TextLeaf {
     fn cache_weight_bytes(&self) -> u64 {
         self.entities.get_serialized_size_in_bytes::<Portable>() as u64
+            + self.canonical.len() as u64
     }
+}
+
+/// `column` and `query` as bytes no other leaf has: each string after its length.
+fn canonical(column: &str, query: &TextQuery) -> Vec<u8> {
+    let (tag, minimum, tokens) = match query {
+        TextQuery::Match { tokens, minimum } => (0u8, *minimum, tokens),
+        TextQuery::Phrase { words } => (1u8, 0, words),
+    };
+    let mut out =
+        Vec::with_capacity(13 + column.len() + tokens.iter().map(|t| 4 + t.len()).sum::<usize>());
+    out.push(tag);
+    out.extend_from_slice(&minimum.to_le_bytes());
+    for bytes in std::iter::once(column).chain(tokens.iter().map(String::as_str)) {
+        out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(bytes.as_bytes());
+    }
+    out
 }
 
 pub(crate) type TextFilterCache = SingleFlightCache<TextLeafKey, TextLeaf>;
@@ -86,32 +107,34 @@ pub(crate) fn prune_superseded(cache: &TextFilterCache, live: &Generation) -> us
     })
 }
 
-/// The key of `column`'s leaf `query` in `shard` for `grant`.
+/// The key of `column`'s leaf `query` in `shard` for `grant`, and the leaf's canonical bytes.
 pub(crate) fn key_of(
     shard: &Arc<Shard>,
     grant: [u8; 32],
     column: &str,
     query: &TextQuery,
-) -> TextLeafKey {
-    TextLeafKey {
+) -> (TextLeafKey, Vec<u8>) {
+    let canonical = canonical(column, query);
+    let key = TextLeafKey {
         shard: shard.id(),
         snapshot: Arc::as_ptr(shard) as usize,
         grant,
-        column: column.to_string(),
-        query: query.clone(),
-    }
+        digest: crate::region::digest_of(&canonical),
+    };
+    (key, canonical)
 }
 
-/// `evaluate(candidate)`, read from `cache` under `key` where it holds the answer.
+/// `evaluate(candidate)`, read from `cache` under `leaf`'s key where it holds the answer.
 ///
-/// `whole` is the candidate `key` names, where the caller composed it. Only an answer under it is
-/// kept, and concurrent requests for it compute it once; a request waiting on another's computation
-/// stops when `cancel` reports it gone. A smaller candidate reads an answer already kept and
-/// computes its own otherwise. Whichever answer is used is intersected with `candidate`.
+/// `whole` is the candidate the key names, where the caller composed it. Only an answer under it
+/// is kept, and concurrent requests for it compute it once; a request waiting on another's
+/// computation stops when `cancel` reports it gone. A smaller candidate reads an answer already
+/// kept, intersected with it, and computes its own otherwise. An entry whose canonical bytes are
+/// not the leaf's is a digest collision, and the leaf is evaluated instead.
 pub(crate) fn answer(
     cache: &TextFilterCache,
     shard: &Arc<Shard>,
-    key: TextLeafKey,
+    (key, canonical): (TextLeafKey, Vec<u8>),
     whole: Option<&Bitmap>,
     candidate: &Bitmap,
     cancel: &Option<CancelToken>,
@@ -127,9 +150,13 @@ pub(crate) fn answer(
             None => &NeverCancelled,
         };
         let built = cache.get_or_try_build_waiting(key, waiting, || {
+            let mut entities = evaluate(candidate)?;
+            entities.run_optimize();
+            entities.shrink_to_fit();
             Ok(TextLeaf {
+                canonical: canonical.clone(),
                 snapshot: Arc::downgrade(shard),
-                entities: evaluate(candidate)?,
+                entities,
             })
         });
         match built {
@@ -146,8 +173,14 @@ pub(crate) fn answer(
             Peek::Building | Peek::Absent => return evaluate(candidate),
         }
     };
+    if entry.canonical != canonical {
+        return evaluate(candidate);
+    }
     debug_assert!(std::ptr::eq(entry.snapshot.as_ptr(), Arc::as_ptr(shard)));
-    Ok(entry.entities.and(candidate))
+    Ok(match is_whole {
+        true => entry.entities.clone(),
+        false => entry.entities.and(candidate),
+    })
 }
 
 #[cfg(test)]
@@ -204,5 +237,22 @@ mod tests {
             1,
             "a smaller candidate reads the kept answer"
         );
+
+        // Another leaf's bytes under this leaf's digest stand for a collision.
+        let other = TextQuery::Match {
+            tokens: vec!["of".to_string()],
+            minimum: 1,
+        };
+        let colliding = (key().0, key_of(shard, [7; 32], "prose", &other).1);
+        let got = answer(
+            &cache,
+            shard,
+            colliding,
+            Some(&whole),
+            &whole,
+            &None,
+            &|_| Ok(Bitmap::of(&[9])),
+        );
+        assert_eq!(got, Ok(Bitmap::of(&[9])), "a collision is evaluated");
     }
 }

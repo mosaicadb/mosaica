@@ -112,7 +112,7 @@ pub(crate) struct RegionKey {
     pub max_cells: usize,
 }
 
-/// The first 128 bits of SHA-256 over a shape's canonical bytes — the content address.
+/// The first 128 bits of SHA-256 over canonical bytes: a shape's, or a text filter leaf's.
 pub(crate) fn digest_of(canonical: &[u8]) -> [u8; 16] {
     let full = Sha256::digest(canonical);
     let mut out = [0u8; 16];

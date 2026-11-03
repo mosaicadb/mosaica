@@ -2820,6 +2820,22 @@ fn parse_pause_site(name: &str) -> Result<mosaica_lifecycle::faults::PauseSite, 
     })
 }
 
+/// A cache shared across sessions, as `/control/status` reports it.
+fn shared_cache_status(stats: &mosaica_engine::CacheStats) -> serde_json::Value {
+    serde_json::json!({
+        "entries": stats.entries,
+        "bytes": stats.bytes,
+        "bound_bytes": stats.bound_bytes,
+        "hits": stats.hits,
+        "misses": stats.misses,
+        "building_refusals": stats.building_refusals,
+        "waits_satisfied": stats.waits_satisfied,
+        "waiters_now": stats.waiters_now,
+        "evictions": stats.evictions,
+        "oversized_admissions": stats.oversized_admissions,
+    })
+}
+
 /// `GET /control/status`: the operator's view of the node, behind the credential like every
 /// control route; it discloses corpus-wide figures such as `entity_id_high_water`.
 ///
@@ -3231,26 +3247,8 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "disk_bytes": masked_counts.disk_bytes,
             "disk_bound_bytes": masked_counts.disk_bound_bytes,
         },
-        "region_cache": {
-            "entries": region_cache.entries,
-            "bytes": region_cache.bytes,
-            "bound_bytes": region_cache.bound_bytes,
-            "hits": region_cache.hits,
-            "misses": region_cache.misses,
-            "building_refusals": region_cache.building_refusals,
-            "waits_satisfied": region_cache.waits_satisfied,
-            "evictions": region_cache.evictions,
-        },
-        "text_filter_cache": {
-            "entries": text_filter_cache.entries,
-            "bytes": text_filter_cache.bytes,
-            "bound_bytes": text_filter_cache.bound_bytes,
-            "hits": text_filter_cache.hits,
-            "misses": text_filter_cache.misses,
-            "building_refusals": text_filter_cache.building_refusals,
-            "waits_satisfied": text_filter_cache.waits_satisfied,
-            "evictions": text_filter_cache.evictions,
-        },
+        "region_cache": shared_cache_status(&region_cache),
+        "text_filter_cache": shared_cache_status(&text_filter_cache),
         "derived_cache": {
             "entries": derived_cache.entries,
             "bytes": derived_cache.resident_bytes,

@@ -8243,6 +8243,29 @@ components:
           type: boolean
           description: "`PublicationAck.visible`."
 
+    SharedCacheStatus:
+      type: object
+      additionalProperties: false
+      description: A cache shared across sessions, in `GET /control/status`.
+      required: [entries, bytes, bound_bytes, hits, misses, building_refusals, waits_satisfied, waiters_now, evictions, oversized_admissions]
+      properties:
+        entries: { type: integer, minimum: 0 }
+        bytes: { type: integer, minimum: 0 }
+        bound_bytes: { type: integer, minimum: 0 }
+        hits: { type: integer, minimum: 0 }
+        misses: { type: integer, minimum: 0 }
+        building_refusals: { type: integer, minimum: 0 }
+        waits_satisfied: { type: integer, minimum: 0 }
+        waiters_now:
+          type: integer
+          minimum: 0
+          description: Requests waiting for another's build at this instant.
+        evictions: { type: integer, minimum: 0 }
+        oversized_admissions:
+          type: integer
+          minimum: 0
+          description: Builds larger than the whole bound, served to their callers and not kept.
+
     Status:
       type: object
       additionalProperties: false
@@ -8743,33 +8766,13 @@ components:
               minimum: 0
               description: The bound on disk_bytes, `serve.figures_disk_bytes`.
         region_cache:
-          type: object
-          additionalProperties: false
-          required: [entries, bytes, bound_bytes, hits, misses, building_refusals, waits_satisfied, evictions]
           description: The rows each `region` filter leaf selects, shared across sessions per generation.
-          properties:
-            entries: { type: integer, minimum: 0 }
-            bytes: { type: integer, minimum: 0 }
-            bound_bytes: { type: integer, minimum: 0 }
-            hits: { type: integer, minimum: 0 }
-            misses: { type: integer, minimum: 0 }
-            building_refusals: { type: integer, minimum: 0 }
-            waits_satisfied: { type: integer, minimum: 0 }
-            evictions: { type: integer, minimum: 0 }
+          allOf:
+            - $ref: "#/components/schemas/SharedCacheStatus"
         text_filter_cache:
-          type: object
-          additionalProperties: false
-          required: [entries, bytes, bound_bytes, hits, misses, building_refusals, waits_satisfied, evictions]
           description: The items each `match` and `phrase` filter matches, per shard and set of access attributes, kept while the corpus is unchanged.
-          properties:
-            entries: { type: integer, minimum: 0 }
-            bytes: { type: integer, minimum: 0 }
-            bound_bytes: { type: integer, minimum: 0 }
-            hits: { type: integer, minimum: 0 }
-            misses: { type: integer, minimum: 0 }
-            building_refusals: { type: integer, minimum: 0 }
-            waits_satisfied: { type: integer, minimum: 0 }
-            evictions: { type: integer, minimum: 0 }
+          allOf:
+            - $ref: "#/components/schemas/SharedCacheStatus"
         derived_cache:
           type: object
           additionalProperties: false

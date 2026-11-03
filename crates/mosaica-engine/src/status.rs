@@ -402,10 +402,13 @@ impl Engine {
     }
 
     /// How long a request waits on another request's in-flight row-projection or fragment build
-    /// before it is refused (`serve.single_flight_wait_ms`). Unset, an embedder gets [`crate::DEFAULT_SINGLE_FLIGHT_WAIT_MS`].
+    /// before it is refused, or on a text filter leaf's evaluation before it evaluates the leaf
+    /// itself (`serve.single_flight_wait_ms`). Unset, an embedder gets
+    /// [`crate::DEFAULT_SINGLE_FLIGHT_WAIT_MS`].
     pub fn set_single_flight_wait_ms(&self, wait_budget_ms: u64) {
         self.row_projection_cache.set_wait_budget_ms(wait_budget_ms);
         self.fragments.set_wait_budget_ms(wait_budget_ms);
+        self.text_filter_cache.set_wait_budget_ms(wait_budget_ms);
     }
 
     /// The row count at which a commit window closes (`ingest.commit_window_max_items`, which
