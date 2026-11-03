@@ -2,7 +2,7 @@
 oracle, and append one JSON record to the results file.
 
     python run.py --system mosaica --tier data/bench-compare/tiers/paperseek-1e6.parquet \\
-        --cameras cameras/paperseek-1e6.json --binary target/release/mosaica --out results/dev.jsonl
+        --cameras cameras/paperseek-1e6.json --out results/dev.jsonl
 
 The run, in order, every request made as the viewer in `viewer.json`:
 
@@ -44,7 +44,6 @@ from frame import EXTENT, GRID_OFFSET, K, SCREEN, TILE_PX, TYPE_TOP, YEAR_BINS, 
 from oracle import VIEWER, Oracle, compare, compare_tables
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
 
 
 def hardware() -> dict:
@@ -122,7 +121,7 @@ def make_adapter(args):
     work = args.work / f"{args.system}-{args.tier.stem}"
     if args.system in ("mosaica", "mosaica+aggregate"):
         from adapters.mosaica import Mosaica
-        return Mosaica(args.tier, work, args.binary,
+        return Mosaica(args.tier, work, args.image,
                        grid="underlay" if args.system == "mosaica" else "aggregate", nice=args.nice)
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
@@ -135,7 +134,8 @@ def main() -> None:
     ap.add_argument("--system", required=True)
     ap.add_argument("--tier", type=Path, required=True)
     ap.add_argument("--cameras", type=Path, required=True)
-    ap.add_argument("--binary", type=Path, default=REPO / "target/release/mosaica")
+    ap.add_argument("--image", default="bench-compare/mosaica",
+                    help="the Mosaica image, built from the repository's Dockerfile (README step 4)")
     ap.add_argument("--work", type=Path, help="default: work/ beside the tier's directory")
     ap.add_argument("--out", type=Path, default=HERE / "results/dev.jsonl")
     ap.add_argument("--repeats", type=int, default=5)

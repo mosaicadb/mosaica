@@ -43,6 +43,8 @@ def leaf_sql(leaf: dict) -> str:
     op, col, value = leaf["op"], leaf.get("col"), leaf["value"]
     if op == "eq" and col == "type":
         return f"type = '{value}'"
+    if op == "in" and col == "type":
+        return "type IN (" + ", ".join(f"'{v}'" for v in value) + ")"
     if op == "eq" and col == "is_oa":
         return f"is_oa = {'true' if value else 'false'}"
     if op == "range":

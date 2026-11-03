@@ -718,17 +718,20 @@
     "label": "r0-z6"
    },
    "filter": {
-    "label": "type=book-chapter",
+    "label": "type in preprint,review",
     "leaves": [
      {
       "col": "type",
-      "op": "eq",
-      "value": "book-chapter"
+      "op": "in",
+      "value": [
+       "preprint",
+       "review"
+      ]
      }
     ]
    },
-   "fraction": 0.068606,
-   "fraction_of_tier": 0.041558
+   "fraction": 0.024878,
+   "fraction_of_tier": 0.050323
   },
   {
    "camera": {
@@ -738,17 +741,21 @@
     "label": "r0-z6"
    },
    "filter": {
-    "label": "type=reference-entry",
+    "label": "type in erratum,peer-review,retraction",
     "leaves": [
      {
       "col": "type",
-      "op": "eq",
-      "value": "reference-entry"
+      "op": "in",
+      "value": [
+       "erratum",
+       "peer-review",
+       "retraction"
+      ]
      }
     ]
    },
-   "fraction": 0.001093,
-   "fraction_of_tier": 0.00082
+   "fraction": 0.000348,
+   "fraction_of_tier": 0.001004
   },
   {
    "camera": {
@@ -973,10 +980,10 @@
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "none",
@@ -987,10 +994,10 @@
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "type=article",
@@ -1002,55 +1009,62 @@
      }
     ]
    },
-   "fraction": 0.787879,
+   "fraction": 0.818782,
    "fraction_of_tier": 0.785179
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
-    "label": "type=book-chapter",
+    "label": "type in preprint,review",
     "leaves": [
      {
       "col": "type",
-      "op": "eq",
-      "value": "book-chapter"
+      "op": "in",
+      "value": [
+       "preprint",
+       "review"
+      ]
      }
     ]
    },
-   "fraction": 0.121212,
-   "fraction_of_tier": 0.041558
+   "fraction": 0.018274,
+   "fraction_of_tier": 0.050323
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
-    "label": "type=reference-entry",
+    "label": "type in erratum,peer-review,retraction",
     "leaves": [
      {
       "col": "type",
-      "op": "eq",
-      "value": "reference-entry"
+      "op": "in",
+      "value": [
+       "erratum",
+       "peer-review",
+       "retraction"
+      ]
      }
     ]
    },
    "fraction": 0.0,
-   "fraction_of_tier": 0.00082
+   "fraction_of_tier": 0.001004
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "year<2012",
@@ -1064,15 +1078,15 @@
      }
     ]
    },
-   "fraction": 0.333333,
+   "fraction": 0.413706,
    "fraction_of_tier": 0.489447
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "year<1974",
@@ -1086,15 +1100,15 @@
      }
     ]
    },
-   "fraction": 0.060606,
+   "fraction": 0.020812,
    "fraction_of_tier": 0.050142
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "year<1863",
@@ -1113,10 +1127,10 @@
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "is_oa=true",
@@ -1128,15 +1142,15 @@
      }
     ]
    },
-   "fraction": 0.333333,
+   "fraction": 0.339086,
    "fraction_of_tier": 0.323289
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "is_oa=false",
@@ -1148,15 +1162,15 @@
      }
     ]
    },
-   "fraction": 0.666667,
+   "fraction": 0.645178,
    "fraction_of_tier": 0.640523
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "type=article&is_oa=true&year>=2012",
@@ -1180,15 +1194,15 @@
      }
     ]
    },
-   "fraction": 0.272727,
+   "fraction": 0.229442,
    "fraction_of_tier": 0.154679
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "box0.5",
@@ -1196,22 +1210,22 @@
      {
       "op": "bbox",
       "value": [
-       3.785207990091296,
-       -1.0540251564525522,
-       3.813668963033704,
-       -1.0380158591724478
+       3.690410145325584,
+       -1.0874133362231089,
+       3.956074229674416,
+       -0.9379772887768911
       ]
      }
     ]
    },
-   "fraction": 0.515152
+   "fraction": 0.5
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "box0.05",
@@ -1219,22 +1233,22 @@
      {
       "op": "bbox",
       "value": [
-       3.796265604905786,
-       -1.0478052481194016,
-       3.802611348219214,
-       -1.0442357675055984
+       3.7820784399906775,
+       -1.035849920473994,
+       3.8644059350093225,
+       -0.9895407045260062
       ]
      }
     ]
    },
-   "fraction": 0.060606
+   "fraction": 0.050254
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "box0.001",
@@ -1242,22 +1256,22 @@
      {
       "op": "bbox",
       "value": [
-       3.7964098217586657,
-       -1.0477241261396568,
-       3.8024671313663343,
-       -1.0443168894853432
+       3.8179726203282693,
+       -1.0156594440340987,
+       3.8285117546717307,
+       -1.0097311809659013
       ]
      }
     ]
    },
-   "fraction": 0.030303
+   "fraction": 0.001015
   },
   {
    "camera": {
-    "zoom": 12,
-    "cx": 3.7994384765625,
-    "cy": -1.0460205078125,
-    "label": "r0-z12"
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
    },
    "filter": {
     "label": "none-again",

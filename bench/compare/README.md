@@ -34,10 +34,10 @@ cd bench/compare && nice -n 19 .venv/bin/python prepare.py \
 cd bench/compare && .venv/bin/python cameras.py \
     --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet --out cameras/paperseek-1e6.json && cd -
 
-# 4. Mosaica, in release mode, with a target directory of its own
-CARGO_TARGET_DIR=$PWD/target CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_DEBUG=0 \
-    nice -n 19 cargo build --release -p mosaica --bin mosaica \
-    && rustc --version > target/release/mosaica.rustc   # the toolchain, for the run's record
+# 4. The Mosaica image, from the repository's Dockerfile at this checkout's commit; the record
+#    keeps its image id and the version it prints
+docker build --build-arg MOSAICA_BUILD_COMMIT=$(git rev-parse --short=9 HEAD) \
+    --build-arg MOSAICA_VERSION=$(python3 scripts/version.py) -t bench-compare/mosaica .
 
 # 5. The ClickHouse image (26.8.34.13), by the digest adapters/clickhouse.py runs
 docker pull clickhouse/clickhouse-server@sha256:8b28eb09479c36c4533eec7a6268917d04ba3a6fd90e3f4205f70e761b6d7779
@@ -46,8 +46,7 @@ docker pull clickhouse/clickhouse-server@sha256:8b28eb09479c36c4533eec7a6268917d
 cd bench/compare
 for s in mosaica mosaica+aggregate clickhouse; do
   .venv/bin/python run.py --system $s --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
-      --cameras cameras/paperseek-1e6.json --binary ../../target/release/mosaica \
-      --work $DATA/bench-compare/work
+      --cameras cameras/paperseek-1e6.json --work $DATA/bench-compare/work
 done
 
 # 7. The table
@@ -63,10 +62,11 @@ oracle, runs each workload five times warm, measures session start five times wa
 cold, then times one cold frame per battery camera, and stops and removes everything it started.
 Work directories go under `$DATA/bench-compare/work/`; delete them when done.
 
-Each build and server runs in a systemd user scope of its own, capped at 16 GiB with no swap, so
-that its cgroup's `memory.peak` is its own. Where there is no systemd user manager, as in a shell
-with no login session, Mosaica runs uncapped, its record says so under `build.memory_cap`, and its
-cgroup figures are blank. ClickHouse's container always has its own cgroup.
+Every system's build and server run in Docker containers, each capped at 16 GiB with no swap and
+run as the invoking user, so that each cgroup's `memory.peak` is that system's own
+(`adapters/base.py`, `Container`). Mosaica's build runs by `docker exec` in a container kept alive
+for it, so its cgroup's peak can be read once the build has ended; ClickHouse's build is the
+`INSERT` and `OPTIMIZE` on its running server. Session start includes starting the container.
 
 ## Files
 
@@ -120,9 +120,11 @@ has zero error. Every count is over the viewer's visible items.
   follow the filter. So the `mosaica` arm's filtered frames have the wrong grid, and the record
   counts the error. The `mosaica+aggregate` arm sends a `/v1/aggregate` request for the filtered
   cells at the same time as the viewport request, at the cost of a second request.
-- **Filters where the data permits.** The type filters are single values, and `article` is 79% of
-  the viewer's items, so no type comes near 50%; `is_oa` has two values; the zoom-12 filter screen
-  holds 33 of the viewer's items at 10⁶, so its small filters match none. Each step's actual share
+- **Filters where the data permits.** A type filter names one type or an `in` set of up to three,
+  whichever comes nearest its target. `article` is 79% of the viewer's items and every other type
+  together about 18%, so no set comes near 50%, and that filter is `article`. `is_oa` has two
+  values. The zoom-9 filter screen holds about a thousand of the viewer's items at 10⁶, so its
+  0.1% filters match one item or none. Each step's actual share
   is in the cameras file. A box stands in for a polygon.
 - **One viewer.** The design's concurrent viewers, with distinct grants, are not built.
 - **Mosaica is configured to produce the frame.** Every `[serve]` setting the adapter writes

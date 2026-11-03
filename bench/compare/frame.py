@@ -146,7 +146,7 @@ def is_year(v) -> bool:
 @dataclass
 class Filter:
     """A conjunction of leaves, each `{"col", "op", "value"}`: `eq` on `type` (a value of `TYPES`)
-    or on `is_oa` (a bool), `range` on `publication_year` (`{"gte": y}`, `{"lt": y}` or both, a
+    or on `is_oa` (a bool), `in` on `type` (a list of values of `TYPES`), `range` on `publication_year` (`{"gte": y}`, `{"lt": y}` or both, a
     null year matching neither), or `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every
     side after quantisation."""
 
@@ -161,6 +161,9 @@ class Filter:
                 continue
             if op == "eq" and col == "is_oa" and type(value) is bool:
                 continue
+            if (op == "in" and col == "type" and isinstance(value, list) and value
+                    and all(v in TYPES for v in value)):
+                continue
             if (op == "range" and col == "publication_year" and isinstance(value, dict) and value
                     and set(value) <= {"gte", "lt"} and all(is_year(v) for v in value.values())):
                 continue
@@ -168,7 +171,7 @@ class Filter:
                     and all(type(v) in (int, float) and math.isfinite(v) for v in value)):
                 continue
             raise ValueError(f"filter leaf {leaf!r} is not one this harness takes; write type eq "
-                             f"one of TYPES, is_oa eq a bool, publication_year range with gte "
+                             f"one of TYPES or in a list of them, is_oa eq a bool, publication_year range with gte "
                              f"and lt integers, or bbox four numbers")
 
 

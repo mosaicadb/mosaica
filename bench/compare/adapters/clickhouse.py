@@ -38,7 +38,7 @@ from frame import (EXTENT, K, YEAR_BINS, Camera, Filter, Frame, deinterleave, gr
                    points_by_tile)
 from oracle import VIEWER
 
-from .base import Adapter, du_bytes, evict_files, read_int, vm_hwm, wait_for
+from .base import MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, wait_for
 
 IMAGE = "clickhouse/clickhouse-server:26.8.34.13"
 IMAGE_DIGEST = "sha256:8b28eb09479c36c4533eec7a6268917d04ba3a6fd90e3f4205f70e761b6d7779"
@@ -83,6 +83,8 @@ def filter_sql(filt: Filter | None) -> str:
         col, value = leaf.get("col"), leaf["value"]
         if leaf["op"] == "eq" and col == "type":
             terms.append(f"type = '{value}'")
+        elif leaf["op"] == "in" and col == "type":
+            terms.append("type IN (" + ", ".join(f"'{v}'" for v in value) + ")")
         elif leaf["op"] == "eq" and col == "is_oa":
             terms.append(f"is_oa = {'true' if value else 'false'}")
         elif leaf["op"] == "range":
@@ -108,7 +110,7 @@ class ClickHouse(Adapter):
 
     def __init__(self, tier: Path, work: Path, nice: int = 0):
         super().__init__(tier, work, nice)
-        self.container = f"bench-compare-ch-{os.getpid()}"
+        self.container = Container(f"bench-compare-ch-{os.getpid()}")
         self.data = self.work / "ch-data"
         self.pool = ThreadPoolExecutor(2)
         self.admin = requests.Session()
@@ -120,37 +122,28 @@ class ClickHouse(Adapter):
     def _create(self, nice: int = 0) -> None:
         """Create the container. With `nice`, the server runs at that niceness: the build's
         container, which is removed once the table is built, the serving one being created at 0."""
-        subprocess.run(["docker", "rm", "-f", self.container], capture_output=True)
         (self.work / "config.d").mkdir(exist_ok=True)
         (self.work / "config.d/no-logs.xml").write_text(NO_LOGS)
         (self.work / "config.d/access-management.xml").write_text(ACCESS_MANAGEMENT)
         # Made here, not by docker, so they belong to this user and a rebuild can delete them.
         for d in ("ch-data/user_files/tiers", "ch-logs"):
             (self.work / d).mkdir(parents=True, exist_ok=True)
-        subprocess.run([
-            "docker", "create", "--name", self.container, "--user", f"{os.getuid()}:{os.getgid()}",
-            "--ulimit", "nofile=262144:262144", "--memory", "16g", "--memory-swap", "16g",
-            "-p", f"127.0.0.1:{PORT}:8123", "-e", "CLICKHOUSE_SKIP_USER_SETUP=1",
-            "-v", f"{self.data}:/var/lib/clickhouse",
-            "-v", f"{self.work / 'ch-logs'}:/var/log/clickhouse-server",
-            "-v", f"{self.work / 'config.d/no-logs.xml'}:/etc/clickhouse-server/config.d/no-logs.xml:ro",
-            "-v", f"{self.work / 'config.d/access-management.xml'}:/etc/clickhouse-server/users.d/access-management.xml:ro",
-            "-v", f"{self.tier.parent}:/var/lib/clickhouse/user_files/tiers:ro",
-            *(["--entrypoint", "nice"] if nice else []),
-            f"{IMAGE.split(':')[0]}@{IMAGE_DIGEST}",
-            *(["-n", str(nice), "/entrypoint.sh"] if nice else []),
-        ], check=True, capture_output=True)
-
-    def _scope(self) -> Path:
-        cid = subprocess.run(["docker", "inspect", "-f", "{{.Id}}", self.container],
-                             capture_output=True, text=True, check=True).stdout.strip()
-        return Path(f"/sys/fs/cgroup/system.slice/docker-{cid}.scope")
+        self.container.create(
+            f"{IMAGE.split(':')[0]}@{IMAGE_DIGEST}", entrypoint="/entrypoint.sh", nice=nice,
+            env={"CLICKHOUSE_SKIP_USER_SETUP": "1"}, ports={PORT: 8123}, mounts={
+                str(self.data): "/var/lib/clickhouse",
+                str(self.work / "ch-logs"): "/var/log/clickhouse-server",
+                str(self.work / "config.d/no-logs.xml"): "/etc/clickhouse-server/config.d/no-logs.xml:ro",
+                str(self.work / "config.d/access-management.xml"):
+                    "/etc/clickhouse-server/users.d/access-management.xml:ro",
+                str(self.tier.parent): "/var/lib/clickhouse/user_files/tiers:ro",
+            })
 
     def start(self) -> dict:
         """Start the container. Returns the seconds to `/ping` answering; ClickHouse's HTTP
         interface has no session to open, so the viewer's credential travels with each query."""
         t0 = time.perf_counter()
-        subprocess.run(["docker", "start", self.container], check=True, capture_output=True)
+        self.container.start()
         wait_for(self._ping, 120, "ClickHouse answering /ping")
         ready = time.perf_counter() - t0
         self.sessions = [requests.Session(), requests.Session()]
@@ -168,24 +161,16 @@ class ClickHouse(Adapter):
         for s in self.sessions:
             s.close()
         self.sessions = []
-        subprocess.run(["docker", "stop", "-t", "60", self.container], capture_output=True)
+        self.container.stop()
 
     def remove(self) -> None:
-        subprocess.run(["docker", "rm", "-f", self.container], capture_output=True)
+        self.container.remove()
 
     def evict(self) -> None:
         evict_files(self.data)
 
     def serve_memory(self) -> dict:
-        """None for a figure that cannot be read, such as from a container that has gone."""
-        try:
-            scope = self._scope()
-            pids = [int(p) for p in (scope / "cgroup.procs").read_text().split()]
-        except (OSError, subprocess.CalledProcessError):
-            return {"peak_rss_bytes": None, "cgroup_peak_bytes": None}
-        rss = [r for r in (vm_hwm(p) for p in pids) if r is not None]
-        return {"peak_rss_bytes": max(rss) if rss else None,
-                "cgroup_peak_bytes": read_int(scope / "memory.peak")}
+        return self.container.memory()
 
     # -- SQL ---------------------------------------------------------------------------------------
 
@@ -199,19 +184,15 @@ class ClickHouse(Adapter):
         return r.content
 
     def version(self) -> dict:
-        fields = ("ServerVersion", "CgroupDriver", "CgroupVersion", "OperatingSystem", "KernelVersion")
-        info = subprocess.run(["docker", "info", "--format", "|".join("{{.%s}}" % f for f in fields)],
-                              capture_output=True, text=True)
         return {"version": self.sql("SELECT version()").decode().strip(), "image": IMAGE,
-                "digest": IMAGE_DIGEST,
-                "docker": dict(zip(fields, info.stdout.strip().split("|"))) if info.returncode == 0 else None}
+                "digest": IMAGE_DIGEST, "docker": docker_info()}
 
     def config(self) -> dict:
         settings = self.sql("SELECT name, value FROM system.settings WHERE name IN "
                             "('max_threads', 'use_query_cache', 'max_memory_usage') FORMAT TSV").decode()
         return {"ddl": DDL, "optimize_final": True, "system_logs": "off",
                 "row_policy": self.sql("SHOW CREATE ROW POLICY viewer_terms ON default.points").decode().strip(),
-                "container_memory": "16g", "settings": dict(l.split("\t") for l in settings.splitlines())}
+                "container_memory": MEMORY, "settings": dict(l.split("\t") for l in settings.splitlines())}
 
     def build(self) -> dict:
         self.remove()

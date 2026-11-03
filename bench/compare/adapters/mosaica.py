@@ -1,5 +1,8 @@
 """Mosaica: `mosaica build` over the tier, `mosaica serve`, and the frame over HTTP, as the viewer.
 
+The build and the server run in containers of an image built from the repository's Dockerfile,
+under the same memory cap and with the same cold-start treatment as every other system.
+
 The view declares `licence` as its `point_visibility`, so each row's licence is its access label.
 After the first start the adapter creates the viewer as a principal in the catalogue, grants it
 `read` and exactly the terms of `viewer.json`, and issues it an API key; every start then logs in
@@ -29,8 +32,6 @@ import io
 import json
 import os
 import secrets
-import shlex
-import signal
 import struct
 import subprocess
 import time
@@ -45,9 +46,12 @@ from frame import (EXTENT, FIXED_SPAN, GRID_OFFSET, K, TYPE_TOP, TYPES, YEAR_BIN
                    Frame, deinterleave, grid_depth, interleave, points_by_tile)
 from oracle import VIEWER
 
-from .base import Adapter, du_bytes, evict_files, read_int, scope_dir, scoped, user_scopes, vm_hwm
+from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, evict_files, image_id,
+                   wait_for)
 
 PORTS = (18141, 18142, 18143)
+#: The viewer, session and control listeners inside the container.
+INNER_PORTS = (8080, 8081, 8082)
 CRED_ENV = "BENCH_COMPARE_OPERATOR"
 VIEW = "papers"
 SERVE = {
@@ -104,8 +108,8 @@ def filter_leaves(filt: Filter | None) -> list:
     out = []
     for leaf in (filt.leaves if filt else []):
         op, col, value = leaf["op"], leaf.get("col"), leaf["value"]
-        if op == "eq":
-            out.append({col: {"eq": value}})
+        if op in ("eq", "in"):
+            out.append({col: {op: value}})
         elif op == "range":
             out.append({col: {"range": dict(value)}})
         elif op == "bbox":
@@ -169,38 +173,31 @@ class Mosaica(Adapter):
               "exactly the viewer's terms, logged in with its API key at /v1/login; requests "
               "carry its session token and no access condition")
 
-    def __init__(self, tier: Path, work: Path, binary: Path, grid: str = "underlay", nice: int = 0):
+    def __init__(self, tier: Path, work: Path, image: str, grid: str = "underlay", nice: int = 0):
         super().__init__(tier, work, nice)
         if grid not in ("underlay", "aggregate"):
             raise ValueError(f"grid is underlay or aggregate, not {grid}")
         self.grid = grid
         self.name = "mosaica" if grid == "underlay" else "mosaica+aggregate"
         self.pool = ThreadPoolExecutor(2)
-        self.binary = binary.resolve()
+        self.image = image
+        self.container = Container(f"bench-compare-mosaica-{os.getpid()}")
         self.cred = secrets.token_urlsafe(24)
         self.api_key: str | None = None
-        self.proc: subprocess.Popen | None = None
-        self.log = None
-        self.unit = None
         self.http: requests.Session | None = None
         self.agg_http: requests.Session | None = None
         self.regions: set[str] = set()
 
     def version(self) -> dict:
-        out = subprocess.run([str(self.binary), "--version"], capture_output=True, text=True, check=True)
-        # Written beside the binary when it is built (README step 4); the toolchain on the PATH now
-        # may not be the one that built it.
-        rustc = self.binary.with_name(self.binary.name + ".rustc")
-        return {"version": out.stdout.strip(),
-                "rustc": rustc.read_text().strip() if rustc.exists() else None}
+        out = subprocess.run(["docker", "run", "--rm", self.image, "--version"],
+                             capture_output=True, text=True, check=True)
+        return {"version": out.stdout.strip(), "image": self.image, "image_id": image_id(self.image),
+                "docker": docker_info()}
 
     def config(self) -> dict:
         return {"serve": SERVE, "corpus": CORPUS, "point_rows": [], "grid": self.grid,
-                "region_answers": sorted(self.regions),
+                "container_memory": MEMORY, "region_answers": sorted(self.regions),
                 "routes": ["/v1/login", "/v1/viewport", "/v1/aggregate"]}
-
-    def _env(self) -> dict:
-        return dict(os.environ, **{CRED_ENV: self.cred})
 
     def _write_deployment(self) -> None:
         (self.work / "corpus.toml").write_text(CORPUS)
@@ -221,47 +218,54 @@ token_max_lifetime = 86400
 dir = ".mosaica/catalogue"
 
 [serve]
-viewer  = "127.0.0.1:{PORTS[0]}"
-session = "127.0.0.1:{PORTS[1]}"
-control = "127.0.0.1:{PORTS[2]}"
+viewer  = "0.0.0.0:{INNER_PORTS[0]}"
+session = "0.0.0.0:{INNER_PORTS[1]}"
+control = "0.0.0.0:{INNER_PORTS[2]}"
 operator_credential_env = "{CRED_ENV}"
 {serve}
 """)
 
     def build(self) -> dict:
+        """`mosaica build`, run by `docker exec` in a container of the image kept alive for it, so
+        that its cgroup's peak is read after the build ends; the build's own peak RSS is its
+        stage timings' largest."""
+        self.remove()
         subprocess.run(["rm", "-rf", str(self.work / "bundle"), str(self.work / ".mosaica")], check=True)
         self.api_key = None
         self._write_deployment()
-        unit = f"bench-compare-mosaica-build-{os.getpid()}-{int(time.time())}"
-        peak = self.work / "build.cgroup-peak"
-        rss = self.work / "build.time"
-        q = lambda p: shlex.quote(str(p))
-        script = (
-            f"/usr/bin/time -v -o {q(rss)} {q(self.binary)} build --deployment {q(self.work / 'mosaica.toml')} "
-            f"--file {q(f'points={self.tier}')} --no-oracle-pairs "
-            f"--stage-timings-json {q(self.work / 'build-stages.json')} > {q(self.work / 'build.log')} 2>&1; "
-            f"rc=$?; "
-            + (f"cat /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.peak > {q(peak)}; "
-               if user_scopes() else f"rm -f {q(peak)}; ")
-            + "exit $rc"
-        )
-        t0 = time.monotonic()
-        r = subprocess.run([*scoped(unit), "nice", "-n", str(self.nice), "bash", "-c", script],
-                           cwd=self.work, env=self._env())
-        build_s = time.monotonic() - t0
-        if r.returncode:
+        builder = Container(self.container.name + "-build")
+        builder.create(self.image, entrypoint=TOOLS["/usr/bin/sleep"], args=["infinity"],
+                       mounts={str(self.work): "/work", str(self.tier.parent): "/tiers:ro"})
+        builder.start()
+        try:
+            t0 = time.monotonic()
+            rc = builder.exec([TOOLS["/usr/bin/nice"], "-n", str(self.nice), "/usr/local/bin/mosaica",
+                               "build", "--deployment", "/work/mosaica.toml",
+                               "--file", f"points=/tiers/{self.tier.name}", "--no-oracle-pairs",
+                               "--stage-timings-json", "/work/build-stages.json"],
+                              self.work / "build.log")
+            build_s = time.monotonic() - t0
+            cgroup_peak = builder.memory()["cgroup_peak_bytes"]
+        finally:
+            builder.remove()
+        if rc:
             raise RuntimeError(f"mosaica build failed; see {self.work / 'build.log'}")
-        max_rss = next(int(line.split()[-1]) * 1024 for line in rss.read_text().splitlines()
-                       if "Maximum resident set size" in line)
+        stages = json.loads((self.work / "build-stages.json").read_text())
+        self._create()
         return {
             "build_s": build_s,
-            "peak_rss_bytes": max_rss,
-            "cgroup_peak_bytes": read_int(peak),
+            "peak_rss_bytes": max(s["peak_rss_kib"] for s in stages) * 1024,
+            "cgroup_peak_bytes": cgroup_peak,
             "disk_bytes": du_bytes(self.work / "bundle"),
             "nice": self.nice,
-            "memory_cap": "16G, no swap, in a systemd scope" if user_scopes()
-                          else "none: no systemd user manager, so no scope and no cgroup figures",
         }
+
+    def _create(self) -> None:
+        self.container.create(
+            self.image, entrypoint="/usr/local/bin/mosaica",
+            args=["serve", "--deployment", "/work/mosaica.toml"],
+            mounts={str(self.work): "/work"}, env={CRED_ENV: self.cred},
+            ports=dict(zip(PORTS, INNER_PORTS)))
 
     def _control(self, method: str, path: str, body: dict) -> dict:
         r = requests.request(method, f"http://127.0.0.1:{PORTS[2]}{path}", json=body,
@@ -278,20 +282,18 @@ operator_credential_env = "{CRED_ENV}"
         self._control("POST", "/control/grants", {"principal": name, "terms": VIEWER["terms"]})
         self.api_key = self._control("POST", f"/control/principals/{name}/keys", {})["key"]
 
+    def _ready(self) -> bool:
+        try:
+            return requests.get(f"http://127.0.0.1:{PORTS[0]}/readyz", timeout=1).status_code == 200
+        except requests.RequestException:
+            return False
+
     def start(self) -> dict:
-        """Start the server and log the viewer in. Returns the seconds to the server's ready line
+        """Start the container and log the viewer in. Returns the seconds to `/readyz` answering
         and to the session token."""
         t0 = time.perf_counter()
-        self.unit = f"bench-compare-mosaica-serve-{os.getpid()}-{int(time.time() * 1000)}"
-        self.log = open(self.work / "serve.log", "ab")
-        self.proc = subprocess.Popen(
-            [*scoped(self.unit), str(self.binary), "serve", "--deployment",
-             str(self.work / "mosaica.toml")],
-            cwd=self.work, env=self._env(), stdout=subprocess.PIPE,
-            stderr=self.log, text=True)
-        line = self.proc.stdout.readline()
-        if not line:
-            raise RuntimeError(f"mosaica serve exited; see {self.work / 'serve.log'}")
+        self.container.start()
+        wait_for(self._ready, 600, f"mosaica answering /readyz; see docker logs {self.container.name}")
         ready = time.perf_counter() - t0
         if self.api_key is None:
             self._make_viewer()
@@ -310,25 +312,13 @@ operator_credential_env = "{CRED_ENV}"
             if session is not None:
                 session.close()
         self.http = self.agg_http = None
-        if self.proc is not None:
-            self.proc.send_signal(signal.SIGTERM)
-            try:
-                self.proc.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.proc.wait()
-            self.proc.stdout.close()
-            self.proc = None
-        if self.log is not None:
-            self.log.close()
-            self.log = None
+        self.container.stop()
+
+    def remove(self) -> None:
+        self.container.remove()
 
     def serve_memory(self) -> dict:
-        """None for a figure that cannot be read, such as from a server that has stopped."""
-        if self.proc is None:
-            return {"peak_rss_bytes": None, "cgroup_peak_bytes": None}
-        return {"peak_rss_bytes": vm_hwm(self.proc.pid),
-                "cgroup_peak_bytes": read_int(scope_dir(self.unit) / "memory.peak")}
+        return self.container.memory()
 
     def evict(self) -> None:
         subprocess.run(["rm", "-rf", str(self.work / ".mosaica/cache")], check=True)

@@ -12,8 +12,9 @@ Three workloads, each a list of (camera, filter) steps, all drawn from the items
   densest depth-3 regions through zooms 3, 6, 9, 12 and 14, each step centred on the densest tile
   of that depth inside the previous one; a pan east by half a screen at 6, 9 and 14, and south too
   at 14; then back out through 12, 9, 6 and 3.
-* `filters`: at the script's zoom-6 and zoom-12 screens of the densest region, a fixed sequence of
-  filter changes: none; the work type nearest 50%, 5% and 0.1% of the viewer's items; a year
+* `filters`: at the script's zoom-6 and zoom-9 screens of the densest region, a fixed sequence of
+  filter changes: none; the work type, or set of up to three, nearest 50%, 5% and 0.1% of the
+  viewer's items by ratio, each set an `in` and no type in two sets; a year
   below which about 50%, 5% and 0.1% lie; `is_oa` true and false; the commonest type with
   `is_oa` true and the 50% year onwards; boxes centred on the screen holding about 50%, 5% and
   0.1% of the screen's items; and none. Each step records the share of the viewer's items in the
@@ -23,6 +24,7 @@ Three workloads, each a list of (camera, filter) steps, all drawn from the items
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 from pathlib import Path
@@ -103,6 +105,8 @@ def script(con, tier: str) -> tuple[list[dict], dict[tuple[int, int], dict]]:
 
 
 TARGETS = (0.5, 0.05, 0.001)
+#: The most work types one type filter names.
+TYPE_SET_MAX = 3
 
 
 def closest(fractions: dict, target: float, taken: set) -> object:
@@ -125,11 +129,17 @@ def attribute_filters(con, tier: str) -> list[tuple[str, list[dict]]]:
     for y, n in years:
         below[y] = acc / total
         acc += n
+    sets = {c: sum(types[t] for t in c) for n in range(1, TYPE_SET_MAX + 1)
+            for c in itertools.combinations(sorted(types), n)}
     out, taken = [], set()
     for target in TARGETS:
-        t = closest(types, target, taken)
-        taken.add(t)
-        out.append((f"type={t}", [{"col": "type", "op": "eq", "value": t}]))
+        # The nearest set, the one of fewest values among equals; no type is in two of them.
+        c = min((c for c in sets if not taken & set(c)),
+                key=lambda c: (round(abs(math.log(sets[c] / target)), 3), len(c), c))
+        taken |= set(c)
+        leaf = ({"col": "type", "op": "eq", "value": c[0]} if len(c) == 1
+                else {"col": "type", "op": "in", "value": list(c)})
+        out.append((f"type in {','.join(c)}" if len(c) > 1 else f"type={c[0]}", [leaf]))
     cuts = []
     for target in TARGETS:
         y = closest(below, target, set(cuts))
@@ -207,7 +217,7 @@ def main() -> None:
         "battery": battery(con, tier),
         "script": steps,
         "filters": (filter_sequence(oracle, anchors[(0, 6)], attributes)
-                    + filter_sequence(oracle, anchors[(0, 12)], attributes)),
+                    + filter_sequence(oracle, anchors[(0, 9)], attributes)),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(out, indent=1) + "\n")
