@@ -105,6 +105,7 @@ use mosaica_types::{EntityId, MortonCode};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::artifacts::{ArtifactRows, ArtifactVerdict};
+use crate::cancel::gone;
 use crate::compose::{ShardedMask, WholeMask};
 use crate::error::{EngineError, Result};
 use crate::layer_read::ReadLevel;
@@ -367,11 +368,6 @@ impl SlotsCache {
             }
         }
     }
-}
-
-/// Whether the request `cancel` belongs to has gone.
-fn gone(cancel: &Option<crate::CancelToken>) -> bool {
-    cancel.as_ref().is_some_and(|c| c.is_cancelled())
 }
 
 impl Engine {

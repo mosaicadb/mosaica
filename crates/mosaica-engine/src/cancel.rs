@@ -1,21 +1,16 @@
-//! D-C: cooperative cancellation for the viewport path (the rapid-pan case).
+//! Cooperative cancellation for a request whose client may go away.
 //!
-//! [`CancelToken`] is a newtype over `Arc<AtomicBool>` — deliberately no `tokio` dependency, so
-//! the engine API stays synchronous (lifecycle §7). `mosaica-server` mints one per
-//! `/v1/viewport` request, moves a clone into the `spawn_blocking` closure, and flips the
-//! original from a drop-guard wired to client disconnect (see `mosaica-server::viewer`'s
-//! `CancelGuard`). [`crate::viewport::Engine::viewport`] polls it at a few checkpoints (its own
-//! doc lists them) and aborts the whole request with [`crate::EngineError::Cancelled`] the moment
-//! it observes the flip — never a partial `ViewportOut` (I13a).
+//! [`CancelToken`] is a newtype over `Arc<AtomicBool>` with no `tokio` dependency, so the engine API
+//! stays synchronous. `mosaica-server` mints one per request, moves a clone into the blocking call,
+//! and flips the original from a drop-guard wired to client disconnect (`mosaica-server`'s
+//! `CancelGuard`). The engine polls it at checkpoints, filter evaluation among them, and ends the
+//! request with [`crate::EngineError::Cancelled`] the moment it observes the flip, never with a
+//! partial answer.
 //!
-//! **Ordering: `Relaxed` for both the flip and the check.** The flag carries no payload — nothing
-//! else needs to be published alongside it or synchronised against it — so `Release`/`Acquire`
-//! would buy ordering guarantees this token has no use for, and neither ordering bounds *when*
-//! another thread observes the flip, only what other memory operations are ordered relative to
-//! it (there are none here). `Relaxed` gives exactly the guarantee this mechanism needs — every
-//! thread holding a clone eventually observes a flip made on any other clone — at the lowest cost
-//! per check, which matters because the per-tile check sits on the hot path. Either `Relaxed` or
-//! `Acquire` would be correct here; `Relaxed` is the cheaper of the two.
+//! **Ordering: `Relaxed` for both the flip and the check.** The flag carries no payload, so nothing
+//! needs publishing alongside it, and no ordering bounds *when* another thread observes the flip.
+//! `Relaxed` gives the one guarantee this needs, that every clone eventually observes a flip made
+//! on any other, at the lowest cost per check, which matters on the per-tile hot path.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -42,6 +37,20 @@ impl CancelToken {
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
+}
+
+/// Whether the request holding `cancel` has gone. `None` never goes.
+pub(crate) fn gone(cancel: &Option<CancelToken>) -> bool {
+    cancel.as_ref().is_some_and(CancelToken::is_cancelled)
+}
+
+/// `Err(EngineError::Cancelled)` once the request holding `cancel` has gone, `Ok(())` otherwise.
+#[inline]
+pub(crate) fn check_cancelled(cancel: &Option<CancelToken>) -> crate::error::Result<()> {
+    if gone(cancel) {
+        return Err(crate::EngineError::Cancelled);
+    }
+    Ok(())
 }
 
 impl Default for CancelToken {

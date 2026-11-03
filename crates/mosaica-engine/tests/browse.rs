@@ -314,6 +314,7 @@ fn browse(
                 limit,
                 cursor: None,
                 palette_size: None,
+                cancel: None,
             },
         )
         .expect("a browse answers")
@@ -666,6 +667,7 @@ fn a_dag_child_counts_once_under_each_served_parent() {
                         limit: 100,
                         cursor: None,
                         palette_size: None,
+                        cancel: None,
                     },
                 )
                 .unwrap()
@@ -725,6 +727,7 @@ fn a_cursor_over_tied_counts_neither_duplicates_nor_drops() {
                     limit: 1,
                     cursor,
                     palette_size: None,
+                    cancel: None,
                 },
             )
             .unwrap();
@@ -844,6 +847,42 @@ fn a_filter_adds_a_count_per_row_and_moves_nothing_else() {
 
 /// **A negation's count per row is the row's visible members it keeps**, and leaves out a
 /// suppressed member it would keep and a member outside the viewer's grant.
+/// **A filtered browse whose client has gone gives no answer**: it ends with `Cancelled`, and the
+/// same request under a token nobody flips answers.
+#[test]
+fn a_filtered_browse_whose_client_has_gone_gives_no_answer() {
+    let fx = fixture(None);
+    let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let clause = FilterExpr::Leaf {
+        column: "archive".into(),
+        operand: FilterOperand::Equals(mosaica_types::AttrLocalId::new(fx.codes["xx"])),
+    };
+    let request = |cancel| BrowseRequest {
+        view: "s0",
+        layer: LAYER,
+        level: None,
+        form: BrowseForm::Roots,
+        filter: Some(clause.clone()),
+        limit: 100,
+        cursor: None,
+        palette_size: None,
+        cancel,
+    };
+    let live = mosaica_engine::CancelToken::new();
+    assert!(!fx
+        .engine
+        .browse(&session, request(Some(live)))
+        .expect("a live browse answers")
+        .artifacts
+        .is_empty());
+    let gone = mosaica_engine::CancelToken::new();
+    gone.cancel();
+    assert!(matches!(
+        fx.engine.browse(&session, request(Some(gone))),
+        Err(EngineError::Cancelled)
+    ));
+}
+
 #[test]
 fn a_negations_count_per_row_is_the_visible_members_it_keeps() {
     let fx = fixture(None);
@@ -916,6 +955,7 @@ fn the_refusals_are_about_schema_and_an_artifact_is_an_empty_page() {
                 limit,
                 cursor: None,
                 palette_size: None,
+                cancel: None,
             },
         )
     };
@@ -990,6 +1030,7 @@ fn a_session_from_before_a_fold_counts_none_of_the_entity_the_fold_retired() {
                     limit: 100,
                     cursor: None,
                     palette_size: None,
+                    cancel: None,
                 },
             )
             .expect("a filtered browse answers");
@@ -1127,6 +1168,7 @@ impl Labelled {
                     limit: 100,
                     cursor: None,
                     palette_size: None,
+                    cancel: None,
                 },
             )
             .expect("a browse answers")

@@ -1827,6 +1827,7 @@ fn browse_counts_only_served_children_and_none_on_a_layer_without_links() {
                         limit: 100,
                         cursor: None,
                         palette_size: None,
+                        cancel: None,
                     },
                 )
                 .unwrap()
@@ -1873,6 +1874,7 @@ fn an_authored_shape_names_no_other_view_on_browse() {
                     limit: 10,
                     cursor: None,
                     palette_size: None,
+                    cancel: None,
                 },
             )
             .unwrap()

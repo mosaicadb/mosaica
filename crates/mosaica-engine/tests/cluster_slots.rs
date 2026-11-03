@@ -528,6 +528,7 @@ fn a_slot_is_the_same_at_any_zoom_box_budget_or_filter() {
                         limit: 1000,
                         cursor: None,
                         palette_size,
+                        cancel: None,
                     },
                 )
                 .unwrap()
@@ -965,6 +966,7 @@ fn a_level_centred_by_its_figures_is_coloured_alike_whichever_route_asks() {
                 limit: 1000,
                 cursor: None,
                 palette_size: Some(10),
+                cancel: None,
             },
         )
         .unwrap()

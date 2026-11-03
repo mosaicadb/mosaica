@@ -1036,7 +1036,7 @@ impl Engine {
         body(&|expr: &crate::filter::FilterExpr, prefer_row: bool| {
             side.shard
                 .filter_columns
-                .evaluate_routed(expr, candidate, prefer_row, &resolvers)
+                .evaluate_routed(expr, candidate, prefer_row, &resolvers, cancel)
                 .map_err(filter_refusal)
         })
     }
@@ -1170,12 +1170,7 @@ impl Engine {
                     // decomposition.
                     Ok(entry) if entry.is_of(&canonical) => entry,
                     Ok(_) => Arc::new(build()),
-                    Err(mosaica_cache::WaitEnded::Cancelled) => {
-                        return Err(FilterError::RegionUnavailable(
-                            "the request was cancelled while its region was being decomposed"
-                                .to_string(),
-                        ))
-                    }
+                    Err(mosaica_cache::WaitEnded::Cancelled) => return Err(FilterError::Cancelled),
                     // Building unretained rather than refusing: a second viewer's identical lasso
                     // must not 429.
                     Err(mosaica_cache::WaitEnded::Budget) => Arc::new(build()),
@@ -1332,6 +1327,9 @@ pub(crate) fn unique_holders(
 ///
 /// [`FilterError`]: crate::filter::FilterError
 pub(crate) fn filter_refusal(e: crate::filter::FilterError) -> EngineError {
+    if e == crate::filter::FilterError::Cancelled {
+        return EngineError::Cancelled;
+    }
     let detail = e.to_string();
     if e.is_callers_fault() {
         EngineError::FilterMalformed(detail)

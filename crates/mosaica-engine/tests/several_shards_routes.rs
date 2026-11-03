@@ -901,6 +901,7 @@ fn browse(
                 limit: 100,
                 cursor: None,
                 palette_size: None,
+                cancel: None,
             },
         )
         .expect("browse answers");

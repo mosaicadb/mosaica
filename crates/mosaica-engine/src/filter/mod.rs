@@ -95,6 +95,17 @@ pub use mosaica_filter::{Endpoint, Scalar};
 /// routes: the entity-space scan there, the row-space scan in [`crate::viewport`].
 pub(crate) use mosaica_filter::{as_f64, narrow_hi, narrow_lo, NativeBound, Narrowed};
 
+/// How many entities a per-entity walk in filter evaluation takes between looks at cancellation.
+const CANCEL_EVERY: usize = 4096;
+
+/// `Err(FilterError::Cancelled)` once the request holding `cancel` has gone.
+fn check_cancelled(cancel: &Option<crate::CancelToken>) -> Result<(), FilterError> {
+    if crate::cancel::gone(cancel) {
+        return Err(FilterError::Cancelled);
+    }
+    Ok(())
+}
+
 /// The entity-space set a filter may be evaluated over: the session's fragment with the deny state
 /// composed in, plus the buffered entities whose verdict passes.
 ///

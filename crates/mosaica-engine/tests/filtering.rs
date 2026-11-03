@@ -4803,3 +4803,206 @@ fn a_render_column_filter_narrows_the_selection_without_moving_the_anchor() {
         );
     }
 }
+
+// =================================================================================================
+// Cancellation: a request whose client has gone stops inside its filter
+// =================================================================================================
+
+/// A phrase of two words that only item 5's prose says.
+fn phrase_of_five() -> FilterExpr {
+    leaf(
+        "prose",
+        FilterOperand::Phrase {
+            query: "shared p05".to_string(),
+        },
+    )
+}
+
+/// A token flipped before the request starts.
+fn cancelled() -> Option<mosaica_engine::CancelToken> {
+    let token = mosaica_engine::CancelToken::new();
+    token.cancel();
+    Some(token)
+}
+
+/// **A filter evaluation ends with `Cancelled` at the next leaf once its request has gone.** The
+/// unique index's lookup for the first leaf flips the token, so the phrase after it is never
+/// checked; with a token nobody flips, the same tree answers exactly what [`FilterColumns::evaluate`]
+/// answers.
+#[test]
+fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
+    use mosaica_engine::filter::{MemberOfLeaf, RegionLeaf, RoutedFilter, RowLeafResolvers};
+    use mosaica_engine::RegionRows;
+    use mosaica_store::unique::UniqueKey;
+
+    let fx = fixture();
+    let (_engine, cand) = candidate_for(&fx, &full_coverage_credential());
+    let five = fx.entity_of[&5] as u32;
+    let tree = FilterExpr::AllOf(vec![
+        leaf("id", FilterOperand::NumEquals(Scalar::Int(5))),
+        phrase_of_five(),
+    ]);
+
+    let token = mosaica_engine::CancelToken::new();
+    let flips = std::cell::Cell::new(false);
+    let lookup = |_: &str, _: &[UniqueKey]| -> Result<Vec<u32>, FilterError> {
+        if flips.get() {
+            token.cancel();
+        }
+        Ok(vec![five])
+    };
+    let regions = |_: &RegionLeaf| -> Result<RegionRows, FilterError> {
+        unreachable!("the tree holds no region")
+    };
+    let members = |_: &MemberOfLeaf| -> Result<Bitmap, FilterError> {
+        unreachable!("the tree holds no member_of")
+    };
+    let resolvers = RowLeafResolvers {
+        regions: &regions,
+        members: &members,
+        layers: &|_| None,
+        unique: &lookup,
+    };
+    let routed = |cancel: &Option<mosaica_engine::CancelToken>| {
+        fx.columns
+            .evaluate_routed(&tree, &cand, false, &resolvers, cancel)
+    };
+
+    match routed(&Some(token.clone())).expect("a live request answers") {
+        RoutedFilter::Entity(entities) => assert_eq!(as_vec(&entities), vec![five]),
+        RoutedFilter::Row(_) => panic!("an entity-space tree answers in entity space"),
+    }
+    assert_eq!(
+        as_vec(&fx.columns.evaluate(&phrase_of_five(), &cand).unwrap()),
+        vec![five],
+        "the phrase alone matches item 5, so the tree's answer is the phrase's"
+    );
+
+    flips.set(true);
+    assert_eq!(routed(&Some(token.clone())).err(), Some(FilterError::Cancelled));
+    // A keyword leaf has no walk of its own to look at the token in, so only the check between
+    // leaves can stop this one.
+    let keyword = FilterExpr::AllOf(vec![
+        leaf("id", FilterOperand::NumEquals(Scalar::Int(5))),
+        leaf("title", FilterOperand::TextPrefix("paper".to_string())),
+    ]);
+    let token = mosaica_engine::CancelToken::new();
+    let lookup = |_: &str, _: &[UniqueKey]| -> Result<Vec<u32>, FilterError> {
+        token.cancel();
+        Ok(vec![five])
+    };
+    let flipping = RowLeafResolvers {
+        unique: &lookup,
+        ..resolvers
+    };
+    assert_eq!(
+        fx.columns
+            .evaluate_routed(&keyword, &cand, false, &flipping, &Some(token.clone()))
+            .err(),
+        Some(FilterError::Cancelled)
+    );
+    assert_eq!(
+        fx.columns
+            .evaluate_routed(&phrase_of_five(), &cand, false, &resolvers, &cancelled())
+            .err(),
+        Some(FilterError::Cancelled),
+        "a phrase under a request already gone is not checked at all"
+    );
+}
+
+/// **A viewport, a records read and an aggregate with a phrase filter give no answer once their
+/// request has gone**, and the same requests with a live token answer normally. The viewport ends
+/// with `Cancelled`; a records read and an aggregate end their stream by `deadline` with no rows.
+#[test]
+fn a_phrase_filtered_request_whose_client_has_gone_gives_no_answer() {
+    use mosaica_engine::{
+        AggregateRequest, EngineError, Grouping, ItemsRequest, ResponseEndedBy,
+    };
+
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-cancel");
+    let wal = fx._dir.path().join("wal-cancel");
+    let engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let live = || Some(mosaica_engine::CancelToken::new());
+
+    let viewport = |cancel| {
+        engine.viewport(
+            &session,
+            ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000)
+                .filter(phrase_of_five())
+                .cancel(cancel),
+        )
+    };
+    assert_eq!(viewport(live()).expect("a live viewport answers").points.len(), 1);
+    assert!(matches!(viewport(cancelled()), Err(EngineError::Cancelled)));
+
+    let fields = vec!["title".to_string()];
+    let items = |cancel| {
+        let mut pages = Pages::default();
+        let trailer = engine
+            .items_stream(
+                &session,
+                ItemsRequest {
+                    view: "s0",
+                    fields: &fields,
+                    system_fields: &[],
+                    filter: Some(phrase_of_five()),
+                    keep_unmatched: false,
+                    count: false,
+                    order: None,
+                    page_rows: None,
+                    pages: None,
+                    cursor: None,
+                    limits: limits(),
+                    cancel,
+                },
+                &mut pages,
+            )
+            .expect("a records read ends with a trailer");
+        let rows: usize = pages.batches.iter().map(|b| b.num_rows()).sum();
+        (rows, trailer.ended_by)
+    };
+    assert_eq!(items(live()), (1, ResponseEndedBy::End));
+    assert_eq!(items(cancelled()), (0, ResponseEndedBy::Deadline));
+
+    let groupings = [Grouping {
+        by: None,
+        cells: None,
+        area: None,
+        count: true,
+        figures: Vec::new(),
+    }];
+    let aggregate = |cancel| {
+        let mut pages = Pages::default();
+        let trailer = engine
+            .aggregate_stream(
+                &session,
+                AggregateRequest {
+                    view: "s0",
+                    filter: Some(phrase_of_five()),
+                    reference: None,
+                    groupings: &groupings,
+                    page_rows: None,
+                    pages: None,
+                    cursor: None,
+                    limits: limits(),
+                    caps: caps(),
+                    cancel,
+                },
+                &mut pages,
+            )
+            .expect("an aggregate ends with a trailer");
+        let rows: Vec<Vec<String>> = pages
+            .batches
+            .iter()
+            .flat_map(|b| rows_of(b, &[], None))
+            .collect();
+        (rows, trailer.ended_by)
+    };
+    let (rows, ended_by) = aggregate(live());
+    assert_eq!(ended_by, ResponseEndedBy::End);
+    assert_eq!(rows.len(), 1, "one row for the whole set: {rows:?}");
+    assert!(rows[0].contains(&"count=1".to_string()), "{rows:?}");
+    assert_eq!(aggregate(cancelled()), (Vec::new(), ResponseEndedBy::Deadline));
+}

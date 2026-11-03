@@ -112,16 +112,7 @@ use sweep::{
     ViewSegments, MAX_POINTS_FRAME_BYTES,
 };
 
-/// `Err(EngineError::Cancelled)` once `cancel` has flipped, `Ok(())` otherwise (`None` never
-/// flips). Not called around the row-projection build: one already in flight runs to completion
-/// regardless of this caller's interest, since its result serves later arrivals too.
-#[inline]
-fn check_cancelled(cancel: &Option<CancelToken>) -> Result<()> {
-    if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
-        return Err(EngineError::Cancelled);
-    }
-    Ok(())
-}
+use crate::cancel::check_cancelled;
 
 impl Engine {
     /// Mint this response's identity and content keys from the geometry actually served, not the
@@ -193,8 +184,9 @@ impl Engine {
     /// applied at whole-tile boundaries.
     ///
     /// Cancellation is checked once per tile in the sweep, once before [`compose`], once before
-    /// θ's anchor, and once per tile in the emit pass; the row-projection build is not gated by it
-    /// (see [`check_cancelled`]'s doc). A hit aborts the request with [`EngineError::Cancelled`].
+    /// θ's anchor, inside the filter's evaluation, and once per tile in the emit pass. The
+    /// row-projection build is not gated by it: one already in flight serves later arrivals too.
+    /// A hit aborts the request with [`EngineError::Cancelled`].
     /// A consumer that already holds a prefix of the response by then can detect the truncation,
     /// because the prefix is whole tiles and the producer never signalled completion.
     pub fn viewport_stream(

@@ -3,6 +3,7 @@ use mosaica_filter::{resolve_union, RecordValue};
 use mosaica_types::AttrLocalId;
 
 use super::{ColumnLayers, FilterColumns, Route, TextLayer};
+use crate::cancel::CancelToken;
 use crate::filter::declared::Placement;
 use crate::filter::error::FilterError;
 use crate::filter::expr::{
@@ -12,6 +13,7 @@ use crate::filter::expr::{
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 use crate::filter::scan::text::{contains_phrase, text_match};
 use crate::filter::scan::{scan, scan_layer};
+use crate::filter::{check_cancelled, CANCEL_EVERY};
 
 /// The space a sub-tree evaluates in: [`FilterColumns::space_of`]'s answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,18 @@ impl FilterColumns {
         operand: &FilterOperand,
         candidate: &Bitmap,
     ) -> Result<Bitmap, FilterError> {
+        self.resolve_until(column, operand, candidate, &None)
+    }
+
+    /// [`Self::resolve`], ended with [`FilterError::Cancelled`] once the request holding `cancel`
+    /// has gone.
+    fn resolve_until(
+        &self,
+        column: &str,
+        operand: &FilterOperand,
+        candidate: &Bitmap,
+        cancel: &Option<CancelToken>,
+    ) -> Result<Bitmap, FilterError> {
         let name = column;
         let column = self
             .columns
@@ -44,8 +58,15 @@ impl FilterColumns {
                 layers, analyser, ..
             } => {
                 let declared_index = column.declared_index;
-                return self
-                    .resolve_text(name, declared_index, layers, analyser, operand, candidate);
+                return self.resolve_text(
+                    name,
+                    declared_index,
+                    layers,
+                    analyser,
+                    operand,
+                    candidate,
+                    cancel,
+                );
             }
             ColumnLayers::Values {
                 layers,
@@ -80,6 +101,7 @@ impl FilterColumns {
 
     /// A `match` or a `phrase` over one text column's layers: [`FilterColumns::resolve`]'s text
     /// half.
+    #[allow(clippy::too_many_arguments)]
     fn resolve_text(
         &self,
         name: &str,
@@ -88,6 +110,7 @@ impl FilterColumns {
         analyser: &mosaica_analyse::Analyser,
         operand: &FilterOperand,
         candidate: &Bitmap,
+        cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         let (query, minimum, phrase) = match operand {
             FilterOperand::Match { query, minimum } => (query, *minimum, false),
@@ -102,15 +125,22 @@ impl FilterColumns {
         let minimum = minimum.unwrap_or(tokens.len() as u32);
         let mut out = Bitmap::new();
         for layer in text {
-            out |= text_match(&layer.dict, &layer.postings, &tokens, minimum, candidate)
-                .map_err(|e| FilterError::postings_unreadable(name, e))?;
+            out |= text_match(
+                name,
+                &layer.dict,
+                &layer.postings,
+                &tokens,
+                minimum,
+                candidate,
+                cancel,
+            )?;
         }
         // A one-word phrase is a `match`, so short-circuit it before the verify decompresses a
         // block per survivor.
         if !phrase || ordered.len() < 2 {
             return Ok(out);
         }
-        self.verify_phrase(name, declared_index, analyser, &ordered, out, candidate)
+        self.verify_phrase(name, declared_index, analyser, &ordered, out, candidate, cancel)
     }
 
     /// Evaluate a filter expression against `candidate`.
@@ -125,7 +155,7 @@ impl FilterColumns {
                 detail: "this evaluation holds no unique index".to_string(),
             })
         };
-        self.eval(expr, candidate, &no_index)
+        self.eval(expr, candidate, &no_index, &None)
     }
 
     /// The keys a leaf names where its column's unique index answers it: `eq` or `in` on a unique
@@ -165,6 +195,7 @@ impl FilterColumns {
         operand: &FilterOperand,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
+        cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         if let Some(keys) = self.unique_keys(column, operand) {
             let mut out = Bitmap::new();
@@ -180,7 +211,7 @@ impl FilterColumns {
                 operator: operator_name(operand).to_string(),
             });
         }
-        self.resolve(column, operand, candidate)
+        self.resolve_until(column, operand, candidate, cancel)
     }
 
     /// Evaluate a filter expression's entity-space part and route the rest.
@@ -192,22 +223,28 @@ impl FilterColumns {
     /// A tree with no row-space leaf returns [`RoutedFilter::Entity`]. Otherwise every maximal
     /// entity-space sub-tree is evaluated here, under `candidate`, and the returned [`RowExpr`]
     /// awaits the row-space leaves, which need the request's tile ranges.
+    ///
+    /// Once the request holding `cancel` has gone, the evaluation ends with
+    /// [`FilterError::Cancelled`] at the next leaf, or within [`CANCEL_EVERY`] entities of a walk
+    /// inside one. `None` is never cancelled, which is what [`Self::evaluate`] passes.
     pub fn evaluate_routed(
         &self,
         expr: &FilterExpr,
         candidate: &Bitmap,
         prefer_row: bool,
         resolvers: &RowLeafResolvers<'_>,
+        cancel: &Option<CancelToken>,
     ) -> Result<RoutedFilter, FilterError> {
         if self.admitted_space(expr, prefer_row, resolvers.layers)? == Space::Entity {
             return Ok(RoutedFilter::Entity(self.eval(
                 expr,
                 candidate,
                 resolvers.unique,
+                cancel,
             )?));
         }
         Ok(RoutedFilter::Row(
-            self.route(expr, candidate, prefer_row, resolvers)?,
+            self.route(expr, candidate, prefer_row, resolvers, cancel)?,
         ))
     }
 
@@ -331,9 +368,10 @@ impl FilterColumns {
         candidate: &Bitmap,
         prefer_row: bool,
         resolvers: &RowLeafResolvers<'_>,
+        cancel: &Option<CancelToken>,
     ) -> Result<RowExpr, FilterError> {
         if self.space_of(expr, prefer_row)? == Space::Entity {
-            return Ok(RowExpr::Entity(self.eval(expr, candidate, resolvers.unique)?));
+            return Ok(RowExpr::Entity(self.eval(expr, candidate, resolvers.unique, cancel)?));
         }
         match expr {
             FilterExpr::Leaf { column, operand } => Ok(RowExpr::Leaf {
@@ -345,17 +383,17 @@ impl FilterColumns {
             FilterExpr::MemberOf(leaf) => Ok(RowExpr::MemberOf((resolvers.members)(leaf)?)),
             FilterExpr::AllOf(kids) => Ok(RowExpr::AllOf(
                 kids.iter()
-                    .map(|kid| self.route(kid, candidate, prefer_row, resolvers))
+                    .map(|kid| self.route(kid, candidate, prefer_row, resolvers, cancel))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             FilterExpr::AnyOf(kids) => Ok(RowExpr::AnyOf(
                 kids.iter()
-                    .map(|kid| self.route(kid, candidate, prefer_row, resolvers))
+                    .map(|kid| self.route(kid, candidate, prefer_row, resolvers, cancel))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             FilterExpr::NoneOf(kids) => Ok(RowExpr::NotInRows(
                 kids.iter()
-                    .map(|kid| self.route(kid, candidate, prefer_row, resolvers))
+                    .map(|kid| self.route(kid, candidate, prefer_row, resolvers, cancel))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
         }
@@ -377,6 +415,7 @@ impl FilterColumns {
     /// A survivor outside the candidate would be a block read for an entity this principal may
     /// not see. `text_match` intersects with the candidate as it reads each posting, so this
     /// cannot happen, and it is checked anyway before a single block is touched.
+    #[allow(clippy::too_many_arguments)]
     fn verify_phrase(
         &self,
         name: &str,
@@ -385,6 +424,7 @@ impl FilterColumns {
         phrase: &[String],
         survivors: Bitmap,
         candidate: &Bitmap,
+        cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         if survivors.andnot(candidate).cardinality() != 0 {
             return Err(FilterError::postings_unreadable(
@@ -394,7 +434,10 @@ impl FilterColumns {
         }
         let tag = u16::try_from(declared_index).unwrap_or(u16::MAX);
         let mut out = Bitmap::new();
-        for entity in survivors.iter() {
+        for (walked, entity) in survivors.iter().enumerate() {
+            if walked % CANCEL_EVERY == 0 {
+                check_cancelled(cancel)?;
+            }
             // A record that will not read refuses the request: skipping it would leave the phrase
             // short, and widen a `none_of` over it. An item with no record holds no prose.
             let Some(fields) =
@@ -424,17 +467,19 @@ impl FilterColumns {
         expr: &FilterExpr,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
+        cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         match expr {
             FilterExpr::Leaf { column, operand } => {
-                self.eval_leaf(column, operand, candidate, unique)
+                check_cancelled(cancel)?;
+                self.eval_leaf(column, operand, candidate, unique, cancel)
             }
             FilterExpr::Region(_) => Err(FilterError::RegionInEntitySpace),
             FilterExpr::MemberOf(_) => Err(FilterError::MemberOfInEntitySpace),
             FilterExpr::AllOf(kids) => {
                 let mut live = candidate.clone();
                 for kid in kids {
-                    live = self.eval(kid, &live, unique)?;
+                    live = self.eval(kid, &live, unique, cancel)?;
                     if live.is_empty() {
                         break;
                     }
@@ -444,7 +489,7 @@ impl FilterColumns {
             FilterExpr::AnyOf(kids) => {
                 let mut out = Bitmap::new();
                 for kid in kids {
-                    out |= self.eval(kid, candidate, unique)?;
+                    out |= self.eval(kid, candidate, unique, cancel)?;
                 }
                 Ok(out)
             }
@@ -452,7 +497,7 @@ impl FilterColumns {
                 let mut out = candidate.clone();
                 for kid in kids {
                     // Under `out`, not `candidate`, the same narrowing `AllOf` does.
-                    out.andnot_inplace(&self.eval(kid, &out, unique)?);
+                    out.andnot_inplace(&self.eval(kid, &out, unique, cancel)?);
                     if out.is_empty() {
                         break;
                     }

@@ -95,6 +95,9 @@ pub struct BrowseRequest<'a> {
     pub cursor: Option<BrowseCursor>,
     /// The palette size each row's slot is chosen for ([`crate::slots`]); `None` serves no slot.
     pub palette_size: Option<u8>,
+    /// Flipped when the client goes away, which ends the request with
+    /// [`EngineError::Cancelled`]. `None` is never cancelled.
+    pub cancel: Option<crate::CancelToken>,
 }
 
 /// A position in the total order — `(masked or matched count descending, mosaica_id ascending)`.
@@ -296,7 +299,7 @@ impl crate::Engine {
             served: served_view,
             mask,
             ..
-        } = self.open_view(session, &generation, view, &None, &mut _probe)?;
+        } = self.open_view(session, &generation, view, &req.cancel, &mut _probe)?;
 
         // **The filter, evaluated once for the request and over the whole view.** Every route it
         // may take is asked for its whole-view answer: an entity-space verdict is projected whole,
@@ -306,7 +309,7 @@ impl crate::Engine {
         let filter_rows = match &req.filter {
             None => None,
             Some(expr) => Some(
-                self.whole_view_filter_rows(&served_view, &mask, expr, &None)?
+                self.whole_view_filter_rows(&served_view, &mask, expr, &req.cancel)?
                     .0,
             ),
         };

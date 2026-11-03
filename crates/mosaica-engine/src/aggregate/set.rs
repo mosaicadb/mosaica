@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 use croaring::Bitmap;
 
 use super::{AggregateRequest, Reference};
-use crate::cancel::CancelToken;
+use crate::cancel::{check_cancelled, CancelToken};
 use crate::cells::CellSet;
 use crate::compose::{EffectiveMask, MaskedSet, WholeMask};
 use crate::engine::Engine;
@@ -369,13 +369,6 @@ pub(crate) fn entities_passing(
         };
         Ok((entities, region))
     })
-}
-
-fn check_cancelled(cancel: &Option<CancelToken>) -> Result<()> {
-    if cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
-        return Err(EngineError::Cancelled);
-    }
-    Ok(())
 }
 
 /// What one page counts under.

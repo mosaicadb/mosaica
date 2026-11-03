@@ -1896,6 +1896,7 @@ fn routes(engine: &Engine, ids: &[mosaica_types::MosaicaId]) -> Routes {
                 limit: 100,
                 cursor: None,
                 palette_size: None,
+                cancel: None,
             },
         )
         .expect("browse answers");

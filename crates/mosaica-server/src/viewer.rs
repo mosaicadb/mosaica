@@ -1671,6 +1671,9 @@ async fn browse(
         })?),
     };
     let refresh = (Arc::clone(&state), Arc::clone(&session));
+    // A client that goes away drops this handler, and the guard cancels the engine call.
+    let cancel = CancelToken::new();
+    let _cancel_guard = CancelGuard::new(cancel.clone());
     let out = state
         .gated(move |state| {
             let meta = state.engine.meta();
@@ -1706,6 +1709,7 @@ async fn browse(
                         limit,
                         cursor,
                         palette_size,
+                        cancel: Some(cancel),
                     },
                 )
                 .map_err(crate::error::map_engine_error)
