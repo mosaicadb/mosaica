@@ -33,6 +33,8 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
+use mosaica_filter::{put_varint, put_varint64, take_varint, take_varint64, VarintError};
+
 use crate::error::{BuildError, Result};
 
 /// Reserve **allocated** blocks for `file` over `[from, to)`, extending it to `to`.
@@ -810,6 +812,7 @@ pub(crate) fn boundaries_from_histogram<K: Copy + Ord>(
 pub(crate) struct BandWriter {
     path: PathBuf,
     writer: BufWriter<File>,
+    record: Vec<u8>,
     term_lo: u32,
     last_entity: u32,
     count: u64,
@@ -826,6 +829,7 @@ impl BandWriter {
         Ok(BandWriter {
             path: path.to_path_buf(),
             writer,
+            record: Vec::new(),
             term_lo,
             last_entity: 0,
             count: 0,
@@ -853,8 +857,10 @@ impl BandWriter {
                 self.last_entity
             ))
         })?;
-        write_varint(&mut self.writer, &self.path, delta)?;
-        write_varint(&mut self.writer, &self.path, entity_delta)?;
+        self.record.clear();
+        put_varint(delta, &mut self.record);
+        put_varint(entity_delta, &mut self.record);
+        write_record(&mut self.writer, &self.path, &self.record)?;
         self.last_entity = entity;
         self.count += 1;
         self.anchor = self.anchor.wrapping_add(mix64(pack_pair(term, entity)));
@@ -866,10 +872,9 @@ impl BandWriter {
         let BandWriter {
             path,
             writer,
-            term_lo: _,
-            last_entity: _,
             count,
             anchor,
+            ..
         } = self;
         let file = writer
             .into_inner()
@@ -883,24 +888,9 @@ impl BandWriter {
     }
 }
 
-/// LEB128-encode `value` into `writer` (at most 5 bytes for a `u32`).
-fn write_varint(writer: &mut BufWriter<File>, path: &Path, mut value: u32) -> Result<()> {
-    let mut buf = [0u8; 5];
-    let mut len = 0;
-    loop {
-        let byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value == 0 {
-            buf[len] = byte;
-            len += 1;
-            break;
-        }
-        buf[len] = byte | 0x80;
-        len += 1;
-    }
-    writer
-        .write_all(&buf[..len])
-        .map_err(|e| BuildError::io(path, e))
+/// Append one record's encoded bytes to a spill.
+fn write_record(writer: &mut BufWriter<File>, path: &Path, record: &[u8]) -> Result<()> {
+    writer.write_all(record).map_err(|e| BuildError::io(path, e))
 }
 
 /// Streams a band file back, pair by pair, verifying count and anchor at end of stream.
@@ -960,18 +950,12 @@ impl BandReader {
             return Ok(None);
         }
         // EOF is legitimate only on a record boundary — before a record's first byte.
-        let first = match next_byte(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
-            None => {
-                self.verify_end()?;
-                return Ok(None);
-            }
-            Some(byte) => byte,
-        };
-        let delta = self.decode_varint(first)?;
-        let entity_delta = {
-            let byte = self.require_byte()?;
-            self.decode_varint(byte)?
-        };
+        if at_end(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
+            self.verify_end()?;
+            return Ok(None);
+        }
+        let delta = self.next_u32()?;
+        let entity_delta = self.next_u32()?;
         let term = self.term_lo.checked_add(delta).ok_or_else(|| {
             self.malformed(&format!(
                 "term delta {delta} overflows u32 above term_lo {}",
@@ -1018,35 +1002,8 @@ impl BandReader {
         Ok(())
     }
 
-    /// Decode one LEB128 `u32` whose first byte has already been read.
-    fn decode_varint(&mut self, first: u8) -> Result<u32> {
-        let mut value = (first & 0x7F) as u32;
-        if first & 0x80 == 0 {
-            return Ok(value);
-        }
-        let mut shift = 7u32;
-        loop {
-            let byte = self.require_byte()?;
-            if shift == 28 {
-                // Fifth byte: only 4 payload bits remain in a u32, and there is no sixth byte.
-                if byte & 0xF0 != 0 {
-                    return Err(self.malformed("varint overflows u32"));
-                }
-                return Ok(value | ((byte as u32) << 28));
-            }
-            value |= ((byte & 0x7F) as u32) << shift;
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-            shift += 7;
-        }
-    }
-
-    fn require_byte(&mut self) -> Result<u8> {
-        match next_byte(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
-            Some(byte) => Ok(byte),
-            None => Err(self.malformed("truncated mid-record")),
-        }
+    fn next_u32(&mut self) -> Result<u32> {
+        read_varint(&mut self.reader, &self.path, "band file", take_varint)
     }
 
     fn malformed(&self, detail: &str) -> BuildError {
@@ -1054,67 +1011,66 @@ impl BandReader {
     }
 }
 
-/// One byte from `reader`, or `None` at EOF. Retries `Interrupted` (a refill may see it).
-///
-/// **Out of the buffer the reader already holds.** `read` of a single byte is a call and a copy
-/// per byte through `BufReader`'s own bookkeeping; `fill_buf` hands over what is buffered and
-/// `consume` takes one byte of it.
-fn next_byte(reader: &mut BufReader<File>) -> std::io::Result<Option<u8>> {
+/// What `reader` holds buffered, refilling it when it holds nothing: empty only at end of file.
+/// Retries `Interrupted`, which a refill may see.
+fn buffered(reader: &mut BufReader<File>) -> std::io::Result<&[u8]> {
     loop {
-        let byte = match reader.fill_buf() {
-            Ok([]) => return Ok(None),
-            Ok(buffered) => buffered[0],
+        match reader.fill_buf() {
+            // Re-borrowed so the loop's next turn is not held by this one's borrow.
+            Ok(_) => return reader.fill_buf(),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
-        };
-        reader.consume(1);
-        return Ok(Some(byte));
+        }
     }
 }
 
-/// Decode one LEB128 `u32` from the head of `buffered`, with how many bytes it took.
+/// Whether `reader` is at end of file — a record boundary, which is the only place a spill reader
+/// may legitimately be.
+fn at_end(reader: &mut BufReader<File>) -> std::io::Result<bool> {
+    Ok(buffered(reader)?.is_empty())
+}
+
+/// One varint inside a record of the spill at `path`, read from `reader` and decoded by `take`
+/// ([`take_varint`] or [`take_varint64`]). A refusal names the file as `what`.
 ///
-/// `None` where the varint is not whole inside the slice, and where it is whole and malformed:
-/// both send the caller to the byte-at-a-time path, which refills across the boundary and names
-/// the malformation.
-fn varint32_at(buffered: &[u8]) -> Option<(u32, usize)> {
-    let mut value = 0u32;
-    let mut shift = 0u32;
-    for (at, &byte) in buffered.iter().enumerate() {
-        if shift == 28 {
-            // Fifth byte: four payload bits remain in a u32, and there is no sixth.
-            if byte & 0xF0 != 0 {
-                return None;
+/// **Out of the buffer the reader already holds** where the whole varint is in it. A spill holds a
+/// varint a pair or more, so a corpus of 10¹⁰ pairs is 10¹⁰ of them, and a byte at a time is a
+/// call and a copy through `BufReader`'s bookkeeping per byte. Only a varint crossing the buffer's
+/// end is gathered a byte at a time, at most one per [`SPILL_BUF_BYTES`], and the same `take`
+/// decodes what was gathered.
+fn read_varint<T>(
+    reader: &mut BufReader<File>,
+    path: &Path,
+    what: &str,
+    take: impl Fn(&[u8], &mut usize) -> std::result::Result<T, VarintError>,
+) -> Result<T> {
+    let io = |e| BuildError::io(path, e);
+    let mut cursor = 0;
+    let mut taken = take(buffered(reader).map_err(io)?, &mut cursor);
+    if matches!(taken, Err(VarintError::Truncated)) {
+        let mut bytes = [0u8; 10];
+        let mut len = 0;
+        while len < bytes.len() {
+            let Some(&byte) = buffered(reader).map_err(io)?.first() else {
+                break;
+            };
+            reader.consume(1);
+            bytes[len] = byte;
+            len += 1;
+            if byte & 0x80 == 0 {
+                break;
             }
-            return Some((value | ((byte as u32) << 28), at + 1));
         }
-        value |= ((byte & 0x7F) as u32) << shift;
-        if byte & 0x80 == 0 {
-            return Some((value, at + 1));
-        }
-        shift += 7;
+        taken = take(&bytes[..len], &mut 0);
+    } else {
+        reader.consume(cursor);
     }
-    None
-}
-
-/// [`varint32_at`] at the `u64` width.
-fn varint64_at(buffered: &[u8]) -> Option<(u64, usize)> {
-    let mut value = 0u64;
-    let mut shift = 0u32;
-    for (at, &byte) in buffered.iter().enumerate() {
-        if shift == 63 {
-            if byte & 0xFE != 0 {
-                return None;
-            }
-            return Some((value | ((byte as u64) << 63), at + 1));
-        }
-        value |= ((byte & 0x7F) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return Some((value, at + 1));
-        }
-        shift += 7;
-    }
-    None
+    let detail = match taken {
+        Ok(value) => return Ok(value),
+        Err(VarintError::Truncated) => "truncated mid-record".to_string(),
+        Err(e) => format!("a record {e}"),
+    };
+    Err(BuildError::Invalid(format!("{what} {}: {detail}", path.display())))
 }
 
 // --------------------------------------------------------------------------------------------
@@ -1164,6 +1120,7 @@ pub(crate) struct TextRunWriter {
     path: PathBuf,
     payload: RunPayload,
     writer: BufWriter<File>,
+    record: Vec<u8>,
     prev: Vec<u8>,
     terms: u64,
     /// Entities still owed for the open term. A record's count is written before its entities, so
@@ -1195,6 +1152,7 @@ impl TextRunWriter {
             path: path.to_path_buf(),
             payload,
             writer: BufWriter::with_capacity(SPILL_BUF_BYTES, file),
+            record: Vec::new(),
             prev: Vec::new(),
             terms: 0,
             owed: 0,
@@ -1246,12 +1204,12 @@ impl TextRunWriter {
             )));
         }
         let shared = common_prefix_len(&self.prev, term);
-        write_varint(&mut self.writer, &self.path, shared as u32)?;
-        write_varint(&mut self.writer, &self.path, (term.len() - shared) as u32)?;
-        self.writer
-            .write_all(&term[shared..])
-            .map_err(|e| BuildError::io(&self.path, e))?;
-        write_varint(&mut self.writer, &self.path, entities)?;
+        self.record.clear();
+        put_varint(shared as u32, &mut self.record);
+        put_varint((term.len() - shared) as u32, &mut self.record);
+        self.record.extend_from_slice(&term[shared..]);
+        put_varint(entities, &mut self.record);
+        write_record(&mut self.writer, &self.path, &self.record)?;
 
         self.mark = fingerprint(term);
         self.prev.clear();
@@ -1306,24 +1264,25 @@ impl TextRunWriter {
                 self.payload
             )));
         }
-        write_varint(&mut self.writer, &self.path, delta)?;
+        self.record.clear();
+        put_varint(delta, &mut self.record);
         self.last_entity = entity;
         self.started = true;
         self.owed -= 1;
         self.count += 1;
         self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ entity as u64));
         if self.payload == RunPayload::Positions {
-            write_varint(&mut self.writer, &self.path, positions.len() as u32)?;
+            put_varint(positions.len() as u32, &mut self.record);
             let mut previous = 0;
             for &position in positions {
-                write_varint(&mut self.writer, &self.path, position - previous)?;
+                put_varint(position - previous, &mut self.record);
                 previous = position;
                 self.anchor = self
                     .anchor
                     .wrapping_add(mix64(self.mark ^ entity as u64 ^ ((position as u64 + 1) << 32)));
             }
         }
-        Ok(())
+        write_record(&mut self.writer, &self.path, &self.record)
     }
 
     /// Flush, fsync, and hand back the receipt [`TextRunReader::open`] must be given.
@@ -1426,24 +1385,18 @@ impl TextRunReader {
         while self.pending > 0 {
             self.decode_entity()?;
         }
-        let first = match next_byte(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
-            None => {
-                self.verify_end()?;
-                return Ok(false);
-            }
-            Some(byte) => byte,
-        };
-        let shared = self.decode_varint(first)? as usize;
+        if at_end(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
+            self.verify_end()?;
+            return Ok(false);
+        }
+        let shared = self.next_u32()? as usize;
         if shared > self.term.len() {
             return Err(self.malformed(&format!(
                 "shared prefix {shared} exceeds the previous term's {} bytes",
                 self.term.len()
             )));
         }
-        let suffix_len = {
-            let byte = self.require_byte()?;
-            self.decode_varint(byte)? as usize
-        };
+        let suffix_len = self.next_u32()? as usize;
         self.term.truncate(shared);
         // Read through `take` and grow rather than `resize`-then-`read_exact`: `suffix_len` comes
         // off the file, and a corrupted one would otherwise be an allocation of whatever it says
@@ -1460,10 +1413,7 @@ impl TextRunReader {
         }
         // Refused rather than decoded: the writer refuses a zero-entity record, so one here is a
         // malformed file and not a term that lost its postings.
-        let count = {
-            let byte = self.require_byte()?;
-            self.decode_varint(byte)?
-        };
+        let count = self.next_u32()?;
         if count == 0 {
             return Err(self.malformed("a term with no entities"));
         }
@@ -1510,8 +1460,7 @@ impl TextRunReader {
     }
 
     fn decode_entity(&mut self) -> Result<u32> {
-        let byte = self.require_byte()?;
-        let delta = self.decode_varint(byte)?;
+        let delta = self.next_u32()?;
         let entity = if self.taken == 0 {
             delta
         } else {
@@ -1530,17 +1479,13 @@ impl TextRunReader {
         self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ entity as u64));
         self.positions.clear();
         if self.payload == RunPayload::Positions {
-            let occurrences = {
-                let byte = self.require_byte()?;
-                self.decode_varint(byte)?
-            };
+            let occurrences = self.next_u32()?;
             if occurrences == 0 {
                 return Err(self.malformed("an entity holding its term at no position"));
             }
             let mut position = 0u32;
             for j in 0..occurrences {
-                let byte = self.require_byte()?;
-                let gap = self.decode_varint(byte)?;
+                let gap = self.next_u32()?;
                 if j > 0 && gap == 0 {
                     return Err(self.malformed("a position gap of 0 repeats a position"));
                 }
@@ -1574,33 +1519,8 @@ impl TextRunReader {
         Ok(())
     }
 
-    fn decode_varint(&mut self, first: u8) -> Result<u32> {
-        let mut value = (first & 0x7F) as u32;
-        if first & 0x80 == 0 {
-            return Ok(value);
-        }
-        let mut shift = 7u32;
-        loop {
-            let byte = self.require_byte()?;
-            if shift == 28 {
-                if byte & 0xF0 != 0 {
-                    return Err(self.malformed("varint overflows u32"));
-                }
-                return Ok(value | ((byte as u32) << 28));
-            }
-            value |= ((byte & 0x7F) as u32) << shift;
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-            shift += 7;
-        }
-    }
-
-    fn require_byte(&mut self) -> Result<u8> {
-        match next_byte(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
-            Some(byte) => Ok(byte),
-            None => Err(self.malformed("truncated mid-record")),
-        }
+    fn next_u32(&mut self) -> Result<u32> {
+        read_varint(&mut self.reader, &self.path, "text run", take_varint)
     }
 
     fn malformed(&self, detail: &str) -> BuildError {
@@ -1611,30 +1531,6 @@ impl TextRunReader {
 // --------------------------------------------------------------------------------------------
 // Member runs, and the table they merge into
 // --------------------------------------------------------------------------------------------
-
-/// LEB128-encode a `u64` into `writer` (at most 10 bytes).
-///
-/// A twin of [`write_varint`] rather than a widening of it: the band and text encodings are
-/// `u32`-wide on disk and reading a `u64` decoder over them would accept five bytes of trailing
-/// continuation a `u32` file can never legally hold.
-fn write_varint64(writer: &mut BufWriter<File>, path: &Path, mut value: u64) -> Result<()> {
-    let mut buf = [0u8; 10];
-    let mut len = 0;
-    loop {
-        let byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value == 0 {
-            buf[len] = byte;
-            len += 1;
-            break;
-        }
-        buf[len] = byte | 0x80;
-        len += 1;
-    }
-    writer
-        .write_all(&buf[..len])
-        .map_err(|e| BuildError::io(path, e))
-}
 
 /// Appends one **member run**: artifacts in ascending index order, each with the source ids one
 /// window of a layer's member table named it with.
@@ -1652,6 +1548,7 @@ fn write_varint64(writer: &mut BufWriter<File>, path: &Path, mut value: u64) -> 
 pub(crate) struct MemberRunWriter {
     path: PathBuf,
     writer: BufWriter<File>,
+    record: Vec<u8>,
     last_index: u32,
     started: bool,
     /// Sources still owed on the open record, so a truncated caller is caught by `finish`.
@@ -1670,6 +1567,7 @@ impl MemberRunWriter {
         Ok(MemberRunWriter {
             path: path.to_path_buf(),
             writer: BufWriter::with_capacity(SPILL_BUF_BYTES, file),
+            record: Vec::new(),
             last_index: 0,
             started: false,
             owed: 0,
@@ -1698,7 +1596,7 @@ impl MemberRunWriter {
                 self.path.display()
             )));
         }
-        if self.started {
+        let head = if self.started {
             let gap = index.checked_sub(self.last_index).filter(|g| *g > 0).ok_or_else(|| {
                 BuildError::Invalid(format!(
                     "member run {}: artifacts must ascend strictly: {index} follows {}",
@@ -1706,11 +1604,14 @@ impl MemberRunWriter {
                     self.last_index
                 ))
             })?;
-            write_varint(&mut self.writer, &self.path, gap - 1)?;
+            gap - 1
         } else {
-            write_varint(&mut self.writer, &self.path, index)?;
-        }
-        write_varint(&mut self.writer, &self.path, sources)?;
+            index
+        };
+        self.record.clear();
+        put_varint(head, &mut self.record);
+        put_varint(sources, &mut self.record);
+        write_record(&mut self.writer, &self.path, &self.record)?;
         self.mark = mix64(index as u64);
         self.last_index = index;
         self.started = true;
@@ -1741,7 +1642,9 @@ impl MemberRunWriter {
                 ))
             })?
         };
-        write_varint64(&mut self.writer, &self.path, delta)?;
+        self.record.clear();
+        put_varint64(delta, &mut self.record);
+        write_record(&mut self.writer, &self.path, &self.record)?;
         self.last_source = source;
         self.taken += 1;
         self.owed -= 1;
@@ -1848,7 +1751,7 @@ impl MemberRunReader {
         while self.pending > 0 {
             self.next_source()?;
         }
-        if self.at_end()? {
+        if at_end(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
             self.verify_end()?;
             return Ok(false);
         }
@@ -1893,54 +1796,12 @@ impl MemberRunReader {
         Ok(())
     }
 
-    /// Whether the stream is at end of file — a record boundary, which is the only place it may
-    /// legitimately be.
-    fn at_end(&mut self) -> Result<bool> {
-        let MemberRunReader { reader, path, .. } = self;
-        loop {
-            match reader.fill_buf() {
-                Ok(buffered) => return Ok(buffered.is_empty()),
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(BuildError::io(path, e)),
-            }
-        }
-    }
-
-    /// One LEB128 `u32` **out of the buffer the reader already holds**, falling back to the
-    /// byte-at-a-time path where the varint straddles the buffer's end or is malformed.
-    ///
-    /// **Why the two paths.** A member run is one varint a pair, so a corpus of 10¹⁰ pairs is
-    /// 10¹⁰ of them and a byte at a time is a call and a copy through `BufReader`'s bookkeeping
-    /// per byte. `fill_buf` hands over the bytes already read and `consume` takes what the varint
-    /// used; only a varint crossing the buffer's end takes the other path, which is at most one
-    /// per [`SPILL_BUF_BYTES`].
     fn next_u32(&mut self) -> Result<u32> {
-        let taken = {
-            let MemberRunReader { reader, path, .. } = self;
-            let buffered = reader.fill_buf().map_err(|e| BuildError::io(path, e))?;
-            varint32_at(buffered)
-        };
-        if let Some((value, len)) = taken {
-            self.reader.consume(len);
-            return Ok(value);
-        }
-        let first = self.require_byte()?;
-        self.decode_varint(first)
+        read_varint(&mut self.reader, &self.path, "member run", take_varint)
     }
 
-    /// [`Self::next_u32`] at the `u64` width — the source deltas, which is every pair.
     fn next_u64(&mut self) -> Result<u64> {
-        let taken = {
-            let MemberRunReader { reader, path, .. } = self;
-            let buffered = reader.fill_buf().map_err(|e| BuildError::io(path, e))?;
-            varint64_at(buffered)
-        };
-        if let Some((value, len)) = taken {
-            self.reader.consume(len);
-            return Ok(value);
-        }
-        let first = self.require_byte()?;
-        self.decode_varint64(first)
+        read_varint(&mut self.reader, &self.path, "member run", take_varint64)
     }
 
     fn next_source(&mut self) -> Result<u64> {
@@ -1976,57 +1837,6 @@ impl MemberRunReader {
         }
         self.done = true;
         Ok(())
-    }
-
-    fn decode_varint(&mut self, first: u8) -> Result<u32> {
-        let mut value = (first & 0x7F) as u32;
-        if first & 0x80 == 0 {
-            return Ok(value);
-        }
-        let mut shift = 7u32;
-        loop {
-            let byte = self.require_byte()?;
-            if shift == 28 {
-                if byte & 0xF0 != 0 {
-                    return Err(self.malformed("varint overflows u32"));
-                }
-                return Ok(value | ((byte as u32) << 28));
-            }
-            value |= ((byte & 0x7F) as u32) << shift;
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-            shift += 7;
-        }
-    }
-
-    fn decode_varint64(&mut self, first: u8) -> Result<u64> {
-        let mut value = (first & 0x7F) as u64;
-        if first & 0x80 == 0 {
-            return Ok(value);
-        }
-        let mut shift = 7u32;
-        loop {
-            let byte = self.require_byte()?;
-            if shift == 63 {
-                if byte & 0xFE != 0 {
-                    return Err(self.malformed("varint overflows u64"));
-                }
-                return Ok(value | ((byte as u64) << 63));
-            }
-            value |= ((byte & 0x7F) as u64) << shift;
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-            shift += 7;
-        }
-    }
-
-    fn require_byte(&mut self) -> Result<u8> {
-        match next_byte(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
-            Some(byte) => Ok(byte),
-            None => Err(self.malformed("truncated mid-record")),
-        }
     }
 
     fn malformed(&self, detail: &str) -> BuildError {
@@ -2066,6 +1876,7 @@ impl MemberExtent {
 pub(crate) struct MemberTableWriter {
     path: PathBuf,
     writer: BufWriter<File>,
+    record: Vec<u8>,
     offset: u64,
     extents: Vec<MemberExtent>,
 }
@@ -2078,6 +1889,7 @@ impl MemberTableWriter {
         Ok(MemberTableWriter {
             path: path.to_path_buf(),
             writer: BufWriter::with_capacity(SPILL_BUF_BYTES, file),
+            record: Vec::new(),
             offset: 0,
             extents: vec![MemberExtent::default(); artifacts],
         })
@@ -2106,6 +1918,7 @@ impl MemberTableWriter {
         let mut anchor = 0u64;
         let mut last = 0u64;
         let start = self.offset;
+        self.record.clear();
         for (position, &entity) in entities.iter().enumerate() {
             let delta = if position == 0 {
                 entity
@@ -2118,10 +1931,12 @@ impl MemberTableWriter {
                     ))
                 })?
             };
-            self.offset += write_varint64_counted(&mut self.writer, &self.path, delta)?;
+            put_varint64(delta, &mut self.record);
             last = entity;
             anchor = anchor.wrapping_add(mix64(mark ^ entity));
         }
+        write_record(&mut self.writer, &self.path, &self.record)?;
+        self.offset += self.record.len() as u64;
         *extent = MemberExtent {
             offset: start,
             bytes: u32::try_from(self.offset - start).map_err(|_| {
@@ -2162,32 +1977,6 @@ impl MemberTableWriter {
             extents,
         })
     }
-}
-
-/// [`write_varint64`], reporting how many bytes it wrote — the member table tracks its own offset
-/// rather than asking the file, which would flush the buffer on every member.
-fn write_varint64_counted(
-    writer: &mut BufWriter<File>,
-    path: &Path,
-    mut value: u64,
-) -> Result<u64> {
-    let mut buf = [0u8; 10];
-    let mut len = 0;
-    loop {
-        let byte = (value & 0x7F) as u8;
-        value >>= 7;
-        if value == 0 {
-            buf[len] = byte;
-            len += 1;
-            break;
-        }
-        buf[len] = byte | 0x80;
-        len += 1;
-    }
-    writer
-        .write_all(&buf[..len])
-        .map_err(|e| BuildError::io(path, e))?;
-    Ok(len as u64)
 }
 
 /// The merged member table, read by extent.
@@ -2279,9 +2068,8 @@ impl MemberTable {
         let mut anchor = 0u64;
         let mark = mix64(index as u64);
         for position in 0..extent.entries {
-            let delta = decode_varint64_at(scratch, &mut cursor).ok_or_else(|| {
-                self.malformed(index, "truncated inside an extent's member deltas")
-            })?;
+            let delta = take_varint64(scratch, &mut cursor)
+                .map_err(|e| self.malformed(index, &format!("the extent {e}")))?;
             let entity = if position == 0 {
                 delta
             } else {
@@ -2321,28 +2109,6 @@ impl MemberTable {
             "member table {}: artifact {index}: {detail}",
             self.path.display()
         ))
-    }
-}
-
-/// Decode one LEB128 `u64` from `bytes` at `cursor`, advancing it — `None` on a truncated or
-/// overlong encoding.
-fn decode_varint64_at(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
-    let mut value = 0u64;
-    let mut shift = 0u32;
-    loop {
-        let byte = *bytes.get(*cursor)?;
-        *cursor += 1;
-        if shift == 63 {
-            if byte & 0xFE != 0 {
-                return None;
-            }
-            return Some(value | ((byte as u64) << 63));
-        }
-        value |= ((byte & 0x7F) as u64) << shift;
-        if byte & 0x80 == 0 {
-            return Some(value);
-        }
-        shift += 7;
     }
 }
 
@@ -2635,8 +2401,7 @@ mod tests {
         let receipt = write_band(&path, 0, &[]);
         // 6-byte-shaped varint: fifth byte carries payload above bit 31 (and a continuation).
         append(&path, &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00]);
-        let message = err_string(read_band(&receipt));
-        assert!(message.contains("overflows u32"), "got: {message}");
+        assert!(read_band(&receipt).is_err());
     }
 
     proptest! {
@@ -2979,47 +2744,8 @@ mod tests {
         Ok(out)
     }
 
-    /// **A varint is decoded out of the buffer only where the whole of it is in the buffer.** The
-    /// slice decoders are the fast path a member run's pairs take; a prefix read as a value would
-    /// be a source id short of what was written, and every id after it in the record wrong by the
-    /// same amount. Everything they decline — a prefix, an overlong encoding, an empty slice —
-    /// goes to the byte-at-a-time path, which refills across the boundary and names a
-    /// malformation.
-    #[test]
-    fn the_slice_varint_decoders_take_only_a_whole_legal_varint() {
-        // The widest legal values: five bytes at the u32 width, ten at the u64.
-        let widest32 = [0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
-        let widest64 = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01];
-        assert_eq!(varint32_at(&widest32), Some((u32::MAX, 5)));
-        assert_eq!(varint64_at(&widest64), Some((u64::MAX, 10)));
-        // And a value after them is not read: the length is what `consume` takes.
-        assert_eq!(varint32_at(&[0x7F, 0x01]), Some((0x7F, 1)));
-        assert_eq!(varint64_at(&[0x7F, 0x01]), Some((0x7F, 1)));
-
-        // Every proper prefix declines, the empty slice included.
-        for len in 0..widest32.len() {
-            assert_eq!(varint32_at(&widest32[..len]), None, "u32 prefix of {len}");
-        }
-        for len in 0..widest64.len() {
-            assert_eq!(varint64_at(&widest64[..len]), None, "u64 prefix of {len}");
-        }
-
-        // Both overflow shapes: payload bits above the width, and a continuation where there is
-        // no further byte to continue into.
-        assert_eq!(varint32_at(&[0xFF, 0xFF, 0xFF, 0xFF, 0x1F]), None);
-        assert_eq!(varint32_at(&[0xFF, 0xFF, 0xFF, 0xFF, 0x8F]), None);
-        assert_eq!(
-            varint64_at(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x03]),
-            None
-        );
-        assert_eq!(
-            varint64_at(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x81]),
-            None
-        );
-    }
-
     /// One source delta per five bytes over a record larger than the reader's buffer, so varints
-    /// straddle the buffer's end and the slice decoder declines at each boundary. **The record
+    /// straddle the buffer's end and are gathered a byte at a time at each boundary. **The record
     /// that comes back is the record that went in**, which is what says the two decode paths
     /// agree: a boundary read by the wrong one would be a membership whose ids are wrong from the
     /// boundary onward, and the anchor over them is what would catch it.
@@ -3048,7 +2774,7 @@ mod tests {
         assert_eq!(read_member_run(&receipt).unwrap(), vec![(7, sources)]);
     }
 
-    /// **A file cut inside a five-byte delta refuses.** The slice decoder declines a prefix and
+    /// **A file cut inside a five-byte delta refuses.** The buffered decode declines a prefix and
     /// the byte-at-a-time path behind it meets the end of the file, which is the one place a
     /// truncation can be told from a record boundary.
     #[test]

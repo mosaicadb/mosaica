@@ -74,4 +74,4 @@ pub use values::{
     NativeBound, Scalar, ScanWork, ValueColumn, PRESENCE_FILE, VALUES_FILE, read_presence,
 };
 pub use values_writer::{write_presence, write_value_column, ColumnKind, ValueColumnWriter};
-pub use varint::{put_varint, take_varint, VarintError};
+pub use varint::{put_varint, put_varint64, take_varint, take_varint64, VarintError};
