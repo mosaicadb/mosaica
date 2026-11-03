@@ -1,43 +1,62 @@
-"""The exact frame for any camera and filter, computed by DuckDB over the tier's Parquet file, and
-the comparison of a system's frame against it.
+"""The exact frame and aggregation tables for any camera and filter, computed by DuckDB over the
+tier's Parquet file for the viewer in `viewer.json`, and the comparison of a system's answer with
+them.
 
-The oracle reads only the tier file and `frame.py`'s definitions: the positions `qx` and `qy`
-that `prepare.py` quantised, the attributes, and the frame's tile and grid rules. It shares no
-code with any adapter's query.
+The oracle reads only the tier file, `viewer.json` and `frame.py`'s definitions: the positions `qx`
+and `qy` that `prepare.py` quantised, the attributes, and the frame's tile and grid rules. It
+shares no code with any adapter's query. The viewer's restriction is a plain `licence IN (...)`
+here; every system must reach the same rows through its own access control.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import duckdb
 import numpy as np
 
-from frame import EXTENT, K, Camera, Filter, Frame, fixed32, grid_depth, points_by_tile, tile_of
+from frame import (EXTENT, K, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32, grid_depth,
+                   points_by_tile, tile_of)
+
+VIEWER = json.loads(Path(__file__).with_name("viewer.json").read_text())
+
+
+def visible_sql() -> str:
+    return "licence IN (" + ", ".join(f"'{t}'" for t in VIEWER["terms"]) + ")"
 
 
 def where(camera: Camera, filt: Filter | None) -> str:
-    """The SQL predicate for the camera's tiles and the filter, over `qx`, `qy`, `band`, `num`."""
+    """The SQL predicate for the viewer, the camera's tiles and the filter."""
     z = camera.zoom
     tx0, tx1, ty0, ty1 = camera.tile_range()
     s = 32 - z
     lo = lambda t: t << s
     hi = lambda t: ((t + 1) << s) - 1
-    terms = [f"qx BETWEEN {lo(tx0)} AND {hi(tx1)}", f"qy BETWEEN {lo(ty0)} AND {hi(ty1)}"]
+    terms = [visible_sql(), f"qx BETWEEN {lo(tx0)} AND {hi(tx1)}", f"qy BETWEEN {lo(ty0)} AND {hi(ty1)}"]
     for leaf in (filt.leaves if filt else []):
         terms.append(leaf_sql(leaf))
     return " AND ".join(terms)
 
 
 def leaf_sql(leaf: dict) -> str:
-    op = leaf["op"]
-    if op == "eq":
-        return f"{leaf['col']} = '{leaf['value']}'"
-    if op == "lt":
-        return f"{leaf['col']} < {int(leaf['value'])}"
+    op, col, value = leaf["op"], leaf.get("col"), leaf["value"]
+    if op == "eq" and col == "type":
+        return f"type = '{value}'"
+    if op == "eq" and col == "is_oa":
+        return f"is_oa = {'true' if value else 'false'}"
+    if op == "range":
+        parts = []
+        if "gte" in value:
+            parts.append(f"{col} >= {int(value['gte'])}")
+        if "lt" in value:
+            parts.append(f"{col} < {int(value['lt'])}")
+        return " AND ".join(parts)
     if op == "bbox":
-        x0, y0, x1, y1 = leaf["value"]
+        x0, y0, x1, y1 = value
         return (f"qx BETWEEN {fixed32(x0)} AND {fixed32(x1)} AND "
                 f"qy BETWEEN {fixed32(y0, EXTENT[2], EXTENT[3])} AND {fixed32(y1, EXTENT[2], EXTENT[3])}")
-    raise ValueError(f"unknown filter op {op}")
+    raise ValueError(f"unknown filter leaf {leaf}")
 
 
 class Oracle:
@@ -46,6 +65,16 @@ class Oracle:
         self.con.execute(f"SET threads = {threads}")
         self.tier = tier_path
         self._cache: dict[str, Frame] = {}
+
+    def count(self, camera: Camera, filt: Filter | None) -> int:
+        return int(self.con.execute(
+            f"SELECT count(*) FROM read_parquet('{self.tier}') WHERE {where(camera, filt)}").fetchone()[0])
+
+    def visible(self) -> tuple[int, int]:
+        """The viewer's visible rows, and all rows."""
+        return tuple(int(v) for v in self.con.execute(
+            f"SELECT count(*) FILTER (WHERE {visible_sql()}), count(*) FROM read_parquet('{self.tier}')"
+        ).fetchone())
 
     def frame(self, camera: Camera, filt: Filter | None) -> Frame:
         key = repr((camera.zoom, camera.cx, camera.cy, filt.leaves if filt else None))
@@ -76,6 +105,37 @@ class Oracle:
         frame = Frame(tiles=tiles, grid=grid, points=points)
         self._cache[key] = frame
         return frame
+
+    def tables(self, camera: Camera, filt: Filter | None) -> dict[str, dict[str, int]]:
+        """The aggregation workload's two tables over the viewer's matching items in the camera's
+        tiles: `type`, each type's count and `none` for no type (every type is listed, since
+        there are `TYPE_TOP` of them), and `year`, each one-year bin's count by its lower edge,
+        `rest` for a year outside `YEAR_BINS` and `none` for no year. Zero counts are left out."""
+        w = where(camera, filt)
+        src = f"read_parquet('{self.tier}')"
+        types = self.con.execute(
+            f"SELECT coalesce(type, 'none'), count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
+        lo, hi = YEAR_BINS
+        years = self.con.execute(
+            f"SELECT CASE WHEN publication_year IS NULL THEN 'none' "
+            f"WHEN publication_year < {lo} OR publication_year >= {hi} THEN 'rest' "
+            f"ELSE publication_year::VARCHAR END, count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
+        assert len(types) <= TYPE_TOP + 1
+        return {"type": {k: int(n) for k, n in types}, "year": {k: int(n) for k, n in years}}
+
+
+def compare_tables(got: dict[str, dict[str, int]], truth: dict[str, dict[str, int]]) -> dict:
+    """How far a system's tables are from the oracle's: per table, the sum of absolute count
+    differences over every key either holds, and the keys whose counts differ."""
+    out = {}
+    for name in truth:
+        g = {k: v for k, v in got.get(name, {}).items() if v}
+        t = truth[name]
+        keys = set(g) | set(t)
+        out[f"{name}_abs_err"] = int(sum(abs(g.get(k, 0) - t.get(k, 0)) for k in keys))
+        out[f"{name}_keys_wrong"] = int(sum(1 for k in keys if g.get(k, 0) != t.get(k, 0)))
+        out[f"{name}_total_true"] = int(sum(t.values()))
+    return out
 
 
 def common_count(a: np.ndarray, b: np.ndarray) -> int:

@@ -5,6 +5,25 @@ covers Mosaica and the systems it is compared with: ClickHouse (with DuckDB as a
 Datashader with HoloViews or Panel, Tippecanoe with PMTiles, PostGIS with Martin, and OpenSearch.
 `README.md` says how to run it and lists where the current stage departs from this method.
 
+## The data set
+
+The data set is PaperSeek: about 10⁸ scholarly works, each placed on a 2D map by a layout of its
+text embedding, with its licence, year of publication, work type and open-access flag from
+OpenAlex. Tiers of 10⁶, 10⁷ and every work are nested samples drawn by a hash of each work's id,
+so a larger tier holds every row of a smaller one. Every system builds from the same tier file and
+quantises over the same square extent, fixed once from the full data's bounds.
+
+## The viewer
+
+Every request is made as one viewer, and every system computes its answers over that viewer's
+items alone. A work's licence is its access label, and the viewer is granted every licence term
+but one, chosen so that it sees between 75% and 95% of the works. Each system enforces the
+restriction with its own access control: Mosaica by a view whose `point_visibility` is the
+licence and a principal granted the viewer's terms, ClickHouse by a row policy for the viewer's
+user, PostGIS by row-level security, and OpenSearch by document-level security. An adapter never
+writes the viewer's terms into its own queries, and each result records how the system enforced
+them. The oracle restricts to the same terms directly.
+
 ## The frame
 
 Each system is asked for the same frames, and nothing compares until a frame is defined.
@@ -47,8 +66,11 @@ system, derived from the tier's own density.
 | Battery | At zooms 0, 4, 8, 12 and 16, one screen centred on the occupied tile at each density decile |
 | Camera script | From the whole map into each of the two densest regions through zooms 3, 6, 9, 12 and 14, panning east by half a screen at 6, 9 and 14 and south at 14, then back out |
 | Filter changes | At two screens of the script, a fixed sequence of filters: a categorical value, a numeric range and a region, each at about 50%, 5% and 0.1% of the items, and a combination |
+| Aggregation | At each step of the filter changes, two tables over the viewer's matching items in the screen's tiles: the count of each work type, and a histogram of the year of publication in one-year bins over a fixed range, with the items outside the range and those with no year counted apart |
 
-The filters are the same for every system: categorical, numeric range, text, and polygon.
+The filters are the same for every system: categorical, numeric range, text, and polygon. The
+oracle computes each aggregation table exactly, and a system's table is compared with it count by
+count. Aggregation is timed apart from the frames, as a separate request or set of requests.
 
 ## Metrics
 
@@ -59,13 +81,16 @@ The filters are the same for every system: categorical, numeric range, text, and
 | Cold frame latency, p50 and p99 | The server restarted, its own caches deleted and the page cache dropped. A cache that survives a restart, such as Mosaica's figure cache, is deleted, or reported separately as a reopen |
 | Warm frame latency, p50 and p99, per zoom | Result caches off (ClickHouse's query cache, Martin's tile cache) for the compute figures; each system's default caching as a separate row |
 | Latency of a filter change | The filter-change workload. Not applicable to precomputed tiles, which filter on the client |
+| Aggregation latency, p50 and p99 | The aggregation workload, warm, with the error of every table beside it |
+| Session start | From starting a stopped server to the viewer's first whole-map frame, warm (the system's caches kept) and cold (deleted, and its files' pages dropped), with its phases: the server ready, the viewer's session opened, the first frame. Mosaica computes a viewer's visible set once per session, so the first frame carries that cost |
 | Concurrent viewers: 1, 10, 100 and 1,000 | An open-loop load generator, with distinct filters per viewer to defeat shared caches, and identical viewers reported as well |
 | Insert to visible | Insert K points into an empty region and poll the frame until its count rises, with each system's commit, refresh or flush setting stated |
 | Delete or suppress to gone | The same polling. Client and CDN caches are out of scope |
 | Sustained ingest under read load | Rows a second while the battery runs, with the battery's p99 beside it |
 
 Not built yet: concurrent viewers, insert to visible, delete to gone and sustained ingest. The
-harness measures build, size, memory, cold and warm latency and filter changes.
+harness measures build, size, memory, session start, cold and warm latency, filter changes and
+aggregation.
 
 Server time and client time are measured separately. Time to the last byte on the wire comes from
 the load generator, pinned to two cores with the server on the rest. Decoding and drawing are

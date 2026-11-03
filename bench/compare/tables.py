@@ -1,6 +1,6 @@
 """Turn run records into the design's tables, one column per system, as Markdown.
 
-    python tables.py results/dev.jsonl [--tier osm-1e7.parquet]
+    python tables.py results/dev.jsonl [--tier paperseek-1e6.parquet]
 
 The latest record per system and tier is used. A table drawn from any development-only record says
 so in its heading.
@@ -37,6 +37,18 @@ def error_cell(e: dict) -> str:
             f"point err {pts:,}")
 
 
+def agg_error_cell(e: dict) -> str:
+    wrong = e["type_abs_err"] + e["year_abs_err"]
+    return (f"{e['tables_exact']}/{e['tables']} exact; count err {wrong:,} of "
+            f"{e['type_total_true'] + e['year_total_true']:,}")
+
+
+def session(r: dict, mode: str) -> str:
+    s = r["session_start"][mode]
+    phases = ", ".join(f"{k.removesuffix('_s')} {v['p50_ms']:.0f}" for k, v in s.items() if k != "total")
+    return f"{ms(s['total'])} ({phases})"
+
+
 def table(tier: str, runs: dict[str, dict]) -> str:
     systems = sorted(runs)
     dev = any(r.get("development_only", True) for r in runs.values())
@@ -48,19 +60,26 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             ("Size on disk", lambda r: size(r["build"].get("disk_bytes"))),
             ("Serve peak RSS", lambda r: size(r["serve_memory"].get("peak_rss_bytes"))),
             ("Serve peak cgroup memory (incl. page cache)", lambda r: size(r["serve_memory"].get("cgroup_peak_bytes"))),
+            ("Session start to first frame, warm, p50 / p99 (ms; phases p50)", lambda r: session(r, "warm")),
+            ("Session start to first frame, cold, p50 / p99 (ms; phases p50)", lambda r: session(r, "cold")),
             ("Cold battery p50 / p99 (ms)", lambda r: ms(r.get("cold", {}).get("battery")))]
     zooms = sorted({z for r in runs.values() for z in r["warm_battery_by_zoom"]}, key=int)
     for z in zooms:
         rows.append((f"Warm battery, zoom {z}, p50 / p99 (ms)",
                      lambda r, z=z: ms(r["warm_battery_by_zoom"].get(z))))
     rows += [("Warm camera script p50 / p99 (ms)", lambda r: ms(r["warm"]["script"])),
-             ("Warm filter change p50 / p99 (ms)", lambda r: ms(r["warm"]["filters"]))]
+             ("Warm filter change p50 / p99 (ms)", lambda r: ms(r["warm"]["filters"])),
+             ("Warm aggregation p50 / p99 (ms)", lambda r: ms(r["warm"]["aggregation"]))]
     for w in ("battery", "script", "filters"):
         rows.append((f"Error versus oracle, {w}", lambda r, w=w: error_cell(r["errors"][w])))
         rows.append((f"Points sent, {w} (from dense tiles)",
                      lambda r, w=w: f"{r['errors'][w]['points_sent']:,} ({r['errors'][w]['points_dense']:,})"))
         rows.append((f"Bytes received, {w}", lambda r, w=w: size(r["errors"][w]["bytes"])))
-    rows.append(("Load average before / after", lambda r: f"{r['load_before'][0]:.1f} / {r['load_after'][0]:.1f}"))
+    rows += [("Error versus oracle, aggregation", lambda r: agg_error_cell(r["errors"]["aggregation"])),
+             ("Viewer's visible fraction", lambda r: f"{r['viewer']['visible_rows']:,} of "
+              f"{r['viewer']['tier_rows']:,} ({r['viewer']['visible_fraction']:.1%})"),
+             ("Access enforced by", lambda r: r["access"]),
+             ("Load average before / after", lambda r: f"{r['load_before'][0]:.1f} / {r['load_after'][0]:.1f}")]
     out = [head, "", "| | " + " | ".join(systems) + " |", "|---|" + "---|" * len(systems)]
     for name, f in rows:
         cells = []

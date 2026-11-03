@@ -1,0 +1,1270 @@
+{
+ "tier": "paperseek-1e6.parquet",
+ "viewer": {
+  "principal": "bench-viewer",
+  "terms": [
+   "unlicensed",
+   "cc-by-nc-nd",
+   "cc-by-nc",
+   "other-oa",
+   "cc-by-sa",
+   "cc-by-nc-sa",
+   "public-domain",
+   "cc-by-nd",
+   "publisher-specific-oa",
+   "mit"
+  ],
+  "withheld": [
+   "cc-by"
+  ]
+ },
+ "battery": [
+  {
+   "camera": {
+    "zoom": 0,
+    "cx": 1.5,
+    "cy": 5.5,
+    "label": "z0-d0"
+   },
+   "filter": null,
+   "tile_count": 863530
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 12.46875,
+    "cy": 1.84375,
+    "label": "z4-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -2.15625,
+    "cy": 11.59375,
+    "label": "z4-d1"
+   },
+   "filter": null,
+   "tile_count": 11
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -7.03125,
+    "cy": -10.34375,
+    "label": "z4-d2"
+   },
+   "filter": null,
+   "tile_count": 19
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 10.03125,
+    "cy": 4.28125,
+    "label": "z4-d3"
+   },
+   "filter": null,
+   "tile_count": 43
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 10.03125,
+    "cy": -7.90625,
+    "label": "z4-d4"
+   },
+   "filter": null,
+   "tile_count": 133
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 10.03125,
+    "cy": -3.03125,
+    "label": "z4-d5"
+   },
+   "filter": null,
+   "tile_count": 828
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -2.15625,
+    "cy": 9.15625,
+    "label": "z4-d6"
+   },
+   "filter": null,
+   "tile_count": 2424
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 0.28125,
+    "cy": 9.15625,
+    "label": "z4-d7"
+   },
+   "filter": null,
+   "tile_count": 9738
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 2.71875,
+    "cy": -3.03125,
+    "label": "z4-d8"
+   },
+   "filter": null,
+   "tile_count": 24292
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -4.59375,
+    "cy": 4.28125,
+    "label": "z4-d9"
+   },
+   "filter": null,
+   "tile_count": 37436
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 2.185546875,
+    "cy": -7.525390625,
+    "label": "z8-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -0.251953125,
+    "cy": -9.201171875,
+    "label": "z8-d1"
+   },
+   "filter": null,
+   "tile_count": 4
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 9.650390625,
+    "cy": -4.935546875,
+    "label": "z8-d2"
+   },
+   "filter": null,
+   "tile_count": 15
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 0.205078125,
+    "cy": 1.158203125,
+    "label": "z8-d3"
+   },
+   "filter": null,
+   "tile_count": 42
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 1.576171875,
+    "cy": -3.107421875,
+    "label": "z8-d4"
+   },
+   "filter": null,
+   "tile_count": 67
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -3.146484375,
+    "cy": -5.087890625,
+    "label": "z8-d5"
+   },
+   "filter": null,
+   "tile_count": 92
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -3.603515625,
+    "cy": 2.529296875,
+    "label": "z8-d6"
+   },
+   "filter": null,
+   "tile_count": 119
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -1.318359375,
+    "cy": 1.310546875,
+    "label": "z8-d7"
+   },
+   "filter": null,
+   "tile_count": 153
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -5.888671875,
+    "cy": -3.107421875,
+    "label": "z8-d8"
+   },
+   "filter": null,
+   "tile_count": 206
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -4.974609375,
+    "cy": 5.880859375,
+    "label": "z8-d9"
+   },
+   "filter": null,
+   "tile_count": 306
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -5.0079345703125,
+    "cy": 4.1146240234375,
+    "label": "z12-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -3.6368408203125,
+    "cy": -4.4356689453125,
+    "label": "z12-d1"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -2.2943115234375,
+    "cy": -5.4354248046875,
+    "label": "z12-d2"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -0.7803955078125,
+    "cy": 1.4581298828125,
+    "label": "z12-d3"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 1.3524169921875,
+    "cy": -3.5596923828125,
+    "label": "z12-d4"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.8565673828125,
+    "cy": -5.3402099609375,
+    "label": "z12-d5"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 5.9893798828125,
+    "cy": -5.2545166015625,
+    "label": "z12-d6"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -2.9703369140625,
+    "cy": -3.6834716796875,
+    "label": "z12-d7"
+   },
+   "filter": null,
+   "tile_count": 2
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 4.0469970703125,
+    "cy": 0.6107177734375,
+    "label": "z12-d8"
+   },
+   "filter": null,
+   "tile_count": 2
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 4.2755126953125,
+    "cy": 0.5916748046875,
+    "label": "z12-d9"
+   },
+   "filter": null,
+   "tile_count": 3
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -5.318275451660156,
+    "cy": 2.9628219604492188,
+    "label": "z16-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -4.221519470214844,
+    "cy": 5.609199523925781,
+    "label": "z16-d1"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -3.2907943725585938,
+    "cy": -1.0552444458007812,
+    "label": "z16-d2"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -2.3297195434570312,
+    "cy": -4.372886657714844,
+    "label": "z16-d3"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -1.1692886352539062,
+    "cy": 4.335700988769531,
+    "label": "z16-d4"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 0.42794036865234375,
+    "cy": -3.7670822143554688,
+    "label": "z16-d5"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 2.1822738647460938,
+    "cy": -1.2087783813476562,
+    "label": "z16-d6"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 3.8925704956054688,
+    "cy": 1.3947525024414062,
+    "label": "z16-d7"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 4.907798767089844,
+    "cy": -4.820396423339844,
+    "label": "z16-d8"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 6.291984558105469,
+    "cy": 1.0811386108398438,
+    "label": "z16-d9"
+   },
+   "filter": null,
+   "tile_count": 1
+  }
+ ],
+ "script": [
+  {
+   "camera": {
+    "zoom": 0,
+    "cx": 1.5,
+    "cy": 5.5,
+    "label": "whole"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": 3.9375,
+    "cy": -1.8125,
+    "label": "r0-z3"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 4.775390625,
+    "cy": -0.8984375,
+    "label": "r0-z6-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 3.966064453125,
+    "cy": -1.0126953125,
+    "label": "r0-z9-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": 3.800628662109375,
+    "cy": -1.042449951171875,
+    "label": "r0-z14"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": 3.8050918579101562,
+    "cy": -1.042449951171875,
+    "label": "r0-z14-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": 3.8050918579101562,
+    "cy": -1.0449604988098145,
+    "label": "r0-z14-pan1"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 3.8232421875,
+    "cy": -1.0126953125,
+    "label": "r0-z9-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": 3.9375,
+    "cy": -1.8125,
+    "label": "r0-z3-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": -0.9375,
+    "cy": -1.8125,
+    "label": "r1-z3"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": -3.0703125,
+    "cy": -2.7265625,
+    "label": "r1-z6"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": -1.927734375,
+    "cy": -2.7265625,
+    "label": "r1-z6-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": -2.8798828125,
+    "cy": -2.9931640625,
+    "label": "r1-z9"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": -2.737060546875,
+    "cy": -2.9931640625,
+    "label": "r1-z9-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -2.8751220703125,
+    "cy": -2.9788818359375,
+    "label": "r1-z12"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": -2.871551513671875,
+    "cy": -2.975311279296875,
+    "label": "r1-z14"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": -2.8670883178710938,
+    "cy": -2.975311279296875,
+    "label": "r1-z14-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": -2.8670883178710938,
+    "cy": -2.9778218269348145,
+    "label": "r1-z14-pan1"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -2.8751220703125,
+    "cy": -2.9788818359375,
+    "label": "r1-z12-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": -2.8798828125,
+    "cy": -2.9931640625,
+    "label": "r1-z9-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": -3.0703125,
+    "cy": -2.7265625,
+    "label": "r1-z6-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": -0.9375,
+    "cy": -1.8125,
+    "label": "r1-z3-out"
+   },
+   "filter": null
+  }
+ ],
+ "filters": [
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "none",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "type=article",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "article"
+     }
+    ]
+   },
+   "fraction": 0.807218,
+   "fraction_of_tier": 0.785179
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "type=book-chapter",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "book-chapter"
+     }
+    ]
+   },
+   "fraction": 0.068606,
+   "fraction_of_tier": 0.041558
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "type=reference-entry",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "reference-entry"
+     }
+    ]
+   },
+   "fraction": 0.001093,
+   "fraction_of_tier": 0.00082
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "year<2012",
+    "leaves": [
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "lt": 2012
+      }
+     }
+    ]
+   },
+   "fraction": 0.394905,
+   "fraction_of_tier": 0.489447
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "year<1974",
+    "leaves": [
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "lt": 1974
+      }
+     }
+    ]
+   },
+   "fraction": 0.018998,
+   "fraction_of_tier": 0.050142
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "year<1863",
+    "leaves": [
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "lt": 1863
+      }
+     }
+    ]
+   },
+   "fraction": 8.3e-05,
+   "fraction_of_tier": 0.001014
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "is_oa=true",
+    "leaves": [
+     {
+      "col": "is_oa",
+      "op": "eq",
+      "value": true
+     }
+    ]
+   },
+   "fraction": 0.323997,
+   "fraction_of_tier": 0.323289
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "is_oa=false",
+    "leaves": [
+     {
+      "col": "is_oa",
+      "op": "eq",
+      "value": false
+     }
+    ]
+   },
+   "fraction": 0.653245,
+   "fraction_of_tier": 0.640523
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "type=article&is_oa=true&year>=2012",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "article"
+     },
+     {
+      "col": "is_oa",
+      "op": "eq",
+      "value": true
+     },
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "gte": 2012
+      }
+     }
+    ]
+   },
+   "fraction": 0.225842,
+   "fraction_of_tier": 0.154679
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "box0.5",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       2.625014307210224,
+       -1.4653239834442489,
+       4.640610692789776,
+       -0.33155101655575103
+      ]
+     }
+    ]
+   },
+   "fraction": 0.5
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "box0.05",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       3.3706959746777994,
+       -1.045878045493738,
+       3.8949290253222006,
+       -0.7509969545062621
+      ]
+     }
+    ]
+   },
+   "fraction": 0.050005
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "box0.001",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       3.5976638796273637,
+       -0.9182085989596078,
+       3.6679611203726363,
+       -0.8786664010403922
+      ]
+     }
+    ]
+   },
+   "fraction": 0.00101
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 3.6328125,
+    "cy": -0.8984375,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "none-again",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "none",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "type=article",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "article"
+     }
+    ]
+   },
+   "fraction": 0.787879,
+   "fraction_of_tier": 0.785179
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "type=book-chapter",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "book-chapter"
+     }
+    ]
+   },
+   "fraction": 0.121212,
+   "fraction_of_tier": 0.041558
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "type=reference-entry",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "reference-entry"
+     }
+    ]
+   },
+   "fraction": 0.0,
+   "fraction_of_tier": 0.00082
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "year<2012",
+    "leaves": [
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "lt": 2012
+      }
+     }
+    ]
+   },
+   "fraction": 0.333333,
+   "fraction_of_tier": 0.489447
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "year<1974",
+    "leaves": [
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "lt": 1974
+      }
+     }
+    ]
+   },
+   "fraction": 0.060606,
+   "fraction_of_tier": 0.050142
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "year<1863",
+    "leaves": [
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "lt": 1863
+      }
+     }
+    ]
+   },
+   "fraction": 0.0,
+   "fraction_of_tier": 0.001014
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "is_oa=true",
+    "leaves": [
+     {
+      "col": "is_oa",
+      "op": "eq",
+      "value": true
+     }
+    ]
+   },
+   "fraction": 0.333333,
+   "fraction_of_tier": 0.323289
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "is_oa=false",
+    "leaves": [
+     {
+      "col": "is_oa",
+      "op": "eq",
+      "value": false
+     }
+    ]
+   },
+   "fraction": 0.666667,
+   "fraction_of_tier": 0.640523
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "type=article&is_oa=true&year>=2012",
+    "leaves": [
+     {
+      "col": "type",
+      "op": "eq",
+      "value": "article"
+     },
+     {
+      "col": "is_oa",
+      "op": "eq",
+      "value": true
+     },
+     {
+      "col": "publication_year",
+      "op": "range",
+      "value": {
+       "gte": 2012
+      }
+     }
+    ]
+   },
+   "fraction": 0.272727,
+   "fraction_of_tier": 0.154679
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "box0.5",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       3.785207990091296,
+       -1.0540251564525522,
+       3.813668963033704,
+       -1.0380158591724478
+      ]
+     }
+    ]
+   },
+   "fraction": 0.515152
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "box0.05",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       3.796265604905786,
+       -1.0478052481194016,
+       3.802611348219214,
+       -1.0442357675055984
+      ]
+     }
+    ]
+   },
+   "fraction": 0.060606
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "box0.001",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       3.7964098217586657,
+       -1.0477241261396568,
+       3.8024671313663343,
+       -1.0443168894853432
+      ]
+     }
+    ]
+   },
+   "fraction": 0.030303
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3.7994384765625,
+    "cy": -1.0460205078125,
+    "label": "r0-z12"
+   },
+   "filter": {
+    "label": "none-again",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  }
+ ]
+}

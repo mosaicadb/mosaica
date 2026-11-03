@@ -1,22 +1,23 @@
 # Comparative benchmark
 
-Mosaica against other systems that draw a map over many points, each asked for the same frames
-and each frame checked against an exact oracle. [METHOD.md](METHOD.md) defines the frame, the
-workloads, the metrics and the fairness rules; this file is operational, and lists where stage 1
-departs from the method.
+Mosaica against other systems that draw a map over many points, each asked for the same frames and
+aggregations as the same viewer, with every answer checked against an exact oracle.
+[METHOD.md](METHOD.md) defines the frame, the viewer, the workloads, the metrics and the fairness
+rules. This file is operational, and lists where stage 1 departs from the method.
 
-Stage 1 covers the shared harness and two systems, Mosaica and ClickHouse, run at 10⁷ points for
-development only. Mosaica runs as two arms: `mosaica+aggregate`, a viewport request with the count grid
-from `/v1/aggregate` beside it, which is how Mosaica's own map asks and the arm that represents
-it; and `mosaica`, one viewport request alone, whose sub-cell grid counts the visible set and
-ignores the filter (see "Departures"). Runs write to `results/`, which is not tracked. **No
-figure from this directory is fit to publish yet**: every record carries
-`"development_only": true`, and the machine it ran on was shared with other measurement jobs.
+Stage 1 covers the shared harness and two systems, Mosaica and ClickHouse, on the PaperSeek data
+at 10⁶ points for development only. Mosaica runs as two arms: `mosaica+aggregate`, a viewport
+request with the count grid from `/v1/aggregate` beside it, which is how Mosaica's own map asks
+and the arm that represents it; and `mosaica`, one viewport request alone, whose sub-cell grid
+counts the visible set and ignores the filter (see "Departures"). Runs write to `results/`, which
+is not tracked. **No figure from this directory is fit to publish yet**: every record carries
+`"development_only": true`, and the machine it ran on was shared with other work.
 
 ## Running it from scratch
 
-Everything below runs from the repository root. Build steps run under `nice -n 19`; do not start
-one while the one-minute load average is above 3.
+Everything below runs from the repository root, with `DATA` the directory that holds the
+`ladder/` corpora and `bench-compare/` (`data/` in the main checkout). Build steps run under
+`nice -n 19`.
 
 ```bash
 # 1. Python 3.10 (tested on 3.10.12), every package pinned with its hashes, in a venv inside this
@@ -24,13 +25,14 @@ one while the one-minute load average is above 3.
 python3 -m venv bench/compare/.venv
 bench/compare/.venv/bin/pip install --require-hashes -r bench/compare/requirements.lock
 
-# 2. The data: downloads 5.5 GB (HoloViz asks that it be downloaded sparingly), unpacks 7.7 GB,
-#    and writes the tiers under data/bench-compare/tiers/. About 10 minutes.
-cd bench/compare && nice -n 19 .venv/bin/python prepare.py --tiers 1e7,1e8 && cd -
+# 2. The tiers, from the PaperSeek rung's points file (52 GB, of which only seven columns are
+#    read). About 15 seconds for 1e6 and 1e7; `full` writes all 102,117,343 rows.
+cd bench/compare && nice -n 19 .venv/bin/python prepare.py \
+    --source $DATA/ladder/paperseek/points.parquet --data $DATA/bench-compare --tiers 1e6,1e7 && cd -
 
-# 3. The cameras for a tier (checked in for osm-1e7)
+# 3. The cameras for a tier (checked in for paperseek-1e6)
 cd bench/compare && .venv/bin/python cameras.py \
-    --tier ../../data/bench-compare/tiers/osm-1e7.parquet --out cameras/osm-1e7.json && cd -
+    --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet --out cameras/paperseek-1e6.json && cd -
 
 # 4. Mosaica, in release mode, with a target directory of its own
 CARGO_TARGET_DIR=$PWD/target CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_DEBUG=0 \
@@ -42,52 +44,59 @@ docker pull clickhouse/clickhouse-server@sha256:8b28eb09479c36c4533eec7a6268917d
 
 # 6. One run per system; each appends a record to results/dev.jsonl
 cd bench/compare
-.venv/bin/python run.py --system mosaica --tier ../../data/bench-compare/tiers/osm-1e7.parquet \
-    --cameras cameras/osm-1e7.json --binary ../../target/release/mosaica
-.venv/bin/python run.py --system mosaica+aggregate --tier ../../data/bench-compare/tiers/osm-1e7.parquet \
-    --cameras cameras/osm-1e7.json --binary ../../target/release/mosaica
-.venv/bin/python run.py --system clickhouse --tier ../../data/bench-compare/tiers/osm-1e7.parquet \
-    --cameras cameras/osm-1e7.json
+for s in mosaica mosaica+aggregate clickhouse; do
+  .venv/bin/python run.py --system $s --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
+      --cameras cameras/paperseek-1e6.json --binary ../../target/release/mosaica \
+      --work $DATA/bench-compare/work
+done
 
-# 7. The tables
+# 7. The table
 .venv/bin/python tables.py results/dev.jsonl
 ```
 
-`run.py` refuses to start above a one-minute load of 3 (`--max-load`); on a shared machine, for a
+`run.py` refuses to start above a one-minute load of 3 (`--max-load`). On a shared machine, for a
 development run whose timings do not matter, raise it, and pass `--nice 19`, which runs every
 system's build at that niceness (Mosaica's `mosaica build`, and ClickHouse's server for the
-duration of its `INSERT` and `OPTIMIZE`) and every server at 0. The load before and after is in the record.
-A run builds the system from nothing, checks every frame against the oracle, runs each workload
-five times warm, then once cold per battery camera, and stops and removes everything it started.
-Work directories go under `data/bench-compare/work/`; delete them when done.
+duration of its `INSERT` and `OPTIMIZE`) and every server at 0. The load before and after is in
+the record. A run builds the system from nothing, checks every frame and aggregation against the
+oracle, runs each workload five times warm, measures session start five times warm and five times
+cold, then times one cold frame per battery camera, and stops and removes everything it started.
+Work directories go under `$DATA/bench-compare/work/`; delete them when done.
+
+Each build and server runs in a systemd user scope of its own, capped at 16 GiB with no swap, so
+that its cgroup's `memory.peak` is its own. Where there is no systemd user manager, as in a shell
+with no login session, Mosaica runs uncapped, its record says so under `build.memory_cap`, and its
+cgroup figures are blank. ClickHouse's container always has its own cgroup.
 
 ## Files
 
 | File | What it does |
 |---|---|
 | `requirements.txt`, `requirements.lock` | The direct pins, and every package with its hashes |
-| `tiers-manifest.json` | Each tier's row count and SHA-256, which `prepare.py` must reproduce and `run.py` checks |
-| `prepare.py` | Downloads and checks the source, derives the tiers deterministically, and writes `data/bench-compare/tiers/manifest.json` with every checksum, seed and count |
-| `frame.py` | The frame's definition: screen, tiles, grid depth, K, and the quantisation rule |
-| `cameras.py` | The three workloads (battery, camera script, filter changes) from a tier's density |
-| `oracle.py` | The exact frame by DuckDB over the tier file, and the comparison of a frame against it |
+| `tiers-manifest.json` | The extent, and each tier's row count, rows per licence and SHA-256, which `prepare.py` must reproduce and `run.py` checks |
+| `viewer.json` | The one viewer: its principal name and the licence terms it is granted |
+| `prepare.py` | Derives the tiers deterministically and writes `$DATA/bench-compare/tiers/manifest.json` with every checksum, seed and count |
+| `frame.py` | The frame's definition: extent, screen, tiles, grid depth, K, the quantisation rule, the filter grammar and the aggregation's bins |
+| `cameras.py` | The three workloads (battery, camera script, filter changes) from a tier's density as the viewer sees it |
+| `oracle.py` | The exact frame and aggregation tables by DuckDB over the tier file for the viewer, and their comparison with a system's answer |
 | `adapters/` | One adapter per system behind `adapters/base.py` |
 | `run.py` | One run of one system, appending one record to a JSONL file |
-| `tables.py` | Records to Markdown tables, one column per system |
+| `tables.py` | Records to one Markdown table per tier, one column per system |
 
 ## The data
 
-The primary dataset is the HoloViz copy of the OpenStreetMap bulk GPS points
-(`osm-1billion.parq.zip`, 5,498,778,647 bytes, SHA-256
-`7b6e89c3b8be96813c67682d6c9e6a05519ef2e31136378123c9dfea3b93ef57`, 1,000,050,363 rows of float32
-Web Mercator `x` and `y`). Neither HoloViz nor the OpenStreetMap wiki states a licence for the GPS
-dump; settle that before publishing anything drawn from it.
+The source is the PaperSeek rung of the Mosaica test ladder
+(`data/ladder/paperseek/points.parquet`, 52,225,761,595 bytes, 102,117,343 works), whose
+positions are a UMAP layout of Stella V5 embeddings of each work's title and abstract and whose
+attributes come from OpenAlex. The benchmark reads `x`, `y`, `licence`, `publication_year`,
+`type` and `is_oa`. A work OpenAlex did not match has no year, type or `is_oa`, and its licence is
+`unlicensed`, as is that of every work without one, so every row has a licence.
 
-A tier of nominal size N keeps row `rid` where `splitmix64(rid ^ 0x6D6F736169636131) <
-floor(N · 2⁶⁴ / 1,000,050,363)`, `rid` being the row's position across the part files in part
-order. The tiers nest. Two synthetic attributes are derived from `splitmix64(rid ^
-0x6174747269627331)`, since the file has none: `band` (A 50%, B 30%, C 14.9%, D 5%, E 0.1%) and
-`num` (0 to 999, uniform). `prepare.py`'s docstring gives the exact rule.
+A tier of nominal size N keeps the row whose `entity_id` gives `splitmix64(entity_id ^
+0x6D6F736169636131) < floor(N · 2⁶⁴ / 102,117,343)`, and `full` keeps every row, so the tiers
+nest. The extent is the square x ∈ [−18, 21], y ∈ [−14, 25], fixed from the full file's bounds by
+the rule in `prepare.py`'s docstring and used by every system. Before anything drawn from this data
+is published, the licences of PaperSeek and OpenAlex (OpenAlex is CC0) must be stated with it.
 
 ## The frame
 
@@ -95,10 +104,13 @@ A screen of 1920 × 1080 pixels at an integer zoom, with 512-pixel tiles: the de
 touches, each tile's matching count, a count grid at depth `min(zoom + 8, 16)` (256 × 256 cells a
 tile to zoom 8), and every matching position in each tile with at most K = 500 of them. Positions
 are compared on the 2³² grid that Mosaica's build quantises to (`frame.fixed32`), so an exact frame
-has zero error.
+has zero error. Every count is over the viewer's visible items.
 
 ## Departures from the design
 
+- **No text search, no abstracts, no topic layer.** PaperSeek carries titles, abstracts and a
+  topic tree, and the design's filters include text. Stage 1 reads none of them, so neither the
+  build nor the filters exercise text indexing or annotation layers.
 - **The grid stops at depth 16.** Mosaica's viewport grid is 2¹⁶ cells a side and its sub-cell
   counts cannot go deeper, so the design's 256 × 256 cells a tile holds only to zoom 8. Every
   system is asked for the same coarser grid beyond that (16 × 16 a tile at zoom 12, one cell at
@@ -108,10 +120,11 @@ has zero error.
   follow the filter. So the `mosaica` arm's filtered frames have the wrong grid, and the record
   counts the error. The `mosaica+aggregate` arm sends a `/v1/aggregate` request for the filtered
   cells at the same time as the viewport request, at the cost of a second request.
-- **Synthetic filters.** The design's filters name GBIF columns; the OSM file has only positions.
-  Stage 1 filters on the synthetic `band` and `num` at about 50%, 5% and 0.1%, and on a box. Text
-  search is not in stage 1, and a box stands in for a polygon. The attributes are spatially
-  uniform, which real attributes are not.
+- **Filters where the data permits.** The type filters are single values, and `article` is 79% of
+  the viewer's items, so no type comes near 50%; `is_oa` has two values; the zoom-12 filter screen
+  holds 33 of the viewer's items at 10⁶, so its small filters match none. Each step's actual share
+  is in the cameras file. A box stands in for a polygon.
+- **One viewer.** The design's concurrent viewers, with distinct grants, are not built.
 - **Mosaica is configured to produce the frame.** Every `[serve]` setting the adapter writes
   (`adapters/mosaica.py`, `SERVE`), against its default:
 
@@ -134,4 +147,6 @@ has zero error.
   rather than dropping every cache on the machine.
 - **Memory** is reported twice: the server process's peak RSS, and its cgroup's `memory.peak`,
   which includes the page cache it filled. Mosaica maps its bundle, so its RSS counts pages
-  ClickHouse's would not; the cgroup figure is the comparable one.
+  ClickHouse's would not; the cgroup figure is the comparable one, where there is one.
+- **ClickHouse has no session to start.** Its HTTP interface sends the viewer's user and password
+  with every query, so its session start is the server's start and the first frame.

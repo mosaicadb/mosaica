@@ -1,21 +1,25 @@
 """Build one system from one tier, run every workload against it, check every frame against the
 oracle, and append one JSON record to the results file.
 
-    python run.py --system mosaica --tier data/bench-compare/tiers/osm-1e7.parquet \\
-        --cameras cameras/osm-1e7.json --binary target/release/mosaica --out results/dev.jsonl
+    python run.py --system mosaica --tier data/bench-compare/tiers/paperseek-1e6.parquet \\
+        --cameras cameras/paperseek-1e6.json --binary target/release/mosaica --out results/dev.jsonl
 
-The run, in order:
+The run, in order, every request made as the viewer in `viewer.json`:
 
 1. Refuse to start where the one-minute load average is above `--max-load`, and record the load
    and any `mosaica` process this run did not start.
 2. Build from nothing, timed, with peak memory and size on disk.
-3. Start the server and send every frame once, untimed, checking each against the oracle. The
-   errors recorded are from this pass.
-4. Warm: every workload `--repeats` times over, each frame timed on the wire.
-5. Cold: for each battery camera, stop the server, drop its caches and its own files' pages,
+3. Start the server, and send every frame and every aggregation once, untimed, checking each
+   against the oracle. The errors recorded are from this pass.
+4. Warm: every frame workload `--repeats` times over, each frame timed on the wire, then the
+   aggregation workload as many times, timed apart.
+5. Session start: `--repeats` times warm (the server stopped and started, its caches kept) and as
+   many cold (its caches deleted and its own files' pages dropped), the time from starting the
+   server to the viewer's first whole-map frame, with its phases.
+6. Cold: for each battery camera, stop the server, drop its caches and its own files' pages,
    start it, and time the first frame. Mosaica's first frame includes building the session's
    visible set, which every new viewer pays.
-6. Record the server's peak memory, stop it and remove what it started.
+7. Record the server's peak memory, stop it and remove what it started.
 
 Every record carries `"development_only": true` unless `--publishable` is given, which this stage
 never does.
@@ -30,13 +34,14 @@ import os
 import platform
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 
-from frame import GRID_OFFSET, K, SCREEN, TILE_PX, Camera, Filter
-from oracle import Oracle, compare
+from frame import EXTENT, GRID_OFFSET, K, SCREEN, TILE_PX, TYPE_TOP, YEAR_BINS, Camera, Filter
+from oracle import VIEWER, Oracle, compare, compare_tables
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -93,6 +98,26 @@ def steps_of(cameras: dict, workload: str) -> list[tuple[Camera, Filter | None]]
     return out
 
 
+def session_start(adapter, repeats: int) -> dict:
+    """From starting a stopped server to the viewer's first whole-map frame, warm and cold."""
+    whole = Camera(0, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2, "whole")
+    out = {}
+    for mode in ("warm", "cold"):
+        totals, phases = [], {}
+        for _ in range(repeats):
+            adapter.stop()
+            if mode == "cold":
+                adapter.evict()
+            t0 = time.perf_counter()
+            for k, v in adapter.start().items():
+                phases.setdefault(k, []).append(v)
+            _, frame_s = adapter.frame(whole, None)
+            totals.append(time.perf_counter() - t0)
+            phases.setdefault("first_frame_s", []).append(frame_s)
+        out[mode] = {"total": summarise(totals), **{k: summarise(v) for k, v in phases.items()}}
+    return out
+
+
 def make_adapter(args):
     work = args.work / f"{args.system}-{args.tier.stem}"
     if args.system in ("mosaica", "mosaica+aggregate"):
@@ -131,6 +156,7 @@ def main() -> None:
     foreign = foreign_mosaica(set())
     cameras = json.loads(args.cameras.read_text())
     oracle = Oracle(str(args.tier.resolve()))
+    visible, rows = oracle.visible()
     adapter = make_adapter(args)
     record: dict = {
         "system": adapter.name,
@@ -144,13 +170,16 @@ def main() -> None:
         "load_before": load_before,
         "foreign_mosaica_processes": foreign,
         "repeats": args.repeats,
+        "viewer": {**VIEWER, "visible_rows": visible, "tier_rows": rows,
+                   "visible_fraction": visible / rows},
+        "access": adapter.access,
+        "aggregation": {"type_top": TYPE_TOP, "year_bins": YEAR_BINS},
     }
     try:
         print(f"[{adapter.name}] building", file=sys.stderr, flush=True)
         record["build"] = adapter.build()
         adapter.start()
         record["version"] = adapter.version()
-        record["config"] = adapter.config()
         workloads = {w: steps_of(cameras, w) for w in ("battery", "script", "filters")}
 
         print(f"[{adapter.name}] checking against the oracle", file=sys.stderr, flush=True)
@@ -175,6 +204,19 @@ def main() -> None:
                 "worst": sorted(per, key=lambda c: -(c["tile_abs_err"] + c["grid_abs_err"]
                                                      + c["sparse_points_missing"]))[:3],
             }
+        per = []
+        for camera, filt in workloads["filters"]:
+            got, _ = adapter.tables(camera, filt)
+            cmp = compare_tables(got, oracle.tables(camera, filt))
+            cmp["label"] = camera.label + f"/{filt.label}"
+            per.append(cmp)
+        keys = [k for k in per[0] if k != "label"]
+        errors["aggregation"] = {
+            "tables": 2 * len(per),
+            "tables_exact": sum((c["type_abs_err"] == 0) + (c["year_abs_err"] == 0) for c in per),
+            **{k: int(sum(c[k] for c in per)) for k in keys},
+            "worst": sorted(per, key=lambda c: -(c["type_abs_err"] + c["year_abs_err"]))[:3],
+        }
 
         print(f"[{adapter.name}] warm runs", file=sys.stderr, flush=True)
         warm = {w: [] for w in workloads}
@@ -188,14 +230,23 @@ def main() -> None:
                         by_zoom.setdefault(camera.zoom, []).append(t)
         record["warm"] = {w: summarise(v) for w, v in warm.items()}
         record["warm_battery_by_zoom"] = {str(z): summarise(v) for z, v in sorted(by_zoom.items())}
-        # Read before the cold loop: each cold restart starts the server in a new cgroup.
+        print(f"[{adapter.name}] aggregation runs", file=sys.stderr, flush=True)
+        agg = []
+        for _ in range(args.repeats):
+            for camera, filt in workloads["filters"]:
+                agg.append(adapter.tables(camera, filt)[1])
+        record["warm"]["aggregation"] = summarise(agg)
+        # Read before any restart: each restart starts the server in a new cgroup.
         record["serve_memory"] = adapter.serve_memory()
+        record["config"] = adapter.config()
 
         if not args.no_cold:
+            print(f"[{adapter.name}] session start", file=sys.stderr, flush=True)
+            record["session_start"] = session_start(adapter, args.repeats)
             print(f"[{adapter.name}] cold runs", file=sys.stderr, flush=True)
             cold = []
             for camera, filt in workloads["battery"]:
-                adapter.restart_cold()
+                adapter.restart(cold=True)
                 _, t = adapter.frame(camera, filt)
                 cold.append(t)
             record["cold"] = {"battery": summarise(cold),
@@ -211,7 +262,7 @@ def main() -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("a") as f:
         f.write(json.dumps(record) + "\n")
-    print(json.dumps({k: record[k] for k in ("system", "build", "warm", "serve_memory")}, indent=1))
+    print(json.dumps({k: record.get(k) for k in ("system", "build", "warm", "serve_memory", "session_start")}, indent=1))
     print(json.dumps({w: {k: v for k, v in e.items() if k != "worst"} for w, e in errors.items()}, indent=1))
 
 
