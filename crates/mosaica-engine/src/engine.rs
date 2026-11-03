@@ -1372,8 +1372,10 @@ impl Engine {
             .collect();
         engine.figures.sweep(live.iter().copied());
         let fragments = Arc::clone(&engine.fragments);
+        let ladders = Arc::clone(&engine.stage.ladders);
         engine.pool.spawn(move || {
             fragments.sweep(&live);
+            ladders.sweep(&live);
         });
 
         // Every level's row form, built before this engine serves a request: left lazy, the cost
@@ -1473,6 +1475,7 @@ impl Engine {
             artifact_projections: Arc::clone(&self.artifact_projections),
             figures: Arc::clone(&self.figures),
             fragments: Arc::clone(&self.fragments),
+            ladders: Arc::clone(&self.stage.ladders),
             region_cache: Arc::clone(&self.region_cache),
             text_filter_cache: Arc::clone(&self.text_filter_cache),
             shapes: Arc::clone(&self.shapes),

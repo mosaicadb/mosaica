@@ -4,7 +4,9 @@
 //! [`EffectiveMask::visible_total`] counts `V_total` exactly, and
 //! [`crate::select::Threshold::at_depth`] turns the pair into a cut point.
 //!
-//! **One segment counts `N_occ(d)`; two or more estimate it with a [`TileSketch`]**
+//! **One segment counts `N_occ(d)`; two or more estimate it with a [`TileSketch`]**, and past a
+//! walk of [`EXACT_TILES`] tiles the deep rungs are estimated from sampled descents
+//! ([`Chains`]) whatever the segment count
 //! ([decision 0138](../../../docs/decisions/0138-n-occ-is-a-sketch-above-one-segment-and-its-ladder-is-filled-in-the-background.md)).
 //! [`occupied_tiles_ladder`] owns that predicate and gives the measurement behind it. A freshly
 //! built bundle has one segment per view and so does every conformance fixture; a live deployment
@@ -61,8 +63,8 @@
 //! depths can only be a bug. Under an estimate it is false, and r63 deletes it rather than
 //! qualifying it (owner ruling, 2026-09-09): monotonicity now comes from the running maximum, and
 //! the miscount the sentence feared is caught by the differential and by
-//! `the_occupied_tile_count_is_the_sketch_of_the_right_tiles_monotone_and_bounded`, which pins the
-//! walk's emissions against a linear scan.
+//! `the_walk_credits_the_tiles_of_the_visible_rows_through_denies_and_buffered_rows`, which pins
+//! the walk's emissions against a count row by row.
 //!
 //! **`N_occ(d) <= 4^d`.** There are only `4^d` tiles at depth *d*, so a rung is clamped there
 //! before the running maximum. This is what makes the shallow rungs *exact* on the estimated
@@ -84,15 +86,11 @@
 //! after the next uncredited tile's first row, credits the tile holding it, and gallops the cell
 //! codes ([`gallop`]) to the tile after: one seek per occupied tile, whatever the mask's runs. It
 //! reads the cut index and the cell codes, one entry per occupied cell, and never the Morton
-//! column. Over the 1.02 × 10⁸-row paperseek tier with a viewer of 8.8 × 10⁷ rows it counts depth 8
-//! in 8 ms and depth 12 in 130 ms, where the walk over every visible run it replaced took 390–430
-//! ms at every depth to 12; the cost is memory latency per tile, about 400 ns where tiles are large
-//! and 50 ns where they are small.
+//! column.
 //!
-//! **Past [`EXACT_TILES`] tiles the rungs below a start depth are estimated** ([`Chains`]): a walk
-//! counting 7 × 10⁷ tiles at depth 16 takes seconds, where the estimate takes 40–80 ms at every
-//! depth from 9 to 16 on that tier, within 1.1% of the count. The plan reads only the viewer's own
-//! quantities, so the route θ takes is no more a disclosure than θ is.
+//! **Past [`EXACT_TILES`] tiles the rungs below a start depth are estimated** ([`Chains`]), since a
+//! walk's cost is its occupied tiles and at depth 16 those are every occupied cell. The plan reads
+//! only the viewer's own quantities, so the route θ takes is no more a disclosure than θ is.
 //!
 //! # What it costs, measured
 //!
@@ -296,7 +294,7 @@ pub struct OccupancyLadder {
     /// from does not.
     raw: [u64; 17],
     depth: u8,
-    /// Whether the rungs are counts rather than estimates — the one-segment route.
+    /// Whether every rung is a count: one segment, walked to the ladder's depth without chains.
     ///
     /// **A fact about how this ladder was filled, not a mode anything selects.** It exists so a
     /// test can assert which route ran, and so a measurement can say which number it is quoting;
@@ -364,8 +362,11 @@ impl OccupancyLadder {
 ///
 /// # One segment counts; two or more estimate
 ///
-/// **The predicate is `parts.len() == 1` and it is the whole of the route choice**: one segment
-/// across every shard holding the view, whether or not the viewer sees anything in it. At one
+/// **The predicate is `parts.len() == 1` and it is the whole of the choice between a counter and a
+/// sketch**: one segment across every shard holding the view, whether or not the viewer sees
+/// anything in it. Which rungs either accumulates is the other choice: every rung where a walk
+/// visits at most [`EXACT_TILES`] tiles, and otherwise those at and above the chains' start
+/// ([`Chains`]), the rest estimated, at one segment as at several. At one
 /// segment the walk emits each tile once and ascending, so the descent's "the ancestor changed"
 /// test fires exactly `N_occ(d')` times at each depth and a **counter is the accumulator** — the
 /// exact answer costs an increment where the sketch costs a mix, an index and a compare. Measured
@@ -1056,39 +1057,46 @@ pub(crate) fn remember(
 /// fragments, so a restart reads a ladder back rather than walking again.
 pub(crate) const LADDERS_DIR: &str = "occupancy";
 
-/// The bytes the kept ladders may hold; the least recently used go first past it. A ladder is
-/// under 300 bytes, so this is tens of thousands of grants and generations.
+/// The bytes the kept ladders may hold; the least recently used go first past it.
 const LADDERS_DISK_BYTES: u64 = 16 * 1024 * 1024;
 
-const LADDER_MAGIC: &[u8; 8] = b"MSOCC001";
+/// A kept ladder's magic. A change to the estimator's constants or its hashes changes what a
+/// ladder holds for the same mask, and moves this and [`LADDER_TAG`] with it.
+const LADDER_MAGIC: &[u8; 8] = b"MSOCC002";
 
-/// What a kept ladder is a function of, as a file stem: the grant, the view, and in every shard
-/// its identity, its fragment, its segments and the composed mask's diff against the projection,
-/// read from content that is the same after a restart rather than from in-process versions.
-pub(crate) fn ladder_stem<'a>(
+/// What a ladder stem's digest is taken under; see [`LADDER_MAGIC`].
+const LADDER_TAG: &[u8] = b"mosaica-occupancy-ladder-v2";
+
+/// One shard's part of what a kept ladder is a function of: its id, its identity, its fragment,
+/// the viewer's leaf there and the view's segments in it.
+pub(crate) type LadderSide<'a> = (
+    ShardId,
+    [u8; 32],
+    &'a crate::cache::SessionGeometry,
+    Option<&'a EffectiveMask>,
+    &'a [(&'a SegmentData, u32)],
+);
+
+/// What a kept ladder is a function of: the grant, the view, the authorisation rules, and in
+/// every shard its identity, its fragment's watermark, its segments and the composed mask's diff
+/// against the projection, read from content that is the same after a restart rather than from
+/// in-process versions. The shards' identities, which a sweep reads, are returned beside it.
+pub(crate) fn ladder_stem(
     terms: &[u8; 32],
     view: &str,
-    sides: impl Iterator<
-        Item = (
-            ShardId,
-            &'a [u8; 32],
-            &'a mosaica_authz::FrozenFragment,
-            Option<&'a EffectiveMask>,
-            &'a [(&'a SegmentData, u32)],
-        ),
-    >,
-) -> String {
+    sides: &[LadderSide<'_>],
+) -> (String, Vec<[u8; 32]>) {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(b"mosaica-occupancy-ladder-v1");
+    hasher.update(LADDER_TAG);
+    hasher.update(crate::engine::authorisation_rule_hash());
     hasher.update(terms);
     hasher.update((view.len() as u64).to_le_bytes());
     hasher.update(view.as_bytes());
-    for (shard, identity, fragment, mask, segments) in sides {
+    for &(shard, identity, geometry, mask, segments) in sides {
         hasher.update(shard.raw().to_le_bytes());
         hasher.update(identity);
-        hasher.update(fragment.identity);
-        hasher.update(fragment.watermark.to_le_bytes());
+        hasher.update(geometry.fragment.watermark.to_le_bytes());
         for (segment, base) in segments {
             hasher.update((segment.seg_id.len() as u64).to_le_bytes());
             hasher.update(segment.seg_id.as_bytes());
@@ -1101,71 +1109,114 @@ pub(crate) fn ladder_stem<'a>(
                 let (base, minus, plus, _) = mask.parts();
                 hasher.update([1u8]);
                 hasher.update(base.cardinality().to_le_bytes());
-                hasher.update(minus.serialize::<croaring::Portable>());
-                hasher.update(plus.serialize::<croaring::Portable>());
+                for diff in [minus, plus] {
+                    hasher.update(diff.cardinality().to_le_bytes());
+                    if !diff.is_empty() {
+                        hasher.update(diff.serialize::<croaring::Portable>());
+                    }
+                }
             }
         }
     }
-    mosaica_store::hex(&hasher.finalize())
+    let identities = sides.iter().map(|&(_, identity, ..)| identity).collect();
+    (mosaica_store::hex(&hasher.finalize()), identities)
 }
 
 /// The ladders kept in the engine's cache directory, none where it has none.
-#[derive(Debug)]
+///
+/// One file per ladder, named by its stem and its depth, holding the identities of the shards it
+/// was taken over: a deeper ladder is written beside a shallower one before the shallower is
+/// removed, so two writers of one stem never leave the shallower alone, and a sweep removes
+/// every ladder naming an identity no longer served.
+#[derive(Debug, Clone)]
 pub(crate) struct LadderStore {
     dir: Option<std::path::PathBuf>,
-    /// Held across a write's check and its write, so a shallower ladder written beside a deeper
-    /// one cannot replace it.
-    writing: std::sync::Mutex<()>,
 }
 
 impl LadderStore {
     pub(crate) fn new(dir: Option<std::path::PathBuf>) -> LadderStore {
-        LadderStore {
-            dir,
-            writing: std::sync::Mutex::new(()),
-        }
+        LadderStore { dir }
     }
 
-    /// The ladder kept under `stem`, where one is and reaches `depth`.
+    /// The deepest ladder kept under `stem`, where one reaches `depth`.
     pub(crate) fn read(&self, stem: &str, depth: u8) -> Option<OccupancyLadder> {
-        let payload =
-            crate::figures::persist::read(self.dir.as_deref()?, stem, 0, "ladder", LADDER_MAGIC)?;
-        let (&held, rest) = payload.split_first()?;
-        let (&exact, rest) = rest.split_first()?;
-        if held < depth || held > 16 || rest.len() != 16 * (usize::from(held) + 1) {
-            return None;
-        }
-        let mut counts = [0u64; 17];
-        let mut raw = [0u64; 17];
-        for (d, pair) in rest.as_chunks::<16>().0.iter().enumerate() {
-            counts[d] = u64::from_le_bytes(pair[..8].try_into().ok()?);
-            raw[d] = u64::from_le_bytes(pair[8..].try_into().ok()?);
-        }
-        Some(OccupancyLadder {
-            counts,
-            raw,
-            depth: held,
-            exact: exact == 1,
+        let dir = self.dir.as_deref()?;
+        (depth..=16).rev().find_map(|held| {
+            let payload =
+                crate::cache_file::read(dir, stem, u64::from(held), "ladder", LADDER_MAGIC)?;
+            parse_ladder(&payload).map(|(ladder, _)| ladder)
         })
     }
 
-    /// Keep `ladder` under `stem`, unless one at least as deep is kept there already.
-    pub(crate) fn write(&self, stem: &str, ladder: &OccupancyLadder) {
+    /// Keep `ladder` under `stem`, taken over shards of `identities`, and remove the shallower
+    /// ones kept there.
+    pub(crate) fn write(&self, stem: &str, identities: &[[u8; 32]], ladder: &OccupancyLadder) {
         let Some(dir) = self.dir.as_deref() else {
             return;
         };
-        let _writing = self.writing.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if self.read(stem, ladder.depth).is_some() {
-            return;
-        }
-        let mut payload = vec![ladder.depth, u8::from(ladder.exact)];
+        let mut payload = vec![identities.len() as u8];
+        identities.iter().for_each(|id| payload.extend_from_slice(id));
+        payload.extend([ladder.depth, u8::from(ladder.exact)]);
         for d in 0..=ladder.depth as usize {
             payload.extend_from_slice(&ladder.counts[d].to_le_bytes());
             payload.extend_from_slice(&ladder.raw[d].to_le_bytes());
         }
-        crate::figures::persist::write(dir, stem, 0, "ladder", LADDER_MAGIC, &payload);
-        crate::figures::persist::hold_under(dir, LADDERS_DISK_BYTES);
+        let at = u64::from(ladder.depth);
+        if !crate::cache_file::write_beside(dir, stem, at, "ladder", LADDER_MAGIC, &payload) {
+            return;
+        }
+        for shallower in 0..at {
+            let _ = std::fs::remove_file(crate::cache_file::path_of(dir, stem, shallower, "ladder"));
+        }
+        crate::cache_file::hold_under(dir, LADDERS_DISK_BYTES);
     }
+
+    /// Remove every kept ladder taken over a shard identity `live` does not hold: a compaction
+    /// that rotates an identity leaves no ladder counting the rows it removed.
+    pub(crate) fn sweep(&self, live: &[[u8; 32]]) {
+        let Some(dir) = self.dir.as_deref() else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let kept = std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| crate::cache_file::payload_of(&bytes, LADDER_MAGIC))
+                .and_then(|payload| parse_ladder(&payload))
+                .is_some_and(|(_, identities)| identities.iter().all(|id| live.contains(id)));
+            if !kept {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
+/// A kept ladder and the shard identities it was taken over.
+fn parse_ladder(payload: &[u8]) -> Option<(OccupancyLadder, Vec<[u8; 32]>)> {
+    let (&shards, rest) = payload.split_first()?;
+    let (ids, rest) = rest.split_at_checked(32 * usize::from(shards))?;
+    let identities = ids.as_chunks::<32>().0.to_vec();
+    let (&held, rest) = rest.split_first()?;
+    let (&exact, rest) = rest.split_first()?;
+    if held > 16 || rest.len() != 16 * (usize::from(held) + 1) {
+        return None;
+    }
+    let mut counts = [0u64; 17];
+    let mut raw = [0u64; 17];
+    for (d, pair) in rest.as_chunks::<16>().0.iter().enumerate() {
+        counts[d] = u64::from_le_bytes(pair[..8].try_into().ok()?);
+        raw[d] = u64::from_le_bytes(pair[8..].try_into().ok()?);
+    }
+    let ladder = OccupancyLadder {
+        counts,
+        raw,
+        depth: held,
+        exact: exact == 1,
+    };
+    Some((ladder, identities))
 }
 
 /// One memoised `N_occ(d)`.
@@ -1582,6 +1633,34 @@ mod tests {
                 (got - want).abs() <= want * 0.05,
                 "depth {d}: estimated {got}, counted {want}"
             );
+        }
+    }
+
+    /// **The walk credits exactly the tiles a visible row lies in**, at every depth, over a mask
+    /// with rows denied below its projection and buffered rows added above it: the tiles counted
+    /// row by row from the composed set.
+    #[test]
+    fn the_walk_credits_the_tiles_of_the_visible_rows_through_denies_and_buffered_rows() {
+        let codes: Vec<u32> = (0..40_000u64)
+            .map(|i| (i.wrapping_mul(2_654_435_761) % (1u64 << 32)) as u32 & !0xFF)
+            .collect();
+        let written = crate::select::fixture::segment_of_codes(&codes);
+        let rows = codes.len() as u32;
+        let code_of = |row: u32| codes[written.ids[row as usize] as usize];
+        let base: croaring::Bitmap = (0..rows).filter(|r| r % 3 != 0).collect();
+        let minus: croaring::Bitmap = base.iter().filter(|r| r % 7 == 0).collect();
+        let plus: croaring::Bitmap = (0..rows).filter(|r| r % 3 == 0 && r % 5 == 0).collect();
+        let mut visible = base.clone();
+        visible.andnot_inplace(&minus);
+        visible.or_inplace(&plus);
+        let mask = EffectiveMask::of_parts(base, minus, plus);
+        for depth in 0..=16u8 {
+            let mut walked = Vec::new();
+            for_each_occupied_tile(&mask, &written.data, 0, depth, |tile| walked.push(tile));
+            let mut counted: Vec<u64> = visible.iter().map(|row| tile_of(code_of(row), depth)).collect();
+            counted.sort_unstable();
+            counted.dedup();
+            assert_eq!(walked, counted, "depth {depth}");
         }
     }
 }

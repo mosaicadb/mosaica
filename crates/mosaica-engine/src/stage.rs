@@ -234,17 +234,17 @@ fn run(
     if cancel.is_cancelled() {
         return;
     }
-    let stem = crate::occupancy::ladder_stem(
-        &task.identity.terms,
-        &task.view,
-        task.geometries
-            .iter()
-            .zip(&held)
-            .filter_map(|((id, geometry), (_, segments))| {
-                let shard = generation.shard(*id)?;
-                Some((*id, &shard.identity, &*geometry.fragment, mask.leaf(*id), &segments[..]))
-            }),
-    );
+    let sides: Vec<crate::occupancy::LadderSide<'_>> = task
+        .geometries
+        .iter()
+        .zip(&held)
+        .filter_map(|((id, geometry), (_, segments))| {
+            let shard = generation.shard(*id)?;
+            Some((*id, shard.identity, &**geometry, mask.leaf(*id), &segments[..]))
+        })
+        .collect();
+    let (stem, identities) =
+        crate::occupancy::ladder_stem(&task.identity.terms, &task.view, &sides);
     let ladder = match ladders.read(&stem, BACKGROUND_DEPTH) {
         Some(kept) => kept,
         None => {
@@ -263,7 +263,7 @@ fn run(
                 BACKGROUND_DEPTH,
                 mask.visible_total(),
             );
-            ladders.write(&stem, &ladder);
+            ladders.write(&stem, &identities, &ladder);
             ladder
         }
     };

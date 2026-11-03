@@ -14,6 +14,7 @@ pub mod bands;
 pub mod browse;
 mod bundle_lock;
 mod cache;
+mod cache_file;
 pub mod cancel;
 pub mod cells;
 mod categories;

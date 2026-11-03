@@ -267,13 +267,22 @@ pub(super) fn compose(
         _ => None,
     };
     let resolved = ResolvedLeaves::new(&open.mask);
+    let prefers_rows = |expr: Option<&FilterExpr>| -> Result<bool> {
+        let Some(expr) = expr else {
+            return Ok(prefer_row);
+        };
+        let read = reads.iter().map(|&place| &served.sides[place]);
+        let visible = open.mask.visible_total();
+        Ok(prefer_row
+            || engine.region_prefers_rows(served, read, &resolved, &req.cancel, expr, visible)?)
+    };
+    let (filter_rows, reference_rows) = (prefers_rows(req.filter.as_ref())?, prefers_rows(reference_expr)?);
     let mut candidates: Vec<Option<Bitmap>> = vec![None; sides];
     let (mut set, mut reference) = (Set::filtered(sides), Set::filtered(sides));
     for &place in &reads {
         let side = &served.sides[place];
         let candidate =
             engine.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
-        let visible = served.leaf(&open.mask, place).map_or(0, EffectiveMask::visible_total);
         engine.route_filters_under(
             served,
             side,
@@ -281,7 +290,7 @@ pub(super) fn compose(
             &resolved,
             &req.cancel,
             |route| {
-            let route_one = |expr: &FilterExpr, into: &mut Set| -> Result<()> {
+            let route_one = |expr: &FilterExpr, prefer_row: bool, into: &mut Set| -> Result<()> {
                 clock.check_ended(moved)?;
                 let over = engine.route_over_view(
                     served,
@@ -291,16 +300,15 @@ pub(super) fn compose(
                     route,
                     expr,
                     prefer_row,
-                    visible,
                 )?;
                 into.add(place, routed(open, place, over)?);
                 Ok(())
             };
             if let Some(expr) = &req.filter {
-                route_one(expr, &mut set)?;
+                route_one(expr, filter_rows, &mut set)?;
             }
             if let Some(expr) = reference_expr {
-                route_one(expr, &mut reference)?;
+                route_one(expr, reference_rows, &mut reference)?;
             }
             Ok(())
         })?;
@@ -361,10 +369,17 @@ pub(crate) fn entities_passing(
     let served = &open.served;
     let side = &served.sides[place];
     let whole = FilterCandidate::Whole(candidate);
-    let visible = served.leaf(&open.mask, place).map_or(0, EffectiveMask::visible_total);
+    let read = served.filtered_sides(&open.mask).map(|(_, side, _)| side);
+    let prefer_row = engine.region_prefers_rows(
+        served,
+        read,
+        resolved,
+        cancel,
+        expr,
+        open.mask.visible_total(),
+    )?;
     engine.route_filters_under(served, side, whole, resolved, cancel, |route| {
-        let over =
-            engine.route_over_view(served, side, resolved, cancel, route, expr, false, visible)?;
+        let over = engine.route_over_view(served, side, resolved, cancel, route, expr, prefer_row)?;
         let (part, region) = routed(open, place, over)?;
         check_cancelled(cancel)?;
         let entities = match part.held {

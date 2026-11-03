@@ -185,10 +185,8 @@ impl Engine {
 
     /// `expr` routed in `side` and, where it routes to row space, evaluated over every row of the
     /// view it can match: the rows of the drawn region that bounds it ([`bounding_region`]), and
-    /// the whole view where none does. Inside such a region a column with both routes takes the
-    /// row route by the viewport's rule ([`row_route_pays`]), the region's rows standing for a
-    /// request's tiles; `prefer_row` is the caller's own preference otherwise. `visible` is the
-    /// viewer's visible total in `side`.
+    /// the whole view where none does. `prefer_row` decides a column with both routes, the same in
+    /// every side of the request ([`Engine::region_prefers_rows`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn route_over_view(
         &self,
@@ -199,7 +197,6 @@ impl Engine {
         route: &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
         expr: &crate::filter::FilterExpr,
         prefer_row: bool,
-        visible: u64,
     ) -> Result<OverView> {
         let domain = match bounding_region(expr) {
             Some(leaf) => self
@@ -210,12 +207,9 @@ impl Engine {
         };
         let total = side.data.row_space.total_rows();
         let whole = 0..u32::try_from(total).unwrap_or(u32::MAX);
-        let (domain, rows, prefer_row): (&[Range<u32>], u64, bool) = match &domain {
-            Some(domain) => {
-                let rows = domain.iter().map(|r| u64::from(r.end - r.start)).sum();
-                (domain, rows, prefer_row || row_route_pays(rows, visible))
-            }
-            None => (std::slice::from_ref(&whole), total, prefer_row),
+        let (domain, rows): (&[Range<u32>], u64) = match &domain {
+            Some(domain) => (domain, domain.iter().map(|r| u64::from(r.end - r.start)).sum()),
+            None => (std::slice::from_ref(&whole), total),
         };
         Ok(match route(expr, prefer_row)? {
             crate::filter::RoutedFilter::Entity(entities) => OverView::Entities(entities),
@@ -229,6 +223,35 @@ impl Engine {
                 OverView::Rows { rows, region }
             }
         })
+    }
+
+    /// Whether a column with both routes takes the row route in `expr` over the whole view, decided
+    /// once for every side in `sides` as the viewport decides it for a request's tiles: inside the
+    /// drawn region that bounds `expr`, where its rows in every side are no more than `visible`,
+    /// the viewer's visible total in the view.
+    pub(crate) fn region_prefers_rows<'s>(
+        &self,
+        served: &ServedView<'_>,
+        sides: impl Iterator<Item = &'s ServedSide<'s>>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+        expr: &crate::filter::FilterExpr,
+        visible: u64,
+    ) -> Result<bool> {
+        let Some(leaf) = bounding_region(expr) else {
+            return Ok(false);
+        };
+        let mut rows = 0u64;
+        for side in sides {
+            let held = self
+                .region_rows(leaf, served, side, resolved, cancel)
+                .map_err(filter_refusal)?;
+            let Some(domain) = held.domain else {
+                return Ok(false);
+            };
+            rows += domain.iter().map(|r| u64::from(r.end - r.start)).sum::<u64>();
+        }
+        Ok(row_route_pays(rows, visible))
     }
 }
 

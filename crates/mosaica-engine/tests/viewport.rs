@@ -1265,6 +1265,48 @@ fn a_grants_ladder_is_read_back_after_a_restart() {
     assert_eq!(reopened.occupancy_walks(), 0, "every rung to 12 was read back");
 }
 
+/// **A kept ladder is not read back over a mask a suppression has moved.** The ladder kept before
+/// the suppression names the mask it was taken over; an engine reopened over the same cache
+/// directory after the suppression empties a tile walks again and counts the tile gone.
+#[test]
+fn a_kept_ladder_is_not_read_back_after_a_suppression() {
+    let tmp = TempDir::new().unwrap();
+    let bundle_root = tmp.path().join("bundle");
+    build_fixture(
+        &bundle_root,
+        &tmp.path().join("points.parquet"),
+        &tmp.path().join("pairs.parquet"),
+    );
+    let (cache, wal) = (tmp.path().join("cache"), tmp.path().join("wal.log"));
+    let before = {
+        let first = open_live(&bundle_root, &cache, &wal);
+        let session = first.authorise(&full_coverage_credential()).unwrap();
+        let before = first.occupied_tiles_for_test(&session, "s0", 16).unwrap();
+        wait_for_the_fill(&first);
+        let cohort: Vec<_> = (0..10u64)
+            .map(|i| item_of_id(&first, 5 + i * 1_000).unwrap().expect("a built item"))
+            .collect();
+        drop(first);
+        let mut log = Wal::open(&wal).unwrap();
+        for entity in cohort {
+            log.append(&WalRecord::ChangeBatch {
+                changes: vec![(item(entity), ChangeOp::Suppress)],
+            })
+            .unwrap();
+        }
+        log.fsync().unwrap();
+        before
+    };
+    let reopened = open_live(&bundle_root, &cache, &wal);
+    let session = reopened.authorise(&full_coverage_credential()).unwrap();
+    assert_eq!(
+        reopened.occupied_tiles_for_test(&session, "s0", 16).unwrap(),
+        before - 1,
+        "the suppressed position's tile is gone from the count"
+    );
+    assert_eq!(reopened.occupancy_walks(), 1, "the kept ladder was not read back");
+}
+
 /// **A first read takes no occupancy walk where θ cannot change a tile's sample**: at depth 0,
 /// where one tile holds everything; under a target reaching every visible item; and where the
 /// floor reaches the cap. Each serves what a live threshold's engine serves for the same request.

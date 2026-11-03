@@ -462,19 +462,16 @@ impl Engine {
         if let mosaica_cache::Peek::Ready(hit) = self.occupancy.peek(&key) {
             return hit.0;
         }
-        let stem = crate::occupancy::ladder_stem(
-            &served.mask_identity.terms,
-            served.name,
-            served.sides.iter().map(|side| {
-                (
-                    side.shard.id(),
-                    &side.shard.identity,
-                    &*side.geometry.fragment,
-                    mask.leaf(side.shard.id()),
-                    &side.segments[..],
-                )
-            }),
-        );
+        let sides: Vec<crate::occupancy::LadderSide<'_>> = served
+            .sides
+            .iter()
+            .map(|side| {
+                let id = side.shard.id();
+                (id, side.shard.identity, &*side.geometry, mask.leaf(id), &side.segments[..])
+            })
+            .collect();
+        let (stem, identities) =
+            crate::occupancy::ladder_stem(&served.mask_identity.terms, served.name, &sides);
         let ladder = match self.stage.ladders.read(&stem, depth) {
             Some(kept) => kept,
             None => {
@@ -486,7 +483,8 @@ impl Engine {
                 let ladder =
                     crate::occupancy::occupied_tiles_ladder(&parts, depth, mask.visible_total());
                 let ladders = Arc::clone(&self.stage.ladders);
-                self.pool.spawn(move || ladders.write(&stem, &ladder));
+                self.pool
+                    .spawn(move || ladders.write(&stem, &identities, &ladder));
                 ladder
             }
         };

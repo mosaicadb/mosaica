@@ -139,7 +139,46 @@ async fn an_overlay_swap_does_not_stale_a_geometry_stamp() {
 
 // --- Cache pruning, the startup bound, and check_bearer ---
 
-/// A viewport at depth 12 over a box of one tile: a read that builds its grant's projection.
+const SHAPES: &str = "clusters/shapes";
+
+/// A layer whose artifacts carry a centroid and a box, which a viewer's derived geometry holds per
+/// session: the cache a prune is observed through.
+async fn shaped(server: &TestServer) {
+    register(
+        server,
+        serde_json::json!({
+            "name": SHAPES,
+            "title": SHAPES,
+            "views": ["s0"],
+            "membership": "enumerated",
+            "value_set": "closed",
+            "visibility": null,
+            "artifact_visibility": { "field": null, "default": "inherited" },
+            "require_member_visibility": { "count": 1 },
+            "hierarchy": { "kind": "flat" },
+            "content": { "computed": ["centroid", "box"], "supplied": [] },
+            "depends_on": [],
+            "levels": []
+        }),
+    )
+    .await;
+    let artifacts: Vec<serde_json::Value> = (0..4u64)
+        .map(|k| serde_json::json!({ "key": format!("c{k}"), "members": members(k * 250..(k + 1) * 250) }))
+        .collect();
+    let resp = server
+        .client
+        .put(server.control_url(&format!("/control/layers/{}/artifacts", SHAPES.replace('/', "%2F"))))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&serde_json::json!({ "artifacts": artifacts }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 201, "{}", resp.text().await.unwrap());
+    tick(server).await;
+}
+
+/// A viewport at depth 12 over a box of one tile, which builds its grant's projection, and the
+/// shaped layer's artifacts over the whole map, which take the session's derived geometry.
 async fn deep_viewport(server: &TestServer, token: &str) {
     let resp = server
         .client
@@ -152,25 +191,42 @@ async fn deep_viewport(server: &TestServer, token: &str) {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/artifacts/viewport"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({
+            "view": "s0", "zoom": 0, "per_tile": 100, "bbox": [0.0, 0.0, 1000.0, 1000.0],
+            "layers": [SHAPES]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "{}", resp.text().await.unwrap());
 }
 
 /// **End-to-end revoke pruning.** The revoke handler prunes the revoked session's own caches and
 /// leaves its grant's row projection, which another session with the grant goes on reading.
 ///
 /// The revoked session is unusable either way (the registry removal does that, and
-/// `revocation_takes_effect_without_waiting_for_a_sweep` covers it). What a prune removes, the
-/// engine's per-session caches, is asserted in `mosaica-engine`'s `artifact_cache_cadence`; the
-/// observable here is the grant's projection, which the prune must leave.
+/// `revocation_takes_effect_without_waiting_for_a_sweep` covers it), so the observable here is
+/// memory: the derived geometry, which is per session, read through `TestServer::state`. A 204 and
+/// a survivor's 200 would pass against a handler that pruned nothing.
 #[tokio::test]
 async fn revoke_prunes_the_session_and_leaves_its_grants_projection() {
     let tmp = TempDir::new().unwrap();
     let server = serve(&tmp).await;
+    shaped(&server).await;
+    let shapes = || server.state.engine.derived_cache_stats().entries;
     let projections = || server.state.engine.row_projection_cache_stats().entries;
 
     let doomed = authorise(&server, &["0"]).await;
     let survivor = authorise(&server, &["0"]).await;
     deep_viewport(&server, doomed["token"].as_str().unwrap()).await;
+    let per_session = shapes();
+    assert!(per_session > 0);
     deep_viewport(&server, survivor["token"].as_str().unwrap()).await;
+    assert_eq!(shapes(), 2 * per_session);
     assert_eq!(projections(), 1, "one grant, one projection");
 
     let resp = server
@@ -183,15 +239,20 @@ async fn revoke_prunes_the_session_and_leaves_its_grants_projection() {
         .unwrap();
     assert_eq!(resp.status(), 204);
 
+    assert_eq!(
+        shapes(),
+        per_session,
+        "the revoke handler must prune the revoked session's entries and only those"
+    );
     assert_eq!(projections(), 1, "the grant's projection outlives the session");
 
     let hits = server.state.engine.row_projection_cache_stats().hits;
     deep_viewport(&server, survivor["token"].as_str().unwrap()).await;
-    assert_eq!(
-        server.state.engine.row_projection_cache_stats().hits,
-        hits + 1,
+    assert!(
+        server.state.engine.row_projection_cache_stats().hits > hits,
         "the survivor reads the shared projection rather than building it again"
     );
+    assert_eq!(projections(), 1);
 }
 
 /// Logout, a catalogue change and ending a session on the control plane each prune the ended
@@ -200,6 +261,8 @@ async fn revoke_prunes_the_session_and_leaves_its_grants_projection() {
 async fn every_way_a_session_ends_prunes_its_caches() {
     let tmp = TempDir::new().unwrap();
     let server = serve(&tmp).await;
+    shaped(&server).await;
+    let shapes = || server.state.engine.derived_cache_stats().entries;
     let projections = || server.state.engine.row_projection_cache_stats().entries;
 
     let sessions = [
@@ -208,9 +271,13 @@ async fn every_way_a_session_ends_prunes_its_caches() {
         authorise(&server, &["0", "1"]).await,
     ];
     deep_viewport(&server, sessions[0]["token"].as_str().unwrap()).await;
+    let first = shapes();
+    assert!(first > 0);
     for session in &sessions[1..] {
         deep_viewport(&server, session["token"].as_str().unwrap()).await;
     }
+    let all = shapes();
+    assert!(all > first);
     assert_eq!(projections(), 3);
 
     let resp = server
@@ -221,6 +288,8 @@ async fn every_way_a_session_ends_prunes_its_caches() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 204);
+    let after_logout = shapes();
+    assert_eq!(after_logout, all - first, "logout must prune the session it ends");
 
     let control = |path: &str, body: serde_json::Value| {
         server
@@ -239,6 +308,8 @@ async fn every_way_a_session_ends_prunes_its_caches() {
     .unwrap();
     assert_eq!(resp.status(), 200);
 
+    let after_grant = shapes();
+    assert!(after_grant < after_logout, "a catalogue change must prune the sessions it ends");
     let token_id = sessions[2]["token_id"].as_u64().unwrap();
     let resp = control(
         "/control/sessions/end",
@@ -247,6 +318,7 @@ async fn every_way_a_session_ends_prunes_its_caches() {
     .await
     .unwrap();
     assert_eq!(resp.status(), 200);
+    assert_eq!(shapes(), 0, "ending a session on the control plane must prune it");
     assert_eq!(projections(), 3, "no session's end removes a grant's projection");
 }
 
@@ -428,9 +500,12 @@ async fn the_sweep_prunes_what_the_engine_holds_for_an_expired_session() {
         config,
     )
     .await;
+    shaped(&server).await;
+    let shapes = || server.state.engine.derived_cache_stats().entries;
 
     let doomed = authorise(&server, &["0"]).await;
     deep_viewport(&server, doomed["token"].as_str().unwrap()).await;
+    assert!(shapes() > 0, "a served read leaves the session's derived geometry resident");
     let status = control_status(&server).await;
     assert_eq!(status["row_projection_cache"]["entries"].as_u64().unwrap(), 1);
 
@@ -443,6 +518,11 @@ async fn the_sweep_prunes_what_the_engine_holds_for_an_expired_session() {
     assert!(
         status["sessions"]["swept_total"].as_u64().unwrap() > 0,
         "the sweep must have run, or this case asserts nothing"
+    );
+    assert_eq!(
+        shapes(),
+        0,
+        "the swept session's engine-side entries go with it, as a revocation's do"
     );
     assert_eq!(status["row_projection_cache"]["entries"].as_u64().unwrap(), 1);
 }

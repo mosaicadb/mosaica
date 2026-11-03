@@ -97,15 +97,17 @@ impl Engine {
         let mut rows = vec![Bitmap::new(); served.sides.len()];
         let mut region = None;
         let candidate = crate::viewport::FilterCandidate::Compose;
-        for (place, side, leaf) in served.filtered_sides(mask) {
-            let visible = leaf.visible_total();
+        let read = served.filtered_sides(mask).map(|(_, side, _)| side);
+        let prefer_row =
+            self.region_prefers_rows(served, read, &resolved, cancel, expr, mask.visible_total())?;
+        for (place, side, _) in served.filtered_sides(mask) {
             let (side_rows, verdict) =
                 self.route_filters_under(served, side, candidate, &resolved, cancel, |route| {
                     // A column with both routes takes the entity route outside a region: there are
                     // no tile ranges here to make the row route cheaper.
                     Ok(
                         match self.route_over_view(
-                            served, side, &resolved, cancel, route, expr, false, visible,
+                            served, side, &resolved, cancel, route, expr, prefer_row,
                         )? {
                             crate::viewport::OverView::Entities(entities) => {
                                 (side.data.row_space.project(&entities), None)

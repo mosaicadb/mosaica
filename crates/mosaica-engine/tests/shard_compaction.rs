@@ -527,3 +527,36 @@ fn edit_in_shard_zero(engine: &Engine) {
 fn seal_shard_one(engine: &Engine) {
     insert_keyed(engine, "sealing", &[true; 11]);
 }
+
+/// **A compaction leaves no occupancy ladder counting the rows it removed.** A grant's ladder kept
+/// on disk names the shard identities it was taken over; the compaction that rotates one sweeps
+/// every ladder naming it, as it sweeps that identity's fragments and figures.
+#[test]
+fn a_compaction_sweeps_the_ladders_of_the_identity_it_superseded() {
+    let several = two_shards();
+    let engine = several.open_writing();
+    engine.set_merge_for_test(false);
+    engine
+        .accept_changes(vec![(item_in(1, 4), ChangeOp::Delete)])
+        .unwrap();
+    tick_until(
+        &engine,
+        "shard 1's deletion in its record",
+        Duration::from_secs(30),
+        || records(&several.root)[1].2 == vec![4],
+    );
+    let ladders = || -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(several.cache.join("occupancy"))
+            .map(|dir| dir.flatten().map(|entry| entry.path()).collect())
+            .unwrap_or_default()
+    };
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    engine.occupied_tiles_for_test(&session, "s0", 3).unwrap();
+    wait_until("the ladder kept on disk", Duration::from_secs(30), || !ladders().is_empty());
+    let kept = ladders();
+
+    assert_eq!(compact(&engine, Some(shard(1))), 1);
+    wait_until("the superseded ladder swept", Duration::from_secs(30), || {
+        ladders().iter().all(|path| !kept.contains(path))
+    });
+}

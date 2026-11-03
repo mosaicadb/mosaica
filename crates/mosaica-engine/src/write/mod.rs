@@ -1289,6 +1289,8 @@ pub(crate) struct MaintenanceDeps {
     pub(crate) figures: Arc<crate::figures::FiguresCache>,
     /// The fragments, swept when a compaction rotates a shard's identity.
     pub(crate) fragments: Arc<mosaica_authz::FragmentCache>,
+    /// The grants' occupancy ladders on disk, swept when a compaction rotates a shard's identity.
+    pub(crate) ladders: Arc<crate::occupancy::LadderStore>,
     /// The region decompositions (`crate::region`), pruned of superseded generations at every
     /// geometry swap exactly as the row-projection cache is: a row-space artefact keyed on a
     /// generation is unusable after it, and only retention is left to do.

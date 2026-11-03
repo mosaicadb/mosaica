@@ -220,6 +220,8 @@ struct Served {
     from_bands: u64,
     widened: u64,
     sparse_after_read: u64,
+    /// Of `from_bands`, the tiles of a filtered request.
+    filtered_from_bands: u64,
     points: usize,
 }
 
@@ -280,6 +282,9 @@ fn check(engine: &Engine, term: &str) -> Served {
             );
             served.tiles += bands.timings.tiles_nonempty;
             served.from_bands += bands.timings.tiles_from_bands;
+            if filter.is_some() {
+                served.filtered_from_bands += bands.timings.tiles_from_bands;
+            }
             served.widened += bands.timings.tiles_bands_widened;
             served.sparse_after_read += bands.timings.tiles_sparse_after_read;
             served.points += bands.points.mosaica_ids.len();
@@ -298,6 +303,10 @@ fn check_all(engine: &Engine) {
     for (who, s) in [("broad", &broad), ("medium", &medium)] {
         assert!(s.from_bands > 0, "{who}: the bands answered no tile: {s:?}");
     }
+    assert!(
+        broad.filtered_from_bands > 0,
+        "the bands answered no filtered tile, whose threshold is saturated: {broad:?}"
+    );
     let all = [&broad, &medium, &narrow, &lone];
     assert!(
         all.iter().any(|s| s.widened > 0),

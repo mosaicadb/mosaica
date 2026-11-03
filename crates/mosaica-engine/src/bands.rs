@@ -146,10 +146,8 @@ pub fn select(shards: &[TileShard<'_>], params: &SelectParams, matched: u64) -> 
     Ok(BandAnswer::Sparse { read: true })
 }
 
-/// What one band entry costs to read against one row of the identity column's scan: a band entry
-/// is a row, an identity and a mask question at a scattered row, where the scan reads identities
-/// in row order. Measured over the 1.02 × 10⁸-row paperseek tier, filtered dense tiles at zoom 6:
-/// about 35 ns an entry against 4–6 ns a row where the filter keeps most of a tile.
+/// How many rows of the identity column's scan one band entry costs to read: an entry is a row, an
+/// identity and a mask question at a scattered row, where the scan reads identities in row order.
 const ENTRY_COST_IN_ROWS: u64 = 8;
 
 /// Whether reading band `band`'s entries in every part of a tile costs less than scanning the

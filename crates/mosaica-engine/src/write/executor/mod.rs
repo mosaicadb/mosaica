@@ -474,6 +474,8 @@ impl Executor {
             self.deps
                 .figures
                 .sweep(next.shards().map(|shard| shard.identity));
+            let live: Vec<[u8; 32]> = next.shards().map(|shard| shard.identity).collect();
+            self.deps.ladders.sweep(&live);
             let kept: Vec<[u8; 32]> = next
                 .shards()
                 .chain(previous.shards())
