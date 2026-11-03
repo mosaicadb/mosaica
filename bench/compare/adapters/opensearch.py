@@ -52,7 +52,7 @@ from frame import (EXTENT, K, MAX_DEPTH, TYPES, YEAR_BINS, Camera, Filter, Frame
                    fixed32, grid_depth, points_by_tile)
 from oracle import VIEWER
 
-from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
 
 IMAGE = "opensearchproject/opensearch:3.9.0"
@@ -63,7 +63,7 @@ VIEWER_USER = "viewer"
 VIEWER_ROLE = "viewer_read"
 HOME = "/usr/share/opensearch"
 #: Half the container's memory, at most 31 GB, as OpenSearch's documentation recommends.
-HEAP = f"{min(int(MEMORY.rstrip('g')) // 2, 31)}g"
+HEAP = f"{min(MEMORY_GIB * 512, 31 * 1024)}m"
 #: Enough buckets for the largest grid: 20 tiles of 256 by 256 cells, and the columns above them.
 MAX_BUCKETS = 1 << 21
 #: Bulk requests of this many documents (about 7 MB), from this many client processes.

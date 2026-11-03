@@ -142,8 +142,10 @@ def du_bytes(path: Path) -> int:
     return int(out.stdout.split()[0])
 
 
-#: Every server and build runs in a container under this memory, with no swap beyond it.
-MEMORY = "16g"
+#: Every server and build runs in a container under this memory, with no swap beyond it: whole
+#: gibibytes, from `BENCH_MEMORY`.
+MEMORY = os.environ.get("BENCH_MEMORY", "24g")
+MEMORY_GIB = int(MEMORY.rstrip("g"))
 #: Host binaries mounted into every container, so a server or build can run under `nice`, and a
 #: build container can stay alive for `docker exec`, in an image without them. Each links only to
 #: the C library.

@@ -59,7 +59,7 @@ from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_
                    points_by_tile)
 from oracle import VIEWER
 
-from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
 from .sql import filter_sql
 
@@ -69,9 +69,11 @@ IMAGE_DIGEST = "sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a23
 PGDATA = "/var/lib/postgresql/18/docker"
 VIEWER_ROLE = "viewer"
 CPUS = os.cpu_count() or 1
+#: A quarter of the cap for shared buffers and three quarters as the planner's cache estimate, as
+#: PostgreSQL's documentation suggests for a dedicated server.
 SETTINGS = {
-    "shared_buffers": "4GB",
-    "effective_cache_size": "12GB",
+    "shared_buffers": f"{MEMORY_GIB * 256}MB",
+    "effective_cache_size": f"{MEMORY_GIB * 768}MB",
     "work_mem": "64MB",
     "max_worker_processes": str(CPUS),
     "max_parallel_workers": str(CPUS),
@@ -79,9 +81,9 @@ SETTINGS = {
     "jit": "off",
     "random_page_cost": "1.1",
 }
-BULK = {"wal_level": "minimal", "max_wal_senders": "0", "maintenance_work_mem": "2GB",
+BULK = {"wal_level": "minimal", "max_wal_senders": "0", "maintenance_work_mem": f"{min(2048, MEMORY_GIB * 128)}MB",
         "max_wal_size": "16GB"}
-SHM = "2g"
+SHM = f"{min(2048, MEMORY_GIB * 128)}m"
 COLUMNS = ("x", "y", "licence", "publication_year", "type", "is_oa")
 #: Each arm's index and whether `&&` is marked leakproof.
 ARMS = {"postgis": ("gist", False), "postgis+leakproof": ("gist", True),
