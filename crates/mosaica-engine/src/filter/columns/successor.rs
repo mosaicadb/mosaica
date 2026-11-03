@@ -300,8 +300,8 @@ impl FilterColumns {
     /// their values, after an entity-space coalesce.
     ///
     /// Replacing N layers with one must check the replacement's presence equals the union of the
-    /// ones it consumes, or `covered` drifts and later disjointness checks test against the wrong
-    /// coverage. A consumed layer this generation does not hold is a refusal: the plan was made
+    /// ones it consumes: the replacement stands for exactly those entities, so the column's coverage
+    /// is unchanged and later disjointness checks test against what the column holds. A consumed layer this generation does not hold is a refusal: the plan was made
     /// against a manifest, and a layer it names that this process cannot find means the two
     /// disagree about what the bundle is.
     ///

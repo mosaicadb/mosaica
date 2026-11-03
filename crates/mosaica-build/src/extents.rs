@@ -433,14 +433,16 @@ impl OpenExtents {
         self.entities = lo..hi;
     }
 
-    /// The entities the readers yield, as they yield them: every extent's has-row bitmap read in
-    /// turn and released, and the union narrowed to the window.
+    /// The entities the readers yield, as they yield them: the has-row bitmap of every extent that
+    /// reaches the window, read in turn, narrowed to the window and released.
     pub(crate) fn present(&self) -> Result<Bitmap> {
+        let window = Bitmap::from_range(self.entities.clone());
         let mut union = Bitmap::new();
-        for paths in &self.hasrows {
-            union.or_inplace(&read_hasrow(paths)?);
+        for (extent, paths) in self.hasrows.iter().enumerate() {
+            if self.reaches(extent) {
+                union.or_inplace(&read_hasrow(paths)?.and(&window));
+            }
         }
-        union.and_inplace(&Bitmap::from_range(self.entities.clone()));
         Ok(union.add_offset(-i64::from(self.entities.start)))
     }
 

@@ -6579,7 +6579,7 @@ mod tests {
             .chain(open.iter().map(TextValues::Extents))
             .collect();
 
-        let mut files: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+        let mut files: Vec<[Vec<u8>; 3]> = Vec::new();
         for (k, plan) in [
             TextIndexPlan::explicit(4_096, 1 << 30, 1 << 22),
             TextIndexPlan::explicit(1, 1 << 30, 1 << 22),
@@ -6620,11 +6620,7 @@ mod tests {
                     .filter(|name| name.ends_with(".spill"))
                     .collect();
                 assert!(left.is_empty(), "plan {k} source {source} left {left:?}");
-                files.push((
-                    std::fs::read(column_dir.join(mosaica_filter::DICT_FILE)).expect("dict"),
-                    std::fs::read(column_dir.join(mosaica_filter::POSTINGS_FILE))
-                        .expect("postings"),
-                ));
+                files.push(index_files(&column_dir));
             }
             let column_dir = dir.path().join(format!("plan-{k}"));
             std::fs::create_dir_all(&column_dir).expect("column dir");
@@ -6636,23 +6632,31 @@ mod tests {
                 expected_text_postings().len() as u64,
                 "plan {k} wrote the wrong term count"
             );
-            // Nothing but the two artefacts is left behind: every run this plan spilled is gone.
+            // Nothing but the artefacts is left behind: every run this plan spilled is gone.
             let left: Vec<String> = std::fs::read_dir(&column_dir)
                 .expect("read dir")
                 .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
                 .filter(|name| name.ends_with(".spill"))
                 .collect();
             assert!(left.is_empty(), "plan {k} left {left:?} behind");
-            files.push((
-                std::fs::read(column_dir.join(mosaica_filter::DICT_FILE)).expect("dict"),
-                std::fs::read(column_dir.join(mosaica_filter::POSTINGS_FILE)).expect("postings"),
-            ));
+            files.push(index_files(&column_dir));
         }
-        let (dict, postings) = files.first().expect("at least one plan").clone();
-        for (k, emitted) in files.iter().enumerate().skip(1) {
-            assert_eq!(emitted.0, dict, "plan {k}'s dictionary differs");
-            assert_eq!(emitted.1, postings, "plan {k}'s postings differ");
+        let [dict, postings, presence] = files.first().expect("at least one plan").clone();
+        for (k, [d, p, e]) in files.iter().enumerate().skip(1) {
+            assert_eq!(d, &dict, "plan {k}'s dictionary differs");
+            assert_eq!(p, &postings, "plan {k}'s postings differ");
+            assert_eq!(e, &presence, "plan {k}'s presence differs");
         }
+    }
+
+    /// A text index's dictionary, postings and presence, as bytes.
+    fn index_files(column_dir: &Path) -> [Vec<u8>; 3] {
+        [
+            mosaica_filter::DICT_FILE,
+            mosaica_filter::POSTINGS_FILE,
+            mosaica_filter::PRESENCE_FILE,
+        ]
+        .map(|name| std::fs::read(column_dir.join(name)).expect(name))
     }
 
     /// And the index says what the column says: every term the analyser produces is a key, and its
