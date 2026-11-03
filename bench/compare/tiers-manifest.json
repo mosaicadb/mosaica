@@ -1,34 +1,67 @@
 {
   "source": {
-    "url": "https://s3.amazonaws.com/datashader-data/osm-1billion.parq.zip",
-    "sha256": "7b6e89c3b8be96813c67682d6c9e6a05519ef2e31136378123c9dfea3b93ef57",
-    "bytes": 5498778647,
-    "rows": 1000050363,
-    "origin": "OpenStreetMap bulk GPS points (planet.gpx, 2013), projected to Web Mercator by HoloViz with datashader.utils.lnglat_to_meters, stored as float32",
-    "licence": "not stated by HoloViz or on the OSM wiki's Planet.gpx page; confirm before publishing"
+    "path": "/home/joe/code/tessera/data/ladder/paperseek/points.parquet",
+    "bytes": 52225761595,
+    "rows": 102117343,
+    "columns": [
+      "entity_id",
+      "x",
+      "y",
+      "licence",
+      "publication_year",
+      "type",
+      "is_oa"
+    ],
+    "origin": "The PaperSeek rung of the Mosaica test ladder: PaperSeek works joined to OpenAlex for licence, year, type and open access, laid out in 2D by UMAP over Stella V5 embeddings of title and abstract"
   },
   "sample_seed": 7885648334766170417,
-  "attr_seed": 7022365753720599345,
   "extent": [
-    -20037508.342789244,
-    20037508.342789244,
-    -20037508.342789244,
-    20037508.342789244
+    -18.0,
+    21.0,
+    -14.0,
+    25.0
   ],
+  "extent_rule": "side = ceil(max(x_max - floor(x_min), y_max - floor(y_min))) over the full file; each axis from the floor of its minimum",
   "tiers": {
-    "1e7": {
-      "file": "osm-1e7.parquet",
-      "nominal_rows": 10000000,
-      "rows": 10001011,
-      "threshold": 184458150871243187,
-      "sha256": "3cd5997991a35a90eda28f8e6813ce836077a583a08d5167565a858255d0b5dc"
+    "1e6": {
+      "file": "paperseek-1e6.parquet",
+      "nominal_rows": 1000000,
+      "rows": 1000767,
+      "threshold": 180642616932459274,
+      "rows_by_licence": {
+        "unlicensed": 777436,
+        "cc-by": 137237,
+        "cc-by-nc-nd": 28139,
+        "cc-by-nc": 21067,
+        "other-oa": 14702,
+        "cc-by-sa": 8758,
+        "cc-by-nc-sa": 7726,
+        "public-domain": 4541,
+        "cc-by-nd": 1089,
+        "publisher-specific-oa": 71,
+        "mit": 1
+      },
+      "sha256": "9fb496f9e80b40c46d82b4d26d2a0be947f9d7afa4c20565cd7be6257c262ea8"
     },
-    "1e8": {
-      "file": "osm-1e8.parquet",
-      "nominal_rows": 100000000,
-      "rows": 100005696,
-      "threshold": 1844581508712431877,
-      "sha256": "7a6b3db29dcc2d83de95f9f713eac0dc011e5efb9393d8cfb892db9c0a14ed4f"
+    "1e7": {
+      "file": "paperseek-1e7.parquet",
+      "nominal_rows": 10000000,
+      "rows": 9996934,
+      "threshold": 1806426169324592749,
+      "rows_by_licence": {
+        "unlicensed": 7763615,
+        "cc-by": 1373242,
+        "cc-by-nc-nd": 280537,
+        "cc-by-nc": 208428,
+        "other-oa": 146850,
+        "cc-by-sa": 88321,
+        "cc-by-nc-sa": 78379,
+        "public-domain": 45785,
+        "cc-by-nd": 10982,
+        "publisher-specific-oa": 791,
+        "mit": 4
+      },
+      "sha256": "db33cbd178081b1060613b69b3f5ade6aa5f5928383a9c0582e4dd26e4b49101"
     }
   }
 }

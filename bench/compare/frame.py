@@ -19,14 +19,17 @@ each axis. The y axis runs upwards, with cell 0 at the south edge.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
-#: Web Mercator's square, in metres: the HoloViz OSM file's coordinates.
-HALF = 20037508.342789244
-EXTENT = (-HALF, HALF, -HALF, HALF)  # x_min, x_max, y_min, y_max
+#: The square every system quantises over, as `(x_min, x_max, y_min, y_max)`: fixed once by
+#: `prepare.py` from the full source's bounds and recorded in the committed manifest.
+EXTENT = tuple(json.loads((Path(__file__).with_name("tiers-manifest.json")).read_text()).get(
+    "extent", (0.0, 1.0, 0.0, 1.0)))
 FIXED_SPAN = 4294967296.0
 
 SCREEN = (1920, 1080)
@@ -36,8 +39,18 @@ GRID_OFFSET = 8
 MAX_DEPTH = 16
 #: The most positions a sparse tile has, and the most any tile may send.
 K = 500
-#: The values of the synthetic `band` attribute (see prepare.py).
-BANDS = ("A", "B", "C", "D", "E")
+#: The work types of the PaperSeek vocabulary, the values a `type` filter may name.
+TYPES = ("article", "book", "book-chapter", "dataset", "dissertation", "editorial", "erratum",
+         "grant", "letter", "libguides", "other", "paratext", "peer-review", "preprint",
+         "reference-entry", "report", "retraction", "review", "standard", "supplementary-materials")
+#: The licence terms, which are the access terms: every row carries exactly one.
+LICENCES = ("unlicensed", "cc-by", "cc-by-nc-nd", "cc-by-nc", "other-oa", "cc-by-sa", "cc-by-nc-sa",
+            "public-domain", "cc-by-nd", "publisher-specific-oa", "mit")
+#: The `publication_year` histogram of the aggregation workload: one-year bins over
+#: `[YEAR_BINS[0], YEAR_BINS[1])`. A year outside it is counted as `rest`, no year as `none`.
+YEAR_BINS = (1900, 2030)
+#: The most types the `type` table lists, which is every one.
+TYPE_TOP = 20
 
 
 def fixed32(v: float, lo: float = EXTENT[0], hi: float = EXTENT[1]) -> int:
@@ -126,10 +139,16 @@ class Camera:
         return [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)]
 
 
+def is_year(v) -> bool:
+    return type(v) is int and -(2**31) <= v < 2**31
+
+
 @dataclass
 class Filter:
-    """A conjunction of leaves, each `{"col", "op", "value"}`: `eq` on `band`, `lt` on `num`, or
-    `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every side after quantisation."""
+    """A conjunction of leaves, each `{"col", "op", "value"}`: `eq` on `type` (a value of `TYPES`)
+    or on `is_oa` (a bool), `range` on `publication_year` (`{"gte": y}`, `{"lt": y}` or both, a
+    null year matching neither), or `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every
+    side after quantisation."""
 
     leaves: list[dict] = field(default_factory=list)
     label: str = "none"
@@ -138,15 +157,19 @@ class Filter:
         """Refuse a leaf outside that grammar, since adapters write its values into SQL."""
         for leaf in self.leaves:
             op, col, value = leaf.get("op"), leaf.get("col"), leaf.get("value")
-            if op == "eq" and col == "band" and value in BANDS:
+            if op == "eq" and col == "type" and value in TYPES:
                 continue
-            if op == "lt" and col == "num" and type(value) is int and 0 <= value <= 65536:
+            if op == "eq" and col == "is_oa" and type(value) is bool:
+                continue
+            if (op == "range" and col == "publication_year" and isinstance(value, dict) and value
+                    and set(value) <= {"gte", "lt"} and all(is_year(v) for v in value.values())):
                 continue
             if (op == "bbox" and col is None and isinstance(value, list) and len(value) == 4
                     and all(type(v) in (int, float) and math.isfinite(v) for v in value)):
                 continue
-            raise ValueError(f"filter leaf {leaf!r} is not one this harness takes; write "
-                             f"band eq one of {BANDS}, num lt an integer, or bbox four numbers")
+            raise ValueError(f"filter leaf {leaf!r} is not one this harness takes; write type eq "
+                             f"one of TYPES, is_oa eq a bool, publication_year range with gte "
+                             f"and lt integers, or bbox four numbers")
 
 
 @dataclass
