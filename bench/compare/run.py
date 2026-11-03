@@ -364,15 +364,19 @@ def main() -> None:
                                         "otherwise untouched"}
         errors["timed"] = check.record()
         record["errors"] = errors
+    except BaseException:
+        print(f"[{adapter.name}] failed; its work directory is kept at {adapter.work}",
+              file=sys.stderr, flush=True)
+        raise
     finally:
         adapter.stop()
         adapter.remove()
-        shutil.rmtree(adapter.work)
     record["load_after"] = os.getloadavg()
     record["finished_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("a") as f:
         f.write(json.dumps(record) + "\n")
+    shutil.rmtree(adapter.work)
     print(json.dumps({k: record.get(k) for k in ("system", "build", "warm", "serve_memory", "session_start")}, indent=1))
     print(json.dumps({w: {k: v for k, v in e.items() if k != "worst"} for w, e in errors.items()}, indent=1))
 

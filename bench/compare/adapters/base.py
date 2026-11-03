@@ -110,12 +110,16 @@ def evict_files(root: Path) -> int:
 
 def fsync_tree(root: Path, skip: set[Path] = frozenset()) -> int:
     """Flush every file and directory under `root` to disc, leaving out the trees in `skip`.
-    Returns the entries flushed; a file that cannot be opened is an error."""
+    Returns the entries flushed. A running server may delete a file between the listing and its
+    opening, which skips it; any other failure to open is an error."""
     n = 0
     for dirpath, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if Path(dirpath, d) not in skip]
         for path in [*(os.path.join(dirpath, f) for f in files), dirpath]:
-            fd = os.open(path, os.O_RDONLY)
+            try:
+                fd = os.open(path, os.O_RDONLY)
+            except FileNotFoundError:
+                continue
             try:
                 os.fsync(fd)
                 n += 1

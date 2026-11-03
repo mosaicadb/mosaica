@@ -7,8 +7,9 @@ bits); and an index of one shard and no replicas with `_source` disabled: `qx`, 
 `long`, `licence` and `type` as `keyword`, `publication_year` as `integer` and `is_oa` as
 `boolean`, each with doc values. Worker processes read the tier's Parquet and send it through the
 pipeline in bulk requests while the index does not refresh; the index is then refreshed,
-force-merged to one segment, given back its default refresh interval and flushed, and every file
-in its data directory synced. All of that is timed.
+force-merged to at most six segments, given back its default refresh interval and flushed, and
+every file in its data directory synced. All of that is timed. The index is sorted by `m16`, so a
+tile's documents are adjacent, as they are in ClickHouse's table and PostGIS's.
 
 A frame is two searches sent at once with `size: 0`, each filtered to the camera's tiles by two
 ranges and to the filter by its terms and ranges: the count grid as a `histogram` on `m16` at
@@ -16,8 +17,8 @@ interval `4^(16 - grid_depth)`, whose bucket keys are the cells' Morton codes, a
 the same histogram at interval `4^(16 - zoom)`, each tile holding a `top_hits` of K positions read
 from doc values and a `bucket_selector` that keeps only the tiles of at most K. Histogram counts
 are exact: a document falls in the bucket `floor(value / interval)`, exact in double precision for
-a power-of-two interval and a value below 2^53, and with one shard nothing is merged from shards
-that each kept only their top buckets. Nested histograms on `qx` and `qy`, in one search or two,
+a power-of-two interval and a value below 2^53, and a histogram's buckets are merged whole across
+shards and segments. Nested histograms on `qx` and `qy`, in one search or two,
 and a `composite` grid were exact too and slower; the README gives the figures.
 
 The aggregation workload is one search with a `terms` aggregation on `type` (every type, a missing
@@ -36,6 +37,7 @@ the viewer's searches.
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import secrets
 import subprocess
@@ -50,7 +52,7 @@ import urllib3
 
 from frame import (EXTENT, K, MAX_DEPTH, TYPES, YEAR_BINS, Camera, Filter, Frame, deinterleave,
                    fixed32, grid_depth, points_by_tile)
-from oracle import VIEWER
+from oracle import VIEWER, Oracle
 
 from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
@@ -69,6 +71,14 @@ MAX_BUCKETS = 1 << 21
 #: Bulk requests of this many documents (about 7 MB), from this many client processes.
 BULK_DOCS = 50_000
 BULK_CLIENTS = 6
+#: The index's layout: its shards, the most segments each is force-merged to, and whether its
+#: documents are sorted by `m16`. Several segments let concurrent segment search, in its default
+#: `auto` mode, run one search on several threads.
+SHARDS = 1
+SEGMENTS = 6
+SORT = True
+#: Node settings written at the build, which persist in the cluster state.
+CLUSTER = {"search.max_buckets": MAX_BUCKETS}
 #: The two result caches, off for the compute figures. Both are static index settings.
 COMPUTE_CACHES = {"index.requests.cache.enable": False, "index.queries.cache.enabled": False}
 #: The settings of the caches a search can meet; the rest of what `include_defaults` lists with
@@ -167,9 +177,10 @@ def tables_request(camera: Camera, filt: Filter | None) -> dict:
         "none": {"missing": {"field": "publication_year"}}}}
 
 
-def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> int:
+def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> tuple[int, float]:
     """Send the tier's row groups `groups` through the pipeline in bulk requests. Runs in a worker
-    process."""
+    process, and returns the documents sent and the CPU seconds the process spent sending them."""
+    cpu = time.process_time()
     head = json.dumps({"index": {"_index": INDEX}})
     columns = ["x", "y", "licence", "publication_year", "type", "is_oa"]
     sent = 0
@@ -188,7 +199,7 @@ def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> 
                 item = next((i for i in (body or {}).get("items", []) if "error" in i["index"]), None)
                 raise RuntimeError(f"bulk load failed: {r.status_code} {item or r.text[:800]}")
             sent += len(body["items"])
-    return sent
+    return sent, time.process_time() - cpu
 
 
 class OpenSearch(Adapter):
@@ -208,7 +219,7 @@ class OpenSearch(Adapter):
         # The security plugin refuses a weak initial admin password.
         self.admin_auth = ("admin", "Aa1!" + secrets.token_hex(16))
         self.viewer_auth = (VIEWER_USER, "Vv1!" + secrets.token_hex(16))
-        self.admin = self._session(self.admin_auth)
+        self.admin: requests.Session | None = None
         self.viewers: list[requests.Session] = []
         self.pool = ThreadPoolExecutor(2)
         self.access_checks: dict = {}
@@ -239,6 +250,7 @@ class OpenSearch(Adapter):
         """Start the container, ready once the admin's search of the index answers, or before the
         index exists, once the admin is authenticated. The viewer's first authentication and the
         resolution of its role fall in its first search, after `connect`."""
+        self.admin = self._session(self.admin_auth)
         self.container.start()
         wait_for(self._ready, 600, f"OpenSearch answering; see {self.logs}")
 
@@ -264,7 +276,9 @@ class OpenSearch(Adapter):
         for s in self.viewers:
             s.close()
         self.viewers = []
-        self.admin.close()
+        if self.admin is not None:
+            self.admin.close()
+            self.admin = None
         self.container.stop()
 
     def remove(self) -> None:
@@ -299,6 +313,7 @@ class OpenSearch(Adapter):
                  "thread_pool.search.size", "node.processors", "http.compression")
         node = {**cluster["defaults"], **cluster["persistent"]}
         return {"caches": self.caches, "heap": HEAP, "container_memory": MEMORY,
+                "shards": SHARDS, "segments": SEGMENTS, "index_sorted": SORT, "cluster": CLUSTER,
                 "index_settings": index["settings"],
                 "index_cache_settings": cache(index["defaults"]),
                 "cluster_settings": cluster["persistent"],
@@ -316,21 +331,23 @@ class OpenSearch(Adapter):
         subprocess.run(["rm", "-rf", str(self.data), str(self.logs)], check=True)
         self._create(self.nice)
         self.start()
-        self.call("PUT", "/_cluster/settings", {"persistent": {"search.max_buckets": MAX_BUCKETS}})
-        settings = {"index.number_of_shards": 1, "index.number_of_replicas": 0,
+        self.call("PUT", "/_cluster/settings", {"persistent": CLUSTER})
+        settings = {"index.number_of_shards": SHARDS, "index.number_of_replicas": 0,
                     "index.refresh_interval": "-1", "index.max_inner_result_window": K,
+                    **({"index.sort.field": "m16", "index.sort.order": "asc"} if SORT else {}),
                     **(COMPUTE_CACHES if self.caches == "compute" else {})}
         groups = list(range(pq.ParquetFile(self.tier).metadata.num_row_groups))
         t0 = time.monotonic()
         self.call("PUT", f"/_ingest/pipeline/{PIPELINE}", PIPELINE_BODY)
         self.call("PUT", f"/{INDEX}", {"settings": settings, "mappings": MAPPING})
-        with ProcessPoolExecutor(BULK_CLIENTS, initializer=os.nice, initargs=(self.nice,)) as pool:
+        with ProcessPoolExecutor(BULK_CLIENTS, mp_context=multiprocessing.get_context("forkserver"),
+                                 initializer=os.nice, initargs=(self.nice,)) as pool:
             parts = [pool.submit(load_part, self.url, str(self.tier), groups[i::BULK_CLIENTS], self.admin_auth)
                      for i in range(BULK_CLIENTS)]
-            sent = sum(p.result() for p in parts)
+            sent, clients_cpu = (sum(v) for v in zip(*(p.result() for p in parts)))
         t_load = time.monotonic() - t0
         self.call("POST", f"/{INDEX}/_refresh")
-        self.call("POST", f"/{INDEX}/_forcemerge", max_num_segments=1)
+        self.call("POST", f"/{INDEX}/_forcemerge", max_num_segments=SEGMENTS)
         self.call("PUT", f"/{INDEX}/_settings", {"index.refresh_interval": None})
         self.call("POST", f"/{INDEX}/_flush", wait_if_ongoing="true", force="true")
         fsync_tree(self.data)
@@ -338,17 +355,19 @@ class OpenSearch(Adapter):
         self.index_made = True
         mem = self.serve_memory()
         rows = self.call("GET", f"/{INDEX}/_count")["count"]
-        segments = self.call("GET", f"/{INDEX}/_segments")["indices"][INDEX]["shards"]["0"][0]["segments"]
+        shards = self.call("GET", f"/{INDEX}/_segments")["indices"][INDEX]["shards"].values()
+        segments = [len(copy["segments"]) for copies in shards for copy in copies]
         self._make_viewer()
         self.access_checks = self._check_access(rows)
         disk = du_bytes(self.data)
         index_bytes = self.call("GET", f"/{INDEX}/_stats/store")["indices"][INDEX]["primaries"]["store"]["size_in_bytes"]
         self.stop()
         self._create()
-        return {"build_s": build_s, "load_s": t_load, **mem, "disk_bytes": disk,
+        return {"build_s": build_s, "load_s": t_load, "bulk_clients_cpu_s": clients_cpu, **mem, "disk_bytes": disk,
                 "disk": "du of the data directory, which holds the security index too",
                 "index_bytes": index_bytes, "rows": rows, "rows_sent": sent,
-                "segments": len(segments), "nice": self.nice,
+                "shards": SHARDS, "segments_per_shard": segments, "index_sorted": SORT,
+                "nice": self.nice,
                 "boundary": "from creating the pipeline and the index to the end of refresh, "
                             "force-merge, flush and an fsync of every file and directory in the "
                             "data directory, on a running server; the bulk clients run on the host"}
@@ -384,8 +403,9 @@ class OpenSearch(Adapter):
         out["request_cache_admin"] = rc(before, mid)
         out["request_cache_viewer"] = rc(mid, after)
         out["query_cache_after"] = {k: after["query_cache"][k] for k in ("hit_count", "miss_count", "cache_count")}
+        out["oracle_visible_rows"] = Oracle(str(self.tier)).visible()[0]
         out["dls_holds"] = (out["viewer_agg_rows"] == [out["admin_terms_rows"]] * 2
-                            and out["admin_agg_rows"] == [rows] * 2)
+                            == [out["oracle_visible_rows"]] * 2 and out["admin_agg_rows"] == [rows] * 2)
         if not out["dls_holds"]:
             raise RuntimeError(f"the viewer's aggregation is not restricted to its terms: {out}")
         return out
