@@ -125,8 +125,11 @@ quantised space, which carries the GiST index PostGIS's documentation recommends
 clusters the table on that index, runs `VACUUM ANALYZE`, a `CHECKPOINT` and an `fsync` of the data
 directory, and its time runs from the `CREATE TABLE` to the end of the `fsync`; `initdb`, which
 the image runs at the container's first start, is the server's setup and falls outside it, as
-ClickHouse's start does. The loader runs in the harness's process, in a thread at the build's
-niceness, so the build's cgroup peak is the server's alone. Every query selects the camera's tiles
+ClickHouse's start does. Size on disk is the whole data directory by `du`: at 10⁶, 110 MiB of
+table and 40 MiB of index, beside about 240 MiB of WAL segments the server keeps for reuse and the
+template databases; each record gives the table's, the index's and the WAL's sizes. The loader
+runs in the harness's process, in a thread at the build's niceness, so the build's cgroup peak is
+the server's alone. Every query selects the camera's tiles
 with `geom && ST_MakeEnvelope(...)` and the same bounds on `qx` and `qy`, because PostGIS compares
 boxes in single precision, rounded outwards, and `&&` alone admits points just outside a tile.
 Server start ends when the superuser's `SELECT 1 FROM points LIMIT 1` answers; session start holds
@@ -139,15 +142,15 @@ setting is in `SETTINGS` and each record lists them with the server's values:
 |---|---|---|---|
 | `shared_buffers` | 4 GB | 128 MB | A quarter of the memory, the documentation's starting point |
 | `effective_cache_size` | 12 GB | 4 GB | `shared_buffers` and the page cache the cap leaves |
-| `work_mem` | 64 MB | 4 MB | Each sort and hash a query runs may use it; the largest grid has 65,536 cells a tile |
+| `work_mem` | 64 MB | 4 MB | Each sort and hash in a query may use this much; at 10⁶ the largest grid's hash table took about 20 MB, which the default would spill to disc |
 | `max_worker_processes`, `max_parallel_workers` | 12, the machine's CPUs | 8 | Parallel query may use every CPU |
 | `max_parallel_workers_per_gather` | 6 | 2 | Half the CPUs, since a frame sends two queries at once |
 | `jit` | off | on | JIT pays for long CPU-bound queries and costs more than it saves on short ones, which a frame's are |
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
 
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
-`wal_level = minimal` and `max_wal_senders = 0`, so the `COPY` into a table created in its
-transaction, the index build and `CLUSTER` write no WAL; `maintenance_work_mem = 2GB`; and
+`wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` into a table created in its
+transaction, the index build and `CLUSTER` may skip the WAL; `maintenance_work_mem = 2GB`; and
 `max_wal_size = 16GB` (`BULK`). The serving server runs without them. `/dev/shm` is 2 GB, since
 the image's documentation warns that Docker's 64 MB may be too small for parallel query.
 
@@ -157,9 +160,9 @@ and forces row-level security on it, and creates a policy `FOR SELECT TO viewer 
 applies the policy to the table's owner too; a superuser bypasses it regardless. **Under the policy
 the GiST index is never used.** PostgreSQL evaluates a policy's condition before any condition of
 the query that is not marked leakproof, and will not use such a condition to scan an index.
-PostGIS marks none of its functions leakproof, `&&` included, while PostgreSQL's own comparisons of
-integers and text are. Every viewer query therefore scans the whole table, in parallel, with the
-leakproof bounds on `qx` and `qy` evaluated first; `EXPLAIN` shows it, and each record keeps the
+PostGIS 3.6.4 marks none of its 776 functions leakproof, `&&` included, while PostgreSQL's own
+comparisons of integers and text are. Every viewer query therefore scans the whole table, in
+parallel where the planner chooses to, with the leakproof bounds on `qx` and `qy` evaluated first; `EXPLAIN` shows it, and each record keeps the
 plan of the whole map's grid and whether `&&` is leakproof. The superuser's identical query uses
 the index. Marking the operator's function leakproof (`ALTER FUNCTION geometry_overlaps(geometry,
 geometry) LEAKPROOF`, a superuser's assertion that it reveals nothing about its arguments) lets the

@@ -176,7 +176,8 @@ class Container:
         subprocess.run(["docker", "stop", "-t", "60", self.name], capture_output=True)
 
     def remove(self) -> None:
-        subprocess.run(["docker", "rm", "-f", self.name], capture_output=True)
+        """Remove the container and the anonymous volumes its image declares."""
+        subprocess.run(["docker", "rm", "-f", "-v", self.name], capture_output=True)
 
     def cgroup(self) -> Path:
         cid = subprocess.run(["docker", "inspect", "-f", "{{.Id}}", self.name],
