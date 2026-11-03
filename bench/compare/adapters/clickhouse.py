@@ -38,7 +38,8 @@ from frame import (EXTENT, K, YEAR_BINS, Camera, Filter, Frame, deinterleave, gr
                    points_by_tile)
 from oracle import VIEWER
 
-from .base import MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, wait_for
+from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree,
+                   wait_for)
 
 IMAGE = "clickhouse/clickhouse-server:26.8.34.13"
 IMAGE_DIGEST = "sha256:8b28eb09479c36c4533eec7a6268917d04ba3a6fd90e3f4205f70e761b6d7779"
@@ -115,7 +116,7 @@ class ClickHouse(Adapter):
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
         super().__init__(tier, work, nice, caches)
         self.settings = COMPUTE_CACHES if caches == "compute" else {}
-        self.viewer_made = False
+        self.table_made = False
         self.container = Container(f"bench-compare-ch-{os.getpid()}")
         self.data = self.work / "ch-data"
         self.pool = ThreadPoolExecutor(2)
@@ -146,17 +147,18 @@ class ClickHouse(Adapter):
             })
 
     def start(self) -> None:
-        """Start the container, ready once the viewer can read the table, or before the table
-        exists, once the server answers `/ping`."""
+        """Start the container, ready once the default user's query against the table answers,
+        or before the table exists, once the server answers `/ping`. The viewer's first
+        authentication and access check fall in its first query, after `connect`."""
         self.container.start()
-        wait_for(self._ready, 120, f"ClickHouse answering; see {self.work / 'ch-logs'}")
+        wait_for(self._ready, 600, f"ClickHouse answering; see {self.work / 'ch-logs'}")
 
     def _ready(self) -> bool:
         try:
-            if not self.viewer_made:
-                return requests.get(f"http://127.0.0.1:{PORT}/ping", timeout=1).ok
-            return requests.post(f"http://127.0.0.1:{PORT}/", data=b"SELECT 1 FROM points LIMIT 1",
-                                 headers=self._viewer_headers(), timeout=1).ok
+            if not self.table_made:
+                return requests.get(f"http://127.0.0.1:{PORT}/ping", timeout=60).ok
+            return self.admin.post(f"http://127.0.0.1:{PORT}/", data=b"SELECT 1 FROM points LIMIT 1",
+                                   timeout=60).ok
         except requests.RequestException:
             return False
 
@@ -207,30 +209,38 @@ class ClickHouse(Adapter):
                             + ", ".join(f"'{n}'" for n in names) + ") FORMAT TSV").decode()
         granularity = self.sql("SELECT value FROM system.merge_tree_settings "
                                "WHERE name = 'index_granularity'").decode().strip()
+        caches = self.sql("SELECT name, value FROM system.settings WHERE name ILIKE '%cache%' "
+                          "FORMAT TSV").decode()
+        server = self.sql("SELECT name, value FROM system.server_settings WHERE name ILIKE '%cache%' "
+                          "FORMAT TSV").decode()
+        tsv = lambda t: dict(l.split("\t", 1) for l in t.splitlines())
         return {"ddl": DDL, "optimize_final": True, "system_logs": "off", "caches": self.caches,
+                "cache_settings": tsv(caches), "server_cache_settings": tsv(server),
                 "query_settings": self.settings, "index_granularity": granularity,
                 "row_policy": self.sql("SHOW CREATE ROW POLICY viewer_terms ON default.points").decode().strip(),
-                "container_memory": MEMORY, "settings": dict(l.split("\t") for l in settings.splitlines())}
+                "container_memory": MEMORY, "settings": tsv(settings)}
 
     def build(self) -> dict:
         self.remove()
-        self.viewer_made = False
+        self.table_made = False
         subprocess.run(["rm", "-rf", str(self.data), str(self.work / "ch-logs")], check=True)
         self._create(self.nice)
         self.start()
         if self.sql("SELECT mortonEncode(toUInt32(1), toUInt32(0))").strip() != b"1":
             raise RuntimeError("mortonEncode does not put its first argument on the even bits")
+        columns = "licence, publication_year, type, is_oa"
         src = (f"file('tiers/{self.tier.name}', Parquet, 'x Float64, y Float64, licence String, "
                f"publication_year Nullable(Int32), type Nullable(String), is_oa Nullable(Bool)')")
+        quantised = (f"SELECT {quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
+                     f"{quantise('y', EXTENT[2], EXTENT[3])} AS qy, {columns} FROM {src}")
         t0 = time.monotonic()
         self.sql(DDL)
-        self.sql(f"INSERT INTO points SELECT mortonEncode(qx, qy) AS m, qx, qy, licence, "
-                 f"publication_year, type, is_oa FROM ("
-                 f"SELECT {quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
-                 f"{quantise('y', EXTENT[2], EXTENT[3])} AS qy, licence, publication_year, type, is_oa "
-                 f"FROM {src})")
+        self.sql(f"INSERT INTO points SELECT mortonEncode(qx, qy) AS m, qx, qy, {columns} "
+                 f"FROM ({quantised})")
         self.sql("OPTIMIZE TABLE points FINAL")
+        fsync_tree(self.data)
         build_s = time.monotonic() - t0
+        self.table_made = True
         mem = self.serve_memory()
         table_bytes = int(self.sql("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND table = 'points'"))
         rows = int(self.sql("SELECT count() FROM points"))
@@ -239,13 +249,13 @@ class ClickHouse(Adapter):
         self.sql(f"GRANT SELECT ON default.points TO {VIEWER_USER}")
         self.sql(f"CREATE ROW POLICY viewer_terms ON default.points FOR SELECT "
                  f"USING licence IN ({terms}) AS permissive TO {VIEWER_USER}")
-        self.viewer_made = True
         disk = du_bytes(self.data)
         self.stop()
         self._create()
         return {"build_s": build_s, **mem, "disk_bytes": disk, "disk": "du of the data directory",
                 "table_bytes": table_bytes, "rows": rows, "nice": self.nice,
-                "boundary": "from the CREATE TABLE to the end of OPTIMIZE, on a running server"}
+                "boundary": "from the CREATE TABLE to the end of OPTIMIZE and an fsync of every "
+                            "file in the data directory, on a running server"}
 
     # -- a frame -----------------------------------------------------------------------------------
 

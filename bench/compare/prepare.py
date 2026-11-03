@@ -29,6 +29,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -159,6 +161,10 @@ def main() -> None:
     committed_path = HERE / "tiers-manifest.json"
     committed = json.loads(committed_path.read_text()) if committed_path.exists() else {}
     extent = square_extent(source)
+    # Recorded from the checkout that holds `data/`, which a worktree shares with the main one.
+    common = Path(subprocess.run(["git", "-C", str(HERE), "rev-parse", "--path-format=absolute",
+                                  "--git-common-dir"], capture_output=True, text=True,
+                                 check=True).stdout.strip()).parent
     if committed.get("extent") not in (None, extent):
         sys.exit(f"the source's bounds give the extent {extent}, not the committed "
                  f"{committed['extent']}: the source has changed")
@@ -168,8 +174,7 @@ def main() -> None:
     derived = derive(source, args.data / "tiers", tiers, extent)
     manifest = {
         "source": {
-            "path": str(args.source.resolve().relative_to(REPO)) if args.source.resolve().is_relative_to(REPO)
-                    else str(args.source),
+            "path": os.path.relpath(args.source.resolve(), common),
             "bytes": args.source.stat().st_size,
             "rows": SOURCE_ROWS,
             "columns": COLUMNS,

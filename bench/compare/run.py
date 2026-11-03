@@ -40,9 +40,10 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pyarrow
+import requests
 
 from frame import EXTENT, GRID_OFFSET, K, SCREEN, TILE_PX, TYPE_TOP, YEAR_BINS, Camera, Filter
-from oracle import VIEWER, Oracle, compare, compare_tables
+from oracle import COUNT_ERRORS, POINT_ERRORS, VIEWER, Oracle, compare, compare_tables
 from prepare import sha256
 
 HERE = Path(__file__).resolve().parent
@@ -96,7 +97,60 @@ def steps_of(cameras: dict, workload: str) -> list[tuple[Camera, Filter | None]]
     return out
 
 
-def session_start(adapter, repeats: int) -> dict:
+def step_key(camera: Camera, filt: Filter | None) -> str:
+    return repr((camera.zoom, camera.cx, camera.cy, filt.leaves if filt else None))
+
+
+class TimedCheck:
+    """Every timed response compared with the oracle's memoised answer on its cheap parts: each
+    tile's count, the count grid, and the number of points from each sparse tile, and for the
+    aggregation each table. A part the untimed check found wrong for that step is already in its
+    errors, so a timed response is a mismatch only where it differs in a part that was right."""
+
+    def __init__(self, oracle: Oracle):
+        self.oracle = oracle
+        self.right: dict[str, dict[str, bool]] = {}
+        self.counts = {"frames": 0, "frames_mismatched": 0, "tables": 0, "tables_mismatched": 0}
+        self.examples: list[str] = []
+
+    def parts(self, camera: Camera, filt: Filter | None, got) -> dict[str, bool]:
+        truth = self.oracle.frame(camera, filt)
+        return {"tiles": got.tiles == truth.tiles,
+                "grid": {c: n for c, n in got.grid.items() if n} == truth.grid,
+                "points": all(len(got.points.get(t, ())) == n for t, n in truth.tiles.items() if n <= K)}
+
+    def learn(self, camera: Camera, filt: Filter | None, got) -> None:
+        self.right[step_key(camera, filt)] = self.parts(camera, filt, got)
+
+    def learn_tables(self, camera: Camera, filt: Filter | None, exact: bool) -> None:
+        self.right[step_key(camera, filt) + "/tables"] = {"tables": exact}
+
+    def frame(self, camera: Camera, filt: Filter | None, got) -> None:
+        right = self.right.get(step_key(camera, filt))
+        if right is None:
+            right = {"tiles": True, "grid": True, "points": True}
+        now = self.parts(camera, filt, got)
+        self.counts["frames"] += 1
+        wrong = [p for p, ok in now.items() if right[p] and not ok]
+        if wrong:
+            self.counts["frames_mismatched"] += 1
+            self.examples.append(f"{camera.label}/{filt.label if filt else 'none'}: {', '.join(wrong)}")
+
+    def tables(self, camera: Camera, filt: Filter | None, got: dict) -> None:
+        truth = self.oracle.tables(camera, filt)
+        self.counts["tables"] += 2
+        if not self.right[step_key(camera, filt) + "/tables"]["tables"]:
+            return
+        bad = sum(1 for n in truth if {k: v for k, v in got.get(n, {}).items() if v} != truth[n])
+        if bad:
+            self.counts["tables_mismatched"] += bad
+            self.examples.append(f"{camera.label}/{filt.label}: tables")
+
+    def record(self) -> dict:
+        return {**self.counts, "examples": self.examples[:10]}
+
+
+def session_start(adapter, repeats: int, check: TimedCheck) -> dict:
     """Warm and cold, two figures from a stopped server: `server`, from starting it to its
     answering the viewer's queries, and `session`, from opening the viewer's session or
     connections to the end of its first whole-map frame, which for Mosaica includes building the
@@ -113,9 +167,10 @@ def session_start(adapter, repeats: int) -> dict:
             adapter.start()
             t1 = time.perf_counter()
             adapter.connect()
-            adapter.frame(whole, None)
+            got, _ = adapter.frame(whole, None)
             server.append(t1 - t0)
             session.append(time.perf_counter() - t1)
+            check.frame(whole, None, got)
         out[mode] = {"server": summarise(server), "session": summarise(session)}
     return out
 
@@ -184,7 +239,7 @@ def main() -> None:
         "cameras": args.cameras.name,
         "cameras_sha256": sha256(args.cameras),
         "packages": {"duckdb": duckdb.__version__, "pyarrow": pyarrow.__version__,
-                     "numpy": np.__version__},
+                     "numpy": np.__version__, "requests": requests.__version__},
         "frame": {"screen": SCREEN, "tile_px": TILE_PX, "grid_offset": GRID_OFFSET, "k": K},
         "hardware": hardware(),
         "load_before": load_before,
@@ -205,6 +260,7 @@ def main() -> None:
 
         print(f"[{adapter.name}] checking against the oracle", file=sys.stderr, flush=True)
         errors = {}
+        check = TimedCheck(oracle)
         for w, steps in workloads.items():
             per = []
             for camera, filt in steps:
@@ -212,27 +268,23 @@ def main() -> None:
                 truth = oracle.frame(camera, filt)
                 cmp = compare(got, truth, camera)
                 cmp["dense_points_invalid"] = oracle.dense_invalid(camera, filt, got, truth)
+                check.learn(camera, filt, got)
                 cmp["label"] = camera.label + (f"/{filt.label}" if filt else "")
                 cmp["bytes"] = got.bytes
                 per.append(cmp)
             errors[w] = {
                 "frames": len(per),
-                "frames_exact": sum(1 for c in per if not (c["tile_abs_err"] or c["grid_abs_err"]
-                                                        or c["sparse_points_missing"] or c["sparse_points_extra"]
-                                                        or c["points_outside_tile"]
-                                                        or c["dense_points_invalid"])),
+                "frames_exact": sum(1 for c in per if not any(c[k] for k in COUNT_ERRORS + POINT_ERRORS)),
                 **{k: int(sum(c[k] for c in per)) for k in (
-                    "matched_true", "tile_abs_err", "grid_abs_err", "grid_cells_wrong", "grid_cells_true",
-                    "sparse_points_missing", "sparse_points_extra", "points_outside_tile", "points_dense",
-                    "dense_points_invalid",
-                    "points_sent", "bytes")},
-                "worst": sorted(per, key=lambda c: -(c["tile_abs_err"] + c["grid_abs_err"] + c["dense_points_invalid"]
-                                                     + c["sparse_points_missing"]))[:3],
+                    "matched_true", *COUNT_ERRORS, *POINT_ERRORS, "grid_cells_wrong", "grid_cells_true",
+                    "points_dense", "points_sent", "bytes")},
+                "worst": sorted(per, key=lambda c: -sum(c[k] for k in COUNT_ERRORS + POINT_ERRORS))[:3],
             }
         per = []
         for camera, filt in workloads["filters"]:
             got, _ = adapter.tables(camera, filt)
             cmp = compare_tables(got, oracle.tables(camera, filt))
+            check.learn_tables(camera, filt, not (cmp["type_abs_err"] or cmp["year_abs_err"]))
             cmp["label"] = camera.label + f"/{filt.label}"
             per.append(cmp)
         keys = [k for k in per[0] if k != "label"]
@@ -249,7 +301,8 @@ def main() -> None:
         for _ in range(args.repeats):
             for w, steps in workloads.items():
                 for camera, filt in steps:
-                    _, t = adapter.frame(camera, filt)
+                    got, t = adapter.frame(camera, filt)
+                    check.frame(camera, filt, got)
                     warm[w].append(t)
                     if w == "battery":
                         by_zoom.setdefault(camera.zoom, []).append(t)
@@ -259,7 +312,9 @@ def main() -> None:
         agg = []
         for _ in range(args.repeats):
             for camera, filt in workloads["filters"]:
-                agg.append(adapter.tables(camera, filt)[1])
+                got, t = adapter.tables(camera, filt)
+                check.tables(camera, filt, got)
+                agg.append(t)
         record["warm"]["aggregation"] = summarise(agg)
         # Read before any restart: each restart starts the server in a new cgroup.
         record["serve_memory"] = adapter.serve_memory()
@@ -267,17 +322,21 @@ def main() -> None:
 
         if not args.no_cold:
             print(f"[{adapter.name}] session start", file=sys.stderr, flush=True)
-            record["session_start"] = session_start(adapter, args.repeats)
+            record["session_start"] = session_start(adapter, args.repeats, check)
             print(f"[{adapter.name}] cold runs", file=sys.stderr, flush=True)
             cold = []
             for camera, filt in workloads["battery"]:
                 adapter.restart(cold=True)
-                _, t = adapter.frame(camera, filt)
+                got, t = adapter.frame(camera, filt)
+                check.frame(camera, filt, got)
                 cold.append(t)
+            # After the last cold restart and its one frame: the server's own pages, read again.
+            record["serve_memory_after_cold"] = adapter.serve_memory()
             record["cold"] = {"battery": summarise(cold),
                               "method": "server restarted, own caches deleted, own files' pages "
                                         "dropped with posix_fadvise; the machine's page cache "
                                         "otherwise untouched"}
+        errors["timed"] = check.record()
         record["errors"] = errors
     finally:
         adapter.stop()

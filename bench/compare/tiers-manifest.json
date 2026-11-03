@@ -1,6 +1,6 @@
 {
   "source": {
-    "path": "/home/joe/code/tessera/data/ladder/paperseek/points.parquet",
+    "path": "data/ladder/paperseek/points.parquet",
     "bytes": 52225761595,
     "rows": 102117343,
     "columns": [

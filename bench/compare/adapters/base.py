@@ -106,6 +106,23 @@ def evict_files(root: Path) -> int:
     return n
 
 
+def fsync_tree(root: Path) -> int:
+    """Flush every file under `root` to disc. Returns the files flushed."""
+    n = 0
+    for dirpath, _, files in os.walk(root):
+        for name in files:
+            try:
+                fd = os.open(os.path.join(dirpath, name), os.O_RDONLY)
+            except OSError:
+                continue
+            try:
+                os.fsync(fd)
+                n += 1
+            finally:
+                os.close(fd)
+    return n
+
+
 def du_bytes(path: Path) -> int:
     out = subprocess.run(["du", "-sb", str(path)], capture_output=True, text=True, check=True)
     return int(out.stdout.split()[0])
@@ -126,11 +143,13 @@ class Container:
     def __init__(self, name: str):
         self.name = name
 
-    def create(self, image: str, *, entrypoint: str, args: list[str] = (), mounts: dict = {},
-               ports: dict = {}, env: dict = {}, nice: int = 0) -> None:
+    def create(self, image: str, *, entrypoint: str, args: tuple[str, ...] = (),
+               mounts: dict | None = None, ports: dict | None = None, env: dict | None = None,
+               nice: int = 0) -> None:
         """Create the container, replacing one of the same name. `mounts` maps a host path to a
         container path (suffix `:ro` for read-only), `ports` a host port on 127.0.0.1 to a
         container port. The entry point runs at niceness `nice`."""
+        mounts, ports, env = mounts or {}, ports or {}, env or {}
         check_tools(image)
         self.remove()
         subprocess.run([

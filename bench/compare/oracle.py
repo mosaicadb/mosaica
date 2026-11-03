@@ -21,6 +21,10 @@ from frame import (EXTENT, K, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed3
                    points_by_tile)
 
 VIEWER = json.loads(Path(__file__).with_name("viewer.json").read_text())
+#: The frame figures that count against an exact frame: the count errors, then the point errors.
+COUNT_ERRORS = ("tile_abs_err", "grid_abs_err")
+POINT_ERRORS = ("sparse_points_missing", "sparse_points_extra", "points_outside_tile",
+                "dense_points_invalid")
 
 
 def visible_sql() -> str:
@@ -68,6 +72,7 @@ class Oracle:
         self.con.execute(f"SET threads = {threads}")
         self.tier = tier_path
         self._cache: dict[str, Frame] = {}
+        self._tables: dict[str, dict] = {}
 
     def count(self, camera: Camera, filt: Filter | None) -> int:
         return int(self.con.execute(
@@ -134,6 +139,9 @@ class Oracle:
         tiles: `type`, each type's count and `none` for no type (every type is listed, since
         there are `TYPE_TOP` of them), and `year`, each one-year bin's count by its lower edge,
         `rest` for a year outside `YEAR_BINS` and `none` for no year. Zero counts are left out."""
+        key = repr((camera.zoom, camera.cx, camera.cy, filt.leaves if filt else None))
+        if key in self._tables:
+            return self._tables[key]
         w = where(camera, filt)
         src = f"read_parquet('{self.tier}')"
         types = self.con.execute(
@@ -144,7 +152,9 @@ class Oracle:
             f"WHEN publication_year < {lo} OR publication_year >= {hi} THEN 'rest' "
             f"ELSE publication_year::VARCHAR END, count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
         assert len(types) <= TYPE_TOP + 1
-        return {"type": {k: int(n) for k, n in types}, "year": {k: int(n) for k, n in years}}
+        out = {"type": {k: int(n) for k, n in types}, "year": {k: int(n) for k, n in years}}
+        self._tables[key] = out
+        return out
 
 
 def compare_tables(got: dict[str, dict[str, int]], truth: dict[str, dict[str, int]]) -> dict:
@@ -187,7 +197,7 @@ def compare(got: Frame, truth: Frame, camera: Camera) -> dict:
     for t, pts in got.points.items():
         if t not in wanted:
             outside += len(pts)
-    for t in set(truth.tiles) | set(got.points):
+    for t in (set(truth.tiles) | set(got.points)) & wanted:
         sent = got.points.get(t, none)
         if truth.tiles.get(t, 0) <= K:
             want = truth.points.get(t, none)

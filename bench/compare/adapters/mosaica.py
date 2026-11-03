@@ -63,15 +63,13 @@ SERVE = {
     "max_aggregate_cells": 20 << (2 * GRID_OFFSET),
     "aggregate_response_bytes": 256 << 20,
 }
-#: Every cache the server keeps between requests, at zero for the compute figures. The visibility
-#: masks Mosaica writes to its cache directory are not bounded by any of these, and are kept.
+#: The caches of request results and resolved filters, at zero for the compute figures. The
+#: caches of a session's or a grant's state (`row_projection_cache_bytes`, `fragment_cache_bytes`,
+#: `occupancy_cache_bytes`) stay at their defaults; README, "Caches", classifies each.
 COMPUTE_CACHES = {
     "region_cache_bytes": 0,
-    "row_projection_cache_bytes": 0,
-    "fragment_cache_bytes": 0,
     "masked_count_cache_bytes": 0,
     "figures_disk_bytes": 0,
-    "occupancy_cache_bytes": 0,
 }
 CORPUS = f"""
 [sources]
@@ -166,6 +164,12 @@ def tables_request(camera: Camera, filt: Filter | None) -> dict:
     ]}
 
 
+def cells(table) -> dict:
+    """A table of `cell` codes and their `count`, by (x, y)."""
+    gx, gy = deinterleave(table["cell"].to_numpy())
+    return dict(zip(zip(gx.tolist(), gy.tolist()), table["count"].to_numpy().tolist()))
+
+
 def split_frames(body: bytes):
     off, frames = 0, []
     while off < len(body):
@@ -206,9 +210,28 @@ class Mosaica(Adapter):
                 "docker": docker_info()}
 
     def config(self) -> dict:
-        return {"serve": self._serve(), "caches": self.caches, "corpus": CORPUS, "point_rows": [], "grid": self.grid,
-                "container_memory": MEMORY, "region_answers": sorted(self.regions),
+        cpus = os.cpu_count()
+        return {"serve": self._serve(), "caches": self.caches, "corpus": CORPUS, "point_rows": [],
+                "grid": self.grid, "container_memory": MEMORY, "container_cpus": cpus,
+                # Left at their defaults, which derive from the CPUs the container may use.
+                "serve_defaults": {"compute_threads": cpus, "compute_admission": 4 * cpus,
+                                   "compute_queue": 8 * cpus, "artifact_admission": cpus,
+                                   "admission_timeout_ms": 250, "bulk_admission": 2,
+                                   "row_projection_cache_bytes": 2 << 30,
+                                   "fragment_cache_bytes": 1 << 30,
+                                   "occupancy_cache_bytes": 32 << 20,
+                                   **({} if self.caches == "compute" else {
+                                       "region_cache_bytes": 256 << 20,
+                                       "masked_count_cache_bytes": 1 << 30,
+                                       "figures_disk_bytes": 8 << 30})},
+                "status": self._status(), "region_answers": sorted(self.regions),
                 "routes": ["/v1/login", "/v1/viewport", "/v1/aggregate"]}
+
+    def _status(self) -> dict:
+        r = requests.get(f"http://127.0.0.1:{PORTS[2]}/control/status",
+                         headers={"Authorization": f"Bearer {self.cred}"}, timeout=60)
+        r.raise_for_status()
+        return r.json()
 
     def _serve(self) -> dict:
         """Every `[serve]` setting written: `SERVE`, and with compute caches `COMPUTE_CACHES`."""
@@ -376,23 +399,21 @@ operator_credential_env = "{CRED_ENV}"
         elapsed = time.perf_counter() - t0
         return self._decode_tables(body), elapsed
 
-    def _viewport(self, body: dict) -> bytes:
-        r = self.http.post(f"http://127.0.0.1:{PORTS[0]}/v1/viewport", json=body, timeout=600)
+    def _post(self, http: requests.Session, route: str, body: dict) -> bytes:
+        """One viewer request. An aggregate response is the whole result, since
+        `aggregate_response_bytes` holds it; the decoders refuse one that ends with a cursor."""
+        r = http.post(f"http://127.0.0.1:{PORTS[0]}{route}", json=body, timeout=600)
         if r.status_code != 200:
-            raise RuntimeError(f"viewport {r.status_code}: {r.content[:500]!r}")
+            raise RuntimeError(f"{route} {r.status_code}: {r.content[:500]!r}")
         if "x-mosaica-region" in r.headers:
             self.regions.add(r.headers["x-mosaica-region"])
         return r.content
 
+    def _viewport(self, body: dict) -> bytes:
+        return self._post(self.http, "/v1/viewport", body)
+
     def _aggregate(self, body: dict) -> bytes:
-        """One aggregate response, which `aggregate_response_bytes` makes the whole result; the
-        decoders refuse one that ends with a cursor."""
-        r = self.agg_http.post(f"http://127.0.0.1:{PORTS[0]}/v1/aggregate", json=body, timeout=600)
-        if r.status_code != 200:
-            raise RuntimeError(f"aggregate {r.status_code}: {r.content[:500]!r}")
-        if "x-mosaica-region" in r.headers:
-            self.regions.add(r.headers["x-mosaica-region"])
-        return r.content
+        return self._post(self.agg_http, "/v1/aggregate", body)
 
     @staticmethod
     def _records(raw: bytes) -> dict[int, list]:
@@ -417,9 +438,7 @@ operator_credential_env = "{CRED_ENV}"
     def _decode_cells(cls, raw: bytes) -> dict:
         grid = {}
         for table in cls._records(raw).get(0, []):
-            gx, gy = deinterleave(table["cell"].to_numpy())
-            for a, b, n in zip(gx.tolist(), gy.tolist(), table["count"].to_numpy().tolist()):
-                grid[(a, b)] = n
+            grid.update(cells(table))
         return grid
 
     @classmethod
@@ -449,9 +468,7 @@ operator_credential_env = "{CRED_ENV}"
                     if m:
                         tiles[(a, b)] = m
             elif kind == 2:
-                gx, gy = deinterleave(table["cell"].to_numpy())
-                for a, b, n in zip(gx.tolist(), gy.tolist(), table["count"].to_numpy().tolist()):
-                    grid[(a, b)] = n
+                grid.update(cells(table))
             elif kind == 3:
                 qx, qy = deinterleave(table["code"].to_numpy())
                 for t, pts in points_by_tile(qx, qy, z).items():

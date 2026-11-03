@@ -28,8 +28,11 @@ import numpy as np
 
 #: The square every system quantises over, as `(x_min, x_max, y_min, y_max)`: fixed once by
 #: `prepare.py` from the full source's bounds and recorded in the committed manifest.
-EXTENT = tuple(json.loads((Path(__file__).with_name("tiers-manifest.json")).read_text()).get(
-    "extent", (0.0, 1.0, 0.0, 1.0)))
+_MANIFEST = json.loads((Path(__file__).with_name("tiers-manifest.json")).read_text())
+if "extent" not in _MANIFEST:
+    raise SystemExit("tiers-manifest.json records no extent; run prepare.py, which fixes it from "
+                     "the source's bounds")
+EXTENT = tuple(_MANIFEST["extent"])
 FIXED_SPAN = 4294967296.0
 
 SCREEN = (1920, 1080)
@@ -146,9 +149,9 @@ def is_year(v) -> bool:
 @dataclass
 class Filter:
     """A conjunction of leaves, each `{"col", "op", "value"}`: `eq` on `type` (a value of `TYPES`)
-    or on `is_oa` (a bool), `in` on `type` (a list of values of `TYPES`), `range` on `publication_year` (`{"gte": y}`, `{"lt": y}` or both, a
-    null year matching neither), or `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every
-    side after quantisation."""
+    or on `is_oa` (a bool), `in` on `type` (a list of values of `TYPES`), `range` on
+    `publication_year` (`{"gte": y}`, `{"lt": y}` or both, a null year matching neither), or
+    `bbox` (`col` absent) with `[x0, y0, x1, y1]` closed on every side after quantisation."""
 
     leaves: list[dict] = field(default_factory=list)
     label: str = "none"
