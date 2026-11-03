@@ -1033,7 +1033,7 @@ fn at_end(reader: &mut BufReader<File>, path: &Path) -> Result<bool> {
 ///
 /// The varint is decoded from the bytes the reader holds where it is whole among them, and
 /// gathered a byte at a time where it crosses the buffer's end.
-fn read_varint<T>(
+pub(crate) fn read_varint<T>(
     reader: &mut BufReader<File>,
     path: &Path,
     what: &str,

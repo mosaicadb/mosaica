@@ -10,10 +10,11 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
+use mosaica_filter::{put_varint64, take_varint64};
 use mosaica_store::key_index::Key;
 
 use crate::error::{BuildError, Result};
-use crate::spill::mix64;
+use crate::spill::{mix64, read_varint};
 
 const BUFFER: usize = 4 << 20;
 
@@ -39,6 +40,7 @@ fn entry_anchor(key: u128, value: u32) -> u64 {
 pub(super) struct RunWriter<K: Key> {
     path: PathBuf,
     writer: BufWriter<File>,
+    record: Vec<u8>,
     last: u128,
     count: u64,
     anchor: u64,
@@ -51,6 +53,7 @@ impl<K: Key> RunWriter<K> {
         Ok(RunWriter {
             path: path.to_path_buf(),
             writer: BufWriter::with_capacity(BUFFER, file),
+            record: Vec::new(),
             last: 0,
             count: 0,
             anchor: 0,
@@ -62,28 +65,16 @@ impl<K: Key> RunWriter<K> {
     pub fn push(&mut self, key: K, value: u32) -> Result<()> {
         let wide = key.widen();
         debug_assert!(wide >= self.last, "a run's keys ascend");
-        let mut bytes = [0u8; 24];
-        let mut at = 0;
+        self.record.clear();
         if K::WIDTH <= 8 {
-            let mut gap = (wide - self.last) as u64;
-            loop {
-                let byte = (gap & 0x7f) as u8;
-                gap >>= 7;
-                if gap == 0 {
-                    bytes[at] = byte;
-                    at += 1;
-                    break;
-                }
-                bytes[at] = byte | 0x80;
-                at += 1;
-            }
+            put_varint64((wide - self.last) as u64, &mut self.record);
         } else {
-            key.write(&mut bytes[..K::WIDTH]);
-            at = K::WIDTH;
+            self.record.resize(K::WIDTH, 0);
+            key.write(&mut self.record);
         }
-        bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        self.record.extend_from_slice(&value.to_le_bytes());
         self.writer
-            .write_all(&bytes[..at + 4])
+            .write_all(&self.record)
             .map_err(|e| BuildError::io(&self.path, e))?;
         self.last = wide;
         self.count += 1;
@@ -132,14 +123,6 @@ impl<K: Key> RunReader<K> {
         })
     }
 
-    fn byte(&mut self) -> Result<u8> {
-        let mut byte = [0u8; 1];
-        self.reader
-            .read_exact(&mut byte)
-            .map_err(|e| BuildError::io(&self.receipt.path, e))?;
-        Ok(byte[0])
-    }
-
     /// The next entry, or `None` past the last, which is where the run is checked.
     pub fn next_entry(&mut self) -> Result<Option<(K, u32)>> {
         if self.left == 0 {
@@ -158,22 +141,7 @@ impl<K: Key> RunReader<K> {
             return Ok(None);
         }
         let wide = if K::WIDTH <= 8 {
-            let mut gap = 0u64;
-            let mut shift = 0;
-            loop {
-                let byte = self.byte()?;
-                if shift > 63 {
-                    return Err(BuildError::Invalid(format!(
-                        "{} is not the run this build wrote: a gap runs past 64 bits. Build again",
-                        self.receipt.path.display()
-                    )));
-                }
-                gap |= u64::from(byte & 0x7f) << shift;
-                if byte & 0x80 == 0 {
-                    break;
-                }
-                shift += 7;
-            }
+            let gap = read_varint(&mut self.reader, &self.receipt.path, "key run", take_varint64)?;
             self.last + u128::from(gap)
         } else {
             let mut bytes = [0u8; 16];
