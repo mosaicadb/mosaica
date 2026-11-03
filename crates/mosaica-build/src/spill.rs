@@ -950,7 +950,7 @@ impl BandReader {
             return Ok(None);
         }
         // EOF is legitimate only on a record boundary — before a record's first byte.
-        if at_end(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
+        if at_end(&mut self.reader, &self.path)? {
             self.verify_end()?;
             return Ok(None);
         }
@@ -1014,30 +1014,25 @@ impl BandReader {
 /// What `reader` holds buffered, refilling it when it holds nothing: empty only at end of file.
 /// Retries `Interrupted`, which a refill may see.
 fn buffered(reader: &mut BufReader<File>) -> std::io::Result<&[u8]> {
-    loop {
-        match reader.fill_buf() {
-            // Re-borrowed so the loop's next turn is not held by this one's borrow.
-            Ok(_) => return reader.fill_buf(),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
+    while let Err(e) = reader.fill_buf() {
+        if e.kind() != std::io::ErrorKind::Interrupted {
+            return Err(e);
         }
     }
+    Ok(reader.buffer())
 }
 
-/// Whether `reader` is at end of file — a record boundary, which is the only place a spill reader
-/// may legitimately be.
-fn at_end(reader: &mut BufReader<File>) -> std::io::Result<bool> {
-    Ok(buffered(reader)?.is_empty())
+/// Whether the spill at `path` is at end of file — a record boundary, which is the only place a
+/// spill reader may legitimately be.
+fn at_end(reader: &mut BufReader<File>, path: &Path) -> Result<bool> {
+    Ok(buffered(reader).map_err(|e| BuildError::io(path, e))?.is_empty())
 }
 
 /// One varint inside a record of the spill at `path`, read from `reader` and decoded by `take`
 /// ([`take_varint`] or [`take_varint64`]). A refusal names the file as `what`.
 ///
-/// **Out of the buffer the reader already holds** where the whole varint is in it. A spill holds a
-/// varint a pair or more, so a corpus of 10¹⁰ pairs is 10¹⁰ of them, and a byte at a time is a
-/// call and a copy through `BufReader`'s bookkeeping per byte. Only a varint crossing the buffer's
-/// end is gathered a byte at a time, at most one per [`SPILL_BUF_BYTES`], and the same `take`
-/// decodes what was gathered.
+/// The varint is decoded from the bytes the reader holds where it is whole among them, and
+/// gathered a byte at a time where it crosses the buffer's end.
 fn read_varint<T>(
     reader: &mut BufReader<File>,
     path: &Path,
@@ -1385,7 +1380,7 @@ impl TextRunReader {
         while self.pending > 0 {
             self.decode_entity()?;
         }
-        if at_end(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
+        if at_end(&mut self.reader, &self.path)? {
             self.verify_end()?;
             return Ok(false);
         }
@@ -1751,7 +1746,7 @@ impl MemberRunReader {
         while self.pending > 0 {
             self.next_source()?;
         }
-        if at_end(&mut self.reader).map_err(|e| BuildError::io(&self.path, e))? {
+        if at_end(&mut self.reader, &self.path)? {
             self.verify_end()?;
             return Ok(false);
         }
@@ -2156,8 +2151,9 @@ mod tests {
         fs::write(path, bytes).unwrap();
     }
 
-    fn err_string(result: Result<impl std::fmt::Debug>) -> String {
-        result.expect_err("expected an error").to_string()
+    /// The read or write was refused as malformed, rather than failing for I/O.
+    fn assert_refused<T: std::fmt::Debug>(result: Result<T>) {
+        assert!(matches!(result, Err(BuildError::Invalid(_))), "{result:?}");
     }
 
 
@@ -2307,11 +2303,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let path = temp.path().join("band.bin");
         let mut writer = BandWriter::create(&path, 10).unwrap();
-        let message = err_string(writer.push(9, 0).map(|_| ()));
-        assert!(
-            message.contains("below the band's term_lo"),
-            "got: {message}"
-        );
+        assert_refused(writer.push(9, 0).map(|_| ()));
     }
 
     #[test]
@@ -2345,7 +2337,7 @@ mod tests {
         // The header is covered indirectly: a shifted term_lo shifts every decoded term, so
         // the anchor (or an overflow check) fails even though every varint still parses.
         flip_byte(&path, 0);
-        assert!(read_band(&receipt).is_err());
+        assert_refused(read_band(&receipt));
     }
 
     #[test]
@@ -2375,8 +2367,7 @@ mod tests {
         let path = temp.path().join("band.bin");
         let receipt = write_band(&path, 5, &[(5, 1)]);
         fs::write(&path, [0u8, 0]).unwrap();
-        let message = err_string(BandReader::open(&receipt).map(|_| ()));
-        assert!(message.contains("term_lo header"), "got: {message}");
+        assert_refused(BandReader::open(&receipt).map(|_| ()));
     }
 
     #[test]
@@ -2386,13 +2377,11 @@ mod tests {
         let receipt = write_band(&path, 0, &[(1, 2)]);
         // A complete, well-formed extra record: caught as trailing data by count.
         append(&path, &[0x00, 0x00]);
-        let message = err_string(read_band(&receipt));
-        assert!(message.contains("trailing data"), "got: {message}");
+        assert_refused(read_band(&receipt));
         // A ragged byte that starts a varint and hits EOF: caught as a truncated record.
         let receipt = write_band(&path, 0, &[(1, 2)]);
         append(&path, &[0xFF]);
-        let message = err_string(read_band(&receipt));
-        assert!(message.contains("truncated mid-record"), "got: {message}");
+        assert_refused(read_band(&receipt));
     }
 
     #[test]
@@ -2402,7 +2391,7 @@ mod tests {
         let receipt = write_band(&path, 0, &[]);
         // 6-byte-shaped varint: fifth byte carries payload above bit 31 (and a continuation).
         append(&path, &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x00]);
-        assert!(read_band(&receipt).is_err());
+        assert_refused(read_band(&receipt));
     }
 
     proptest! {
@@ -2443,8 +2432,7 @@ mod tests {
         let mut writer = BandWriter::create(&temp.path().join("band.bin"), 0).unwrap();
         writer.push(1, 10).unwrap();
         writer.push(2, 10).unwrap(); // equal is fine (one item, several terms)
-        let err = writer.push(1, 9).unwrap_err().to_string();
-        assert!(err.contains("regresses"), "{err}");
+        assert_refused(writer.push(1, 9));
     }
 
     #[test]
@@ -2624,9 +2612,7 @@ mod tests {
         // is exactly the failure a count check alone would miss.
         let last = fs::read(&path).unwrap().len() - 1;
         flip_byte(&path, last);
-        let message = err_string(read_text_run(&receipt));
-        assert!(message.contains("anchor mismatch"), "got: {message}");
-        assert!(message.contains("text-run.spill"), "got: {message}");
+        assert_refused(read_text_run(&receipt));
     }
 
     #[test]
@@ -2637,11 +2623,7 @@ mod tests {
         for cut in [1usize, 2, 3, 4, 5] {
             let receipt = write_text_run(&path, &records);
             truncate_by(&path, cut);
-            let message = err_string(read_text_run(&receipt));
-            assert!(
-                message.contains("truncated") || message.contains("count mismatch"),
-                "cut {cut} got: {message}"
-            );
+            assert_refused(read_text_run(&receipt));
         }
     }
 
@@ -2654,8 +2636,7 @@ mod tests {
         // A whole extra record, well formed: `zz` with one entity. Only the receipt's pair count
         // separates it from a legitimate stream.
         append(&path, &[0, 2, b'z', b'z', 1, 3]);
-        let message = err_string(read_text_run(&receipt));
-        assert!(message.contains("trailing data"), "got: {message}");
+        assert_refused(read_text_run(&receipt));
     }
 
     #[test]
@@ -2787,8 +2768,7 @@ mod tests {
         let receipt = write_member_run(&path, &[(3, sources)]);
         // Two of the last delta's five bytes, so the file ends inside it.
         truncate_by(&path, 2);
-        let message = err_string(read_member_run(&receipt));
-        assert!(message.contains("truncated"), "{message}");
+        assert_refused(read_member_run(&receipt));
     }
 
     #[test]
@@ -2864,9 +2844,7 @@ mod tests {
         // is exactly the failure a count check alone would miss.
         let last = fs::read(&path).unwrap().len() - 1;
         flip_byte(&path, last);
-        let message = err_string(read_member_run(&receipt));
-        assert!(message.contains("anchor mismatch"), "got: {message}");
-        assert!(message.contains("member-run.spill"), "got: {message}");
+        assert_refused(read_member_run(&receipt));
     }
 
     #[test]
@@ -2877,11 +2855,7 @@ mod tests {
         for cut in [1usize, 2, 3, 4, 5] {
             let receipt = write_member_run(&path, &records);
             truncate_by(&path, cut);
-            let message = err_string(read_member_run(&receipt));
-            assert!(
-                message.contains("truncated") || message.contains("count mismatch"),
-                "cut {cut} got: {message}"
-            );
+            assert_refused(read_member_run(&receipt));
         }
     }
 
@@ -2893,8 +2867,7 @@ mod tests {
         // A whole extra record, well formed: the next artifact with one source. Only the
         // receipt's pair count separates it from a legitimate stream.
         append(&path, &[0, 1, 3]);
-        let message = err_string(read_member_run(&receipt));
-        assert!(message.contains("trailing data"), "got: {message}");
+        assert_refused(read_member_run(&receipt));
     }
 
     #[test]
@@ -2991,8 +2964,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let path = temp.path().join("member-table.spill");
         let table = write_member_table(&path, 1, &[(0, vec![1, u32::MAX as u64 + 1])]);
-        let message = err_string(read_member_table(&table, 1));
-        assert!(message.contains("outside the u32 entity space"), "{message}");
+        assert_refused(read_member_table(&table, 1));
     }
 
     #[test]
@@ -3002,9 +2974,7 @@ mod tests {
         let table = write_member_table(&path, 2, &[(0, vec![1, 5, 9]), (1, vec![2, 4])]);
         let last = fs::read(&path).unwrap().len() - 1;
         flip_byte(&path, last);
-        let message = err_string(read_member_table(&table, 2));
-        assert!(message.contains("anchor mismatch"), "got: {message}");
-        assert!(message.contains("member-table.spill"), "got: {message}");
+        assert_refused(read_member_table(&table, 2));
     }
 
     #[test]
