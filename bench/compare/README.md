@@ -5,12 +5,12 @@ aggregations as the same viewer, with every answer checked against an exact orac
 [METHOD.md](METHOD.md) defines the frame, the viewer, the workloads, the metrics and the fairness
 rules. This file is operational, and lists where stage 1 departs from the method.
 
-Stage 1 covers the shared harness and Mosaica, ClickHouse and PostGIS, on the PaperSeek data
-at 10⁶ points for development only. Mosaica runs as two arms: `mosaica+aggregate`, a viewport
+Stage 1 covers the shared harness and Mosaica, ClickHouse, PostGIS and OpenSearch, on the
+PaperSeek data at 10⁶ points for development only. Mosaica runs as two arms: `mosaica+aggregate`, a viewport
 request with the count grid from `/v1/aggregate` beside it, which is how Mosaica's own map asks
 and the arm that represents it; and `mosaica`, one viewport request alone, whose sub-cell grid
 counts the visible set and ignores the filter (see "Departures"). Runs write to `results/`, which
-is not tracked. OpenSearch is a third system, described under "OpenSearch" below. **No figure from this directory is fit to publish yet**: every record carries
+is not tracked. **No figure from this directory is fit to publish yet**: every record carries
 `"development_only": true`, and the machine it ran on was shared with other work.
 
 ## Running it from scratch
