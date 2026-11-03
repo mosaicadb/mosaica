@@ -823,6 +823,29 @@ async fn the_region_header_is_exact_or_a_cover() {
     }
 }
 
+/// **A box edge is read as the number written**: each edge below is the last or first double of
+/// the grid column holding the items at `x`, and a parser one unit in the last place off puts it
+/// in the next column, which drops those items.
+#[tokio::test]
+async fn a_box_edge_on_an_items_grid_column_counts_the_item() {
+    let f = fixture().await;
+    let token = token_for(&f.server, &["0"]).await;
+    for (x, bbox) in [
+        (12.0, [12.000000104308127, 0.0, 12.000000104308127, 1000.0]),
+        (92.0, [91.99999994598329, 0.0, 91.99999994598329, 1000.0]),
+    ] {
+        let body = json!({
+            "view": "s0",
+            "filters": { "region": { "bbox": bbox } },
+            "groupings": [{ "count": true }],
+        });
+        let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;
+        let expected = items(&["0"], |e| scatter(e).0 == x);
+        assert!(!expected.is_empty());
+        assert_eq!(table(&[decoded], 0)[0].count, expected.len() as u64, "{bbox:?}");
+    }
+}
+
 /// **A table read through its cursor is the whole table**: pages of a few rows, a few pages a
 /// response, give the rows one response gives, each response opening with the head of the table
 /// it continues, marked resumed.
