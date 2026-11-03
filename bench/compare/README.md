@@ -68,7 +68,9 @@ duration of its `INSERT` and `OPTIMIZE`) and every server at 0. The load before 
 the record. A run builds the system from nothing, checks every frame and aggregation against the
 oracle, runs each workload five times warm, measures server start and session start five times warm
 and five times cold, then times one cold frame per battery camera, and stops and removes everything it started.
-Work directories go under `$DATA/bench-compare/work/`; delete them when done.
+Each run works in a directory of its own, `$DATA/bench-compare/work/<system>-<caches>-<tier>-<pid>`,
+and removes it when it ends, and each server listens on ports the kernel reports free when the run
+starts (`adapters/base.py`, `free_ports`), so runs side by side do not collide.
 
 Every system's build and server run in Docker containers, each capped at 16 GiB with no swap and
 run as the invoking user, so that each cgroup's `memory.peak` is that system's own
@@ -207,8 +209,9 @@ configuration: its demo TLS certificates, which the adapter does not verify, and
 with a password made for the run. That is fit for a local run and for nothing else.
 
 The build (`adapters/opensearch.py`) creates an ingest pipeline that quantises `x` and `y` in
-Painless by `frame.fixed32`'s rule, in the same order of operations as ClickHouse's SQL, and an
-index of one shard and no replicas, with `qx` and `qy` as `long`, `licence` and `type` as
+Painless by `frame.fixed32`'s rule, in the same order of operations as ClickHouse's SQL, and
+stores `m16`, the Morton code of the top 16 bits of `qx` and `qy` with x on the even bits; and an
+index of one shard and no replicas, with `qx`, `qy` and `m16` as `long`, `licence` and `type` as
 `keyword`, `publication_year` as `integer` and `is_oa` as `boolean`, and `_source` disabled, so
 positions are read from doc values and nothing else is stored. Six client processes read the
 tier's Parquet on the host and send it through the pipeline in bulk requests of 50,000 documents
@@ -229,14 +232,35 @@ on the second (with default caches); sent twice as the viewer it neither hits no
 because the security plugin turns the request cache off for a search under document-level
 security, so the admin's cached result cannot reach the viewer.
 
-A frame is one search: two ranges on `qx` and `qy` for the camera's tiles and the filter's terms
-and ranges, all in filter context, and two aggregations. The grid is a `histogram` on `qx` with a
-`histogram` on `qy` inside it, at interval 2^(32 − depth) and `min_doc_count` 1; the tiles are the
-same pair at the tile depth, each with a `top_hits` of K positions from doc values sorted by
-`_doc`, and a `bucket_selector` that keeps only the tiles of at most K, so no dense tile's
-positions are sent. Tile counts are the grid's sums, as for ClickHouse. A histogram's counts are
-exact: a value falls in bucket `floor(value / interval)`, exact in double precision for a power
-of two and a value below 2^53, and with one shard no bucket is cut. The aggregation workload is one
+A frame is two searches sent at once, each filtered to the camera's tiles by two ranges on `qx`
+and `qy` and to the filter by its terms and ranges, all in filter context. The grid's is a
+`histogram` on `m16` at interval 4^(16 − depth) with `min_doc_count` 1, whose bucket keys are the
+cells' Morton codes; the tiles' is the same histogram at the tile depth, each tile with a
+`top_hits` of K positions from doc values sorted by `_doc`, and a `bucket_selector` that keeps only
+the tiles of at most K, so no dense tile's positions are sent. Tile counts are the grid's sums, as
+for ClickHouse. A histogram's counts are exact: a value falls in bucket `floor(value / interval)`,
+exact in double precision for a power of two and a value below 2^53, and with one shard no bucket
+is cut. `m16` holds cells to depth 16, which is as deep as the frame's grid and the cameras' zoom
+go.
+
+Four other ways of asking for the frame were exact and slower, over every frame of the three
+workloads three times, warm, with compute caches, each timed with its JSON decoding (so the
+figures run above the harness's):
+
+| Frame | Per pass | p50 / p99 |
+|---|---|---|
+| Nested histograms on `qx` and `qy`, grid and tiles in one search | 22.6 s | 27 / 1,980 ms |
+| The same, as two searches at once | 19.1 s | 23 / 1,782 ms |
+| A `composite` grid of two histogram sources, paged, beside the nested tiles | 14.3 s | 26 / 1,480 ms |
+| `m16` histograms, grid and tiles in one search | 7.6 s | 21 / 566 ms |
+| **`m16` histograms, as two searches at once (used)** | **6.3 s** | **22 / 422 ms** |
+
+`m16` costs about a second of build time and 21 MiB on disk at 10⁶ (96 MiB against 71 MiB). With
+`http.compression: true`, which 3.9 accepts as a node setting and which then gzips each response
+the client asks to have compressed, the chosen frame took 7.2 s a pass (28 / 459 ms), so
+compression is left at its default, off.
+
+The aggregation workload is one
 search with a `terms` aggregation on `type` (size 21, so every type and `none` for a missing one;
 exact with one shard, where no shard's top buckets are merged with another's), a year `histogram`
 at interval 1 inside a `filter` on the binned range, a `filter` for the years outside it and a
@@ -255,15 +279,14 @@ indexing speed and search performance:
 | `_source` | disabled | enabled | Positions come from doc values; nothing reads the source |
 | Force-merge | to one segment | none | A read-only index merged to one segment |
 | `index.max_inner_result_window` | 500 | 100 | A `top_hits` of K |
-| `search.max_buckets` | 2,097,152 | 65,535 | The largest grid: 20 tiles of 256 × 256 cells and their columns |
+| `search.max_buckets` | 2,097,152 | 65,535 | The largest grid: 20 tiles of 256 × 256 cells |
 | Bulk requests | 50,000 documents from 6 processes | – | The documentation's 5 to 15 MB a request, from several clients |
 | Performance analyzer agent | off | on | A monitoring process beside the server, kept out of the timings as ClickHouse's log tables are |
 | `index.requests.cache.enable`, `index.queries.cache.enabled` | off with compute caches | on | See the cache table |
 
 Every other setting is the image's default, and each record lists the index's settings, the
 node's cache settings, the concurrent segment search mode, `http.compression`, the role and the
-access checks. The security plugin caches an authenticated user for
-an hour, so the viewer's first search after a start, which session start times, pays for its
+access checks. The security plugin caches an authenticated user for an hour, so the viewer's first search after a start, which session start times, pays for its
 password check and the resolution of its role, and later searches do not.
 
 ## Files
@@ -371,9 +394,10 @@ has zero error. Every count is over the viewer's visible items.
   warning, and one merged segment maps few files. `bootstrap.memory_lock` is not set, since the
   container has no swap.
 - **OpenSearch speaks TLS.** Its responses are encrypted with the demo certificates and are not
-  compressed (`http.compression` is off by default in this release), where ClickHouse's
-  and Mosaica's are plain HTTP. A `bbox` filter's corners are quantised by the adapter with
-  `frame.fixed32`, since a range query has no arithmetic.
+  compressed (`http.compression` is off by default in this release, and turning it on was
+  slower; see "OpenSearch"), where ClickHouse's and Mosaica's are plain HTTP. A `bbox` filter's
+  corners are quantised by the adapter with `frame.fixed32`, since a range query has no
+  arithmetic.
 - **Timed responses are checked too.** Every timed frame is checked as the untimed pass checks
   it, tile counts, grid and every point check including the dense tiles', and every timed table
   likewise. Where the untimed answer to a step was wrong in a part, which its errors already

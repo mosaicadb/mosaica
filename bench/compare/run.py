@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -202,7 +203,7 @@ def harness_commit() -> str:
 
 
 def make_adapter(args):
-    work = args.work / f"{args.system}-{args.caches}-{args.tier.stem}"
+    work = args.work / f"{args.system}-{args.caches}-{args.tier.stem}-{os.getpid()}"
     if args.system in ("mosaica", "mosaica+aggregate"):
         from adapters.mosaica import Mosaica
         return Mosaica(args.tier, work, args.image, nice=args.nice, caches=args.caches,
@@ -366,6 +367,7 @@ def main() -> None:
     finally:
         adapter.stop()
         adapter.remove()
+        shutil.rmtree(adapter.work)
     record["load_after"] = os.getloadavg()
     record["finished_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     args.out.parent.mkdir(parents=True, exist_ok=True)

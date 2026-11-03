@@ -46,10 +46,9 @@ from frame import (EXTENT, FIXED_SPAN, GRID_OFFSET, K, TYPE_TOP, TYPES, YEAR_BIN
                    Frame, deinterleave, grid_depth, interleave, points_by_tile)
 from oracle import VIEWER
 
-from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, evict_files, image_id,
-                   wait_for)
+from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+                   image_id, wait_for)
 
-PORTS = (18141, 18142, 18143)
 #: The viewer, session and control listeners inside the container.
 INNER_PORTS = (8080, 8081, 8082)
 CRED_ENV = "BENCH_COMPARE_OPERATOR"
@@ -211,6 +210,8 @@ class Mosaica(Adapter):
         self.pool = ThreadPoolExecutor(2)
         self.image = image
         self.container = Container(f"bench-compare-mosaica-{os.getpid()}")
+        #: The viewer, session and control listeners on the host.
+        self.ports = free_ports(3)
         self.cred = secrets.token_urlsafe(24)
         self.api_key: str | None = None
         self.http: requests.Session | None = None
@@ -232,7 +233,7 @@ class Mosaica(Adapter):
                 "routes": ["/v1/login", "/v1/viewport", "/v1/aggregate"]}
 
     def _status(self) -> dict:
-        r = requests.get(f"http://127.0.0.1:{PORTS[2]}/control/status",
+        r = requests.get(f"http://127.0.0.1:{self.ports[2]}/control/status",
                          headers={"Authorization": f"Bearer {self.cred}"}, timeout=60)
         r.raise_for_status()
         return r.json()
@@ -318,10 +319,10 @@ operator_credential_env = "{CRED_ENV}"
             self.image, entrypoint="/usr/local/bin/mosaica",
             args=["serve", "--deployment", "/work/mosaica.toml"],
             mounts={str(self.work): "/work"}, env={CRED_ENV: self.cred},
-            ports=dict(zip(PORTS, INNER_PORTS)))
+            ports=dict(zip(self.ports, INNER_PORTS)))
 
     def _control(self, method: str, path: str, body: dict) -> dict:
-        r = requests.request(method, f"http://127.0.0.1:{PORTS[2]}{path}", json=body,
+        r = requests.request(method, f"http://127.0.0.1:{self.ports[2]}{path}", json=body,
                              headers={"Authorization": f"Bearer {self.cred}"}, timeout=60)
         if r.status_code != 200:
             raise RuntimeError(f"{method} {path} {r.status_code}: {r.text[:500]}")
@@ -337,7 +338,7 @@ operator_credential_env = "{CRED_ENV}"
 
     def _ready(self) -> bool:
         try:
-            return requests.get(f"http://127.0.0.1:{PORTS[0]}/readyz", timeout=1).status_code == 200
+            return requests.get(f"http://127.0.0.1:{self.ports[0]}/readyz", timeout=1).status_code == 200
         except requests.RequestException:
             return False
 
@@ -348,7 +349,7 @@ operator_credential_env = "{CRED_ENV}"
             self._make_viewer()
 
     def connect(self) -> None:
-        r = requests.post(f"http://127.0.0.1:{PORTS[0]}/v1/login", json={"api_key": self.api_key},
+        r = requests.post(f"http://127.0.0.1:{self.ports[0]}/v1/login", json={"api_key": self.api_key},
                           timeout=60)
         r.raise_for_status()
         auth = {"Authorization": f"Bearer {r.json()['token']}"}
@@ -406,7 +407,7 @@ operator_credential_env = "{CRED_ENV}"
     def _post(self, http: requests.Session, route: str, body: dict) -> bytes:
         """One viewer request. An aggregate response is the whole result, since
         `aggregate_response_bytes` holds it; the decoders refuse one that ends with a cursor."""
-        r = http.post(f"http://127.0.0.1:{PORTS[0]}{route}", json=body, timeout=600)
+        r = http.post(f"http://127.0.0.1:{self.ports[0]}{route}", json=body, timeout=600)
         if r.status_code != 200:
             raise RuntimeError(f"{route} {r.status_code}: {r.content[:500]!r}")
         if "x-mosaica-region" in r.headers:

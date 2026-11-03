@@ -38,13 +38,12 @@ from frame import (EXTENT, K, YEAR_BINS, Camera, Filter, Frame, deinterleave, gr
                    points_by_tile)
 from oracle import VIEWER
 
-from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree,
-                   wait_for)
+from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+                   fsync_tree, wait_for)
 from .sql import filter_sql
 
 IMAGE = "clickhouse/clickhouse-server:26.8.34.13"
 IMAGE_DIGEST = "sha256:8b28eb09479c36c4533eec7a6268917d04ba3a6fd90e3f4205f70e761b6d7779"
-PORT = 18123
 NO_LOGS = """<clickhouse>
   <query_log remove="1"/><query_thread_log remove="1"/><query_views_log remove="1"/>
   <trace_log remove="1"/><metric_log remove="1"/><asynchronous_metric_log remove="1"/>
@@ -93,6 +92,7 @@ class ClickHouse(Adapter):
         self.settings = COMPUTE_CACHES if caches == "compute" else {}
         self.table_made = False
         self.container = Container(f"bench-compare-ch-{os.getpid()}")
+        self.port = free_ports(1)[0]
         self.data = self.work / "ch-data"
         self.pool = ThreadPoolExecutor(2)
         self.admin = requests.Session()
@@ -112,7 +112,7 @@ class ClickHouse(Adapter):
             (self.work / d).mkdir(parents=True, exist_ok=True)
         self.container.create(
             f"{IMAGE.split(':')[0]}@{IMAGE_DIGEST}", entrypoint="/entrypoint.sh", nice=nice,
-            env={"CLICKHOUSE_SKIP_USER_SETUP": "1"}, ports={PORT: 8123}, mounts={
+            env={"CLICKHOUSE_SKIP_USER_SETUP": "1"}, ports={self.port: 8123}, mounts={
                 str(self.data): "/var/lib/clickhouse",
                 str(self.work / "ch-logs"): "/var/log/clickhouse-server",
                 str(self.work / "config.d/no-logs.xml"): "/etc/clickhouse-server/config.d/no-logs.xml:ro",
@@ -134,8 +134,8 @@ class ClickHouse(Adapter):
         close = {"Connection": "close"}
         try:
             if not self.table_made:
-                return requests.get(f"http://127.0.0.1:{PORT}/ping", headers=close, timeout=60).ok
-            return requests.post(f"http://127.0.0.1:{PORT}/", data=b"SELECT 1 FROM points LIMIT 1",
+                return requests.get(f"http://127.0.0.1:{self.port}/ping", headers=close, timeout=60).ok
+            return requests.post(f"http://127.0.0.1:{self.port}/", data=b"SELECT 1 FROM points LIMIT 1",
                                  headers=close, timeout=60).ok
         except requests.RequestException:
             return False
@@ -170,7 +170,7 @@ class ClickHouse(Adapter):
     def sql(self, query: str, session: int | None = None, timeout: float = 3600) -> bytes:
         """Run `query` as the default user, or as the viewer on its connection `session`."""
         http = self.admin if session is None else self.sessions[session]
-        r = http.post(f"http://127.0.0.1:{PORT}/", params=self.settings,
+        r = http.post(f"http://127.0.0.1:{self.port}/", params=self.settings,
                       data=query.encode(), timeout=timeout)
         if r.status_code != 200:
             raise RuntimeError(f"ClickHouse {r.status_code}: {r.text[:800]}")

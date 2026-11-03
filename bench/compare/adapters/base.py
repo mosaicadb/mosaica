@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import os
 import re
+import socket
 import subprocess
 import time
 from abc import ABC, abstractmethod
@@ -121,6 +122,19 @@ def fsync_tree(root: Path, skip: set[Path] = frozenset()) -> int:
             finally:
                 os.close(fd)
     return n
+
+
+def free_ports(n: int) -> list[int]:
+    """`n` distinct ports on 127.0.0.1 that nothing listens on, chosen by the kernel, so that runs
+    side by side do not collide."""
+    socks = [socket.socket() for _ in range(n)]
+    try:
+        for s in socks:
+            s.bind(("127.0.0.1", 0))
+        return [s.getsockname()[1] for s in socks]
+    finally:
+        for s in socks:
+            s.close()
 
 
 def du_bytes(path: Path) -> int:

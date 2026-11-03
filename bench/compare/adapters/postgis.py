@@ -59,12 +59,12 @@ from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_
                    points_by_tile)
 from oracle import VIEWER
 
-from .base import MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree, wait_for
+from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+                   fsync_tree, wait_for)
 from .sql import filter_sql
 
 IMAGE = "postgis/postgis:18-3.6"
 IMAGE_DIGEST = "sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a2390989c4"
-PORT = 15432
 #: The data directory inside the container, the image's default under its volume.
 PGDATA = "/var/lib/postgresql/18/docker"
 VIEWER_ROLE = "viewer"
@@ -167,6 +167,7 @@ class PostGIS(Adapter):
                           if self.leakproof else ""))
         self.table_made = False
         self.container = Container(f"bench-compare-pg-{os.getpid()}")
+        self.port = free_ports(1)[0]
         self.root = self.work / "pg"
         self.data = self.root / Path(PGDATA).relative_to("/var/lib/postgresql")
         self.pool = ThreadPoolExecutor(2)
@@ -185,10 +186,10 @@ class PostGIS(Adapter):
             f"{IMAGE.split(':')[0]}@{IMAGE_DIGEST}", entrypoint="docker-entrypoint.sh", nice=nice,
             args=("postgres", *(a for k, v in settings.items() for a in ("-c", f"{k}={v}"))),
             env={"POSTGRES_PASSWORD": self.password, "PGDATA": PGDATA}, shm=SHM,
-            ports={PORT: 5432}, mounts={str(self.root): "/var/lib/postgresql"})
+            ports={self.port: 5432}, mounts={str(self.root): "/var/lib/postgresql"})
 
     def _connect(self, user: str, password: str, **kw) -> psycopg.Connection:
-        return psycopg.connect(host="127.0.0.1", port=PORT, dbname="postgres", user=user,
+        return psycopg.connect(host="127.0.0.1", port=self.port, dbname="postgres", user=user,
                                password=password, autocommit=True, prepare_threshold=None, **kw)
 
     def start(self) -> None:

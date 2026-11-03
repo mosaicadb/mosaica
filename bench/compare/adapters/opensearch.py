@@ -1,22 +1,24 @@
 """OpenSearch: a pinned single-node image with its security plugin, one index loaded by the bulk
 API, and the frame as aggregations.
 
-The build creates an ingest pipeline that quantises `x` and `y` by the frame's rule in Painless
-and drops them, and an index of one shard and no replicas with `_source` disabled: `qx` and `qy`
-as `long`, `licence` and `type` as `keyword`, `publication_year` as `integer` and `is_oa` as
+The build creates an ingest pipeline that quantises `x` and `y` by the frame's rule in Painless,
+drops them, and stores `m16`, the Morton code of the top 16 bits of `qx` and `qy` (x on the even
+bits); and an index of one shard and no replicas with `_source` disabled: `qx`, `qy` and `m16` as
+`long`, `licence` and `type` as `keyword`, `publication_year` as `integer` and `is_oa` as
 `boolean`, each with doc values. Worker processes read the tier's Parquet and send it through the
 pipeline in bulk requests while the index does not refresh; the index is then refreshed,
 force-merged to one segment, given back its default refresh interval and flushed, and every file
 in its data directory synced. All of that is timed.
 
-A frame is one search with `size: 0`, filtered to the camera's tiles by two ranges and to the
-filter by its terms and ranges, and two aggregations over it: the count grid as a `histogram` on
-`qx` with a `histogram` on `qy` inside it, both at interval `2^(32 - grid_depth)`, and the tiles
-as the same pair at interval `2^(32 - zoom)`, each holding a `top_hits` of K positions read from
-doc values and a `bucket_selector` that keeps only the tiles of at most K. Histogram counts are
-exact: each document falls in the bucket `floor(value / interval)`, which for a power-of-two
-interval and a value below 2^53 is exact in double precision, and with one shard nothing is
-merged from shards that each kept only their top buckets.
+A frame is two searches sent at once with `size: 0`, each filtered to the camera's tiles by two
+ranges and to the filter by its terms and ranges: the count grid as a `histogram` on `m16` at
+interval `4^(16 - grid_depth)`, whose bucket keys are the cells' Morton codes, and the tiles as
+the same histogram at interval `4^(16 - zoom)`, each tile holding a `top_hits` of K positions read
+from doc values and a `bucket_selector` that keeps only the tiles of at most K. Histogram counts
+are exact: a document falls in the bucket `floor(value / interval)`, exact in double precision for
+a power-of-two interval and a value below 2^53, and with one shard nothing is merged from shards
+that each kept only their top buckets. Nested histograms on `qx` and `qy`, in one search or two,
+and a `composite` grid were exact too and slower; the README gives the figures.
 
 The aggregation workload is one search with a `terms` aggregation on `type` (every type, a missing
 type as `none`) and a year histogram at interval 1 inside a `filter` on the binned range, beside a
@@ -46,15 +48,15 @@ import pyarrow.parquet as pq
 import requests
 import urllib3
 
-from frame import EXTENT, K, TYPES, YEAR_BINS, Camera, Filter, Frame, fixed32, grid_depth, points_by_tile
+from frame import (EXTENT, K, MAX_DEPTH, TYPES, YEAR_BINS, Camera, Filter, Frame, deinterleave,
+                   fixed32, grid_depth, points_by_tile)
 from oracle import VIEWER
 
-from .base import MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, fsync_tree, wait_for
+from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+                   fsync_tree, wait_for)
 
 IMAGE = "opensearchproject/opensearch:3.9.0"
 IMAGE_DIGEST = "sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e"
-PORT = 19200
-URL = f"https://127.0.0.1:{PORT}"
 INDEX = "points"
 PIPELINE = "quantise"
 VIEWER_USER = "viewer"
@@ -75,7 +77,7 @@ CACHE_PREFIXES = ("index.", "indices.", "plugins.security.", "script.", "node.se
 MAPPING = {
     "_source": {"enabled": False},
     "dynamic": "strict",
-    "properties": {"qx": {"type": "long"}, "qy": {"type": "long"},
+    "properties": {"qx": {"type": "long"}, "qy": {"type": "long"}, "m16": {"type": "long"},
                    "licence": {"type": "keyword"}, "type": {"type": "keyword"},
                    "publication_year": {"type": "integer"}, "is_oa": {"type": "boolean"}},
 }
@@ -86,9 +88,14 @@ for (String a : ['x', 'y']) {
   ctx['q' + a] = f <= 0 ? 0L : (long) Math.min(f, 4294967295.0);
   ctx.remove(a);
 }
+long hx = ctx.qx >>> 16, hy = ctx.qy >>> 16, m = 0;
+for (int i = 0; i < 16; ++i) {
+  m |= ((hx >>> i) & 1L) << (2 * i) | ((hy >>> i) & 1L) << (2 * i + 1);
+}
+ctx.m16 = m;
 """
 PIPELINE_BODY = {
-    "description": "x and y onto the frame's 2^32 grid, as frame.fixed32",
+    "description": "x and y onto the frame's 2^32 grid as frame.fixed32, and their Morton code m16",
     "processors": [{"script": {"lang": "painless", "source": QUANTISE, "params": {
         "x_lo": EXTENT[0], "x_hi": EXTENT[1], "y_lo": EXTENT[2], "y_hi": EXTENT[3]}}}],
 }
@@ -126,21 +133,26 @@ def where(camera: Camera, filt: Filter | None) -> dict:
 
 
 def cells(depth: int, inner: dict | None = None) -> dict:
-    """Nested histograms on `qx` then `qy`, one bucket per occupied depth-`depth` cell."""
-    hist = lambda f: {"field": f, "interval": 1 << (32 - depth), "min_doc_count": 1}
-    qy = {"histogram": hist("qy")}
+    """A histogram on `m16`, one bucket per occupied depth-`depth` cell, keyed by the cell's
+    depth-16 Morton code."""
+    if depth > MAX_DEPTH:
+        raise ValueError(f"m16 holds cells to depth {MAX_DEPTH}, not {depth}")
+    agg = {"histogram": {"field": "m16", "interval": 4 ** (MAX_DEPTH - depth), "min_doc_count": 1}}
     if inner:
-        qy["aggs"] = inner
-    return {"histogram": hist("qx"), "aggs": {"qy": qy}}
+        agg["aggs"] = inner
+    return agg
 
 
-def frame_request(camera: Camera, filt: Filter | None) -> dict:
+def frame_requests(camera: Camera, filt: Filter | None) -> tuple[dict, dict]:
+    """The grid's search and the tiles' search."""
     sparse = {"top": {"top_hits": {"size": K, "sort": ["_doc"], "_source": False,
                                    "docvalue_fields": ["qx", "qy"]}},
               "sparse": {"bucket_selector": {"buckets_path": {"n": "_count"},
                                              "script": f"params.n <= {K}"}}}
-    return {"size": 0, "track_total_hits": False, "query": where(camera, filt),
-            "aggs": {"grid": cells(grid_depth(camera.zoom)), "tiles": cells(camera.zoom, sparse)}}
+    search = lambda aggs: {"size": 0, "track_total_hits": False, "query": where(camera, filt),
+                           "aggs": aggs}
+    return (search({"grid": cells(grid_depth(camera.zoom))}),
+            search({"tiles": cells(camera.zoom, sparse)}))
 
 
 def tables_request(camera: Camera, filt: Filter | None) -> dict:
@@ -155,7 +167,7 @@ def tables_request(camera: Camera, filt: Filter | None) -> dict:
         "none": {"missing": {"field": "publication_year"}}}}
 
 
-def load_part(tier: str, groups: list[int], auth: tuple[str, str]) -> int:
+def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> int:
     """Send the tier's row groups `groups` through the pipeline in bulk requests. Runs in a worker
     process."""
     head = json.dumps({"index": {"_index": INDEX}})
@@ -168,7 +180,7 @@ def load_part(tier: str, groups: list[int], auth: tuple[str, str]) -> int:
             for row in batch.to_pylist():
                 lines.append(head)
                 lines.append(json.dumps({k: v for k, v in row.items() if v is not None}))
-            r = http.post(f"{URL}/_bulk", params={"pipeline": PIPELINE},
+            r = http.post(f"{url}/_bulk", params={"pipeline": PIPELINE},
                           data=("\n".join(lines) + "\n").encode(),
                           headers={"Content-Type": "application/x-ndjson"}, timeout=3600)
             body = r.json() if r.ok else None
@@ -189,14 +201,18 @@ class OpenSearch(Adapter):
         super().__init__(tier, work, nice, caches)
         self.index_made = False
         self.container = Container(f"bench-compare-os-{os.getpid()}")
+        self.port = free_ports(1)[0]
+        self.url = f"https://127.0.0.1:{self.port}"
         self.data = self.work / "os-data"
         self.logs = self.work / "os-logs"
         # The security plugin refuses a weak initial admin password.
         self.admin_auth = ("admin", "Aa1!" + secrets.token_hex(16))
         self.viewer_auth = (VIEWER_USER, "Vv1!" + secrets.token_hex(16))
         self.admin = self._session(self.admin_auth)
-        self.viewer: requests.Session | None = None
+        self.viewers: list[requests.Session] = []
+        self.pool = ThreadPoolExecutor(2)
         self.access_checks: dict = {}
+        self.extra_env: dict = {}
 
     @staticmethod
     def _session(auth: tuple[str, str]) -> requests.Session:
@@ -213,9 +229,9 @@ class OpenSearch(Adapter):
             d.mkdir(parents=True, exist_ok=True)
         self.container.create(
             f"{IMAGE.split(':')[0]}@{IMAGE_DIGEST}", entrypoint=f"{HOME}/opensearch-docker-entrypoint.sh",
-            args=("opensearch",), nice=nice, ports={PORT: 9200},
+            args=("opensearch",), nice=nice, ports={self.port: 9200},
             mounts={str(self.data): f"{HOME}/data", str(self.logs): f"{HOME}/logs"},
-            env={"discovery.type": "single-node", "OPENSEARCH_JAVA_OPTS": f"-Xms{HEAP} -Xmx{HEAP}",
+            env={**self.extra_env, "discovery.type": "single-node", "OPENSEARCH_JAVA_OPTS": f"-Xms{HEAP} -Xmx{HEAP}",
                  "OPENSEARCH_INITIAL_ADMIN_PASSWORD": self.admin_auth[1],
                  "DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI": "true"})
 
@@ -231,9 +247,9 @@ class OpenSearch(Adapter):
         close = {"Connection": "close"}
         try:
             if not self.index_made:
-                r = requests.get(f"{URL}/", auth=self.admin_auth, verify=False, headers=close, timeout=60)
+                r = requests.get(f"{self.url}/", auth=self.admin_auth, verify=False, headers=close, timeout=60)
             else:
-                r = requests.post(f"{URL}/{INDEX}/_search", auth=self.admin_auth, verify=False,
+                r = requests.post(f"{self.url}/{INDEX}/_search", auth=self.admin_auth, verify=False,
                                   headers=close, json={"size": 1, "terminate_after": 1}, timeout=60)
             return r.ok
         except requests.RequestException:
@@ -242,12 +258,12 @@ class OpenSearch(Adapter):
     def connect(self) -> None:
         """OpenSearch has no session to open: the viewer's credential travels with each search on
         this connection, and the server caches the authenticated user."""
-        self.viewer = self._session(self.viewer_auth)
+        self.viewers = [self._session(self.viewer_auth) for _ in range(2)]
 
     def stop(self) -> None:
-        if self.viewer is not None:
-            self.viewer.close()
-            self.viewer = None
+        for s in self.viewers:
+            s.close()
+        self.viewers = []
         self.admin.close()
         self.container.stop()
 
@@ -264,7 +280,7 @@ class OpenSearch(Adapter):
 
     def call(self, method: str, path: str, body=None, http: requests.Session | None = None,
              timeout: float = 3600, **params):
-        r = (http or self.admin).request(method, f"{URL}{path}", json=body, params=params or None,
+        r = (http or self.admin).request(method, f"{self.url}{path}", json=body, params=params or None,
                                          timeout=timeout)
         if not r.ok:
             raise RuntimeError(f"OpenSearch {method} {path}: {r.status_code} {r.text[:800]}")
@@ -309,7 +325,7 @@ class OpenSearch(Adapter):
         self.call("PUT", f"/_ingest/pipeline/{PIPELINE}", PIPELINE_BODY)
         self.call("PUT", f"/{INDEX}", {"settings": settings, "mappings": MAPPING})
         with ProcessPoolExecutor(BULK_CLIENTS, initializer=os.nice, initargs=(self.nice,)) as pool:
-            parts = [pool.submit(load_part, str(self.tier), groups[i::BULK_CLIENTS], self.admin_auth)
+            parts = [pool.submit(load_part, self.url, str(self.tier), groups[i::BULK_CLIENTS], self.admin_auth)
                      for i in range(BULK_CLIENTS)]
             sent = sum(p.result() for p in parts)
         t_load = time.monotonic() - t0
@@ -376,18 +392,20 @@ class OpenSearch(Adapter):
 
     # -- a frame -----------------------------------------------------------------------------------
 
-    def search(self, body: dict) -> bytes:
-        r = self.viewer.post(f"{URL}/{INDEX}/_search", json=body, timeout=3600)
+    def search(self, body: dict, session: int = 0) -> bytes:
+        r = self.viewers[session].post(f"{self.url}/{INDEX}/_search", json=body, timeout=3600)
         if r.status_code != 200:
             raise RuntimeError(f"OpenSearch {r.status_code}: {r.text[:800]}")
         return r.content
 
     def frame(self, camera: Camera, filt: Filter | None) -> tuple[Frame, float]:
-        body = frame_request(camera, filt)
+        grid_body, tiles_body = frame_requests(camera, filt)
         t0 = time.perf_counter()
-        raw = self.search(body)
+        fg = self.pool.submit(self.search, grid_body, 0)
+        ft = self.pool.submit(self.search, tiles_body, 1)
+        grid_raw, tiles_raw = fg.result(), ft.result()
         elapsed = time.perf_counter() - t0
-        return self._decode(raw, camera.zoom, grid_depth(camera.zoom)), elapsed
+        return self._decode(grid_raw, tiles_raw, camera.zoom, grid_depth(camera.zoom)), elapsed
 
     def tables(self, camera: Camera, filt: Filter | None) -> tuple[dict, float]:
         body = tables_request(camera, filt)
@@ -402,22 +420,21 @@ class OpenSearch(Adapter):
         return {"type": types, "year": years}, elapsed
 
     @staticmethod
-    def _decode(raw: bytes, z: int, dg: int) -> Frame:
-        aggs = json.loads(raw)["aggregations"]
+    def _decode(grid_raw: bytes, tiles_raw: bytes, z: int, dg: int) -> Frame:
+        buckets = json.loads(grid_raw)["aggregations"]["grid"]["buckets"]
         grid, tiles = {}, {}
-        shift = dg - z
-        for bx in aggs["grid"]["buckets"]:
-            gx = int(bx["key"]) >> (32 - dg)
-            for by in bx["qy"]["buckets"]:
-                gy = int(by["key"]) >> (32 - dg)
-                grid[(gx, gy)] = by["doc_count"]
-                t = (gx >> shift, gy >> shift)
-                tiles[t] = tiles.get(t, 0) + by["doc_count"]
+        if buckets:
+            codes = np.array([int(b["key"]) for b in buckets], np.uint64) >> np.uint64(2 * (MAX_DEPTH - dg))
+            gx, gy = deinterleave(codes)
+            shift = dg - z
+            for a, b, bucket in zip(gx.tolist(), gy.tolist(), buckets):
+                grid[(a, b)] = bucket["doc_count"]
+                t = (a >> shift, b >> shift)
+                tiles[t] = tiles.get(t, 0) + bucket["doc_count"]
         qx, qy = [], []
-        for bx in aggs["tiles"]["buckets"]:
-            for by in bx["qy"]["buckets"]:
-                for hit in by["top"]["hits"]["hits"]:
-                    qx.append(hit["fields"]["qx"][0])
-                    qy.append(hit["fields"]["qy"][0])
+        for bucket in json.loads(tiles_raw)["aggregations"]["tiles"]["buckets"]:
+            for hit in bucket["top"]["hits"]["hits"]:
+                qx.append(hit["fields"]["qx"][0])
+                qy.append(hit["fields"]["qy"][0])
         points = points_by_tile(np.array(qx, np.uint32), np.array(qy, np.uint32), z) if qx else {}
-        return Frame(tiles=tiles, grid=grid, points=points, bytes=len(raw))
+        return Frame(tiles=tiles, grid=grid, points=points, bytes=len(grid_raw) + len(tiles_raw))
