@@ -1,0 +1,6 @@
+{
+  "principal": "bench-viewer",
+  "terms": ["unlicensed", "cc-by-nc-nd", "cc-by-nc", "other-oa", "cc-by-sa", "cc-by-nc-sa",
+            "public-domain", "cc-by-nd", "publisher-specific-oa", "mit"],
+  "withheld": ["cc-by"]
+}

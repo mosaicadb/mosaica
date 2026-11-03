@@ -1,0 +1,66 @@
+{
+  "source": {
+    "path": "data/ladder/paperseek/points.parquet",
+    "bytes": 52225761595,
+    "rows": 102117343,
+    "columns": [
+      "entity_id",
+      "x",
+      "y",
+      "licence",
+      "publication_year",
+      "type",
+      "is_oa"
+    ],
+    "origin": "The PaperSeek rung of the Mosaica test ladder: PaperSeek works joined to OpenAlex for licence, year, type and open access, laid out in 2D by UMAP over Stella V5 embeddings of title and abstract"
+  },
+  "sample_seed": 7885648334766170417,
+  "extent": [
+    -18.0,
+    21.0,
+    -14.0,
+    25.0
+  ],
+  "extent_rule": "side = ceil(max(x_max - floor(x_min), y_max - floor(y_min))) over the full file; each axis from the floor of its minimum",
+  "tiers": {
+    "1e6": {
+      "file": "paperseek-1e6.parquet",
+      "nominal_rows": 1000000,
+      "rows": 998965,
+      "threshold": 180642616932459274,
+      "rows_by_licence": {
+        "unlicensed": 776561,
+        "cc-by": 136422,
+        "cc-by-nc-nd": 28108,
+        "cc-by-nc": 20872,
+        "other-oa": 14593,
+        "cc-by-sa": 8974,
+        "cc-by-nc-sa": 7796,
+        "public-domain": 4479,
+        "cc-by-nd": 1082,
+        "publisher-specific-oa": 78
+      },
+      "sha256": "d00cbfc936ca164c798c8c8916efaf5b8a11add82ff2d4e7137b46a0279b2c5c"
+    },
+    "1e7": {
+      "file": "paperseek-1e7.parquet",
+      "nominal_rows": 10000000,
+      "rows": 9999495,
+      "threshold": 1806426169324592749,
+      "rows_by_licence": {
+        "unlicensed": 7765043,
+        "cc-by": 1372875,
+        "cc-by-nc-nd": 281016,
+        "cc-by-nc": 208655,
+        "other-oa": 146715,
+        "cc-by-sa": 88995,
+        "cc-by-nc-sa": 78335,
+        "public-domain": 45853,
+        "cc-by-nd": 11181,
+        "publisher-specific-oa": 823,
+        "mit": 4
+      },
+      "sha256": "95b868b1f6a56690038c86c45d4b77bff19ec217d36aca0794c3aa41d9c7dd07"
+    }
+  }
+}
