@@ -1918,7 +1918,6 @@ impl MemberTableWriter {
         let mut anchor = 0u64;
         let mut last = 0u64;
         let start = self.offset;
-        self.record.clear();
         for (position, &entity) in entities.iter().enumerate() {
             let delta = if position == 0 {
                 entity
@@ -1931,12 +1930,14 @@ impl MemberTableWriter {
                     ))
                 })?
             };
+            // One varint at a time: an artifact's extent is as large as its membership.
+            self.record.clear();
             put_varint64(delta, &mut self.record);
+            write_record(&mut self.writer, &self.path, &self.record)?;
+            self.offset += self.record.len() as u64;
             last = entity;
             anchor = anchor.wrapping_add(mix64(mark ^ entity));
         }
-        write_record(&mut self.writer, &self.path, &self.record)?;
-        self.offset += self.record.len() as u64;
         *extent = MemberExtent {
             offset: start,
             bytes: u32::try_from(self.offset - start).map_err(|_| {
