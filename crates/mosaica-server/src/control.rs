@@ -2844,6 +2844,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
     let fragment_cache: mosaica_engine::FragmentCacheStats = live.fragment_cache;
     let masked_counts = state.engine.figures_stats();
     let region_cache: mosaica_engine::CacheStats = state.engine.region_cache_stats();
+    let text_filter_cache: mosaica_engine::CacheStats = state.engine.text_filter_cache_stats();
     let derived_cache = state.engine.derived_cache_stats();
     let suggest_sets = state.engine.suggest_set_stats();
     let occupancy: mosaica_engine::CacheStats = state.engine.occupancy_cache_stats();
@@ -3239,6 +3240,16 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "building_refusals": region_cache.building_refusals,
             "waits_satisfied": region_cache.waits_satisfied,
             "evictions": region_cache.evictions,
+        },
+        "text_filter_cache": {
+            "entries": text_filter_cache.entries,
+            "bytes": text_filter_cache.bytes,
+            "bound_bytes": text_filter_cache.bound_bytes,
+            "hits": text_filter_cache.hits,
+            "misses": text_filter_cache.misses,
+            "building_refusals": text_filter_cache.building_refusals,
+            "waits_satisfied": text_filter_cache.waits_satisfied,
+            "evictions": text_filter_cache.evictions,
         },
         "derived_cache": {
             "entries": derived_cache.entries,

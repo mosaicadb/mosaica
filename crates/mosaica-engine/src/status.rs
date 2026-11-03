@@ -367,6 +367,13 @@ impl Engine {
         self.region_cache.set_bound_bytes(bytes);
     }
 
+    /// Bound the text filter leaves' answers (`serve.text_filter_cache_bytes`). Zero keeps none
+    /// and evaluates every leaf. Unset, an embedder gets
+    /// [`crate::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES`].
+    pub fn set_text_filter_cache_bytes(&self, bytes: u64) {
+        self.text_filter_cache.set_bound_bytes(bytes);
+    }
+
     /// `serve.max_region_cells`: the boundary-cell budget a region's descent stops at, published
     /// on `/v1/meta`. Default [`crate::region::DEFAULT_MAX_REGION_CELLS`].
     pub fn set_max_region_cells(&self, cells: usize) {
@@ -376,6 +383,11 @@ impl Engine {
     /// The region cache's gauges, beside the row-projection cache's.
     pub fn region_cache_stats(&self) -> mosaica_cache::CacheStats {
         self.region_cache.stats()
+    }
+
+    /// The text filter cache's gauges.
+    pub fn text_filter_cache_stats(&self) -> mosaica_cache::CacheStats {
+        self.text_filter_cache.stats()
     }
 
     /// The occupancy memo's gauges, one entry per `(session, view, depth, generation)` rung.

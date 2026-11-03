@@ -227,14 +227,6 @@ impl WalkCx for PageCx<'_> {
         let body = |route: &dyn Fn(&FilterExpr, bool) -> Result<crate::filter::RoutedFilter>| {
             engine.rows_of_routed(side, route(expr, true)?, domain, rows_in_ranges, per_tile_only)
         };
-        let whole;
-        let candidate = match candidate {
-            Some(candidate) => candidate,
-            None => {
-                whole = self.candidate(place)?;
-                &whole
-            }
-        };
         let served = &self.open.served;
         engine.route_filters_under(served, side, candidate, &self.resolved, cancel, body)
     }

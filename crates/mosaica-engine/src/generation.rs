@@ -483,10 +483,13 @@ impl Generation {
     }
 
     pub(crate) fn shard(&self, id: ShardId) -> Option<&Shard> {
-        self.shards
-            .iter()
-            .find(|shard| shard.id() == id)
-            .map(Arc::as_ref)
+        self.shard_arc(id).map(Arc::as_ref)
+    }
+
+    /// Shard `id` as this generation holds it. A publication that changes any of the shard's
+    /// parts holds a new one, and one that does not carries this.
+    pub(crate) fn shard_arc(&self, id: ShardId) -> Option<&Arc<Shard>> {
+        self.shards.iter().find(|shard| shard.id() == id)
     }
 
     /// Shard `id`. Panics where the generation holds no such shard: an item is read from the

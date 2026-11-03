@@ -890,7 +890,7 @@ impl Engine {
         for (place, side, _) in served.filtered_sides(&mask) {
             let (domain, rows_in_ranges) = tiling.domain_in(place);
             let (filter_rows, highlight_rows) =
-                self.route_filters(served, side, &resolved, &req.cancel, |route| {
+                self.route_filters_under(served, side, None, &resolved, &req.cancel, |route| {
                     // `count_matched` excludes the highlight from the `filter_matched` probe: its
                     // cardinality is not the filter's.
                     let mut evaluate = |expr: &crate::filter::FilterExpr,
@@ -946,26 +946,6 @@ impl Engine {
         ))
     }
 
-    /// Route this request's filter expressions in one side: the entity-space candidate over the
-    /// session's fragment at the shard's watermark (an earlier one, such as a stale-served
-    /// projection's, would silently omit every entity flushed since), the region and `member_of`
-    /// resolvers over `resolved`'s pre-filter mask, and a `route` handed to `body` that puts one
-    /// expression through them.
-    pub(crate) fn route_filters<T>(
-        &self,
-        served: &ServedView<'_>,
-        side: &ServedSide<'_>,
-        resolved: &ResolvedLeaves<'_>,
-        cancel: &Option<CancelToken>,
-        body: impl FnOnce(
-            &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
-        ) -> Result<T>,
-    ) -> Result<T> {
-        let candidate =
-            self.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
-        self.route_filters_under(served, side, &candidate, resolved, cancel, body)
-    }
-
     /// The entity-space set a request's filter is evaluated under in `shard`: the session's
     /// fragment there ([`Self::fragment_for`], given what the request holds as `held`), with the
     /// deny state and the passing buffered entities composed in.
@@ -1002,22 +982,39 @@ impl Engine {
         ))
     }
 
-    /// [`Self::route_filters`] under a candidate the caller composed: a subset of
-    /// [`Self::filter_candidate`]'s set, never wider, since every scan returns a subset of it.
-    /// A region or `member_of` leaf `resolved` holds is answered from it, and one it does not is
-    /// resolved and kept there; the caller holds it only while `served` and its mask are the ones
-    /// it was filled under.
+    /// Route this request's filter expressions in one side under `candidate`, a subset of
+    /// [`Self::filter_candidate`]'s set that the caller composed, or under that set itself where
+    /// `candidate` is `None`, composed over the session's fragment at the shard's watermark: an
+    /// earlier one, such as a stale-served projection's, would omit every entity flushed since.
+    /// Every scan returns a subset of the candidate. A region or `member_of` leaf `resolved` holds
+    /// is answered from it, and one it does not is resolved and kept there; the caller holds it
+    /// only while `served` and its mask are the ones it was filled under. A text leaf's answer is
+    /// kept for later requests only when it is evaluated under the whole set
+    /// ([`crate::text_filter_cache`]). `body` is handed a `route` that puts one expression through
+    /// them.
     pub(crate) fn route_filters_under<T>(
         &self,
         served: &ServedView<'_>,
         side: &ServedSide<'_>,
-        candidate: &croaring::Bitmap,
+        candidate: Option<&croaring::Bitmap>,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         body: impl FnOnce(
             &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
         ) -> Result<T>,
     ) -> Result<T> {
+        let composed;
+        let (candidate, whole) = match candidate {
+            Some(candidate) => (candidate, None),
+            None => {
+                composed = self.filter_candidate(
+                    served.session,
+                    side.shard,
+                    Some(&side.geometry.fragment),
+                )?;
+                (&composed, Some(&composed))
+            }
+        };
         let regions = |leaf: &crate::filter::RegionLeaf| {
             self.region_rows(leaf, served, side, resolved, cancel)
         };
@@ -1027,11 +1024,34 @@ impl Engine {
         let unique = |column: &str, keys: &[mosaica_store::unique::UniqueKey]| {
             unique_holders(served.generation, side.shard, column, keys)
         };
+        let shard = served
+            .generation
+            .shard_arc(side.shard.id())
+            .filter(|shard| std::ptr::eq(shard.as_ref(), side.shard));
+        let text: &crate::filter::TextResolver<'_> =
+            &|column, query, at, evaluate| match shard {
+                Some(shard) => crate::text_filter_cache::answer(
+                    &self.text_filter_cache,
+                    shard,
+                    crate::text_filter_cache::key_of(
+                        shard,
+                        served.session.terms_digest(),
+                        column,
+                        query,
+                    ),
+                    whole,
+                    at,
+                    cancel,
+                    evaluate,
+                ),
+                None => evaluate(at),
+            };
         let resolvers = crate::filter::RowLeafResolvers {
             regions: &regions,
             members: &members,
             layers: &layers,
             unique: &unique,
+            text,
         };
         body(&|expr: &crate::filter::FilterExpr, prefer_row: bool| {
             side.shard

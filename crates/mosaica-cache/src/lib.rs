@@ -339,6 +339,11 @@ impl<K: Eq + Hash + Clone, V: CacheWeight> SingleFlightCache<K, V> {
         self.bound_bytes.store(bound_bytes, Ordering::Relaxed);
     }
 
+    /// The byte bound.
+    pub fn bound_bytes(&self) -> u64 {
+        self.bound_bytes.load(Ordering::Relaxed)
+    }
+
     /// The wait budget in milliseconds.
     pub fn wait_budget_ms(&self) -> u64 {
         self.wait_budget_ms.load(Ordering::Relaxed)

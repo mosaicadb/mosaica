@@ -99,7 +99,7 @@ impl Engine {
         for (place, side, _) in served.filtered_sides(mask) {
             let total_rows = side.data.row_space.total_rows();
             let (side_rows, verdict) =
-                self.route_filters(served, side, &resolved, cancel, |route| {
+                self.route_filters_under(served, side, None, &resolved, cancel, |route| {
                     // A column with both routes takes the entity route: there are no tile ranges
                     // here to make the row route cheaper, so only a render-only column reaches
                     // the scan.

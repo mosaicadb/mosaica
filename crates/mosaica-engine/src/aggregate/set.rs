@@ -272,7 +272,7 @@ pub(super) fn compose(
         let side = &served.sides[place];
         let candidate =
             engine.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
-        engine.route_filters_under(served, side, &candidate, &resolved, &req.cancel, |route| {
+        engine.route_filters_under(served, side, Some(&candidate), &resolved, &req.cancel, |route| {
             let route_one = |expr: &FilterExpr, into: &mut Set| -> Result<()> {
                 clock.check_ended()?;
                 into.add(
@@ -361,7 +361,7 @@ pub(crate) fn entities_passing(
     check_cancelled(cancel)?;
     let served = &open.served;
     let side = &served.sides[place];
-    engine.route_filters_under(served, side, candidate, resolved, cancel, |route| {
+    engine.route_filters_under(served, side, Some(candidate), resolved, cancel, |route| {
         let (part, region) = routed(engine, open, place, route(expr, false)?)?;
         check_cancelled(cancel)?;
         let entities = match part.held {

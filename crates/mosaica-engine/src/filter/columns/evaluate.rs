@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use croaring::Bitmap;
 use mosaica_filter::resolve_union;
 use mosaica_types::AttrLocalId;
@@ -7,8 +9,8 @@ use crate::cancel::CancelToken;
 use crate::filter::declared::Placement;
 use crate::filter::error::FilterError;
 use crate::filter::expr::{
-    FilterExpr, FilterOperand, MemberOfArtifact, RoutedFilter, RowExpr, RowLeafResolvers, UniqueResolver,
-    MEMBER_OF_COLUMN, REGION_COLUMN,
+    evaluate_text, FilterExpr, FilterOperand, MemberOfArtifact, RoutedFilter, RowExpr,
+    RowLeafResolvers, TextQuery, TextResolver, UniqueResolver, MEMBER_OF_COLUMN, REGION_COLUMN,
 };
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 use crate::filter::scan::text::{phrase_match, text_match};
@@ -33,16 +35,17 @@ impl FilterColumns {
         operand: &FilterOperand,
         candidate: &Bitmap,
     ) -> Result<Bitmap, FilterError> {
-        self.resolve_until(column, operand, candidate, &None)
+        self.resolve_until(column, operand, candidate, &evaluate_text, &None)
     }
 
-    /// [`Self::resolve`], ended with [`FilterError::Cancelled`] once the request holding `cancel`
-    /// has gone.
+    /// [`Self::resolve`], with a text leaf answered through `text`, ended with
+    /// [`FilterError::Cancelled`] once the request holding `cancel` has gone.
     fn resolve_until(
         &self,
         column: &str,
         operand: &FilterOperand,
         candidate: &Bitmap,
+        text: &TextResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         let name = column;
@@ -57,7 +60,7 @@ impl FilterColumns {
             ColumnLayers::Text {
                 layers, analyser, ..
             } => {
-                return resolve_text(name, layers, analyser, operand, candidate, cancel);
+                return resolve_text(name, layers, analyser, operand, candidate, text, cancel);
             }
             ColumnLayers::Values {
                 layers,
@@ -102,7 +105,7 @@ impl FilterColumns {
                 detail: "this evaluation holds no unique index".to_string(),
             })
         };
-        self.eval(expr, candidate, &no_index, &None)
+        self.eval(expr, candidate, &no_index, &evaluate_text, &None)
     }
 
     /// The keys a leaf names where its column's unique index answers it: `eq` or `in` on a unique
@@ -142,6 +145,7 @@ impl FilterColumns {
         operand: &FilterOperand,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
+        text: &TextResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         if let Some(keys) = self.unique_keys(column, operand) {
@@ -158,7 +162,7 @@ impl FilterColumns {
                 operator: operator_name(operand).to_string(),
             });
         }
-        self.resolve_until(column, operand, candidate, cancel)
+        self.resolve_until(column, operand, candidate, text, cancel)
     }
 
     /// Evaluate a filter expression's entity-space part and route the rest.
@@ -187,6 +191,7 @@ impl FilterColumns {
                 expr,
                 candidate,
                 resolvers.unique,
+                resolvers.text,
                 cancel,
             )?));
         }
@@ -318,7 +323,13 @@ impl FilterColumns {
         cancel: &Option<CancelToken>,
     ) -> Result<RowExpr, FilterError> {
         if self.space_of(expr, prefer_row)? == Space::Entity {
-            return Ok(RowExpr::Entity(self.eval(expr, candidate, resolvers.unique, cancel)?));
+            return Ok(RowExpr::Entity(self.eval(
+                expr,
+                candidate,
+                resolvers.unique,
+                resolvers.text,
+                cancel,
+            )?));
         }
         match expr {
             FilterExpr::Leaf { column, operand } => Ok(RowExpr::Leaf {
@@ -351,19 +362,20 @@ impl FilterColumns {
         expr: &FilterExpr,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
+        text: &TextResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         match expr {
             FilterExpr::Leaf { column, operand } => {
                 check_cancelled(cancel)?;
-                self.eval_leaf(column, operand, candidate, unique, cancel)
+                self.eval_leaf(column, operand, candidate, unique, text, cancel)
             }
             FilterExpr::Region(_) => Err(FilterError::RegionInEntitySpace),
             FilterExpr::MemberOf(_) => Err(FilterError::MemberOfInEntitySpace),
             FilterExpr::AllOf(kids) => {
                 let mut live = candidate.clone();
                 for kid in kids {
-                    live = self.eval(kid, &live, unique, cancel)?;
+                    live = self.eval(kid, &live, unique, text, cancel)?;
                     if live.is_empty() {
                         break;
                     }
@@ -373,7 +385,7 @@ impl FilterColumns {
             FilterExpr::AnyOf(kids) => {
                 let mut out = Bitmap::new();
                 for kid in kids {
-                    out |= self.eval(kid, candidate, unique, cancel)?;
+                    out |= self.eval(kid, candidate, unique, text, cancel)?;
                 }
                 Ok(out)
             }
@@ -381,7 +393,7 @@ impl FilterColumns {
                 let mut out = candidate.clone();
                 for kid in kids {
                     // Under `out`, not `candidate`, the same narrowing `AllOf` does.
-                    out.andnot_inplace(&self.eval(kid, &out, unique, cancel)?);
+                    out.andnot_inplace(&self.eval(kid, &out, unique, text, cancel)?);
                     if out.is_empty() {
                         break;
                     }
@@ -392,29 +404,77 @@ impl FilterColumns {
     }
 }
 
-/// A `match` or a `phrase` over one text column's layers: [`FilterColumns::resolve`]'s text half.
-///
-/// A phrase of two or more words is the conjunction of its words in each layer, narrowed by that
-/// layer's positions to the items saying them adjacent and in order.
+/// A `match` or a `phrase` over one text column's layers: [`FilterColumns::resolve`]'s text half,
+/// answered through `resolver`.
 fn resolve_text(
     name: &str,
     text: &[TextLayer],
     analyser: &mosaica_analyse::Analyser,
     operand: &FilterOperand,
     candidate: &Bitmap,
+    resolver: &TextResolver<'_>,
     cancel: &Option<CancelToken>,
 ) -> Result<Bitmap, FilterError> {
-    let (query, minimum, phrase) = match operand {
-        FilterOperand::Match { query, minimum } => (query, *minimum, false),
-        FilterOperand::Phrase { query } => (query, None, true),
-        _ => return Ok(Bitmap::new()),
+    let Some(query) = text_query(analyser, operand) else {
+        return Ok(Bitmap::new());
     };
-    // `ordered` keeps the original order and duplicates, which a phrase needs.
-    let ordered = analyser.tokens(query);
-    let mut tokens = ordered.clone();
+    resolver(name, &query, candidate, &|candidate| {
+        text_answer(name, text, &query, candidate, cancel)
+    })
+}
+
+/// `operand` as `analyser` reads it, or `None` where it is not a text operand.
+fn text_query(analyser: &mosaica_analyse::Analyser, operand: &FilterOperand) -> Option<TextQuery> {
+    Some(match operand {
+        FilterOperand::Match { query, minimum } => {
+            let tokens = distinct(analyser.tokens(query));
+            TextQuery::Match {
+                minimum: minimum.unwrap_or(tokens.len() as u32),
+                tokens,
+            }
+        }
+        FilterOperand::Phrase { query } => {
+            let words = analyser.tokens(query);
+            if words.len() < 2 {
+                let tokens = distinct(words);
+                TextQuery::Match {
+                    minimum: tokens.len() as u32,
+                    tokens,
+                }
+            } else {
+                TextQuery::Phrase { words }
+            }
+        }
+        _ => return None,
+    })
+}
+
+/// `tokens` sorted, each once.
+fn distinct(mut tokens: Vec<String>) -> Vec<String> {
     tokens.sort();
     tokens.dedup();
-    let minimum = minimum.unwrap_or(tokens.len() as u32);
+    tokens
+}
+
+/// The entities of `candidate` whose value in one of `text`'s layers answers `query`.
+///
+/// A phrase is the conjunction of its words in each layer, narrowed by that layer's positions to
+/// the items saying them adjacent and in order.
+fn text_answer(
+    name: &str,
+    text: &[TextLayer],
+    query: &TextQuery,
+    candidate: &Bitmap,
+    cancel: &Option<CancelToken>,
+) -> Result<Bitmap, FilterError> {
+    let (tokens, minimum, phrase) = match query {
+        TextQuery::Match { tokens, minimum } => (Cow::Borrowed(tokens), *minimum, None),
+        TextQuery::Phrase { words } => {
+            let tokens = distinct(words.clone());
+            let minimum = tokens.len() as u32;
+            (Cow::Owned(tokens), minimum, Some(words))
+        }
+    };
     let mut out = Bitmap::new();
     for layer in text {
         let survivors = text_match(
@@ -426,11 +486,10 @@ fn resolve_text(
             candidate,
             cancel,
         )?;
-        // A one-word phrase is a `match`.
-        if !phrase || ordered.len() < 2 {
+        let Some(words) = phrase else {
             out |= survivors;
             continue;
-        }
+        };
         // `text_match` intersects with the candidate as it reads each posting, so this cannot
         // fire; it is checked before any positions are read on a survivor's behalf.
         if !survivors.is_subset(candidate) {
@@ -444,7 +503,7 @@ fn resolve_text(
             &layer.dict,
             &layer.postings,
             &layer.positions,
-            &ordered,
+            words,
             &survivors,
             cancel,
         )?;

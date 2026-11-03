@@ -115,6 +115,7 @@ STATUS_PROCESS = frozenset(
         "masked_count_cache",
         "row_projection_cache",
         "region_cache",
+        "text_filter_cache",
         "occupancy",
         "suggest_sets",
         "derived_cache",

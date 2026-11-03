@@ -79,8 +79,8 @@ pub use declared::{
 pub use error::{ComposeError, FilterError};
 pub use expr::{
     FilterExpr, FilterOperand, MemberOfArtifact, MemberOfLeaf, MemberResolver, RegionLeaf, RegionResolver,
-    RoutedFilter, RowExpr, RowLeafResolvers, UniqueResolver, MAX_FILTER_DEPTH, MEMBER_OF_COLUMN,
-    REGION_COLUMN, UNRESOLVABLE_VALUE,
+    RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, TextResolver, UniqueResolver,
+    evaluate_text, MAX_FILTER_DEPTH, MEMBER_OF_COLUMN, REGION_COLUMN, UNRESOLVABLE_VALUE,
 };
 pub use membership::{
     CategoryCounts, CategoryMembership, CountCodes, EntityCodes, VisitBuffered, VisitCodes,

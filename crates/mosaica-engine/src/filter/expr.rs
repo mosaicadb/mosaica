@@ -254,12 +254,44 @@ pub type MemberResolver<'a> = dyn Fn(&MemberOfLeaf) -> Result<Bitmap, FilterErro
 pub type UniqueResolver<'a> =
     dyn Fn(&str, &[mosaica_store::unique::UniqueKey]) -> Result<Vec<u32>, FilterError> + 'a;
 
+/// A `match` or `phrase` operand as its column's analyser reads it. Two operands that read alike
+/// answer alike over the same layers.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum TextQuery {
+    /// Items holding at least `minimum` of `tokens`, which are sorted and distinct. A phrase of
+    /// fewer than two words is one of these.
+    Match { tokens: Vec<String>, minimum: u32 },
+    /// Items holding `words`, two or more, adjacent and in order.
+    Phrase { words: Vec<String> },
+}
+
+/// How a text leaf is answered in entity space: given its column, its query, the candidate it is
+/// evaluated under and the evaluation itself, an answer equal to `evaluate(candidate)`.
+pub type TextResolver<'a> = dyn Fn(
+        &str,
+        &TextQuery,
+        &Bitmap,
+        &dyn Fn(&Bitmap) -> Result<Bitmap, FilterError>,
+    ) -> Result<Bitmap, FilterError>
+    + 'a;
+
+/// The [`TextResolver`] that evaluates every leaf it is asked.
+pub fn evaluate_text(
+    _column: &str,
+    _query: &TextQuery,
+    candidate: &Bitmap,
+    evaluate: &dyn Fn(&Bitmap) -> Result<Bitmap, FilterError>,
+) -> Result<Bitmap, FilterError> {
+    evaluate(candidate)
+}
+
 /// The two row-space leaves' resolvers, how many levels a layer a `member_of` names holds where
 /// `/v1/meta` lists it to this principal (`None` where not, refused before either resolver runs),
-/// and the unique columns' lookup.
+/// the unique columns' lookup and the text leaves' answers.
 pub struct RowLeafResolvers<'a> {
     pub regions: &'a RegionResolver<'a>,
     pub members: &'a MemberResolver<'a>,
     pub layers: &'a dyn Fn(&str) -> Option<u32>,
     pub unique: &'a UniqueResolver<'a>,
+    pub text: &'a TextResolver<'a>,
 }

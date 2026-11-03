@@ -107,6 +107,8 @@ pub struct Engine {
     /// `serve.max_region_cells` — the most boundary cells a region's descent may hold at one
     /// depth before it answers a cover instead.
     pub(crate) max_region_cells: AtomicU64,
+    /// Each text filter leaf's answer per shard and grant ([`crate::text_filter_cache`]).
+    pub(crate) text_filter_cache: Arc<crate::text_filter_cache::TextFilterCache>,
     /// Artifact memberships in row space, one entry per `(view, layer, level)`. Keyed per
     /// *deployment*, unlike the session-keyed caches below, so it moves only when a layer is
     /// published.
@@ -1301,6 +1303,9 @@ impl Engine {
 
         let row_projection_cache = Arc::new(RowProjectionCache::new(u64::MAX));
         let region_cache = Arc::new(mosaica_cache::SingleFlightCache::new(u64::MAX));
+        let text_filter_cache = Arc::new(mosaica_cache::SingleFlightCache::new(
+            crate::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES,
+        ));
         let refresh_in_flight = Arc::new(AtomicU64::new(crate::refresh::NO_REFRESH));
         let switches = Arc::new(TestSwitches::default());
         let counters = Arc::new(ServeCounters::default());
@@ -1324,6 +1329,7 @@ impl Engine {
             fragments,
             region_cache: Arc::clone(&region_cache),
             max_region_cells: AtomicU64::new(crate::region::DEFAULT_MAX_REGION_CELLS as u64),
+            text_filter_cache,
             artifact_projections: Arc::clone(&artifact_projections),
             shapes: Arc::clone(&shapes),
             figures: Arc::new(crate::figures::FiguresCache::new(
@@ -1465,6 +1471,7 @@ impl Engine {
             figures: Arc::clone(&self.figures),
             fragments: Arc::clone(&self.fragments),
             region_cache: Arc::clone(&self.region_cache),
+            text_filter_cache: Arc::clone(&self.text_filter_cache),
             shapes: Arc::clone(&self.shapes),
             lineages: Arc::clone(&self.lineages),
             level_contents: Arc::clone(&self.level_contents),

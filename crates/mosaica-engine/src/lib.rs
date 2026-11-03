@@ -57,6 +57,7 @@ pub mod suggest;
 pub mod suggest_set;
 mod switches;
 mod test_hooks;
+pub mod text_filter_cache;
 pub mod tile_index;
 pub mod timing;
 mod unique;
