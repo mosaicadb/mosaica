@@ -253,8 +253,9 @@ pub(super) fn compose(
     req: &AggregateRequest<'_>,
     prefer_row: bool,
     clock: &Clock,
+    moved: bool,
 ) -> Result<Sets> {
-    clock.check_ended()?;
+    clock.check_ended(moved)?;
     let served = &open.served;
     let sides = served.sides.len();
     let reads: Vec<usize> = served
@@ -280,7 +281,7 @@ pub(super) fn compose(
             &req.cancel,
             |route| {
             let route_one = |expr: &FilterExpr, into: &mut Set| -> Result<()> {
-                clock.check_ended()?;
+                clock.check_ended(moved)?;
                 into.add(
                     place,
                     routed(engine, open, place, route(expr, prefer_row)?)?,
@@ -387,6 +388,8 @@ pub(super) struct Cx<'a> {
     pub(super) generation: &'a Arc<Generation>,
     pub(super) sets: &'a Sets,
     pub(super) clock: &'a Clock,
+    /// Whether the response has sent a page, after which the stream deadline ends it.
+    moved: bool,
 }
 
 impl<'a> Cx<'a> {
@@ -396,6 +399,7 @@ impl<'a> Cx<'a> {
         generation: &'a Arc<Generation>,
         sets: &'a Sets,
         clock: &'a Clock,
+        moved: bool,
     ) -> Cx<'a> {
         Cx {
             engine,
@@ -403,6 +407,7 @@ impl<'a> Cx<'a> {
             generation,
             sets,
             clock,
+            moved,
         }
     }
 
@@ -438,9 +443,10 @@ impl<'a> Cx<'a> {
             .sum()
     }
 
-    /// [`Clock::check_ended`]: `Err(EngineError::Cancelled)` once the client has gone or the
-    /// stream deadline has passed, which a caller maps to an end by `deadline`.
+    /// [`Clock::check_ended`]: `Err(EngineError::Cancelled)` once the client has gone, or once
+    /// the stream deadline has passed after the response's first page, which a caller maps to an
+    /// end by `deadline`.
     pub(super) fn check_clock(&self) -> Result<()> {
-        self.clock.check_ended()
+        self.clock.check_ended(self.moved)
     }
 }

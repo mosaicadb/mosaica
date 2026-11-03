@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use arrow::record_batch::RecordBatch;
 
-use crate::cancel::{gone, CancelToken};
+use crate::cancel::CancelToken;
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
 use crate::filter::FilterExpr;
@@ -81,8 +81,8 @@ pub struct RecordsLimits {
     /// Time after which a response ends by `deadline`. A records read honours it between pages,
     /// and within a page's walk once stopping moves the cursor on, so it does not interrupt a
     /// stretch's filter evaluation; an artifacts read's count honours it between chunks before the
-    /// first page, ending the response with no rows. An aggregate honours it at every check, the
-    /// first page included.
+    /// first page, ending the response with no rows. An aggregate honours it at every check once
+    /// its first page has been sent.
     pub stream_deadline: Duration,
 }
 
@@ -540,7 +540,7 @@ impl Engine {
             }
             // Before the first page only a client that has gone ends the response here: the walk
             // honours the deadline once its scan has moved, so every response moves the cursor on.
-            if clock.ended() && (pages > 0 || gone(&response.cancel)) {
+            if clock.ended(pages > 0) {
                 break ResponseEndedBy::Deadline;
             }
             // Each page reads the latest generation and composes the view's mask for itself; the

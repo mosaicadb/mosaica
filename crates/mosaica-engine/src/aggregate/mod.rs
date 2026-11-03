@@ -620,7 +620,8 @@ impl Engine {
                     break ResponseEndedBy::BudgetTime;
                 }
             }
-            if clock.ended() {
+            let moved = pages > 0;
+            if clock.ended(moved) {
                 break ResponseEndedBy::Deadline;
             }
             let generation = self.generation.load_full();
@@ -635,7 +636,7 @@ impl Engine {
                 open => open?,
             };
             let composing = Instant::now();
-            let sets = match set::compose(self, &open, req, planned.prefer_row, &clock) {
+            let sets = match set::compose(self, &open, req, planned.prefer_row, &clock, moved) {
                 Err(EngineError::Cancelled) => break ResponseEndedBy::Deadline,
                 sets => sets?,
             };
@@ -663,9 +664,9 @@ impl Engine {
 
             let grouping = position.table;
             let plan = &planned.plans[grouping as usize];
-            let cx = set::Cx::new(self, &open, &generation, &sets, &clock);
+            let cx = set::Cx::new(self, &open, &generation, &sets, &clock, moved);
             let budget = table::Budget {
-                deadline: (pages > 0).then(|| started + limits.response_time),
+                deadline: moved.then(|| started + limits.response_time),
                 page_rows: planned.page_rows,
                 max_page_bytes: limits.max_page_bytes,
                 pages_left: req.pages.map_or(u64::MAX, |limit| u64::from(limit) - pages),

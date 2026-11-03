@@ -2182,9 +2182,10 @@ paths:
         - `4` trailer: JSON `RecordsTrailer`, exactly one, last.
 
         Tables arrive in the order of `groupings`, one per grouping. A table may span pages, and a
-        response may end part-way through one. There is no response head: a response cancelled
-        before its first page is a trailer alone, ending by `deadline`. An unknown kind is a
-        decoding error. [Wire framing](../openapi/README.md) walks a decode.
+        response may end part-way through one. There is no response head. The stream deadline
+        ends a response only after its first page; a response whose client goes before its first
+        page is a trailer alone, ending by `deadline`. An unknown kind is a decoding error.
+        [Wire framing](../openapi/README.md) walks a decode.
 
         **The sets.** `filters` is the set every count is taken over, in the viewport's grammar
         and evaluated in `view`; absent is every item this principal may see there. `reference` is

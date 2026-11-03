@@ -1129,6 +1129,34 @@ fn a_response_cancelled_before_its_first_page_carries_no_rows() {
     assert!(trailer.next.is_some(), "the read can start again");
 }
 
+/// **A stream deadline already passed ends a response after its first page**, not before it: the
+/// page is sent whole, and the trailer after it ends by `deadline` with a cursor past it.
+#[test]
+fn a_passed_stream_deadline_ends_a_response_after_its_first_page() {
+    let fx = fixture();
+    let engine = &fx.engine;
+    let session = fx.session(true);
+    let groupings = [field("kind", Pick::Top(3)), size()];
+    let mut req = request(&groupings);
+    req.limits.stream_deadline = Duration::ZERO;
+    let (collect, trailer) = respond(engine, &session, req).unwrap();
+    assert_eq!(trailer.ended_by, ResponseEndedBy::Deadline);
+    assert_eq!(trailer.pages, 1);
+    assert_eq!(collect.pages.len(), 1);
+    let (grouping, batch, _) = &collect.pages[0];
+    assert_eq!(*grouping, 0);
+    assert_eq!(trailer.rows, batch.num_rows() as u64);
+    assert!(batch.num_rows() > 0, "the first page holds the table's rows");
+
+    let token = trailer.next.expect("the second table is still owed");
+    let mut rest = request(&groupings);
+    rest.cursor = Some(&token);
+    let (collect, trailer) = respond(engine, &session, rest).unwrap();
+    assert_eq!(trailer.ended_by, ResponseEndedBy::End);
+    let groupings: Vec<u32> = collect.pages.iter().map(|(g, ..)| *g).collect();
+    assert_eq!(groupings, [1], "the next response resumes at the second table");
+}
+
 /// **What the request's shape decides is refused before anything is read**, naming the limit.
 #[test]
 fn a_request_past_a_limit_or_naming_what_cannot_be_counted_is_refused() {

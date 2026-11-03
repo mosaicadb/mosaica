@@ -395,16 +395,17 @@ impl Clock {
         }
     }
 
-    /// Whether the client has gone or the stream deadline has passed, either of which ends the
-    /// response by `deadline`.
-    pub(crate) fn ended(&self) -> bool {
-        gone(&self.cancel) || self.started.elapsed() >= self.deadline
+    /// Whether the response ends by `deadline` here: at once where the client has gone, and where
+    /// the stream deadline has passed only once the response has `moved` on, by sending a page or
+    /// by its scan passing where the response began.
+    pub(crate) fn ended(&self, moved: bool) -> bool {
+        gone(&self.cancel) || (moved && self.started.elapsed() >= self.deadline)
     }
 
-    /// `Err(EngineError::Cancelled)` where [`Self::ended`], whether the client has gone or only the
-    /// deadline has passed. A caller maps it to an end by `deadline`, never to a refusal.
-    pub(crate) fn check_ended(&self) -> Result<()> {
-        if self.ended() {
+    /// `Err(EngineError::Cancelled)` where [`Self::ended`]. A caller maps it to an end by
+    /// `deadline`, never to a refusal.
+    pub(crate) fn check_ended(&self, moved: bool) -> Result<()> {
+        if self.ended(moved) {
             return Err(EngineError::Cancelled);
         }
         Ok(())
@@ -414,9 +415,12 @@ impl Clock {
         self.started.elapsed() >= self.budget
     }
 
-    /// Why the scan would stop here.
-    pub(super) fn stop(&self) -> Option<ResponseEndedBy> {
-        if self.ended() {
+    /// Why the scan stops here, where stopping leaves it `moved` past where the response began.
+    pub(super) fn stop(&self, moved: bool) -> Option<ResponseEndedBy> {
+        if !moved {
+            return None;
+        }
+        if self.ended(moved) {
             return Some(ResponseEndedBy::Deadline);
         }
         self.out_of_time().then_some(ResponseEndedBy::BudgetTime)
@@ -664,10 +668,8 @@ impl Walk {
                 self.stretch = None;
             }
             if self.stretch.is_none() {
-                if let Some(reason) = clock.stop() {
-                    if !rows.is_empty() || scan > self.origin {
-                        break Walked::Stopped(reason);
-                    }
+                if let Some(reason) = clock.stop(!rows.is_empty() || scan > self.origin) {
+                    break Walked::Stopped(reason);
                 }
                 self.note_regions(cx, &clock.cancel)?;
                 let opened = match self.driving_rows(cx)? {
@@ -1225,9 +1227,8 @@ impl<C: WalkCx> Take<'_, C> {
         first_unreached: Key,
         began_at: Key,
     ) -> Option<(ResponseEndedBy, Key)> {
-        let reason = clock.stop()?;
-        (!rows.is_empty() || self.moved || first_unreached > began_at)
-            .then_some((reason, first_unreached))
+        let moved = !rows.is_empty() || self.moved || first_unreached > began_at;
+        clock.stop(moved).map(|reason| (reason, first_unreached))
     }
 
     /// Take map-order rows past `scan` and in the stretch until `rows` holds `need`: each
