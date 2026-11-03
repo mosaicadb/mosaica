@@ -787,15 +787,12 @@ mod tests {
             prop_assert_eq!(reader.term_count() as usize, per_term.len());
 
             for (t, expected) in per_term.iter().enumerate() {
-                let got: Vec<u32> = match reader.posting(TermId::new(t as u32)).unwrap().expect("every term is present") {
-                    PostingRef::Array(bytes) => bytes
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .map(|c| u32::from_le_bytes(*c))
-                        .collect(),
-                    PostingRef::Roaring(bm) => bm.iter().collect(),
-                };
+                let got: Vec<u32> = reader
+                    .posting(TermId::new(t as u32))
+                    .unwrap()
+                    .expect("every term is present")
+                    .iter()
+                    .collect();
                 prop_assert_eq!(&got, expected);
             }
         }
