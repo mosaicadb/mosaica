@@ -82,7 +82,9 @@ def tile_ranges(tiles: list[tuple[int, int]], z: int) -> str:
     return "(" + " OR ".join(out) + ")"
 
 
-def filter_sql(filt: Filter | None) -> str:
+def filter_sql(filt: Filter | None, quantise=quantise) -> str:
+    """The filter as SQL conditions, each led by `AND`; a box is quantised by `quantise`, so a
+    dialect whose other conditions read the same passes its own."""
     terms = []
     for leaf in (filt.leaves if filt else []):
         col, value = leaf.get("col"), leaf["value"]

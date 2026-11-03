@@ -145,10 +145,11 @@ class Container:
 
     def create(self, image: str, *, entrypoint: str, args: tuple[str, ...] = (),
                mounts: dict | None = None, ports: dict | None = None, env: dict | None = None,
-               nice: int = 0) -> None:
+               nice: int = 0, shm: str | None = None) -> None:
         """Create the container, replacing one of the same name. `mounts` maps a host path to a
         container path (suffix `:ro` for read-only), `ports` a host port on 127.0.0.1 to a
-        container port. The entry point runs at niceness `nice`."""
+        container port, and `shm` sizes `/dev/shm` where Docker's 64 MB is too small. The entry
+        point runs at niceness `nice`."""
         mounts, ports, env = mounts or {}, ports or {}, env or {}
         check_tools(image)
         self.remove()
@@ -159,6 +160,7 @@ class Container:
             *(a for host, inside in mounts.items() for a in ("-v", f"{host}:{inside}")),
             *(a for host, inside in ports.items() for a in ("-p", f"127.0.0.1:{host}:{inside}")),
             *(a for k, v in env.items() for a in ("-e", f"{k}={v}")),
+            *(("--shm-size", shm) if shm else ()),
             "--entrypoint", TOOLS["/usr/bin/nice"], image, "-n", str(nice), entrypoint, *args,
         ], check=True, capture_output=True)
 

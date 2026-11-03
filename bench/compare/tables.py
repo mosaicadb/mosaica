@@ -19,13 +19,18 @@ GIB = 1 << 30
 #: The fields a record must carry to be tabled; an older record without them is refused.
 REQUIRED = ("system", "caches", "tier", "tier_sha256", "harness_commit", "cameras_sha256",
             "repeats", "cold_runs", "version", "build", "warm", "errors", "serve_memory")
-#: Each system's image, which every record must name and every column of one table must share.
-IMAGE = {"mosaica": lambda r: (r["version"]["image_id"], r["version"]["version"]),
-         "clickhouse": lambda r: r["version"]["digest"]}
 
 
 def image_of(r: dict):
-    return IMAGE["clickhouse" if r["system"] == "clickhouse" else "mosaica"](r)
+    """The image a record ran: a pulled image's digest, or a built one's id and version. Every
+    record must name one, and every column of one system in a table must share it."""
+    v = r["version"]
+    return v["digest"] if "digest" in v else (v["image_id"], v["version"])
+
+
+def family(r: dict) -> str:
+    """The system an arm belongs to: `mosaica` for both Mosaica arms."""
+    return r["system"].split("+")[0]
 
 
 def column(r: dict) -> str:
@@ -54,8 +59,8 @@ def check_comparable(tier: str, runs: dict[str, dict]) -> None:
     images."""
     checks = {k: (lambda r, k=k: r[k], lambda r: True)
               for k in ("harness_commit", "cameras_sha256", "tier_sha256")}
-    checks["Mosaica image"] = (image_of, lambda r: r["system"] != "clickhouse")
-    checks["ClickHouse image"] = (image_of, lambda r: r["system"] == "clickhouse")
+    for f in {family(r) for r in runs.values()}:
+        checks[f"{f} image"] = (image_of, lambda r, f=f: family(r) == f)
     for name, (get, applies) in checks.items():
         seen = {get(r) for r in runs.values() if applies(r)}
         if len(seen) > 1:
@@ -113,7 +118,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             ("Build time", lambda r: f"{r['build']['build_s']:.1f} s"),
             ("Build peak RSS", lambda r: size(r["build"]["peak_rss_bytes"])),
             ("Build peak cgroup memory (incl. page cache)", lambda r: size(r["build"]["cgroup_peak_bytes"])),
-            ("Size on disk (ClickHouse: data directory; Mosaica: bundle)", lambda r: size(r["build"]["disk_bytes"])),
+            ("Size on disk (Mosaica: bundle; others: data directory)", lambda r: size(r["build"]["disk_bytes"])),
             ("Serve peak RSS", lambda r: size(r["serve_memory"]["peak_rss_bytes"])),
             ("Serve peak cgroup memory (incl. page cache)", lambda r: size(r["serve_memory"]["cgroup_peak_bytes"])),
             ("Serve cgroup memory after a cold restart and one frame",

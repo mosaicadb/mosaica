@@ -210,7 +210,10 @@ def make_adapter(args):
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
         return ClickHouse(args.tier, work, nice=args.nice, caches=args.caches)
-    sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate or clickhouse")
+    if args.system == "postgis":
+        from adapters.postgis import PostGIS
+        return PostGIS(args.tier, work, nice=args.nice, caches=args.caches)
+    sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate, clickhouse or postgis")
 
 
 def main() -> None:
