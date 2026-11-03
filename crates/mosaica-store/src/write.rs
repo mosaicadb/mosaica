@@ -560,7 +560,7 @@ impl ColumnSpool {
             .into_inner()
             .map_err(io::IntoInnerError::into_error)?;
         // The bytes are about to be read back through a memory map; they must be durable and
-        // visible before the map is taken. Same rule as `PostingsSpool::finish`.
+        // visible before the map is taken.
         file.sync_all()?;
         let len = file.metadata()?.len() as usize;
 

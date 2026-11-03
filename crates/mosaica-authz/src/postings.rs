@@ -179,6 +179,12 @@ pub(crate) struct RecordSpool {
 impl RecordSpool {
     /// Create (truncating) the spool file at `spool_path`.
     pub(crate) fn create(spool_path: &Path) -> io::Result<Self> {
+        let dir = match spool_path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir,
+            _ => Path::new("."),
+        };
+        let mut offsets = BufWriter::new(tempfile::tempfile_in(dir)?);
+        offsets.write_all(&0i64.to_ne_bytes())?;
         // Read access is required too: `finish` memory-maps the spool through this same handle.
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -186,12 +192,6 @@ impl RecordSpool {
             .create(true)
             .truncate(true)
             .open(spool_path)?;
-        let dir = match spool_path.parent() {
-            Some(dir) if !dir.as_os_str().is_empty() => dir,
-            _ => Path::new("."),
-        };
-        let mut offsets = BufWriter::new(tempfile::tempfile_in(dir)?);
-        offsets.write_all(&0i64.to_ne_bytes())?;
         Ok(RecordSpool {
             spool_path: spool_path.to_path_buf(),
             writer: BufWriter::new(file),
@@ -271,9 +271,13 @@ impl RecordSpool {
         }
         let total = usize::try_from(self.last)
             .map_err(|_| invalid_data("postings spool total exceeds usize on this platform"))?;
-        let values = map_spooled(self.writer, total)?;
+        let values = map_spooled(self.writer, total, "the postings spool")?;
         let entries = self.records + 1;
-        let offsets = map_spooled(self.offsets, entries * std::mem::size_of::<i64>())?;
+        let offsets = map_spooled(
+            self.offsets,
+            entries * std::mem::size_of::<i64>(),
+            "the postings spool's offset table",
+        )?;
         let offsets = OffsetBuffer::new(ScalarBuffer::new(offsets, 0, entries));
         let array = LargeBinaryArray::try_new(offsets, values, None)
             .map_err(|e| invalid_data(e.to_string()))?;
@@ -282,15 +286,13 @@ impl RecordSpool {
     }
 }
 
-/// Flush and fsync a spool file and map it as a buffer, which must be `len` bytes. The mapping
-/// outlives the file handle.
-fn map_spooled(writer: BufWriter<File>, len: usize) -> io::Result<Buffer> {
+/// Flush a spool file and map it as a buffer, which must be the `len` bytes written to it; `what`
+/// names the file where it is not. The map reads the page cache the flush wrote to, and outlives
+/// the file handle.
+fn map_spooled(writer: BufWriter<File>, len: usize, what: &str) -> io::Result<Buffer> {
     let file = writer
         .into_inner()
         .map_err(io::IntoInnerError::into_error)?;
-    // The spool is read back through a memory map; its bytes must be durable before the map is
-    // taken.
-    file.sync_all()?;
     if len == 0 {
         // memmap2 rejects zero-length maps.
         return Ok(Buffer::from_vec(Vec::<u8>::new()));
@@ -298,7 +300,7 @@ fn map_spooled(writer: BufWriter<File>, len: usize) -> io::Result<Buffer> {
     let buffer = mapped_buffer(&file)?;
     if buffer.len() != len {
         return Err(invalid_data(format!(
-            "postings spool is {} bytes but the offset table accounts for {len}",
+            "{what} is {} bytes where {len} were written to it",
             buffer.len()
         )));
     }
@@ -353,8 +355,7 @@ impl PostingsSpool {
         self.spool.end_record(head)
     }
 
-    /// Flush and fsync the spool, write the file at `path` from it, and delete the spool file on
-    /// success.
+    /// Write the file at `path` from the spool, and delete the spool file on success.
     pub fn finish(self, path: &Path) -> io::Result<()> {
         let column = self.column;
         self.spool
