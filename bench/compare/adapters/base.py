@@ -11,7 +11,7 @@ import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from frame import Camera, Filter, Frame
+from frame import DENSE, Camera, Filter, Frame
 
 
 class Adapter(ABC):
@@ -27,9 +27,14 @@ class Adapter(ABC):
     name: str
     access: str
 
-    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
+    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
+                 dense: str = "points"):
         if caches not in ("compute", "defaults"):
             raise ValueError(f"caches is compute or defaults, not {caches}")
+        if dense not in DENSE:
+            raise ValueError(f"dense is points or counts, not {dense}")
+        #: `points`: each dense tile sends its sample of K positions; `counts`: none required.
+        self.dense = dense
         #: `compute` turns off every cache kept between requests; `defaults` leaves the system's own.
         self.caches = caches
         self.tier = tier.resolve()

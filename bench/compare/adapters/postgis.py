@@ -12,7 +12,7 @@ Three arms share this adapter and differ in the table's order, its index and one
   camera's rectangle is a range of `qx` and a range of `qy` within it, and comparisons of
   `bigint` are leakproof, so the viewer's queries use the index with no claim made.
 
-The build streams the tier's `x`, `y`, `licence`, `publication_year`, `type` and `is_oa` (never
+The build streams the tier's `x`, `y`, `licence`, `publication_year`, `type`, `is_oa` and `rank` (never
 the oracle's `qx` and `qy`) from pyarrow as CSV into `COPY staging FROM STDIN`. CSV rather than
 binary: psycopg encodes binary `COPY` a row at a time in Python, 2.7 s against CSV's 0.8 s at 10⁶.
 Then `CREATE TABLE points AS SELECT ... ORDER BY` the arm's key, in which PostgreSQL quantises
@@ -22,8 +22,10 @@ directory, all in the build time. Positions are `bigint`, since PostgreSQL has n
 integer, and `geom` is the same position as a point in quantised space.
 
 A frame is two queries sent at once on two connections, each a `COPY (...) TO STDOUT` in the
-binary format: the count grid (`GROUP BY` the cell, `qx` and `qy` shifted right), and every
-position in the tiles whose count is at most K. The aggregation workload is two `GROUP BY`
+binary format: the count grid (`GROUP BY` the cell, `qx` and `qy` shifted right), and the
+positions. Under the `points` frame those are each tile's K matching rows of lowest `rank`, by
+`row_number() OVER (PARTITION BY` the tile `ORDER BY rank)`, which is every row of a sparse tile;
+under `counts`, every position in the tiles whose count is at most K. The aggregation workload is two `GROUP BY`
 queries sent at once. PostgreSQL keeps no result cache, so `--caches compute` and `defaults` run
 the same server.
 
@@ -84,7 +86,7 @@ SETTINGS = {
 BULK = {"wal_level": "minimal", "max_wal_senders": "0", "maintenance_work_mem": f"{min(2048, MEMORY_GIB * 128)}MB",
         "max_wal_size": "16GB"}
 SHM = f"{min(2048, MEMORY_GIB * 128)}m"
-COLUMNS = ("x", "y", "licence", "publication_year", "type", "is_oa")
+COLUMNS = ("x", "y", "licence", "publication_year", "type", "is_oa", "rank")
 #: Each arm's index and whether `&&` is marked leakproof.
 ARMS = {"postgis": ("gist", False), "postgis+leakproof": ("gist", True),
         "postgis+integer": ("btree", False)}
@@ -103,11 +105,11 @@ def pg_quantise(expr: str, lo: float, hi: float) -> str:
 
 
 STAGING = ("CREATE TABLE staging (x float8 NOT NULL, y float8 NOT NULL, licence text NOT NULL, "
-           "publication_year integer, type text, is_oa boolean)")
+           "publication_year integer, type text, is_oa boolean, rank bigint NOT NULL)")
 QUANTISED = (f"SELECT {pg_quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
-             f"{pg_quantise('y', EXTENT[2], EXTENT[3])} AS qy, licence, publication_year, type, is_oa "
-             f"FROM staging")
-ATTRIBUTES = "licence, publication_year, type, is_oa"
+             f"{pg_quantise('y', EXTENT[2], EXTENT[3])} AS qy, licence, publication_year, type, is_oa, "
+             f"rank FROM staging")
+ATTRIBUTES = "licence, publication_year, type, is_oa, rank"
 #: Each index's table, as `CREATE TABLE points AS`, and the index on it.
 TABLES = {
     "gist": (f"SELECT qx, qy, ST_MakePoint(qx, qy)::geometry(Point, 0) AS geom, {ATTRIBUTES} "
@@ -157,8 +159,8 @@ def from_binary_copy(raw: bytes, ncols: int) -> np.ndarray:
 
 class PostGIS(Adapter):
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
-                 arm: str = "postgis"):
-        super().__init__(tier, work, nice, caches)
+                 arm: str = "postgis", dense: str = "points"):
+        super().__init__(tier, work, nice, caches, dense)
         self.name = arm
         self.index, self.leakproof = ARMS[arm]
         self.access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO "
@@ -267,6 +269,7 @@ class PostGIS(Adapter):
                 "row_level_security": {"enabled": rls[0], "forced": rls[1]},
                 "policy": [list(p) for p in policy], "geometry_overlaps_leakproof": leakproof,
                 "plan_zoom8_grid_at_centre": self.explain(self._grid_sql(mid, None)),
+                "plan_zoom8_points_at_centre": self.explain(self._points_sql(mid, None)),
                 "container_memory": MEMORY, "load": "COPY staging FROM STDIN (FORMAT csv), "
                 "streamed from pyarrow's CSV writer, in the build's transaction"}
 
@@ -354,6 +357,15 @@ class PostGIS(Adapter):
         return (f"SELECT qx >> {s}, qy >> {s}, count(*) FROM points WHERE {self._where(camera, filt)} "
                 f"GROUP BY 1, 2")
 
+    def _points_sql(self, camera: Camera, filt: Filter | None) -> str:
+        where, s = self._where(camera, filt), 32 - camera.zoom
+        if self.dense == "points":
+            return (f"SELECT qx, qy FROM (SELECT qx, qy, row_number() OVER (PARTITION BY qx >> {s}, "
+                    f"qy >> {s} ORDER BY rank) AS r FROM points WHERE {where}) ranked WHERE r <= {K}")
+        return (f"SELECT qx, qy FROM points WHERE {where} AND (qx >> {s}, qy >> {s}) IN ("
+                f"SELECT qx >> {s}, qy >> {s} FROM points WHERE {where} GROUP BY 1, 2 "
+                f"HAVING count(*) <= {K})")
+
     def _copy(self, session: int, query: str) -> bytes:
         with self.sessions[session].cursor().copy(f"COPY ({query}) TO STDOUT (FORMAT binary)") as cp:
             return b"".join(cp)
@@ -364,11 +376,7 @@ class PostGIS(Adapter):
 
     def frame(self, camera: Camera, filt: Filter | None) -> tuple[Frame, float]:
         z, dg = camera.zoom, grid_depth(camera.zoom)
-        where = self._where(camera, filt)
-        s = 32 - z
-        points_q = (f"SELECT qx, qy FROM points WHERE {where} AND (qx >> {s}, qy >> {s}) IN ("
-                    f"SELECT qx >> {s}, qy >> {s} FROM points WHERE {where} GROUP BY 1, 2 "
-                    f"HAVING count(*) <= {K})")
+        points_q = self._points_sql(camera, filt)
         t0 = time.perf_counter()
         fg = self.pool.submit(self._copy, 0, self._grid_sql(camera, filt))
         fp = self.pool.submit(self._copy, 1, points_q)

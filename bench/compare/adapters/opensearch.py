@@ -4,8 +4,8 @@ API, and the frame as aggregations.
 The build creates an ingest pipeline that quantises `x` and `y` by the frame's rule in Painless,
 drops them, and stores `m16`, the Morton code of the top 16 bits of `qx` and `qy` (x on the even
 bits); and an index of one shard and no replicas with `_source` disabled: `qx`, `qy` and `m16` as
-`long`, `licence` and `type` as `keyword`, `publication_year` as `integer` and `is_oa` as
-`boolean`, each with doc values. Worker processes read the tier's Parquet and send it through the
+`long`, `licence` and `type` as `keyword`, `publication_year` as `integer`, `is_oa` as
+`boolean` and `rank` as `long`, each with doc values. Worker processes read the tier's Parquet and send it through the
 pipeline in bulk requests while the index does not refresh; the index is then refreshed,
 force-merged to at most six segments, given back its default refresh interval and flushed, and
 every file in its data directory synced. All of that is timed. The index is sorted by `m16`, so a
@@ -15,7 +15,10 @@ A frame is two searches sent at once with `size: 0`, each filtered to the camera
 ranges and to the filter by its terms and ranges: the count grid as a `histogram` on `m16` at
 interval `4^(16 - grid_depth)`, whose bucket keys are the cells' Morton codes, and the tiles as
 the same histogram at interval `4^(16 - zoom)`, each tile holding a `top_hits` of K positions read
-from doc values and a `bucket_selector` that keeps only the tiles of at most K. Histogram counts
+from doc values. Under the `points` frame the `top_hits` is sorted by `rank`, so each tile sends
+its K matching documents of lowest rank, which is every document of a sparse tile; under
+`counts` it is sorted by `_doc`, beside a `bucket_selector` that keeps only the tiles of at most
+K. Histogram counts
 are exact: a document falls in the bucket `floor(value / interval)`, exact in double precision for
 a power-of-two interval and a value below 2^53, and a histogram's buckets are merged whole across
 shards and segments. Nested histograms on `qx` and `qy`, in one search or two,
@@ -89,7 +92,8 @@ MAPPING = {
     "dynamic": "strict",
     "properties": {"qx": {"type": "long"}, "qy": {"type": "long"}, "m16": {"type": "long"},
                    "licence": {"type": "keyword"}, "type": {"type": "keyword"},
-                   "publication_year": {"type": "integer"}, "is_oa": {"type": "boolean"}},
+                   "publication_year": {"type": "integer"}, "is_oa": {"type": "boolean"},
+                   "rank": {"type": "long"}},
 }
 QUANTISE = """
 for (String a : ['x', 'y']) {
@@ -153,12 +157,16 @@ def cells(depth: int, inner: dict | None = None) -> dict:
     return agg
 
 
-def frame_requests(camera: Camera, filt: Filter | None) -> tuple[dict, dict]:
+def frame_requests(camera: Camera, filt: Filter | None, dense: str) -> tuple[dict, dict]:
     """The grid's search and the tiles' search."""
-    sparse = {"top": {"top_hits": {"size": K, "sort": ["_doc"], "_source": False,
-                                   "docvalue_fields": ["qx", "qy"]}},
-              "sparse": {"bucket_selector": {"buckets_path": {"n": "_count"},
-                                             "script": f"params.n <= {K}"}}}
+    top = lambda sort: {"top_hits": {"size": K, "sort": sort, "_source": False,
+                                     "docvalue_fields": ["qx", "qy"]}}
+    if dense == "points":
+        sparse = {"top": top([{"rank": "asc"}])}
+    else:
+        sparse = {"top": top(["_doc"]),
+                  "sparse": {"bucket_selector": {"buckets_path": {"n": "_count"},
+                                                 "script": f"params.n <= {K}"}}}
     search = lambda aggs: {"size": 0, "track_total_hits": False, "query": where(camera, filt),
                            "aggs": aggs}
     return (search({"grid": cells(grid_depth(camera.zoom))}),
@@ -182,7 +190,7 @@ def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> 
     process, and returns the documents sent and the CPU seconds the process spent sending them."""
     cpu = time.process_time()
     head = json.dumps({"index": {"_index": INDEX}})
-    columns = ["x", "y", "licence", "publication_year", "type", "is_oa"]
+    columns = ["x", "y", "licence", "publication_year", "type", "is_oa", "rank"]
     sent = 0
     with requests.Session() as http:
         http.auth, http.verify = auth, False
@@ -208,8 +216,9 @@ class OpenSearch(Adapter):
               f"security query licence in (the viewer's terms), mapped to the internal user "
               f"{VIEWER_USER}; every frame and table searched as {VIEWER_USER}")
 
-    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
-        super().__init__(tier, work, nice, caches)
+    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
+                 dense: str = "points"):
+        super().__init__(tier, work, nice, caches, dense)
         self.index_made = False
         self.container = Container(f"bench-compare-os-{os.getpid()}")
         self.port = free_ports(1)[0]
@@ -419,7 +428,7 @@ class OpenSearch(Adapter):
         return r.content
 
     def frame(self, camera: Camera, filt: Filter | None) -> tuple[Frame, float]:
-        grid_body, tiles_body = frame_requests(camera, filt)
+        grid_body, tiles_body = frame_requests(camera, filt, self.dense)
         t0 = time.perf_counter()
         fg = self.pool.submit(self.search, grid_body, 0)
         ft = self.pool.submit(self.search, tiles_body, 1)

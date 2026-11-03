@@ -11,20 +11,21 @@ here; every system must reach the same rows through its own access control.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import duckdb
 import numpy as np
 import pyarrow as pa
 
-from frame import (EXTENT, K, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32, grid_depth,
-                   points_by_tile)
+from frame import (EXTENT, K, SUBCELL_OFFSET, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32,
+                   grid_depth, points_by_tile)
 
 VIEWER = json.loads(Path(__file__).with_name("viewer.json").read_text())
 #: The frame figures that count against an exact frame: the count errors, then the point errors.
 COUNT_ERRORS = ("tile_abs_err", "grid_abs_err")
 POINT_ERRORS = ("sparse_points_missing", "sparse_points_extra", "points_outside_tile",
-                "dense_points_invalid")
+                "dense_points_missing", "dense_points_extra", "dense_points_invalid")
 
 
 def visible_sql() -> str:
@@ -73,6 +74,7 @@ class Oracle:
         self.tier = tier_path
         self._cache: dict[str, Frame] = {}
         self._tables: dict[str, dict] = {}
+        self._subcells: dict[str, dict] = {}
 
     def count(self, camera: Camera, filt: Filter | None) -> int:
         return int(self.con.execute(
@@ -134,6 +136,39 @@ class Oracle:
         finally:
             self.con.unregister("sent")
 
+    def coverage(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame) -> dict:
+        """How representative the positions sent from dense tiles are: the sub-cells
+        `SUBCELL_OFFSET` levels below each tile that they fall in, against the number a uniform
+        random sample of as many of the tile's matching items covers on average. A sample spread
+        like a random one scores about 1; one taken from a corner of the tile, far less."""
+        z = camera.zoom
+        dense = [t for t, n in truth.tiles.items() if n > K and len(got.points.get(t, ()))]
+        if not dense:
+            return {"dense_tiles_sampled": 0, "dense_cover": 0, "dense_cover_expected": 0.0}
+        d = min(z + SUBCELL_OFFSET, 32)
+        key = repr((z, camera.cx, camera.cy, filt.leaves if filt else None))
+        if key not in self._subcells:
+            rows = self.con.execute(
+                f"SELECT qx::UBIGINT >> {32 - d}, qy::UBIGINT >> {32 - d}, count(*) "
+                f"FROM read_parquet('{self.tier}') WHERE {where(camera, filt)} GROUP BY ALL").fetchall()
+            per: dict[tuple[int, int], list[int]] = {}
+            for sx, sy, n in rows:
+                per.setdefault((int(sx) >> (d - z), int(sy) >> (d - z)), []).append(int(n))
+            self._subcells[key] = per
+        per = self._subcells[key]
+        covered, expected = 0, 0.0
+        for t in dense:
+            sent = got.points[t].astype(np.uint64) >> np.uint64(32 - d)
+            covered += len({(int(a), int(b)) for a, b in sent})
+            total, k = truth.tiles[t], min(len(sent), truth.tiles[t])
+            for n in per.get(t, []):
+                rest = total - n
+                # The chance that none of k items drawn without replacement falls in this cell.
+                miss = 0.0 if rest < k else math.exp(math.lgamma(rest + 1) - math.lgamma(rest - k + 1)
+                                                     - math.lgamma(total + 1) + math.lgamma(total - k + 1))
+                expected += 1 - miss
+        return {"dense_tiles_sampled": len(dense), "dense_cover": covered, "dense_cover_expected": expected}
+
     def tables(self, camera: Camera, filt: Filter | None) -> dict[str, dict[str, int]]:
         """The aggregation workload's two tables over the viewer's matching items in the camera's
         tiles: `type`, each type's count and `none` for no type (every type is listed, since
@@ -182,18 +217,19 @@ def common_count(a: np.ndarray, b: np.ndarray) -> int:
     return int(np.minimum(ca[ia], cb[ib]).sum())
 
 
-def compare(got: Frame, truth: Frame, camera: Camera) -> dict:
+def compare(got: Frame, truth: Frame, camera: Camera, dense: str = "points") -> dict:
     """How far a system's frame is from the oracle's. Every figure is zero for an exact frame,
-    except `points_dense`, the positions sent from dense tiles, which the frame allows; whether
-    those are the viewer's matching items is `Oracle.dense_invalid`. A tile with points sent and
-    no true count is a sparse tile from which nothing was wanted."""
+    except `points_dense`, the positions sent from dense tiles. Under the `points` frame a dense
+    tile must send exactly `K`, and under `counts` up to `K`; whether those are the viewer's
+    matching items, each sent once, is `Oracle.dense_invalid`. A tile with points sent and no true
+    count is a sparse tile from which nothing was wanted."""
     tile_keys = set(got.tiles) | set(truth.tiles)
     tile_err = sum(abs(got.tiles.get(t, 0) - truth.tiles.get(t, 0)) for t in tile_keys)
     cell_keys = set(got.grid) | set(truth.grid)
     diffs = [abs(got.grid.get(c, 0) - truth.grid.get(c, 0)) for c in cell_keys]
     wanted = set(camera.tiles())
     none = np.empty((0, 2), np.uint32)
-    sparse_missing = sparse_extra = outside = dense = 0
+    sparse_missing = sparse_extra = outside = dense_sent = dense_missing = dense_extra = 0
     for t, pts in got.points.items():
         if t not in wanted:
             outside += len(pts)
@@ -205,8 +241,10 @@ def compare(got: Frame, truth: Frame, camera: Camera) -> dict:
             sparse_missing += len(want) - common
             sparse_extra += len(sent) - common
         else:
-            sparse_extra += max(0, len(sent) - K)
-            dense += len(sent)
+            dense_extra += max(0, len(sent) - K)
+            if dense == "points":
+                dense_missing += max(0, K - len(sent))
+            dense_sent += len(sent)
     return {
         "matched_true": sum(truth.tiles.values()),
         "tile_abs_err": tile_err,
@@ -216,6 +254,8 @@ def compare(got: Frame, truth: Frame, camera: Camera) -> dict:
         "sparse_points_missing": sparse_missing,
         "sparse_points_extra": sparse_extra,
         "points_outside_tile": outside,
-        "points_dense": dense,
+        "dense_points_missing": dense_missing,
+        "dense_points_extra": dense_extra,
+        "points_dense": dense_sent,
         "points_sent": int(sum(len(p) for p in got.points.values())),
     }

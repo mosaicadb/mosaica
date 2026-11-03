@@ -8,8 +8,11 @@ for each of them
 * a count grid: the matching items in each cell at depth `grid_depth(zoom)`, which is 256 by 256
   cells per tile (2 pixels a cell) down to zoom 8 and coarser below it, since Mosaica's grid stops
   at depth 16 (see README, "Departures from the design");
-* every matching item's position where the tile holds at most `K` of them (a sparse tile). A
-  system may also send up to `K` positions from a dense tile; that is counted, not required.
+* every matching item's position where the tile holds at most `K` of them (a sparse tile), and
+  from a tile with more (a dense tile) exactly `K` of its matching items, chosen by a random order
+  of the items: Mosaica's is its `mosaica_id`, a keyed permutation of its internal number, and
+  every other system's is the tier's `rank` column (`prepare.py`). The `counts` frame, the
+  earlier definition, asks for no positions from a dense tile and allows up to `K`.
 
 Positions are quantised once, by one rule, onto a 2^32 by 2^32 grid over `EXTENT`: the rule
 Mosaica's build applies (`mosaica_spatial::morton::fixed32`), written out below so that the oracle
@@ -42,6 +45,10 @@ GRID_OFFSET = 8
 MAX_DEPTH = 16
 #: The most positions a sparse tile has, and the most any tile may send.
 K = 500
+#: A dense tile's sample is judged by the sub-cells this many levels below the tile it covers.
+SUBCELL_OFFSET = 4
+#: The two frames: `points` sends `K` positions from each dense tile, `counts` none required.
+DENSE = ("points", "counts")
 #: The work types of the PaperSeek vocabulary, the values a `type` filter may name.
 TYPES = ("article", "book", "book-chapter", "dataset", "dissertation", "editorial", "erratum",
          "grant", "letter", "libguides", "other", "paratext", "peer-review", "preprint",

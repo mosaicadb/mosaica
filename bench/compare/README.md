@@ -6,10 +6,9 @@ aggregations as the same viewer, with every answer checked against an exact orac
 rules. This file is operational, and lists where stage 1 departs from the method.
 
 Stage 1 covers the shared harness and Mosaica, ClickHouse, PostGIS and OpenSearch, on the
-PaperSeek data at 10⁶ points for development only. Mosaica runs as two arms: `mosaica+aggregate`, a viewport
-request with the count grid from `/v1/aggregate` beside it, which is how Mosaica's own map asks
-and the arm that represents it; and `mosaica`, one viewport request alone, whose sub-cell grid
-counts the visible set and ignores the filter (see "Departures"). Runs write to `results/`, which
+PaperSeek data at 10⁶ points for development only. Each system runs two frames: `points`, the
+default, in which every dense tile sends a sample of K of its matching items, and `counts`, the
+earlier frame, in which it sends none (see "The frame"). Runs write to `results/`, which
 is not tracked. **No figure from this directory is fit to publish yet**: every record carries
 `"development_only": true`, and the machine it ran on was shared with other work.
 
@@ -49,11 +48,13 @@ docker pull opensearchproject/opensearch@sha256:3b55f6b6249cfdb92b52ee59adc8a266
 
 # 6. One run per system; each appends a record to results/dev.jsonl
 cd bench/compare
-for s in mosaica mosaica+aggregate clickhouse postgis postgis+leakproof postgis+integer opensearch; do
+for s in mosaica clickhouse postgis postgis+leakproof postgis+integer opensearch; do
   for c in compute defaults; do
-    .venv/bin/python run.py --system $s --caches $c \
-        --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
-        --cameras cameras/paperseek-1e6.json --work $DATA/bench-compare/work
+    for d in points counts; do
+      .venv/bin/python run.py --system $s --caches $c --dense $d \
+          --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
+          --cameras cameras/paperseek-1e6.json --work $DATA/bench-compare/work
+    done
   done
 done
 
@@ -117,7 +118,12 @@ may use. Mosaica also writes each grant's visibility masks to its cache director
 bounds; they are grant state, kept in both modes, and deleted by a cold start.
 
 ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache settings above
-and its system log tables, which are off. It leaves `index_granularity` (8192),
+and its system log tables, which are off. A dense tile's sample is its K matching rows of lowest
+`rank`, by `ORDER BY tile, rank LIMIT K BY tile`, ClickHouse's documented way to take the first
+rows of each group; one query answers sparse and dense tiles alike. `rank` is a plain column,
+outside the sort key, since no query filters by it. `SAMPLE` was not used: it needs a sampling
+key in the table's sort key, samples a fraction of the whole table rather than K a tile, and so
+cannot give exactly K from each dense tile. It leaves `index_granularity` (8192),
 `max_insert_threads` and `max_threads` (both `auto`, 12 on this machine) at their defaults, and
 each record lists them. Its filter predicates (`adapters/clickhouse.py`, `filter_sql`) have the
 same SQL shapes as the oracle's; the oracle is DuckDB over the Parquet file, so the two share no
@@ -171,6 +177,15 @@ setting is in `SETTINGS` and each record lists them with the server's values:
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
 | `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | From the columns' statistics alone the planner overestimates the cells of a grid or tile grouping many times over, and does not then aggregate in parallel |
 
+A dense tile's sample is its K matching rows of lowest `rank`, by `row_number() OVER (PARTITION BY`
+the tile `ORDER BY rank)` over the camera's matching rows, kept where the row number is at most K;
+one query answers sparse and dense tiles alike. The window reads the rows the arm's tile condition
+selects, by the index where the arm can use it, and sorts them; `rank` has no index, since a
+per-tile top K over an index on `rank` alone would walk that index past every other tile's rows,
+and an index on the tile and `rank` would serve one zoom only. `TABLESAMPLE` was not used: it
+samples pages or rows of the whole table by a fraction, before the policy and the filter, so it
+cannot give exactly K matching rows a tile. Each record keeps the viewer's plan of one points
+query.
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
 `wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` and the table and index made in
 the same transaction may skip the WAL; `maintenance_work_mem = 2GB`; and `max_wal_size = 16GB`
@@ -213,7 +228,8 @@ Painless by `frame.fixed32`'s rule, in the same order of operations as ClickHous
 stores `m16`, the Morton code of the top 16 bits of `qx` and `qy` with x on the even bits; and an
 index of one shard and no replicas, sorted by `m16`, with `qx`, `qy` and `m16` as `long`,
 `licence` and `type` as `keyword`, `publication_year` as `integer` and `is_oa` as `boolean`, and
-`_source` disabled, so positions are read from doc values and nothing else is stored. Six client
+`rank` as `long`, and `_source` disabled, so positions are read from doc values and nothing else
+is stored. Six client
 processes read the tier's Parquet on the host and send it through the pipeline in bulk requests of
 50,000 documents (about 7 MB), with the refresh interval at `-1`; the index is then refreshed,
 force-merged to at most six segments, returned to the default refresh interval (one second) and
@@ -242,15 +258,19 @@ A frame is two searches sent at once, each filtered to the camera's tiles by two
 and `qy` and to the filter by its terms and ranges, all in filter context. The grid's is a
 `histogram` on `m16` at interval 4^(16 − depth) with `min_doc_count` 1, whose bucket keys are the
 cells' Morton codes; the tiles' is the same histogram at the tile depth, each tile with a
-`top_hits` of K positions from doc values sorted by `_doc`, and a `bucket_selector` that keeps only
-the tiles of at most K, so no dense tile's positions are sent. Tile counts are the grid's sums, as
-for ClickHouse. `m16` holds cells to depth 16, as deep as the frame's grid and the cameras' zoom go.
+`top_hits` of K positions from doc values. Under the `points` frame the `top_hits` is sorted by
+`rank`, so each tile sends its K matching documents of lowest rank, every document of a sparse
+tile; under `counts` it is sorted by `_doc`, beside a `bucket_selector` that keeps only the tiles of
+at most K, so no dense tile's positions are sent. A `sampler` or `diversified_sampler` aggregation
+was not used, since each takes the best-scoring documents a shard, not K a tile, and a
+`random_score` query would score every document in the camera for each search. Tile counts are the
+grid's sums, as for ClickHouse. `m16` holds cells to depth 16, as deep as the frame's grid and the cameras' zoom go.
 
 Every aggregation here is exact on any number of shards and segments. A histogram's buckets are
 merged whole: a value falls in bucket `floor(value / interval)`, exact in double precision for a
-power of two and a value below 2^53, and no shard drops a bucket. Each shard's `top_hits` sends at
-most K positions per tile, and the `bucket_selector` runs on the merged count, so a sparse tile
-gets every position. The `type` aggregation asks for 21 buckets, more than the 20 types and
+power of two and a value below 2^53, and no shard drops a bucket. Each shard's `top_hits` sends its
+K lowest ranks per tile and the merge keeps the K lowest of those, which are the tile's; under
+`counts` the `bucket_selector` runs on the merged count, so a sparse tile gets every position. The `type` aggregation asks for 21 buckets, more than the 20 types and
 `none`, so no shard cuts one, and it reports no error bound.
 
 The aggregation workload is one search with a `terms` aggregation on `type` (`none` for a missing
@@ -309,6 +329,7 @@ indexing speed and search performance:
 | `_source` | disabled | enabled | Positions come from doc values; nothing reads the source |
 | Force-merge | to at most six segments | none | A read-only index merged, keeping segments for concurrent segment search |
 | `index.max_inner_result_window` | 500 | 100 | A `top_hits` of K |
+| `rank` | `long` with doc values | – | A random value per document for the dense tiles' samples, as ClickHouse and PostGIS store it |
 | `search.max_buckets` | 2,097,152 | 65,535 | The largest grid: 20 tiles of 256 × 256 cells |
 | Bulk requests | 50,000 documents from 6 processes | – | The documentation's 5 to 15 MB a request, from several clients |
 | Performance analyzer agent | off | on | A monitoring process beside the server, kept out of the timings as ClickHouse's log tables are |
@@ -354,9 +375,29 @@ is published, the licences of PaperSeek and OpenAlex (OpenAlex is CC0) must be s
 
 A screen of 1920 × 1080 pixels at an integer zoom, with 512-pixel tiles: the depth-`zoom` tiles it
 touches, each tile's matching count, a count grid at depth `min(zoom + 8, 16)` (256 × 256 cells a
-tile to zoom 8), and every matching position in each tile with at most K = 500 of them. Positions
-are compared on the 2³² grid that Mosaica's build quantises to (`frame.fixed32`), so an exact frame
-has zero error. Every count is over the viewer's visible items.
+tile to zoom 8), every matching position in each tile with at most K = 500 of them, and from each
+tile with more exactly K of its matching items, a random sample. Positions are compared on the 2³²
+grid that Mosaica's build quantises to (`frame.fixed32`), so an exact frame has zero error. Every
+count is over the viewer's visible items.
+
+Mosaica serves the K matching items of each tile with the lowest `mosaica_id`
+(`crates/mosaica-engine/src/select.rs`, whose module comment defines it), once
+`theta_target_marks` saturates its density threshold. A `mosaica_id` is a keyed Feistel
+permutation of the item's internal number, under a key each build draws at random, so the sample
+is uniform and differs from build to build. Every other system takes the K with the lowest `rank`,
+a column `prepare.py` writes as `splitmix64(entity_id ^ RANK_SEED) >> 1`, which is the same
+method over a stored random value. The samples are therefore different items, and the oracle
+cannot check one item by item. It checks what holds for any correct sample: exactly K positions
+from each dense tile, each one of the viewer's matching items there, none sent twice (all three
+point errors), and the sample's spread, as the sub-cells four levels below the tile
+(`SUBCELL_OFFSET` in `frame.py`) that it covers against the number a uniform random sample of the
+same size covers on average. The table gives that ratio. A uniform sample scores about 1, and the
+first K of each tile ordered by position scored 0.18 to 0.42 over the camera script's first frames.
+
+The `counts` frame (`--dense counts`) is the earlier definition, in which a dense tile need send
+nothing and may send up to K, each counted and checked as above; ClickHouse, PostGIS and
+OpenSearch send none. Mosaica has no request that sends a sparse tile's points and none of a dense
+one's, so under `counts` it sends K from each dense tile, as it did.
 
 ## Departures from the design
 
@@ -369,9 +410,11 @@ has zero error. Every count is over the viewer's visible items.
   zoom 16). Mosaica's `/v1/aggregate` can count to depth 32, but as a second request.
 - **Mosaica's viewport grid ignores the filter.** The sub-cell counts (`underlay_offset`) are
   taken over the viewer's visible set, not the filtered set, while the tiles' `matched` counts do
-  follow the filter. So the `mosaica` arm's filtered frames have the wrong grid, and the record
-  counts the error. The `mosaica+aggregate` arm sends a `/v1/aggregate` request for the filtered
-  cells at the same time as the viewport request, at the cost of a second request.
+  follow the filter. So for a filtered frame whose grid is deeper than its tiles, the adapter
+  sends the viewport request without the underlay and a `/v1/aggregate` request for the filtered
+  cells at the same time, and the latency covers both. Every other frame is the viewport request
+  alone: an unfiltered one, whose underlay is the grid, and a filtered one at zoom 16, whose grid
+  is its tiles.
 - **Filters where the data permits.** A type filter names one type or an `in` set of up to three,
   whichever comes nearest its target. `article` is 79% of the viewer's items and every other type
   together about 18%, so no set comes near 50%, and that filter is `article`. `is_oa` has two
@@ -394,10 +437,11 @@ has zero error. Every count is over the viewer's visible items.
 
   The build runs with `--no-oracle-pairs`, which leaves out `pairs.parquet`, a file only the
   conformance suite and `mosaica verify --deep` read; the server does not.
-- **Dense tiles.** The frame asks for no positions from a tile with more than K. ClickHouse sends
-  none; Mosaica sends K anyway, so its responses are larger. Both counts are in the record, and
-  every position sent from a dense tile must be one of the viewer's matching items there, counted
-  as a multiset; one that is not counts as a point error.
+- **Dense tiles are sampled by different items.** Each system draws its own random sample of a
+  dense tile, so the oracle checks the sample's size, its validity and its spread rather than its
+  items (see "The frame"). Under `counts` Mosaica alone sends dense tiles' positions.
+- **Every build loads `rank`.** ClickHouse, PostGIS and OpenSearch load the `rank` column under
+  both frames, so their builds and sizes include it; Mosaica's build does not read it.
 - **Cold means this system's files only.** The machine's page cache is shared with other work, so
   a cold start drops the system's own files' pages with `posix_fadvise` and deletes its caches,
   rather than dropping every cache on the machine.

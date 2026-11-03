@@ -36,8 +36,15 @@ screen touches, and holds, for each tile:
 - a count grid: the matching items in each cell of a fixed grid, 256 by 256 cells a tile, so two
   pixels a cell;
 - every matching item's position, where the tile holds at most K of them (K = 500). A tile with
-  more is dense, and a system may send up to K positions from it, which are counted and not
-  required.
+  more is dense, and sends K of its matching items, a sample that each system draws by its own
+  means and that must be spread over the tile as a uniform random sample would be. Mosaica takes
+  the K with the lowest `mosaica_id`, a keyed scrambling of each item's number; a system with no
+  random order of its own takes the K with the lowest value of a random column stored with each
+  item. Taking the first K in storage order would put them in one corner of the tile, and is not
+  a sample.
+
+A second frame, `counts`, asks a dense tile for no positions, so that figures taken before the
+dense tiles were sampled stay comparable.
 
 Positions are compared on one grid. Each coordinate is quantised onto 2³² steps across a fixed
 square extent by `floor((v − min) / (max − min) · 2³²)`, clamped to the grid, computed in IEEE
@@ -51,7 +58,12 @@ query in Datashader, and drop or cluster settings in Tippecanoe.
 Every frame is checked against an exact answer computed by DuckDB over the same Parquet file the
 systems are built from. The oracle shares no code with any system's adapter. Each result records,
 beside its latency, the error of every frame: the absolute count error per tile and per grid cell,
-the positions missing from or added to each sparse tile, and the positions sent from dense tiles.
+the positions missing from or added to each sparse tile, and for each dense tile the positions
+short of K or past it and those that are not the viewer's matching items or are sent twice. A
+dense tile's sample cannot be checked item by item, since each system draws its own, so its
+spread is measured instead: the cells 16 times finer than the tile in each direction that the
+sample falls in, against the number that a uniform random sample of as many of the tile's
+matching items falls in on average.
 A system that drops points at build time, as precomputed tiles do, has a non-zero error, and the
 error is published with its speed.
 

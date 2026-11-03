@@ -1,14 +1,17 @@
 """ClickHouse: a pinned server image, one MergeTree table sorted by Morton code, and the frame in SQL.
 
-The build reads the tier's `x`, `y`, `licence`, `publication_year`, `type` and `is_oa` (never the
-oracle's `qx` and `qy`),
+The build reads the tier's `x`, `y`, `licence`, `publication_year`, `type`, `is_oa` and `rank`
+(never the oracle's `qx` and `qy`),
 quantises the coordinates in SQL by the frame's rule, and stores `m = mortonEncode(qx, qy)` as the
 sorting key, so that a tile is a contiguous range of `m` as it is in Mosaica. `OPTIMIZE TABLE ...
 FINAL` merges the table to one part and is counted in the build.
 
 A frame is two queries sent at once over HTTP: the count grid (`GROUP BY` the depth-`grid_depth`
-prefix of `m` over the camera's tile ranges), and every position in the tiles whose count is at
-most K (the same ranges, restricted in the same statement to the sparse tiles). The query cache
+prefix of `m` over the camera's tile ranges), and the positions. Under the `points` frame the
+positions are each tile's K matching rows of lowest `rank`, by `ORDER BY tile, rank LIMIT K BY
+tile`, which is every row of a sparse tile; under `counts`, every position in the tiles whose
+count is at most K (the same ranges, restricted in the same statement to the sparse tiles). The
+query cache
 is off, as it is by default. The server's own log tables are turned off so their writes stay out
 of the timings.
 
@@ -57,7 +60,8 @@ ACCESS_MANAGEMENT = """<clickhouse>
 </clickhouse>
 """
 DDL = ("CREATE TABLE points (m UInt64, qx UInt32, qy UInt32, licence LowCardinality(String), "
-       "publication_year Nullable(Int32), type LowCardinality(Nullable(String)), is_oa Nullable(Bool)) "
+       "publication_year Nullable(Int32), type LowCardinality(Nullable(String)), is_oa Nullable(Bool), "
+       "rank Int64) "
        "ENGINE = MergeTree ORDER BY m")
 VIEWER_USER = "viewer"
 #: Every cache kept between queries that serves a result or a filter's result, off for the
@@ -87,8 +91,9 @@ class ClickHouse(Adapter):
     access = (f"ROW POLICY on points FOR SELECT USING licence IN (the viewer's terms) TO "
               f"{VIEWER_USER}; every frame and table queried as {VIEWER_USER}")
 
-    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
-        super().__init__(tier, work, nice, caches)
+    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
+                 dense: str = "points"):
+        super().__init__(tier, work, nice, caches, dense)
         self.settings = COMPUTE_CACHES if caches == "compute" else {}
         self.table_made = False
         self.container = Container(f"bench-compare-ch-{os.getpid()}")
@@ -206,9 +211,10 @@ class ClickHouse(Adapter):
         self.start()
         if self.sql("SELECT mortonEncode(toUInt32(1), toUInt32(0))").strip() != b"1":
             raise RuntimeError("mortonEncode does not put its first argument on the even bits")
-        columns = "licence, publication_year, type, is_oa"
+        columns = "licence, publication_year, type, is_oa, rank"
         src = (f"file('tiers/{self.tier.name}', Parquet, 'x Float64, y Float64, licence String, "
-               f"publication_year Nullable(Int32), type Nullable(String), is_oa Nullable(Bool)')")
+               f"publication_year Nullable(Int32), type Nullable(String), is_oa Nullable(Bool), "
+               f"rank Int64')")
         quantised = (f"SELECT {quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
                      f"{quantise('y', EXTENT[2], EXTENT[3])} AS qy, {columns} FROM {src}")
         t0 = time.monotonic()
@@ -258,9 +264,13 @@ class ClickHouse(Adapter):
         grid_q = (f"SELECT bitShiftRight(m, {64 - 2 * dg}) AS cell, count() AS n FROM points "
                   f"WHERE {where} GROUP BY cell FORMAT ArrowStream")
         tile_expr = f"bitShiftRight(m, {64 - 2 * z})" if z else "0"
-        points_q = (f"SELECT qx, qy FROM points WHERE {where} AND {tile_expr} IN ("
-                    f"SELECT {tile_expr} AS t FROM points WHERE {where} GROUP BY t HAVING count() <= {K}) "
-                    f"FORMAT ArrowStream")
+        if self.dense == "points":
+            order = f"ORDER BY {tile_expr}, rank LIMIT {K} BY {tile_expr}" if z else f"ORDER BY rank LIMIT {K}"
+            points_q = f"SELECT qx, qy FROM points WHERE {where} {order} FORMAT ArrowStream"
+        else:
+            points_q = (f"SELECT qx, qy FROM points WHERE {where} AND {tile_expr} IN ("
+                        f"SELECT {tile_expr} AS t FROM points WHERE {where} GROUP BY t HAVING count() <= {K}) "
+                        f"FORMAT ArrowStream")
         t0 = time.perf_counter()
         fg = self.pool.submit(self.sql, grid_q, 0)
         fp = self.pool.submit(self.sql, points_q, 1)

@@ -2,8 +2,8 @@
 
     python tables.py results/dev.jsonl [--tier paperseek-1e6.parquet]
 
-The latest record per tier, system and cache setting is used, and a system run with its default
-caches has a column of its own. A table drawn from any development-only record says so in its
+The latest record per tier, system, cache setting and frame is used, and a system run with its
+default caches, or under the `counts` frame, has a column of its own. A table drawn from any development-only record says so in its
 heading. Records from different harness commits or camera files are refused in one table.
 """
 
@@ -17,7 +17,7 @@ from oracle import COUNT_ERRORS, POINT_ERRORS
 
 GIB = 1 << 30
 #: The fields a record must carry to be tabled; an older record without them is refused.
-REQUIRED = ("system", "caches", "tier", "tier_sha256", "harness_commit", "cameras_sha256",
+REQUIRED = ("system", "caches", "dense", "tier", "tier_sha256", "harness_commit", "cameras_sha256",
             "repeats", "cold_runs", "version", "build", "warm", "errors", "serve_memory")
 
 
@@ -34,7 +34,8 @@ def family(r: dict) -> str:
 
 
 def column(r: dict) -> str:
-    return r["system"] + (" (default caches)" if r["caches"] == "defaults" else "")
+    return (r["system"] + (" (default caches)" if r["caches"] == "defaults" else "")
+            + (" (counts)" if r["dense"] == "counts" else ""))
 
 
 def latest(records: list[dict]) -> dict[tuple[str, str], dict]:
@@ -104,6 +105,13 @@ def agg_error_cell(e: dict) -> str:
             f"{e['type_total_true'] + e['year_total_true']:,}")
 
 
+def cover_cell(e: dict) -> str:
+    if not e["dense_tiles_sampled"]:
+        return "–"
+    return (f"{e['dense_cover'] / e['dense_cover_expected']:.3f} ({e['dense_cover']:,} of "
+            f"{e['dense_cover_expected']:,.0f}, {e['dense_tiles_sampled']} tiles)")
+
+
 def timed_cell(e: dict) -> str:
     return (f"{e['frames_mismatched']:,} of {e['frames']:,} frames, "
             f"{e['tables_mismatched']:,} of {e['tables']:,} tables")
@@ -143,6 +151,8 @@ def table(tier: str, runs: dict[str, dict]) -> str:
         rows.append((f"Points sent, {w} (from dense tiles)",
                      lambda r, w=w: f"{r['errors'][w]['points_sent']:,} ({r['errors'][w]['points_dense']:,})"))
         rows.append((f"Bytes received, {w}", lambda r, w=w: size(r["errors"][w]["bytes"])))
+        rows.append((f"Dense-tile samples, {w}: sub-cells covered against a uniform random sample",
+                     lambda r, w=w: cover_cell(r["errors"][w])))
     rows += [("Error versus oracle, aggregation", lambda r: agg_error_cell(r["errors"]["aggregation"])),
              ("Timed responses wrong (against the oracle, or the untimed answer where that was wrong)",
               lambda r: timed_cell(r["errors"]["timed"])),

@@ -9,15 +9,20 @@ After the first start the adapter creates the viewer as a principal in the catal
 with that key at `POST /v1/login`, and every request carries the session token. No request
 names the viewer's terms.
 
-Two ways to ask for a frame, run as two systems:
+A frame is one `POST /v1/viewport`, as Mosaica's own client asks: the camera's tiles as Morton
+prefixes, `k = K`, the grid as `underlay_offset = grid_depth - zoom` (none at zoom 16, where the
+grid is the tiles), the filter in Mosaica's grammar, and `point_rows: []` so each point carries
+its position alone. The viewport's grid counts the viewer's visible set and not the filtered one,
+so a filtered frame whose grid is deeper than its tiles sends the viewport request without the
+underlay and, at the same time, a `POST /v1/aggregate` counting the filtered set in the cells at
+`grid_depth` over the camera's tiles; the latency covers both.
 
-* `mosaica`: one `POST /v1/viewport`, as Mosaica's own client asks: the camera's tiles as Morton
-  prefixes, `k = K`, the grid as `underlay_offset = grid_depth - zoom` (none at zoom 16, where the
-  grid is the tiles), the filter in Mosaica's grammar, and `point_rows: []` so each point carries
-  its position alone.
-* `mosaica+aggregate`: the same viewport request without the underlay, and beside it, sent at the
-  same time, a `POST /v1/aggregate` counting the filtered set in the cells at `grid_depth` over
-  the camera's tiles. The latency covers both.
+Each tile serves the `min(matched, K)` of its matching items with the lowest `mosaica_id`
+(`mosaica_engine::select`), since `theta_target_marks` saturates the density threshold. The
+`mosaica_id` is a keyed permutation of each item's internal number under a key the build draws at
+random, so the sample is a uniform random one, different at each build. Mosaica has no request
+that sends a sparse tile's points and none from a dense one, so under the `counts` frame it sends
+`K` from each dense tile, as before.
 
 The aggregation workload is one `POST /v1/aggregate` with two groupings, the counts by `type` and
 the `publication_year` histogram, over the filter and a `region` box of the camera's tiles.
@@ -200,13 +205,11 @@ class Mosaica(Adapter):
               "exactly the viewer's terms, logged in with its API key at /v1/login; requests "
               "carry its session token and no access condition")
 
-    def __init__(self, tier: Path, work: Path, image: str, grid: str = "underlay", nice: int = 0,
-                 caches: str = "compute"):
-        super().__init__(tier, work, nice, caches)
-        if grid not in ("underlay", "aggregate"):
-            raise ValueError(f"grid is underlay or aggregate, not {grid}")
-        self.grid = grid
-        self.name = "mosaica" if grid == "underlay" else "mosaica+aggregate"
+    name = "mosaica"
+
+    def __init__(self, tier: Path, work: Path, image: str, nice: int = 0, caches: str = "compute",
+                 dense: str = "points"):
+        super().__init__(tier, work, nice, caches, dense)
         self.pool = ThreadPoolExecutor(2)
         self.image = image
         self.container = Container(f"bench-compare-mosaica-{os.getpid()}")
@@ -227,7 +230,9 @@ class Mosaica(Adapter):
     def config(self) -> dict:
         status = self._status()
         return {"serve": self._serve(), "caches": self.caches, "corpus": CORPUS, "point_rows": [],
-                "grid": self.grid, "container_memory": MEMORY, "container_cpus": os.cpu_count(),
+                "grid": "underlay, or /v1/aggregate beside the viewport for a filtered frame "
+                        "whose grid is deeper than its tiles",
+                "container_memory": MEMORY, "container_cpus": os.cpu_count(),
                 "serve_reported": reported(status), "status": status,
                 "region_answers": sorted(self.regions),
                 "routes": ["/v1/login", "/v1/viewport", "/v1/aggregate"]}
@@ -379,13 +384,14 @@ operator_credential_env = "{CRED_ENV}"
         tiles = camera.tiles()
         body = {"view": VIEW, "zoom": z, "tiles": [interleave(tx, ty) for tx, ty in tiles],
                 "k": K, "point_rows": []}
-        if dg > z and self.grid == "underlay":
-            body["underlay_offset"] = dg - z
         f = combine(filter_leaves(filt))
         if f is not None:
             body["filters"] = f
+        aggregate = f is not None and dg > z
+        if dg > z and not aggregate:
+            body["underlay_offset"] = dg - z
         t0 = time.perf_counter()
-        if self.grid == "underlay":
+        if not aggregate:
             raw, agg = self._viewport(body), None
         else:
             fv = self.pool.submit(self._viewport, body)

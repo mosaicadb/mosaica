@@ -16,9 +16,12 @@ Every step is deterministic, so two runs write the same rows:
    2^64 / 102,117,343)`, and in `full` always. The tiers therefore nest. The sample is Bernoulli,
    so a tier holds N rows give or take a few thousand; the manifest records the exact count.
 4. `qx` and `qy` are the 32-bit grid positions `frame.fixed32` gives, for the oracle.
+5. `rank` is `splitmix64(entity_id ^ RANK_SEED) >> 1`, a uniform random 63-bit value per item
+   that fits a signed 64-bit column in every system. A system that has no random order of its own
+   samples a dense tile by its K lowest ranks; Mosaica samples by its own `mosaica_id`.
 
 Rows are written in source order; each system sorts as its own build does. The manifest beside
-the tiers records the source's size, the seed, the extent, thresholds, row counts, rows per
+the tiers records the source's size, the seeds, the extent, thresholds, row counts, rows per
 licence and each tier's SHA-256, which must match `tiers-manifest.json`, the committed copy that
 `run.py` checks a tier against.
 """
@@ -44,6 +47,7 @@ REPO = HERE.parents[1]
 SOURCE = REPO / "data/ladder/paperseek/points.parquet"
 SOURCE_ROWS = 102117343
 SAMPLE_SEED = 0x6D6F736169636131
+RANK_SEED = 0x6D6F736169636132
 COLUMNS = ["entity_id", "x", "y", "licence", "publication_year", "type", "is_oa"]
 
 SCHEMA = pa.schema([
@@ -56,6 +60,7 @@ SCHEMA = pa.schema([
     ("is_oa", pa.bool_()),
     ("qx", pa.uint32()),
     ("qy", pa.uint32()),
+    ("rank", pa.int64()),
 ])
 
 
@@ -121,7 +126,9 @@ def derive(source: pq.ParquetFile, out: Path, tiers: list[int], extent: list[flo
         t = t.select(COLUMNS).cast(pa.schema([SCHEMA.field(c) for c in COLUMNS]))
         qx = pa.array(fixed32_array(t["x"].to_numpy(), extent[0], extent[1]))
         qy = pa.array(fixed32_array(t["y"].to_numpy(), extent[2], extent[3]))
-        t = t.append_column("qx", qx).append_column("qy", qy)
+        rank = splitmix64(t["entity_id"].to_numpy() ^ np.uint64(RANK_SEED)) >> np.uint64(1)
+        t = t.append_column("qx", qx).append_column("qy", qy).append_column(
+            "rank", pa.array(rank.astype(np.int64)))
         for n in tiers:
             sel = t if cuts[n] is None else t.filter(pa.array(h < np.uint64(cuts[n])))
             writers[n].write_table(sel, row_group_size=1 << 20)
@@ -183,6 +190,7 @@ def main() -> None:
                       "over Stella V5 embeddings of title and abstract",
         },
         "sample_seed": SAMPLE_SEED,
+        "rank_seed": RANK_SEED,
         "extent": extent,
         "extent_rule": "side = ceil(max(x_max - floor(x_min), y_max - floor(y_min))) over the full "
                        "file; each axis from the floor of its minimum",

@@ -2,7 +2,10 @@
 oracle, and append one JSON record to the results file.
 
     python run.py --system mosaica --tier data/bench-compare/tiers/paperseek-1e6.parquet \\
-        --cameras cameras/paperseek-1e6.json --out results/dev.jsonl
+        --cameras cameras/paperseek-1e6.json --out results/dev.jsonl [--dense points|counts]
+
+`--dense points`, the default, asks every dense tile for its sample of K positions; `--dense
+counts` is the earlier frame, which asks a dense tile for none.
 
 The run, in order, every request made as the viewer in `viewer.json`:
 
@@ -43,7 +46,8 @@ import numpy as np
 import pyarrow
 import requests
 
-from frame import EXTENT, GRID_OFFSET, K, SCREEN, TILE_PX, TYPE_TOP, YEAR_BINS, Camera, Filter
+from frame import (DENSE, EXTENT, GRID_OFFSET, K, SCREEN, SUBCELL_OFFSET, TILE_PX, TYPE_TOP,
+                   YEAR_BINS, Camera, Filter)
 from oracle import COUNT_ERRORS, POINT_ERRORS, VIEWER, Oracle, compare, compare_tables
 from prepare import sha256
 
@@ -121,15 +125,16 @@ class TimedCheck:
     and `Oracle.dense_invalid` make; where the untimed answer was wrong, which its errors already
     count, the timed answer is compared with the untimed one, so the figure is repeatability."""
 
-    def __init__(self, oracle: Oracle):
+    def __init__(self, oracle: Oracle, dense: str):
         self.oracle = oracle
+        self.dense = dense
         self.untimed: dict[str, tuple] = {}
         self.counts = {"frames": 0, "frames_mismatched": 0, "tables": 0, "tables_mismatched": 0}
         self.examples: list[str] = []
 
     def errors(self, camera: Camera, filt: Filter | None, got) -> dict:
         truth = self.oracle.frame(camera, filt)
-        cmp = compare(got, truth, camera)
+        cmp = compare(got, truth, camera, self.dense)
         cmp["dense_points_invalid"] = self.oracle.dense_invalid(camera, filt, got, truth)
         return cmp
 
@@ -203,21 +208,21 @@ def harness_commit() -> str:
 
 
 def make_adapter(args):
-    work = args.work / f"{args.system}-{args.caches}-{args.tier.stem}-{os.getpid()}"
-    if args.system in ("mosaica", "mosaica+aggregate"):
+    work = args.work / f"{args.system}-{args.caches}-{args.dense}-{args.tier.stem}-{os.getpid()}"
+    common = {"nice": args.nice, "caches": args.caches, "dense": args.dense}
+    if args.system == "mosaica":
         from adapters.mosaica import Mosaica
-        return Mosaica(args.tier, work, args.image, nice=args.nice, caches=args.caches,
-                       grid="underlay" if args.system == "mosaica" else "aggregate")
+        return Mosaica(args.tier, work, args.image, **common)
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
-        return ClickHouse(args.tier, work, nice=args.nice, caches=args.caches)
+        return ClickHouse(args.tier, work, **common)
     if args.system in ("postgis", "postgis+leakproof", "postgis+integer"):
         from adapters.postgis import PostGIS
-        return PostGIS(args.tier, work, nice=args.nice, caches=args.caches, arm=args.system)
+        return PostGIS(args.tier, work, arm=args.system, **common)
     if args.system == "opensearch":
         from adapters.opensearch import OpenSearch
-        return OpenSearch(args.tier, work, nice=args.nice, caches=args.caches)
-    sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate, clickhouse, postgis, "
+        return OpenSearch(args.tier, work, **common)
+    sys.exit(f"unknown system {args.system}; write mosaica, clickhouse, postgis, "
              f"postgis+leakproof, postgis+integer or opensearch")
 
 
@@ -233,6 +238,8 @@ def main() -> None:
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--caches", choices=("compute", "defaults"), default="compute",
                     help="compute: every cache kept between requests off; defaults: the system's own")
+    ap.add_argument("--dense", choices=DENSE, default="points",
+                    help="points: K positions from each dense tile; counts: none required")
     ap.add_argument("--max-load", type=float, default=3.0)
     ap.add_argument("--no-cold", action="store_true")
     ap.add_argument("--nice", type=int, default=0,
@@ -262,12 +269,14 @@ def main() -> None:
         "tier": args.tier.name,
         "tier_sha256": tier_sha256,
         "caches": args.caches,
+        "dense": args.dense,
         "harness_commit": harness_commit(),
         "cameras": args.cameras.name,
         "cameras_sha256": sha256(args.cameras),
         "packages": {"duckdb": duckdb.__version__, "pyarrow": pyarrow.__version__,
                      "numpy": np.__version__, "requests": requests.__version__},
-        "frame": {"screen": SCREEN, "tile_px": TILE_PX, "grid_offset": GRID_OFFSET, "k": K},
+        "frame": {"screen": SCREEN, "tile_px": TILE_PX, "grid_offset": GRID_OFFSET, "k": K,
+                  "dense": args.dense, "subcell_offset": SUBCELL_OFFSET},
         "hardware": hardware(),
         "load_before": load_before,
         "foreign_mosaica_processes": foreign,
@@ -288,13 +297,14 @@ def main() -> None:
 
         print(f"[{adapter.name}] checking against the oracle", file=sys.stderr, flush=True)
         errors = {}
-        check = TimedCheck(oracle)
+        check = TimedCheck(oracle, args.dense)
         for w, steps in workloads.items():
             per = []
             for camera, filt in steps:
                 got, _ = adapter.frame(camera, filt)
                 cmp = check.errors(camera, filt, got)
                 check.learn(camera, filt, got, cmp)
+                cmp.update(oracle.coverage(camera, filt, got, oracle.frame(camera, filt)))
                 cmp["label"] = camera.label + (f"/{filt.label}" if filt else "")
                 cmp["bytes"] = got.bytes
                 per.append(cmp)
@@ -303,7 +313,8 @@ def main() -> None:
                 "frames_exact": sum(1 for c in per if not any(c[k] for k in COUNT_ERRORS + POINT_ERRORS)),
                 **{k: int(sum(c[k] for c in per)) for k in (
                     "matched_true", *COUNT_ERRORS, *POINT_ERRORS, "grid_cells_wrong", "grid_cells_true",
-                    "points_dense", "points_sent", "bytes")},
+                    "points_dense", "points_sent", "bytes", "dense_tiles_sampled", "dense_cover")},
+                "dense_cover_expected": float(sum(c["dense_cover_expected"] for c in per)),
                 "worst": sorted(per, key=lambda c: -sum(c[k] for k in COUNT_ERRORS + POINT_ERRORS))[:3],
             }
         per = []

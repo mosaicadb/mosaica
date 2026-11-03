@@ -15,6 +15,7 @@
     "origin": "The PaperSeek rung of the Mosaica test ladder: PaperSeek works joined to OpenAlex for licence, year, type and open access, laid out in 2D by UMAP over Stella V5 embeddings of title and abstract"
   },
   "sample_seed": 7885648334766170417,
+  "rank_seed": 7885648334766170418,
   "extent": [
     -18.0,
     21.0,
@@ -40,7 +41,7 @@
         "cc-by-nd": 1082,
         "publisher-specific-oa": 78
       },
-      "sha256": "d00cbfc936ca164c798c8c8916efaf5b8a11add82ff2d4e7137b46a0279b2c5c"
+      "sha256": "74d262f384640ec32693fc49a62d83ae75413807cf34382a02667f72d7983f7a"
     },
     "1e7": {
       "file": "paperseek-1e7.parquet",
@@ -60,7 +61,7 @@
         "publisher-specific-oa": 823,
         "mit": 4
       },
-      "sha256": "95b868b1f6a56690038c86c45d4b77bff19ec217d36aca0794c3aa41d9c7dd07"
+      "sha256": "dde36090a1f0db964eeb9ea323656aaa90bd27d753d283374fefa9a441d27e49"
     },
     "5e7": {
       "file": "paperseek-5e7.parquet",
@@ -80,7 +81,7 @@
         "publisher-specific-oa": 4156,
         "mit": 33
       },
-      "sha256": "3fef942769496d59b31a81ccb97503b8a13438825100c3e38053d646cab62f43"
+      "sha256": "982088f4b22e0bcb217b404c495eadf3793a2a94389fd866d6f2ec302e13130b"
     },
     "full": {
       "file": "paperseek-full.parquet",
@@ -100,7 +101,7 @@
         "publisher-specific-oa": 8329,
         "mit": 62
       },
-      "sha256": "a1ad52463d4b34492ae9e935fc8d50186acf92de8f9e625f0790850bbcca896b"
+      "sha256": "fb67b29264d34b47eaaae5ab3fd747c54faec45b0a63a50bd96911921aac4564"
     }
   }
 }
