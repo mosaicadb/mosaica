@@ -15,9 +15,10 @@ from pathlib import Path
 
 import duckdb
 import numpy as np
+import pyarrow as pa
 
 from frame import (EXTENT, K, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32, grid_depth,
-                   points_by_tile, tile_of)
+                   points_by_tile)
 
 VIEWER = json.loads(Path(__file__).with_name("viewer.json").read_text())
 
@@ -108,6 +109,26 @@ class Oracle:
         self._cache[key] = frame
         return frame
 
+    def dense_invalid(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame) -> int:
+        """The positions a system sent from dense tiles that are not the viewer's matching items
+        there, counted as a multiset: a position sent more often than the matching items hold it
+        counts each time over."""
+        sent = [p for t, p in got.points.items() if truth.tiles.get(t, 0) > K and len(p)]
+        if not sent:
+            return 0
+        pts = np.concatenate(sent)
+        positions = pa.table({"qx": pts[:, 0], "qy": pts[:, 1]})
+        self.con.register("sent", positions)
+        try:
+            return int(self.con.execute(
+                f"WITH s AS (SELECT qx, qy, count(*) AS n FROM sent GROUP BY ALL), "
+                f"t AS (SELECT qx, qy, count(*) AS n FROM read_parquet('{self.tier}') "
+                f"WHERE {where(camera, filt)} AND (qx, qy) IN (SELECT (qx, qy) FROM s) GROUP BY ALL) "
+                f"SELECT coalesce(sum(greatest(s.n - coalesce(t.n, 0), 0)), 0) FROM s "
+                f"LEFT JOIN t USING (qx, qy)").fetchone()[0])
+        finally:
+            self.con.unregister("sent")
+
     def tables(self, camera: Camera, filt: Filter | None) -> dict[str, dict[str, int]]:
         """The aggregation workload's two tables over the viewer's matching items in the camera's
         tiles: `type`, each type's count and `none` for no type (every type is listed, since
@@ -153,8 +174,9 @@ def common_count(a: np.ndarray, b: np.ndarray) -> int:
 
 def compare(got: Frame, truth: Frame, camera: Camera) -> dict:
     """How far a system's frame is from the oracle's. Every figure is zero for an exact frame,
-    except `points_dense`, the positions sent from dense tiles, which the frame allows. A tile
-    with points sent and no true count is a sparse tile from which nothing was wanted."""
+    except `points_dense`, the positions sent from dense tiles, which the frame allows; whether
+    those are the viewer's matching items is `Oracle.dense_invalid`. A tile with points sent and
+    no true count is a sparse tile from which nothing was wanted."""
     tile_keys = set(got.tiles) | set(truth.tiles)
     tile_err = sum(abs(got.tiles.get(t, 0) - truth.tiles.get(t, 0)) for t in tile_keys)
     cell_keys = set(got.grid) | set(truth.grid)
@@ -163,9 +185,6 @@ def compare(got: Frame, truth: Frame, camera: Camera) -> dict:
     none = np.empty((0, 2), np.uint32)
     sparse_missing = sparse_extra = outside = dense = 0
     for t, pts in got.points.items():
-        if len(pts):
-            tx, ty = tile_of(pts[:, 0], camera.zoom), tile_of(pts[:, 1], camera.zoom)
-            outside += int(np.count_nonzero((tx != t[0]) | (ty != t[1])))
         if t not in wanted:
             outside += len(pts)
     for t in set(truth.tiles) | set(got.points):

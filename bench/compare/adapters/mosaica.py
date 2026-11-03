@@ -63,6 +63,16 @@ SERVE = {
     "max_aggregate_cells": 20 << (2 * GRID_OFFSET),
     "aggregate_response_bytes": 256 << 20,
 }
+#: Every cache the server keeps between requests, at zero for the compute figures. The visibility
+#: masks Mosaica writes to its cache directory are not bounded by any of these, and are kept.
+COMPUTE_CACHES = {
+    "region_cache_bytes": 0,
+    "row_projection_cache_bytes": 0,
+    "fragment_cache_bytes": 0,
+    "masked_count_cache_bytes": 0,
+    "figures_disk_bytes": 0,
+    "occupancy_cache_bytes": 0,
+}
 CORPUS = f"""
 [sources]
 points = "points.parquet"
@@ -173,8 +183,9 @@ class Mosaica(Adapter):
               "exactly the viewer's terms, logged in with its API key at /v1/login; requests "
               "carry its session token and no access condition")
 
-    def __init__(self, tier: Path, work: Path, image: str, grid: str = "underlay", nice: int = 0):
-        super().__init__(tier, work, nice)
+    def __init__(self, tier: Path, work: Path, image: str, grid: str = "underlay", nice: int = 0,
+                 caches: str = "compute"):
+        super().__init__(tier, work, nice, caches)
         if grid not in ("underlay", "aggregate"):
             raise ValueError(f"grid is underlay or aggregate, not {grid}")
         self.grid = grid
@@ -195,13 +206,17 @@ class Mosaica(Adapter):
                 "docker": docker_info()}
 
     def config(self) -> dict:
-        return {"serve": SERVE, "corpus": CORPUS, "point_rows": [], "grid": self.grid,
+        return {"serve": self._serve(), "caches": self.caches, "corpus": CORPUS, "point_rows": [], "grid": self.grid,
                 "container_memory": MEMORY, "region_answers": sorted(self.regions),
                 "routes": ["/v1/login", "/v1/viewport", "/v1/aggregate"]}
 
+    def _serve(self) -> dict:
+        """Every `[serve]` setting written: `SERVE`, and with compute caches `COMPUTE_CACHES`."""
+        return {**SERVE, **(COMPUTE_CACHES if self.caches == "compute" else {})}
+
     def _write_deployment(self) -> None:
         (self.work / "corpus.toml").write_text(CORPUS)
-        serve = "\n".join(f"{k} = {v}" for k, v in SERVE.items())
+        serve = "\n".join(f"{k} = {v}" for k, v in self._serve().items())
         (self.work / "mosaica.toml").write_text(f"""
 [bundle]
 path  = "bundle"
@@ -238,13 +253,19 @@ operator_credential_env = "{CRED_ENV}"
                        mounts={str(self.work): "/work", str(self.tier.parent): "/tiers:ro"})
         builder.start()
         try:
+            overhead = []
+            for _ in range(3):
+                t0 = time.monotonic()
+                builder.exec([TOOLS["/usr/bin/sleep"], "0"], self.work / "exec-probe.log")
+                overhead.append(time.monotonic() - t0)
+            exec_s = sorted(overhead)[1]
             t0 = time.monotonic()
             rc = builder.exec([TOOLS["/usr/bin/nice"], "-n", str(self.nice), "/usr/local/bin/mosaica",
                                "build", "--deployment", "/work/mosaica.toml",
                                "--file", f"points=/tiers/{self.tier.name}", "--no-oracle-pairs",
                                "--stage-timings-json", "/work/build-stages.json"],
                               self.work / "build.log")
-            build_s = time.monotonic() - t0
+            wall_s = time.monotonic() - t0
             cgroup_peak = builder.memory()["cgroup_peak_bytes"]
         finally:
             builder.remove()
@@ -253,10 +274,15 @@ operator_credential_env = "{CRED_ENV}"
         stages = json.loads((self.work / "build-stages.json").read_text())
         self._create()
         return {
-            "build_s": build_s,
+            "build_s": wall_s - exec_s,
+            "build_wall_s": wall_s,
+            "exec_overhead_s": exec_s,
+            "boundary": "mosaica build's own run: the docker exec's wall time less the median of "
+                        "three empty execs in the same container",
             "peak_rss_bytes": max(s["peak_rss_kib"] for s in stages) * 1024,
             "cgroup_peak_bytes": cgroup_peak,
             "disk_bytes": du_bytes(self.work / "bundle"),
+            "disk": "du of the bundle directory",
             "nice": self.nice,
         }
 
@@ -288,16 +314,13 @@ operator_credential_env = "{CRED_ENV}"
         except requests.RequestException:
             return False
 
-    def start(self) -> dict:
-        """Start the container and log the viewer in. Returns the seconds to `/readyz` answering
-        and to the session token."""
-        t0 = time.perf_counter()
+    def start(self) -> None:
         self.container.start()
         wait_for(self._ready, 600, f"mosaica answering /readyz; see docker logs {self.container.name}")
-        ready = time.perf_counter() - t0
         if self.api_key is None:
             self._make_viewer()
-        t1 = time.perf_counter()
+
+    def connect(self) -> None:
         r = requests.post(f"http://127.0.0.1:{PORTS[0]}/v1/login", json={"api_key": self.api_key},
                           timeout=60)
         r.raise_for_status()
@@ -305,7 +328,6 @@ operator_credential_env = "{CRED_ENV}"
         self.http, self.agg_http = requests.Session(), requests.Session()
         self.http.headers.update(auth)
         self.agg_http.headers.update(auth)
-        return {"ready_s": ready, "login_s": time.perf_counter() - t1}
 
     def stop(self) -> None:
         for session in (self.http, self.agg_http):
@@ -345,14 +367,14 @@ operator_credential_env = "{CRED_ENV}"
         frame = self._decode(raw, z, dg)
         if agg is not None:
             frame.grid = {cell: n for cell, n in self._decode_cells(agg).items() if n}
-            frame.bytes += sum(len(b) for b in agg)
+            frame.bytes += len(agg)
         return frame, elapsed
 
     def tables(self, camera: Camera, filt: Filter | None) -> tuple[dict, float]:
         t0 = time.perf_counter()
-        bodies = self._aggregate(tables_request(camera, filt))
+        body = self._aggregate(tables_request(camera, filt))
         elapsed = time.perf_counter() - t0
-        return self._decode_tables(bodies), elapsed
+        return self._decode_tables(body), elapsed
 
     def _viewport(self, body: dict) -> bytes:
         r = self.http.post(f"http://127.0.0.1:{PORTS[0]}/v1/viewport", json=body, timeout=600)
@@ -362,54 +384,52 @@ operator_credential_env = "{CRED_ENV}"
             self.regions.add(r.headers["x-mosaica-region"])
         return r.content
 
-    def _aggregate(self, body: dict) -> list[bytes]:
-        """Every response of one aggregate read, following the cursor to the end."""
-        out = []
-        while True:
-            r = self.agg_http.post(f"http://127.0.0.1:{PORTS[0]}/v1/aggregate", json=body, timeout=600)
-            if r.status_code != 200:
-                raise RuntimeError(f"aggregate {r.status_code}: {r.content[:500]!r}")
-            if "x-mosaica-region" in r.headers:
-                self.regions.add(r.headers["x-mosaica-region"])
-            out.append(r.content)
-            trailer = json.loads(split_frames(r.content)[-1][1])
-            if not trailer.get("next"):
-                return out
-            body = dict(body, cursor=trailer["next"])
+    def _aggregate(self, body: dict) -> bytes:
+        """One aggregate response, which `aggregate_response_bytes` makes the whole result; the
+        decoders refuse one that ends with a cursor."""
+        r = self.agg_http.post(f"http://127.0.0.1:{PORTS[0]}/v1/aggregate", json=body, timeout=600)
+        if r.status_code != 200:
+            raise RuntimeError(f"aggregate {r.status_code}: {r.content[:500]!r}")
+        if "x-mosaica-region" in r.headers:
+            self.regions.add(r.headers["x-mosaica-region"])
+        return r.content
 
     @staticmethod
-    def _records(bodies: list[bytes]) -> dict[int, list]:
+    def _records(raw: bytes) -> dict[int, list]:
         """Each table's record batches, by its grouping index."""
         tables: dict[int, list] = {}
         current = None
-        for raw in bodies:
-            for kind, payload in split_frames(raw):
-                if kind == 9:
-                    current = json.loads(payload)["grouping"]
-                    tables.setdefault(current, [])
-                elif kind == 7:
-                    tables[current].append(ipc.open_stream(io.BytesIO(payload)).read_all())
-                elif kind not in (8, 4):
-                    raise ValueError(f"unknown frame kind {kind}")
+        frames = split_frames(raw)
+        if json.loads(frames[-1][1]).get("next"):
+            raise RuntimeError("an aggregate response ended with a cursor; raise "
+                               "aggregate_response_bytes so one response holds the result")
+        for kind, payload in frames:
+            if kind == 9:
+                current = json.loads(payload)["grouping"]
+                tables.setdefault(current, [])
+            elif kind == 7:
+                tables[current].append(ipc.open_stream(io.BytesIO(payload)).read_all())
+            elif kind not in (8, 4):
+                raise ValueError(f"unknown frame kind {kind}")
         return tables
 
     @classmethod
-    def _decode_cells(cls, bodies: list[bytes]) -> dict:
+    def _decode_cells(cls, raw: bytes) -> dict:
         grid = {}
-        for table in cls._records(bodies).get(0, []):
+        for table in cls._records(raw).get(0, []):
             gx, gy = deinterleave(table["cell"].to_numpy())
             for a, b, n in zip(gx.tolist(), gy.tolist(), table["count"].to_numpy().tolist()):
                 grid[(a, b)] = n
         return grid
 
     @classmethod
-    def _decode_tables(cls, bodies: list[bytes]) -> dict:
+    def _decode_tables(cls, raw: bytes) -> dict:
         """The two tables in the oracle's shape: listed rows by key or lower edge, then `rest`
         and `none`."""
         out = {}
         for index, name, column in ((0, "type", "key"), (1, "year", "lower")):
             rows: dict[str, int] = {}
-            for table in cls._records(bodies).get(index, []):
+            for table in cls._records(raw).get(index, []):
                 for r in table.select(["group", column, "count"]).to_pylist():
                     k = str(r[column]) if r["group"] == "listed" else r["group"]
                     rows[k] = rows.get(k, 0) + r["count"]

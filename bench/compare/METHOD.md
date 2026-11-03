@@ -82,7 +82,8 @@ count. Aggregation is timed apart from the frames, as a separate request or set 
 | Warm frame latency, p50 and p99, per zoom | Result caches off (ClickHouse's query cache, Martin's tile cache) for the compute figures; each system's default caching as a separate row |
 | Latency of a filter change | The filter-change workload. Not applicable to precomputed tiles, which filter on the client |
 | Aggregation latency, p50 and p99 | The aggregation workload, warm, with the error of every table beside it |
-| Session start | From starting a stopped server to the viewer's first whole-map frame, warm (the system's caches kept) and cold (deleted, and its files' pages dropped), with its phases: the server ready, the viewer's session opened, the first frame. Mosaica computes a viewer's visible set once per session, so the first frame carries that cost |
+| Server start | From starting a stopped server to its answering the viewer's queries, warm (the system's caches kept) and cold (deleted, and its files' pages dropped) |
+| Session start | From opening the viewer's session to the end of its first whole-map frame, warm and cold. Mosaica computes a viewer's visible set once per session, on its first read, so this figure carries that cost |
 | Concurrent viewers: 1, 10, 100 and 1,000 | An open-loop load generator, with distinct filters per viewer to defeat shared caches, and identical viewers reported as well |
 | Insert to visible | Insert K points into an empty region and poll the frame until its count rises, with each system's commit, refresh or flush setting stated |
 | Delete or suppress to gone | The same polling. Client and CDN caches are out of scope |

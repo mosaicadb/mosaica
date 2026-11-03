@@ -74,6 +74,7 @@ def tier_name(n: int) -> str:
 
 
 def sha256(path: Path) -> str:
+    """The file's SHA-256, read in chunks."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         while chunk := f.read(1 << 24):
@@ -111,7 +112,7 @@ def derive(source: pq.ParquetFile, out: Path, tiers: list[int], extent: list[flo
     for g in range(source.metadata.num_row_groups):
         t = source.read_row_group(g, columns=COLUMNS)
         read += t.num_rows
-        h = splitmix64(t["entity_id"].to_numpy())
+        h = splitmix64(t["entity_id"].to_numpy() ^ np.uint64(SAMPLE_SEED))
         if cuts[widest] is not None:
             keep = h < np.uint64(cuts[widest])
             t, h = t.filter(pa.array(keep)), h[keep]

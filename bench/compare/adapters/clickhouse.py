@@ -59,6 +59,10 @@ DDL = ("CREATE TABLE points (m UInt64, qx UInt32, qy UInt32, licence LowCardinal
        "publication_year Nullable(Int32), type LowCardinality(Nullable(String)), is_oa Nullable(Bool)) "
        "ENGINE = MergeTree ORDER BY m")
 VIEWER_USER = "viewer"
+#: Every cache kept between queries that serves a result or a filter's result, off for the
+#: compute figures; with defaults the query cache is off and the query condition cache on.
+COMPUTE_CACHES = {"use_query_cache": 0, "use_query_condition_cache": 0,
+                  "use_query_condition_cache_for_top_k": 0}
 
 
 def quantise(expr: str, lo: float, hi: float) -> str:
@@ -108,8 +112,10 @@ class ClickHouse(Adapter):
     access = (f"ROW POLICY on points FOR SELECT USING licence IN (the viewer's terms) TO "
               f"{VIEWER_USER}; every frame and table queried as {VIEWER_USER}")
 
-    def __init__(self, tier: Path, work: Path, nice: int = 0):
-        super().__init__(tier, work, nice)
+    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
+        super().__init__(tier, work, nice, caches)
+        self.settings = COMPUTE_CACHES if caches == "compute" else {}
+        self.viewer_made = False
         self.container = Container(f"bench-compare-ch-{os.getpid()}")
         self.data = self.work / "ch-data"
         self.pool = ThreadPoolExecutor(2)
@@ -139,23 +145,30 @@ class ClickHouse(Adapter):
                 str(self.tier.parent): "/var/lib/clickhouse/user_files/tiers:ro",
             })
 
-    def start(self) -> dict:
-        """Start the container. Returns the seconds to `/ping` answering; ClickHouse's HTTP
-        interface has no session to open, so the viewer's credential travels with each query."""
-        t0 = time.perf_counter()
+    def start(self) -> None:
+        """Start the container, ready once the viewer can read the table, or before the table
+        exists, once the server answers `/ping`."""
         self.container.start()
-        wait_for(self._ping, 120, "ClickHouse answering /ping")
-        ready = time.perf_counter() - t0
-        self.sessions = [requests.Session(), requests.Session()]
-        for s in self.sessions:
-            s.headers.update({"X-ClickHouse-User": VIEWER_USER, "X-ClickHouse-Key": self.viewer_password})
-        return {"ready_s": ready}
+        wait_for(self._ready, 120, f"ClickHouse answering; see {self.work / 'ch-logs'}")
 
-    def _ping(self) -> bool:
+    def _ready(self) -> bool:
         try:
-            return requests.get(f"http://127.0.0.1:{PORT}/ping", timeout=1).ok
+            if not self.viewer_made:
+                return requests.get(f"http://127.0.0.1:{PORT}/ping", timeout=1).ok
+            return requests.post(f"http://127.0.0.1:{PORT}/", data=b"SELECT 1 FROM points LIMIT 1",
+                                 headers=self._viewer_headers(), timeout=1).ok
         except requests.RequestException:
             return False
+
+    def _viewer_headers(self) -> dict:
+        return {"X-ClickHouse-User": VIEWER_USER, "X-ClickHouse-Key": self.viewer_password}
+
+    def connect(self) -> None:
+        """ClickHouse's HTTP interface has no session to open: the viewer's credential travels
+        with each query on these connections."""
+        self.sessions = [requests.Session(), requests.Session()]
+        for s in self.sessions:
+            s.headers.update(self._viewer_headers())
 
     def stop(self) -> None:
         for s in self.sessions:
@@ -177,7 +190,7 @@ class ClickHouse(Adapter):
     def sql(self, query: str, session: int | None = None, timeout: float = 3600) -> bytes:
         """Run `query` as the default user, or as the viewer on its connection `session`."""
         http = self.admin if session is None else self.sessions[session]
-        r = http.post(f"http://127.0.0.1:{PORT}/", params={"use_query_cache": 0},
+        r = http.post(f"http://127.0.0.1:{PORT}/", params=self.settings,
                       data=query.encode(), timeout=timeout)
         if r.status_code != 200:
             raise RuntimeError(f"ClickHouse {r.status_code}: {r.text[:800]}")
@@ -188,14 +201,20 @@ class ClickHouse(Adapter):
                 "digest": IMAGE_DIGEST, "docker": docker_info()}
 
     def config(self) -> dict:
-        settings = self.sql("SELECT name, value FROM system.settings WHERE name IN "
-                            "('max_threads', 'use_query_cache', 'max_memory_usage') FORMAT TSV").decode()
-        return {"ddl": DDL, "optimize_final": True, "system_logs": "off",
+        names = ["max_threads", "max_insert_threads", "max_memory_usage", "use_uncompressed_cache",
+                 "enable_reads_from_query_cache", *COMPUTE_CACHES]
+        settings = self.sql("SELECT name, value FROM system.settings WHERE name IN ("
+                            + ", ".join(f"'{n}'" for n in names) + ") FORMAT TSV").decode()
+        granularity = self.sql("SELECT value FROM system.merge_tree_settings "
+                               "WHERE name = 'index_granularity'").decode().strip()
+        return {"ddl": DDL, "optimize_final": True, "system_logs": "off", "caches": self.caches,
+                "query_settings": self.settings, "index_granularity": granularity,
                 "row_policy": self.sql("SHOW CREATE ROW POLICY viewer_terms ON default.points").decode().strip(),
                 "container_memory": MEMORY, "settings": dict(l.split("\t") for l in settings.splitlines())}
 
     def build(self) -> dict:
         self.remove()
+        self.viewer_made = False
         subprocess.run(["rm", "-rf", str(self.data), str(self.work / "ch-logs")], check=True)
         self._create(self.nice)
         self.start()
@@ -213,17 +232,20 @@ class ClickHouse(Adapter):
         self.sql("OPTIMIZE TABLE points FINAL")
         build_s = time.monotonic() - t0
         mem = self.serve_memory()
-        disk = int(self.sql("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND table = 'points'"))
+        table_bytes = int(self.sql("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND table = 'points'"))
         rows = int(self.sql("SELECT count() FROM points"))
         terms = ", ".join(f"'{t}'" for t in VIEWER["terms"])
         self.sql(f"CREATE USER {VIEWER_USER} IDENTIFIED WITH sha256_password BY '{self.viewer_password}'")
         self.sql(f"GRANT SELECT ON default.points TO {VIEWER_USER}")
         self.sql(f"CREATE ROW POLICY viewer_terms ON default.points FOR SELECT "
                  f"USING licence IN ({terms}) AS permissive TO {VIEWER_USER}")
+        self.viewer_made = True
+        disk = du_bytes(self.data)
         self.stop()
         self._create()
-        return {"build_s": build_s, **mem, "disk_bytes": disk, "rows": rows,
-                "data_dir_bytes": du_bytes(self.data), "nice": self.nice}
+        return {"build_s": build_s, **mem, "disk_bytes": disk, "disk": "du of the data directory",
+                "table_bytes": table_bytes, "rows": rows, "nice": self.nice,
+                "boundary": "from the CREATE TABLE to the end of OPTIMIZE, on a running server"}
 
     # -- a frame -----------------------------------------------------------------------------------
 

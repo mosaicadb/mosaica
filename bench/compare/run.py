@@ -28,7 +28,6 @@ never does.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import platform
@@ -38,10 +37,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import duckdb
 import numpy as np
+import pyarrow
 
 from frame import EXTENT, GRID_OFFSET, K, SCREEN, TILE_PX, TYPE_TOP, YEAR_BINS, Camera, Filter
 from oracle import VIEWER, Oracle, compare, compare_tables
+from prepare import sha256
 
 HERE = Path(__file__).resolve().parent
 
@@ -71,12 +73,9 @@ def check_tier(tier: Path) -> str:
     want = next((t["sha256"] for t in manifest["tiers"].values() if t["file"] == tier.name), None)
     if want is None:
         sys.exit(f"{tier.name} is not in tiers-manifest.json; derive it with prepare.py")
-    h = hashlib.sha256()
-    with tier.open("rb") as f:
-        while chunk := f.read(1 << 24):
-            h.update(chunk)
-    if h.hexdigest() != want:
-        sys.exit(f"{tier} has SHA-256 {h.hexdigest()}, not the manifest's {want}; derive it again "
+    got = sha256(tier)
+    if got != want:
+        sys.exit(f"{tier} has SHA-256 {got}, not the manifest's {want}; derive it again "
                  f"with prepare.py")
     return want
 
@@ -98,34 +97,45 @@ def steps_of(cameras: dict, workload: str) -> list[tuple[Camera, Filter | None]]
 
 
 def session_start(adapter, repeats: int) -> dict:
-    """From starting a stopped server to the viewer's first whole-map frame, warm and cold."""
+    """Warm and cold, two figures from a stopped server: `server`, from starting it to its
+    answering the viewer's queries, and `session`, from opening the viewer's session or
+    connections to the end of its first whole-map frame, which for Mosaica includes building the
+    viewer's visible set on its first read."""
     whole = Camera(0, (EXTENT[0] + EXTENT[1]) / 2, (EXTENT[2] + EXTENT[3]) / 2, "whole")
     out = {}
     for mode in ("warm", "cold"):
-        totals, phases = [], {}
+        server, session = [], []
         for _ in range(repeats):
             adapter.stop()
             if mode == "cold":
                 adapter.evict()
             t0 = time.perf_counter()
-            for k, v in adapter.start().items():
-                phases.setdefault(k, []).append(v)
-            _, frame_s = adapter.frame(whole, None)
-            totals.append(time.perf_counter() - t0)
-            phases.setdefault("first_frame_s", []).append(frame_s)
-        out[mode] = {"total": summarise(totals), **{k: summarise(v) for k, v in phases.items()}}
+            adapter.start()
+            t1 = time.perf_counter()
+            adapter.connect()
+            adapter.frame(whole, None)
+            server.append(t1 - t0)
+            session.append(time.perf_counter() - t1)
+        out[mode] = {"server": summarise(server), "session": summarise(session)}
     return out
 
 
+def harness_commit() -> str:
+    """The commit the harness ran from, with `-dirty` where its directory has changes."""
+    git = lambda *a: subprocess.run(["git", "-C", str(HERE), *a], capture_output=True,
+                                    text=True).stdout.strip()
+    return git("rev-parse", "HEAD") + ("-dirty" if git("status", "--porcelain", ".") else "")
+
+
 def make_adapter(args):
-    work = args.work / f"{args.system}-{args.tier.stem}"
+    work = args.work / f"{args.system}-{args.caches}-{args.tier.stem}"
     if args.system in ("mosaica", "mosaica+aggregate"):
         from adapters.mosaica import Mosaica
-        return Mosaica(args.tier, work, args.image,
-                       grid="underlay" if args.system == "mosaica" else "aggregate", nice=args.nice)
+        return Mosaica(args.tier, work, args.image, nice=args.nice, caches=args.caches,
+                       grid="underlay" if args.system == "mosaica" else "aggregate")
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
-        return ClickHouse(args.tier, work, nice=args.nice)
+        return ClickHouse(args.tier, work, nice=args.nice, caches=args.caches)
     sys.exit(f"unknown system {args.system}; write mosaica, mosaica+aggregate or clickhouse")
 
 
@@ -139,6 +149,8 @@ def main() -> None:
     ap.add_argument("--work", type=Path, help="default: work/ beside the tier's directory")
     ap.add_argument("--out", type=Path, default=HERE / "results/dev.jsonl")
     ap.add_argument("--repeats", type=int, default=5)
+    ap.add_argument("--caches", choices=("compute", "defaults"), default="compute",
+                    help="compute: every cache kept between requests off; defaults: the system's own")
     ap.add_argument("--max-load", type=float, default=3.0)
     ap.add_argument("--no-cold", action="store_true")
     ap.add_argument("--nice", type=int, default=0,
@@ -155,6 +167,9 @@ def main() -> None:
     tier_sha256 = check_tier(args.tier)
     foreign = foreign_mosaica(set())
     cameras = json.loads(args.cameras.read_text())
+    if cameras["tier"] != args.tier.name:
+        sys.exit(f"{args.cameras} was made for {cameras['tier']}, not {args.tier.name}; make the "
+                 f"cameras for this tier with cameras.py")
     oracle = Oracle(str(args.tier.resolve()))
     visible, rows = oracle.visible()
     adapter = make_adapter(args)
@@ -164,7 +179,12 @@ def main() -> None:
         "development_only": not args.publishable,
         "tier": args.tier.name,
         "tier_sha256": tier_sha256,
+        "caches": args.caches,
+        "harness_commit": harness_commit(),
         "cameras": args.cameras.name,
+        "cameras_sha256": sha256(args.cameras),
+        "packages": {"duckdb": duckdb.__version__, "pyarrow": pyarrow.__version__,
+                     "numpy": np.__version__},
         "frame": {"screen": SCREEN, "tile_px": TILE_PX, "grid_offset": GRID_OFFSET, "k": K},
         "hardware": hardware(),
         "load_before": load_before,
@@ -179,6 +199,7 @@ def main() -> None:
         print(f"[{adapter.name}] building", file=sys.stderr, flush=True)
         record["build"] = adapter.build()
         adapter.start()
+        adapter.connect()
         record["version"] = adapter.version()
         workloads = {w: steps_of(cameras, w) for w in ("battery", "script", "filters")}
 
@@ -188,7 +209,9 @@ def main() -> None:
             per = []
             for camera, filt in steps:
                 got, _ = adapter.frame(camera, filt)
-                cmp = compare(got, oracle.frame(camera, filt), camera)
+                truth = oracle.frame(camera, filt)
+                cmp = compare(got, truth, camera)
+                cmp["dense_points_invalid"] = oracle.dense_invalid(camera, filt, got, truth)
                 cmp["label"] = camera.label + (f"/{filt.label}" if filt else "")
                 cmp["bytes"] = got.bytes
                 per.append(cmp)
@@ -196,12 +219,14 @@ def main() -> None:
                 "frames": len(per),
                 "frames_exact": sum(1 for c in per if not (c["tile_abs_err"] or c["grid_abs_err"]
                                                         or c["sparse_points_missing"] or c["sparse_points_extra"]
-                                                        or c["points_outside_tile"])),
+                                                        or c["points_outside_tile"]
+                                                        or c["dense_points_invalid"])),
                 **{k: int(sum(c[k] for c in per)) for k in (
                     "matched_true", "tile_abs_err", "grid_abs_err", "grid_cells_wrong", "grid_cells_true",
                     "sparse_points_missing", "sparse_points_extra", "points_outside_tile", "points_dense",
+                    "dense_points_invalid",
                     "points_sent", "bytes")},
-                "worst": sorted(per, key=lambda c: -(c["tile_abs_err"] + c["grid_abs_err"]
+                "worst": sorted(per, key=lambda c: -(c["tile_abs_err"] + c["grid_abs_err"] + c["dense_points_invalid"]
                                                      + c["sparse_points_missing"]))[:3],
             }
         per = []

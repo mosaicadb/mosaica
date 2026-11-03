@@ -2,8 +2,9 @@
 
     python tables.py results/dev.jsonl [--tier paperseek-1e6.parquet]
 
-The latest record per system and tier is used. A table drawn from any development-only record says
-so in its heading.
+The latest record per tier, system and cache setting is used, and a system run with its default
+caches has a column of its own. A table drawn from any development-only record says so in its
+heading. Records from different harness commits or camera files are refused in one table.
 """
 
 from __future__ import annotations
@@ -15,11 +16,23 @@ from pathlib import Path
 GIB = 1 << 30
 
 
+def column(r: dict) -> str:
+    return r["system"] + (" (default caches)" if r["caches"] == "defaults" else "")
+
+
 def latest(records: list[dict]) -> dict[tuple[str, str], dict]:
     out = {}
     for r in records:
-        out[(r["tier"], r["system"])] = r
+        out[(r["tier"], column(r))] = r
     return out
+
+
+def check_comparable(tier: str, runs: dict[str, dict]) -> None:
+    for key in ("harness_commit", "cameras_sha256"):
+        seen = {r[key] for r in runs.values()}
+        if len(seen) > 1:
+            raise SystemExit(f"the {tier} records come from different {key} values {sorted(seen)}; "
+                             f"rerun the older systems, or pass only the records of one run")
 
 
 def ms(s: dict | None) -> str:
@@ -32,7 +45,8 @@ def size(b: int | None) -> str:
 
 def error_cell(e: dict) -> str:
     wrong = e["tile_abs_err"] + e["grid_abs_err"]
-    pts = e["sparse_points_missing"] + e["sparse_points_extra"] + e["points_outside_tile"]
+    pts = (e["sparse_points_missing"] + e["sparse_points_extra"] + e["points_outside_tile"]
+           + e["dense_points_invalid"])
     return (f"{e['frames_exact']}/{e['frames']} exact; count err {wrong:,} of {e['matched_true']:,}; "
             f"point err {pts:,}")
 
@@ -43,12 +57,6 @@ def agg_error_cell(e: dict) -> str:
             f"{e['type_total_true'] + e['year_total_true']:,}")
 
 
-def session(r: dict, mode: str) -> str:
-    s = r["session_start"][mode]
-    phases = ", ".join(f"{k.removesuffix('_s')} {v['p50_ms']:.0f}" for k, v in s.items() if k != "total")
-    return f"{ms(s['total'])} ({phases})"
-
-
 def table(tier: str, runs: dict[str, dict]) -> str:
     systems = sorted(runs)
     dev = any(r.get("development_only", True) for r in runs.values())
@@ -57,11 +65,13 @@ def table(tier: str, runs: dict[str, dict]) -> str:
             ("Build time", lambda r: f"{r['build']['build_s']:.1f} s"),
             ("Build peak RSS", lambda r: size(r["build"].get("peak_rss_bytes"))),
             ("Build peak cgroup memory (incl. page cache)", lambda r: size(r["build"].get("cgroup_peak_bytes"))),
-            ("Size on disk", lambda r: size(r["build"].get("disk_bytes"))),
+            ("Size on disk (ClickHouse: data directory; Mosaica: bundle)", lambda r: size(r["build"].get("disk_bytes"))),
             ("Serve peak RSS", lambda r: size(r["serve_memory"].get("peak_rss_bytes"))),
             ("Serve peak cgroup memory (incl. page cache)", lambda r: size(r["serve_memory"].get("cgroup_peak_bytes"))),
-            ("Session start to first frame, warm, p50 / p99 (ms; phases p50)", lambda r: session(r, "warm")),
-            ("Session start to first frame, cold, p50 / p99 (ms; phases p50)", lambda r: session(r, "cold")),
+            ("Server start to ready, warm, p50 / p99 (ms)", lambda r: ms(r["session_start"]["warm"]["server"])),
+            ("Server start to ready, cold, p50 / p99 (ms)", lambda r: ms(r["session_start"]["cold"]["server"])),
+            ("Session start to first frame, warm, p50 / p99 (ms)", lambda r: ms(r["session_start"]["warm"]["session"])),
+            ("Session start to first frame, cold, p50 / p99 (ms)", lambda r: ms(r["session_start"]["cold"]["session"])),
             ("Cold battery p50 / p99 (ms)", lambda r: ms(r.get("cold", {}).get("battery")))]
     zooms = sorted({z for r in runs.values() for z in r["warm_battery_by_zoom"]}, key=int)
     for z in zooms:
@@ -79,6 +89,7 @@ def table(tier: str, runs: dict[str, dict]) -> str:
              ("Viewer's visible fraction", lambda r: f"{r['viewer']['visible_rows']:,} of "
               f"{r['viewer']['tier_rows']:,} ({r['viewer']['visible_fraction']:.1%})"),
              ("Access enforced by", lambda r: r["access"]),
+             ("Harness commit", lambda r: r["harness_commit"][:12] + ("-dirty" if r["harness_commit"].endswith("-dirty") else "")),
              ("Load average before / after", lambda r: f"{r['load_before'][0]:.1f} / {r['load_after'][0]:.1f}")]
     out = [head, "", "| | " + " | ".join(systems) + " |", "|---|" + "---|" * len(systems)]
     for name, f in rows:
@@ -102,7 +113,9 @@ def main() -> None:
     for tier in sorted({t for t, _ in by}):
         if args.tier and tier != args.tier:
             continue
-        print(table(tier, {s: r for (t, s), r in by.items() if t == tier}))
+        runs = {s: r for (t, s), r in by.items() if t == tier}
+        check_comparable(tier, runs)
+        print(table(tier, runs))
         print()
 
 

@@ -45,8 +45,11 @@ docker pull clickhouse/clickhouse-server@sha256:8b28eb09479c36c4533eec7a6268917d
 # 6. One run per system; each appends a record to results/dev.jsonl
 cd bench/compare
 for s in mosaica mosaica+aggregate clickhouse; do
-  .venv/bin/python run.py --system $s --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
-      --cameras cameras/paperseek-1e6.json --work $DATA/bench-compare/work
+  for c in compute defaults; do
+    .venv/bin/python run.py --system $s --caches $c \
+        --tier $DATA/bench-compare/tiers/paperseek-1e6.parquet \
+        --cameras cameras/paperseek-1e6.json --work $DATA/bench-compare/work
+  done
 done
 
 # 7. The table
@@ -58,15 +61,39 @@ development run whose timings do not matter, raise it, and pass `--nice 19`, whi
 system's build at that niceness (Mosaica's `mosaica build`, and ClickHouse's server for the
 duration of its `INSERT` and `OPTIMIZE`) and every server at 0. The load before and after is in
 the record. A run builds the system from nothing, checks every frame and aggregation against the
-oracle, runs each workload five times warm, measures session start five times warm and five times
-cold, then times one cold frame per battery camera, and stops and removes everything it started.
+oracle, runs each workload five times warm, measures server start and session start five times warm
+and five times cold, then times one cold frame per battery camera, and stops and removes everything it started.
 Work directories go under `$DATA/bench-compare/work/`; delete them when done.
 
 Every system's build and server run in Docker containers, each capped at 16 GiB with no swap and
 run as the invoking user, so that each cgroup's `memory.peak` is that system's own
-(`adapters/base.py`, `Container`). Mosaica's build runs by `docker exec` in a container kept alive
-for it, so its cgroup's peak can be read once the build has ended; ClickHouse's build is the
-`INSERT` and `OPTIMIZE` on its running server. Session start includes starting the container.
+(`adapters/base.py`, `Container`). A container's cgroup is read at Docker's systemd driver path on
+cgroup v2, and a run stops with an error where it is missing. Each container runs the host's
+`/usr/bin/nice` and `/usr/bin/sleep`, mounted read-only, because the Mosaica image has neither;
+both link only to the C library, and a run checks that they start in each image before using it.
+
+Build time excludes each server's start in the same way. ClickHouse's is from `CREATE TABLE` to the
+end of `OPTIMIZE` on a running server. Mosaica's build runs by `docker exec` in a container kept
+alive for it, so its cgroup's peak can be read once the build has ended, and its time is the
+exec's wall time less the median of three empty execs in that container; both figures are in the
+record. Size on disk is ClickHouse's whole data directory and Mosaica's bundle directory, each by
+`du`.
+
+Each system runs twice, once with `--caches compute`, which turns off every cache it keeps
+between requests, and once with `--caches defaults`, which leaves its own; the table gives each
+its own column, and each record lists the settings. Compute for ClickHouse is `use_query_cache`,
+`use_query_condition_cache` and `use_query_condition_cache_for_top_k` at 0. Compute for Mosaica is
+`region_cache_bytes`, `row_projection_cache_bytes`, `fragment_cache_bytes`,
+`masked_count_cache_bytes`, `figures_disk_bytes` and `occupancy_cache_bytes` at 0; the visibility
+masks Mosaica writes to its cache directory are kept, since no setting bounds them, and a cold
+start deletes them.
+
+ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache settings above
+and its system log tables, which are off. It leaves `index_granularity` (8192),
+`max_insert_threads` and `max_threads` (both `auto`, 12 on this machine) at their defaults, and
+each record lists them. Its filter predicates (`adapters/clickhouse.py`, `filter_sql`) have the
+same SQL shapes as the oracle's; the oracle is DuckDB over the Parquet file, so the two share no
+code and no engine, but a mistake in a predicate's shape would be made in both.
 
 ## Files
 
@@ -143,12 +170,18 @@ has zero error. Every count is over the viewer's visible items.
   The build runs with `--no-oracle-pairs`, which leaves out `pairs.parquet`, a file only the
   conformance suite and `mosaica verify --deep` read; the server does not.
 - **Dense tiles.** The frame asks for no positions from a tile with more than K. ClickHouse sends
-  none; Mosaica sends K anyway, so its responses are larger. Both counts are in the record.
+  none; Mosaica sends K anyway, so its responses are larger. Both counts are in the record, and
+  every position sent from a dense tile must be one of the viewer's matching items there, counted
+  as a multiset; one that is not counts as a point error.
 - **Cold means this system's files only.** The machine's page cache is shared with other work, so
   a cold start drops the system's own files' pages with `posix_fadvise` and deletes its caches,
   rather than dropping every cache on the machine.
 - **Memory** is reported twice: the server process's peak RSS, and its cgroup's `memory.peak`,
   which includes the page cache it filled. Mosaica maps its bundle, so its RSS counts pages
   ClickHouse's would not; the cgroup figure is the comparable one, where there is one.
-- **ClickHouse has no session to start.** Its HTTP interface sends the viewer's user and password
-  with every query, so its session start is the server's start and the first frame.
+- **Server start and session start are two figures.** Server start runs from starting the
+  container to the server answering the viewer: Mosaica's `/readyz`, and for ClickHouse a query
+  as the viewer against the table. Session start runs from opening the viewer's session to the end
+  of its first whole-map frame: for Mosaica the login and the first read, which builds the
+  viewer's visible set; for ClickHouse, whose HTTP interface sends the viewer's user and password
+  with every query, the first frame alone.

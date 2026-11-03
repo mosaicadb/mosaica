@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import subprocess
@@ -25,7 +26,11 @@ class Adapter(ABC):
     name: str
     access: str
 
-    def __init__(self, tier: Path, work: Path, nice: int = 0):
+    def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute"):
+        if caches not in ("compute", "defaults"):
+            raise ValueError(f"caches is compute or defaults, not {caches}")
+        #: `compute` turns off every cache kept between requests; `defaults` leaves the system's own.
+        self.caches = caches
         self.tier = tier.resolve()
         #: The niceness of the build, applied the same way to every system; servers run at 0.
         self.nice = nice
@@ -41,9 +46,12 @@ class Adapter(ABC):
         `disk_bytes`, and anything else worth keeping."""
 
     @abstractmethod
-    def start(self) -> dict:
-        """Start the server and open the viewer's connection or session. Returns its phases in
-        seconds, such as `ready_s`, for the session-start record."""
+    def start(self) -> None:
+        """Start the server and return once it answers the viewer's queries."""
+
+    @abstractmethod
+    def connect(self) -> None:
+        """Open the viewer's session or connections on a started server."""
 
     @abstractmethod
     def stop(self) -> None: ...
@@ -71,11 +79,12 @@ class Adapter(ABC):
     def remove(self) -> None:
         """Remove anything `start` left behind that `stop` does not, such as a container."""
 
-    def restart(self, cold: bool) -> dict:
+    def restart(self, cold: bool) -> None:
         self.stop()
         if cold:
             self.evict()
-        return self.start()
+        self.start()
+        self.connect()
 
 
 def evict_files(root: Path) -> int:
@@ -122,6 +131,7 @@ class Container:
         """Create the container, replacing one of the same name. `mounts` maps a host path to a
         container path (suffix `:ro` for read-only), `ports` a host port on 127.0.0.1 to a
         container port. The entry point runs at niceness `nice`."""
+        check_tools(image)
         self.remove()
         subprocess.run([
             "docker", "create", "--name", self.name, "--user", f"{os.getuid()}:{os.getgid()}",
@@ -150,19 +160,32 @@ class Container:
     def cgroup(self) -> Path:
         cid = subprocess.run(["docker", "inspect", "-f", "{{.Id}}", self.name],
                              capture_output=True, text=True, check=True).stdout.strip()
-        return Path(f"/sys/fs/cgroup/system.slice/docker-{cid}.scope")
+        scope = Path(f"/sys/fs/cgroup/system.slice/docker-{cid}.scope")
+        if not (scope / "memory.peak").exists():
+            raise RuntimeError(f"container {self.name} has no cgroup at {scope}; run Docker with "
+                               f"the systemd cgroup driver on cgroup v2, or the container is not "
+                               f"running")
+        return scope
 
     def memory(self) -> dict:
-        """The running container's largest process peak RSS and its cgroup's `memory.peak`; None
-        for a figure that cannot be read, such as from a container that has stopped."""
-        try:
-            scope = self.cgroup()
-            pids = [int(p) for p in (scope / "cgroup.procs").read_text().split()]
-        except (OSError, subprocess.CalledProcessError):
-            return {"peak_rss_bytes": None, "cgroup_peak_bytes": None}
+        """The running container's largest process peak RSS and its cgroup's `memory.peak`."""
+        scope = self.cgroup()
+        pids = [int(p) for p in (scope / "cgroup.procs").read_text().split()]
         rss = [r for r in (vm_hwm(p) for p in pids) if r is not None]
         return {"peak_rss_bytes": max(rss) if rss else None,
                 "cgroup_peak_bytes": read_int(scope / "memory.peak")}
+
+
+@functools.cache
+def check_tools(image: str) -> None:
+    """Refuse an image in which the mounted host tools do not run."""
+    r = subprocess.run(["docker", "run", "--rm", *(a for h, i in TOOLS.items() for a in ("-v", f"{h}:{i}:ro")),
+                        "--entrypoint", TOOLS["/usr/bin/nice"], image, "-n", "0",
+                        TOOLS["/usr/bin/sleep"], "0"], capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(f"the host's nice and sleep do not run in {image} "
+                           f"({r.stderr.strip()[:300]}); build the image on a C library the host's "
+                           f"binaries can load, or mount static ones in TOOLS")
 
 
 def docker_info() -> dict | None:
