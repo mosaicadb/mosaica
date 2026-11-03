@@ -1058,10 +1058,9 @@ impl Pager for ArtifactsPager<'_> {
         let counted = self.with_scope(engine, open, generation, |pager, scope| {
             let (mut served_count, mut matched) = (0u64, 0u64);
             for (walked, (level, ordinal, named)) in pager.positions(scope, None).enumerate() {
-                // The count runs before the first page, so no time budget ends it; the stream
-                // deadline does, and ends the response with no rows.
-                if walked % CHUNK as usize == 0 {
-                    clock.check_ended(true)?;
+                // The count runs before the first page, so no time budget ends it.
+                if walked % CHUNK as usize == 0 && clock.gone_or_past_deadline() {
+                    return Err(EngineError::Cancelled);
                 }
                 let Some(served) = scope.served(level, ordinal) else {
                     continue;

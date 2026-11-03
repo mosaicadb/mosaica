@@ -395,11 +395,21 @@ impl Clock {
         }
     }
 
+    /// Whether the client has gone or the stream deadline has passed, whether or not the response
+    /// has moved on.
+    pub(crate) fn gone_or_past_deadline(&self) -> bool {
+        gone(&self.cancel) || self.started.elapsed() >= self.deadline
+    }
+
     /// Whether the response ends by `deadline` here: at once where the client has gone, and where
     /// the stream deadline has passed only once the response has `moved` on, by sending a page or
     /// by its scan passing where the response began.
     pub(crate) fn ended(&self, moved: bool) -> bool {
-        gone(&self.cancel) || (moved && self.started.elapsed() >= self.deadline)
+        if moved {
+            self.gone_or_past_deadline()
+        } else {
+            gone(&self.cancel)
+        }
     }
 
     /// `Err(EngineError::Cancelled)` where [`Self::ended`]. A caller maps it to an end by
@@ -420,7 +430,7 @@ impl Clock {
         if !moved {
             return None;
         }
-        if self.ended(moved) {
+        if self.gone_or_past_deadline() {
             return Some(ResponseEndedBy::Deadline);
         }
         self.out_of_time().then_some(ResponseEndedBy::BudgetTime)
