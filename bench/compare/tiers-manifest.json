@@ -1,0 +1,34 @@
+{
+  "source": {
+    "url": "https://s3.amazonaws.com/datashader-data/osm-1billion.parq.zip",
+    "sha256": "7b6e89c3b8be96813c67682d6c9e6a05519ef2e31136378123c9dfea3b93ef57",
+    "bytes": 5498778647,
+    "rows": 1000050363,
+    "origin": "OpenStreetMap bulk GPS points (planet.gpx, 2013), projected to Web Mercator by HoloViz with datashader.utils.lnglat_to_meters, stored as float32",
+    "licence": "not stated by HoloViz or on the OSM wiki's Planet.gpx page; confirm before publishing"
+  },
+  "sample_seed": 7885648334766170417,
+  "attr_seed": 7022365753720599345,
+  "extent": [
+    -20037508.342789244,
+    20037508.342789244,
+    -20037508.342789244,
+    20037508.342789244
+  ],
+  "tiers": {
+    "1e7": {
+      "file": "osm-1e7.parquet",
+      "nominal_rows": 10000000,
+      "rows": 10001011,
+      "threshold": 184458150871243187,
+      "sha256": "3cd5997991a35a90eda28f8e6813ce836077a583a08d5167565a858255d0b5dc"
+    },
+    "1e8": {
+      "file": "osm-1e8.parquet",
+      "nominal_rows": 100000000,
+      "rows": 100005696,
+      "threshold": 1844581508712431877,
+      "sha256": "7a6b3db29dcc2d83de95f9f713eac0dc011e5efb9393d8cfb892db9c0a14ed4f"
+    }
+  }
+}
