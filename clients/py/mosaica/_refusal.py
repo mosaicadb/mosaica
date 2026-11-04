@@ -51,10 +51,12 @@ class Refusal(ValueError):
     - `report`: the report of a `commit`, `remove`, `suppress`, `unsuppress` or `leave` that
       applied nothing, which says what was refused and why, and `None` otherwise.
 
-        try:
-            db.commit()
-        except mosaica.Refusal as refused:
-            print(refused.report)
+    ```
+    try:
+        db.commit()
+    except mosaica.Refusal as refused:
+        print(refused.report)
+    ```
     """
 
     def __init__(

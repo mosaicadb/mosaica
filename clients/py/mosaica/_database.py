@@ -154,7 +154,9 @@ class Database:
         - `kind`: `"view"`, `"view_group"`, `"vocabulary"`, `"attribute"` or `"layer"`.
         - `block`: the block as a dictionary, with the keys `schema.toml` uses.
 
-            db.declare("attribute", {"name": "score", "type": "f64", "index": True})
+        ```
+        db.declare("attribute", {"name": "score", "type": "f64", "index": True})
+        ```
         """
         if kind == "attribute":
             self._mark_a_filled_column(block)
@@ -194,7 +196,9 @@ class Database:
           first view declared is the anchor by default.
         - `title`: the name shown for the view.
 
-            db.declare_view("papers", extent={"x": [0, 100], "y": [0, 100]})
+        ```
+        db.declare_view("papers", extent={"x": [0, 100], "y": [0, 100]})
+        ```
         """
         block = D.view_block(
             name,
@@ -236,7 +240,9 @@ class Database:
         - `extent`, `projection`, `default_label`, `visibility`, `title`: as for `declare_view`, and
           each applies to every view in the group.
 
-            db.declare_view_group("years", metadata={"year": "i32"})
+        ```
+        db.declare_view_group("years", metadata={"year": "i32"})
+        ```
         """
         block = D.view_group_block(
             name,
@@ -278,7 +284,9 @@ class Database:
           lists a value only to a reader who may see at least one item carrying it.
         - `title`: the name shown for the vocabulary.
 
-            db.declare_vocabulary("venue", closed=True, values=["neurips", "icml", "iclr"])
+        ```
+        db.declare_vocabulary("venue", closed=True, values=["neurips", "icml", "iclr"])
+        ```
         """
         block = D.vocabulary_block(
             name,
@@ -332,8 +340,10 @@ class Database:
           indexed. Only a `"keyword"`, integer or `"timestamp_us"` column that is not scoped to a
           group can be unique. It is `False` by default.
 
-            db.declare_attribute("year", type="i32", render=True, index=True)
-            db.declare_attribute("doi", type="keyword", unique=True)
+        ```
+        db.declare_attribute("year", type="i32", render=True, index=True)
+        db.declare_attribute("doi", type="keyword", unique=True)
+        ```
         """
         block = D.attribute_block(
             name,
@@ -526,7 +536,9 @@ class Database:
           a table.
         - `title`: the name shown for the layer.
 
-            db.declare_layer("clusters", kind="flat", require_member_visibility={"count": 20})
+        ```
+        db.declare_layer("clusters", kind="flat", require_member_visibility={"count": 20})
+        ```
         """
         block = D.layer_block(
             name,
@@ -583,8 +595,10 @@ class Database:
           `require_member_visibility` alone decide who sees them. A `field` is refused.
         - `type`: the type of each label's text, `"text"` by default.
 
-            db.declare_labels("topics", of="clusters")
-            db.insert("topics", {"c0": "graph neural networks", "c1": "diffusion models"})
+        ```
+        db.declare_labels("topics", of="clusters")
+        db.insert("topics", {"c0": "graph neural networks", "c1": "diffusion models"})
+        ```
         """
         parent = self.blocks.layer(of)
         if "labels" in parent:
@@ -1477,7 +1491,9 @@ class Database:
           Without them the token is the operator's own, which `authorise` describes under
           `read_all`.
 
-            token = db.token(["cs.LG"])
+        ```
+        token = db.token(["cs.LG"])
+        ```
         """
         self.serve()
         if terms is None:
@@ -1493,8 +1509,10 @@ class Database:
           reads with the operator's token, as `db.view` and the other reads on `Database` do. An empty list is refused
           because such a reader would see nothing, while a term that no item carries is accepted.
 
-            db.viewer(["cs.LG"]).view("papers").count()
-            db.viewer(["cs.LG"]).map()
+        ```
+        db.viewer(["cs.LG"]).view("papers").count()
+        db.viewer(["cs.LG"]).map()
+        ```
         """
         self._refuse_before_the_first_commit("viewer")
         chosen = None if terms is None else listed(terms)
@@ -1559,7 +1577,9 @@ class Database:
         - `mosaica_id`: the item's id, as a sample's `mosaica_id` column or a pick on the map
           gives it.
 
-            db.item(db.view("papers").sample(k=1).column("mosaica_id")[0].as_py())
+        ```
+        db.item(db.view("papers").sample(k=1).column("mosaica_id")[0].as_py())
+        ```
         """
         self._refuse_before_the_first_commit("item")
         return self.viewer().item(mosaica_id)
@@ -1659,8 +1679,10 @@ class Database:
         - `name`: the view's name, which for a view in a view group is `"<group>:<key>"`. An
           unknown name is refused, and the refusal lists the views there are.
 
-            db.view("papers").count()
-            db.view("papers").filter({"venue": {"eq": "neurips"}}).map()
+        ```
+        db.view("papers").count()
+        db.view("papers").filter({"venue": {"eq": "neurips"}}).map()
+        ```
         """
         self._refuse_before_the_first_commit("view")
         self.viewer()._require_view(name)
@@ -2232,8 +2254,10 @@ def create(path: str | os.PathLike | None = None, replace: bool = False) -> Data
     - `replace`: `True` deletes a Mosaica database already at `path` first. A non-empty directory
       that is not a Mosaica database is refused either way.
 
-        db = mosaica.create()
-        db = mosaica.create("~/maps/papers", replace=True)
+    ```
+    db = mosaica.create()
+    db = mosaica.create("~/maps/papers", replace=True)
+    ```
     """
     if path is None:
         directory = _instance.make_temporary(RAM_BACKED if RAM_BACKED.is_dir() else None)

@@ -164,8 +164,10 @@ class Batches:
     - `next`: the cursor to pass as `cursor` to read on after the last page taken.
     - `done`: `True` once the server has said that no row remains.
 
-        for batch in db.items("papers", ["title"], page_rows=10_000, batches=True):
-            frame = batch.to_pandas()
+    ```
+    for batch in db.items("papers", ["title"], page_rows=10_000, batches=True):
+        frame = batch.to_pandas()
+    ```
     """
 
     def __init__(self, reader: "Viewer", route: str, request: dict) -> None:
@@ -1088,7 +1090,9 @@ class Viewer:
         - `scoped`: its values of columns declared for a view group, by column and then by the
           group's key.
 
-            v.item(sample.column("mosaica_id")[0].as_py())
+        ```
+        v.item(sample.column("mosaica_id")[0].as_py())
+        ```
         """
         return json.loads(self._request("POST", f"/v1/items/{_an_id(mosaica_id, 'item')}", {}))
 
@@ -1835,8 +1839,10 @@ def connect(url: str, token: Optional[TokenSource] = None) -> Viewer:
     - `token`: the token the database's operator issued you, in any of the forms `TokenSource`
       describes. Leave it out for a server started with `mosaica serve --open`.
 
-        v = mosaica.connect("https://maps.example/viewer", token=my_token)
-        v.view("papers").count()
-        v = mosaica.connect(url, lambda: mosaica.login(url, api_key=my_key))
+    ```
+    v = mosaica.connect("https://maps.example/viewer", token=my_token)
+    v.view("papers").count()
+    v = mosaica.connect(url, lambda: mosaica.login(url, api_key=my_key))
+    ```
     """
     return Viewer(url, token)
