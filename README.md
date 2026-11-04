@@ -81,6 +81,7 @@ Mosaica runs on one machine, with no replication yet, and search filters rather 
 ## Learn more
 
 - [Documentation](docs/index.md): tutorials, [how it works](docs/system/overview.md), [guides](docs/guides/index.md) and the [reference](docs/reference/index.md).
+- The same documentation as a [website](https://mosaicadb.github.io/mosaica/), with search.
 - Examples for the [browser](clients/ts/examples) and [Python](clients/py/examples).
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
