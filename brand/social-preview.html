@@ -1,0 +1,34 @@
+<!doctype html>
+<!-- The repository's social preview. Render it from the repository root with:
+     npx --prefix clients/ts playwright screenshot --viewport-size "1280, 640" --wait-for-timeout 1000 "file://$PWD/brand/social-preview.html" brand/social-preview.png -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600&display=block">
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; background: #f6f6f4; }
+  .map {
+    position: absolute; left: 540px; top: 0; width: 740px; height: 640px;
+    background: url(mosaica_example.png) no-repeat;
+    background-size: 1152px auto;
+    background-position: -300px -6px;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 22%), linear-gradient(to bottom, transparent 0, #000 5%, #000 86%, transparent 93%);
+    -webkit-mask-composite: source-in;
+    mask-image: linear-gradient(to right, transparent 0, #000 22%), linear-gradient(to bottom, transparent 0, #000 5%, #000 86%, transparent 93%);
+    mask-composite: intersect;
+  }
+  .text { position: absolute; left: 72px; top: 0; bottom: 0; width: 500px; display: flex; flex-direction: column; justify-content: center; font-family: "Instrument Sans", sans-serif; color: #1b1d21; }
+  .text img { width: 300px; display: block; margin-bottom: 44px; }
+  h1 { font-size: 60px; line-height: 1.08; font-weight: 600; letter-spacing: -0.015em; margin: 0; }
+  p { font-size: 22px; font-weight: 500; color: #565c64; margin: 40px 0 0; }
+</style>
+</head>
+<body>
+  <div class="map"></div>
+  <div class="text">
+    <img src="mosaica-lockup.svg" alt="Mosaica">
+    <h1>Interactive maps<br>of billions<br>of points.</h1>
+    <p>github.com/mosaicadb/mosaica</p>
+  </div>
+</body>
+</html>
