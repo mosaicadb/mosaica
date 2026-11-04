@@ -58,7 +58,7 @@ import urllib3
 from dataset import DATASET
 from frame import (EXTENT, K, MAX_DEPTH, TYPES, YEAR_BINS, Camera, Filter, Frame, deinterleave,
                    fixed32, grid_depth, points_by_tile)
-from oracle import TABLES, VIEWER, Oracle
+from oracle import TABLES, VIEWER
 
 from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
@@ -227,8 +227,10 @@ class OpenSearch(Adapter):
               f"{VIEWER_USER}; every frame and table searched as {VIEWER_USER}")
 
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
-                 dense: str = "points"):
+                 dense: str = "points", visible: int | None = None):
         super().__init__(tier, work, nice, caches, dense)
+        #: The oracle's count of the viewer's visible rows, or None in a run without the oracle.
+        self.visible = visible
         self.index_made = False
         self.container = Container(f"bench-compare-os-{os.getpid()}")
         self.port = free_ports(1)[0]
@@ -401,9 +403,10 @@ class OpenSearch(Adapter):
 
     def _check_access(self, rows: int) -> dict:
         """What the running server does with the viewer's searches: the documents an aggregation
-        counts as the admin and as the viewer, beside the admin's count of the viewer's terms; and
-        the shard request cache's hits and misses over the same aggregation sent twice by the
-        admin, then twice by the viewer."""
+        counts as the admin and as the viewer, beside the admin's count of the viewer's terms and
+        the oracle's of the viewer's rows, where the run has the oracle; and the shard request
+        cache's hits and misses over the same aggregation sent twice by the admin, then twice by
+        the viewer."""
         viewer = self._session(self.viewer_auth)
         body = {"size": 0, "track_total_hits": False,
                 "aggs": {"terms": {"terms": {"field": DATASET.access, "size": 100}}}}
@@ -423,9 +426,12 @@ class OpenSearch(Adapter):
         out["request_cache_admin"] = rc(before, mid)
         out["request_cache_viewer"] = rc(mid, after)
         out["query_cache_after"] = {k: after["query_cache"][k] for k in ("hit_count", "miss_count", "cache_count")}
-        out["oracle_visible_rows"] = Oracle(str(self.tier), copy=DATASET.oracle_copy).visible()[0]
+        out["oracle_visible_rows"] = self.visible
+        if self.visible is None:
+            out["oracle_visible_rows_checked"] = "no: a run without the oracle"
         out["dls_holds"] = (out["viewer_agg_rows"] == [out["admin_terms_rows"]] * 2
-                            == [out["oracle_visible_rows"]] * 2 and out["admin_agg_rows"] == [rows] * 2)
+                            and self.visible in (None, out["admin_terms_rows"])
+                            and out["admin_agg_rows"] == [rows] * 2)
         if not out["dls_holds"]:
             raise RuntimeError(f"the viewer's aggregation is not restricted to its terms: {out}")
         return out

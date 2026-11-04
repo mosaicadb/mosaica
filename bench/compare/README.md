@@ -315,7 +315,9 @@ terms]}}`, and a mapping of the role to the user. Every frame and table is a sea
 viewer's credentials over basic authentication, and no search names a licence. Each record's
 `config.access_checks` holds what the running server did: an aggregation over the whole index
 counts every row as the admin and, as the viewer, the admin's count of the viewer's terms and the
-oracle's count of the viewer's rows, and a run stops if either differs. The same aggregation sent
+oracle's count of the viewer's rows, and a run stops if either differs. A run with `--no-oracle`
+compares the viewer's count with the admin's alone, and its record says the oracle's was not
+checked. The same aggregation sent
 twice as the admin hits the shard request cache on the second (with default caches); sent twice
 as the viewer it neither hits nor misses, because the security plugin turns the request cache off
 for a search under document-level security, so the admin's cached result cannot reach the viewer.

@@ -228,7 +228,7 @@ def harness_commit() -> str:
     return git("rev-parse", "HEAD") + ("-dirty" if git("status", "--porcelain", ".") else "")
 
 
-def make_adapter(args):
+def make_adapter(args, visible: int | None):
     work = args.work / f"{args.system}-{args.caches}-{args.dense}-{args.tier.stem}-{os.getpid()}"
     common = {"nice": args.nice, "caches": args.caches, "dense": args.dense}
     if args.system == "mosaica":
@@ -245,7 +245,7 @@ def make_adapter(args):
         return PostGIS(args.tier, work, arm=args.system, **common)
     if args.system == "opensearch":
         from adapters.opensearch import OpenSearch
-        return OpenSearch(args.tier, work, **common)
+        return OpenSearch(args.tier, work, visible=visible, **common)
     sys.exit(f"unknown system {args.system}; write mosaica, clickhouse, postgis, "
              f"postgis+leakproof, postgis+integer or opensearch")
 
@@ -292,7 +292,7 @@ def main() -> None:
     else:
         oracle = Oracle(str(args.tier.resolve()), copy=DATASET.oracle_copy)
         visible, rows = oracle.visible()
-    adapter = make_adapter(args)
+    adapter = make_adapter(args, visible)
     record: dict = {
         "system": adapter.name,
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
