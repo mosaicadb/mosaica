@@ -24,7 +24,7 @@ Mosaica is a database for serving interactive maps over billions of spatial data
 
 ## Compared with other databases
 
-![Typical and slowest frame time against the number of records, for Mosaica, ClickHouse, OpenSearch and PostGIS](docs/assets/comparison/four-systems.png)
+![Typical and slowest frame time against the number of records, for Mosaica, ClickHouse, OpenSearch and PostgreSQL](docs/assets/comparison/four-systems.png)
 
 We served one map of GBIF's species records to a viewer allowed to see 88% of them, from Mosaica and from three databases, each enforcing that viewer's access with its own access control on a desktop with a 24 GB memory cap. At a billion records, a viewer panning and zooming waited 35 ms for a typical frame and 0.36 s for the slowest with Mosaica, and 234 ms and 6.6 s with ClickHouse. ClickHouse builds four times faster and stores the data in about a quarter of the space. [Compared with other databases](docs/system/comparison.md) gives the method, each system's setup and every measurement.
 
