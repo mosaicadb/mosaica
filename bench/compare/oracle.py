@@ -23,6 +23,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pyarrow as pa
+import pyarrow.parquet as pq
 
 from dataset import DATASET
 from frame import (EXTENT, K, SUBCELL_OFFSET, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32,
@@ -106,6 +107,10 @@ MORTON16 = f"({_spread16('qx::UBIGINT >> 16')}) | (({_spread16('qy::UBIGINT >> 1
 class Oracle:
     def __init__(self, tier_path: str, threads: int = 4, copy: bool = False):
         self.tier = tier_path
+        if DATASET.access not in pq.ParquetFile(tier_path).schema_arrow.names:
+            raise SystemExit(f"{Path(tier_path).name} has no {DATASET.access} column, so it cannot "
+                             f"decide visibility by it; choose the access mode the tier holds "
+                             f"(BENCH_GBIF_ACCESS), or derive the tier with that column")
         #: The relation every query reads, and the viewer's predicate over it.
         self.src, self.visible_where = f"read_parquet('{tier_path}')", visible_sql()
         if copy:

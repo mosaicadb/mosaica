@@ -118,7 +118,10 @@ may use. Mosaica also writes each grant's visibility masks to its cache director
 bounds; they are grant state, kept in both modes, and deleted by a cold start.
 
 ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache settings above
-and its system log tables, which are off. A dense tile's sample is its K matching rows of lowest
+and its system log tables, which are off. Its build alone sets `old_parts_lifetime = 0`, so that
+the parts inserts and `OPTIMIZE` replace are deleted once no query holds them rather than kept
+for eight minutes, and resets it before serving: at GBIF's 10⁹ those parts took the build's disc
+use to 57 GB for a 10 GiB table. It is a disc setting and touches no query. A dense tile's sample is its K matching rows of lowest
 `rank`, by `groupArraySorted(K)((rank, qx, qy))` grouped by tile and unnested with `arrayJoin`,
 or at zoom 0, where the screen is one tile, by `ORDER BY rank LIMIT K`; one query answers sparse
 and dense tiles alike. Three shapes,
@@ -601,7 +604,10 @@ declares `point_visibility` on `label`, ClickHouse stores it as `LowCardinality(
 terms) with the row policy `label IN (the viewer's terms)`, and the oracle restricts by `label IN
 (...)`. Each system loads only the access column the run uses. `prepare_gbif.py --add-label`
 added the column to the 1e6 and 5e8 tiers written before it, so the list-access records at 5e8
-name the tier's earlier checksum.
+name the tier's earlier checksum. The full tier, all 3,495,729,729 rows, is written with
+`--no-access`, without the list, so that it fits this machine's disc; it serves label access
+alone, the oracle refuses it under `list`, and its checksum differs from that of a tier with the
+same rows and `access`.
 
 The oracle answers from its own copy of each tier (`Oracle(copy=True)`): a DuckDB file beside the
 tier holding the viewer's visible rows' positions, kingdom and year, ordered by the Morton code

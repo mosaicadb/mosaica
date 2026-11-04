@@ -78,6 +78,10 @@ COLUMNS = {
 DDL = ("CREATE TABLE points (m UInt64, qx UInt32, qy UInt32, "
        + "".join(f"{c} {t}, " for c, (t, _) in COLUMNS.items()) + "rank Int64) "
        "ENGINE = MergeTree ORDER BY m")
+#: The build alone deletes the parts that inserts and `OPTIMIZE` replace as soon as no query
+#: holds them, rather than keeping them for `old_parts_lifetime` (8 minutes), so the build's peak
+#: on disc is the table and its merge; the setting is reset before serving and touches no query.
+BUILD_SETTING = "old_parts_lifetime = 0"
 VIEWER_USER = "viewer"
 #: Every cache kept between queries that serves a result or a filter's result, off for the
 #: compute figures; with defaults the query cache is off and the query condition cache on.
@@ -214,7 +218,7 @@ class ClickHouse(Adapter):
         server = self.sql("SELECT name, value FROM system.server_settings WHERE name ILIKE '%cache%' "
                           "FORMAT TSV").decode()
         tsv = lambda t: dict(l.split("\t", 1) for l in t.splitlines())
-        return {"ddl": DDL, "optimize_final": True, "system_logs": "off", "caches": self.caches,
+        return {"ddl": DDL, "build_setting": BUILD_SETTING, "optimize_final": True, "system_logs": "off", "caches": self.caches,
                 "cache_settings": tsv(caches), "server_cache_settings": tsv(server),
                 "query_settings": self.settings, "index_granularity": granularity,
                 "row_policy": self.sql("SHOW CREATE ROW POLICY viewer_terms ON default.points").decode().strip(),
@@ -235,6 +239,7 @@ class ClickHouse(Adapter):
                      f"{quantise('y', EXTENT[2], EXTENT[3])} AS qy, {columns} FROM {src}")
         t0 = time.monotonic()
         self.sql(DDL)
+        self.sql(f"ALTER TABLE points MODIFY SETTING {BUILD_SETTING}")
         self.sql(f"INSERT INTO points SELECT mortonEncode(qx, qy) AS m, qx, qy, {columns} "
                  f"FROM ({quantised})")
         self.sql("OPTIMIZE TABLE points FINAL")
@@ -247,6 +252,7 @@ class ClickHouse(Adapter):
         mem = self.serve_memory()
         table_bytes = int(self.sql("SELECT sum(bytes_on_disk) FROM system.parts WHERE active AND table = 'points'"))
         rows = int(self.sql("SELECT count() FROM points"))
+        self.sql(f"ALTER TABLE points RESET SETTING {BUILD_SETTING.split(' =')[0]}")
         terms = ", ".join(f"'{t}'" for t in VIEWER["terms"])
         policy = (f"hasAny({DATASET.access}, [{terms}])" if DATASET.access_is_list
                   else f"{DATASET.access} IN ({terms})")

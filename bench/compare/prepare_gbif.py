@@ -26,6 +26,9 @@ The steps are deterministic, so two runs write the same rows, and they follow `p
    access label a row, the common case, beside the list's heavier one. A row with no country
    term or more than one stops the run, which reports how many. `--add-label` adds the column
    to a tier written without it, row group by row group, to the bytes this run writes.
+7. `--no-access` leaves `access` out of the file, so the tier serves label access alone and is
+   smaller; the full tier is written so, to fit this machine's disc. Its manifest entry lists its
+   columns, and its rows are the same as a tier with `access` but its checksum is not.
 
 Rows are written in source order. The manifest beside the tiers records the source, the seeds,
 the extent, the projection, the thresholds, row counts, rows by kingdom and each tier's SHA-256;
@@ -161,13 +164,14 @@ def ahead(pool: ProcessPoolExecutor, fn, args, depth: int):
         yield pending.popleft().result()
 
 
-def derive(source: Path, out: Path, tiers: list[int], workers: int) -> dict:
+def derive(source: Path, out: Path, tiers: list[int], workers: int, no_access: bool = False) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     # Two significant figures where the second is not zero, as in 2.5e8.
     names = {n: "full" if n >= SOURCE_ROWS else f"{n:.1e}".replace(".0e", "e").replace("+0", "")
              for n in tiers}
     paths = {n: out / f"gbif-{names[n]}.parquet" for n in tiers}
-    writers = {n: pq.ParquetWriter(paths[n], SCHEMA, compression="zstd") for n in tiers}
+    schema = pa.schema([f for f in SCHEMA if not (no_access and f.name == "access")])
+    writers = {n: pq.ParquetWriter(paths[n], schema, compression="zstd") for n in tiers}
     cuts = [threshold(n, SOURCE_ROWS) for n in tiers]
     rows = {n: 0 for n in tiers}
     kingdoms: dict[int, dict[str, int]] = {n: {} for n in tiers}
@@ -185,7 +189,8 @@ def derive(source: Path, out: Path, tiers: list[int], workers: int) -> dict:
                 sys.exit(f"{bad['no_country']} rows have no country term and "
                          f"{bad['several_countries']} more than one, so `label` cannot be one term a row")
             for n, sel in zip(tiers, tables):
-                writers[n].write_table(sel, row_group_size=1 << 20)
+                writers[n].write_table(sel.drop_columns(["access"]) if no_access else sel,
+                                       row_group_size=1 << 20)
                 rows[n] += sel.num_rows
                 for v in pc.value_counts(sel["kingdom"]).to_pylist():
                     kingdoms[n][v["values"]] = kingdoms[n].get(v["values"], 0) + v["counts"]
@@ -201,6 +206,7 @@ def derive(source: Path, out: Path, tiers: list[int], workers: int) -> dict:
     return {
         names[n]: {
             "file": paths[n].name,
+            "columns": schema.names,
             "nominal_rows": min(n, SOURCE_ROWS),
             "rows": rows[n],
             "threshold": threshold(n, SOURCE_ROWS),
@@ -217,6 +223,8 @@ def main() -> None:
     ap.add_argument("--data", type=Path, default=COMMON / "data/bench-compare")
     ap.add_argument("--tiers", default="1e6,5e8")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--no-access", action="store_true",
+                    help="leave `access` out of the tiers, which then serve label access only")
     ap.add_argument("--add-label", nargs="+", metavar="TIER_FILE",
                     help="add `label` to these tiers, written before it, and record their checksums")
     args = ap.parse_args()
@@ -246,7 +254,7 @@ def main() -> None:
     if "extent" not in committed:
         # frame.py reads the extent from the committed manifest, so it is written before the tiers.
         committed_path.write_text(json.dumps(dict(committed, extent=EXTENT), indent=2) + "\n")
-    derived = derive(args.source, args.data / "tiers", tiers, args.workers)
+    derived = derive(args.source, args.data / "tiers", tiers, args.workers, args.no_access)
     manifest = {
         "source": {
             "path": os.path.relpath(args.source.resolve(), COMMON),
