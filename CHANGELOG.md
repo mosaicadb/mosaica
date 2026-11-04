@@ -29,6 +29,9 @@ clients behave as they did in 0.1.0.
   when the indexed text changes at a flush, coalesce or compaction. `serve.text_filter_cache_bytes`
   bounds it (256 MiB by default, `0` keeps none), and `GET /control/status` reports it as
   `text_filter_cache`. The status's `region_cache` gains `waiters_now` and `oversized_admissions`.
+  When several requests start the same search at once, one runs it and the others wait for its
+  answer. A request that has waited `serve.single_flight_wait_ms` runs the search itself, where a
+  wait that long for any other shared cache is refused with 429.
 - **Faster first frames for a new viewer.** The count of occupied tiles that sets how many points a
   tile draws is now shared by every viewer with the same access and kept on disc, so a second
   session and a restart reuse it. At deep zooms over large visible sets it is estimated from a
@@ -59,6 +62,10 @@ clients behave as they did in 0.1.0.
 
 ### Documentation
 
+- **A documentation website** at <https://mosaicadb.github.io/mosaica/>, with search, published
+  from each release tag so that it describes the release.
+- **Security policy.** SECURITY.md now supports the latest release, and a security fix ships in
+  the next release.
 - **Compared with other databases**, a page and a README section that time one per-viewer map of
   GBIF species records served by Mosaica, ClickHouse, PostgreSQL and OpenSearch, each enforcing the
   viewer's access with its own access control, from 10 million to a billion records.
