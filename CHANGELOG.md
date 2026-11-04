@@ -6,6 +6,62 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
+## [0.2.0] - Unreleased
+
+An alpha, like 0.1.0. The bundle format has changed, so 0.2.0 refuses a bundle that 0.1.0 built,
+and each one has to be built again. The HTTP API keeps its version, and the Python and TypeScript
+clients behave as they did in 0.1.0.
+
+### Changed
+
+- **Bundles from 0.1.0 must be rebuilt.** The bundle format is now 50, and 0.2.0 refuses to open a
+  bundle of format 48, which 0.1.0 writes, with a message that says to rebuild it. Build it again
+  from its declaration and source files with `mosaica build`, or from data frames in Python. Items
+  inserted into a running 0.1.0 service are stored in its bundle, so insert them again after the
+  rebuild.
+- **Phrase search reads word positions from the index.** A text field's index now records where
+  each word falls in each item, and a `phrase` filter or highlight is answered from those positions
+  instead of by reading the text of every item that holds all its words. The positions add to a
+  bundle's size on disc and to a build's work.
+- **A search is kept between requests.** The items each `match` and `phrase` filter matches are
+  kept for every viewer with the same access, so panning and zooming with a search does not run it
+  again. Deletions and suppressions still apply to the next request, and the kept answer is dropped
+  when the indexed text changes at a flush, coalesce or compaction. `serve.text_filter_cache_bytes`
+  bounds it (256 MiB by default, `0` keeps none), and `GET /control/status` reports it as
+  `text_filter_cache`. The status's `region_cache` gains `waiters_now` and `oversized_admissions`.
+- **Faster first frames for a new viewer.** The count of occupied tiles that sets how many points a
+  tile draws is now shared by every viewer with the same access and kept on disc, so a second
+  session and a restart reuse it. At deep zooms over large visible sets it is estimated from a
+  sample of the viewer's own tiles, which can move a tile's number of drawn points slightly.
+- **Faster filtered maps and aggregates.** A dense tile under a filter is drawn from the stored
+  sample bands where that reads less than a scan, and `/v1/aggregate` evaluates a filter bounded by
+  a drawn region only within the region's tiles.
+- **An aggregate always returns its first page.** A `/v1/aggregate` response whose stream deadline
+  passed before its first page used to end with a trailer alone, and now delivers that page first,
+  as a records read does.
+- **Filters stop when the client goes away.** A request whose client disconnects stops evaluating
+  its filter, and `POST /v1/artifacts/browse` is now cancelled the same way.
+
+### Fixed
+
+- **JSON numbers are read as the correctly rounded double.** 0.1.0 could read some numbers with
+  seventeen significant digits one step away from their true value, which could move a box's edge
+  past an item lying on it and drop that item from the answer.
+- A `phrase` filter over a group-scoped text field matched nothing, and now matches as it does over
+  any other text field.
+- Two batches that added the same item through two views of one key could each keep their own
+  value for a group-scoped field. The second batch is now checked again, so an equal value counts
+  as a repeat and a different one as an edit.
+- Building a text field with very many distinct words held one 8-byte offset per word in memory
+  outside the build's memory budget, about 1.6 GB at 100 million words. The offsets are now written
+  to a scratch file.
+
+### Documentation
+
+- **Compared with other databases**, a page and a README section that time one per-viewer map of
+  GBIF species records served by Mosaica, ClickHouse, PostgreSQL and OpenSearch, each enforcing the
+  viewer's access with its own access control, from 10 million to a billion records.
+
 ## [0.1.0] - 2026-10-27
 
 The first public release, an alpha. Formats, the HTTP API and the client libraries may change in
@@ -61,4 +117,5 @@ any later release, and a bundle built by one version may be refused by the next.
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
+[0.2.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
