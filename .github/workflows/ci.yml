@@ -188,23 +188,7 @@ jobs:
           command: check
 
   docs:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: docs/constraints.txt
-      - run: pip install -r docs/requirements.txt -c docs/constraints.txt
-      # The TypeScript and components reference is generated from clients/ts before the site's build.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "22.15"
-          cache: npm
-          cache-dependency-path: clients/ts/package-lock.json
-      - run: npm --prefix clients/ts ci
-      - run: bash scripts/check-docs.sh
+    uses: ./.github/workflows/docs.yml
 
   # The suite in each mode on its own runner: `one` builds every corpus as one shard, `many` over
   # several and leaves out the tests that set their own shard sizes (conformance/README.md).

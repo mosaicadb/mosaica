@@ -1,0 +1,41 @@
+# Publishes the documentation site at https://mosaicadb.github.io/mosaica/ from main, from each
+# release tag, and on demand. The site is built and checked by `docs.yml`, as in the gate.
+#
+# It needs the repository's Pages source set to GitHub Actions, and the `github-pages` environment
+# to allow the release tags as well as main; without that a tag's deployment is refused.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time. A later push waits for the one under way instead of cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/docs.yml
+    with:
+      pages: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

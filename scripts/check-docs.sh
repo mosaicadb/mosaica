@@ -2,6 +2,7 @@
 # The documentation checks, as the `docs` job in .github/workflows/ci.yml runs them: the TypeScript
 # and components reference generated from the client sources, the site's strict build, the
 # register, the links in the site's pages, and the Python blocks in the tutorials and guides.
+# Given a directory, the site is built into it and kept there, as the Pages workflow deploys it.
 #
 # The tools come from .venv-docs when it exists, and from PATH otherwise. To make it:
 #   python3 -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt -c docs/constraints.txt
@@ -34,8 +35,12 @@ done
 npm --prefix clients/ts/components test --silent -- test/reference.test.ts
 node clients/ts/scripts/reference.mjs
 
-site=$(mktemp -d)
-trap 'rm -rf "$site"' EXIT
+if [ $# -gt 0 ]; then
+  site=$1
+else
+  site=$(mktemp -d)
+  trap 'rm -rf "$site"' EXIT
+fi
 mkdocs build --strict --site-dir "$site"
 
 bash scripts/check-register.sh
