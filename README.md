@@ -76,7 +76,7 @@ Mosaica runs on one machine, with no replication yet, and search filters rather 
 
 ## Status
 
-0.1.0 is an alpha. Expect formats and APIs to change before 1.0.
+0.2.0 is an alpha. Expect formats and APIs to change before 1.0.
 
 ## Learn more
 

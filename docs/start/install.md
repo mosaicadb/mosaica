@@ -33,7 +33,7 @@ mosaica --version
 ```
 
 ```
-mosaica 0.1.0 (…)
+mosaica 0.2.0 (…)
 ```
 
 That's the version you installed, with the commit it was built from in brackets. Beside `mosaica`, the archive holds `README.md`, `CHANGELOG.md`, `LICENSE` and `THIRD_PARTY_LICENSES`. Every release, with its archives, is on the [releases page](https://github.com/mosaicadb/mosaica/releases).

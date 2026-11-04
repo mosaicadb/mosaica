@@ -35,7 +35,7 @@ mosaica --version
 ```
 
 ```
-mosaica 0.1.0 (…)
+mosaica 0.2.0 (…)
 ```
 
 ## Get the data
