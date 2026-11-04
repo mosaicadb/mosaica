@@ -4,9 +4,9 @@ API, and the frame as aggregations.
 The build creates an ingest pipeline that quantises `x` and `y` by the frame's rule in Painless,
 drops them, and stores `m16`, the Morton code of the top 16 bits of `qx` and `qy` (x on the even
 bits); and an index of one shard and no replicas with `_source` disabled: `qx`, `qy` and `m16` as
-`long`, `licence` and `type` as `keyword`, `publication_year` as `integer`, `is_oa` as
-`boolean` and `rank` as `long`, each with doc values; `rank` is only sorted by, so it is not
-indexed. Worker processes read the tier's Parquet and send it through the
+`long`, the data set's attributes and access field (`FIELDS`: terms as `keyword`, years as
+`integer`, a flag as `boolean`) and `rank` as `long`, each with doc values; `rank` is only sorted
+by, so it is not indexed. Worker processes read the tier's Parquet and send it through the
 pipeline in bulk requests while the index does not refresh; the index is then refreshed,
 force-merged to at most six segments, given back its default refresh interval and flushed, and
 every file in its data directory synced. All of that is timed. The index is sorted by `m16`, so a
@@ -25,15 +25,16 @@ a power-of-two interval and a value below 2^53, and a histogram's buckets are me
 shards and segments. Nested histograms on `qx` and `qy`, in one search or two,
 and a `composite` grid were exact too and slower; the README gives the figures.
 
-The aggregation workload is one search with a `terms` aggregation on `type` (every type, a missing
-type as `none`) and a year histogram at interval 1 inside a `filter` on the binned range, beside a
+The aggregation workload is one search with a `terms` aggregation on the category (every value,
+a missing one as `none`) and a year histogram at interval 1 inside a `filter` on the binned range, beside a
 `filter` for the years outside it and a `missing` aggregation for no year.
 
 Access: the security plugin with the image's demo certificates and its `admin` user. After the
 build the admin creates the internal user `viewer`, a role `viewer_read` with `read` on the index
-and a document-level security query keeping the documents whose `licence` is one of the viewer's
-terms, and a mapping of the role to the user. Every frame and table is a search sent with the
-viewer's credentials, and no search names a licence. `access_checks` records, from the running
+and a document-level security query keeping the documents whose access term (PaperSeek's
+`licence`, GBIF's `label`) is one of the viewer's terms, and a mapping of the role to the user.
+Every frame and table is a search sent with the viewer's credentials, and no search names a
+term. `access_checks` records, from the running
 server, that the restriction holds under aggregation and what the shard request cache did with
 the viewer's searches.
 """
@@ -54,9 +55,10 @@ import pyarrow.parquet as pq
 import requests
 import urllib3
 
+from dataset import DATASET
 from frame import (EXTENT, K, MAX_DEPTH, TYPES, YEAR_BINS, Camera, Filter, Frame, deinterleave,
                    fixed32, grid_depth, points_by_tile)
-from oracle import VIEWER, Oracle
+from oracle import TABLES, VIEWER, Oracle
 
 from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
@@ -88,13 +90,19 @@ COMPUTE_CACHES = {"index.requests.cache.enable": False, "index.queries.cache.ena
 #: The settings of the caches a search can meet; the rest of what `include_defaults` lists with
 #: "cache" in its name belongs to plugins this workload does not touch.
 CACHE_PREFIXES = ("index.", "indices.", "plugins.security.", "script.", "node.search.")
+#: Each data set's fields beside the position and `rank`: its attributes, and only the access
+#: field the run uses.
+FIELDS = {
+    "paperseek": {"licence": {"type": "keyword"}, "type": {"type": "keyword"},
+                  "publication_year": {"type": "integer"}, "is_oa": {"type": "boolean"}},
+    "gbif": {"kingdom": {"type": "keyword"}, "year": {"type": "integer"},
+             DATASET.access: {"type": "keyword"}},
+}[DATASET.name]
 MAPPING = {
     "_source": {"enabled": False},
     "dynamic": "strict",
     "properties": {"qx": {"type": "long"}, "qy": {"type": "long"}, "m16": {"type": "long"},
-                   "licence": {"type": "keyword"}, "type": {"type": "keyword"},
-                   "publication_year": {"type": "integer"}, "is_oa": {"type": "boolean"},
-                   "rank": {"type": "long", "index": False, "doc_values": True}},
+                   **FIELDS, "rank": {"type": "long", "index": False, "doc_values": True}},
 }
 QUANTISE = """
 for (String a : ['x', 'y']) {
@@ -176,14 +184,15 @@ def frame_requests(camera: Camera, filt: Filter | None, dense: str) -> tuple[dic
 
 def tables_request(camera: Camera, filt: Filter | None) -> dict:
     lo, hi = YEAR_BINS
-    binned = {"range": {"publication_year": {"gte": lo, "lt": hi}}}
+    year = DATASET.year
+    binned = {"range": {year: {"gte": lo, "lt": hi}}}
     return {"size": 0, "track_total_hits": False, "query": where(camera, filt), "aggs": {
-        "type": {"terms": {"field": "type", "size": len(TYPES) + 1, "missing": "none"}},
+        "type": {"terms": {"field": DATASET.category, "size": len(TYPES) + 1, "missing": "none"}},
         "binned": {"filter": binned, "aggs": {"year": {"histogram": {
-            "field": "publication_year", "interval": 1, "min_doc_count": 1}}}},
-        "rest": {"filter": {"bool": {"filter": [{"exists": {"field": "publication_year"}}],
+            "field": year, "interval": 1, "min_doc_count": 1}}}},
+        "rest": {"filter": {"bool": {"filter": [{"exists": {"field": year}}],
                                      "must_not": [binned]}}},
-        "none": {"missing": {"field": "publication_year"}}}}
+        "none": {"missing": {"field": year}}}}
 
 
 def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> tuple[int, float]:
@@ -191,7 +200,7 @@ def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> 
     process, and returns the documents sent and the CPU seconds the process spent sending them."""
     cpu = time.process_time()
     head = json.dumps({"index": {"_index": INDEX}})
-    columns = ["x", "y", "licence", "publication_year", "type", "is_oa", "rank"]
+    columns = ["x", "y", *FIELDS, "rank"]
     sent = 0
     with requests.Session() as http:
         http.auth, http.verify = auth, False
@@ -214,7 +223,7 @@ def load_part(url: str, tier: str, groups: list[int], auth: tuple[str, str]) -> 
 class OpenSearch(Adapter):
     name = "opensearch"
     access = (f"security plugin: role {VIEWER_ROLE} with read on {INDEX} and a document-level "
-              f"security query licence in (the viewer's terms), mapped to the internal user "
+              f"security query {DATASET.access} in (the viewer's terms), mapped to the internal user "
               f"{VIEWER_USER}; every frame and table searched as {VIEWER_USER}")
 
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
@@ -384,7 +393,7 @@ class OpenSearch(Adapter):
 
     def _make_viewer(self) -> None:
         api = "/_plugins/_security/api"
-        dls = json.dumps({"terms": {"licence": VIEWER["terms"]}})
+        dls = json.dumps({"terms": {DATASET.access: VIEWER["terms"]}})
         self.call("PUT", f"{api}/internalusers/{VIEWER_USER}", {"password": self.viewer_auth[1]})
         self.call("PUT", f"{api}/roles/{VIEWER_ROLE}", {"index_permissions": [
             {"index_patterns": [INDEX], "dls": dls, "allowed_actions": ["read"]}]})
@@ -397,12 +406,13 @@ class OpenSearch(Adapter):
         admin, then twice by the viewer."""
         viewer = self._session(self.viewer_auth)
         body = {"size": 0, "track_total_hits": False,
-                "aggs": {"licence": {"terms": {"field": "licence", "size": 100}}}}
-        total = lambda r: sum(b["doc_count"] for b in r["aggregations"]["licence"]["buckets"])
+                "aggs": {"terms": {"terms": {"field": DATASET.access, "size": 100}}}}
+        total = lambda r: (sum(b["doc_count"] for b in r["aggregations"]["terms"]["buckets"])
+                           + r["aggregations"]["terms"]["sum_other_doc_count"])
         stats = lambda: self.call("GET", f"/{INDEX}/_stats/request_cache,query_cache")["indices"][INDEX]["primaries"]
         out = {"rows": rows}
         out["admin_terms_rows"] = self.call("POST", f"/{INDEX}/_count", {
-            "query": {"terms": {"licence": VIEWER["terms"]}}})["count"]
+            "query": {"terms": {DATASET.access: VIEWER["terms"]}}})["count"]
         before = stats()
         out["admin_agg_rows"] = [total(self.call("POST", f"/{INDEX}/_search", body)) for _ in range(2)]
         mid = stats()
@@ -413,7 +423,7 @@ class OpenSearch(Adapter):
         out["request_cache_admin"] = rc(before, mid)
         out["request_cache_viewer"] = rc(mid, after)
         out["query_cache_after"] = {k: after["query_cache"][k] for k in ("hit_count", "miss_count", "cache_count")}
-        out["oracle_visible_rows"] = Oracle(str(self.tier)).visible()[0]
+        out["oracle_visible_rows"] = Oracle(str(self.tier), copy=DATASET.oracle_copy).visible()[0]
         out["dls_holds"] = (out["viewer_agg_rows"] == [out["admin_terms_rows"]] * 2
                             == [out["oracle_visible_rows"]] * 2 and out["admin_agg_rows"] == [rows] * 2)
         if not out["dls_holds"]:
@@ -447,7 +457,7 @@ class OpenSearch(Adapter):
         years = {str(int(b["key"])): b["doc_count"] for b in aggs["binned"]["year"]["buckets"]}
         years["rest"] = aggs["rest"]["doc_count"]
         years["none"] = aggs["none"]["doc_count"]
-        return {"type": types, "year": years}, elapsed
+        return {TABLES[0]: types, TABLES[1]: years}, elapsed
 
     @staticmethod
     def _decode(grid_raw: bytes, tiles_raw: bytes, z: int, dg: int) -> Frame:

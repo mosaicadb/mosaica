@@ -236,9 +236,9 @@ def make_adapter(args):
     if args.system == "clickhouse":
         from adapters.clickhouse import ClickHouse
         return ClickHouse(args.tier, work, **common)
-    if DATASET.name != "paperseek":
-        sys.exit(f"the {args.system} adapter has no schema for {DATASET.name}; run mosaica or "
-                 f"clickhouse")
+    if DATASET.access_is_list:
+        sys.exit(f"the {args.system} adapter has no schema for a list of access terms; run mosaica "
+                 f"or clickhouse, or set BENCH_GBIF_ACCESS=label")
     if args.system in ("postgis", "postgis+leakproof", "postgis+integer"):
         from adapters.postgis import PostGIS
         return PostGIS(args.tier, work, arm=args.system, **common)

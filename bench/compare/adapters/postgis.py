@@ -12,8 +12,8 @@ Three arms share this adapter and differ in the table's order, its index and one
   camera's rectangle is a range of `qx` and a range of `qy` within it, and comparisons of
   `bigint` are leakproof, so the viewer's queries use the index with no claim made.
 
-The build streams the tier's `x`, `y`, `licence`, `publication_year`, `type`, `is_oa` and `rank` (never
-the oracle's `qx` and `qy`) from pyarrow as CSV into `COPY staging FROM STDIN`. CSV rather than
+The build streams the tier's `x`, `y`, the data set's attributes and access column (`ATTRIBUTES`)
+and `rank` (never the oracle's `qx` and `qy`) from pyarrow as CSV into `COPY staging FROM STDIN`. CSV rather than
 binary: psycopg encodes binary `COPY` a row at a time in Python, 2.7 s against CSV's 0.8 s at 10⁶.
 Then `CREATE TABLE points AS SELECT ... ORDER BY` the arm's key, in which PostgreSQL quantises
 each position by the frame's rule, the arm's index and statistics on the cells at each depth, all
@@ -33,8 +33,9 @@ the same server.
 
 Access: after the build, the superuser creates the login role `viewer`, which owns nothing and is
 granted `SELECT` on the table alone, enables and forces row-level security on the table, and
-creates a policy for `viewer` keeping the rows whose `licence` is one of the viewer's terms. Every
-frame and table is queried as `viewer`, and no query names a licence. The setup is not counted in
+creates a policy for `viewer` keeping the rows whose access term (PaperSeek's `licence`, GBIF's
+`label`) is one of the viewer's terms. Every frame and table is queried as `viewer`, and no query
+names a term. The setup is not counted in
 the build time. PostgreSQL evaluates the policy's condition before any of the query's that is not
 leakproof, and does not scan an index by such a condition; PostGIS marks none of its functions
 leakproof.
@@ -61,7 +62,8 @@ import pyarrow.parquet as pq
 
 from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_depth,
                    points_by_tile)
-from oracle import VIEWER
+from dataset import DATASET
+from oracle import TABLES as AGGREGATES, VIEWER
 
 from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
                    fsync_tree, wait_for)
@@ -88,7 +90,14 @@ SETTINGS = {
 BULK = {"wal_level": "minimal", "max_wal_senders": "0", "maintenance_work_mem": f"{min(2048, MEMORY_GIB * 128)}MB",
         "max_wal_size": "16GB"}
 SHM = f"{min(2048, MEMORY_GIB * 128)}m"
-COLUMNS = ("x", "y", "licence", "publication_year", "type", "is_oa", "rank")
+#: Each data set's columns beside the position and `rank`, with their staged types: its attributes,
+#: and the access column the run uses, a single term, since a list cannot be loaded as CSV.
+ATTRIBUTES = {
+    "paperseek": {"licence": "text NOT NULL", "publication_year": "integer", "type": "text",
+                  "is_oa": "boolean"},
+    "gbif": {"kingdom": "text NOT NULL", "year": "integer", DATASET.access: "text NOT NULL"},
+}[DATASET.name]
+COLUMNS = ("x", "y", *ATTRIBUTES, "rank")
 #: Each arm's index and whether `&&` is marked leakproof.
 ARMS = {"postgis": ("gist", False), "postgis+leakproof": ("gist", True),
         "postgis+integer": ("btree", False)}
@@ -106,18 +115,17 @@ def pg_quantise(expr: str, lo: float, hi: float) -> str:
     return f"({quantise(expr, lo, hi)})::bigint"
 
 
-STAGING = ("CREATE TABLE staging (x float8 NOT NULL, y float8 NOT NULL, licence text NOT NULL, "
-           "publication_year integer, type text, is_oa boolean, rank bigint NOT NULL)")
+STAGING = ("CREATE TABLE staging (x float8 NOT NULL, y float8 NOT NULL, "
+           + "".join(f"{c} {t}, " for c, t in ATTRIBUTES.items()) + "rank bigint NOT NULL)")
+CARRIED = ", ".join([*ATTRIBUTES, "rank"])
 QUANTISED = (f"SELECT {pg_quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
-             f"{pg_quantise('y', EXTENT[2], EXTENT[3])} AS qy, licence, publication_year, type, is_oa, "
-             f"rank FROM staging")
-ATTRIBUTES = "licence, publication_year, type, is_oa, rank"
+             f"{pg_quantise('y', EXTENT[2], EXTENT[3])} AS qy, {CARRIED} FROM staging")
 #: Each index's table, as `CREATE TABLE points AS`, and the index on it.
 TABLES = {
-    "gist": (f"SELECT qx, qy, ST_MakePoint(qx, qy)::geometry(Point, 0) AS geom, {ATTRIBUTES} "
+    "gist": (f"SELECT qx, qy, ST_MakePoint(qx, qy)::geometry(Point, 0) AS geom, {CARRIED} "
              f"FROM ({QUANTISED}) q ORDER BY geom",
              "CREATE INDEX points_geom ON points USING gist (geom)"),
-    "btree": (f"SELECT qx, qy, {ATTRIBUTES} FROM ({QUANTISED}) q ORDER BY qx, qy",
+    "btree": (f"SELECT qx, qy, {CARRIED} FROM ({QUANTISED}) q ORDER BY qx, qy",
               "CREATE INDEX points_qx_qy ON points (qx, qy)"),
 }
 
@@ -173,7 +181,7 @@ class PostGIS(Adapter):
         #: Whether each tile's top K walks a B-tree on `rank`, which is then built.
         self.rank_index = self.index_under_policy and self.dense == "points"
         self.access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO "
-                       f"{VIEWER_ROLE} USING (licence IN (the viewer's terms)); {VIEWER_ROLE} owns "
+                       f"{VIEWER_ROLE} USING ({DATASET.access} IN (the viewer's terms)); {VIEWER_ROLE} owns "
                        f"nothing and has SELECT on points alone; every frame and table queried as "
                        f"{VIEWER_ROLE}"
                        + ("; geometry_overlaps(geometry, geometry) marked LEAKPROOF by the superuser"
@@ -327,7 +335,7 @@ class PostGIS(Adapter):
                 "ALTER TABLE points ENABLE ROW LEVEL SECURITY",
                 "ALTER TABLE points FORCE ROW LEVEL SECURITY",
                 f"CREATE POLICY viewer_terms ON points FOR SELECT TO {VIEWER_ROLE} "
-                f"USING (licence IN ({terms}))",
+                f"USING ({DATASET.access} IN ({terms}))",
                 *(["ALTER FUNCTION geometry_overlaps(geometry, geometry) LEAKPROOF"] if self.leakproof else []),
                 "CHECKPOINT"):
             self.sql(statement)
@@ -413,13 +421,14 @@ class PostGIS(Adapter):
     def tables(self, camera: Camera, filt: Filter | None) -> tuple[dict, float]:
         where = self._where(camera, filt)
         lo, hi = YEAR_BINS
-        type_q = f"SELECT coalesce(type, 'none'), count(*) FROM points WHERE {where} GROUP BY 1"
-        year_q = (f"SELECT CASE WHEN publication_year IS NULL THEN 'none' WHEN publication_year < {lo} "
-                  f"OR publication_year >= {hi} THEN 'rest' ELSE publication_year::text END, count(*) "
+        category, year = DATASET.category, DATASET.year
+        type_q = f"SELECT coalesce({category}, 'none'), count(*) FROM points WHERE {where} GROUP BY 1"
+        year_q = (f"SELECT CASE WHEN {year} IS NULL THEN 'none' WHEN {year} < {lo} "
+                  f"OR {year} >= {hi} THEN 'rest' ELSE {year}::text END, count(*) "
                   f"FROM points WHERE {where} GROUP BY 1")
         t0 = time.perf_counter()
         ft = self.pool.submit(self._fetch, 0, type_q)
         fy = self.pool.submit(self._fetch, 1, year_q)
         types, years = ft.result(), fy.result()
         elapsed = time.perf_counter() - t0
-        return {"type": dict(types.fetchall()), "year": dict(years.fetchall())}, elapsed
+        return {AGGREGATES[0]: dict(types.fetchall()), AGGREGATES[1]: dict(years.fetchall())}, elapsed

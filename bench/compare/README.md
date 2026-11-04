@@ -544,10 +544,11 @@ one's, so under `counts` it sends K from each dense tile, as it did.
 
 ## GBIF
 
-The second data set is GBIF's occurrence records, at 5 × 10⁸ and 10⁹ points, for Mosaica and
-ClickHouse alone. `BENCH_DATASET=gbif` selects it in every script (`dataset.py`), so the tier,
-the viewer (`viewer-gbif.json`), the committed manifest (`tiers-manifest-gbif.json`) and each
-adapter's schema are GBIF's; run without it, every script works on PaperSeek as above.
+The second data set is GBIF's occurrence records, from 5 × 10⁷ to 10⁹ points, for Mosaica and
+ClickHouse, and under single-label access also for PostGIS's `postgis+integer` arm and OpenSearch.
+`BENCH_DATASET=gbif` selects it in every script (`dataset.py`), so the tier, the viewer
+(`viewer-gbif.json`), the committed manifest (`tiers-manifest-gbif.json`) and each adapter's schema
+are GBIF's; run without it, every script works on PaperSeek as above.
 
 ```bash
 # The tiers, from the gbif-terms rung's points file (74 GB, 3,495,729,729 placed occurrences),
@@ -560,7 +561,7 @@ cd bench/compare && BENCH_DATASET=gbif nice -n 19 .venv/bin/python cameras.py \
     --tier $DATA/bench-compare/tiers/gbif-5e8.parquet --out cameras/gbif-5e8.json && cd -
 
 # One run per system
-cd bench/compare && for s in mosaica clickhouse; do
+cd bench/compare && for s in mosaica clickhouse postgis+integer opensearch; do
   BENCH_DATASET=gbif BENCH_MEMORY=24g .venv/bin/python run.py --system $s --nice 19 \
       --tier $DATA/bench-compare/tiers/gbif-5e8.parquet --cameras cameras/gbif-5e8.json
 done
@@ -595,19 +596,22 @@ never applies. The viewer holds every country term but `GB` and `CA`, and also `
 `Array(String)`, since its documentation recommends `LowCardinality` under 10,000 distinct
 values and the column holds about 1.4 million.
 
-Each tier also holds `label`, each row's one country term from `access`, so that the main GBIF
-curve measures a single access label an item, the common case, as PaperSeek's licence is.
-`BENCH_GBIF_ACCESS` chooses which column decides visibility: `label`, the default, or `list`
-for the list of country, year and species terms above, the heavier case. Under `label` the viewer
-is `viewer-gbif-label.json`, every country but `GB` and `CA` with no year term; Mosaica's view
-declares `point_visibility` on `label`, ClickHouse stores it as `LowCardinality(String)` (253
-terms) with the row policy `label IN (the viewer's terms)`, and the oracle restricts by `label IN
-(...)`. Each system loads only the access column the run uses. `prepare_gbif.py --add-label`
-added the column to the 1e6 and 5e8 tiers written before it, so the list-access records at 5e8
-name the tier's earlier checksum. The full tier, all 3,495,729,729 rows, is written with
-`--no-access`, without the list, so that it fits this machine's disc; it serves label access
-alone, the oracle refuses it under `list`, and its checksum differs from that of a tier with the
-same rows and `access`.
+Each tier also holds `label`, each row's one country term from `access`, so that the main GBIF curve
+measures a single access label an item, the common case, as PaperSeek's licence is.
+`BENCH_GBIF_ACCESS` chooses which column decides visibility: `label`, the default, or `list` for the
+list of country, year and species terms above, the heavier case. Under `label` the viewer is
+`viewer-gbif-label.json`, every country but `GB` and `CA` with no year term; Mosaica's view declares
+`point_visibility` on `label`, ClickHouse stores it as `LowCardinality(String)` (253 terms) with the
+row policy `label IN (the viewer's terms)`, and the oracle restricts by `label IN (...)`. PostGIS
+stores `label` as `text`, with the row-level security policy `label IN (the viewer's terms)`, and
+OpenSearch as a `keyword` field, with the document-level security query `terms` on `label`; both
+store `kingdom` as they store PaperSeek's `type` and `year` as they store `publication_year`, and
+neither has a schema for the list, which `run.py` refuses for them. Each system loads only the
+access column the run uses. `prepare_gbif.py --add-label` added the column to the 1e6 and 5e8 tiers
+written before it, so the list-access records at 5e8 name the tier's earlier checksum. The full
+tier, all 3,495,729,729 rows, is written with `--no-access`, without the list, so that it fits this
+machine's disc; it serves label access alone, the oracle refuses it under `list`, and its checksum
+differs from that of a tier with the same rows and `access`.
 
 The full tier is a performance run, with no oracle (`run.py --no-oracle`): the oracle's copy of
 its 3.1 × 10⁹ visible rows spilled 169 GB of sort to disc before it was stopped, short of this
