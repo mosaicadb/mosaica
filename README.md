@@ -22,6 +22,12 @@ Mosaica is a database for serving interactive maps over billions of spatial data
 - **Powerful filters.** Combine spatial filtering such as tiles or polygons with metadata and text search to build exactly the view you need.
 - **Multiple views.** Build multiple views over the same data, across geospatial and abstract spaces, or visualise your data at different times.
 
+## Performance
+
+![Typical and slowest frame time against the number of records, for Mosaica, ClickHouse, OpenSearch and PostGIS](docs/assets/performance/four-systems.png)
+
+We served one map of GBIF's species records to a viewer allowed to see 88% of them, from Mosaica and from three databases, each enforcing that viewer's access with its own access control on a desktop with a 24 GB memory cap. At a billion records, a viewer panning and zooming waited 35 ms for a typical frame and 0.36 s for the slowest with Mosaica, and 234 ms and 6.6 s with ClickHouse. ClickHouse builds four times faster and stores the data in about a quarter of the space. [Performance](docs/system/performance.md) gives the method, each system's setup and every measurement.
+
 ## Try it in a notebook
 
 ```bash
