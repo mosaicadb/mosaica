@@ -14,9 +14,7 @@ Each record carries one access label, its country, and the viewer holds every la
 
 The main workload is a scripted camera: it starts on the whole world, zooms into each of the two densest regions to zoom 14, pans at several zooms and zooms back out. The script runs five times with every result cache off. Filter changes and two aggregation tables, counts by kingdom and a histogram of years, are timed at screens along the way.
 
-Every run used one desktop, an AMD Ryzen 9 5900X with 12 logical CPUs under WSL2, with each system in a Docker container capped at 24 GB of memory. Each system was set up as its documentation recommends for spatial data: ClickHouse and OpenSearch store the records in Morton order, and PostGIS indexes quantised integer positions.
-
-[PostGIS: figures and setup to be updated after the tuning pass.]
+Every run used one desktop, an AMD Ryzen 9 5900X with 12 logical CPUs under WSL2, with each system in a Docker container capped at 24 GB of memory. Each system was set up as its documentation recommends for spatial data, and ClickHouse, PostGIS and OpenSearch each store the records in Morton order, as Mosaica does, so the records of one tile are stored together.
 
 ## Results
 
@@ -48,12 +46,10 @@ PostGIS and OpenSearch fall behind well before a billion records:
 
 | At 100M records | Mosaica | ClickHouse | OpenSearch | PostGIS |
 |---|---|---|---|---|
-| Typical frame | 16 ms | 73 ms | 185 ms | 434 ms at 50M |
-| Slowest frame | 0.15 s | 0.86 s | 1.69 s | 45.6 s at 50M |
-| Build | 122 s | 29 s | 702 s | 100 s at 50M |
-| Size on disk | 3.8 GiB | 1.2 GiB | 5.4 GiB | 5.2 GiB at 50M |
-
-PostGIS did not finish the camera script at 100 million records within an hour.
+| Typical frame | 16 ms | 73 ms | 185 ms | 338 ms |
+| Slowest frame | 0.15 s | 0.86 s | 1.69 s | 5.14 s |
+| Build | 122 s | 29 s | 702 s | 260 s |
+| Size on disk | 3.8 GiB | 1.2 GiB | 5.4 GiB | 10.9 GiB |
 
 ## Why the curves differ
 
