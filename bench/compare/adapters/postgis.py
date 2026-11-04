@@ -8,9 +8,9 @@ Three arms share this adapter and differ in the table's order, its index and one
   viewer's queries cannot use it (see "Access" below), so each scans the table.
 * `postgis+leakproof`: the same, and the superuser marks `geometry_overlaps`, the function behind
   `&&`, leakproof, so the viewer's queries can use the index.
-* `postgis+integer`: no geometry; a B-tree on `(qx, qy)`, with the table in that order. The
-  camera's rectangle is a range of `qx` and a range of `qy` within it, and comparisons of
-  `bigint` are leakproof, so the viewer's queries use the index with no claim made.
+* `postgis+integer`: no geometry; a B-tree on `m`, the Morton code of `(qx, qy)`, with the table
+  in that order. A tile is one range of `m`, and comparisons of `bigint` are leakproof, so the
+  viewer's queries use the index with no claim made.
 
 The build streams the tier's `x`, `y`, the data set's attributes and access column (`ATTRIBUTES`)
 and `rank` (never the oracle's `qx` and `qy`) from pyarrow as CSV into `COPY staging FROM STDIN`. CSV rather than
@@ -25,8 +25,9 @@ A frame is two queries sent at once on two connections, each a `COPY (...) TO ST
 binary format: the count grid (`GROUP BY` the cell, `qx` and `qy` shifted right), and the
 positions. Under the `points` frame those are each tile's K matching rows of lowest `rank`,
 every row of a sparse tile: where the arm's spatial index serves the viewer, one `ORDER BY rank
-LIMIT K` subquery a tile, joined by `UNION ALL`, over a B-tree on `rank` beside the spatial index;
-in `postgis`, whose viewer scans the table, `row_number() OVER (PARTITION BY` the tile `ORDER BY
+LIMIT K` subquery a tile, joined by `UNION ALL`, with a B-tree on `rank` beside the spatial index,
+which `postgis+integer` walks for the whole map alone and otherwise sorts the tile's range of `m`; in
+`postgis`, whose viewer scans the table, `row_number() OVER (PARTITION BY` the tile `ORDER BY
 rank)` over one scan. Under `counts`, every position in the tiles whose count is at most K. The aggregation workload is two `GROUP BY`
 queries sent at once. PostgreSQL keeps no result cache, so `--caches compute` and `defaults` run
 the same server.
@@ -60,7 +61,7 @@ import psycopg
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 
-from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_depth,
+from frame import (EXTENT, K, MAX_DEPTH, YEAR_BINS, Camera, Filter, Frame, grid_depth, interleave,
                    points_by_tile)
 from dataset import DATASET
 from oracle import TABLES as AGGREGATES, VIEWER
@@ -86,6 +87,8 @@ SETTINGS = {
     "max_parallel_workers_per_gather": str(max(1, CPUS // 2)),
     "jit": "off",
     "random_page_cost": "1.1",
+    "parallel_setup_cost": "100",
+    "parallel_tuple_cost": "0.01",
 }
 BULK = {"wal_level": "minimal", "max_wal_senders": "0", "maintenance_work_mem": f"{min(2048, MEMORY_GIB * 128)}MB",
         "max_wal_size": "16GB"}
@@ -120,13 +123,29 @@ STAGING = ("CREATE TABLE staging (x float8 NOT NULL, y float8 NOT NULL, "
 CARRIED = ", ".join([*ATTRIBUTES, "rank"])
 QUANTISED = (f"SELECT {pg_quantise('x', EXTENT[0], EXTENT[1])} AS qx, "
              f"{pg_quantise('y', EXTENT[2], EXTENT[3])} AS qy, {CARRIED} FROM staging")
+#: The masks that spread a 32-bit integer onto the even bits of 64, a step at a time.
+SPREAD = ((16, 0x0000FFFF0000FFFF), (8, 0x00FF00FF00FF00FF), (4, 0x0F0F0F0F0F0F0F0F),
+          (2, 0x3333333333333333), (1, 0x5555555555555555))
+#: Added to the Morton code, which is unsigned, so that `bigint`'s order is the code's.
+M_OFFSET = 1 << 63
+
+
+def with_morton(select: str) -> str:
+    """`select`'s rows with `m`, `frame.interleave(qx, qy)` less `M_OFFSET`: each axis spread by
+    `SPREAD` in a subquery a step, then the top bit flipped by XOR with `bigint`'s least value."""
+    q = f"SELECT qx AS sx, qy AS sy, * FROM ({select}) s0"
+    for i, (shift, mask) in enumerate(SPREAD):
+        q = (f"SELECT (sx | (sx << {shift})) & {mask} AS sx, (sy | (sy << {shift})) & {mask} AS sy, "
+             f"qx, qy, {CARRIED} FROM ({q}) s{i + 1}")
+    return f"SELECT (sx | (sy << 1)) # '{-M_OFFSET}'::bigint AS m, qx, qy, {CARRIED} FROM ({q}) sm"
+
+
 #: Each index's table, as `CREATE TABLE points AS`, and the index on it.
 TABLES = {
     "gist": (f"SELECT qx, qy, ST_MakePoint(qx, qy)::geometry(Point, 0) AS geom, {CARRIED} "
              f"FROM ({QUANTISED}) q ORDER BY geom",
              "CREATE INDEX points_geom ON points USING gist (geom)"),
-    "btree": (f"SELECT qx, qy, {CARRIED} FROM ({QUANTISED}) q ORDER BY qx, qy",
-              "CREATE INDEX points_qx_qy ON points (qx, qy)"),
+    "btree": (f"{with_morton(QUANTISED)} ORDER BY m", "CREATE INDEX points_m ON points (m)"),
 }
 
 
@@ -145,15 +164,24 @@ def statements(index: str, rank_index: bool) -> tuple[str, ...]:
 
 
 def tiles_sql(camera: Camera, index: str, tile: tuple[int, int] | None = None) -> str:
-    """The rectangle of the camera's tiles, or of the one `tile`, exactly by the bounds on `qx` and
-    `qy`. For GiST, also by `&&`, which the index answers; PostGIS compares boxes in single
-    precision, rounded outwards, so `&&` alone admits points just outside the rectangle."""
+    """The camera's tiles, or the one `tile`. For the B-tree, each tile's range of `m`, adjacent
+    ranges joined. For GiST, the rectangle exactly by the bounds on `qx` and `qy`, and by `&&`,
+    which the index answers; PostGIS compares boxes in single precision, rounded outwards, so `&&`
+    alone admits points just outside the rectangle."""
+    tiles = camera.tiles() if tile is None else [tile]
+    if index == "btree":
+        span, ranges = 1 << 2 * (32 - camera.zoom), []
+        for lo in sorted(interleave(tx, ty) * span for tx, ty in tiles):
+            if ranges and ranges[-1][1] == lo:
+                ranges[-1][1] = lo + span
+            else:
+                ranges.append([lo, lo + span])
+        return "(" + " OR ".join(f"m BETWEEN '{lo - M_OFFSET}'::bigint AND '{hi - 1 - M_OFFSET}'::bigint"
+                                 for lo, hi in ranges) + ")"
     tx0, tx1, ty0, ty1 = camera.tile_range() if tile is None else (tile[0], tile[0], tile[1], tile[1])
     s = 32 - camera.zoom
     x0, x1, y0, y1 = tx0 << s, ((tx1 + 1) << s) - 1, ty0 << s, ((ty1 + 1) << s) - 1
     exact = f"qx BETWEEN {x0} AND {x1} AND qy BETWEEN {y0} AND {y1}"
-    if index == "btree":
-        return exact
     return f"geom && ST_MakeEnvelope({x0}, {y0}, {x1}, {y1}, 0) AND {exact}"
 
 
@@ -178,8 +206,10 @@ class PostGIS(Adapter):
         self.index, self.leakproof = ARMS[arm]
         #: Whether the viewer's tile condition can scan the spatial index under the policy.
         self.index_under_policy = self.index == "btree" or self.leakproof
-        #: Whether each tile's top K walks a B-tree on `rank`, which is then built.
+        #: Whether a tile's top K may walk a B-tree on `rank`, which is then built.
         self.rank_index = self.index_under_policy and self.dense == "points"
+        #: Whether each tile's top K is a subquery of its own.
+        self.per_tile = self.index_under_policy and self.dense == "points"
         self.access = (f"ROW LEVEL SECURITY enabled and forced on points, POLICY FOR SELECT TO "
                        f"{VIEWER_ROLE} USING ({DATASET.access} IN (the viewer's terms)); {VIEWER_ROLE} owns "
                        f"nothing and has SELECT on points alone; every frame and table queried as "
@@ -378,13 +408,20 @@ class PostGIS(Adapter):
 
     def _points_sql(self, camera: Camera, filt: Filter | None) -> str:
         where, s = self._where(camera, filt), 32 - camera.zoom
-        if self.rank_index:
+        if self.per_tile:
             # One subquery a tile, each with its own bounds, so the planner chooses for each
-            # between walking the rank index and sorting the tile's rows from the spatial index.
+            # between walking any rank index and sorting the tile's rows from the spatial index.
+            # In the integer arm only the whole map under no filter walks it, sorting by `rank`;
+            # every other tile sorts by `rank + 0`, which the index does not serve. The planner
+            # takes the policy and the filter to keep the same share of every tile, so it would
+            # walk the index for a tile whose rows the viewer mostly may not see and read most
+            # of the table, while a top-N sort of the tile's range of `m` costs at most the tile.
+            walk = self.index != "btree" or (camera.zoom == 0 and filt is None)
+            order = "rank" if walk else "rank + 0"
             filters = filter_sql(filt, pg_quantise)
             return " UNION ALL ".join(
                 f"(SELECT qx, qy FROM points WHERE {tiles_sql(camera, self.index, tile)}{filters} "
-                f"ORDER BY rank LIMIT {K})" for tile in camera.tiles())
+                f"ORDER BY {order} LIMIT {K})" for tile in camera.tiles())
         if self.dense == "points":
             # The table is scanned whatever the query, so once, with every tile's rows numbered.
             return (f"SELECT qx, qy FROM (SELECT qx, qy, row_number() OVER (PARTITION BY qx >> {s}, "

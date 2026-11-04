@@ -169,16 +169,18 @@ selects the camera's tiles:
   restricts its viewers with row-level security gets.
 - **`postgis+leakproof`** is the same table and index, and the superuser marks `&&`'s function
   leakproof, so the viewer's queries use the index.
-- **`postgis+integer`** has no geometry: a B-tree on `(qx, qy)`, with the table in that order. A
-  B-tree compares `bigint`, which PostgreSQL marks leakproof, so the viewer's queries use it under
-  the same policy with no claim made.
+- **`postgis+integer`** has no geometry: a B-tree on `m`, the Morton code of `(qx, qy)` as
+  ClickHouse stores it, with the table in that order, so a tile is one range of `m`. A B-tree
+  compares `bigint`, which PostgreSQL marks leakproof, so the viewer's queries use it under the
+  same policy with no claim made.
 
 The build streams the tier from pyarrow's CSV writer into `COPY staging FROM STDIN`, since `COPY`
 is the bulk load PostgreSQL documents and the Parquet file is on the client's side. Binary `COPY`
 would mean psycopg encoding each row in Python, which took three times as long as CSV. Then
 `CREATE TABLE points AS SELECT ... ORDER BY` the arm's key quantises each position by the frame's
 rule, with every operand a `float8`, into `qx` and `qy`, `bigint` since PostgreSQL has no unsigned
-32-bit integer; one index build, statistics on the cells, `VACUUM ANALYZE`, a `CHECKPOINT` and an
+32-bit integer, and in the integer arm `m`, the two interleaved by shifts and masks and offset by
+2⁶³ so that `bigint`'s order is the code's; one index build, statistics on the cells, `VACUUM ANALYZE`, a `CHECKPOINT` and an
 `fsync` of the data directory follow. The build time runs from creating the staging table to the
 end of the `fsync`; `initdb`, which the image runs at the container's first start, is the
 server's setup and falls outside it, as ClickHouse's start does. The loader runs in the harness's
@@ -188,7 +190,7 @@ ClickHouse's is less the parts it replaced; each record also gives the WAL's, th
 table's and the index's sizes. The GiST arms select the camera's tiles with `geom &&
 ST_MakeEnvelope(...)` and the same bounds on `qx` and `qy`, because PostGIS compares boxes in
 single precision, rounded outwards, and `&&` alone admits points just outside a tile; the integer
-arm uses the bounds alone. Server start ends when the superuser's `SELECT 1 FROM points LIMIT 1`
+arm selects them by their ranges of `m`, adjacent ranges joined, `OR`ed in one condition. Server start ends when the superuser's `SELECT 1 FROM points LIMIT 1`
 answers; session start holds the viewer's two connections, each authenticated by SCRAM, and its
 first frame.
 
@@ -204,6 +206,7 @@ setting is in `SETTINGS` and each record lists them with the server's values:
 | `max_parallel_workers_per_gather` | half the CPUs | 2 | A frame sends two queries at once |
 | `jit` | off | on | JIT pays for long CPU-bound queries and costs more than it saves on short ones, which a frame's are |
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
+| `parallel_setup_cost`, `parallel_tuple_cost` | 100, 0.01 | 1000, 0.1 | A grid's partial aggregates send many groups to the leader; at the defaults the planner aggregates millions of rows in one process rather than pay for them |
 | `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | From the columns' statistics alone the planner overestimates the cells of a grid or tile grouping many times over, and does not then aggregate in parallel |
 
 A dense tile's sample is its K matching rows of lowest `rank`. Three ways of asking for it were
@@ -233,7 +236,21 @@ parameters; in the GiST arms it cannot use `&&`, whose box must be a constant he
 the `rank` index across the whole table. So `postgis+integer` and `postgis+leakproof` use a
 subquery a tile and build the `rank` index, and `postgis`, whose viewer cannot use the spatial
 index and scans the table for each subquery, uses the window over one scan and builds no `rank`
-index. `TABLESAMPLE` was not used: it samples pages or rows of the whole table by a fraction,
+index.
+
+On GBIF the walk is the slow plan. The planner estimates the rows a tile and the policy keep as if
+every place held the same share of every label, while GBIF's records crowd onto land and a label
+is a country: a tile over Canada or Britain, whose labels the viewer lacks, holds hundreds of
+thousands of rows and almost none the viewer may see, and the walk reads most of the table before
+it finds K of them, or the whole of it for a tile with none (7.4 s for one tile at 10⁷ rows, and
+the 5 × 10⁷ tier's zoom-4 frames a median of 17.7 s). On `(qx, qy)` the estimate was worse still,
+the product of the two columns' ranges. So in `postgis+integer` each tile is its range of `m`,
+read from the B-tree and kept to the K lowest ranks by a top-N sort, which costs at most the
+tile's rows whatever the policy keeps; it sorts by `rank + 0`, which the `rank` index does not
+serve, so that the planner cannot choose the walk. The whole map under no filter is the one tile
+that sorts by `rank` and walks the index, since there the policy keeps exactly the share the
+planner assumes. The rows above for `postgis+integer` are PaperSeek's, with the earlier `(qx, qy)`
+key. `TABLESAMPLE` was not used: it samples pages or rows of the whole table by a fraction,
 before the policy and the filter, so it cannot give exactly K matching rows a tile.
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
 `wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` and the table and index made in
