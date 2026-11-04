@@ -123,7 +123,7 @@ class Oracle:
     def _copy(self, threads: int) -> str:
         """The DuckDB file holding the viewer's visible rows ordered by `MORTON16`, made where the
         one beside the tier was made from another tier file or another viewer."""
-        path = Path(self.tier).with_suffix(".oracle.duckdb")
+        path = Path(self.tier).with_suffix(f".oracle-{DATASET.access}.duckdb")
         stat = Path(self.tier).stat()
         made_from = json.dumps({"tier": Path(self.tier).name, "bytes": stat.st_size,
                                 "mtime_ns": stat.st_mtime_ns, "visible": visible_sql()})

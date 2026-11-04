@@ -277,6 +277,7 @@ def main() -> None:
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "development_only": not args.publishable,
         "dataset": DATASET.name,
+        "access_column": DATASET.access,
         "tier": args.tier.name,
         "tier_sha256": tier_sha256,
         "caches": args.caches,

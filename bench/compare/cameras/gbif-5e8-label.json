@@ -1,0 +1,1437 @@
+{
+ "tier": "gbif-5e8.parquet",
+ "viewer": {
+  "principal": "bench-viewer",
+  "terms": [
+   "US",
+   "AU",
+   "FR",
+   "SE",
+   "NL",
+   "ES",
+   "NO",
+   "DE",
+   "IN",
+   "DK",
+   "FI",
+   "BE",
+   "ZA",
+   "CH",
+   "CR",
+   "CO",
+   "MX",
+   "BR",
+   "PT",
+   "TW",
+   "CL",
+   "RU",
+   "NZ",
+   "AT",
+   "AR",
+   "PL",
+   "EC",
+   "CN",
+   "IT",
+   "UNRECORDED",
+   "JP",
+   "PE",
+   "PA",
+   "IL",
+   "EE",
+   "CZ",
+   "BZ",
+   "TH",
+   "KR",
+   "IE",
+   "GT",
+   "KE",
+   "VE",
+   "AQ",
+   "UA",
+   "SK",
+   "GR",
+   "TR",
+   "PR",
+   "MY",
+   "HN",
+   "ID",
+   "LU",
+   "MG",
+   "TZ",
+   "BG",
+   "PH",
+   "NA",
+   "LK",
+   "UG",
+   "IS",
+   "BO",
+   "HU",
+   "GF",
+   "NI",
+   "HK",
+   "CU",
+   "SG",
+   "UY",
+   "PG",
+   "AE",
+   "IM",
+   "MA",
+   "NP",
+   "AX",
+   "RS",
+   "SJ",
+   "LT",
+   "RO",
+   "ZW",
+   "PY",
+   "SV",
+   "GE",
+   "HR",
+   "BW",
+   "TT",
+   "ZM",
+   "KH",
+   "BS",
+   "GH",
+   "VN",
+   "BJ",
+   "NG",
+   "ET",
+   "NC",
+   "SA",
+   "SI",
+   "PK",
+   "GY",
+   "IR",
+   "DO",
+   "AS",
+   "CD",
+   "MZ",
+   "VI",
+   "LV",
+   "BD",
+   "GM",
+   "RE",
+   "GL",
+   "GP",
+   "GA",
+   "JM",
+   "SN",
+   "CM",
+   "BT",
+   "BY",
+   "OM",
+   "BM",
+   "CY",
+   "EG",
+   "SR",
+   "MN",
+   "KI",
+   "KZ",
+   "PF",
+   "NU",
+   "ZZ",
+   "CI",
+   "RW",
+   "SC",
+   "CW",
+   "KY",
+   "GS",
+   "SZ",
+   "PS",
+   "UM",
+   "MW",
+   "BQ",
+   "DZ",
+   "MM",
+   "KW",
+   "FO",
+   "FJ",
+   "TF",
+   "AW",
+   "GG",
+   "MQ",
+   "MR",
+   "LA",
+   "TK",
+   "MP",
+   "FK",
+   "JE",
+   "AZ",
+   "KG",
+   "AM",
+   "AI",
+   "AO",
+   "GN",
+   "BF",
+   "PW",
+   "TN",
+   "SB",
+   "EH",
+   "FM",
+   "LB",
+   "HM",
+   "ME",
+   "HT",
+   "MK",
+   "CV",
+   "VU",
+   "BB",
+   "LR",
+   "AD",
+   "GD",
+   "UZ",
+   "ML",
+   "JO",
+   "AL",
+   "GU",
+   "QA",
+   "ST",
+   "CX",
+   "YE",
+   "MD",
+   "TO",
+   "MH",
+   "CG",
+   "LS",
+   "MU",
+   "MT",
+   "BA",
+   "LI",
+   "MV",
+   "SD",
+   "YT",
+   "NF",
+   "LC",
+   "GQ",
+   "AG",
+   "TL",
+   "TG",
+   "TJ",
+   "BI",
+   "CF",
+   "DM",
+   "MO",
+   "NE",
+   "SY",
+   "SL",
+   "PM",
+   "MF",
+   "GW",
+   "AF",
+   "TC",
+   "IQ",
+   "TD",
+   "VG",
+   "VC",
+   "SH",
+   "CK",
+   "BN",
+   "LY",
+   "WS",
+   "SO",
+   "WF",
+   "MS",
+   "GI",
+   "KN",
+   "SX",
+   "KP",
+   "XK",
+   "IO",
+   "KM",
+   "DJ",
+   "CC",
+   "SS",
+   "TM",
+   "BH",
+   "PN",
+   "BL",
+   "ER",
+   "MC",
+   "BV",
+   "TV",
+   "VA",
+   "NR",
+   "SM",
+   "XZ"
+  ],
+  "withheld": [
+   "GB",
+   "CA"
+  ],
+  "rule": "a row is visible where the viewer holds its label, its one country term: every country but GB and CA"
+ },
+ "battery": [
+  {
+   "camera": {
+    "zoom": 0,
+    "cx": 0.0,
+    "cy": 0.0,
+    "label": "z0-d0"
+   },
+   "filter": null,
+   "tile_count": 439648685
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 16280475.528516259,
+    "cy": -16280475.52851626,
+    "label": "z4-d0"
+   },
+   "filter": null,
+   "tile_count": 5
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -8766409.899970295,
+    "cy": -16280475.52851626,
+    "label": "z4-d1"
+   },
+   "filter": null,
+   "tile_count": 62
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -13775786.985667605,
+    "cy": 18785164.071364913,
+    "label": "z4-d2"
+   },
+   "filter": null,
+   "tile_count": 526
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -11271098.442818949,
+    "cy": -8766409.899970295,
+    "label": "z4-d3"
+   },
+   "filter": null,
+   "tile_count": 1682
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -1252344.271424327,
+    "cy": -3757032.814272983,
+    "label": "z4-d4"
+   },
+   "filter": null,
+   "tile_count": 7732
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 6261721.357121639,
+    "cy": -8766409.899970295,
+    "label": "z4-d5"
+   },
+   "filter": null,
+   "tile_count": 18570
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 8766409.899970293,
+    "cy": -6261721.357121639,
+    "label": "z4-d6"
+   },
+   "filter": null,
+   "tile_count": 59875
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": -18785164.071364917,
+    "cy": -6261721.357121639,
+    "label": "z4-d7"
+   },
+   "filter": null,
+   "tile_count": 231401
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 16280475.528516259,
+    "cy": 3757032.814272985,
+    "label": "z4-d8"
+   },
+   "filter": null,
+   "tile_count": 1176811
+  },
+  {
+   "camera": {
+    "zoom": 4,
+    "cx": 3757032.814272985,
+    "cy": 8766409.899970293,
+    "label": "z4-d9"
+   },
+   "filter": null,
+   "tile_count": 7314386
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -234814.55089206249,
+    "cy": -3209132.1955248415,
+    "label": "z8-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -1017529.7205322646,
+    "cy": -10253568.722286683,
+    "label": "z8-d1"
+   },
+   "filter": null,
+   "tile_count": 3
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -17141462.215120487,
+    "cy": -11505912.993711011,
+    "label": "z8-d2"
+   },
+   "filter": null,
+   "tile_count": 7
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 7435794.111581948,
+    "cy": 5087648.60266133,
+    "label": "z8-d3"
+   },
+   "filter": null,
+   "tile_count": 12
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -16984919.181192447,
+    "cy": -8844681.416934315,
+    "label": "z8-d4"
+   },
+   "filter": null,
+   "tile_count": 23
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": -19959236.82582522,
+    "cy": -1487158.8223163895,
+    "label": "z8-d5"
+   },
+   "filter": null,
+   "tile_count": 44
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 8218509.28122215,
+    "cy": -8061966.247294109,
+    "label": "z8-d6"
+   },
+   "filter": null,
+   "tile_count": 93
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 234814.55089206249,
+    "cy": 9783939.620502561,
+    "label": "z8-d7"
+   },
+   "filter": null,
+   "tile_count": 261
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 12132085.129423175,
+    "cy": -704443.6526761837,
+    "label": "z8-d8"
+   },
+   "filter": null,
+   "tile_count": 1407
+  },
+  {
+   "camera": {
+    "zoom": 8,
+    "cx": 4304933.433021128,
+    "cy": 2582960.059812676,
+    "label": "z8-d9"
+   },
+   "filter": null,
+   "tile_count": 23053
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -8282104.888755418,
+    "cy": 1276804.1204755828,
+    "label": "z12-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3311863.5615401156,
+    "cy": -10415003.726024976,
+    "label": "z12-d1"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 13947005.929026399,
+    "cy": 8105993.97558637,
+    "label": "z12-d2"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3106400.8295095637,
+    "cy": 7264575.16822315,
+    "label": "z12-d3"
+   },
+   "filter": null,
+   "tile_count": 2
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 11618428.29934679,
+    "cy": 2499796.573038403,
+    "label": "z12-d4"
+   },
+   "filter": null,
+   "tile_count": 3
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 3527110.2331911735,
+    "cy": 8781085.809401046,
+    "label": "z12-d5"
+   },
+   "filter": null,
+   "tile_count": 6
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -464737.1319738701,
+    "cy": 5386058.761086661,
+    "label": "z12-d6"
+   },
+   "filter": null,
+   "tile_count": 13
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 1443131.0940241292,
+    "cy": 10004078.261963867,
+    "label": "z12-d7"
+   },
+   "filter": null,
+   "tile_count": 32
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -11002040.103255128,
+    "cy": 3664085.3878782094,
+    "label": "z12-d8"
+   },
+   "filter": null,
+   "tile_count": 105
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 8986548.541431602,
+    "cy": 816958.9583119638,
+    "label": "z12-d9"
+   },
+   "filter": null,
+   "tile_count": 755
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -10902060.470258119,
+    "cy": 4170098.5151260756,
+    "label": "z16-d0"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -1679474.385481894,
+    "cy": 7031900.854123075,
+    "label": "z16-d1"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 1699042.2647228986,
+    "cy": 4973604.556459848,
+    "label": "z16-d2"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 13035570.803753957,
+    "cy": -9512741.044146756,
+    "label": "z16-d3"
+   },
+   "filter": null,
+   "tile_count": 1
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -3387994.8417121526,
+    "cy": 8607115.133023988,
+    "label": "z16-d4"
+   },
+   "filter": null,
+   "tile_count": 2
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -11859663.560614806,
+    "cy": 4480127.101850752,
+    "label": "z16-d5"
+   },
+   "filter": null,
+   "tile_count": 3
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": -481553.2781966105,
+    "cy": 4625051.707479443,
+    "label": "z16-d6"
+   },
+   "filter": null,
+   "tile_count": 4
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 8166837.85010137,
+    "cy": 7115675.837123629,
+    "label": "z16-d7"
+   },
+   "filter": null,
+   "tile_count": 6
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 2827252.8022121005,
+    "cy": 11176010.779632192,
+    "label": "z16-d8"
+   },
+   "filter": null,
+   "tile_count": 12
+  },
+  {
+   "camera": {
+    "zoom": 16,
+    "cx": 1241643.0874644034,
+    "cy": 7495414.993644383,
+    "label": "z16-d9"
+   },
+   "filter": null,
+   "tile_count": 45
+  }
+ ],
+ "script": [
+  {
+   "camera": {
+    "zoom": 0,
+    "cx": 0.0,
+    "cy": 0.0,
+    "label": "whole"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": 2504688.542848654,
+    "cy": 7514065.628545966,
+    "label": "r0-z3"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 1487158.8223163881,
+    "cy": 6574807.42497772,
+    "label": "r0-z6-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 655523.9545736725,
+    "cy": 6770486.217387773,
+    "label": "r0-z9-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 533224.7093173899,
+    "cy": 6755810.30795702,
+    "label": "r0-z12"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": 529555.7319597006,
+    "cy": 6754587.315504454,
+    "label": "r0-z14"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": 534141.9536568112,
+    "cy": 6754587.315504454,
+    "label": "r0-z14-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": 534141.9536568112,
+    "cy": 6752007.56579983,
+    "label": "r0-z14-pan1"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": 533224.7093173899,
+    "cy": 6755810.30795702,
+    "label": "r0-z12-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": 2504688.542848654,
+    "cy": 7514065.628545966,
+    "label": "r0-z3-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": -7514065.628545966,
+    "cy": 2504688.542848654,
+    "label": "r1-z3"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": -8453323.832114212,
+    "cy": 4696291.017841227,
+    "label": "r1-z6"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": -7279251.077653905,
+    "cy": 4696291.017841227,
+    "label": "r1-z6-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": -8257645.039704161,
+    "cy": 4970241.327215299,
+    "label": "r1-z9"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": -8110885.945396623,
+    "cy": 4970241.327215299,
+    "label": "r1-z9-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -8233185.190652905,
+    "cy": 4975133.29702555,
+    "label": "r1-z12"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": -8234408.183105467,
+    "cy": 4978802.274383239,
+    "label": "r1-z14"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": -8229821.961408356,
+    "cy": 4978802.274383239,
+    "label": "r1-z14-pan0"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 14,
+    "cx": -8229821.961408356,
+    "cy": 4976222.524678615,
+    "label": "r1-z14-pan1"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 12,
+    "cx": -8233185.190652905,
+    "cy": 4975133.29702555,
+    "label": "r1-z12-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": -8257645.039704161,
+    "cy": 4970241.327215299,
+    "label": "r1-z9-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": -8453323.832114212,
+    "cy": 4696291.017841227,
+    "label": "r1-z6-out"
+   },
+   "filter": null
+  },
+  {
+   "camera": {
+    "zoom": 3,
+    "cx": -7514065.628545966,
+    "cy": 2504688.542848654,
+    "label": "r1-z3-out"
+   },
+   "filter": null
+  }
+ ],
+ "filters": [
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "none",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "kingdom=Animalia",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "eq",
+      "value": "Animalia"
+     }
+    ]
+   },
+   "fraction": 0.61343,
+   "fraction_of_tier": 0.79394
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "kingdom in Archaea,Bacteria,Chromista",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "in",
+      "value": [
+       "Archaea",
+       "Bacteria",
+       "Chromista"
+      ]
+     }
+    ]
+   },
+   "fraction": 0.016786,
+   "fraction_of_tier": 0.047372
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "kingdom in Protozoa,Viruses",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "in",
+      "value": [
+       "Protozoa",
+       "Viruses"
+      ]
+     }
+    ]
+   },
+   "fraction": 0.000872,
+   "fraction_of_tier": 0.000927
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "year<2019",
+    "leaves": [
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "lt": 2019
+      }
+     }
+    ]
+   },
+   "fraction": 0.597653,
+   "fraction_of_tier": 0.483162
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "year<1987",
+    "leaves": [
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "lt": 1987
+      }
+     }
+    ]
+   },
+   "fraction": 0.074463,
+   "fraction_of_tier": 0.049402
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "year<1884",
+    "leaves": [
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "lt": 1884
+      }
+     }
+    ]
+   },
+   "fraction": 0.002373,
+   "fraction_of_tier": 0.001006
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "kingdom=Animalia&year>=2019",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "eq",
+      "value": "Animalia"
+     },
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "gte": 2019
+      }
+     }
+    ]
+   },
+   "fraction": 0.271229,
+   "fraction_of_tier": 0.435711
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "box0.5",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       -480206.6727373693,
+       6128580.258393904,
+       1106378.808449531,
+       7021034.591561535
+      ]
+     }
+    ]
+   },
+   "fraction": 0.500001
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "box0.05",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       145826.31436605568,
+       6480723.81363958,
+       480345.821346106,
+       6668891.036315859
+      ]
+     }
+    ]
+   },
+   "fraction": 0.050001
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "box0.001",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       283780.7780449887,
+       6558323.19945898,
+       342391.35766717297,
+       6591291.65049646
+      ]
+     }
+    ]
+   },
+   "fraction": 0.001
+  },
+  {
+   "camera": {
+    "zoom": 6,
+    "cx": 313086.06785608083,
+    "cy": 6574807.42497772,
+    "label": "r0-z6"
+   },
+   "filter": {
+    "label": "none-again",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "none",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "kingdom=Animalia",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "eq",
+      "value": "Animalia"
+     }
+    ]
+   },
+   "fraction": 0.735151,
+   "fraction_of_tier": 0.79394
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "kingdom in Archaea,Bacteria,Chromista",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "in",
+      "value": [
+       "Archaea",
+       "Bacteria",
+       "Chromista"
+      ]
+     }
+    ]
+   },
+   "fraction": 0.01095,
+   "fraction_of_tier": 0.047372
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "kingdom in Protozoa,Viruses",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "in",
+      "value": [
+       "Protozoa",
+       "Viruses"
+      ]
+     }
+    ]
+   },
+   "fraction": 0.001227,
+   "fraction_of_tier": 0.000927
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "year<2019",
+    "leaves": [
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "lt": 2019
+      }
+     }
+    ]
+   },
+   "fraction": 0.487153,
+   "fraction_of_tier": 0.483162
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "year<1987",
+    "leaves": [
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "lt": 1987
+      }
+     }
+    ]
+   },
+   "fraction": 0.064767,
+   "fraction_of_tier": 0.049402
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "year<1884",
+    "leaves": [
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "lt": 1884
+      }
+     }
+    ]
+   },
+   "fraction": 0.000486,
+   "fraction_of_tier": 0.001006
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "kingdom=Animalia&year>=2019",
+    "leaves": [
+     {
+      "col": "kingdom",
+      "op": "eq",
+      "value": "Animalia"
+     },
+     {
+      "col": "year",
+      "op": "range",
+      "value": {
+       "gte": 2019
+      }
+     }
+    ]
+   },
+   "fraction": 0.395468,
+   "fraction_of_tier": 0.435711
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "box0.5",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       383008.63097280083,
+       6699748.338410273,
+       634521.0895594675,
+       6841224.096365273
+      ]
+     }
+    ]
+   },
+   "fraction": 0.507379
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "box0.05",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       481318.9078032383,
+       6755047.869127394,
+       536210.81272903,
+       6785924.5656481525
+      ]
+     }
+    ]
+   },
+   "fraction": 0.050425
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "box0.001",
+    "leaves": [
+     {
+      "op": "bbox",
+      "value": [
+       504209.0939474843,
+       6767923.598833532,
+       513320.626584784,
+       6773048.835942014
+      ]
+     }
+    ]
+   },
+   "fraction": 0.003332
+  },
+  {
+   "camera": {
+    "zoom": 9,
+    "cx": 508764.86026613414,
+    "cy": 6770486.217387773,
+    "label": "r0-z9"
+   },
+   "filter": {
+    "label": "none-again",
+    "leaves": []
+   },
+   "fraction": 1.0,
+   "fraction_of_tier": 1.0
+  }
+ ]
+}

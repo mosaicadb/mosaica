@@ -62,8 +62,9 @@ ACCESS_MANAGEMENT = """<clickhouse>
 </clickhouse>
 """
 #: Each data set's columns beside the position and `rank`: the stored type, and the type read from
-#: the Parquet file. GBIF's access terms are a plain `Array(String)`: about 1.4 million distinct
-#: terms is far past the 10,000 under which ClickHouse's documentation recommends `LowCardinality`.
+#: the Parquet file, and only the access column the run uses. GBIF's list of access terms is a
+#: plain `Array(String)`: about 1.4 million distinct terms is far past the 10,000 under which
+#: ClickHouse's documentation recommends `LowCardinality`; its single `label`, 253 terms, is one.
 COLUMNS = {
     "paperseek": {"licence": ("LowCardinality(String)", "String"),
                   "publication_year": ("Nullable(Int32)", "Nullable(Int32)"),
@@ -71,7 +72,8 @@ COLUMNS = {
                   "is_oa": ("Nullable(Bool)", "Nullable(Bool)")},
     "gbif": {"kingdom": ("LowCardinality(String)", "String"),
              "year": ("Nullable(UInt16)", "Nullable(UInt16)"),
-             "access": ("Array(String)", "Array(String)")},
+             **({"access": ("Array(String)", "Array(String)")} if DATASET.access_is_list
+                else {"label": ("LowCardinality(String)", "String")})},
 }[DATASET.name]
 DDL = ("CREATE TABLE points (m UInt64, qx UInt32, qy UInt32, "
        + "".join(f"{c} {t}, " for c, (t, _) in COLUMNS.items()) + "rank Int64) "

@@ -592,6 +592,17 @@ never applies. The viewer holds every country term but `GB` and `CA`, and also `
 `Array(String)`, since its documentation recommends `LowCardinality` under 10,000 distinct
 values and the column holds about 1.4 million.
 
+Each tier also holds `label`, each row's one country term from `access`, so that the main GBIF
+curve measures a single access label an item, the common case, as PaperSeek's licence is.
+`BENCH_GBIF_ACCESS` chooses which column decides visibility: `label`, the default, or `list`
+for the list of country, year and species terms above, the heavier case. Under `label` the viewer
+is `viewer-gbif-label.json`, every country but `GB` and `CA` with no year term; Mosaica's view
+declares `point_visibility` on `label`, ClickHouse stores it as `LowCardinality(String)` (253
+terms) with the row policy `label IN (the viewer's terms)`, and the oracle restricts by `label IN
+(...)`. Each system loads only the access column the run uses. `prepare_gbif.py --add-label`
+added the column to the 1e6 and 5e8 tiers written before it, so the list-access records at 5e8
+name the tier's earlier checksum.
+
 The oracle answers from its own copy of each tier (`Oracle(copy=True)`): a DuckDB file beside the
 tier holding the viewer's visible rows' positions, kingdom and year, ordered by the Morton code
 of each position's top 16 bits, so that a query over a small screen reads few of DuckDB's row

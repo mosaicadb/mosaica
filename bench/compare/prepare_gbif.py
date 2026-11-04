@@ -2,6 +2,7 @@
 
     python prepare_gbif.py [--source data/ladder/gbif-terms/points.parquet]
                            [--data data/bench-compare] [--tiers 1e6,5e8] [--workers 6]
+    python prepare_gbif.py --add-label gbif-5e8.parquet ...   # a tier written before `label`
 
 The steps are deterministic, so two runs write the same rows, and they follow `prepare.py`'s:
 
@@ -21,6 +22,10 @@ The steps are deterministic, so two runs write the same rows, and they follow `p
    where GBIF has none), `y:` and its year, and `s:` and its species key. A row is visible to a
    viewer who holds any one of them. No list is empty, which the run checks, so the view's
    default never applies.
+6. `label` is the row's one country term from `access`, the term with neither prefix: a single
+   access label a row, the common case, beside the list's heavier one. A row with no country
+   term or more than one stops the run, which reports how many. `--add-label` adds the column
+   to a tier written without it, row group by row group, to the bytes this run writes.
 
 Rows are written in source order. The manifest beside the tiers records the source, the seeds,
 the extent, the projection, the thresholds, row counts, rows by kingdom and each tier's SHA-256;
@@ -45,7 +50,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from prepare import SAMPLE_SEED, sha256, splitmix64, threshold, tier_name
+from prepare import SAMPLE_SEED, sha256, splitmix64, threshold
 
 HERE = Path(__file__).resolve().parent
 #: The checkout that holds `data/`, which a worktree shares with the main one.
@@ -69,6 +74,7 @@ SCHEMA = pa.schema([
     ("kingdom", pa.string()),
     ("year", pa.uint16()),
     ("access", pa.list_(pa.string())),
+    ("label", pa.string()),
     ("qx", pa.uint32()),
     ("qy", pa.uint32()),
     ("rank", pa.int64()),
@@ -80,8 +86,45 @@ def mercator(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return RADIUS * lon * (math.pi / 180), RADIUS * np.log(np.tan(math.pi / 4 + phi * (math.pi / 360)))
 
 
-def part(args: tuple[str, int, list[int | None]]) -> tuple[list[pa.Table], int, int]:
-    """One source row group: each tier's rows, the rows read and the rows with no access term."""
+def country_label(access: pa.ChunkedArray | pa.Array) -> tuple[pa.Array, dict[str, int]]:
+    """Each row's country term, and the rows with none and with more than one."""
+    access = access.combine_chunks() if isinstance(access, pa.ChunkedArray) else access
+    flat = pc.list_flatten(access)
+    parent = pc.list_parent_indices(access).to_numpy()
+    country = pc.invert(pc.or_(pc.starts_with(flat, "y:"), pc.starts_with(flat, "s:"))).to_numpy(zero_copy_only=False)
+    per_row = np.bincount(parent[country], minlength=len(access))
+    bad = {"no_country": int((per_row == 0).sum()), "several_countries": int((per_row > 1).sum())}
+    return flat.filter(pa.array(country)), bad
+
+
+def with_label(t: pa.Table) -> tuple[pa.Table, dict[str, int]]:
+    """`t` with `label` after `access`."""
+    label, bad = country_label(t["access"])
+    if any(bad.values()):
+        return t, bad
+    return t.add_column(t.schema.get_field_index("access") + 1, "label", label).cast(SCHEMA), bad
+
+
+def add_label(path: Path) -> None:
+    """Rewrite a tier written without `label`, keeping each row group, in place."""
+    src = pq.ParquetFile(path)
+    if "label" in src.schema_arrow.names:
+        sys.exit(f"{path.name} already has label")
+    tmp = path.with_suffix(".label.tmp")
+    with pq.ParquetWriter(tmp, SCHEMA, compression="zstd") as w:
+        for g in range(src.metadata.num_row_groups):
+            t, bad = with_label(src.read_row_group(g))
+            if any(bad.values()):
+                tmp.unlink()
+                sys.exit(f"{path.name} row group {g}: {bad['no_country']} rows have no country "
+                         f"term and {bad['several_countries']} more than one")
+            w.write_table(t, row_group_size=1 << 20)
+    tmp.rename(path)
+
+
+def part(args: tuple[str, int, list[int | None]]) -> tuple[list[pa.Table], int, int, dict]:
+    """One source row group: each tier's rows, the rows read, the rows with no access term and
+    those without exactly one country term."""
     from frame import fixed32_array
 
     path, g, cuts = args
@@ -99,25 +142,34 @@ def part(args: tuple[str, int, list[int | None]]) -> tuple[list[pa.Table], int, 
         "access": t["access"],
         "qx": fixed32_array(x, EXTENT[0], EXTENT[1]), "qy": fixed32_array(y, EXTENT[2], EXTENT[3]),
         "rank": (splitmix64(ids ^ np.uint64(RANK_SEED)) >> np.uint64(1)).astype(np.int64),
-    }).cast(SCHEMA)
-    return [out if c is None else out.filter(pa.array(h < np.uint64(c))) for c in cuts], read, empty
+    })
+    out, bad = with_label(out)
+    return [out if c is None else out.filter(pa.array(h < np.uint64(c))) for c in cuts], read, empty, bad
 
 
 def derive(source: Path, out: Path, tiers: list[int], workers: int) -> dict:
     out.mkdir(parents=True, exist_ok=True)
-    names = {n: tier_name(n, SOURCE_ROWS) for n in tiers}
+    # Two significant figures where the second is not zero, as in 2.5e8.
+    names = {n: "full" if n >= SOURCE_ROWS else f"{n:.1e}".replace(".0e", "e").replace("+0", "")
+             for n in tiers}
     paths = {n: out / f"gbif-{names[n]}.parquet" for n in tiers}
     writers = {n: pq.ParquetWriter(paths[n], SCHEMA, compression="zstd") for n in tiers}
     cuts = [threshold(n, SOURCE_ROWS) for n in tiers]
     rows = {n: 0 for n in tiers}
     kingdoms: dict[int, dict[str, int]] = {n: {} for n in tiers}
     read = empty = 0
+    bad = {"no_country": 0, "several_countries": 0}
     groups = pq.ParquetFile(source).metadata.num_row_groups
     with ProcessPoolExecutor(workers) as pool:
         jobs = pool.map(part, ((str(source), g, cuts) for g in range(groups)), chunksize=4)
-        for g, (tables, n_read, n_empty) in enumerate(jobs):
+        for g, (tables, n_read, n_empty, n_bad) in enumerate(jobs):
             read += n_read
             empty += n_empty
+            for k, v in n_bad.items():
+                bad[k] += v
+            if any(bad.values()):
+                sys.exit(f"{bad['no_country']} rows have no country term and "
+                         f"{bad['several_countries']} more than one, so `label` cannot be one term a row")
             for n, sel in zip(tiers, tables):
                 writers[n].write_table(sel, row_group_size=1 << 20)
                 rows[n] += sel.num_rows
@@ -151,7 +203,23 @@ def main() -> None:
     ap.add_argument("--data", type=Path, default=COMMON / "data/bench-compare")
     ap.add_argument("--tiers", default="1e6,5e8")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--add-label", nargs="+", metavar="TIER_FILE",
+                    help="add `label` to these tiers, written before it, and record their checksums")
     args = ap.parse_args()
+    if args.add_label:
+        manifests = [HERE / "tiers-manifest-gbif.json", args.data / "tiers" / "manifest-gbif.json"]
+        for name in args.add_label:
+            path = args.data / "tiers" / name
+            add_label(path)
+            digest = sha256(path)
+            for m in manifests:
+                doc = json.loads(m.read_text())
+                for tier in doc["tiers"].values():
+                    if tier["file"] == name:
+                        tier["sha256"] = digest
+                m.write_text(json.dumps(doc, indent=2) + "\n")
+            print(f"{name}: {digest}", flush=True)
+        return
     tiers = sorted(SOURCE_ROWS if t == "full" else int(float(t)) for t in args.tiers.split(","))
     rows = pq.ParquetFile(args.source).metadata.num_rows
     if rows != SOURCE_ROWS:

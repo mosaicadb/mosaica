@@ -50,13 +50,20 @@ PAPERSEEK = Dataset(
     access="licence", access_is_list=False,
 )
 
+#: GBIF's access is `label` (each row's one country term) unless `BENCH_GBIF_ACCESS` is `list`,
+#: which uses `access` (country, year and species terms, any one of which admits a viewer).
+GBIF_ACCESS = os.environ.get("BENCH_GBIF_ACCESS", "label")
+if GBIF_ACCESS not in ("label", "list"):
+    raise SystemExit(f"BENCH_GBIF_ACCESS is {GBIF_ACCESS!r}; write label or list")
 GBIF = Dataset(
-    name="gbif", manifest="tiers-manifest-gbif.json", viewer="viewer-gbif.json",
+    name="gbif", manifest="tiers-manifest-gbif.json",
+    viewer="viewer-gbif.json" if GBIF_ACCESS == "list" else "viewer-gbif-label.json",
     category="kingdom",
     categories=("Animalia", "Archaea", "Bacteria", "Chromista", "Fungi", "Plantae", "Protozoa",
                 "Viruses", "incertae sedis"),
     year="year", year_bins=(1900, 2030), flag=None,
-    access="access", access_is_list=True, oracle_copy=True,
+    access="access" if GBIF_ACCESS == "list" else "label", access_is_list=GBIF_ACCESS == "list",
+    oracle_copy=True,
 )
 
 DATASETS = {d.name: d for d in (PAPERSEEK, GBIF)}

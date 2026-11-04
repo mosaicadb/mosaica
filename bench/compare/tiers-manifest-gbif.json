@@ -39,7 +39,7 @@
         "Protozoa": 823,
         "Viruses": 20
       },
-      "sha256": "8812604e9a509a0a596e62e780281bf18f092057c04d06542fcbe71983c18f64"
+      "sha256": "a70fd94defbcc7fea3bec3fafd40486a5bb48c6a4e7804c6c466db9e6f772e3b"
     },
     "5e8": {
       "file": "gbif-5e8.parquet",
@@ -57,7 +57,61 @@
         "Protozoa": 418260,
         "Viruses": 10297
       },
-      "sha256": "cefed99fc2123993553b13c5abc032497cb22bbf0c8404a6fa82452e77e846e9"
+      "sha256": "6e2db4cd419086dcc7c7f77a5fd7a02b4a2d425a04f9cc7a62b3d52e21293a4a"
+    },
+    "5e7": {
+      "file": "gbif-5e7.parquet",
+      "nominal_rows": 50000000,
+      "rows": 49995634,
+      "threshold": 263846828899248000,
+      "rows_by_kingdom": {
+        "Animalia": 39749330,
+        "Plantae": 7226495,
+        "Bacteria": 1368377,
+        "Fungi": 683165,
+        "Chromista": 631674,
+        "incertae sedis": 151050,
+        "Archaea": 142550,
+        "Protozoa": 42015,
+        "Viruses": 978
+      },
+      "sha256": "7d340914ffcefaeef48866f6f82384bafe70322f166345f24129a92b88e58830"
+    },
+    "1e8": {
+      "file": "gbif-1e8.parquet",
+      "nominal_rows": 100000000,
+      "rows": 100000328,
+      "threshold": 527693657798496000,
+      "rows_by_kingdom": {
+        "Animalia": 79503639,
+        "Plantae": 14456077,
+        "Bacteria": 2739637,
+        "Fungi": 1365964,
+        "Chromista": 1262124,
+        "incertae sedis": 301934,
+        "Archaea": 285184,
+        "Protozoa": 83763,
+        "Viruses": 2006
+      },
+      "sha256": "bedd366a2df7b96ef574d967fbb5266aeb3034f336184ae1a4b5a018a90bc602"
+    },
+    "2.5e8": {
+      "file": "gbif-2.5e8.parquet",
+      "nominal_rows": 250000000,
+      "rows": 250011177,
+      "threshold": 1319234144496240002,
+      "rows_by_kingdom": {
+        "Animalia": 198767206,
+        "Plantae": 36143576,
+        "Bacteria": 6844072,
+        "Fungi": 3418880,
+        "Chromista": 3154998,
+        "incertae sedis": 755856,
+        "Archaea": 711619,
+        "Protozoa": 209855,
+        "Viruses": 5115
+      },
+      "sha256": "b07ba1c6e035a8901236f78549b796aa3b5d78e39fef5d274663963855e8885c"
     }
   }
 }
