@@ -522,8 +522,8 @@ def _(mo):
     Your counts may not match someone else's exactly. HDBSCAN uses no random numbers, but where
     two ways of splitting a region score almost the same, the choice comes down to rounding in
     the last digits of its arithmetic, which differs between computers and between versions of
-    scikit-learn. One run can find a cluster more than another and leave a thousand more papers
-    in none. The cluster we study below comes out the same to within a paper or two, so what we
+    scikit-learn. One run can find one more cluster than another and leave a thousand more
+    papers in none. The cluster we study below comes out nearly the same each time, so what we
     find in it will hold for your run as well.
 
     `mine` is a table of our own, one row per paper. `entity_id` names the paper, as in the
@@ -652,13 +652,13 @@ def _(planetary_papers):
 def _(mo):
     mo.md(r"""
     Among the 46 second-level topics, about a third of the papers are in "Stellar Systems and
-    ISM Chemistry", and every one of those under "Higgs Physics" is in "Quantum Optics and
-    Exoplanets". That topic sits under "Higgs Physics" beside a topic on Higgs boson
+    ISM Chemistry". The papers that were under "Higgs Physics" one level up are all in "Quantum
+    Optics and Exoplanets". That topic sits under "Higgs Physics" beside a topic on Higgs boson
     phenomenology, and the language model named the pair after the other one, as the topic's
-    card on the map shows. So our cluster is a real subject
-    that Toponymy split between a topic it named well and one it filed under a misleading name,
-    which is worth knowing before you filter a map by "Higgs Physics". Try the same with
-    another of your clusters, or with level 2.
+    card on the map shows. So our cluster is a real subject that Toponymy split between a topic
+    it named well and one it filed under a misleading name, which is worth knowing before you
+    filter a map by "Higgs Physics". Try the same with another of your clusters, or with level
+    2.
 
     ## 4. Questions the server answers
 
