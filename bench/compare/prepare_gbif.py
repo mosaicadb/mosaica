@@ -40,6 +40,7 @@ import math
 import os
 import subprocess
 import sys
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -147,6 +148,19 @@ def part(args: tuple[str, int, list[int | None]]) -> tuple[list[pa.Table], int, 
     return [out if c is None else out.filter(pa.array(h < np.uint64(c))) for c in cuts], read, empty, bad
 
 
+def ahead(pool: ProcessPoolExecutor, fn, args, depth: int):
+    """`fn` over `args` in order, with at most `depth` results computed and not yet taken.
+    `pool.map` submits every job at once, so where the workers outrun the writer, as when a tier
+    keeps every row, the finished row groups pile up in this process."""
+    pending = deque()
+    for a in args:
+        pending.append(pool.submit(fn, a))
+        if len(pending) >= depth:
+            yield pending.popleft().result()
+    while pending:
+        yield pending.popleft().result()
+
+
 def derive(source: Path, out: Path, tiers: list[int], workers: int) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     # Two significant figures where the second is not zero, as in 2.5e8.
@@ -161,8 +175,8 @@ def derive(source: Path, out: Path, tiers: list[int], workers: int) -> dict:
     bad = {"no_country": 0, "several_countries": 0}
     groups = pq.ParquetFile(source).metadata.num_row_groups
     with ProcessPoolExecutor(workers) as pool:
-        jobs = pool.map(part, ((str(source), g, cuts) for g in range(groups)), chunksize=4)
-        for g, (tables, n_read, n_empty, n_bad) in enumerate(jobs):
+        for g, (tables, n_read, n_empty, n_bad) in enumerate(ahead(pool, part, (
+                (str(source), g, cuts) for g in range(groups)), 2 * workers)):
             read += n_read
             empty += n_empty
             for k, v in n_bad.items():
