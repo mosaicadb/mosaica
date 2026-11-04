@@ -516,8 +516,15 @@ def _(cluster_names, pd):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    HDBSCAN found 40 clusters and left 23,254 papers, nearly half, in none: the wide layout
-    spreads papers out more evenly than the first, so fewer of them sit in a dense region.
+    HDBSCAN finds about 40 clusters and leaves about half the papers in none, because the wide
+    layout spreads papers out more evenly than the first and fewer of them sit in a dense region.
+
+    Your counts may not match someone else's exactly. HDBSCAN uses no random numbers, but where
+    two ways of splitting a region score almost the same, the choice comes down to rounding in
+    the last digits of its arithmetic, which differs between computers and between versions of
+    scikit-learn. One run can find a cluster more than another and leave a thousand more papers
+    in none. The cluster we study below comes out the same to within a paper or two, so what we
+    find in it will hold for your run as well.
 
     `mine` is a table of our own, one row per paper. `entity_id` names the paper, as in the
     points file, and `cluster` is the key of its cluster, or empty for a paper in none, as most
@@ -601,7 +608,7 @@ def _(db, planetary):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    The cluster holds 466 papers. `aggregate` counts how a selection's items are distributed,
+    The cluster holds about 470 papers. `aggregate` counts how a selection's items are distributed,
     and grouping by a layer counts them by that layer's annotations. Here we ask which of the
     16 broad topics our cluster's papers are in.
     """)
@@ -625,9 +632,9 @@ def _(mo):
     `"count": True` asks for the number of papers in each. The `none` row counts the papers in
     no topic at this level.
 
-    Here is a surprise. 349 of the 466 papers are in no broad topic, and 108 of the rest are in
-    one called "Higgs Physics". Toponymy names a broad topic from the topics inside it, and the
-    next level down shows what happened.
+    Here is a surprise. About three quarters of the papers are in no broad topic, and nearly
+    all the rest are in one called "Higgs Physics". Toponymy names a broad topic from the topics
+    inside it, and the next level down shows what happened.
     """)
     return
 
@@ -644,10 +651,11 @@ def _(planetary_papers):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Among the 46 second-level topics, 161 of the papers are in "Stellar Systems and ISM
-    Chemistry" and the 108 are in "Quantum Optics and Exoplanets". That topic sits under "Higgs
-    Physics" beside a topic on Higgs boson phenomenology, and the language model named the pair
-    after the other one, as the topic's card on the map shows. So our cluster is a real subject
+    Among the 46 second-level topics, about a third of the papers are in "Stellar Systems and
+    ISM Chemistry", and every one of those under "Higgs Physics" is in "Quantum Optics and
+    Exoplanets". That topic sits under "Higgs Physics" beside a topic on Higgs boson
+    phenomenology, and the language model named the pair after the other one, as the topic's
+    card on the map shows. So our cluster is a real subject
     that Toponymy split between a topic it named well and one it filed under a misleading name,
     which is worth knowing before you filter a map by "Higgs Physics". Try the same with
     another of your clusters, or with level 2.

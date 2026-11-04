@@ -396,9 +396,10 @@ def test_analysing_a_map_shows_what_its_data_and_its_clusters_hold(stub_marimo, 
     the same counts made in pandas from the sample's files and from the notebook's own HDBSCAN
     clusters, and against the figures its prose quotes.
 
-    The clusters are the reader's scikit-learn run, so what is checked of them is a property:
-    the cluster the notebook compares is the one holding most planetary papers, whatever its
-    number."""
+    The clusters are the reader's scikit-learn run, whose counts move a little between platforms,
+    so what is checked of them is what the prose says of any run: the cluster the notebook
+    compares is the one holding most planetary papers, whatever its number, and the proportions
+    the prose gives in words hold for it."""
     binary()
     namespace: dict = {"__name__": "analysing_a_map", "__file__": str(ANALYSING)}
     try:
@@ -421,9 +422,9 @@ def test_analysing_a_map_shows_what_its_data_and_its_clusters_hold(stub_marimo, 
         }
         summary = next(value for value in shown if isinstance(value, dict) and "clusters" in value)
         assert summary == {"clusters": len(names), "papers in none": len(mine) - len(clustered)}
-        # HDBSCAN's result varies with the platform's numerics, so the figures the prose quotes are
-        # checked only when this run is the one the prose was written from.
-        as_written = summary == {"clusters": 40, "papers in none": 23254}
+        # About 40 clusters, and about half the papers in none.
+        assert 35 <= summary["clusters"] <= 45
+        assert 0.4 <= summary["papers in none"] / len(mine) <= 0.6
 
         # The cluster compared is the one holding most planetary papers, and the server counts
         # its papers by topic as pandas does.
@@ -432,7 +433,7 @@ def test_analysing_a_map_shows_what_its_data_and_its_clusters_hold(stub_marimo, 
         assert planetary == on_planets.value_counts().index[0]
         in_planetary = set(clustered.loc[clustered["cluster"] == planetary, "entity_id"])
         assert counts[0] == len(in_planetary)
-        assert not as_written or len(in_planetary) == 466
+        assert 450 <= len(in_planetary) <= 490
 
         members = pd.read_parquet(arxiv / "clusters-toponymy-members.parquet")
         topics = pd.read_parquet(arxiv / "topics-toponymy.parquet")
@@ -459,13 +460,17 @@ def test_analysing_a_map_shows_what_its_data_and_its_clusters_hold(stub_marimo, 
         ].nunique()
         assert none_of(level_0) == len(in_planetary) - in_a_broad_topic
         assert listed(level_1) == by_topic(in_planetary, 1)[:5]
-        if as_written:
-            assert none_of(level_0) == 349
-            assert listed(level_0)[0] == ("Higgs Physics", 108)
-            assert listed(level_1)[:2] == [
-                ("Stellar Systems and ISM Chemistry", 161), ("Quantum Optics and Exoplanets", 108)
-            ]
-        # The 108 under "Higgs Physics" are the 108 in "Quantum Optics and Exoplanets", which is
+        # About three quarters in no broad topic and nearly all the rest under "Higgs Physics";
+        # about a third in "Stellar Systems and ISM Chemistry", then "Quantum Optics and
+        # Exoplanets".
+        assert 0.7 <= none_of(level_0) / len(in_planetary) <= 0.8
+        assert listed(level_0)[0][0] == "Higgs Physics"
+        assert listed(level_0)[0][1] >= 0.85 * (len(in_planetary) - none_of(level_0))
+        assert [name for name, _ in listed(level_1)[:2]] == [
+            "Stellar Systems and ISM Chemistry", "Quantum Optics and Exoplanets"
+        ]
+        assert 0.28 <= listed(level_1)[0][1] / len(in_planetary) <= 0.4
+        # The papers under "Higgs Physics" are those in "Quantum Optics and Exoplanets", which is
         # one of its two children.
         artifacts = pd.read_parquet(arxiv / "clusters-toponymy.parquet")
         key_of = {name: key for key, name in title.items()}
@@ -474,7 +479,7 @@ def test_analysing_a_map_shows_what_its_data_and_its_clusters_hold(stub_marimo, 
         def held_in(key: str) -> set:
             return set(members.loc[members["key"] == key, "entity"]) & in_planetary
 
-        assert not as_written or held_in(higgs) == held_in(optics)
+        assert held_in(higgs) == held_in(optics)
         children = {title[key] for key in artifacts.loc[artifacts["parent"] == higgs, "key"]}
         assert len(children) == 2 and "Quantum Optics and Exoplanets" in children
 
