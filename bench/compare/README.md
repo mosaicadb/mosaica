@@ -421,6 +421,7 @@ the resolution of its role, and later searches do not.
 | `adapters/` | One adapter per system behind `adapters/base.py` |
 | `run.py` | One run of one system, appending one record to a JSONL file |
 | `tables.py` | Records to one Markdown table per tier, one column per system |
+| `test_spread.py` | The dense-tile spread check on synthetic tiles, run with `.venv/bin/python test_spread.py` |
 
 ## The data
 
@@ -458,16 +459,23 @@ build; the column costs 7.5 ms at 10⁶ rows (7.5 ns a row), so leaving it out o
 times changes them by less than their noise. The samples are therefore different items, and the
 oracle cannot check one item by item. It checks what holds for any correct sample: exactly K positions
 from each dense tile, each one of the viewer's matching items there, none sent twice (all three
-point errors), and the sample's spread, as the sub-cells four levels below the tile
-(`SUBCELL_OFFSET` in `frame.py`) that it covers against the number a uniform random sample of the
-same size covers on average, and Pearson's chi-square of the sample's count in each of those sub-cells
-against a uniform sample's expectation, corrected for drawing without replacement, as its value a
-degree of freedom and a normal deviate. A uniform sample scores about 1 on both; the table marks
-a column whose coverage is off 1 by more than 3%, either way, or whose deviate is past 5 either
-way. Over the battery and the camera script, the tier's `rank`, three Feistel keys and a numpy
-permutation gave coverage 0.995 to 1.001 and deviates −1.7 to +2.7, and the first K of each tile
-ordered by x gave coverage 0.19 and a deviate of +1,369. A timed frame must also send the same
-sample as the untimed one, since the oracle cannot tell two valid samples apart.
+point errors), and the sample's spread over the sub-cells four levels below the tile
+(`SUBCELL_OFFSET` in `frame.py`). Two figures measure the spread against a uniform random sample
+of as many of the tile's matching items, drawn without replacement: the sub-cells the sample
+covers against the number such a sample covers on average, and Pearson's chi-square of the
+sample's count in runs of sub-cells, taken in Morton order and each closed once a uniform sample
+expects five points in it, corrected for drawing without replacement. Each is given as a normal
+deviate, for the workload and for each zoom of it, and the table marks a column where any is past
+5 either way. A workload judges a tile once under each filter, however often its pans and steps
+back out return to it. The chi-square counts runs rather than single sub-cells because a GBIF tile
+holding millions of records has sub-cells at sea holding a few, which a sample of 500 rarely
+reaches and which add hundreds to the statistic when it does: counted cell by cell, most uniform
+samples scored far below the statistic's mean and a few far above it. `test_spread.py` checks the
+figures on synthetic tiles of that kind: uniform samples give deviates of unit spread, a fifth of
+each sample drawn from one corner gives a chi-square deviate of +92, the first K in Morton order
++743, and three skewed tiles among 300 are marked at their zoom while the workload's sum passes.
+A timed frame must also send the same sample as the untimed one, since the oracle cannot tell two
+valid samples apart.
 
 The `counts` frame (`--dense counts`) is the earlier definition, in which a dense tile need send
 nothing and may send up to K, each counted and checked as above; ClickHouse, PostGIS and

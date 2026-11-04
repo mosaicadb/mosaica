@@ -50,7 +50,8 @@ import requests
 from dataset import DATASET
 from frame import (DENSE, EXTENT, GRID_OFFSET, K, SCREEN, SUBCELL_OFFSET, TILE_PX, TYPE_TOP,
                    YEAR_BINS, Camera, Filter)
-from oracle import COUNT_ERRORS, POINT_ERRORS, TABLES, VIEWER, Oracle, compare, compare_tables
+from oracle import (COUNT_ERRORS, POINT_ERRORS, TABLES, VIEWER, Oracle, compare, compare_tables,
+                    spread_totals)
 from prepare import sha256
 
 HERE = Path(__file__).resolve().parent
@@ -349,13 +350,14 @@ def main() -> None:
             print(f"[{adapter.name}] checking against the oracle", file=sys.stderr, flush=True)
             check = TimedCheck(oracle, args.dense)
         for w, steps in ({} if args.no_oracle else workloads).items():
-            per = []
+            per, seen = [], set()
             for camera, filt in steps:
                 got, _ = adapter.frame(camera, filt)
                 cmp = check.errors(camera, filt, got)
                 check.learn(camera, filt, got, cmp)
-                cmp.update(oracle.coverage(camera, filt, got, oracle.frame(camera, filt)))
+                cmp.update(oracle.coverage(camera, filt, got, oracle.frame(camera, filt), seen))
                 cmp["label"] = camera.label + (f"/{filt.label}" if filt else "")
+                cmp["zoom"] = camera.zoom
                 cmp["bytes"] = got.bytes
                 per.append(cmp)
             errors[w] = {
@@ -363,9 +365,8 @@ def main() -> None:
                 "frames_exact": sum(1 for c in per if not any(c[k] for k in COUNT_ERRORS + POINT_ERRORS)),
                 **{k: int(sum(c[k] for c in per)) for k in (
                     "matched_true", *COUNT_ERRORS, *POINT_ERRORS, "grid_cells_wrong", "grid_cells_true",
-                    "points_dense", "points_sent", "bytes", "dense_tiles_sampled", "dense_cover",
-                    "dense_chi2_df")},
-                **{k: float(sum(c[k] for c in per)) for k in ("dense_cover_expected", "dense_chi2")},
+                    "points_dense", "points_sent", "bytes")},
+                **spread_totals(per),
                 "worst": sorted(per, key=lambda c: -sum(c[k] for k in COUNT_ERRORS + POINT_ERRORS))[:3],
             }
         per = []

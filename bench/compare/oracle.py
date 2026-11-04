@@ -27,7 +27,7 @@ import pyarrow.parquet as pq
 
 from dataset import DATASET
 from frame import (EXTENT, K, SUBCELL_OFFSET, TYPE_TOP, YEAR_BINS, Camera, Filter, Frame, fixed32,
-                   grid_depth, points_by_tile)
+                   grid_depth, interleave, points_by_tile)
 
 VIEWER = json.loads(Path(__file__).with_name(DATASET.viewer).read_text())
 #: The aggregation workload's two tables: the category's counts and the year histogram.
@@ -36,6 +36,15 @@ TABLES = (DATASET.category, "year")
 COUNT_ERRORS = ("tile_abs_err", "grid_abs_err")
 POINT_ERRORS = ("sparse_points_missing", "sparse_points_extra", "points_outside_tile",
                 "dense_points_missing", "dense_points_extra", "dense_points_invalid")
+#: The figures `spread` gives for one dense tile's sample, which a workload sums.
+SPREAD = ("dense_tiles_sampled", "dense_cover", "dense_cover_expected", "dense_cover_var",
+          "dense_chi2", "dense_chi2_df")
+#: The fewest points a uniform sample expects in each run of sub-cells the chi-square counts.
+BIN_EXPECTED = 5
+#: Past this many standard deviations either way, a spread figure is unlike a uniform sample's.
+#: The filters at one screen select overlapping items, whose samples are the lowest of one random
+#: order, so their figures are correlated and vary more than independent ones.
+Z_LIMIT = 5.0
 
 
 def visible_sql() -> str:
@@ -91,6 +100,66 @@ def summed(rows) -> dict:
         k = k[0] if len(k) == 1 else k
         out[k] = out.get(k, 0) + int(n)
     return out
+
+
+def spread(cells: dict[tuple[int, int], int], sent: list[tuple[int, int]]) -> dict:
+    """How one dense tile's sample spreads over the tile's sub-cells, against a uniform sample of
+    as many of its `N` matching items drawn without replacement. `cells` holds each sub-cell's
+    count of those items, and `sent` the sub-cell of each of the `k` positions sent.
+
+    * `dense_cover` against `dense_cover_expected`: the sub-cells the sample falls in, and the
+      number a uniform sample falls in on average. `dense_cover_var` sums each sub-cell's variance,
+      which bounds the number's own from above, since one sub-cell's hit makes another's less
+      likely. A sample from a corner of the tile covers fewer; one spread more evenly than
+      chance, more.
+    * `dense_chi2` on `dense_chi2_df` degrees of freedom: Pearson's statistic over runs of
+      sub-cells in Morton order, each run closed once it holds enough items that a uniform sample
+      expects `BIN_EXPECTED`, scaled by `(N - 1) / (N - k)` for drawing without replacement, so
+      that a uniform sample's expectation is the degrees of freedom. Taking `k` items is the same
+      draw as leaving `N - k` out, so the runs are closed on the smaller of the two."""
+    total = sum(cells.values())
+    k = min(len(sent), total)
+    counts: dict[tuple[int, int], int] = {}
+    for cell in sent:
+        counts[cell] = counts.get(cell, 0) + 1
+    out = {"dense_tiles_sampled": 1, "dense_cover": len(counts), "dense_cover_expected": 0.0,
+           "dense_cover_var": 0.0, "dense_chi2": 0.0, "dense_chi2_df": 0}
+    for n in cells.values():
+        rest = total - n
+        # The chance that none of k items drawn without replacement falls in this cell.
+        miss = 0.0 if rest < k else math.exp(math.lgamma(rest + 1) - math.lgamma(rest - k + 1)
+                                             - math.lgamma(total + 1) + math.lgamma(total - k + 1))
+        out["dense_cover_expected"] += 1 - miss
+        out["dense_cover_var"] += miss * (1 - miss)
+    draws = min(k, total - k)
+    runs: list[list[int]] = []
+    held = got = 0
+    for cell in sorted(cells, key=lambda c: interleave(*c)):
+        held += cells[cell]
+        got += counts.get(cell, 0)
+        if draws * held >= BIN_EXPECTED * total:
+            runs.append([held, got])
+            held = got = 0
+    if runs:
+        runs[-1][0] += held
+        runs[-1][1] += got
+    if len(runs) > 1:
+        chi2 = sum((x - k * n / total) ** 2 / (k * n / total) for n, x in runs)
+        out["dense_chi2"] = chi2 * (total - 1) / (total - k)
+        out["dense_chi2_df"] = len(runs) - 1
+    return out
+
+
+def spread_totals(per: list[dict]) -> dict:
+    """`SPREAD` summed over a workload's frames, each carrying its camera's `zoom`, and under
+    `spread_by_zoom` for each zoom apart, where a sample skewed on a few screens is not lost in
+    the workload's sum."""
+    by_zoom: dict[str, dict] = {}
+    for c in per:
+        z = by_zoom.setdefault(str(c["zoom"]), dict.fromkeys(SPREAD, 0))
+        for k in SPREAD:
+            z[k] += c[k]
+    return {**{k: sum(c[k] for c in per) for k in SPREAD}, "spread_by_zoom": by_zoom}
 
 
 def _spread16(v: str) -> str:
@@ -227,23 +296,18 @@ class Oracle:
         self._invalid[key] = sum(max(n - held.get(p, 0), 0) for p, n in wanted.items())
         return self._invalid[key]
 
-    def coverage(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame) -> dict:
-        """How the positions sent from dense tiles spread over the sub-cells `SUBCELL_OFFSET`
-        levels below each tile, against a uniform random sample of as many of the tile's matching
-        items, drawn without replacement. Two figures, summed over the dense tiles:
-
-        * `dense_cover` against `dense_cover_expected`: the sub-cells the sample falls in, and the
-          number a uniform sample falls in on average. A sample taken from a corner of the tile
-          covers far fewer; one spread more evenly than chance, more.
-        * `dense_chi2` on `dense_chi2_df` degrees of freedom: Pearson's statistic of the sample's
-          count in each sub-cell against its expectation, `k * n / N` for a sub-cell holding `n` of
-          the tile's `N` items, scaled by `(N - 1) / (N - k)` for drawing without replacement. A
-          uniform sample gives about one a degree of freedom, a clumped one more and one spread
-          evenly less; the statistic is approximate where a sub-cell expects few points."""
+    def coverage(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame,
+                 seen: set) -> dict:
+        """`spread`'s figures, summed, for the samples this frame's dense tiles sent, over the
+        sub-cells `SUBCELL_OFFSET` levels below each tile. A workload's pans and steps back out
+        ask for the same tiles again: a tile already judged under the same filter, whose key is
+        in `seen`, is left out, and the rest are added to `seen`."""
         z = camera.zoom
-        dense = [t for t, n in truth.tiles.items() if n > K and len(got.points.get(t, ()))]
-        out = {"dense_tiles_sampled": len(dense), "dense_cover": 0, "dense_cover_expected": 0.0,
-               "dense_chi2": 0.0, "dense_chi2_df": 0}
+        leaves = repr(filt.leaves if filt else [])
+        dense = [t for t, n in truth.tiles.items()
+                 if n > K and len(got.points.get(t, ())) and (z, t, leaves) not in seen]
+        seen.update((z, t, leaves) for t in dense)
+        out = dict.fromkeys(SPREAD, 0)
         if not dense:
             return out
         d = min(z + SUBCELL_OFFSET, 32)
@@ -259,24 +323,8 @@ class Oracle:
         per = self._subcells[key]
         for t in dense:
             sent = got.points[t].astype(np.uint64) >> np.uint64(32 - d)
-            counts: dict[tuple[int, int], int] = {}
-            for a, b in sent.tolist():
-                counts[(a, b)] = counts.get((a, b), 0) + 1
-            cells = per.get(t, {})
-            total = truth.tiles[t]
-            k = min(len(sent), total)
-            out["dense_cover"] += len(counts)
-            chi2 = 0.0
-            for cell, n in cells.items():
-                rest = total - n
-                # The chance that none of k items drawn without replacement falls in this cell.
-                miss = 0.0 if rest < k else math.exp(math.lgamma(rest + 1) - math.lgamma(rest - k + 1)
-                                                     - math.lgamma(total + 1) + math.lgamma(total - k + 1))
-                out["dense_cover_expected"] += 1 - miss
-                want = k * n / total
-                chi2 += (counts.get(cell, 0) - want) ** 2 / want
-            out["dense_chi2"] += chi2 * (total - 1) / (total - k)
-            out["dense_chi2_df"] += len(cells) - 1
+            for name, v in spread(per.get(t, {}), [tuple(p) for p in sent.tolist()]).items():
+                out[name] += v
         return out
 
     def tables(self, camera: Camera, filt: Filter | None) -> dict[str, dict[str, int]]:
@@ -305,11 +353,28 @@ class Oracle:
 
 def chi2_z(chi2: float, df: int) -> float:
     """The standard normal deviate of `chi2` on `df` degrees of freedom, by Wilson and Hilferty's
-    cube-root approximation: beyond about 3 either way, the sample is unlike a uniform one."""
+    cube-root approximation."""
     if df <= 0:
         return 0.0
     v = 2 / (9 * df)
     return ((chi2 / df) ** (1 / 3) - (1 - v)) / math.sqrt(v)
+
+
+def spread_z(e: dict) -> tuple[float, float]:
+    """The standard normal deviates of summed `SPREAD` figures: the coverage's, on its variance's
+    upper bound, and the chi-square's."""
+    var = e["dense_cover_var"]
+    cover = (e["dense_cover"] - e["dense_cover_expected"]) / math.sqrt(var) if var > 0 else 0.0
+    return cover, chi2_z(e["dense_chi2"], e["dense_chi2_df"])
+
+
+def unlike_uniform(e: dict) -> list[str]:
+    """Where a workload's samples, `spread_totals`'s figures, are unlike uniform ones by either
+    deviate past `Z_LIMIT`: `all` for the workload's sum, and `zoom z` for each zoom's own."""
+    zooms = sorted(e["spread_by_zoom"].items(), key=lambda item: int(item[0]))
+    parts = [("all", e), *((f"zoom {z}", f) for z, f in zooms)]
+    return [name for name, f in parts
+            if f["dense_tiles_sampled"] and max(abs(v) for v in spread_z(f)) > Z_LIMIT]
 
 
 def compare_tables(got: dict[str, dict[str, int]], truth: dict[str, dict[str, int]]) -> dict:

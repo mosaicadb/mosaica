@@ -13,7 +13,7 @@ import argparse
 import json
 from pathlib import Path
 
-from oracle import COUNT_ERRORS, POINT_ERRORS, TABLES, chi2_z
+from oracle import COUNT_ERRORS, POINT_ERRORS, TABLES, spread_z, unlike_uniform
 
 GIB = 1 << 30
 #: The fields a record must carry to be tabled; an older record without them is refused.
@@ -112,26 +112,22 @@ def agg_error_cell(e: dict) -> str:
             f"{sum(e[f'{t}_total_true'] for t in TABLES):,}")
 
 
-#: Beyond these the spread is marked: coverage off 1 by more than this share, or a chi-square
-#: deviate past this many standard deviations either way. Frames share tiles, so the sums vary
-#: more than independent ones would; uniform orders measured gave deviates up to 2.7.
-COVER_TOLERANCE = 0.03
-CHI2_Z_LIMIT = 5.0
-
-
 def cover_cell(e: dict) -> str:
-    """Coverage against a uniform sample's, and the chi-square per degree of freedom with its
-    deviate; marked where either is unlike a uniform sample, above or below."""
+    """Coverage against a uniform sample's, and the chi-square per degree of freedom, each with
+    its deviate; marked where the workload, or any zoom of it, is unlike a uniform sample."""
     if e.get("checked") is False:
         return NOT_CHECKED
+    if "dense_cover_var" not in e:
+        return "– (an earlier spread check, not comparable)"
     if not e["dense_tiles_sampled"]:
         return "–"
-    ratio = e["dense_cover"] / e["dense_cover_expected"]
-    z = chi2_z(e["dense_chi2"], e["dense_chi2_df"])
-    odd = abs(ratio - 1) > COVER_TOLERANCE or abs(z) > CHI2_Z_LIMIT
-    return (f"{'**unlike uniform** ' if odd else ''}cover {ratio:.3f} ({e['dense_cover']:,} of "
-            f"{e['dense_cover_expected']:,.0f}); chi² {e['dense_chi2'] / e['dense_chi2_df']:.3f} a df "
-            f"on {e['dense_chi2_df']:,}, z {z:+.1f}; {e['dense_tiles_sampled']} tiles")
+    cover_z, chi2_dev = spread_z(e)
+    odd = unlike_uniform(e)
+    return (f"{'**unlike uniform** (' + ', '.join(odd) + ') ' if odd else ''}"
+            f"cover {e['dense_cover'] / e['dense_cover_expected']:.3f} ({e['dense_cover']:,} of "
+            f"{e['dense_cover_expected']:,.0f}), z {cover_z:+.1f}; chi² "
+            f"{e['dense_chi2'] / max(1, e['dense_chi2_df']):.3f} a df on {e['dense_chi2_df']:,}, "
+            f"z {chi2_dev:+.1f}; {e['dense_tiles_sampled']} tiles")
 
 
 def timed_cell(e: dict) -> str:
