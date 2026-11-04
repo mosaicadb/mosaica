@@ -27,7 +27,7 @@ body:
     attributes:
       label: Version
       description: The output of `mosaica --version`, and the client's version if you used one.
-      placeholder: mosaica 0.1.0 (1a2b3c4d5)
+      placeholder: mosaica <version> (<commit>)
     validations:
       required: true
   - type: dropdown

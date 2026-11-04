@@ -18,7 +18,7 @@ const REGENERATE: &str = "MOSAICA_WRITE_CLI_REFERENCE=1 cargo test -p mosaica cl
 
 const INTRO: &str = "\
 `mosaica <subcommand> --help` prints the text on this page. `mosaica --version` prints the \
-release version and the commit the binary was built from, as in `mosaica 0.1.0 (3c872b11a)`. It \
+release version and the commit the binary was built from, as `mosaica <version> (<commit>)`. It \
 prints the release version alone when `MOSAICA_BUILD_COMMIT` was unset at build time and git could \
 not name the commit, as in a build outside a git checkout.
 
