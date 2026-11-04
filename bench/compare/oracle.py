@@ -80,6 +80,18 @@ def leaf_sql(leaf: dict) -> str:
     raise ValueError(f"unknown filter leaf {leaf}")
 
 
+def summed(rows) -> dict:
+    """Each group's count, by its key (every column but the last), adding the counts of a key
+    returned more than once. DuckDB 1.3.2's parallel `GROUP BY` returned some groups twice over
+    the GBIF copy, each with part of the group's count, so no caller takes one row a group."""
+    out: dict = {}
+    for *key, n in rows:
+        k = tuple(int(v) if isinstance(v, int) else v for v in key)
+        k = k[0] if len(k) == 1 else k
+        out[k] = out.get(k, 0) + int(n)
+    return out
+
+
 def _spread16(v: str) -> str:
     """A 16-bit value's bits on the even bits of a 32-bit one, in DuckDB."""
     for shift, mask in ((8, 0x00FF00FF), (4, 0x0F0F0F0F), (2, 0x33333333), (1, 0x55555555)):
@@ -164,7 +176,7 @@ class Oracle:
             f"SELECT qx >> {32 - dg} AS gx, qy >> {32 - dg} AS gy, count(*) FROM {self.src} "
             f"WHERE {w} GROUP BY ALL"
         ).fetchall()
-        grid = {(int(gx), int(gy)): int(n) for gx, gy, n in rows}
+        grid = summed(rows)
         tiles: dict[tuple[int, int], int] = {}
         shift = dg - z
         for (gx, gy), n in grid.items():
@@ -201,14 +213,13 @@ class Oracle:
         positions = pa.table({"qx": pts[:, 0], "qy": pts[:, 1]})
         self.con.register("sent", positions)
         try:
-            self._invalid[key] = int(self.con.execute(
-                f"WITH s AS (SELECT qx, qy, count(*) AS n FROM sent GROUP BY ALL), "
-                f"t AS (SELECT qx, qy, count(*) AS n FROM {self.src} "
-                f"WHERE {self.where(camera, filt)} AND (qx, qy) IN (SELECT (qx, qy) FROM s) GROUP BY ALL) "
-                f"SELECT coalesce(sum(greatest(s.n - coalesce(t.n, 0), 0)), 0) FROM s "
-                f"LEFT JOIN t USING (qx, qy)").fetchone()[0])
+            held = summed(self.con.execute(
+                f"SELECT qx, qy, count(*) FROM {self.src} WHERE {self.where(camera, filt)} "
+                f"AND (qx, qy) IN (SELECT (qx, qy) FROM sent) GROUP BY ALL").fetchall())
         finally:
             self.con.unregister("sent")
+        wanted = summed((int(a), int(b), 1) for a, b in pts.tolist())
+        self._invalid[key] = sum(max(n - held.get(p, 0), 0) for p, n in wanted.items())
         return self._invalid[key]
 
     def coverage(self, camera: Camera, filt: Filter | None, got: Frame, truth: Frame) -> dict:
@@ -237,8 +248,8 @@ class Oracle:
                 f"SELECT qx::UBIGINT >> {32 - d}, qy::UBIGINT >> {32 - d}, count(*) "
                 f"FROM {self.src} WHERE {self.where(camera, filt)} GROUP BY ALL").fetchall()
             per: dict[tuple[int, int], dict[tuple[int, int], int]] = {}
-            for sx, sy, n in rows:
-                per.setdefault((int(sx) >> (d - z), int(sy) >> (d - z)), {})[(int(sx), int(sy))] = int(n)
+            for (sx, sy), n in summed(rows).items():
+                per.setdefault((sx >> (d - z), sy >> (d - z)), {})[(sx, sy)] = n
             self._subcells[key] = per
         per = self._subcells[key]
         for t in dense:
@@ -281,8 +292,8 @@ class Oracle:
             f"SELECT CASE WHEN {year} IS NULL THEN 'none' "
             f"WHEN {year} < {lo} OR {year} >= {hi} THEN 'rest' "
             f"ELSE {year}::VARCHAR END, count(*) FROM {src} WHERE {w} GROUP BY 1").fetchall()
-        assert len(types) <= TYPE_TOP + 1
-        out = {TABLES[0]: {k: int(n) for k, n in types}, TABLES[1]: {k: int(n) for k, n in years}}
+        out = {TABLES[0]: summed(types), TABLES[1]: summed(years)}
+        assert len(out[TABLES[0]]) <= TYPE_TOP + 1
         self._tables[key] = out
         return out
 
