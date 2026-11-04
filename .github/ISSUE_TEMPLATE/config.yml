@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question
+    url: https://github.com/mosaicadb/mosaica/discussions
+    about: Ask how to do something, or talk through an idea, in Discussions.
+  - name: Report a vulnerability
+    url: https://github.com/mosaicadb/mosaica/security/policy
+    about: Report it privately, as the security policy describes, and not in a public issue.
