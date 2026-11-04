@@ -609,6 +609,15 @@ name the tier's earlier checksum. The full tier, all 3,495,729,729 rows, is writ
 alone, the oracle refuses it under `list`, and its checksum differs from that of a tier with the
 same rows and `access`.
 
+The full tier is a performance run, with no oracle (`run.py --no-oracle`): the oracle's copy of
+its 3.1 × 10⁹ visible rows spilled 169 GB of sort to disc before it was stopped, short of this
+machine's room. Such a record says it was not checked, and `tables.py` shows its error rows as
+"not checked"; it keeps every timing, and the points and bytes each workload received, the
+points from dense tiles counted by the system's own tile counts. Every smaller tier is checked
+against the oracle. The full tier reuses the 10⁹ tier's cameras (`cameras/gbif-1e9-label.json`):
+both are Web Mercator's world square, so the screens apply, and each filter's share is the one
+measured at 10⁹.
+
 The oracle answers from its own copy of each tier (`Oracle(copy=True)`): a DuckDB file beside the
 tier holding the viewer's visible rows' positions, kingdom and year, ordered by the Morton code
 of each position's top 16 bits, so that a query over a small screen reads few of DuckDB's row

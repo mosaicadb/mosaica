@@ -130,6 +130,35 @@
         "Viruses": 20723
       },
       "sha256": "61bb60a0a49852b609233ff79a9dbc2956048a04124b147fd6c9c6e3752e5132"
+    },
+    "full": {
+      "file": "gbif-full.parquet",
+      "columns": [
+        "entity_id",
+        "x",
+        "y",
+        "kingdom",
+        "year",
+        "label",
+        "qx",
+        "qy",
+        "rank"
+      ],
+      "nominal_rows": 3495729729,
+      "rows": 3495729729,
+      "threshold": null,
+      "rows_by_kingdom": {
+        "Animalia": 2779256205,
+        "Plantae": 505360211,
+        "Bacteria": 95688683,
+        "Fungi": 47770240,
+        "Chromista": 44135588,
+        "incertae sedis": 10575474,
+        "Archaea": 9949478,
+        "Protozoa": 2921192,
+        "Viruses": 72658
+      },
+      "sha256": "05e8c66e96386b8f0ec7ccb4859bbf95d9793f5e4639669ff805994eb938b239"
     }
   }
 }

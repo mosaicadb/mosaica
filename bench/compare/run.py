@@ -44,6 +44,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pyarrow
+import pyarrow.parquet
 import requests
 
 from dataset import DATASET
@@ -182,6 +183,18 @@ class TimedCheck:
                 "method": "every timed frame and table, with dense_invalid on every timed frame"}
 
 
+class Unchecked:
+    """`TimedCheck`'s place in a run without the oracle: nothing is compared."""
+
+    def learn(self, *a) -> None: ...
+    def learn_tables(self, *a) -> None: ...
+    def frame(self, *a) -> None: ...
+    def tables(self, *a) -> None: ...
+
+    def record(self) -> dict:
+        return {"checked": False}
+
+
 def session_start(adapter, repeats: int, check: TimedCheck) -> dict:
     """Warm and cold, two figures from a stopped server: `server`, from starting it until its data
     is loaded and it answers a request that is not the viewer's, and `session`, from opening the viewer's session or
@@ -252,6 +265,9 @@ def main() -> None:
                     help="points: K positions from each dense tile; counts: none required")
     ap.add_argument("--max-load", type=float, default=3.0)
     ap.add_argument("--no-cold", action="store_true")
+    ap.add_argument("--no-oracle", action="store_true",
+                    help="no correctness checks: a performance run, where the tier is too large for "
+                         "the oracle; cameras made for another tier of the data set are accepted")
     ap.add_argument("--nice", type=int, default=0,
                     help="niceness of every system's build (19 on a shared machine); servers run at 0")
     ap.add_argument("--publishable", action="store_true",
@@ -266,11 +282,15 @@ def main() -> None:
     tier_sha256 = check_tier(args.tier)
     foreign = foreign_mosaica(set())
     cameras = json.loads(args.cameras.read_text())
-    if cameras["tier"] != args.tier.name:
+    if cameras["tier"] != args.tier.name and not args.no_oracle:
         sys.exit(f"{args.cameras} was made for {cameras['tier']}, not {args.tier.name}; make the "
                  f"cameras for this tier with cameras.py")
-    oracle = Oracle(str(args.tier.resolve()), copy=DATASET.oracle_copy)
-    visible, rows = oracle.visible()
+    if args.no_oracle:
+        oracle, visible = None, None
+        rows = pyarrow.parquet.ParquetFile(args.tier).metadata.num_rows
+    else:
+        oracle = Oracle(str(args.tier.resolve()), copy=DATASET.oracle_copy)
+        visible, rows = oracle.visible()
     adapter = make_adapter(args)
     record: dict = {
         "system": adapter.name,
@@ -285,6 +305,8 @@ def main() -> None:
         "harness_commit": harness_commit(),
         "cameras": args.cameras.name,
         "cameras_sha256": sha256(args.cameras),
+        "cameras_tier": cameras["tier"],
+        "checked": not args.no_oracle,
         "packages": {"duckdb": duckdb.__version__, "pyarrow": pyarrow.__version__,
                      "numpy": np.__version__, "requests": requests.__version__},
         "frame": {"screen": SCREEN, "tile_px": TILE_PX, "grid_offset": GRID_OFFSET, "k": K,
@@ -295,7 +317,7 @@ def main() -> None:
         "repeats": args.repeats,
         "cold_runs": not args.no_cold,
         "viewer": {**VIEWER, "visible_rows": visible, "tier_rows": rows,
-                   "visible_fraction": visible / rows},
+                   "visible_fraction": None if visible is None else visible / rows},
         "access": adapter.access,
         "aggregation": {"type_top": TYPE_TOP, "year_bins": YEAR_BINS},
     }
@@ -307,10 +329,26 @@ def main() -> None:
         record["version"] = adapter.version()
         workloads = {w: steps_of(cameras, w) for w in ("battery", "script", "filters")}
 
-        print(f"[{adapter.name}] checking against the oracle", file=sys.stderr, flush=True)
         errors = {}
-        check = TimedCheck(oracle, args.dense)
-        for w, steps in workloads.items():
+        if args.no_oracle:
+            print(f"[{adapter.name}] one untimed pass, not checked", file=sys.stderr, flush=True)
+            check = Unchecked()
+            for w, steps in workloads.items():
+                sent = dense = size = 0
+                for camera, filt in steps:
+                    got, _ = adapter.frame(camera, filt)
+                    sent += sum(len(p) for p in got.points.values())
+                    dense += sum(len(p) for t, p in got.points.items() if got.tiles.get(t, 0) > K)
+                    size += got.bytes
+                errors[w] = {"checked": False, "frames": len(steps), "points_sent": sent,
+                             "points_dense": dense, "bytes": size}
+            for camera, filt in workloads["filters"]:
+                adapter.tables(camera, filt)
+            errors["aggregation"] = {"checked": False, "tables": 2 * len(workloads["filters"])}
+        else:
+            print(f"[{adapter.name}] checking against the oracle", file=sys.stderr, flush=True)
+            check = TimedCheck(oracle, args.dense)
+        for w, steps in ({} if args.no_oracle else workloads).items():
             per = []
             for camera, filt in steps:
                 got, _ = adapter.frame(camera, filt)
@@ -331,14 +369,14 @@ def main() -> None:
                 "worst": sorted(per, key=lambda c: -sum(c[k] for k in COUNT_ERRORS + POINT_ERRORS))[:3],
             }
         per = []
-        for camera, filt in workloads["filters"]:
+        for camera, filt in ([] if args.no_oracle else workloads["filters"]):
             got, _ = adapter.tables(camera, filt)
             cmp = compare_tables(got, oracle.tables(camera, filt))
             check.learn_tables(camera, filt, got)
             cmp["label"] = camera.label + f"/{filt.label}"
             per.append(cmp)
-        keys = [k for k in per[0] if k != "label"]
-        errors["aggregation"] = {
+        keys = [k for k in per[0] if k != "label"] if per else []
+        errors["aggregation"] = errors.get("aggregation") or {
             "tables": 2 * len(per),
             "tables_exact": sum(c[f"{t}_abs_err"] == 0 for c in per for t in TABLES),
             **{k: int(sum(c[k] for c in per)) for k in keys},

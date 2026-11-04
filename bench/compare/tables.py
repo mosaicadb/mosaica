@@ -92,7 +92,12 @@ def size(b: int | None) -> str:
     return "–" if b is None else (f"{b / GIB:.2f} GiB" if b >= GIB / 4 else f"{b / (1 << 20):.0f} MiB")
 
 
+NOT_CHECKED = "not checked"
+
+
 def error_cell(e: dict) -> str:
+    if e.get("checked") is False:
+        return NOT_CHECKED
     wrong = sum(e[k] for k in COUNT_ERRORS)
     pts = sum(e[k] for k in POINT_ERRORS)
     return (f"{e['frames_exact']}/{e['frames']} exact; count err {wrong:,} of {e['matched_true']:,}; "
@@ -100,6 +105,8 @@ def error_cell(e: dict) -> str:
 
 
 def agg_error_cell(e: dict) -> str:
+    if e.get("checked") is False:
+        return NOT_CHECKED
     wrong = sum(e[f"{t}_abs_err"] for t in TABLES)
     return (f"{e['tables_exact']}/{e['tables']} exact; count err {wrong:,} of "
             f"{sum(e[f'{t}_total_true'] for t in TABLES):,}")
@@ -115,6 +122,8 @@ CHI2_Z_LIMIT = 5.0
 def cover_cell(e: dict) -> str:
     """Coverage against a uniform sample's, and the chi-square per degree of freedom with its
     deviate; marked where either is unlike a uniform sample, above or below."""
+    if e.get("checked") is False:
+        return NOT_CHECKED
     if not e["dense_tiles_sampled"]:
         return "–"
     ratio = e["dense_cover"] / e["dense_cover_expected"]
@@ -126,6 +135,8 @@ def cover_cell(e: dict) -> str:
 
 
 def timed_cell(e: dict) -> str:
+    if e.get("checked") is False:
+        return NOT_CHECKED
     return (f"{e['frames_mismatched']:,} of {e['frames']:,} frames, "
             f"{e['tables_mismatched']:,} of {e['tables']:,} tables")
 
@@ -169,8 +180,9 @@ def table(tier: str, runs: dict[str, dict]) -> str:
     rows += [("Error versus oracle, aggregation", lambda r: agg_error_cell(r["errors"]["aggregation"])),
              ("Timed responses wrong (against the oracle, or the untimed answer where that was wrong)",
               lambda r: timed_cell(r["errors"]["timed"])),
-             ("Viewer's visible fraction", lambda r: f"{r['viewer']['visible_rows']:,} of "
-              f"{r['viewer']['tier_rows']:,} ({r['viewer']['visible_fraction']:.1%})"),
+             ("Viewer's visible fraction", lambda r: NOT_CHECKED if r['viewer']['visible_rows'] is None
+              else f"{r['viewer']['visible_rows']:,} of {r['viewer']['tier_rows']:,} "
+              f"({r['viewer']['visible_fraction']:.1%})"),
              ("Access enforced by", lambda r: r["access"]),
              ("Harness commit", lambda r: r["harness_commit"][:12]
               + ("-dirty" if r["harness_commit"].endswith("-dirty") else "")),
