@@ -119,9 +119,9 @@ bounds; they are grant state, kept in both modes, and deleted by a cold start.
 
 ClickHouse runs at its defaults apart from the sort key, `ORDER BY m`, the cache settings above
 and its system log tables, which are off. A dense tile's sample is its K matching rows of lowest
-`rank`, by `ORDER BY tile, rank LIMIT K BY tile`, ClickHouse's documented way to take the first
-rows of each group; one query answers sparse and dense tiles alike. Its pipeline sorts every
-matching row, in parallel, and cuts each stream to K a tile before merging them. Three shapes,
+`rank`, by `groupArraySorted(K)((rank, qx, qy))` grouped by tile and unnested with `arrayJoin`,
+or at zoom 0, where the screen is one tile, by `ORDER BY rank LIMIT K`; one query answers sparse
+and dense tiles alike. Three shapes,
 each sending the same points, were measured once over every frame of the three workloads at 10⁷,
 warm, on a loaded machine (median ms by zoom):
 
@@ -131,8 +131,20 @@ warm, on a loaded machine (median ms by zoom):
 | `arrayJoin(groupArraySorted(K)((rank, qx, qy)))` `GROUP BY` tile | 117 | 158 | 40 | 38 | 13 | 5.5 | 6.2 | 2.6 s |
 | `row_number() OVER (PARTITION BY` tile `ORDER BY rank) <= K` | 844 | 451 | 63 | 31 | 7.9 | 6.2 | 5.9 | 5.3 s |
 
-The aggregation was faster at zoom 3 and slower at zoom 0, and level overall, so `LIMIT BY`
-stays. `rank` is a plain column,
+The aggregation was faster at zoom 3 and slower at zoom 0, and level overall, at 10⁷. At GBIF's
+5 × 10⁸ it was twice as fast on the slow zoom-6 frames, as the viewer with compute caches, each
+query run alone three times, and sent the same 7,500 points:
+
+| Zoom-6 frame (rows read) | Grid query | `LIMIT BY` | `groupArraySorted` |
+|---|---|---|---|
+| `r0-z6` (100.1 M) | 8.4 s | 13.2–16.4 s, 1.72 GiB | 8.7–9.1 s, 88 MiB |
+| `r0-z6-pan0` (76.8 M) | 2.6–2.7 s | 5.7–6.5 s, 1.66 GiB | 2.8–2.9 s, 88 MiB |
+| `r1-z6` (88.7 M) | 2.9–3.1 s | 5.7–6.0 s, 1.85 GiB | 3.4 s, 87 MiB |
+
+`LIMIT BY`'s pipeline sorts every matching row in twelve streams and merges them into one, where
+the aggregation keeps K ranks a tile in each of twelve streams, as the grid query's does; neither
+spilled. So the frame uses the aggregation, and at zoom 0, where the aggregation was slower and
+the screen is one tile, a top K by `ORDER BY rank LIMIT K`. `rank` is a plain column,
 outside the sort key, since no query filters by it; ClickHouse has no secondary index that
 returns rows in an order (its skipping indexes only skip granules), and reading in order applies
 to the sort key alone. `SAMPLE` was not used: it needs a sampling

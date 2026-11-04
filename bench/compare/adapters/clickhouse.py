@@ -8,8 +8,8 @@ FINAL` merges the table to one part and is counted in the build.
 
 A frame is two queries sent at once over HTTP: the count grid (`GROUP BY` the depth-`grid_depth`
 prefix of `m` over the camera's tile ranges), and the positions. Under the `points` frame the
-positions are each tile's K matching rows of lowest `rank`, by `ORDER BY tile, rank LIMIT K BY
-tile`, which is every row of a sparse tile; under `counts`, every position in the tiles whose
+positions are each tile's K matching rows of lowest `rank`, by `groupArraySorted(K)((rank, qx,
+qy))` grouped by tile (one `ORDER BY rank LIMIT K` at zoom 0), which is every row of a sparse tile; under `counts`, every position in the tiles whose
 count is at most K (the same ranges, restricted in the same statement to the sparse tiles). The
 query cache
 is off, as it is by default. The server's own log tables are turned off so their writes stay out
@@ -281,8 +281,10 @@ class ClickHouse(Adapter):
                   f"WHERE {where} GROUP BY cell FORMAT ArrowStream")
         tile_expr = f"bitShiftRight(m, {64 - 2 * z})" if z else "0"
         if self.dense == "points":
-            order = f"ORDER BY {tile_expr}, rank LIMIT {K} BY {tile_expr}" if z else f"ORDER BY rank LIMIT {K}"
-            points_q = f"SELECT qx, qy FROM points WHERE {where} {order} FORMAT ArrowStream"
+            points_q = (f"SELECT tupleElement(p, 2) AS qx, tupleElement(p, 3) AS qy FROM (SELECT "
+                        f"arrayJoin(groupArraySorted({K})((rank, qx, qy))) AS p FROM points "
+                        f"WHERE {where} GROUP BY {tile_expr}) FORMAT ArrowStream" if z else
+                        f"SELECT qx, qy FROM points WHERE {where} ORDER BY rank LIMIT {K} FORMAT ArrowStream")
         else:
             points_q = (f"SELECT qx, qy FROM points WHERE {where} AND {tile_expr} IN ("
                         f"SELECT {tile_expr} AS t FROM points WHERE {where} GROUP BY t HAVING count() <= {K}) "
