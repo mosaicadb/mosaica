@@ -21,7 +21,8 @@ These are done once, by the owner of the repository and the registry accounts.
    scope, and each of `@mosaicajs/client`, `@mosaicajs/deck`, `@mosaicajs/components` and
    `@mosaicajs/react` exists as a 0.0.0 placeholder. On each package's Settings page, under Trusted
    publishing, add GitHub Actions with repository `mosaicadb/mosaica`, workflow `release.yml` and
-   environment `release`. No token is stored, and npm records provenance for each publish.
+   environment `release`, and select Allow npm dist-tag so that the workflow can move `next`. No
+   token is stored, and npm records provenance for each publish.
 4. **crates.io trusted publishers.** All twenty published crates exist as 0.0.0 placeholders. On
    each crate's Settings page at crates.io, under Trusted Publishing, add GitHub with repository
    owner `mosaicadb`, repository `mosaica`, workflow `release.yml` and environment `release`. No
@@ -84,7 +85,7 @@ Every third-party action in `release.yml` and `wheels.yml` is pinned to a commit
 | `archives` | One `mosaica-<target>.tar.gz` per target, with no version in the name so `/releases/latest/download/` links stay fixed, with the binary, `LICENSE`, `THIRD_PARTY_LICENSES`, `README.md` and `CHANGELOG.md`, and `SHA256SUMS`. |
 | `npm-pack` | Builds the four npm packages and packs them. |
 | `pypi` | Publishes `mosaica-native`, waits until PyPI serves it, then publishes `mosaica`, through trusted publishing. |
-| `npm` | Publishes the four tarballs in dependency order through trusted publishing, with provenance; the newest release goes to `latest`, a later candidate to `next` (see below). |
+| `npm` | Publishes the four tarballs in dependency order through trusted publishing, with provenance; the newest release goes to `latest` and `next`, a later candidate to `next` alone (see below). |
 | `crates` | Packages and builds the twenty crates, then `cargo publish --workspace --no-verify` through trusted publishing, in dependency order. |
 | `image-build`, `image` | Builds the image natively on amd64 and arm64, pushes both by digest, then tags the pair as the version and `next`, the newest release also `latest`, and a full release also the minor version. |
 | `github-release` | Creates the release with the changelog section as its notes, marked latest if it is the newest release and pre-release otherwise. |
