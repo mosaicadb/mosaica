@@ -4,6 +4,8 @@ Mosaica is a database for interactive maps of very large sets of points. Give it
 
 It is designed to hold billions of points on one machine and to serve them to many viewers at once. The data can change while it serves. New records appear on the map at the next flush, every 90 seconds by default, and a deletion applies to every request that starts after the server accepts it.
 
+![150,000 GeoNames places in the Mosaica explorer, coloured by feature class](assets/brand/mosaica_example.png)
+
 ## What a map can show
 
 <div class="grid cards" markdown>
