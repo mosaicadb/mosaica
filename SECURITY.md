@@ -16,6 +16,5 @@ The defects the threat model covers:
 - a deletion or a suppression that a later request does not observe
 - a filter that reveals an item rather than hiding one
 
-No version is supported. Nothing is deployed and there are no released artefacts. A format change
-bumps the format version so that a stale bundle is refused, rather than being migrated. A fix lands
-on `main`.
+Only the latest release is supported, and a fix ships in the next release. A format change bumps the
+format version so that a stale bundle is refused, rather than being migrated.
