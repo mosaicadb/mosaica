@@ -123,7 +123,7 @@ nav:
       - Views and projections: system/views.md
       - Queries: system/queries.md
       - Serving: system/serving.md
-      - Performance: system/performance.md
+      - Compared with other databases: system/comparison.md
       - Changing data: system/write-path.md
       - Clients: system/clients.md
       - Maps in the browser: system/browser-maps.md
