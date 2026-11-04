@@ -53,8 +53,9 @@ clients behave as they did in 0.1.0.
   value for a group-scoped field. The second batch is now checked again, so an equal value counts
   as a repeat and a different one as an edit.
 - Building a text field with very many distinct words held one 8-byte offset per word in memory
-  outside the build's memory budget, about 1.6 GB at 100 million words. The offsets are now written
-  to a scratch file.
+  outside the build's memory budget, about 0.8 GB at 100 million words. The offsets are now written
+  to a scratch file, and so are those of the word positions this release adds, which would have
+  doubled the figure.
 
 ### Documentation
 
