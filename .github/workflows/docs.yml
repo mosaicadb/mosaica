@@ -1,6 +1,7 @@
 # The documentation checks and the site's build, as `scripts/check-docs.sh` runs them. The gate
 # (`ci.yml`) calls this on every pull request; `pages.yml` calls it with `pages` set, and the built
-# site is uploaded for GitHub Pages to deploy.
+# site is uploaded for GitHub Pages to deploy. As in `release.yml`, every action is pinned to a
+# commit, and the site's build restores no cache another workflow could have written.
 
 name: docs
 
@@ -19,18 +20,18 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-          cache: pip
+          cache: ${{ !inputs.pages && 'pip' || '' }}
           cache-dependency-path: docs/constraints.txt
       - run: pip install -r docs/requirements.txt -c docs/constraints.txt
       # The TypeScript and components reference is generated from clients/ts before the site's build.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22.15"
-          cache: npm
+          cache: ${{ !inputs.pages && 'npm' || '' }}
           cache-dependency-path: clients/ts/package-lock.json
       - run: npm --prefix clients/ts ci
       - run: bash scripts/check-docs.sh site
