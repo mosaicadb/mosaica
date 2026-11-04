@@ -60,7 +60,7 @@ from frame import (EXTENT, K, MAX_DEPTH, TYPES, YEAR_BINS, Camera, Filter, Frame
                    fixed32, grid_depth, points_by_tile)
 from oracle import TABLES, VIEWER
 
-from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+from .base import (MEMORY, MEMORY_GIB, Adapter, Container, docker_info, du_bytes, free_ports,
                    fsync_tree, wait_for)
 
 IMAGE = "opensearchproject/opensearch:3.9.0"
@@ -244,7 +244,6 @@ class OpenSearch(Adapter):
         self.viewers: list[requests.Session] = []
         self.pool = ThreadPoolExecutor(2)
         self.access_checks: dict = {}
-        self.extra_env: dict = {}
 
     @staticmethod
     def _session(auth: tuple[str, str]) -> requests.Session:
@@ -263,7 +262,7 @@ class OpenSearch(Adapter):
             f"{IMAGE.split(':')[0]}@{IMAGE_DIGEST}", entrypoint=f"{HOME}/opensearch-docker-entrypoint.sh",
             args=("opensearch",), nice=nice, ports={self.port: 9200},
             mounts={str(self.data): f"{HOME}/data", str(self.logs): f"{HOME}/logs"},
-            env={**self.extra_env, "discovery.type": "single-node", "OPENSEARCH_JAVA_OPTS": f"-Xms{HEAP} -Xmx{HEAP}",
+            env={"discovery.type": "single-node", "OPENSEARCH_JAVA_OPTS": f"-Xms{HEAP} -Xmx{HEAP}",
                  "OPENSEARCH_INITIAL_ADMIN_PASSWORD": self.admin_auth[1],
                  "DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI": "true"})
 
@@ -301,15 +300,6 @@ class OpenSearch(Adapter):
             self.admin.close()
             self.admin = None
         self.container.stop()
-
-    def remove(self) -> None:
-        self.container.remove()
-
-    def evict(self) -> None:
-        evict_files(self.data)
-
-    def serve_memory(self) -> dict:
-        return self.container.memory()
 
     # -- requests ----------------------------------------------------------------------------------
 

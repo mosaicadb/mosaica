@@ -43,7 +43,7 @@ from frame import (EXTENT, K, YEAR_BINS, Camera, Filter, Frame, deinterleave, gr
                    points_by_tile)
 from oracle import TABLES, VIEWER
 
-from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+from .base import (MEMORY, Adapter, Container, docker_info, du_bytes, free_ports,
                    fsync_tree, wait_for)
 from .sql import filter_sql
 
@@ -181,15 +181,6 @@ class ClickHouse(Adapter):
             s.close()
         self.sessions = []
         self.container.stop()
-
-    def remove(self) -> None:
-        self.container.remove()
-
-    def evict(self) -> None:
-        evict_files(self.data)
-
-    def serve_memory(self) -> dict:
-        return self.container.memory()
 
     # -- SQL ---------------------------------------------------------------------------------------
 

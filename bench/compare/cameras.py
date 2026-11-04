@@ -34,7 +34,7 @@ import numpy as np
 
 from dataset import DATASET
 from frame import EXTENT, SCREEN, TILE_PX, Camera, Filter, fixed32
-from oracle import VIEWER, Oracle
+from oracle import VIEWER, Oracle, summed
 
 BATTERY_ZOOMS = (0, 4, 8, 12, 16)
 SCRIPT_ZOOMS = (3, 6, 9, 12, 14)
@@ -54,10 +54,10 @@ def tile_counts(oracle: Oracle, z: int, within: tuple[int, int, int] | None = No
         pz, ptx, pty = within
         s = 32 - pz
         where += f" AND qx::UBIGINT >> {s} = {ptx} AND qy::UBIGINT >> {s} = {pty}"
-    return oracle.con.execute(
-        f"SELECT qx::UBIGINT >> {shift} AS tx, qy::UBIGINT >> {shift} AS ty, count(*) AS n FROM {oracle.src} "
-        f"{where} GROUP BY ALL ORDER BY n, tx, ty"
-    ).fetchall()
+    counts = summed(oracle.con.execute(
+        f"SELECT qx::UBIGINT >> {shift}, qy::UBIGINT >> {shift}, count(*) FROM {oracle.src} "
+        f"{where} GROUP BY ALL").fetchall())
+    return sorted(((tx, ty, n) for (tx, ty), n in counts.items()), key=lambda r: (r[2], r[0], r[1]))
 
 
 def cam(z: int, cx: float, cy: float, label: str) -> dict:
@@ -123,10 +123,10 @@ def attribute_filters(oracle: Oracle) -> list[tuple[str, list[dict]]]:
     con, category, year, flag = oracle.con, DATASET.category, DATASET.year, DATASET.flag
     src = f"{oracle.src} WHERE {oracle.visible_where}"
     total = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
-    types = {t: n / total for t, n in con.execute(
-        f"SELECT {category}, count(*) FROM {src} AND {category} IS NOT NULL GROUP BY 1").fetchall()}
-    years = con.execute(f"SELECT {year}, count(*) FROM {src} AND {year} IS NOT NULL "
-                        f"GROUP BY 1 ORDER BY 1").fetchall()
+    types = {t: n / total for t, n in summed(con.execute(
+        f"SELECT {category}, count(*) FROM {src} AND {category} IS NOT NULL GROUP BY 1").fetchall()).items()}
+    years = sorted(summed(con.execute(
+        f"SELECT {year}, count(*) FROM {src} AND {year} IS NOT NULL GROUP BY 1").fetchall()).items())
     below, acc = {}, 0
     for y, n in years:
         below[y] = acc / total

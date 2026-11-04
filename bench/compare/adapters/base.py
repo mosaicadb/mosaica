@@ -26,6 +26,9 @@ class Adapter(ABC):
 
     name: str
     access: str
+    #: The server's container, and the directory of its data on the host.
+    container: Container
+    data: Path
 
     def __init__(self, tier: Path, work: Path, nice: int = 0, caches: str = "compute",
                  dense: str = "points"):
@@ -63,10 +66,10 @@ class Adapter(ABC):
     @abstractmethod
     def stop(self) -> None: ...
 
-    @abstractmethod
     def evict(self) -> None:
         """Remove this system's own caches and its files' pages from the page cache, with the
         server stopped. Never the whole machine's page cache."""
+        evict_files(self.data)
 
     @abstractmethod
     def frame(self, camera: Camera, filt: Filter | None) -> tuple[Frame, float]: ...
@@ -75,16 +78,17 @@ class Adapter(ABC):
     def tables(self, camera: Camera, filt: Filter | None) -> tuple[dict, float]:
         """The aggregation workload's tables in the shape `Oracle.tables` gives."""
 
-    @abstractmethod
     def serve_memory(self) -> dict:
         """`peak_rss_bytes` and `cgroup_peak_bytes` of the running server since it started."""
+        return self.container.memory()
 
     @abstractmethod
     def config(self) -> dict:
         """The settings this system ran with, as recorded in the result."""
 
     def remove(self) -> None:
-        """Remove anything `start` left behind that `stop` does not, such as a container."""
+        """Remove what `start` left behind that `stop` does not: the container."""
+        self.container.remove()
 
     def restart(self, cold: bool) -> None:
         self.stop()

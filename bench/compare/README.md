@@ -73,8 +73,8 @@ Each run works in a directory of its own, `$DATA/bench-compare/work/<system>-<ca
 and removes it when it ends, and each server listens on ports the kernel reports free when the run
 starts (`adapters/base.py`, `free_ports`), so runs side by side do not collide.
 
-Every system's build and server run in Docker containers, each capped at 16 GiB with no swap and
-run as the invoking user, so that each cgroup's `memory.peak` is that system's own
+Every system's build and server run in Docker containers, each capped at `BENCH_MEMORY` (whole
+gibibytes, `24g` by default) with no swap and run as the invoking user, so that each cgroup's `memory.peak` is that system's own
 (`adapters/base.py`, `Container`). A container's cgroup is read at Docker's systemd driver path on
 cgroup v2, and a run stops with an error where it is missing. Each container runs the host's
 `/usr/bin/nice` and `/usr/bin/sleep`, mounted read-only, because the Mosaica image has neither;
@@ -106,7 +106,7 @@ default. The table gives each its own column, and each record lists every cache 
 | Mosaica | `fragment_cache_bytes` | each grant's visibility masks in memory: state | default | 1 GiB |
 | Mosaica | `occupancy_cache_bytes` | each viewer's occupied-tile counts, from which sampling is set: state | default | 32 MiB |
 | PostGIS | none | PostgreSQL keeps no cache of results, so its two modes run the same server | – | – |
-| PostGIS | `shared_buffers`, and the machine's page cache | the table's and index's pages: state | 4 GB | 4 GB |
+| PostGIS | `shared_buffers`, and the machine's page cache | the table's and index's pages: state | a quarter of `BENCH_MEMORY`, 6 GB at `24g` | the same |
 | PostGIS | each connection's catalogue and plan caches | the schema, and statements a client prepares; the adapter prepares none (`prepare_threshold=None`): state | default | default |
 | OpenSearch | `index.requests.cache.enable` | the shard request cache: whole results of `size: 0` searches. The security plugin bypasses it for a search under document-level security, so it never serves the viewer in either mode | off | on |
 | OpenSearch | `index.queries.cache.enabled` | the node query cache: which documents a filter clause matched, per segment | off | on |
@@ -130,8 +130,8 @@ warm, on a loaded machine (median ms by zoom):
 
 | Query | Zoom 0 | 3 | 4 | 6 | 8 | 12 | 16 | All frames |
 |---|---|---|---|---|---|---|---|---|
-| **`ORDER BY tile, rank LIMIT K BY tile` (used)** | 29 | 269 | 35 | 24 | 10 | 7.2 | 7.2 | **2.6 s** |
-| `arrayJoin(groupArraySorted(K)((rank, qx, qy)))` `GROUP BY` tile | 117 | 158 | 40 | 38 | 13 | 5.5 | 6.2 | 2.6 s |
+| `ORDER BY tile, rank LIMIT K BY tile` | 29 | 269 | 35 | 24 | 10 | 7.2 | 7.2 | 2.6 s |
+| **`arrayJoin(groupArraySorted(K)((rank, qx, qy)))` `GROUP BY` tile (used, `ORDER BY rank LIMIT K` at zoom 0)** | 117 | 158 | 40 | 38 | 13 | 5.5 | 6.2 | **2.6 s** |
 | `row_number() OVER (PARTITION BY` tile `ORDER BY rank) <= K` | 844 | 451 | 63 | 31 | 7.9 | 6.2 | 5.9 | 5.3 s |
 
 The aggregation was faster at zoom 3 and slower at zoom 0, and level overall, at 10⁷. At GBIF's
@@ -194,25 +194,27 @@ arm selects them by their ranges of `m`, adjacent ranges joined, `OR`ed in one c
 answers; session start holds the viewer's two connections, each authenticated by SCRAM, and its
 first frame.
 
-PostGIS is tuned as PostgreSQL's documentation recommends for reads, under the 16 GiB cap; every
-setting is in `SETTINGS` and each record lists them with the server's values:
+PostGIS is tuned as PostgreSQL's documentation recommends for reads, under the container's cap,
+`BENCH_MEMORY`; the memory settings are fractions of it, given below at the default of `24g`.
+Every setting is in `SETTINGS` and each record lists them with the server's values:
 
 | Setting | Value | Default | Why |
 |---|---|---|---|
-| `shared_buffers` | 4 GB | 128 MB | A quarter of the memory, the documentation's starting point |
-| `effective_cache_size` | 12 GB | 4 GB | `shared_buffers` and the page cache the cap leaves |
+| `shared_buffers` | a quarter of `BENCH_MEMORY`, 6 GB | 128 MB | The documentation's starting point |
+| `effective_cache_size` | three quarters of `BENCH_MEMORY`, 18 GB | 4 GB | `shared_buffers` and the page cache the cap leaves |
 | `work_mem` | 64 MB | 4 MB | Each sort and hash in a query may use this much; the largest grid's hash table needs more than the default |
 | `max_worker_processes`, `max_parallel_workers` | the machine's CPUs, which each record gives | 8 | Parallel query may use every CPU |
 | `max_parallel_workers_per_gather` | half the CPUs | 2 | A frame sends two queries at once |
 | `jit` | off | on | JIT pays for long CPU-bound queries and costs more than it saves on short ones, which a frame's are |
 | `random_page_cost` | 1.1 | 4 | The value the documentation gives for solid-state storage |
-| `parallel_setup_cost`, `parallel_tuple_cost` | 100, 0.01 | 1000, 0.1 | A grid's partial aggregates send many groups to the leader; at the defaults the planner aggregates millions of rows in one process rather than pay for them |
+| `parallel_setup_cost`, `parallel_tuple_cost` | 100, 0.01 | 1000, 0.1 | A grid's partial aggregates send many groups to the leader; at the defaults the planner aggregates millions of rows in one process rather than pay for them. Every arm runs with them; the PaperSeek shapes below were measured at the defaults |
 | `CREATE STATISTICS` on `(qx >> s), (qy >> s)` for each depth 0 to 16 | built by `VACUUM ANALYZE` | none | From the columns' statistics alone the planner overestimates the cells of a grid or tile grouping many times over, and does not then aggregate in parallel |
 
 A dense tile's sample is its K matching rows of lowest `rank`. Three ways of asking for it were
 measured, each exact, over every frame of the three workloads, warm, as the viewer (median ms by
-zoom). Each record's `config` keeps the viewer's plan of the arm's query at zoom 0 and at
-zoom 8:
+zoom), with `parallel_setup_cost` and `parallel_tuple_cost` at their defaults: every arm now runs
+with them lowered (see the table above), and these figures were not taken again. Each record's
+`config` keeps the viewer's plan of the arm's query at zoom 0 and at zoom 8:
 
 | Query | Arm | Zoom 0 | 3 | 4 | 6 | 8 | 12 | 16 | All frames |
 |---|---|---|---|---|---|---|---|---|---|
@@ -254,8 +256,9 @@ key. `TABLESAMPLE` was not used: it samples pages or rows of the whole table by 
 before the policy and the filter, so it cannot give exactly K matching rows a tile.
 The build's server also runs with what "Populating a Database" recommends for a bulk load:
 `wal_level = minimal` and `max_wal_senders = 0`, so that the `COPY` and the table and index made in
-the same transaction may skip the WAL; `maintenance_work_mem = 2GB`; and `max_wal_size = 16GB`
-(`BULK`). The serving server runs without them. `/dev/shm` is 2 GB, since the image's
+the same transaction may skip the WAL; `maintenance_work_mem` an eighth of `BENCH_MEMORY` up to
+2 GB, which it reaches at `16g`; and `max_wal_size = 16GB` (`BULK`). The serving server runs
+without them. `/dev/shm` is the same eighth up to 2 GB, since the image's
 documentation warns that Docker's 64 MB may be too small for parallel query.
 
 The viewer's restriction is row-level security: the superuser builds and owns the table, enables
@@ -388,7 +391,7 @@ indexing speed and search performance:
 
 | Setting | Value | Default | Why |
 |---|---|---|---|
-| Heap (`-Xms`, `-Xmx`) | 8 GiB | 1 GiB (the image's `jvm.options`) | Half the container's memory, up to 31 GB |
+| Heap (`-Xms`, `-Xmx`) | half of `BENCH_MEMORY` up to 31 GiB, 12 GiB at `24g` | 1 GiB (the image's `jvm.options`) | Half the container's memory, up to 31 GB |
 | `discovery.type` | `single-node` | multi-node discovery | One node |
 | `index.number_of_shards` | 1 | 1 | Stated: the fastest of the layouts measured |
 | `index.number_of_replicas` | 0 | 1 | One node, and no replicas during a bulk load |

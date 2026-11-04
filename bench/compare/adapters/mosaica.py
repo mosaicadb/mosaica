@@ -54,7 +54,7 @@ from frame import (EXTENT, FIXED_SPAN, GRID_OFFSET, K, TYPE_TOP, TYPES, YEAR_BIN
                    Frame, deinterleave, grid_depth, interleave, points_by_tile)
 from oracle import TABLES, VIEWER
 
-from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, evict_files, free_ports,
+from .base import (MEMORY, TOOLS, Adapter, Container, docker_info, du_bytes, free_ports,
                    image_id, wait_for)
 
 #: The viewer, session and control listeners inside the container.
@@ -222,6 +222,7 @@ class Mosaica(Adapter):
         self.pool = ThreadPoolExecutor(2)
         self.image = image
         self.container = Container(f"bench-compare-mosaica-{os.getpid()}")
+        self.data = self.work / "bundle"
         #: The viewer, session and control listeners on the host.
         self.ports = free_ports(3)
         self.cred = secrets.token_urlsafe(24)
@@ -287,7 +288,7 @@ operator_credential_env = "{CRED_ENV}"
         that its cgroup's peak is read after the build ends; the build's own peak RSS is its
         stage timings' largest."""
         self.remove()
-        subprocess.run(["rm", "-rf", str(self.work / "bundle"), str(self.work / ".mosaica")], check=True)
+        subprocess.run(["rm", "-rf", str(self.data), str(self.work / ".mosaica")], check=True)
         self.api_key = None
         self._write_deployment()
         builder = Container(self.container.name + "-build")
@@ -323,7 +324,7 @@ operator_credential_env = "{CRED_ENV}"
                         "three empty execs in the same container",
             "peak_rss_bytes": max(s["peak_rss_kib"] for s in stages) * 1024,
             "cgroup_peak_bytes": cgroup_peak,
-            "disk_bytes": du_bytes(self.work / "bundle"),
+            "disk_bytes": du_bytes(self.data),
             "disk": "du of the bundle directory",
             "nice": self.nice,
         }
@@ -378,15 +379,9 @@ operator_credential_env = "{CRED_ENV}"
         self.http = self.agg_http = None
         self.container.stop()
 
-    def remove(self) -> None:
-        self.container.remove()
-
-    def serve_memory(self) -> dict:
-        return self.container.memory()
-
     def evict(self) -> None:
         subprocess.run(["rm", "-rf", str(self.work / ".mosaica/cache")], check=True)
-        evict_files(self.work / "bundle")
+        super().evict()
 
     def frame(self, camera: Camera, filt: Filter | None) -> tuple[Frame, float]:
         z, dg = camera.zoom, grid_depth(camera.zoom)

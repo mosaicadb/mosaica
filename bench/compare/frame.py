@@ -53,9 +53,6 @@ SUBCELL_OFFSET = 4
 DENSE = ("points", "counts")
 #: The values of the data set's category (PaperSeek's work types), which a category filter may name.
 TYPES = DATASET.categories
-#: The licence terms, which are the access terms: every row carries exactly one.
-LICENCES = ("unlicensed", "cc-by", "cc-by-nc-nd", "cc-by-nc", "other-oa", "cc-by-sa", "cc-by-nc-sa",
-            "public-domain", "cc-by-nd", "publisher-specific-oa", "mit")
 #: The year histogram of the aggregation workload: one-year bins over
 #: `[YEAR_BINS[0], YEAR_BINS[1])`. A year outside it is counted as `rest`, no year as `none`.
 YEAR_BINS = DATASET.year_bins
