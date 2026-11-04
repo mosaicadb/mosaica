@@ -60,7 +60,10 @@ These are done once, by the owner of the repository and the registry accounts.
    ```
 
 5. **Merge to `main`** and wait for the gate (`ci.yml`) to pass on the merge commit.
-6. **Tag and push the tag:**
+6. **Tag and push the tag.** Before the first full release that moves `next`, 0.2.0, check that
+   each npm package's trusted publisher allows npm dist-tag (step 3 of the set-up). It is a
+   one-time setting, and without it the `npm` job publishes the four packages and then fails to
+   move `next`, which turning it on and re-running the job finishes.
 
    ```bash
    git tag -a v0.2.0 -m "Mosaica 0.2.0"

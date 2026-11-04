@@ -229,11 +229,17 @@ jobs:
             else
               npm publish "./dist-npm/mosaicajs-$name-$VERSION.tgz" --provenance --access public --tag "$DIST_TAG"
             fi
-            # `next` follows every release, as the image's does, so it never names an older
-            # version than `latest`. The trusted publisher must allow npm dist-tag.
-            if [ "$DIST_TAG" = latest ]; then
-              npm dist-tag add "@mosaicajs/$name@$VERSION" next
-            fi
+          done
+      # `next` follows every release, as the image's does, so it never names an older version
+      # than `latest`. After every publish, so a trusted publisher that does not allow npm dist-tag
+      # leaves all four published; adding a tag a package already has changes nothing on a re-run.
+      - name: move next to the newest release
+        if: needs.verify.outputs.newest == 'true'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          for name in client deck components react; do
+            npm dist-tag add "@mosaicajs/$name@$VERSION" next
           done
 
   # Trusted publishing: crates.io exchanges this job's OIDC token for a publish token that lasts
