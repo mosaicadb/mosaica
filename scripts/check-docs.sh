@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The documentation checks, as the `docs` job in .github/workflows/ci.yml runs them: the TypeScript
-# and components reference generated from the client sources, the site's strict build, the
-# register, the links in the site's pages, and the Python blocks in the tutorials and guides.
+# The documentation checks, as .github/workflows/docs.yml runs them for the gate and the site:
+# the TypeScript and components reference generated from the client sources, the site's strict
+# build, the register, the links in the site's pages, and the Python blocks in the tutorials and
+# guides.
 # Given a directory, the site is built into it and kept there, as the Pages workflow deploys it.
 #
 # The tools come from .venv-docs when it exists, and from PATH otherwise. To make it:

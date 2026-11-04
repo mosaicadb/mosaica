@@ -50,7 +50,7 @@ exclude_docs: |
   /constraints.txt
   /tests/
   /openapi/templates/
-  /assets/brand/social-preview.html
+  /assets/brand/social-preview.*
 
 validation:
   omitted_files: warn
