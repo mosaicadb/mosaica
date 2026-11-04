@@ -61,6 +61,18 @@
     },
     "5e7": {
       "file": "gbif-5e7.parquet",
+      "columns": [
+        "entity_id",
+        "x",
+        "y",
+        "kingdom",
+        "year",
+        "access",
+        "label",
+        "qx",
+        "qy",
+        "rank"
+      ],
       "nominal_rows": 50000000,
       "rows": 49995634,
       "threshold": 263846828899248000,
@@ -79,6 +91,18 @@
     },
     "1e8": {
       "file": "gbif-1e8.parquet",
+      "columns": [
+        "entity_id",
+        "x",
+        "y",
+        "kingdom",
+        "year",
+        "access",
+        "label",
+        "qx",
+        "qy",
+        "rank"
+      ],
       "nominal_rows": 100000000,
       "rows": 100000328,
       "threshold": 527693657798496000,
@@ -159,6 +183,36 @@
         "Viruses": 72658
       },
       "sha256": "05e8c66e96386b8f0ec7ccb4859bbf95d9793f5e4639669ff805994eb938b239"
+    },
+    "1e7": {
+      "file": "gbif-1e7.parquet",
+      "columns": [
+        "entity_id",
+        "x",
+        "y",
+        "kingdom",
+        "year",
+        "access",
+        "label",
+        "qx",
+        "qy",
+        "rank"
+      ],
+      "nominal_rows": 10000000,
+      "rows": 10003852,
+      "threshold": 52769365779849600,
+      "rows_by_kingdom": {
+        "Animalia": 7955034,
+        "Plantae": 1445013,
+        "Bacteria": 273384,
+        "Fungi": 136011,
+        "Chromista": 126682,
+        "incertae sedis": 30521,
+        "Archaea": 28630,
+        "Protozoa": 8398,
+        "Viruses": 179
+      },
+      "sha256": "b6470c1deb17971d6b8d6c819a16c55c2accfa5b77aec42c602c40885c87cee6"
     }
   }
 }
