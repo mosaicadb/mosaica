@@ -1027,7 +1027,12 @@ impl std::fmt::Display for WalError {
                 f,
                 "wal corruption before the last-fsynced offset — acked state may be damaged"
             ),
-            WalError::BadHeader => write!(f, "wal file header missing or unrecognised"),
+            WalError::BadHeader => write!(
+                f,
+                "a file of the log has no header this version of Mosaica writes, so the log was \
+                 written by another version or is not a Mosaica log; move the log's files aside, \
+                 or set `[bundle] wal` to a new path, to serve this bundle without it"
+            ),
             WalError::OtherDatabase { path } => write!(
                 f,
                 "{} is part of a log written for another database; move that log's files aside, \
