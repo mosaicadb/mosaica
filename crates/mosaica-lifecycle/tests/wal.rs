@@ -415,7 +415,7 @@ fn bad_header_is_rejected() {
     corrupt_byte(&member(&path, 1), 0);
 
     match Wal::open(&path, DATABASE) {
-        Err(WalError::BadHeader) => {}
+        Err(WalError::BadHeader { .. }) => {}
         Err(other) => panic!("expected BadHeader, got a different error: {other}"),
         Ok(_) => panic!("expected BadHeader, got Ok"),
     }

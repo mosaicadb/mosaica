@@ -992,7 +992,7 @@ pub struct PublishedContent {
     pub cardinality: u64,
 }
 
-/// WAL-level failures. [`WalError::WalCorruption`], [`WalError::BadHeader`] and
+/// WAL-level failures. [`WalError::WalCorruption`], the header refusals and
 /// [`WalError::Poisoned`] are all fail-closed cases: the caller must not treat the WAL as
 /// open/ready, and must not attempt further operations on a poisoned handle.
 #[derive(Debug)]
@@ -1004,10 +1004,14 @@ pub enum WalError {
     /// a caller was told was durable — possibly a deny — is damaged, missing, or not where the
     /// sidecar says it is. Fail closed (lifecycle §4): do not come ready.
     WalCorruption,
-    /// The file's leading magic/version header is missing or does not match. Not itself a
-    /// framing/CRC failure, but the same fail-closed answer applies: a file we cannot positively
-    /// identify as this WAL format must not be trusted or written to.
-    BadHeader,
+    /// The member at `path` has a header that is cut short, is not a log's, or names another
+    /// member. Not itself a framing/CRC failure, but the same fail-closed answer applies: a file
+    /// we cannot positively identify as this member of this log must not be trusted or written
+    /// to. It can be the database's own log, damaged, so nothing here says to set it aside.
+    BadHeader { path: PathBuf },
+    /// The member at `path` is a log's, written at format `version`, which this build does not
+    /// read. Nothing in it is read or changed.
+    OtherVersion { path: PathBuf, version: u16 },
     /// The member at `path` was written for another database. Nothing in it is read or changed.
     OtherDatabase { path: PathBuf },
     /// A previous `append` or `fsync` failed, and the handle has not been repaired. Every
@@ -1027,11 +1031,18 @@ impl std::fmt::Display for WalError {
                 f,
                 "wal corruption before the last-fsynced offset — acked state may be damaged"
             ),
-            WalError::BadHeader => write!(
+            WalError::BadHeader { path } => write!(
                 f,
-                "a file of the log has no header this version of Mosaica writes, so the log was \
-                 written by another version or is not a Mosaica log; move the log's files aside, \
-                 or set `[bundle] wal` to a new path, to serve this bundle without it"
+                "{} has a header that is cut short, is not a write-ahead log's, or names another \
+                 member of the log",
+                path.display()
+            ),
+            WalError::OtherVersion { path, version } => write!(
+                f,
+                "{} is part of a log written at log format {version}, and this version of Mosaica \
+                 reads only format {WAL_VERSION}; move that log's files aside, or set \
+                 `[bundle] wal` to a new path, to serve this bundle",
+                path.display()
             ),
             WalError::OtherDatabase { path } => write!(
                 f,
@@ -1495,21 +1506,24 @@ fn check_header(file: &mut File, base: &SequenceBase, expected_number: u64) -> R
     file.seek(SeekFrom::Start(0))?;
     let mut buf = [0u8; HEADER_LEN as usize];
     let n = read_up_to(file, &mut buf)?;
-    if n < HEADER_LEN as usize
-        || buf[0..4] != WAL_MAGIC
-        || u16::from_le_bytes([buf[4], buf[5]]) != WAL_VERSION
-    {
-        return Err(WalError::BadHeader);
+    let path = || base.member(expected_number);
+    let version = u16::from_le_bytes([buf[4], buf[5]]);
+    if n >= 6 && buf[0..4] == WAL_MAGIC && version != WAL_VERSION {
+        return Err(WalError::OtherVersion {
+            path: path(),
+            version,
+        });
+    }
+    if n < HEADER_LEN as usize || buf[0..4] != WAL_MAGIC {
+        return Err(WalError::BadHeader { path: path() });
     }
     if buf[6..22] != base.database {
-        return Err(WalError::OtherDatabase {
-            path: base.member(expected_number),
-        });
+        return Err(WalError::OtherDatabase { path: path() });
     }
     let number = u64::from_le_bytes(buf[22..30].try_into().expect("8 bytes"));
     let base_pos = u64::from_le_bytes(buf[30..38].try_into().expect("8 bytes"));
     if number != expected_number {
-        return Err(WalError::BadHeader);
+        return Err(WalError::BadHeader { path: path() });
     }
     Ok((number, base_pos))
 }

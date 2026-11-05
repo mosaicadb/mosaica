@@ -286,7 +286,7 @@ fn a_member_whose_header_number_disagrees_with_its_name_fails_closed() {
     f.write_all(&7u64.to_le_bytes()).unwrap();
     f.sync_all().unwrap();
 
-    assert!(matches!(Wal::open(&base, DATABASE), Err(WalError::BadHeader)));
+    assert!(matches!(Wal::open(&base, DATABASE), Err(WalError::BadHeader { .. })));
 }
 
 /// A crash between creating a member and writing its header leaves a zero-length file. Refusing it

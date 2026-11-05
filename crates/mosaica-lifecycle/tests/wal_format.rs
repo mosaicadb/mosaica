@@ -78,7 +78,7 @@ fn an_older_version_wal_is_refused() {
         header_at_version(1, 1, 0),
     )
     .unwrap();
-    assert!(matches!(Wal::open(&path, DATABASE), Err(WalError::BadHeader)));
+    assert!(matches!(Wal::open(&path, DATABASE), Err(WalError::OtherVersion { .. })));
 }
 
 /// A coordinate the log has to carry at full width, round-tripped exactly.
@@ -198,7 +198,7 @@ fn a_log_at_a_version_whose_records_would_be_misread_is_refused() {
         std::fs::write(at.join("wal-000001.log"), header_at_version(version, 1, 0)).unwrap();
         assert!(matches!(
             Wal::open(at.join("wal.log"), DATABASE),
-            Err(WalError::BadHeader)
+            Err(WalError::OtherVersion { .. })
         ));
     }
 
@@ -407,7 +407,7 @@ fn a_log_whose_header_names_no_database_is_refused() {
 
     assert!(matches!(
         Wal::open(dir.path().join("wal.log"), DATABASE),
-        Err(WalError::BadHeader)
+        Err(WalError::OtherVersion { .. })
     ));
     assert_eq!(
         std::fs::read(dir.path().join("wal-000001.log")).unwrap(),
@@ -468,4 +468,17 @@ fn a_log_is_refused_by_any_database_but_its_own() {
     let wal = Wal::open(written.join("wal.log"), DATABASE).unwrap();
     let records: Vec<WalRecord> = wal.records().map(|r| r.unwrap().1).collect();
     assert_eq!(records, vec![record]);
+}
+
+/// A member of this format whose header a crash cut short is refused as a damaged header, apart
+/// from a log written at another format, because it can be the database's own log.
+#[test]
+fn a_header_cut_short_is_refused_as_damaged_and_not_as_another_version() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let header = header_at_version(44, 1, 0);
+    std::fs::write(dir.path().join("wal-000001.log"), &header[..30]).unwrap();
+    assert!(matches!(
+        Wal::open(dir.path().join("wal.log"), DATABASE),
+        Err(WalError::BadHeader { .. })
+    ));
 }
