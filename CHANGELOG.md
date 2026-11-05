@@ -6,7 +6,7 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-11-05
 
 An alpha, like 0.1.0. The bundle format has changed, so 0.2.0 refuses a bundle that 0.1.0 built,
 and each one has to be built again. The HTTP API keeps its version, and the Python and TypeScript
