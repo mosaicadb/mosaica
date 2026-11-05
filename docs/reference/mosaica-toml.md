@@ -16,7 +16,7 @@ The table is required.
 | --- | --- | --- | --- |
 | `path` | string (a path) | required | The bundle directory, which `mosaica build` writes unless `--out` names another, and `mosaica serve` opens. |
 | `cache` | string (a path) | `".mosaica/cache"` | A directory outside the bundle for files the server derives: cached visibility masks, which survive a restart, and suggestion indexes and scratch files, which are rebuilt at each start. |
-| `wal` | string (a path) | `".mosaica/wal.log"` | The write-ahead log. Every write through the control plane is appended and synced to disc here before it is acknowledged, and the log is replayed when the server starts. The path names a series of files: `wal.log` is written as `wal-000001.log`, `wal-000002.log` and so on, and is never itself a file. |
+| `wal` | string (a path) | `".mosaica/wal.log"` | The write-ahead log. Every write through the control plane is appended and synced to disc here before it is acknowledged, and the log is replayed when the server starts. The path names a series of files: `wal.log` is written as `wal-000001.log`, `wal-000002.log` and so on, and is never itself a file. A log belongs to the bundle it was written for, and the server refuses to start with a log written for another, a rebuild of the same sources included. |
 
 ## `[build]`
 

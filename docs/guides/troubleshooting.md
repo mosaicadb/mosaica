@@ -59,7 +59,8 @@ A page can call the viewer address only from an origin the server admits. Add th
 - **an address already in use**, which the message doesn't name, so check each of `viewer`, `session` and `control` under `[serve]`;
 - **an operator credential file it can't read**;
 - **no `mosaica.toml` found**, searching from the directory you ran it in and upwards; name it with `--deployment`;
-- **a bundle whose file formats this version doesn't read**, which the message says to rebuild.
+- **a bundle whose file formats this version doesn't read**, which the message says to rebuild;
+- **a log written for another bundle**, such as the log of the bundle a rebuild replaced. Move the log's files aside, as [Rebuild and replace the bundle](rebuild.md#swap-it-in) shows.
 
 ## The server is slow
 

@@ -136,7 +136,9 @@ struct RawBundle {
     /// The write-ahead log. Every write through the control plane is appended and synced to disc
     /// here before it is acknowledged, and the log is replayed when the server starts. The path
     /// names a series of files: `wal.log` is written as `wal-000001.log`, `wal-000002.log` and so
-    /// on, and is never itself a file.
+    /// on, and is never itself a file. A log belongs to the bundle it was written for, and the
+    /// server refuses to start with a log written for another, a rebuild of the same sources
+    /// included.
     ///
     /// Default: `".mosaica/wal.log"`.
     wal: Option<PathBuf>,

@@ -72,7 +72,7 @@ Deleted and edited items stay in the bundle, hidden, until a **compaction** remo
 | `wal` | The write-ahead log: every change since the last flush, in files named after this path, such as `wal-000001.log` | Every change acknowledged since the last flush |
 | `cache` | Work the server can redo, such as each set of access attributes' visible items and their annotation counts | Nothing but time. The server rebuilds what it needs |
 
-Back up the bundle and the log together, with the server stopped. A copy of one without the other is the database as it stood at some other moment. [Disc](sizing.md#disc) explains how much space each takes.
+Back up the bundle and the log together, with the server stopped. A copy of one without the other is the database as it stood at some other moment. A log belongs to the bundle it was written for, and the server refuses to start with a log written for any other, so a [rebuilt bundle](rebuild.md#swap-it-in) starts with a log of its own. [Disc](sizing.md#disc) explains how much space each takes.
 
 Keep the bundle and the log on a local disc. The server locks the bundle's directory so that a second server can't write to it, and that lock doesn't work reliably over NFS or SMB, where two servers writing one bundle overwrite each other's changes.
 

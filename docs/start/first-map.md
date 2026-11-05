@@ -434,7 +434,8 @@ Germany. The build has pinned it to the eastern edge of our map.
 
 We'll leave it there, since it makes a handy landmark. To correct it, you'd fix the longitude in
 `IE.txt`, run `convert.py` again, delete the `bundle` directory and build again. The build won't
-write over an existing bundle.
+write over an existing bundle. Once the server has run, delete its log as well, the `wal-*` files,
+because the server refuses to start with a log written for another bundle.
 
 The line beginning `built` names the new bundle's directory, which on your machine is the full
 path of your own `ireland` directory; we've written it as `/home/you/ireland` here. It counts

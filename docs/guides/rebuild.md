@@ -70,9 +70,14 @@ $ sudo systemctl start mosaica
 ```
 
 The old log belongs to the old bundle. Its records name items by the old bundle's internal numbers,
-which after this rebuild may belong to other items. Nothing checks which bundle a log was written
-against, so a deletion or suppression replayed over the new bundle could hide the wrong item. The
-cache is tied to the bundle it was built from, and moving it aside only frees the space.
+which in the new bundle may belong to other items, so a server refuses to start with a log written
+for any other bundle, even one built from the same sources:
+
+```text
+mosaica serve: refused to start: wal error: /srv/mosaica/state/wal/wal-000001.log is part of a log written for another database; move that log's files aside, or set `[bundle] wal` to a new path, to serve this bundle
+```
+
+The cache is tied to the bundle it was built from, and moving it aside only frees the space.
 
 The new bundle holds exactly what the sources hold. Anything ingested, deleted, suppressed or
 declared through the running server since the last build is not in it, so put those changes into
