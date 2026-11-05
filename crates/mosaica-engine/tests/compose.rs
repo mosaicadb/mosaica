@@ -551,12 +551,14 @@ fn step3_restart_replay_survives_cross_cause_sequences() {
 
     const ENTITY_X: u64 = 10_002;
     const ENTITY_Y: u64 = 10_003;
+    // No bundle: the log is written and replayed here alone.
+    const DATABASE: [u8; 16] = [7; 16];
 
     let wal_dir = TempDir::new().unwrap();
     let wal_path = wal_dir.path().join("wal.log");
 
     {
-        let mut wal = Wal::open(&wal_path).unwrap();
+        let mut wal = Wal::open(&wal_path, DATABASE).unwrap();
         wal.append(&WalRecord::IngestBatch {
             edits: Vec::new(),
             receipt: Vec::new(),
@@ -628,7 +630,7 @@ fn step3_restart_replay_survives_cross_cause_sequences() {
     let dict = mosaica_authz::Dict::load(&dict_paths).unwrap();
 
     // Reopen: fresh replay from disk, not the in-memory `Overlay`/`IngestBuffer` above.
-    let wal = Wal::open(&wal_path).unwrap();
+    let wal = Wal::open(&wal_path, DATABASE).unwrap();
     let mut replay = Replay::new(
         &dict,
         mosaica_lifecycle::Overlays::default(),

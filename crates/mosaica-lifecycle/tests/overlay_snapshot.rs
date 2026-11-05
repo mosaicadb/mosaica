@@ -14,6 +14,9 @@ use mosaica_lifecycle::wal::{ChangeOp, Wal, WalRecord};
 use mosaica_lifecycle::{Overlay, Overlays};
 use mosaica_types::{EntityId, LayerSpace, ShardId, Target};
 
+/// The database every log in these tests is written for.
+const DATABASE: [u8; 16] = [7; 16];
+
 fn empty_dict() -> (Dict, TempDir) {
     let temp = TempDir::new().unwrap();
     let paths = mosaica_authz::DictWriter::new(temp.path())
@@ -125,7 +128,7 @@ fn a_snapshot_replays_in_position_and_never_displaces_what_precedes_it() {
     before.apply(EntityId::new(7), ChangeOp::Suppress);
 
     {
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&WalRecord::ChangeBatch {
             changes: vec![(item(EntityId::new(8)), ChangeOp::Delete)],
         })
@@ -137,7 +140,7 @@ fn a_snapshot_replays_in_position_and_never_displaces_what_precedes_it() {
         wal.fsync().unwrap();
     }
 
-    let wal = Wal::open(&path).unwrap();
+    let wal = Wal::open(&path, DATABASE).unwrap();
     let mut replay = Replay::new(
         &dict,
         Overlays::default(),

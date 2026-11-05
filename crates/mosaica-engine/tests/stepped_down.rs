@@ -55,7 +55,7 @@ fn a_stepped_down_node_refuses_ingest_flushes_nothing_and_rotates_nothing() {
     // flush would have something to publish — the plan gate is what must stop it.
     let wal_path = tmp.path().join("wal.log");
     {
-        let mut wal = Wal::open(&wal_path).unwrap();
+        let mut wal = Wal::open(&wal_path, database_of(&root)).unwrap();
         wal.append(&WalRecord::IngestBatch {
             edits: Vec::new(),
             receipt: Vec::new(),

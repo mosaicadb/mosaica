@@ -6,7 +6,7 @@ mod common;
 
 use common::*;
 use mosaica_engine::Engine;
-use mosaica_lifecycle::wal::{Wal, WalRecord};
+use mosaica_lifecycle::wal::WalRecord;
 use mosaica_types::{MosaicaId, ShardId, ShardState, Target};
 
 /// [`Fixture::open_writing`], with a compaction a seal starts held before it publishes, so what
@@ -110,8 +110,7 @@ fn a_window_crossing_the_size_opens_a_shard_that_survives_restarts() {
         wanted,
         "the pool's four, shard 1's ten to its size, and two in shard 2"
     );
-    let logged: Vec<WalRecord> = Wal::open(&restarted.wal)
-        .unwrap()
+    let logged: Vec<WalRecord> = restarted.log()
         .records()
         .map(|record| record.unwrap().1)
         .filter(|record| {
@@ -236,8 +235,7 @@ fn a_window_that_is_not_made_durable_opens_and_seals_nothing() {
             .collect::<Vec<_>>(),
         "shard 1 issues again the ids the failed window took, and shard 2 opens once"
     );
-    let logged: Vec<WalRecord> = Wal::open(&built.wal)
-        .unwrap()
+    let logged: Vec<WalRecord> = built.log()
         .records()
         .map(|record| record.unwrap().1)
         .filter(|record| {

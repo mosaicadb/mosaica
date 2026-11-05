@@ -28,7 +28,7 @@ use mosaica_build::config::{Config, Schema};
 use mosaica_build::{build, BuildArgs};
 use mosaica_engine::{AcceptError, Engine, EngineConfig};
 use mosaica_lifecycle::command::UnallocatedRow;
-use mosaica_lifecycle::{ChangeOp, ExecError, Wal, WalRecord, WalScalar};
+use mosaica_lifecycle::{ChangeOp, ExecError, WalRecord, WalScalar};
 use mosaica_store::read::{open_bundle, ColumnsRef, ScalarSlice};
 use mosaica_types::{EntityId, ShardId};
 
@@ -222,9 +222,9 @@ fn stored_code_of(root: &Path, column: &str, entity: EntityId) -> Option<u32> {
     None
 }
 
-/// Every `VocabularyMint` record in the WAL at `wal_path`, in file order.
-fn mint_records(wal_path: &Path) -> Vec<(String, String, u32)> {
-    let wal = Wal::open(wal_path).expect("the WAL reopens");
+/// Every `VocabularyMint` record in the WAL in `dir`, in file order.
+fn mint_records(dir: &Path) -> Vec<(String, String, u32)> {
+    let wal = log_in(dir);
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     records
         .into_iter()
@@ -327,13 +327,12 @@ fn two_rows_in_one_window_with_the_same_novel_key_mint_once() {
         .code_of("finance")
         .expect("the shared key is bound");
 
-    let wal_path = tmp.path().join("wal.log");
     // Drop first, so the WAL is read as it stands right after the window closed — a flush later
     // would rotate it, reclaiming the very mint record this assertion is about (rotation is what
     // `positions` in `close_window` exists for). `mint_records` and the flush-based checks below
     // therefore run against two different engine handles, in that order.
     drop(engine);
-    let finance_mints: Vec<_> = mint_records(&wal_path)
+    let finance_mints: Vec<_> = mint_records(tmp.path())
         .into_iter()
         .filter(|(vocabulary, key, _)| vocabulary == "department" && key == "finance")
         .collect();
@@ -363,10 +362,9 @@ fn the_mint_record_precedes_the_ingest_batch_record_in_the_wal() {
 
     ingest_row(&engine, "order-1", WalScalar::Utf8("legal".to_string()));
 
-    let wal_path = tmp.path().join("wal.log");
     drop(engine); // joins the executor and closes the WAL handle before it is reopened below
 
-    let wal = Wal::open(&wal_path).expect("the WAL reopens");
+    let wal = log_in(tmp.path());
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     let mint_index = records
         .iter()
@@ -547,15 +545,15 @@ fn a_predicate_layer_over_a_category_names_its_artifact_by_the_key() {
     // Read before any flush, which rotates the log these publications were written to.
     drop(engine);
     assert_eq!(
-        published_keys(&tmp.path().join("wal.log"), LAYER),
+        published_keys(tmp.path(), LAYER),
         vec!["finance".to_string()],
         "the artifact must be named by the vocabulary key, not by the code the mint drew"
     );
 }
 
-/// The key of every artifact published into `layer` by the records in the WAL at `wal_path`.
-fn published_keys(wal_path: &Path, layer: &str) -> Vec<String> {
-    let wal = Wal::open(wal_path).expect("the WAL reopens");
+/// The key of every artifact published into `layer` by the records in the WAL in `dir`.
+fn published_keys(dir: &Path, layer: &str) -> Vec<String> {
+    let wal = log_in(dir);
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     records
         .into_iter()

@@ -4,8 +4,11 @@
 //! it must be re-derivable from the log byte-for-byte. The field this file pins is the one §2.1's
 //! contiguity arithmetic assumes and the format did not carry.
 
-use mosaica_lifecycle::wal::{Wal, WalError, WalRecord, WalRow, WalScalar};
+use mosaica_lifecycle::wal::{Wal, WalError, WalRecord, WalRow, WalScalar, HEADER_LEN};
 use mosaica_types::{EntityId, ShardId, Target};
+
+/// The database every log in these tests is written for.
+const DATABASE: [u8; 16] = [7; 16];
 
 /// The view a row belongs to is durable, because a flush segment's entity range is
 /// contiguous only within one view (§2.1) and the WAL is append-only.
@@ -25,7 +28,7 @@ fn a_wal_row_round_trips_its_view() {
         scoped: Vec::new(),
     };
     {
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&WalRecord::IngestBatch {
             edits: Vec::new(),
             receipt: Vec::new(),
@@ -37,7 +40,7 @@ fn a_wal_row_round_trips_its_view() {
         .unwrap();
         wal.fsync().unwrap();
     }
-    let wal = Wal::open(&path).unwrap();
+    let wal = Wal::open(&path, DATABASE).unwrap();
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     match &records[0] {
         WalRecord::IngestBatch { rows, .. } => assert_eq!(rows[0], row),
@@ -45,8 +48,8 @@ fn a_wal_row_round_trips_its_view() {
     }
 }
 
-/// A well-formed header at some other version: `WAL_MAGIC`, the version, the member number and the
-/// base position, all present and all right except the one field under test.
+/// A well-formed header at some other version: `WAL_MAGIC`, the version, the database, the member
+/// number and the base position, all present and all right except the one field under test.
 ///
 /// A *short* header is refused on its length before the version is ever compared, so a fixture
 /// that writes six bytes passes against no version check at all — which is why every case below
@@ -54,6 +57,7 @@ fn a_wal_row_round_trips_its_view() {
 fn header_at_version(version: u16, number: u64, base_pos: u64) -> Vec<u8> {
     let mut header = b"MWAL".to_vec();
     header.extend_from_slice(&version.to_le_bytes());
+    header.extend_from_slice(&DATABASE);
     header.extend_from_slice(&number.to_le_bytes());
     header.extend_from_slice(&base_pos.to_le_bytes());
     header
@@ -74,7 +78,7 @@ fn an_older_version_wal_is_refused() {
         header_at_version(1, 1, 0),
     )
     .unwrap();
-    assert!(matches!(Wal::open(&path), Err(WalError::BadHeader)));
+    assert!(matches!(Wal::open(&path, DATABASE), Err(WalError::BadHeader)));
 }
 
 /// A coordinate the log has to carry at full width, round-tripped exactly.
@@ -108,7 +112,7 @@ fn a_wal_row_round_trips_a_coordinate_no_f32_holds() {
         scoped: Vec::new(),
     };
     {
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&WalRecord::IngestBatch {
             edits: Vec::new(),
             receipt: Vec::new(),
@@ -120,7 +124,7 @@ fn a_wal_row_round_trips_a_coordinate_no_f32_holds() {
         .unwrap();
         wal.fsync().unwrap();
     }
-    let wal = Wal::open(&path).unwrap();
+    let wal = Wal::open(&path, DATABASE).unwrap();
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     match &records[0] {
         WalRecord::IngestBatch { rows, .. } => {
@@ -177,13 +181,14 @@ fn a_wal_row_round_trips_a_coordinate_no_f32_holds() {
 /// **39** is the version before an ingest batch carried the principal that sent it: a 39 batch
 /// read at 40 takes its batch id for the principal and its body hash's leading bytes for the id.
 /// **40** is the version before a receipt could give `value_held` or `label_not_held`. **41** is
-/// the version before the variant table gained `BatchesCarried`.
+/// the version before the variant table gained `BatchesCarried`. **43** is the version whose header
+/// named no database.
 #[test]
 fn a_log_at_a_version_whose_records_would_be_misread_is_refused() {
     let dir = tempfile::TempDir::new().unwrap();
     for (index, version) in [
         15u16, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
-        37, 38, 39, 40, 41, 42,
+        37, 38, 39, 40, 41, 42, 43,
     ]
         .into_iter()
         .enumerate()
@@ -192,7 +197,7 @@ fn a_log_at_a_version_whose_records_would_be_misread_is_refused() {
         std::fs::create_dir(&at).unwrap();
         std::fs::write(at.join("wal-000001.log"), header_at_version(version, 1, 0)).unwrap();
         assert!(matches!(
-            Wal::open(at.join("wal.log")),
+            Wal::open(at.join("wal.log"), DATABASE),
             Err(WalError::BadHeader)
         ));
     }
@@ -201,8 +206,8 @@ fn a_log_at_a_version_whose_records_would_be_misread_is_refused() {
     // a statement about the version rather than about the rest of the header.
     let other = dir.path().join("current");
     std::fs::create_dir(&other).unwrap();
-    std::fs::write(other.join("wal-000001.log"), header_at_version(43, 1, 0)).unwrap();
-    assert!(Wal::open(other.join("wal.log")).is_ok());
+    std::fs::write(other.join("wal-000001.log"), header_at_version(44, 1, 0)).unwrap();
+    assert!(Wal::open(other.join("wal.log"), DATABASE).is_ok());
 }
 
 /// A create and a drop round-trip, and the drop replays whatever else the log carries
@@ -238,7 +243,7 @@ fn view_create_and_drop_round_trip() {
         Target::Item(ShardId::ZERO, EntityId::new(9)),
     ];
     {
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&WalRecord::ViewCreate {
             view: created.clone(),
         })
@@ -250,7 +255,7 @@ fn view_create_and_drop_round_trip() {
         .unwrap();
         wal.fsync().unwrap();
     }
-    let wal = Wal::open(&path).unwrap();
+    let wal = Wal::open(&path, DATABASE).unwrap();
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     assert_eq!(records.len(), 2);
     match (&records[0], &records[1]) {
@@ -302,7 +307,7 @@ fn a_row_of_every_scalar_kind_is_written_as_these_bytes() {
         scoped: vec![WalScalar::U8(1)],
     };
     {
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&WalRecord::IngestBatch {
             edits: Vec::new(),
             receipt: Vec::new(),
@@ -318,10 +323,11 @@ fn a_row_of_every_scalar_kind_is_written_as_these_bytes() {
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(
         hex,
-        "4d57414c2b000100000000000000000000000000000089000000010170016200000000000000000000000000\
-         0000000000000000000000000000000000000001000301760000000000000000e03f000000000000d03f0e00\
-         0101ab02cdd702038486880804ffffffffffffffffff0105fe06d70407dfc50808ffffffffffffffffff0109\
-         0000c03f0a00000000000002c00b8080f281838985060c016b0d0101010000b20d3123"
+        "4d57414c2c000707070707070707070707070707070701000000000000000000000000000000890000000101\
+         7001620000000000000000000000000000000000000000000000000000000000000000010003017600000000\
+         00000000e03f000000000000d03f0e000101ab02cdd702038486880804ffffffffffffffffff0105fe06d704\
+         07dfc50808ffffffffffffffffff01090000c03f0a00000000000002c00b8080f281838985060c016b0d0101\
+         010000b20d3123"
     );
 }
 
@@ -356,18 +362,18 @@ fn the_records_naming_a_shard_are_written_as_these_bytes() {
         },
     ];
     {
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         for record in &records {
             wal.append(record).unwrap();
         }
         wal.fsync().unwrap();
     }
-    let wal = Wal::open(&path).unwrap();
+    let wal = Wal::open(&path, DATABASE).unwrap();
     let replayed: Vec<WalRecord> = wal.records().map(|r| r.unwrap().1).collect();
     assert_eq!(replayed, records);
 
     let bytes = std::fs::read(dir.path().join("wal-000001.log")).unwrap();
-    let hex: String = bytes[22..].iter().map(|b| format!("{b:02x}")).collect();
+    let hex: String = bytes[HEADER_LEN as usize..].iter().map(|b| format!("{b:02x}")).collect();
     // Variants 17 and 18, each the shard as a varint (`ac02`, 300); then the growth's one set,
     // shard 300 before its 18 bytes of bitmap.
     assert_eq!(
@@ -375,4 +381,91 @@ fn the_records_naming_a_shard_are_written_as_these_bytes() {
         "0300000011ac029c82190e0300000012ac02c53c5f0c1f00000009016c0100010201ac02123a300000010000\
          00000000001000000007000000aff4b0dd"
     );
+}
+
+/// A log at version 43, as a 0.1.0 server wrote it: a 22-byte header naming no database, then a
+/// record. It is refused, so a log written before a header named its database is never replayed
+/// over a bundle it may not belong to.
+#[test]
+fn a_log_whose_header_names_no_database_is_refused() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let mut member = b"MWAL".to_vec();
+    member.extend_from_slice(&43u16.to_le_bytes());
+    member.extend_from_slice(&1u64.to_le_bytes());
+    member.extend_from_slice(&0u64.to_le_bytes());
+    let body = postcard::to_allocvec(&WalRecord::ChangeBatch {
+        changes: vec![(
+            Target::Item(ShardId::ZERO, EntityId::new(171)),
+            mosaica_lifecycle::wal::ChangeOp::Delete,
+        )],
+    })
+    .unwrap();
+    member.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    member.extend_from_slice(&body);
+    member.extend_from_slice(&crc32fast::hash(&body).to_le_bytes());
+    std::fs::write(dir.path().join("wal-000001.log"), &member).unwrap();
+
+    assert!(matches!(
+        Wal::open(dir.path().join("wal.log"), DATABASE),
+        Err(WalError::BadHeader)
+    ));
+    assert_eq!(
+        std::fs::read(dir.path().join("wal-000001.log")).unwrap(),
+        member,
+        "a refused log is left as it was"
+    );
+}
+
+/// A log is opened only for the database it was begun for. Another database's open is refused
+/// whether the log holds records or none, and leaves every file of it as it was; the log's own
+/// database opens it again, records and all.
+#[test]
+fn a_log_is_refused_by_any_database_but_its_own() {
+    const OTHER: [u8; 16] = [8; 16];
+    let dir = tempfile::TempDir::new().unwrap();
+
+    let empty = dir.path().join("empty");
+    std::fs::create_dir(&empty).unwrap();
+    drop(Wal::open(empty.join("wal.log"), DATABASE).unwrap());
+    assert!(matches!(
+        Wal::open(empty.join("wal.log"), OTHER),
+        Err(WalError::OtherDatabase { .. })
+    ));
+
+    let written = dir.path().join("written");
+    std::fs::create_dir(&written).unwrap();
+    let record = WalRecord::ChangeBatch {
+        changes: vec![(
+            Target::Item(ShardId::ZERO, EntityId::new(213)),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )],
+    };
+    {
+        let mut wal = Wal::open(written.join("wal.log"), DATABASE).unwrap();
+        wal.append(&record).unwrap();
+        // An unsynced tail, which an open for the log's own database would truncate.
+        wal.fsync().unwrap();
+        wal.append(&record).unwrap();
+    }
+    let files = |at: &std::path::Path| {
+        let mut files: Vec<(std::ffi::OsString, Vec<u8>)> = std::fs::read_dir(at)
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (entry.file_name(), std::fs::read(entry.path()).unwrap())
+            })
+            .collect();
+        files.sort();
+        files
+    };
+    let before = files(&written);
+    assert!(matches!(
+        Wal::open(written.join("wal.log"), OTHER),
+        Err(WalError::OtherDatabase { .. })
+    ));
+    assert_eq!(files(&written), before, "a refused log is left as it was");
+
+    let wal = Wal::open(written.join("wal.log"), DATABASE).unwrap();
+    let records: Vec<WalRecord> = wal.records().map(|r| r.unwrap().1).collect();
+    assert_eq!(records, vec![record]);
 }

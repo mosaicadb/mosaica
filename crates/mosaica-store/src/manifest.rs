@@ -336,12 +336,18 @@ impl Quantisation {
 /// compared against one of the bundle's file digests, and truncated to 32 bits, which is enough to
 /// tell two keys apart.
 pub fn identity_key_fingerprint(key_hex: &str) -> String {
+    let digest = key_digest(b"mosaica-identity-key-fingerprint-v1\0", key_hex);
+    format!("fp:{}", crate::hex(&digest[..4]))
+}
+
+/// SHA-256 over `domain` and then the key's canonical hex form: a value that names the key and
+/// discloses nothing of it.
+fn key_digest(domain: &[u8], key_hex: &str) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(b"mosaica-identity-key-fingerprint-v1\0");
+    hasher.update(domain);
     hasher.update(key_hex.as_bytes());
-    let digest = hasher.finalize();
-    format!("fp:{}", crate::hex(&digest[..4]))
+    hasher.finalize().into()
 }
 
 /// `MANIFEST.json`'s `identity` object: the `mosaica_id` permutation's construction, round count
@@ -372,6 +378,15 @@ impl std::fmt::Debug for IdentityDescriptor {
 }
 
 impl IdentityDescriptor {
+    /// The database this bundle is, as the write-ahead log's header names it: 16 bytes of a
+    /// domain-separated SHA-256 over the identity key. A build draws the key when it creates the
+    /// bundle, and every flush, compaction and copy keeps it, so a log written against the bundle
+    /// is accepted by it and refused by every other, a rebuild of the same files among them.
+    pub fn database(&self) -> [u8; 16] {
+        let digest = key_digest(b"mosaica-database-v1\0", &self.key);
+        digest[..16].try_into().expect("16 bytes")
+    }
+
     /// Rejects an unknown `construction` or a `rounds` other than [`IDENTITY_ROUNDS`]: another
     /// construction's bundle must not be read by this one.
     pub fn validate(&self) -> Result<()> {

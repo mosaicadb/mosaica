@@ -88,8 +88,7 @@ fn a_sealed_shard_at_the_end_of_its_ids_refuses_an_edit_and_changes_nothing() {
     );
     assert_eq!(item_by_id(&engine, id), before);
     assert_eq!(engine.allocator_high_water(), high_water);
-    let logged = mosaica_lifecycle::wal::Wal::open(&built.wal)
-        .unwrap()
+    let logged = built.log()
         .records()
         .count();
     assert_eq!(logged, 0, "nothing is in the log");

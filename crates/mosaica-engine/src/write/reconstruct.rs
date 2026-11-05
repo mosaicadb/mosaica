@@ -111,7 +111,8 @@ impl WritePath {
         vocabularies: &mut Vocabularies,
         has_row: impl Fn(ShardId, EntityId, &str) -> bool,
     ) -> Result<Reconstructed, EngineError> {
-        let wal = Wal::open(wal_path).map_err(EngineError::Wal)?;
+        let wal =
+            Wal::open(wal_path, seed.manifest.identity.database()).map_err(EngineError::Wal)?;
         let shard_ids: Vec<ShardId> = seed.shards.iter().map(|shard| shard.id).collect();
         let mut seeds = seed.shards;
 
@@ -1024,18 +1025,6 @@ mod tests {
     ) -> Result<WritePathState, EngineError> {
         let dir = tempfile::tempdir().expect("tempdir");
         let wal_path = dir.path().join("wal.log");
-        let mut wal = Wal::open(&wal_path).expect("a log opens");
-        for record in records {
-            wal.append(record).expect("an append");
-        }
-        wal.fsync().expect("an fsync");
-        drop(wal);
-        let dict = Dict::load(
-            &mosaica_authz::DictWriter::new(dir.path())
-                .finish()
-                .expect("a dictionary"),
-        )
-        .expect("a dictionary loads");
         let manifest = mosaica_store::manifest::Manifest {
             bundle_format: 3,
             created_at: String::new(),
@@ -1053,6 +1042,18 @@ mod tests {
             files: std::collections::BTreeMap::new(),
             declared_scalars: vec![],
         };
+        let mut wal = Wal::open(&wal_path, manifest.identity.database()).expect("a log opens");
+        for record in records {
+            wal.append(record).expect("an append");
+        }
+        wal.fsync().expect("an fsync");
+        drop(wal);
+        let dict = Dict::load(
+            &mosaica_authz::DictWriter::new(dir.path())
+                .finish()
+                .expect("a dictionary"),
+        )
+        .expect("a dictionary loads");
         let seed = ManifestSeed {
             shards: seeds,
             size: 100,

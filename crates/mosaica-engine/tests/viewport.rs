@@ -224,7 +224,7 @@ fn d_suppressing_an_item_drops_the_count_by_one() {
         .expect("source item 5 is established in the bundle");
     let wal_path_b = tmp.path().join("wal_b.log");
     {
-        let mut wal = Wal::open(&wal_path_b).unwrap();
+        let mut wal = Wal::open(&wal_path_b, database_of(&bundle_root)).unwrap();
         wal.append(&WalRecord::ChangeBatch {
             changes: vec![(item(suppressed_entity), ChangeOp::Suppress)],
         })
@@ -974,7 +974,7 @@ fn the_theta_anchor_falls_when_an_item_is_suppressed() {
         .expect("source item 5 is established in the bundle");
     let wal_path_b = tmp.path().join("wal_b.log");
     {
-        let mut wal = Wal::open(&wal_path_b).unwrap();
+        let mut wal = Wal::open(&wal_path_b, database_of(&bundle_root)).unwrap();
         wal.append(&WalRecord::ChangeBatch {
             changes: vec![(item(suppressed_entity), ChangeOp::Suppress)],
         })
@@ -1057,7 +1057,7 @@ fn n_occ_falls_when_a_suppression_empties_a_tile() {
     // The ten entities sharing one lattice position, and one of them on its own.
     let cohort: Vec<u64> = (0..10).map(|i| 5 + i * 1_000).collect();
     let suppress = |wal_path: &std::path::Path, ids: &[u64]| {
-        let mut wal = Wal::open(wal_path).unwrap();
+        let mut wal = Wal::open(wal_path, database_of(&bundle_root)).unwrap();
         for id in ids {
             let entity = item_of_id(&baseline, *id)
                 .unwrap()
@@ -1287,7 +1287,7 @@ fn a_kept_ladder_is_not_read_back_after_a_suppression() {
             .map(|i| item_of_id(&first, 5 + i * 1_000).unwrap().expect("a built item"))
             .collect();
         drop(first);
-        let mut log = Wal::open(&wal).unwrap();
+        let mut log = Wal::open(&wal, database_of(&bundle_root)).unwrap();
         for entity in cohort {
             log.append(&WalRecord::ChangeBatch {
                 changes: vec![(item(entity), ChangeOp::Suppress)],

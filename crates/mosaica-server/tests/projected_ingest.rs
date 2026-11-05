@@ -480,7 +480,8 @@ async fn replay_reproduces_the_stored_positions_without_re_running_the_transform
     copy_dir(&wal_dir, &replay_dir);
 
     // ---- half one: what the log actually holds.
-    let wal = Wal::open(replay_dir.join("wal.log")).expect("the copied log opens");
+    let wal =
+        Wal::open(replay_dir.join("wal.log"), database_of(&root)).expect("the copied log opens");
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     let logged: Vec<(f64, f64)> = records
         .iter()

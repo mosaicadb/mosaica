@@ -4,8 +4,8 @@
 //! ack before fsync — everything below exists to make that fsync boundary the one place acked
 //! state can be trusted from, and everything past it disposable.
 //!
-//! On-disk layout: a fixed 22-byte header (`b"MWAL"` ‖ `u16 LE` format version ‖ `u64 LE` member
-//! number ‖ `u64 LE` base position), then framed records:
+//! On-disk layout: a fixed 38-byte header (`b"MWAL"` ‖ `u16 LE` format version ‖ the 16-byte
+//! database ‖ `u64 LE` member number ‖ `u64 LE` base position), then framed records:
 //! `u32 LE len ‖ postcard bytes ‖ u32 LE crc32(postcard bytes)`.
 //!
 //! ## The log is a sequence, not a file
@@ -13,6 +13,12 @@
 //! A caller names one path — `<dir>/wal.log` — and that names a **family**:
 //! `<dir>/wal-000001.log`, `<dir>/wal-000002.log`, … each with its own fsync-offset sidecar
 //! (decision 0038). The base path is never itself a file.
+//!
+//! Every member's header names the database the log was written for, and `open` refuses a member
+//! naming any other. A log's records name items by entity id, and a rebuilt bundle gives those ids
+//! to other items, so replaying a log over a bundle it was not written for deletes and suppresses
+//! the wrong items and lifts the denies it holds. A sequence with no members is begun for the
+//! database that opens it.
 //!
 //! It has to be a sequence because a flush makes a prefix of the log redundant and there is no way
 //! to reclaim the front of a single file. [`Wal::rotate`] seals the active member, opens the next
@@ -1002,6 +1008,8 @@ pub enum WalError {
     /// framing/CRC failure, but the same fail-closed answer applies: a file we cannot positively
     /// identify as this WAL format must not be trusted or written to.
     BadHeader,
+    /// The member at `path` was written for another database. Nothing in it is read or changed.
+    OtherDatabase { path: PathBuf },
     /// A previous `append` or `fsync` failed, and the handle has not been repaired. Every
     /// `append`/`fsync` refuses: after a torn append `self.len` cannot name a record boundary, and
     /// after a failed sync nothing above the last durable offset may be built on. The two are
@@ -1020,6 +1028,12 @@ impl std::fmt::Display for WalError {
                 "wal corruption before the last-fsynced offset — acked state may be damaged"
             ),
             WalError::BadHeader => write!(f, "wal file header missing or unrecognised"),
+            WalError::OtherDatabase { path } => write!(
+                f,
+                "the log {} was written for another database; remove it, or set `[bundle] wal` \
+                 to a new path, before serving this bundle",
+                path.display()
+            ),
             WalError::Poisoned => write!(
                 f,
                 "wal handle poisoned by a previous write failure — reopen from disk"
@@ -1153,12 +1167,15 @@ const WAL_MAGIC: [u8; 4] = *b"MWAL";
 // gained `BatchesCarried`. A log at 41 is refused.
 // **43**: `LayerCreate` carries the names the layer's views were written with, where one names a
 // view group. A log at 42 is refused.
-const WAL_VERSION: u16 = 43;
-/// Header size in bytes: `WAL_MAGIC` ‖ `WAL_VERSION` LE ‖ member number LE ‖ base position LE.
+// **44**: every member's header names the database the log was written for, after the version. A
+// log at 43 is refused.
+const WAL_VERSION: u16 = 44;
+/// Header size in bytes: `WAL_MAGIC` ‖ `WAL_VERSION` LE ‖ database ‖ member number LE ‖ base
+/// position LE.
 /// Every *offset* in this module is a byte offset from the start of its own file, so it already
 /// accounts for the header living at the front; every *position* is sequence-global and counts
 /// record bytes only — see [`Wal::position`].
-pub const HEADER_LEN: u64 = WAL_MAGIC.len() as u64 + 2 + 8 + 8;
+pub const HEADER_LEN: u64 = WAL_MAGIC.len() as u64 + 2 + 16 + 8 + 8;
 
 /// Digits in a member's zero-padded number. Fixed width so lexical order is numerical order, which
 /// makes a directory listing already sorted oldest-first — the order reclamation must delete in.
@@ -1183,7 +1200,8 @@ enum WalState {
     Torn,
 }
 
-/// The **sequence base**: the directory, stem and extension every member's name is derived from.
+/// The **sequence base**: the directory, stem and extension every member's name is derived from,
+/// and the database every member's header names.
 ///
 /// The caller still names a single path — `<dir>/wal.log` — and this turns it into the family
 /// `<dir>/wal-000001.log`, `<dir>/wal-000002.log`, … The base path itself is never a file.
@@ -1192,11 +1210,13 @@ struct SequenceBase {
     dir: PathBuf,
     stem: std::ffi::OsString,
     ext: Option<std::ffi::OsString>,
+    database: [u8; 16],
 }
 
 impl SequenceBase {
-    fn of(path: &Path) -> Self {
+    fn of(path: &Path, database: [u8; 16]) -> Self {
         SequenceBase {
+            database,
             dir: path
                 .parent()
                 .filter(|d| !d.as_os_str().is_empty())
@@ -1442,10 +1462,16 @@ fn read_up_to(reader: &mut impl Read, buf: &mut [u8]) -> std::io::Result<usize> 
     Ok(total)
 }
 
-fn write_header(file: &mut File, number: u64, base_pos: u64) -> std::io::Result<()> {
+fn write_header(
+    file: &mut File,
+    database: &[u8; 16],
+    number: u64,
+    base_pos: u64,
+) -> std::io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
     file.write_all(&WAL_MAGIC)?;
     file.write_all(&WAL_VERSION.to_le_bytes())?;
+    file.write_all(database)?;
     file.write_all(&number.to_le_bytes())?;
     file.write_all(&base_pos.to_le_bytes())?;
     file.sync_all()?;
@@ -1453,14 +1479,14 @@ fn write_header(file: &mut File, number: u64, base_pos: u64) -> std::io::Result<
     Ok(())
 }
 
-/// The `(number, base_pos)` a member's header claims, refusing anything this format cannot
-/// positively identify.
+/// The `(number, base_pos)` the header of `base`'s member `expected_number` claims, refusing
+/// anything this format cannot positively identify and a member written for another database.
 ///
 /// The number is checked against the *filename* here rather than merely read: a member renamed or
 /// copied into the sequence would otherwise take its predecessor's place in the walk, and every
 /// position derived afterwards would be silently wrong. A file we cannot identify is not trusted
 /// and not written to.
-fn check_header(file: &mut File, expected_number: u64) -> Result<(u64, u64)> {
+fn check_header(file: &mut File, base: &SequenceBase, expected_number: u64) -> Result<(u64, u64)> {
     file.seek(SeekFrom::Start(0))?;
     let mut buf = [0u8; HEADER_LEN as usize];
     let n = read_up_to(file, &mut buf)?;
@@ -1470,8 +1496,13 @@ fn check_header(file: &mut File, expected_number: u64) -> Result<(u64, u64)> {
     {
         return Err(WalError::BadHeader);
     }
-    let number = u64::from_le_bytes(buf[6..14].try_into().expect("8 bytes"));
-    let base_pos = u64::from_le_bytes(buf[14..22].try_into().expect("8 bytes"));
+    if buf[6..22] != base.database {
+        return Err(WalError::OtherDatabase {
+            path: base.member(expected_number),
+        });
+    }
+    let number = u64::from_le_bytes(buf[22..30].try_into().expect("8 bytes"));
+    let base_pos = u64::from_le_bytes(buf[30..38].try_into().expect("8 bytes"));
     if number != expected_number {
         return Err(WalError::BadHeader);
     }
@@ -1623,7 +1654,7 @@ impl Records<'_> {
     /// the handle recorded for it.
     fn open_member(&self, span: SealedSpan) -> Result<MemberReader> {
         let mut file = File::open(self.base.member(span.number))?;
-        let (_, base_pos) = check_header(&mut file, span.number)?;
+        let (_, base_pos) = check_header(&mut file, self.base, span.number)?;
         if base_pos != span.start_pos {
             return Err(WalError::WalCorruption);
         }
@@ -1707,7 +1738,7 @@ fn create_member(base: &SequenceBase, number: u64, base_pos: u64) -> Result<WalF
         .read(true)
         .write(true)
         .open(&path)?;
-    write_header(&mut file, number, base_pos)?;
+    write_header(&mut file, &base.database, number, base_pos)?;
     write_sync_offset(&sync_path, HEADER_LEN)?;
     fsync_dir(&base.dir)?;
     Ok(WalFile {
@@ -1721,9 +1752,14 @@ fn create_member(base: &SequenceBase, number: u64, base_pos: u64) -> Result<WalF
 }
 
 impl Wal {
-    /// Opens (creating if absent) the WAL sequence based at `path`, checks every surviving member
-    /// under the positional CRC rule, and returns the live handle. [`Wal::records`] reads what it
-    /// recovered.
+    /// Opens (creating if absent) the WAL sequence based at `path` for `database`, checks every
+    /// surviving member under the positional CRC rule, and returns the live handle.
+    /// [`Wal::records`] reads what it recovered.
+    ///
+    /// `database` names the bundle the log belongs to, and every member this handle creates
+    /// carries it. A member naming another database refuses the open with
+    /// [`WalError::OtherDatabase`] before anything in the log is read or changed, whether or not
+    /// the log holds a record.
     ///
     /// **Recovery walks every surviving file in sequence order.** It does not start *at* the
     /// newest overlay snapshot and resume: an older member can still carry `Change` records above
@@ -1740,8 +1776,8 @@ impl Wal {
     /// first. A **broken position chain** — a member whose header base position does not continue
     /// its predecessor's durable end — means a stale or foreign file has taken a member's place,
     /// and every position derived from it afterwards would name the wrong bytes.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Wal> {
-        let base = SequenceBase::of(path.as_ref());
+    pub fn open<P: AsRef<Path>>(path: P, database: [u8; 16]) -> Result<Wal> {
+        let base = SequenceBase::of(path.as_ref(), database);
         let members = base.members()?;
 
         if members.is_empty() {
@@ -1787,12 +1823,12 @@ impl Wal {
                     // later member's position would be a guess.
                     (None, _) => return Err(WalError::WalCorruption),
                 };
-                write_header(&mut file, number, base_pos)?;
+                write_header(&mut file, &base.database, number, base_pos)?;
                 write_sync_offset(&sync_path, HEADER_LEN)?;
                 file_len = HEADER_LEN;
             }
 
-            let (_, base_pos) = check_header(&mut file, number)?;
+            let (_, base_pos) = check_header(&mut file, &base, number)?;
             if expected_base.is_some_and(|expected| expected != base_pos) {
                 return Err(WalError::WalCorruption);
             }
@@ -2587,6 +2623,9 @@ impl ExecutorWal {
 mod tests {
     use super::*;
 
+    /// The database every log in these tests is written for.
+    const DATABASE: [u8; 16] = [7; 16];
+
     fn record(tag: u8) -> WalRecord {
         WalRecord::ChangeBatch {
             changes: vec![(
@@ -2634,7 +2673,7 @@ mod tests {
             }],
         };
 
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         let replayed = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert!(replayed.is_empty());
         wal.append(&mint).unwrap();
@@ -2642,7 +2681,7 @@ mod tests {
         wal.fsync().unwrap();
         drop(wal);
 
-        let wal = Wal::open(&path).unwrap();
+        let wal = Wal::open(&path, DATABASE).unwrap();
         let replayed = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert_eq!(
             replayed,
@@ -2734,7 +2773,7 @@ mod tests {
             ],
         };
 
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         let replayed = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert!(replayed.is_empty());
         wal.append(&create).unwrap();
@@ -2743,7 +2782,7 @@ mod tests {
         wal.fsync().unwrap();
         drop(wal);
 
-        let wal = Wal::open(&path).unwrap();
+        let wal = Wal::open(&path, DATABASE).unwrap();
         let replayed = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert_eq!(replayed, vec![create, changes, dropped]);
     }
@@ -2846,12 +2885,12 @@ mod tests {
             ],
         };
 
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&publish).unwrap();
         wal.fsync().unwrap();
         drop(wal);
 
-        let wal = Wal::open(&path).unwrap();
+        let wal = Wal::open(&path, DATABASE).unwrap();
         let replayed = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert_eq!(replayed, vec![publish]);
         let WalRecord::ArtifactPublish { artifacts, .. } = &replayed[0] else {
@@ -3082,14 +3121,14 @@ mod tests {
             [None, None, None, None, None, None, None, None, None, None, None, None, None, None]
         );
 
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         for record in &records {
             wal.append(record).unwrap();
         }
         wal.fsync().unwrap();
         drop(wal);
 
-        let wal = Wal::open(&path).unwrap();
+        let wal = Wal::open(&path, DATABASE).unwrap();
         let replayed = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert_eq!(replayed, records);
 
@@ -3137,22 +3176,22 @@ mod tests {
             receipt: Vec::new(),
         };
 
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&edit(1)).unwrap();
         wal.fsync().unwrap();
         drop(wal);
-        let wal = Wal::open(&path).unwrap();
+        let wal = Wal::open(&path, DATABASE).unwrap();
         assert_eq!(
             wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>(),
             vec![edit(1)]
         );
         drop(wal);
 
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&edit(0)).unwrap();
         wal.fsync().unwrap();
         drop(wal);
-        assert!(matches!(Wal::open(&path), Err(WalError::WalCorruption)));
+        assert!(matches!(Wal::open(&path, DATABASE), Err(WalError::WalCorruption)));
     }
 
     /// Overwrite `[from, to)` with zeroes through a second handle, standing in for pages a failed
@@ -3178,7 +3217,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wal.log");
         {
-            let mut wal = Wal::open(&path).unwrap();
+            let mut wal = Wal::open(&path, DATABASE).unwrap();
             wal.append(&record(0)).unwrap();
             wal.fsync().unwrap();
             let durable = wal.active.durable_len;
@@ -3196,7 +3235,7 @@ mod tests {
             assert!(!wal.is_poisoned());
         }
 
-        let wal = Wal::open(&path).unwrap();
+        let wal = Wal::open(&path, DATABASE).unwrap();
         let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
         assert_eq!(
             records,
@@ -3218,7 +3257,7 @@ mod tests {
     fn a_torn_handle_recovers_by_neither_route() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wal.log");
-        let mut wal = Wal::open(&path).unwrap();
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
         wal.append(&record(0)).unwrap();
         wal.fsync().unwrap();
         wal.append(&record(1)).unwrap();
@@ -3250,7 +3289,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("wal.log");
         {
-            let mut wal = Wal::open(&path).unwrap();
+            let mut wal = Wal::open(&path, DATABASE).unwrap();
             wal.append(&record(0)).unwrap();
             wal.fsync().unwrap();
             let durable = wal.active.durable_len;
@@ -3267,7 +3306,7 @@ mod tests {
         }
 
         assert!(
-            matches!(Wal::open(&path), Err(WalError::WalCorruption)),
+            matches!(Wal::open(&path, DATABASE), Err(WalError::WalCorruption)),
             "a hole published inside the durable prefix must refuse to open"
         );
     }

@@ -17,6 +17,9 @@ use mosaica_lifecycle::wal::{
 use mosaica_lifecycle::Overlay;
 use mosaica_types::EntityId;
 
+/// The database every log in these tests is written for.
+const DATABASE: [u8; 16] = [7; 16];
+
 fn member(base: &Path, n: u64) -> PathBuf {
     base.with_file_name(format!("wal-{n:06}.log"))
 }
@@ -41,7 +44,7 @@ fn suppression_of(entity: u64) -> OverlaySnapshotEntry {
 /// A sequence with `files` members, each holding one change record, rotated between them and never
 /// reclaiming. Returns the handle and the position each member ends at.
 fn wal_with_files(base: &Path, files: u64) -> (Wal, Vec<u64>) {
-    let mut wal = Wal::open(base).unwrap();
+    let mut wal = Wal::open(base, DATABASE).unwrap();
     let mut ends = Vec::new();
     for i in 0..files {
         wal.append(&change(i as u8)).unwrap();
@@ -60,7 +63,7 @@ fn wal_with_files(base: &Path, files: u64) -> (Wal, Vec<u64>) {
 fn a_fresh_log_is_a_one_member_sequence() {
     let dir = tempdir().unwrap();
     let base = dir.path().join("wal.log");
-    let wal = Wal::open(&base).unwrap();
+    let wal = Wal::open(&base, DATABASE).unwrap();
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
 
     assert!(records.is_empty());
@@ -76,7 +79,7 @@ fn a_fresh_log_is_a_one_member_sequence() {
 fn positions_continue_across_a_rotation() {
     let dir = tempdir().unwrap();
     let base = dir.path().join("wal.log");
-    let mut wal = Wal::open(&base).unwrap();
+    let mut wal = Wal::open(&base, DATABASE).unwrap();
 
     assert_eq!(wal.position(), 0);
     wal.append(&change(0)).unwrap();
@@ -157,7 +160,7 @@ fn a_suppression_survives_the_reclamation_of_the_record_that_carried_it() {
 
     let entity = EntityId::new(42);
     {
-        let mut wal = Wal::open(&base).unwrap();
+        let mut wal = Wal::open(&base, DATABASE).unwrap();
         wal.append(&WalRecord::ChangeBatch {
             changes: vec![(item(entity), ChangeOp::Suppress)],
         })
@@ -174,7 +177,7 @@ fn a_suppression_survives_the_reclamation_of_the_record_that_carried_it() {
         assert_eq!(deleted, vec![1], "the record's own member must actually go");
     }
 
-    let wal = Wal::open(&base).unwrap();
+    let wal = Wal::open(&base, DATABASE).unwrap();
     let mut replay = Replay::new(
         &dict,
         mosaica_lifecycle::Overlays::default(),
@@ -204,7 +207,7 @@ fn recovery_walks_every_surviving_member_in_order() {
     let dir = tempdir().unwrap();
     let base = dir.path().join("wal.log");
     {
-        let mut wal = Wal::open(&base).unwrap();
+        let mut wal = Wal::open(&base, DATABASE).unwrap();
         wal.append(&change(0)).unwrap();
         wal.fsync().unwrap();
         // Nothing reclaimed, so member 1 survives with its record above nothing at all...
@@ -213,7 +216,7 @@ fn recovery_walks_every_surviving_member_in_order() {
         wal.fsync().unwrap();
     }
 
-    let wal = Wal::open(&base).unwrap();
+    let wal = Wal::open(&base, DATABASE).unwrap();
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     assert_eq!(wal.members(), vec![1, 2]);
     assert_eq!(
@@ -239,7 +242,7 @@ fn a_gap_in_the_sequence_fails_closed() {
 
     std::fs::remove_file(member(&base, 2)).unwrap();
 
-    assert!(matches!(Wal::open(&base), Err(WalError::WalCorruption)));
+    assert!(matches!(Wal::open(&base, DATABASE), Err(WalError::WalCorruption)));
 }
 
 /// A member whose header base position does not continue its predecessor's durable end is a stale
@@ -258,11 +261,11 @@ fn a_broken_position_chain_fails_closed() {
         .write(true)
         .open(member(&base, 2))
         .unwrap();
-    f.seek(SeekFrom::Start(14)).unwrap();
+    f.seek(SeekFrom::Start(HEADER_LEN - 8)).unwrap();
     f.write_all(&9999u64.to_le_bytes()).unwrap();
     f.sync_all().unwrap();
 
-    assert!(matches!(Wal::open(&base), Err(WalError::WalCorruption)));
+    assert!(matches!(Wal::open(&base, DATABASE), Err(WalError::WalCorruption)));
 }
 
 /// A member carrying another member's number in its header is not a continuation: it would take its
@@ -279,11 +282,11 @@ fn a_member_whose_header_number_disagrees_with_its_name_fails_closed() {
         .write(true)
         .open(member(&base, 2))
         .unwrap();
-    f.seek(SeekFrom::Start(6)).unwrap();
+    f.seek(SeekFrom::Start(HEADER_LEN - 16)).unwrap();
     f.write_all(&7u64.to_le_bytes()).unwrap();
     f.sync_all().unwrap();
 
-    assert!(matches!(Wal::open(&base), Err(WalError::BadHeader)));
+    assert!(matches!(Wal::open(&base, DATABASE), Err(WalError::BadHeader)));
 }
 
 /// A crash between creating a member and writing its header leaves a zero-length file. Refusing it
@@ -299,7 +302,7 @@ fn a_zero_length_newest_member_is_re_headered_rather_than_refused() {
 
     std::fs::write(member(&base, 3), b"").unwrap();
 
-    let wal = Wal::open(&base).unwrap();
+    let wal = Wal::open(&base, DATABASE).unwrap();
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     assert_eq!(wal.members(), vec![1, 2, 3]);
     assert_eq!(
@@ -329,7 +332,7 @@ fn a_poisoned_handle_rotates_nothing() {
 
     let dir = tempdir().unwrap();
     let base = dir.path().join("wal.log");
-    let mut wal = Wal::open(&base).unwrap();
+    let mut wal = Wal::open(&base, DATABASE).unwrap();
     wal.append(&change(0)).unwrap();
     wal.fsync().unwrap();
 
@@ -364,7 +367,7 @@ unsafe fn libc_geteuid() -> u32 {
 fn the_first_member_starts_its_records_at_the_header() {
     let dir = tempdir().unwrap();
     let base = dir.path().join("wal.log");
-    let mut wal = Wal::open(&base).unwrap();
+    let mut wal = Wal::open(&base, DATABASE).unwrap();
     wal.append(&change(0)).unwrap();
     let end = wal.fsync().unwrap();
     assert_eq!(

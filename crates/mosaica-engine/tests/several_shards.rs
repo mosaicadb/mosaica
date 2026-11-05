@@ -317,8 +317,7 @@ fn every_write_answers_over_two_shards_as_over_one_and_a_restart_replays_it() {
             .collect();
         let served = served_to(&engine, &full_coverage_credential());
         drop(engine);
-        let logged = mosaica_lifecycle::wal::Wal::open(&built.wal)
-            .unwrap()
+        let logged = built.log()
             .records()
             .count();
         assert!(logged > 0, "the writes are in the log");
@@ -478,11 +477,11 @@ fn a_change_naming_an_entity_alone_is_refused_over_two_shards() {
 /// shard's denies: what the same denies leave served in a bundle of one shard.
 #[test]
 fn a_log_denying_in_both_shards_reopens_with_each_shards_denies() {
-    use mosaica_lifecycle::wal::{Wal, WalRecord};
+    use mosaica_lifecycle::wal::WalRecord;
     let one = fixture_sized(TWO_SHARD_N, None);
     let several = two_shards();
-    let log = |path: &std::path::Path, changes: Vec<(Target, ChangeOp)>| {
-        let mut wal = Wal::open(path).expect("the log opens");
+    let log = |fixture: &Fixture, changes: Vec<(Target, ChangeOp)>| {
+        let mut wal = fixture.log();
         wal.append(&WalRecord::ChangeBatch { changes })
             .expect("an append");
         wal.fsync().expect("an fsync");
@@ -496,8 +495,8 @@ fn a_log_denying_in_both_shards_reopens_with_each_shards_denies() {
         .iter()
         .map(|(t, op)| (as_one_shard(*t), *op))
         .collect();
-    log(&several.wal, changes);
-    log(&one.wal, one_shard);
+    log(&several, changes);
+    log(&one, one_shard);
     let (one, several) = (one.open(), several.open_writing());
     assert_serves_as(&several, &one, "with the log's denies");
     assert_eq!(several.overlay_depth(), 3);
@@ -743,8 +742,7 @@ fn denies_in_both_shards_serve_as_one_shard_and_survive_a_restart() {
     );
     // The rotation's snapshot carries each shard's denies, and the changes leave the log.
     reclaim_log(&engine);
-    let changes = mosaica_lifecycle::wal::Wal::open(&several.wal)
-        .unwrap()
+    let changes = several.log()
         .records()
         .filter(|r| {
             matches!(

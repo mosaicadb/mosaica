@@ -150,8 +150,7 @@ fn a_size_declared_at_a_running_service_survives_a_restart_a_fold_and_both() {
 
 /// The size declarations, openings and seals the log at `tmp` keeps, in order.
 fn shard_records(tmp: &Path) -> Vec<WalRecord> {
-    mosaica_lifecycle::wal::Wal::open(tmp.join("wal.log"))
-        .unwrap()
+    log_in(tmp)
         .records()
         .map(|record| record.unwrap().1)
         .filter(|record| {
@@ -280,7 +279,7 @@ fn a_batch_needing_a_shard_past_the_last_number_is_refused_alone() {
         WalRecord::ShardOpen { shard: before_last },
         WalRecord::ShardSeal { shard: before_last },
     ];
-    let mut wal = mosaica_lifecycle::wal::Wal::open(tmp.path().join("wal.log")).unwrap();
+    let mut wal = log_in(tmp.path());
     for record in &opened {
         wal.append(record).unwrap();
     }

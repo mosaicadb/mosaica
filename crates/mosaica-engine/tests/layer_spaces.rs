@@ -180,8 +180,7 @@ fn a_dropped_layers_space_is_not_given_again_after_a_rotation_and_a_restart() {
         });
         reclaim_log(&engine);
     }
-    let creates = mosaica_lifecycle::Wal::open(&fx.wal)
-        .unwrap()
+    let creates = fx.log()
         .records()
         .filter(|r| matches!(r, Ok((_, WalRecord::LayerCreate { .. }))))
         .count();
@@ -277,8 +276,7 @@ fn an_artifacts_and_a_layers_deny_survive_a_rotation_and_a_restart() {
         reclaim_log(&engine);
         (artifact, target, space_of(layer_b))
     };
-    let changes = mosaica_lifecycle::Wal::open(&fx.wal)
-        .unwrap()
+    let changes = fx.log()
         .records()
         .filter(|r| matches!(r, Ok((_, WalRecord::ChangeBatch { .. }))))
         .count();
@@ -679,8 +677,7 @@ fn a_replayed_publication_into_a_dropped_layer_leaves_its_successors_runs() {
         assert_eq!(runs[0].capacity(), mosaica_types::layer::RESERVED_BLOCK);
         (runs, again)
     };
-    let creates = mosaica_lifecycle::Wal::open(&fx.wal)
-        .unwrap()
+    let creates = fx.log()
         .records()
         .filter(|r| {
             matches!(r, Ok((_, WalRecord::LayerCreate { declaration, .. }))
@@ -736,8 +733,7 @@ fn a_replayed_growth_the_side_manifest_holds_is_not_applied_again() {
         });
         runs
     };
-    let records: Vec<WalRecord> = mosaica_lifecycle::Wal::open(&fx.wal)
-        .unwrap()
+    let records: Vec<WalRecord> = fx.log()
         .records()
         .map(|r| r.unwrap().1)
         .collect();

@@ -790,7 +790,7 @@ fn an_item_edited_twice_across_a_flush_is_found_at_its_last_entity_after_a_resta
     );
     drop(engine);
 
-    let wal = mosaica_lifecycle::Wal::open(tmp.path().join("wal.log")).unwrap();
+    let wal = log_in(tmp.path());
     let edits = wal
         .records()
         .map(|r| r.unwrap().1)
