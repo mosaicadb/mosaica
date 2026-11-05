@@ -993,9 +993,39 @@ fn build(dir: &Path) {
     assert!(built.status.success(), "{built:?}");
 }
 
+/// Serve the deployment in `tmp` with the log `written` moved aside, and check that `ids` are all
+/// served, as the bundle holds them. Then stop, delete the log that server began, and put
+/// `written` back.
+fn serve_with_the_log_aside(tmp: TempDir, written: &[(String, Vec<u8>)], ids: &[u64]) -> TempDir {
+    let dir = tmp.path().to_owned();
+    let aside = dir.join("log.aside");
+    std::fs::create_dir(&aside).unwrap();
+    for (name, _) in written {
+        std::fs::rename(dir.join(name), aside.join(name)).unwrap();
+    }
+    let (server, bound) = Server::announced(&dir);
+    let served = Served {
+        dir: tmp,
+        server,
+        bound,
+    };
+    let token = token(&served);
+    assert_eq!(served_ids(&served, &token, "s0", ids), ids.to_vec());
+    let Served { dir: tmp, server, .. } = served;
+    drop(server);
+    for (name, _) in log_files(&dir) {
+        std::fs::remove_file(dir.join(name)).unwrap();
+    }
+    for (name, _) in written {
+        std::fs::rename(aside.join(name), dir.join(name)).unwrap();
+    }
+    std::fs::remove_dir(&aside).unwrap();
+    tmp
+}
+
 /// A log written against one bundle is refused by a server over a bundle built after it, from the
-/// same files or from others, and is left as it was. With the log moved aside the new bundle
-/// serves, with none of the old log's deletions and suppressions.
+/// same files or from others, and is left as it was. The same bundle serves once the log is moved
+/// aside, with none of the old log's deletions and suppressions, so the log is what was refused.
 #[test]
 fn a_log_is_refused_by_a_bundle_built_after_it() {
     let served = serve(false, "");
@@ -1019,6 +1049,7 @@ fn a_log_is_refused_by_a_bundle_built_after_it() {
         "a bundle built again from the same files refuses the log"
     );
     assert_eq!(log_files(&dir), written);
+    let tmp = serve_with_the_log_aside(tmp, &written, &[0, 1, 2, 3]);
 
     std::fs::rename(dir.join("bundle"), dir.join("bundle.second")).unwrap();
     let materialised = run(
@@ -1035,20 +1066,8 @@ fn a_log_is_refused_by_a_bundle_built_after_it() {
         "a bundle built from other files refuses the log"
     );
     assert_eq!(log_files(&dir), written);
-
-    let aside = dir.join("log.first");
-    std::fs::create_dir(&aside).unwrap();
-    for (name, _) in &written {
-        std::fs::rename(dir.join(name), aside.join(name)).unwrap();
-    }
-    let (server, bound) = Server::announced(&dir);
-    let served = Served {
-        dir: tmp,
-        server,
-        bound,
-    };
-    let token = token(&served);
-    assert_eq!(served_ids(&served, &token, "s0", &[0, 1, 2, 3]), vec![0, 1, 2, 3]);
+    let tmp = serve_with_the_log_aside(tmp, &written, &[0, 1, 2, 3]);
+    assert_eq!(log_files(tmp.path()), written);
 }
 
 /// The log stays the database's own through everything that keeps the database: a flush, a

@@ -416,6 +416,19 @@ fn a_log_whose_header_names_no_database_is_refused() {
     );
 }
 
+/// Every file in `dir` with its bytes, by name.
+fn files(dir: &std::path::Path) -> Vec<(std::ffi::OsString, Vec<u8>)> {
+    let mut files: Vec<(std::ffi::OsString, Vec<u8>)> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            (entry.file_name(), std::fs::read(entry.path()).unwrap())
+        })
+        .collect();
+    files.sort();
+    files
+}
+
 /// A log is opened only for the database it was begun for. Another database's open is refused
 /// whether the log holds records or none, and leaves every file of it as it was; the log's own
 /// database opens it again, records and all.
@@ -447,17 +460,6 @@ fn a_log_is_refused_by_any_database_but_its_own() {
         wal.fsync().unwrap();
         wal.append(&record).unwrap();
     }
-    let files = |at: &std::path::Path| {
-        let mut files: Vec<(std::ffi::OsString, Vec<u8>)> = std::fs::read_dir(at)
-            .unwrap()
-            .map(|entry| {
-                let entry = entry.unwrap();
-                (entry.file_name(), std::fs::read(entry.path()).unwrap())
-            })
-            .collect();
-        files.sort();
-        files
-    };
     let before = files(&written);
     assert!(matches!(
         Wal::open(written.join("wal.log"), OTHER),
@@ -481,4 +483,53 @@ fn a_header_cut_short_is_refused_as_damaged_and_not_as_another_version() {
         Wal::open(dir.path().join("wal.log"), DATABASE),
         Err(WalError::BadHeader { .. })
     ));
+}
+
+/// A log whose members name two databases is refused by both, and left as it was: with the
+/// foreign header put right, the log's own database opens it with every record it acknowledged.
+#[test]
+fn a_log_whose_members_name_two_databases_is_refused() {
+    use std::io::{Seek, SeekFrom, Write};
+    const OTHER: [u8; 16] = [8; 16];
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().join("wal.log");
+    let change = |entity: u64| WalRecord::ChangeBatch {
+        changes: vec![(
+            Target::Item(ShardId::ZERO, EntityId::new(entity)),
+            mosaica_lifecycle::wal::ChangeOp::Delete,
+        )],
+    };
+    {
+        let mut wal = Wal::open(&path, DATABASE).unwrap();
+        wal.append(&change(171)).unwrap();
+        wal.fsync().unwrap();
+        wal.rotate(&[], &[], 0).unwrap();
+        wal.append(&change(349)).unwrap();
+        wal.fsync().unwrap();
+    }
+    let second = dir.path().join("wal-000002.log");
+    let name = |database: &[u8; 16]| {
+        let mut file = std::fs::OpenOptions::new().write(true).open(&second).unwrap();
+        file.seek(SeekFrom::Start(6)).unwrap();
+        file.write_all(database).unwrap();
+    };
+    name(&OTHER);
+    let before = files(dir.path());
+
+    for database in [DATABASE, OTHER] {
+        assert!(matches!(
+            Wal::open(&path, database),
+            Err(WalError::OtherDatabase { .. })
+        ));
+        assert_eq!(files(dir.path()), before, "a refused log is left as it was");
+    }
+
+    name(&DATABASE);
+    let wal = Wal::open(&path, DATABASE).unwrap();
+    let changes: Vec<WalRecord> = wal
+        .records()
+        .map(|r| r.unwrap().1)
+        .filter(|record| matches!(record, WalRecord::ChangeBatch { .. }))
+        .collect();
+    assert_eq!(changes, vec![change(171), change(349)]);
 }
