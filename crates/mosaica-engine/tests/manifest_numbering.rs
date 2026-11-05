@@ -297,10 +297,13 @@ fn a_refused_publication_re_plans_above_the_number_it_was_refused_at() {
         "nothing published: a refused commit swaps no generation"
     );
 
-    // The retry: a number above what is on disc, and the row with it.
+    // The retry: a number above what is on disc, and the row with it. The row count is taken
+    // after the swap, so the wait is on both.
     engine.request_flush();
     let deadline = Instant::now() + Duration::from_secs(30);
-    while engine.generation().segments_version == 0 {
+    while engine.generation().segments_version == 0
+        || engine.write_executor_stats().flush_rows_published == 0
+    {
         assert!(
             Instant::now() < deadline,
             "the re-planned flush never published: side-manifests {:?}",
