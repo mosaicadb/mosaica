@@ -500,7 +500,9 @@ struct RawServe {
     ///
     /// Default: `2000`.
     masked_count_give_way_ms: Option<u64>,
-    /// Bytes of per-viewer counts of occupied tiles, from which the sampling threshold is derived.
+    /// Bytes of counts of occupied tiles, from which the sampling threshold is derived, shared by
+    /// every viewer with the same grant. The counts are also kept in the cache directory, so a
+    /// restart reads them back.
     ///
     /// Default: `33554432` (32 MiB).
     occupancy_cache_bytes: Option<u64>,
