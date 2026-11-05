@@ -42,15 +42,6 @@ pub fn test_key() -> IdentityKey {
     IdentityKey::from_hex(TEST_KEY_HEX).unwrap()
 }
 
-/// The database the bundle at `root` is: what the header of a log written for it names.
-pub fn database_of(root: &Path) -> [u8; 16] {
-    mosaica_store::open_bundle(root)
-        .expect("the bundle opens")
-        .manifest
-        .identity
-        .database()
-}
-
 pub fn extent() -> Bounds {
     Bounds {
         x_min: 0.0,

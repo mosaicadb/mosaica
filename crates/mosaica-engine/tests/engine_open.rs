@@ -57,7 +57,8 @@ fn engine_open_refuses_an_out_of_range_allocator_seed() {
     // the row's other fields never matter.
     let wal_path = tmp.path().join("wal.log");
     {
-        let mut wal = Wal::open(&wal_path, database_of(&bundle_root)).unwrap();
+        let database = mosaica_store::database_of(&bundle_root).unwrap();
+        let mut wal = Wal::open(&wal_path, database).unwrap();
         wal.append(&WalRecord::IngestBatch {
             edits: Vec::new(),
             receipt: Vec::new(),

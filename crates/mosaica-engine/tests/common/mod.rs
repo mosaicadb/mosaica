@@ -289,20 +289,11 @@ pub fn test_key() -> IdentityKey {
     IdentityKey::from_hex(TEST_KEY_HEX).unwrap()
 }
 
-/// The database the bundle at `root` is: what the header of a log written for it names.
-pub fn database_of(root: &Path) -> [u8; 16] {
-    mosaica_store::open_bundle(root)
-        .expect("the bundle opens")
-        .manifest
-        .identity
-        .database()
-}
-
 /// The log at `dir/wal.log`, opened for the bundle at `dir/bundle`, where a fixture built into a
 /// directory of its own keeps them.
 pub fn log_in(dir: &Path) -> mosaica_lifecycle::Wal {
-    mosaica_lifecycle::Wal::open(dir.join("wal.log"), database_of(&dir.join("bundle")))
-        .expect("the log opens")
+    let database = mosaica_store::database_of(&dir.join("bundle")).unwrap();
+    mosaica_lifecycle::Wal::open(dir.join("wal.log"), database).expect("the log opens")
 }
 
 /// The `mosaica_id` of the item of shard 0 holding `entity` as its number at `tenancy`.
@@ -534,7 +525,8 @@ impl Fixture {
 
     /// The fixture's log, opened for its bundle.
     pub fn log(&self) -> mosaica_lifecycle::Wal {
-        mosaica_lifecycle::Wal::open(&self.wal, database_of(&self.root)).expect("the log opens")
+        let database = mosaica_store::database_of(&self.root).unwrap();
+        mosaica_lifecycle::Wal::open(&self.wal, database).expect("the log opens")
     }
 
     /// The entities the build gave the generator's `sources`.

@@ -782,6 +782,12 @@ enum Verification {
     JustWritten,
 }
 
+/// The database the bundle at `root` is, as the header of a log written for it names it:
+/// [`crate::manifest::IdentityDescriptor::database`] of the bundle [`open_bundle`] opens.
+pub fn database_of(root: &Path) -> Result<[u8; 16]> {
+    Ok(open_bundle(root)?.manifest.identity.database())
+}
+
 /// Open a prefix **this process just wrote**, skipping the digest sweep and the permutation's row
 /// validation. The fourth bundle constructor, and the one a compaction's publication needs.
 ///

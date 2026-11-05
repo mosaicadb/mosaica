@@ -542,7 +542,7 @@ async fn a_restated_growth_appends_only_the_members_the_artifact_does_not_hold()
     server.shutdown().await;
     let wal = mosaica_lifecycle::wal::Wal::open(
         tmp.path().join("wal.log"),
-        database_of(&tmp.path().join("bundle")),
+        mosaica_store::database_of(&tmp.path().join("bundle")).unwrap(),
     )
     .expect("the log reopens");
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();

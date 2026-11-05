@@ -549,8 +549,8 @@ async fn a_restated_page_appends_no_growth_record() {
     tick(&server).await;
 
     server.shutdown().await;
-    let wal = mosaica_lifecycle::wal::Wal::open(&wal_dir, database_of(&built.dir.join("bundle")))
-        .expect("the log reopens");
+    let database = mosaica_store::database_of(&built.dir.join("bundle")).unwrap();
+    let wal = mosaica_lifecycle::wal::Wal::open(&wal_dir, database).expect("the log reopens");
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     let growths = records
         .iter()
@@ -627,8 +627,8 @@ async fn a_partly_restated_page_appends_only_the_new_members() {
     );
 
     server.shutdown().await;
-    let wal = mosaica_lifecycle::wal::Wal::open(&wal_dir, database_of(&built.dir.join("bundle")))
-        .expect("the log reopens");
+    let database = mosaica_store::database_of(&built.dir.join("bundle")).unwrap();
+    let wal = mosaica_lifecycle::wal::Wal::open(&wal_dir, database).expect("the log reopens");
     let records = wal.records().map(|r| r.unwrap().1).collect::<Vec<_>>();
     let growths: Vec<&Vec<mosaica_lifecycle::wal::MembershipGrowth>> = records
         .iter()
