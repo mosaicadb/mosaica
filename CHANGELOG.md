@@ -14,11 +14,14 @@ clients behave as they did in 0.1.0.
 
 ### Changed
 
-- **Bundles from 0.1.0 must be rebuilt.** The bundle format is now 50, and 0.2.0 refuses to open a
-  bundle of format 48, which 0.1.0 writes, with a message that says to rebuild it. Build it again
-  from its declaration and source files with `mosaica build`, or from data frames in Python. Items
-  inserted into a running 0.1.0 service are stored in its bundle, so insert them again after the
-  rebuild.
+- **Bundles from 0.1.0 must be rebuilt, and their logs set aside.** The bundle format is now 50,
+  and 0.2.0 refuses to open a bundle of format 48, which 0.1.0 writes, with a message that says to
+  rebuild it. Build it again from its declaration and source files with `mosaica build`, or from
+  data frames in Python. A rebuild starts from those files alone, so every write made to the
+  running 0.1.0 service is left behind: inserts, edits, deletions, suppressions and declarations.
+  Make them again on the rebuilt database; until a deletion or suppression is made again, the item
+  it named is served. 0.2.0 also refuses 0.1.0's write-ahead log, so move its files (`wal-*.log`
+  and `wal-*.sync`, where `[bundle] wal` points) aside, or set `[bundle] wal` to a new path.
 - **Phrase search reads word positions from the index.** A text field's index now records where
   each word falls in each item, and a `phrase` filter or highlight is answered from those positions
   instead of by reading the text of every item that holds all its words. The positions add to a
@@ -47,6 +50,11 @@ clients behave as they did in 0.1.0.
 
 ### Fixed
 
+- **A server refuses a write-ahead log written for another database.** Each log now records the
+  database it belongs to, and a server refuses to replay one written for any other, such as the log
+  of a bundle that has since been rebuilt, with a message that says to move it aside. Before, the
+  server replayed the old log's writes onto the new bundle by internal id, so a deleted or
+  suppressed item could reappear and an unrelated one be hidden. The log format is now 44.
 - **JSON numbers are read as the correctly rounded double.** 0.1.0 could read some numbers with
   seventeen significant digits one step away from their true value, which could move a box's edge
   past an item lying on it and drop that item from the answer.
