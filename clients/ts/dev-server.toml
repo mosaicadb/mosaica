@@ -1,7 +1,9 @@
 [bundle]
 path = "data/bench-fixtures/1e9"
 cache = "mosaica-demo/dev-server/cache"
-wal = "mosaica-demo/dev-server/wal.log"
+# Inside the bundle's directory, so a rebuild, which replaces the directory, replaces the log with
+# it: a server refuses a log written for another bundle.
+wal = "data/bench-fixtures/1e9/wal.log"
 
 [disclosure]
 token_max_lifetime = 3600

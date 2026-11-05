@@ -134,7 +134,6 @@ cat > "$DEPLOYMENT" <<TOML
 [bundle]
 path  = "$FIXTURES/bundle"
 cache = "$LOG_DIR/cache"
-wal   = "$LOG_DIR/wal.log"
 
 [build]
 schema = "$CONFIG"

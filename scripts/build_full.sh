@@ -70,7 +70,6 @@ cat > "$DEPLOYMENT" <<TOML
 [bundle]
 path  = "$OUT"
 cache = "$OUT.cache"
-wal   = "$OUT.wal"
 
 [build]
 schema = "$CONFIG"
