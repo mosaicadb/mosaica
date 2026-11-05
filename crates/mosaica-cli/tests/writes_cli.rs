@@ -6,7 +6,7 @@ mod common;
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::Path;
-use std::process::{Output, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -946,4 +946,165 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
     let seen = silent.seen.lock().unwrap().clone();
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[0], seen[1]);
+}
+
+/// The files of the write-ahead log in `dir`, each with its bytes, by name.
+fn log_files(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("wal-"))
+        .map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            (name, std::fs::read(entry.path()).unwrap())
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// How `mosaica serve` over the deployment in `dir` exits, which a server that will not open its
+/// bundle and log does at once.
+fn serve_until_it_exits(dir: &Path) -> std::process::ExitStatus {
+    let mut child = mosaica()
+        .arg("serve")
+        .current_dir(dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if started.elapsed() > Duration::from_secs(60) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the server was still running a minute after it started");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// `mosaica build` in `dir`, into the bundle its deployment names.
+fn build(dir: &Path) {
+    let built = run(dir, &["build"], &[], b"");
+    assert!(built.status.success(), "{built:?}");
+}
+
+/// A log written against one bundle is refused by a server over a bundle built after it, from the
+/// same files or from others, and is left as it was. With the log moved aside the new bundle
+/// serves, with none of the old log's deletions and suppressions.
+#[test]
+fn a_log_is_refused_by_a_bundle_built_after_it() {
+    let served = serve(false, "");
+    let dir = served.dir.path().to_owned();
+    let control = served.bound.control.clone();
+    let write = |args: &[&str]| {
+        let mut all = args.to_vec();
+        all.extend(["--control", control.as_str()]);
+        answer(run(&dir, &all, &[OPERATOR], b""))
+    };
+    assert_eq!(write(&["delete", "--match", r#"{"id": "1"}"#])["accepted"], 1);
+    assert_eq!(write(&["suppress", "--match", r#"{"id": "2"}"#])["accepted"], 1);
+    let Served { dir: tmp, server, .. } = served;
+    drop(server);
+    let written = log_files(&dir);
+
+    std::fs::rename(dir.join("bundle"), dir.join("bundle.first")).unwrap();
+    build(&dir);
+    assert!(
+        !serve_until_it_exits(&dir).success(),
+        "a bundle built again from the same files refuses the log"
+    );
+    assert_eq!(log_files(&dir), written);
+
+    std::fs::rename(dir.join("bundle"), dir.join("bundle.second")).unwrap();
+    let materialised = run(
+        &dir,
+        &["corpus", "materialise", "--seed", "2", "--n", "1500", "--out", "."],
+        &[],
+        b"",
+    );
+    assert!(materialised.status.success(), "{materialised:?}");
+    std::fs::rename(dir.join("corpus-config.toml"), dir.join("schema.toml")).unwrap();
+    build(&dir);
+    assert!(
+        !serve_until_it_exits(&dir).success(),
+        "a bundle built from other files refuses the log"
+    );
+    assert_eq!(log_files(&dir), written);
+
+    let aside = dir.join("log.first");
+    std::fs::create_dir(&aside).unwrap();
+    for (name, _) in &written {
+        std::fs::rename(dir.join(name), aside.join(name)).unwrap();
+    }
+    let (server, bound) = Server::announced(&dir);
+    let served = Served {
+        dir: tmp,
+        server,
+        bound,
+    };
+    let token = token(&served);
+    assert_eq!(served_ids(&served, &token, "s0", &[0, 1, 2, 3]), vec![0, 1, 2, 3]);
+}
+
+/// The log stays the database's own through everything that keeps the database: a flush, a
+/// restart, a compaction, another restart, and a copy of the bundle and log together served from
+/// another directory. Each server opens it, and serves every deletion it holds.
+#[test]
+fn a_database_keeps_its_log_through_flushes_compactions_restarts_and_a_copy() {
+    let served = serve(false, "");
+    let dir = served.dir.path().to_owned();
+    let send = |served: &Served, args: &[&str], stdin: &[u8]| {
+        let mut all = args.to_vec();
+        all.extend(["--control", served.bound.control.as_str()]);
+        answer(run(&dir, &all, &[OPERATOR], stdin))
+    };
+    let write = |served: &Served, args: &[&str]| send(served, args, b"");
+    let ids = [0, 1, 2, 3, 9000];
+
+    let row = b"{\"id\": 9000, \"x\": 1.0, \"y\": 1.0}\n";
+    let inserted = send(&served, &["insert", "-", "--format", "ndjson", "--view", "s0"], row);
+    assert_eq!(inserted["created"], 1, "{inserted}");
+    assert_eq!(write(&served, &["delete", "--match", r#"{"id": "1"}"#])["accepted"], 1);
+    write(&served, &["flush", "--wait"]);
+    let served = restart(served);
+    let token = self::token(&served);
+    assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 2, 3, 9000]);
+
+    assert_eq!(write(&served, &["delete", "--match", r#"{"id": "2"}"#])["accepted"], 1);
+    let request = write(&served, &["compact"])["request"].as_u64().unwrap();
+    let started = Instant::now();
+    while write(&served, &["status"])["compaction"]["requests"]["answered"].as_u64()
+        < Some(request)
+    {
+        assert!(started.elapsed() < Duration::from_secs(120));
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let served = restart(served);
+    let token = self::token(&served);
+    assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 3, 9000]);
+
+    let Served { dir: tmp, server, .. } = served;
+    drop(server);
+    let copy = TempDir::new().unwrap();
+    let copied = Command::new("cp")
+        .arg("-a")
+        .arg(format!("{}/.", tmp.path().display()))
+        .arg(copy.path())
+        .status()
+        .unwrap();
+    assert!(copied.success());
+    drop(tmp);
+    let (server, bound) = Server::announced(copy.path());
+    let served = Served {
+        dir: copy,
+        server,
+        bound,
+    };
+    let token = self::token(&served);
+    assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 3, 9000]);
 }

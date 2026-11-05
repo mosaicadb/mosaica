@@ -16,9 +16,9 @@
 //!
 //! Every member's header names the database the log was written for, and `open` refuses a member
 //! naming any other. A log's records name items by entity id, and a rebuilt bundle gives those ids
-//! to other items, so replaying a log over a bundle it was not written for deletes and suppresses
-//! the wrong items and lifts the denies it holds. A sequence with no members is begun for the
-//! database that opens it.
+//! to other items, so a log replayed over a bundle it was not written for would delete and
+//! suppress items other than the ones its callers named. A sequence with no members is begun for
+//! the database that opens it.
 //!
 //! It has to be a sequence because a flush makes a prefix of the log redundant and there is no way
 //! to reclaim the front of a single file. [`Wal::rotate`] seals the active member, opens the next
@@ -1030,8 +1030,8 @@ impl std::fmt::Display for WalError {
             WalError::BadHeader => write!(f, "wal file header missing or unrecognised"),
             WalError::OtherDatabase { path } => write!(
                 f,
-                "the log {} was written for another database; remove it, or set `[bundle] wal` \
-                 to a new path, before serving this bundle",
+                "{} is part of a log written for another database; move that log's files aside, \
+                 or set `[bundle] wal` to a new path, to serve this bundle",
                 path.display()
             ),
             WalError::Poisoned => write!(
