@@ -4365,12 +4365,60 @@ fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
         .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
-/// Merged keys on their way to the dictionary's writer: the characters end to end, and where
-/// each key ends.
+/// Keys on their way to a writer thread: the characters end to end, and where each key ends.
 #[derive(Default)]
 struct KeyBatch {
     text: Vec<u8>,
     ends: Vec<usize>,
+}
+
+impl KeyBatch {
+    fn keys(&self) -> impl Iterator<Item = &[u8]> {
+        let mut start = 0;
+        self.ends.iter().map(move |&end| {
+            let key = &self.text[start..end];
+            start = end;
+            key
+        })
+    }
+}
+
+/// The sending half of a writer thread's queue of [`KeyBatch`]es, `size` keys a batch. Dropping it
+/// closes the queue, which is what ends the writer's loop.
+struct KeySender {
+    batch: KeyBatch,
+    queue: std::sync::mpsc::SyncSender<KeyBatch>,
+    size: usize,
+}
+
+impl KeySender {
+    fn new(queue: std::sync::mpsc::SyncSender<KeyBatch>, size: usize) -> KeySender {
+        KeySender {
+            batch: KeyBatch::default(),
+            queue,
+            size,
+        }
+    }
+
+    fn push(&mut self, key: &[u8]) -> Result<()> {
+        self.batch.text.extend_from_slice(key);
+        self.batch.ends.push(self.batch.text.len());
+        if self.batch.ends.len() >= self.size {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    /// Send the keys held. A writer that has stopped refuses them; its own error is the one to
+    /// report, and is returned when it is joined.
+    fn flush(&mut self) -> Result<()> {
+        if self.batch.ends.is_empty() {
+            return Ok(());
+        }
+        self.queue
+            .send(std::mem::take(&mut self.batch))
+            .map_err(|_| BuildError::Invalid("a keyword writer stopped".to_string()))
+    }
 }
 
 /// Ids per record of the id and perm streams. A record is a block rather than one id so the
@@ -4618,41 +4666,56 @@ impl<'a> KeywordChunks<'a> {
                 )
             })?;
             let path = self.dir.join(format!("keyword-run-{chunk:05}.spill"));
-            let mut run = spill::TextRunWriter::create(&path, spill::RunPayload::Rows)?;
-            let text = &self.text;
-            let mut emit = |key: &mosaica_filter_write::KeyRef| -> Result<()> {
-                run.begin(chunk_key(text, key), 1)?;
-                run.push_entity(chunk, &[])
-            };
-            let keys = match self.mode {
-                ChunkMode::Hash => {
-                    let keys = mosaica_filter_write::rank_table(
-                        &mut self.table,
-                        |k| chunk_key(text, k),
-                        &mut self.scratch,
-                        &mut emit,
-                    )?;
-                    for &rank in &self.scratch {
-                        self.perms.push(rank)?;
+            let (mode, size) = (self.mode, self.plan.merge_batch);
+            let (text, table, pairs) = (&self.text, &mut self.table, &mut self.pairs);
+            let (scratch, ids, perms) = (&mut self.scratch, &mut self.ids, &mut self.perms);
+            // The run is written on its own thread while the chunk is ranked, as the merge's
+            // writers are.
+            let (keys, run) = std::thread::scope(|scope| -> Result<(u32, spill::SpillReceipt)> {
+                let (queue, batches) =
+                    std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
+                let writer = scope.spawn(move || -> Result<spill::SpillReceipt> {
+                    let mut run = spill::TextRunWriter::create(&path, spill::RunPayload::Rows)?;
+                    for batch in batches {
+                        for key in batch.keys() {
+                            run.begin(key, 1)?;
+                            run.push_entity(chunk, &[])?;
+                        }
                     }
-                    keys
-                }
-                ChunkMode::Sort => {
-                    self.scratch.clear();
-                    self.scratch.resize(self.pairs.len(), 0);
-                    let keys = mosaica_filter_write::rank_rows(
-                        &mut self.pairs,
+                    run.finish()
+                });
+                let mut sender = KeySender::new(queue, size);
+                let mut emit =
+                    |key: &mosaica_filter_write::KeyRef| sender.push(chunk_key(text, key));
+                let ranked = match mode {
+                    ChunkMode::Hash => mosaica_filter_write::rank_table(
+                        table,
                         |k| chunk_key(text, k),
-                        &mut self.scratch,
+                        scratch,
                         &mut emit,
-                    )?;
-                    for &rank in &self.scratch {
-                        self.ids.push(rank)?;
+                    ),
+                    ChunkMode::Sort => {
+                        scratch.clear();
+                        scratch.resize(pairs.len(), 0);
+                        mosaica_filter_write::rank_rows(
+                            pairs,
+                            |k| chunk_key(text, k),
+                            scratch,
+                            &mut emit,
+                        )
                     }
-                    keys
+                };
+                let sent = ranked.and_then(|keys| sender.flush().map(|()| keys));
+                drop(sender);
+                let run = joined(writer)?;
+                let keys = sent?;
+                let ranks = if mode == ChunkMode::Hash { perms } else { ids };
+                for &rank in scratch.iter() {
+                    ranks.push(rank)?;
                 }
-            };
-            self.runs.push(run.finish()?);
+                Ok((keys, run))
+            })?;
+            self.runs.push(run);
             next = if mosaica_filter_write::prefers_sort(keys as u64, self.rows) {
                 ChunkMode::Sort
             } else {
@@ -4798,15 +4861,13 @@ fn write_keyword_column(
                     .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
             let mut keys = 0u64;
             for batch in key_batches {
-                let mut start = 0usize;
-                for &end in &batch.ends {
-                    let key = std::str::from_utf8(&batch.text[start..end]).map_err(|e| {
+                for key in batch.keys() {
+                    let key = std::str::from_utf8(key).map_err(|e| {
                         refuse(format!(
                             "a merged key is not UTF-8 ({e}) — the column holds `&str`, so this \
                              is a corrupted run rather than a corpus value"
                         ))
                     })?;
-                    start = end;
                     let ordinal = dict
                         .push(key)
                         .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
@@ -4833,20 +4894,19 @@ fn write_keyword_column(
             Ok(partition)
         });
 
+        let mut merged_keys = KeySender::new(key_queue, plan.merge_batch);
         let merged = (|| -> Result<(u64, u64)> {
             // A queue whose writer has stopped refuses the send; the writer's own error is the
             // one returned, below.
             let stopped = || refuse("a keyword merge writer stopped".to_string());
             let mut merge = TextRunMerge::open(&runs, spill::RunPayload::Rows)?;
-            let mut batch = KeyBatch::default();
             let mut records: Vec<u8> = Vec::new();
             let (mut keys, mut emitted) = (0u64, 0u64);
             while merge.next_term()? {
                 let ordinal = u32::try_from(keys).map_err(|_| {
                     refuse("the column has more distinct keys than a u32 can number".to_string())
                 })?;
-                batch.text.extend_from_slice(merge.term());
-                batch.ends.push(batch.text.len());
+                merged_keys.push(merge.term())?;
                 merge.drain(&mut |chunk, _| {
                     if chunk as usize >= chunks.len() {
                         return Err(refuse(format!(
@@ -4860,22 +4920,17 @@ fn write_keyword_column(
                     Ok(())
                 })?;
                 keys += 1;
-                if batch.ends.len() == plan.merge_batch {
-                    key_queue
-                        .send(std::mem::take(&mut batch))
-                        .map_err(|_| stopped())?;
-                }
                 if records.len() >= plan.merge_batch * KEYWORD_REMAP_RECORD {
                     record_queue
                         .send(std::mem::take(&mut records))
                         .map_err(|_| stopped())?;
                 }
             }
-            key_queue.send(batch).map_err(|_| stopped())?;
+            merged_keys.flush()?;
             record_queue.send(records).map_err(|_| stopped())?;
             Ok((keys, emitted))
         })();
-        drop(key_queue);
+        drop(merged_keys);
         drop(record_queue);
         let written = joined(dict_writer)?;
         let partition = joined(remap_writer)?;
