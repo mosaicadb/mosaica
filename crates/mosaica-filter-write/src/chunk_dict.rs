@@ -16,6 +16,8 @@
 
 use std::io;
 
+use rayon::slice::ParallelSliceMut;
+
 use crate::invalid;
 
 /// Rows a hash chunk reads between two looks at its rate of new keys ([`prefers_sort`]).
@@ -90,18 +92,19 @@ impl KeyRow {
 /// Rank rows by sorting them: `ranks[row]` becomes the rank of that row's key among the distinct
 /// keys, and `emit` is called once per distinct key, ascending. Returns the distinct count.
 ///
-/// `rows` is reordered. `ranks` must have a slot for every `row` the rows name.
+/// `rows` is reordered, by a sort on the rayon pool. `ranks` must have a slot for every `row` the
+/// rows name.
 ///
 /// **No tiebreak on the row.** A tiebreak makes every element distinct, which defeats the
 /// equal-element partitioning the unstable sort does, so a column of two dozen keys would pay
 /// `n log n` comparisons to separate rows that need no order among themselves.
 pub fn rank_rows<'k, E>(
     rows: &mut [KeyRow],
-    bytes: impl Fn(&KeyRef) -> &'k [u8],
+    bytes: impl Fn(&KeyRef) -> &'k [u8] + Sync,
     ranks: &mut [u32],
     mut emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
-    rows.sort_unstable_by(|a, b| {
+    rows.par_sort_unstable_by(|a, b| {
         a.prefix
             .cmp(&b.prefix)
             .then_with(|| bytes(&a.key).cmp(bytes(&b.key)))
@@ -129,7 +132,7 @@ pub fn rank_rows<'k, E>(
 /// is called once per key, ascending. Returns the distinct count.
 pub fn rank_table<'k, E>(
     table: &KeyTable,
-    bytes: impl Fn(&KeyRef) -> &'k [u8],
+    bytes: impl Fn(&KeyRef) -> &'k [u8] + Sync,
     perm: &mut Vec<u32>,
     emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
