@@ -91,8 +91,8 @@ use mosaica_filter::{Codes, ColumnKind, ValueColumn, ValueColumnWriter};
 use mosaica_roaring::RankedRuns;
 
 pub use chunk_dict::{
-    dictionary_of, key_order, key_prefix, prefers_sort, rank_rows, rank_table, KeyRef, KeyRow,
-    KeyTable, Lookup, Vacant, KEY_WINDOW_ROWS,
+    dictionary_of, key_prefix, prefers_sort, rank_rows, rank_table, sort_entry, KeyRef, KeyTable,
+    Lookup, Vacant, KEY_WINDOW_ROWS,
 };
 pub use keyword::{coalesce_keyword_extents, fold_keyword_column, KeywordLayer};
 pub use record::{

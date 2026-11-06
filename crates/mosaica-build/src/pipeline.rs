@@ -4318,9 +4318,8 @@ pub(crate) enum ChunkMode {
 }
 
 /// What one buffered row of a sorted chunk costs beyond its characters: its entry in the array the
-/// chunk sorts, and its rank.
-const KEYWORD_ROW_BYTES: usize =
-    std::mem::size_of::<mosaica_filter_write::KeyRow>() + std::mem::size_of::<u32>();
+/// chunk sorts, the offset of its characters, and its rank.
+const KEYWORD_ROW_BYTES: usize = std::mem::size_of::<u128>() + 2 * std::mem::size_of::<u32>();
 
 /// What one distinct key of a hashed chunk costs beyond its characters: its entry, and two table
 /// slots at half load, doubled because a table that has just grown is half empty.
@@ -4461,7 +4460,10 @@ struct KeywordChunks<'a> {
     /// The open chunk's characters; every [`mosaica_filter_write::KeyRef`] indexes into it.
     text: Vec<u8>,
     table: mosaica_filter_write::KeyTable,
-    pairs: Vec<mosaica_filter_write::KeyRow>,
+    /// A sorted chunk's [`mosaica_filter_write::sort_entry`] per row, and where each row's
+    /// characters start in `text`.
+    entries: Vec<u128>,
+    starts: Vec<u32>,
     rows: u64,
     window_rows: u64,
     window_new: u64,
@@ -4485,7 +4487,8 @@ impl<'a> KeywordChunks<'a> {
             mode: plan.forced.unwrap_or(ChunkMode::Hash),
             text: Vec::new(),
             table: mosaica_filter_write::KeyTable::default(),
-            pairs: Vec::new(),
+            entries: Vec::new(),
+            starts: Vec::new(),
             rows: 0,
             window_rows: 0,
             window_new: 0,
@@ -4545,16 +4548,18 @@ impl<'a> KeywordChunks<'a> {
                 }
             }
             ChunkMode::Sort => {
-                let row = u32::try_from(self.pairs.len()).map_err(|_| {
+                let row = u32::try_from(self.entries.len()).map_err(|_| {
                     BuildError::Invalid(
                         "a sorted keyword chunk holds more rows than a u32 can number; give the \
                          build a smaller memory budget"
                             .to_string(),
                     )
                 })?;
-                let key = self.buffer(key)?;
-                self.pairs.push(mosaica_filter_write::KeyRow { key, row });
-                if self.pairs.len() >= self.plan.chunk_rows
+                let at = self.buffer(key)?;
+                self.starts.push(at.at);
+                self.entries
+                    .push(mosaica_filter_write::sort_entry(key.as_bytes(), row));
+                if self.entries.len() >= self.plan.chunk_rows
                     || self.text.len() >= self.plan.chunk_bytes
                 {
                     self.close(None)?;
@@ -4597,12 +4602,21 @@ impl<'a> KeywordChunks<'a> {
                 }
                 ChunkMode::Sort => {
                     self.scratch.clear();
-                    self.scratch.resize(self.pairs.len(), 0);
+                    self.scratch.resize(self.entries.len(), 0);
+                    let starts = &self.starts;
+                    let row_key = |row: u32| {
+                        let row = row as usize;
+                        let end = starts.get(row + 1).map_or(text.len(), |&end| end as usize);
+                        &text[starts[row] as usize..end]
+                    };
                     let keys = mosaica_filter_write::rank_rows(
-                        &mut self.pairs,
-                        |k| chunk_key(text, k),
+                        &mut self.entries,
+                        row_key,
                         &mut self.scratch,
-                        &mut emit,
+                        |row| emit(&mosaica_filter_write::KeyRef {
+                            at: starts[row as usize],
+                            len: row_key(row).len() as u32,
+                        }),
                     )?;
                     for &rank in &self.scratch {
                         self.ids.push(rank)?;
@@ -4626,7 +4640,8 @@ impl<'a> KeywordChunks<'a> {
         // what the next chunk wants.
         self.text.clear();
         self.table.clear();
-        self.pairs.clear();
+        self.entries.clear();
+        self.starts.clear();
         self.rows = 0;
         self.window_rows = 0;
         self.window_new = 0;

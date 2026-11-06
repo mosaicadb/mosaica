@@ -14,7 +14,6 @@
 //! Either way the output is the same: the ranks name the sorted distinct keys, so which way a
 //! chunk took is not in any artefact.
 
-use std::cmp::Ordering;
 use std::io;
 
 use crate::invalid;
@@ -34,16 +33,11 @@ pub fn prefers_sort(new_keys: u64, rows: u64) -> bool {
     new_keys.saturating_mul(10) > rows
 }
 
-/// Where one key's bytes are in its owner's storage, with its first eight bytes for ordering.
-///
-/// **The first eight bytes, big-endian and zero-padded, order two keys as their bytes do** where
-/// they differ: a key shorter than the other pads with the zeros that make "shorter is less"
-/// true. So [`key_order`] reads the bytes only to separate two keys that agree in their first
-/// eight. `at` is the owner's to interpret, an offset into a buffer or an index into a slice;
-/// nothing here reads it except through the owner's `bytes` function.
+/// Where one key's bytes are in its owner's storage. `at` is the owner's to interpret, an offset
+/// into a buffer or an index into a slice; nothing here reads it except through the owner's
+/// `bytes` function.
 #[derive(Clone, Copy, Debug)]
 pub struct KeyRef {
-    pub prefix: u64,
     pub at: u32,
     pub len: u32,
 }
@@ -59,15 +53,15 @@ impl KeyRef {
                 key.len()
             ))
         })?;
-        Ok(KeyRef {
-            prefix: key_prefix(key),
-            at,
-            len,
-        })
+        Ok(KeyRef { at, len })
     }
 }
 
-/// The key's first eight bytes, big-endian and zero-padded — see [`KeyRef`].
+/// The key's first eight bytes, big-endian and zero-padded.
+///
+/// **They order two keys as their bytes do** wherever the two differ in them: a key shorter than
+/// the other pads with the zeros that make "shorter is less" true. Only keys that agree in all
+/// eight need their bytes compared.
 pub fn key_prefix(key: &[u8]) -> u64 {
     let take = key.len().min(8);
     let mut head = [0u8; 8];
@@ -75,50 +69,55 @@ pub fn key_prefix(key: &[u8]) -> u64 {
     u64::from_be_bytes(head)
 }
 
-/// Order two keys by their bytes, through the prefix first.
-pub fn key_order<'k>(a: &KeyRef, b: &KeyRef, bytes: &impl Fn(&KeyRef) -> &'k [u8]) -> Ordering {
-    a.prefix.cmp(&b.prefix).then_with(|| bytes(a).cmp(bytes(b)))
+/// One row's entry in the sort [`rank_rows`] makes: its key's [`key_prefix`] above its row.
+pub fn sort_entry(key: &[u8], row: u32) -> u128 {
+    ((key_prefix(key) as u128) << 64) | row as u128
 }
 
-/// One row's key and its position among the rows being ranked.
-#[derive(Clone, Copy, Debug)]
-pub struct KeyRow {
-    pub key: KeyRef,
-    pub row: u32,
-}
-
-/// Rank `rows` by sorting them: `ranks[row]` becomes the rank of that row's key among the distinct
-/// keys, and `emit` is called once per distinct key, ascending. Returns the distinct count.
+/// Rank rows by sorting them: `ranks[row]` becomes the rank of that row's key among the distinct
+/// keys, and `emit` is called with one row of each distinct key, ascending. Returns the distinct
+/// count.
 ///
-/// `rows` is reordered. `ranks` must have a slot for every `row` the rows name.
+/// `entries` holds one [`sort_entry`] per row and is reordered; `bytes(row)` is that row's key.
 ///
-/// **No tiebreak on the row.** A tiebreak makes every element distinct, which defeats the
-/// equal-element partitioning the unstable sort does, so a column of two dozen keys would pay
-/// `n log n` comparisons to separate rows that need no order among themselves.
+/// **The sort is of integers.** An entry is 16 bytes and two entries compare without reading a
+/// key, so the sort moves and compares no more than it must. Rows whose prefixes agree come out
+/// in row order and are then sorted on their bytes, which for near-unique keys is a few rows and
+/// for keys sharing a long prefix is most of them.
 pub fn rank_rows<'k, E>(
-    rows: &mut [KeyRow],
-    bytes: impl Fn(&KeyRef) -> &'k [u8],
+    entries: &mut [u128],
+    bytes: impl Fn(u32) -> &'k [u8],
     ranks: &mut [u32],
-    mut emit: impl FnMut(&KeyRef) -> Result<(), E>,
+    mut emit: impl FnMut(u32) -> Result<(), E>,
 ) -> Result<u32, E> {
-    rows.sort_unstable_by(|a, b| key_order(&a.key, &b.key, &bytes));
+    entries.sort_unstable();
+    let row = |entry: u128| entry as u32;
     let mut distinct = 0u32;
     let mut start = 0usize;
-    while start < rows.len() {
-        let head = rows[start].key;
-        let key = bytes(&head);
+    while start < entries.len() {
+        let prefix = entries[start] >> 64;
         let mut end = start + 1;
-        while end < rows.len()
-            && rows[end].key.prefix == head.prefix
-            && bytes(&rows[end].key) == key
-        {
+        while end < entries.len() && entries[end] >> 64 == prefix {
             end += 1;
         }
-        emit(&head)?;
-        for row in &rows[start..end] {
-            ranks[row.row as usize] = distinct;
+        let tied = &mut entries[start..end];
+        if tied.len() > 1 {
+            tied.sort_unstable_by(|a, b| bytes(row(*a)).cmp(bytes(row(*b))));
         }
-        distinct += 1;
+        let mut at = 0usize;
+        while at < tied.len() {
+            let key = bytes(row(tied[at]));
+            let mut same = at + 1;
+            while same < tied.len() && bytes(row(tied[same])) == key {
+                same += 1;
+            }
+            emit(row(tied[at]))?;
+            for &entry in &tied[at..same] {
+                ranks[row(entry) as usize] = distinct;
+            }
+            distinct += 1;
+            at = same;
+        }
         start = end;
     }
     Ok(distinct)
@@ -130,20 +129,18 @@ pub fn rank_table<'k, E>(
     table: &KeyTable,
     bytes: impl Fn(&KeyRef) -> &'k [u8],
     perm: &mut Vec<u32>,
-    emit: impl FnMut(&KeyRef) -> Result<(), E>,
+    mut emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
-    let mut rows: Vec<KeyRow> = table
+    let mut entries: Vec<u128> = table
         .entries
         .iter()
         .enumerate()
-        .map(|(id, &key)| KeyRow {
-            key,
-            row: id as u32,
-        })
+        .map(|(id, key)| sort_entry(bytes(key), id as u32))
         .collect();
     perm.clear();
-    perm.resize(rows.len(), 0);
-    rank_rows(&mut rows, bytes, perm, emit)
+    perm.resize(entries.len(), 0);
+    let key_of = |id: u32| bytes(&table.entries[id as usize]);
+    rank_rows(&mut entries, key_of, perm, |id| emit(&table.entries[id as usize]))
 }
 
 /// An open-addressing table from a key to its provisional id, the ids issued in first-seen order.
@@ -330,21 +327,21 @@ pub fn dictionary_of<'a>(values: &[&'a str]) -> io::Result<(Vec<u32>, Vec<&'a st
     }
 
     if sorted {
-        let mut rows: Vec<KeyRow> = values
+        let mut entries: Vec<u128> = values
             .iter()
             .enumerate()
-            .map(|(row, value)| {
-                Ok(KeyRow {
-                    key: KeyRef::new(value.as_bytes(), row as u32)?,
-                    row: row as u32,
-                })
-            })
-            .collect::<io::Result<_>>()?;
+            .map(|(row, value)| sort_entry(value.as_bytes(), row as u32))
+            .collect();
         let mut ordinals = vec![0u32; values.len()];
-        rank_rows(&mut rows, bytes, &mut ordinals, |key| {
-            keys.push(values[key.at as usize]);
-            Ok::<(), io::Error>(())
-        })?;
+        rank_rows(
+            &mut entries,
+            |row| values[row as usize].as_bytes(),
+            &mut ordinals,
+            |row| {
+                keys.push(values[row as usize]);
+                Ok::<(), io::Error>(())
+            },
+        )?;
         return Ok((ordinals, keys));
     }
 
@@ -439,18 +436,16 @@ mod tests {
         })
         .unwrap();
 
-        let mut rows: Vec<KeyRow> = owned
+        let mut entries: Vec<u128> = owned
             .iter()
             .enumerate()
-            .map(|(row, v)| KeyRow {
-                key: KeyRef::new(v.as_bytes(), row as u32).unwrap(),
-                row: row as u32,
-            })
+            .map(|(row, v)| sort_entry(v.as_bytes(), row as u32))
             .collect();
         let mut ranks = vec![0u32; owned.len()];
         let mut from_rows = Vec::new();
-        rank_rows(&mut rows, bytes, &mut ranks, |k| {
-            from_rows.push(bytes(k).to_vec());
+        let by_row = |row: u32| owned[row as usize].as_bytes();
+        rank_rows(&mut entries, by_row, &mut ranks, |row| {
+            from_rows.push(by_row(row).to_vec());
             Ok::<(), ()>(())
         })
         .unwrap();
