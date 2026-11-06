@@ -142,6 +142,11 @@ pub fn rank_rows<'k, E>(
     let mut distinct = 0u32;
     let mut start = 0usize;
     while start < rows.len() {
+        // The rows are in key order and their keys in row order, so each key read is a miss; the
+        // key some rows on is asked for now, to arrive while this one is used.
+        if let Some(ahead) = rows.get(start + PREFETCH_ROWS) {
+            prefetch(bytes(&ahead.key));
+        }
         let head = rows[start];
         let key = bytes(&head.key);
         let mut end = start + 1;
@@ -156,6 +161,24 @@ pub fn rank_rows<'k, E>(
         start = end;
     }
     Ok(distinct)
+}
+
+/// How far ahead [`rank_rows`] asks for a key.
+const PREFETCH_ROWS: usize = 16;
+
+/// Ask for `bytes` to be brought into cache before they are read. A hint with no effect on what
+/// is read; on a target without one it does nothing.
+#[inline]
+fn prefetch(bytes: &[u8]) {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: a prefetch reads nothing and faults on nothing, whatever the address.
+    unsafe {
+        std::arch::x86_64::_mm_prefetch::<{ std::arch::x86_64::_MM_HINT_T0 }>(
+            bytes.as_ptr().cast(),
+        );
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    let _ = bytes;
 }
 
 /// Rank a table's distinct keys: `perm[id]` becomes the rank of provisional id `id`, and `emit`
