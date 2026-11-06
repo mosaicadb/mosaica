@@ -665,7 +665,7 @@ pub(crate) type MappedU32 = MappedArray<u32>;
 pub(crate) use mosaica_store::partition::{
     boundaries_uniform, mix64, partition_buffer_bytes, read_bucket, Partition, PartitionStore,
     SPILL_BUF_BYTES,
-    SpillReceipt, SpillWriter, PARTITION_BUCKETS, PARTITION_BUCKET_RECORDS,
+    RecordReader, SpillReceipt, SpillWriter, PARTITION_BUCKETS, PARTITION_BUCKET_RECORDS,
     PARTITION_COUNTED_BUCKETS,
 };
 

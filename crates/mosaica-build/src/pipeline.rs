@@ -4247,44 +4247,28 @@ pub(crate) enum KeywordValues<'a> {
     Extents(&'a crate::extents::OpenExtents),
 }
 
-impl KeywordValues<'_> {
-    /// A ceiling on the present rows, for the chunk buffer's capacity: the column's entities, or
-    /// the extents' rows before their live sets take the overwritten ones out. A hint and not a
-    /// count — nothing downstream reads it.
-    fn rows_hint(&self) -> usize {
-        match self {
-            KeywordValues::Column(values) => values.len(),
-            KeywordValues::Extents(extents) => {
-                extents.blobs.iter().map(|blob| blob.rows() as usize).sum()
-            }
-        }
-    }
-}
-
-/// How one indexed keyword column's dictionary pass is sized: the present rows one chunk sorts
-/// before it spills a run.
+/// How one indexed keyword column's dictionary pass is sized: the rows a sorted chunk buffers, the
+/// distinct keys a hashed chunk holds, and the characters either holds.
 ///
 /// **The same share of the build's memory budget the text pass takes** — [`TEXT_BUDGET_SHARE`],
-/// under the same [`TEXT_BUDGET_MIN`] and [`TEXT_BUDGET_MAX`] clamp — and for the reason that
-/// share is what it is: both run inside the entity-order tail `residency.rs` models, with every
-/// declared column resident beside them, so each is a transient on top of the build's largest
-/// resident set rather than a stage with the machine to itself.
+/// under the same [`TEXT_BUDGET_MIN`] and [`TEXT_BUDGET_MAX`] clamp — because both run inside the
+/// entity-order tail `residency.rs` models, with every declared column resident beside them. The
+/// pass is one walk of the column in row order, so one chunk is live and the allowance is that
+/// chunk.
 ///
-/// Where the two differ is the divisor. The text pass divides its allowance by the thread count
-/// because `threads` workers accumulate at once; this pass is one walk of the column in row order,
-/// so one chunk is live and the allowance is that chunk. It is not parallelised: on either route
-/// the values arrive as one entity-ascending stream, and a second worker over a range of it would
-/// be a second reader of the same file rather than a second stream.
-///
-/// **Two bounds, not one.** The chunk buffers each row's characters as well as its entry in the
-/// array to be sorted, so a chunk of long values fills the allowance at a row count a chunk of
-/// short ones would not. Whichever bound a chunk reaches first spills it. Where the boundary falls
-/// changes the runs and changes no byte of the output
-/// ([`tests::chunking_the_keyword_column_does_not_change_its_bytes`]).
+/// **A hashed chunk is bounded by its keys, not its rows**: its rows leave as ids the moment they
+/// are read, so a column with few keys is one chunk at any row count. A sorted chunk holds its rows
+/// until it sorts them, so its bound is rows. Where the boundaries fall changes no byte of the
+/// output ([`tests::chunking_the_keyword_column_does_not_change_its_bytes`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct KeywordDictPlan {
     chunk_rows: usize,
+    chunk_keys: usize,
     chunk_bytes: usize,
+    /// Rows a hashed chunk reads between two looks at its rate of new keys.
+    window: u64,
+    /// One way for every chunk, for the tests that must reach each; `None` chooses per chunk.
+    forced: Option<ChunkMode>,
 }
 
 /// The floor on a chunk, so a tiny `--memory-budget` cannot derive a plan that spills a run every
@@ -4299,257 +4283,392 @@ impl KeywordDictPlan {
     /// The plan a build's memory budget derives.
     pub(crate) fn for_budget(budget: u64) -> KeywordDictPlan {
         let allowance = (budget / TEXT_BUDGET_SHARE).clamp(TEXT_BUDGET_MIN, TEXT_BUDGET_MAX);
-        let chunk_rows = (allowance as usize / KEYWORD_ROW_BYTES).max(KEYWORD_MIN_CHUNK_ROWS);
-        let chunk_bytes = (allowance as usize).max(KEYWORD_MIN_CHUNK_BYTES);
         KeywordDictPlan {
-            chunk_rows,
-            chunk_bytes,
+            chunk_rows: (allowance as usize / KEYWORD_ROW_BYTES).max(KEYWORD_MIN_CHUNK_ROWS),
+            chunk_keys: (allowance as usize / KEYWORD_KEY_BYTES).max(KEYWORD_MIN_CHUNK_ROWS),
+            chunk_bytes: (allowance as usize).max(KEYWORD_MIN_CHUNK_BYTES),
+            window: mosaica_filter_write::KEY_WINDOW_ROWS,
+            forced: None,
         }
     }
 
-    /// An explicit plan, for the tests that must force several runs and a cascade out of a corpus
-    /// small enough to assert over.
+    /// An explicit plan, for the tests that must force several chunks and a cascade out of a
+    /// corpus small enough to assert over: `chunk` bounds both a sorted chunk's rows and a hashed
+    /// chunk's keys.
     #[cfg(test)]
-    fn explicit(chunk_rows: usize) -> KeywordDictPlan {
+    fn explicit(chunk: usize, window: u64, forced: Option<ChunkMode>) -> KeywordDictPlan {
         KeywordDictPlan {
-            chunk_rows: chunk_rows.max(1),
+            chunk_rows: chunk.max(1),
+            chunk_keys: chunk.max(1),
             chunk_bytes: usize::MAX,
+            window: window.max(1),
+            forced,
         }
     }
 }
 
-/// What one buffered row costs beyond its characters: its entry in the array the chunk sorts, and
-/// its place in the scratch a key's rows are gathered into. The figure [`KeywordDictPlan`] divides
-/// the budget by.
-const KEYWORD_ROW_BYTES: usize = std::mem::size_of::<KeywordPair>() + std::mem::size_of::<u32>();
+/// How one chunk ranks its rows ([`mosaica_filter_write::prefers_sort`] chooses).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChunkMode {
+    /// Each row is looked up in a table and leaves as a provisional id; the distinct keys are
+    /// sorted at the end.
+    Hash,
+    /// Each row is buffered and sorted on its key; the ranks leave in row order at the end.
+    Sort,
+}
 
-/// One present row's key and the row it sits at.
+/// What one buffered row of a sorted chunk costs beyond its characters: its entry in the array the
+/// chunk sorts, and its rank.
+const KEYWORD_ROW_BYTES: usize =
+    std::mem::size_of::<mosaica_filter_write::KeyRow>() + std::mem::size_of::<u32>();
+
+/// What one distinct key of a hashed chunk costs beyond its characters: its entry, and two table
+/// slots at half load, doubled because a table that has just grown is half empty.
+const KEYWORD_KEY_BYTES: usize =
+    std::mem::size_of::<mosaica_filter_write::KeyRef>() + 4 * std::mem::size_of::<u64>();
+
+/// The partition the merge pushes `(chunk, ordinal)` into, one record per key of each chunk.
+const KEYWORD_REMAP_PARTITION: &str = "keyword-remap";
+
+/// One `(chunk, ordinal)` record of that partition: two little-endian `u32`s, the chunk first
+/// because it is the key the partition routes on.
+const KEYWORD_REMAP_RECORD: usize = 8;
+
+/// Ids per record of the id and perm streams. A record is a block rather than one id so the
+/// stream's anchor and buffering are paid per block; the last block is padded with zeros.
+const KEYWORD_ID_BLOCK: usize = 2048;
+
+/// A stream of `u32`s spilled in [`KEYWORD_ID_BLOCK`]s.
+struct IdWriter {
+    spill: spill::SpillWriter,
+    block: Vec<u8>,
+    count: u64,
+}
+
+impl IdWriter {
+    fn create(path: &Path) -> Result<IdWriter> {
+        Ok(IdWriter {
+            spill: spill::SpillWriter::create(path)?,
+            block: Vec::with_capacity(KEYWORD_ID_BLOCK * 4),
+            count: 0,
+        })
+    }
+
+    fn push(&mut self, id: u32) -> Result<()> {
+        self.block.extend_from_slice(&id.to_le_bytes());
+        self.count += 1;
+        if self.block.len() == KEYWORD_ID_BLOCK * 4 {
+            self.spill.push_bytes(&self.block)?;
+            self.block.clear();
+        }
+        Ok(())
+    }
+
+    /// The receipt and the ids pushed.
+    fn finish(mut self) -> Result<(spill::SpillReceipt, u64)> {
+        if !self.block.is_empty() {
+            self.block.resize(KEYWORD_ID_BLOCK * 4, 0);
+            self.spill.push_bytes(&self.block)?;
+        }
+        Ok((self.spill.finish()?, self.count))
+    }
+}
+
+/// An [`IdWriter`]'s stream read back, `count` ids, verified against its receipt at the end.
+struct IdReader {
+    records: spill::RecordReader,
+    block: Vec<u32>,
+    at: usize,
+    left: u64,
+}
+
+impl IdReader {
+    fn open(receipt: &spill::SpillReceipt, count: u64) -> Result<IdReader> {
+        if receipt.count != count.div_ceil(KEYWORD_ID_BLOCK as u64) {
+            return Err(BuildError::Invalid(format!(
+                "{}: {} blocks where {count} ids need {}",
+                receipt.path.display(),
+                receipt.count,
+                count.div_ceil(KEYWORD_ID_BLOCK as u64)
+            )));
+        }
+        Ok(IdReader {
+            records: spill::RecordReader::open(receipt, KEYWORD_ID_BLOCK * 4)?,
+            block: Vec::with_capacity(KEYWORD_ID_BLOCK),
+            at: 0,
+            left: count,
+        })
+    }
+
+    /// The next ids, at most `want` and at least one, from the block in hand.
+    fn take(&mut self, want: u64) -> Result<&[u32]> {
+        if self.left == 0 || want == 0 {
+            return Err(BuildError::Invalid(
+                "a keyword id stream was read past the ids it holds".to_string(),
+            ));
+        }
+        if self.at == self.block.len() {
+            let record = self.records.next_record()?.ok_or_else(|| {
+                BuildError::Invalid("a keyword id stream ends before its last block".to_string())
+            })?;
+            self.block.clear();
+            self.block.extend(
+                record
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|bytes| u32::from_le_bytes(*bytes)),
+            );
+            self.at = 0;
+        }
+        let n = (self.block.len() - self.at).min(want.min(self.left) as usize);
+        self.left -= n as u64;
+        self.at += n;
+        Ok(&self.block[self.at - n..self.at])
+    }
+
+    /// Check that every id was read and the stream's anchor holds.
+    fn finish(mut self) -> Result<()> {
+        if self.left != 0 || self.records.next_record()?.is_some() {
+            return Err(BuildError::Invalid(format!(
+                "a keyword id stream holds {} ids past the last chunk",
+                self.left
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// One closed chunk: how it ranked its rows, how many rows it read, and how many distinct keys
+/// they carried.
+struct ChunkMeta {
+    mode: ChunkMode,
+    rows: u64,
+    keys: u32,
+}
+
+/// The chunk pass: rows in, an id per row and one sorted run of keys per chunk out.
 ///
-/// **The key's first bytes are carried beside its position so that most comparisons never reach
-/// the characters.** The first eight bytes read big-endian and zero-padded order two keys exactly
-/// as their bytes do: where the padded prefixes differ, the keys differ the same way at the same
-/// position, a key shorter than the other padding with the zeros that make "shorter is less" true.
-/// So [`keyword_key_order`] reads the buffer only to separate two keys that agree in their first
-/// eight characters.
-///
-/// **The key is a position in the chunk's own buffer and not a reference into the column.** The
-/// two routes deliver a value's characters differently — an arena the whole pass may borrow from,
-/// and a block of one extent that is decompressed and dropped — so the chunk copies what it
-/// buffers and both routes reach the same sort. Holding a reference measured faster when the
-/// alternative was a position into a side array of the *column's* 320 MB of keys, 13.45 s against
-/// 10.12 s over 2×10⁷ distinct ones; what the sort reaches
-/// into here is the chunk's own buffer, which the plan bounds.
-#[derive(Clone, Copy)]
-struct KeywordPair {
-    prefix: u64,
-    at: u32,
-    len: u32,
-    row: u32,
-}
-
-/// The key's first eight bytes, big-endian and zero-padded — see [`KeywordPair`].
-fn keyword_prefix(text: &str) -> u64 {
-    let bytes = text.as_bytes();
-    let take = bytes.len().min(8);
-    let mut head = [0u8; 8];
-    head[..take].copy_from_slice(&bytes[..take]);
-    u64::from_be_bytes(head)
-}
-
-/// Order two pairs by key, and by key alone.
-///
-/// **The row is not a tiebreak, and leaving it out is what keeps a low-cardinality column cheap.**
-/// A tiebreak makes every element distinct, which defeats the equal-element partitioning an
-/// introsort does: a column of two dozen codes would pay a full `n log n` over every row to
-/// separate rows that were in order to begin with. What it costs instead is that a key's rows come
-/// out of the sort in no order, so [`KeywordChunk::spill`] sorts each key's own rows — a `u32`
-/// sort over one key's rows, which is also what
-/// [`crate::spill::TextRunWriter::push_entity`] demands: strictly ascending within a record.
-fn keyword_key_order(a: &KeywordPair, b: &KeywordPair, text: &[u8]) -> std::cmp::Ordering {
-    a.prefix
-        .cmp(&b.prefix)
-        .then_with(|| buffered_key(text, a).cmp(buffered_key(text, b)))
-}
-
-/// One buffered key's characters.
-fn buffered_key<'a>(text: &'a [u8], pair: &KeywordPair) -> &'a [u8] {
-    &text[pair.at as usize..pair.at as usize + pair.len as usize]
-}
-
-/// One chunk of present rows, buffered in row order and sorted by key at the spill.
-struct KeywordChunk {
-    pairs: Vec<KeywordPair>,
-    /// The buffered rows' characters, in push order. [`KeywordPair`] indexes into it.
+/// **The id stream** holds one `u32` per row, in row order: a hashed chunk's provisional ids as
+/// the rows arrive, a sorted chunk's ranks when it closes. **The perm stream** holds, for each
+/// hashed chunk in turn, the rank of each provisional id. **A run** holds a chunk's distinct keys
+/// ascending, each carrying the chunk's index as its one entity, so a merge of runs yields, per
+/// key, the chunks that hold it.
+struct KeywordChunks<'a> {
+    dir: &'a Path,
+    plan: KeywordDictPlan,
+    mode: ChunkMode,
+    /// The open chunk's characters; every [`mosaica_filter_write::KeyRef`] indexes into it.
     text: Vec<u8>,
-    /// One key's rows, gathered and sorted for the run writer.
-    rows: Vec<u32>,
+    table: mosaica_filter_write::KeyTable,
+    pairs: Vec<mosaica_filter_write::KeyRow>,
+    rows: u64,
+    window_rows: u64,
+    window_new: u64,
+    ids: IdWriter,
+    perms: IdWriter,
+    runs: Vec<spill::SpillReceipt>,
+    chunks: Vec<ChunkMeta>,
+    scratch: Vec<u32>,
 }
 
-impl KeywordChunk {
-    fn with_capacity(rows: usize) -> KeywordChunk {
-        KeywordChunk {
-            pairs: Vec::with_capacity(rows),
+/// The chunk's own characters for one of its keys.
+fn chunk_key<'t>(text: &'t [u8], key: &mosaica_filter_write::KeyRef) -> &'t [u8] {
+    &text[key.at as usize..key.at as usize + key.len as usize]
+}
+
+impl<'a> KeywordChunks<'a> {
+    fn create(dir: &'a Path, plan: KeywordDictPlan) -> Result<KeywordChunks<'a>> {
+        Ok(KeywordChunks {
+            dir,
+            plan,
+            mode: plan.forced.unwrap_or(ChunkMode::Hash),
             text: Vec::new(),
-            rows: Vec::new(),
-        }
+            table: mosaica_filter_write::KeyTable::default(),
+            pairs: Vec::new(),
+            rows: 0,
+            window_rows: 0,
+            window_new: 0,
+            ids: IdWriter::create(&dir.join("keyword-ids.spill"))?,
+            perms: IdWriter::create(&dir.join("keyword-perms.spill"))?,
+            runs: Vec::new(),
+            chunks: Vec::new(),
+            scratch: Vec::new(),
+        })
     }
 
-    /// Whether this chunk has reached either of the plan's bounds.
-    fn full(&self, plan: KeywordDictPlan) -> bool {
-        self.pairs.len() >= plan.chunk_rows || self.text.len() >= plan.chunk_bytes
-    }
-
-    fn push(&mut self, row: u32, text: &str) -> Result<()> {
+    /// Append `key` to the chunk's characters and return the reference to it.
+    fn buffer(&mut self, key: &str) -> Result<mosaica_filter_write::KeyRef> {
         let at = u32::try_from(self.text.len()).map_err(|_| {
             BuildError::Invalid(format!(
                 "a keyword chunk buffered {} bytes of characters, past the u32 a buffered key's \
-                 position is held in",
+                 position is held in; give the build a smaller memory budget",
                 self.text.len()
             ))
         })?;
-        let len = u32::try_from(text.len()).map_err(|_| {
-            BuildError::Invalid(format!(
-                "a keyword value of {} bytes is longer than the u32 its length is held in",
-                text.len()
-            ))
-        })?;
-        self.text.extend_from_slice(text.as_bytes());
-        self.pairs.push(KeywordPair {
-            prefix: keyword_prefix(text),
-            at,
-            len,
-            row,
-        });
+        self.text.extend_from_slice(key.as_bytes());
+        mosaica_filter_write::KeyRef::new(key.as_bytes(), at)
+            .map_err(|e| BuildError::Invalid(e.to_string()))
+    }
+
+    fn push(&mut self, key: &str) -> Result<()> {
+        self.rows += 1;
+        match self.mode {
+            ChunkMode::Hash => {
+                let text = &self.text;
+                let id = match self.table.find(key.as_bytes(), |k| chunk_key(text, k)) {
+                    mosaica_filter_write::Lookup::Found(id) => id,
+                    mosaica_filter_write::Lookup::Vacant(vacant) => {
+                        self.window_new += 1;
+                        let at = self.buffer(key)?;
+                        self.table
+                            .insert(vacant, at)
+                            .map_err(|e| BuildError::Invalid(e.to_string()))?
+                    }
+                };
+                self.ids.push(id)?;
+                self.window_rows += 1;
+                if self.table.len() >= self.plan.chunk_keys
+                    || self.text.len() >= self.plan.chunk_bytes
+                {
+                    self.close(None)?;
+                } else if self.window_rows >= self.plan.window {
+                    // A chunk's first window is where it meets its keys, so it is not judged.
+                    if self.plan.forced.is_none()
+                        && self.rows > self.plan.window
+                        && mosaica_filter_write::prefers_sort(self.window_new, self.window_rows)
+                    {
+                        self.close(Some(ChunkMode::Sort))?;
+                    }
+                    self.window_rows = 0;
+                    self.window_new = 0;
+                }
+            }
+            ChunkMode::Sort => {
+                let row = u32::try_from(self.pairs.len()).map_err(|_| {
+                    BuildError::Invalid(
+                        "a sorted keyword chunk holds more rows than a u32 can number; give the \
+                         build a smaller memory budget"
+                            .to_string(),
+                    )
+                })?;
+                let key = self.buffer(key)?;
+                self.pairs.push(mosaica_filter_write::KeyRow { key, row });
+                if self.pairs.len() >= self.plan.chunk_rows
+                    || self.text.len() >= self.plan.chunk_bytes
+                {
+                    self.close(None)?;
+                }
+            }
+        }
         Ok(())
     }
 
-    /// Sort by key and write the chunk out as one run, leaving the buffer empty.
-    fn spill(
-        &mut self,
-        column_dir: &Path,
-        seq: &mut usize,
-        receipts: &mut Vec<spill::SpillReceipt>,
-    ) -> Result<()> {
-        if self.pairs.is_empty() {
-            return Ok(());
-        }
-        // Split apart so the comparator may read the characters while the array is sorted.
-        let KeywordChunk { pairs, text, rows } = self;
-        pairs.sort_unstable_by(|a, b| keyword_key_order(a, b, text));
-
-        let path = column_dir.join(format!("keyword-run-{seq:05}.spill"));
-        let mut writer = spill::TextRunWriter::create(&path, spill::RunPayload::Rows)?;
-        let mut start = 0usize;
-        while start < pairs.len() {
-            let head = pairs[start];
-            let key = buffered_key(text, &head);
-            let mut end = start + 1;
-            while end < pairs.len()
-                && pairs[end].prefix == head.prefix
-                && buffered_key(text, &pairs[end]) == key
-            {
-                end += 1;
-            }
-            rows.clear();
-            rows.extend(pairs[start..end].iter().map(|pair| pair.row));
-            rows.sort_unstable();
-            let count = u32::try_from(rows.len()).map_err(|_| {
-                BuildError::Invalid(format!(
-                    "keyword run {}: the key {:?} is carried by more rows than a u32 can count",
-                    path.display(),
-                    String::from_utf8_lossy(key)
-                ))
+    /// Rank the open chunk, write its run and its ranks, and open the next one: as `switch` says,
+    /// else hashed where this chunk's keys were at most one in ten of its rows and sorted where
+    /// they were more.
+    fn close(&mut self, switch: Option<ChunkMode>) -> Result<()> {
+        let mut next = self.mode;
+        if self.rows > 0 {
+            let chunk = u32::try_from(self.chunks.len()).map_err(|_| {
+                BuildError::Invalid(
+                    "a keyword column spilled more chunks than a u32 can number".to_string(),
+                )
             })?;
-            writer.begin(key, count)?;
-            for &row in rows.iter() {
-                writer.push_entity(row, &[])?;
-            }
-            start = end;
+            let path = self.dir.join(format!("keyword-run-{chunk:05}.spill"));
+            let mut run = spill::TextRunWriter::create(&path, spill::RunPayload::Rows)?;
+            let text = &self.text;
+            let mut emit = |key: &mosaica_filter_write::KeyRef| -> Result<()> {
+                run.begin(chunk_key(text, key), 1)?;
+                run.push_entity(chunk, &[])
+            };
+            let keys = match self.mode {
+                ChunkMode::Hash => {
+                    let keys = mosaica_filter_write::rank_table(
+                        &self.table,
+                        |k| chunk_key(text, k),
+                        &mut self.scratch,
+                        &mut emit,
+                    )?;
+                    for &rank in &self.scratch {
+                        self.perms.push(rank)?;
+                    }
+                    keys
+                }
+                ChunkMode::Sort => {
+                    self.scratch.clear();
+                    self.scratch.resize(self.pairs.len(), 0);
+                    let keys = mosaica_filter_write::rank_rows(
+                        &mut self.pairs,
+                        |k| chunk_key(text, k),
+                        &mut self.scratch,
+                        &mut emit,
+                    )?;
+                    for &rank in &self.scratch {
+                        self.ids.push(rank)?;
+                    }
+                    keys
+                }
+            };
+            self.runs.push(run.finish()?);
+            next = if mosaica_filter_write::prefers_sort(keys as u64, self.rows) {
+                ChunkMode::Sort
+            } else {
+                ChunkMode::Hash
+            };
+            self.chunks.push(ChunkMeta {
+                mode: self.mode,
+                rows: self.rows,
+                keys,
+            });
         }
-        receipts.push(writer.finish()?);
-        // Cleared rather than replaced, where the text pass's accumulator is replaced: these
-        // buffers' capacity *is* the plan's budget, so keeping it is what the next chunk wants.
-        self.pairs.clear();
+        // Cleared rather than replaced: these buffers' capacity is the plan's budget, which is
+        // what the next chunk wants.
         self.text.clear();
-        *seq += 1;
+        self.table.clear();
+        self.pairs.clear();
+        self.rows = 0;
+        self.window_rows = 0;
+        self.window_new = 0;
+        self.mode = self.plan.forced.or(switch).unwrap_or(next);
         Ok(())
     }
 }
-
-/// The partition the merge pushes `(row, ordinal)` into.
-///
-/// **Under the column's own directory in the bundle, not under `.build-tmp/`**, which is where
-/// the sorted runs it merges are already written: the partition sits with its own inputs, and the
-/// one pass that writes both unlinks both. A build that dies between them leaves a bundle with no
-/// `CURRENT`, which the sweep removes whole — so nothing survives a failure here that would not
-/// survive it in `.build-tmp/`. The mapped scratch this replaced was under `.build-tmp/` because
-/// it was a scratch *array*, with no runs beside it to sit with.
-const KEYWORD_ORDINAL_PARTITION: &str = "keyword-ordinals";
-
-/// One `(row, ordinal)` record of that partition: two little-endian `u32`s, the row first because
-/// it is the key the partition routes on.
-const KEYWORD_ORDINAL_RECORD: usize = 8;
 
 /// One indexed keyword column's dictionary and its ordinal values file. Returns the dictionary's
 /// path.
 ///
-/// # The shape: chunk, spill, merge, scatter
+/// # The shape: chunk, merge the keys, translate the ids
 ///
-/// **The dictionary used to be built whole in memory**: a `&str` per present row, cloned, sorted
-/// and deduplicated into the distinct key set, with each row's ordinal then found by binary search
-/// over it. That was 32 bytes per row of resident memory with nothing to bound it — 7.46 GB over
-/// rung 5's 2.33×10⁸ `uuid` rows, and modelled to exhaust a 47 GB box somewhere above 3.5×10⁸ —
-/// and its search was ~28 probes per row, each dereferencing into a random offset of an 8.0 GB
-/// arena. It ran at 175×10³ rows/s where the same corpus's 2.4×10⁵-key `scientific_name` column,
-/// whose key set stays in cache, ran an order of magnitude faster.
-///
-/// So the pass has the text index's shape, with a fourth step the text index does not need:
-///
-/// 1. **Chunk.** The present rows are walked once in row order and buffered as
-///    `(key, row)` pairs, [`KeywordDictPlan`] rows at a time.
-/// 2. **Spill.** A full chunk is sorted by key and written out as a **sorted run**
-///    ([`crate::spill::TextRunWriter`], the same run format and the same receipt the text index
-///    spills) — each distinct key once, front-coded, with the ascending rows carrying it. So the
-///    pass's residency is the plan, whatever the corpus, and the run count grows instead of the
-///    peak.
-/// 3. **Cascade**, where a corpus produced more runs than one merge may hold file descriptors for
+/// 1. **Chunk.** The present rows are walked once in row order. Each chunk ranks its rows among
+///    its own distinct keys, by a table or by a sort ([`KeywordChunks`]), and writes those keys,
+///    sorted, as one run. A row leaves the chunk as a `u32` in the id stream and never enters the
+///    merge.
+/// 2. **Cascade**, where the chunks are more runs than one merge may hold file descriptors for
 ///    ([`RUN_MERGE_FAN_IN`]).
-/// 4. **Merge.** The runs are merged k-way on the key. Each distinct key is pushed once to
-///    [`mosaica_filter::SortedDictWriter`], which streams the dictionary and holds only its
-///    restart table, and the ordinal it returns is written to every row the merge then drains for
-///    that key.
-/// 5. **Partition.** The ordinals leave the merge in key order and the values file needs them in
-///    row order, so the merge pushes `(row, ordinal)` to a [`crate::spill::Partition`] by row
-///    range. Each bucket is then read whole, scattered into a `u32` window over its own row range,
-///    and pushed to the values writer in [`VALUE_CHUNK`] slices.
+/// 3. **Merge.** The runs are merged k-way on the key. Each distinct key is pushed once to
+///    [`mosaica_filter::SortedDictWriter`], and the ordinal it returns is pushed to the remap
+///    partition once for every chunk holding the key. A chunk's keys leave the merge ascending, so
+///    its remap arrives in rank order: entry `r` is the ordinal of the chunk's `r`-th key.
+/// 4. **Translate.** The id stream is read front to back. For each chunk, its remap (and, for a
+///    hashed chunk, its perm) is loaded and each id becomes `remap[perm[id]]` or `remap[id]`,
+///    pushed to the values writer in [`VALUE_CHUNK`] slices.
 ///
-/// **A partition and not a scatter into a mapped array addressed by row**, which is what step 5
-/// was. A mapped array is bounded in memory only while the page cache holds it, and the cache is
-/// whatever the rest of the build leaves: on a run whose `layers` stage had left 3 GB of cache,
-/// the scatter over a 12.9 GB array read **16 TB from disk in four hours** to get 49% of the way
-/// through one column, at 100 to 180 major faults a second
-/// (`docs/evidence/memos/2026-09-12-gbif-whole-corpus-build-observations.md` §6). A partition
-/// costs 8 bytes a row of spill and one more pass, and its cost does not depend on what else the
-/// build holds. What is resident is one bucket and one window, both a 128th of the column.
+/// Disk is 4 B per row of ids and 8 B per chunk key of remap; memory is one chunk.
 ///
 /// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
 /// sorted distinct key set and a row's ordinal is its key's position in it; neither depends on
-/// where a chunk boundary fell.
-/// [`tests::chunking_the_keyword_column_does_not_change_its_bytes`] is the assertion.
+/// where a chunk boundary fell or how a chunk ranked its rows
+/// ([`tests::chunking_the_keyword_column_does_not_change_its_bytes`]).
 ///
-/// # What is checked, and why each check is here
+/// # What is checked
 ///
-/// **The ordinal is the key's position in the sorted distinct set.** The merge yields each
-/// distinct key once, ascending, and pushes it to the dictionary writer, so the ordinal the writer
-/// returns *is* that position — and it is asserted against the count of keys pushed rather than
-/// assumed from the two staying in step. An ordinal naming another key's value has no symptom: it
-/// recolours a map, and every count it feeds stays plausible (`mosaica_filter::dict`).
-///
-/// **Every row that went in came back out.** Each run verifies its own count and anchor as it is
-/// read; what no single run can see is that the *set* of runs is whole, so the run counts are
-/// summed against the rows the walk visited before the merge, and the rows the merge drained are
-/// counted against them after it. A run file lost between the spill and the merge would otherwise
-/// be a values file whose tail rows all read ordinal 0 — the first key's, and a legal one.
+/// The ordinal the dictionary writer returns is asserted against the count of keys pushed. Each
+/// chunk's remap must hold exactly its key count and ascend strictly, since both its keys and the
+/// dictionary are sorted. Every id and perm entry must fall inside its chunk's keys, every row the
+/// walk visited must be translated, and every spill file verifies its count and anchor as it is
+/// read. A wrong ordinal recolours a map with no other symptom (`mosaica_filter::dict`), so each of
+/// these refuses the build rather than writing one.
 fn write_keyword_column(
     column_dir: &Path,
     values_path: &Path,
@@ -4559,169 +4678,213 @@ fn write_keyword_column(
     writer: &mut ValueColumnWriter,
     plan: KeywordDictPlan,
 ) -> Result<PathBuf> {
-    // ---- 1 and 2. the chunk pass, spilling sorted runs ---------------------------------------
-    let mut receipts: Vec<spill::SpillReceipt> = Vec::new();
-    let mut seq = 0usize;
-    // Sized to the plan up front, or to the column where it is smaller.
-    let mut chunk = KeywordChunk::with_capacity(plan.chunk_rows.min(values.rows_hint()));
-    let rows = for_each_keyword(attribute, values, presence, &mut |row, text| {
-        chunk.push(row, text)?;
-        if chunk.full(plan) {
-            chunk.spill(column_dir, &mut seq, &mut receipts)?;
-        }
-        Ok(())
+    let refuse =
+        |detail: String| BuildError::Invalid(format!("attribute '{}': {detail}", attribute.name));
+
+    // ---- 1. the chunk pass ---------------------------------------------------------------------
+    let mut chunks = KeywordChunks::create(column_dir, plan)?;
+    let rows = for_each_keyword(attribute, values, presence, &mut |_row, text| {
+        chunks.push(text)
     })?;
-    chunk.spill(column_dir, &mut seq, &mut receipts)?;
-    drop(chunk);
+    chunks.close(None)?;
+    let KeywordChunks {
+        ids,
+        perms,
+        runs,
+        chunks,
+        ..
+    } = chunks;
+    let (ids, id_count) = ids.finish()?;
+    let (perms, perm_count) = perms.finish()?;
+    let chunked: u64 = chunks.iter().map(|chunk| chunk.rows).sum();
+    if chunked != rows || id_count != rows {
+        return Err(refuse(format!(
+            "the keyword chunks hold {chunked} rows and {id_count} ids where the column has \
+             {rows}"
+        )));
+    }
+    let keys_held: u64 = chunks.iter().map(|chunk| chunk.keys as u64).sum();
 
-    // ---- 3. the cascade, where a column produced more runs than one merge may hold open ------
-    let receipts = cascade_sorted_runs(column_dir, "keyword", spill::RunPayload::Rows, receipts)?;
+    // ---- 2. the cascade --------------------------------------------------------------------------
+    let runs = cascade_sorted_runs(column_dir, "keyword", spill::RunPayload::Rows, runs)?;
+    let spilled: u64 = runs.iter().map(|run| run.count).sum();
+    if spilled != keys_held {
+        return Err(refuse(format!(
+            "the keyword runs hold {spilled} keys where the chunks counted {keys_held} — a run \
+             file is missing or was not merged"
+        )));
+    }
 
-    // ---- 4. the merge: the dictionary, and each row's ordinal ---------------------------------
+    // ---- 3. the merge: the dictionary, and each chunk's remap ------------------------------------
     let dict_path = column_dir.join(mosaica_filter::DICT_FILE);
-    let partition = spill::Partition::create(
+    let mut partition = spill::Partition::create(
         column_dir,
-        KEYWORD_ORDINAL_PARTITION,
-        spill::boundaries_uniform(rows),
-        KEYWORD_ORDINAL_RECORD,
-        rows,
+        KEYWORD_REMAP_PARTITION,
+        spill::boundaries_uniform(chunks.len() as u64),
+        KEYWORD_REMAP_RECORD,
+        keys_held,
     )?;
-    let partition = merge_keyword_runs(&dict_path, attribute, &receipts, rows, partition)?;
-    for receipt in &receipts {
-        std::fs::remove_file(&receipt.path).map_err(|e| BuildError::io(&receipt.path, e))?;
-    }
-
-    // ---- 5. the values file, in row order ----------------------------------------------------
-    //
-    // **A bucket at a time, front to back.** The buckets partition the rows in ascending ranges,
-    // so walking them in order is walking the rows in order; each is scattered into a window over
-    // its own range and pushed on, and its file is released before the next is read.
-    let mut store = partition.store;
-    for k in 0..partition.ranges.len() {
-        let (lo, hi) = partition.ranges[k];
-        let mut window = vec![0u32; (hi - lo) as usize];
-        for record in store.load(k)?.as_chunks::<KEYWORD_ORDINAL_RECORD>().0 {
-            let row = u32::from_le_bytes(record[..4].try_into().expect("a record is 8 bytes"));
-            let ordinal = u32::from_le_bytes(record[4..].try_into().expect("a record is 8 bytes"));
-            // The bucket-range check the row-bound check became: a record outside the range its
-            // bucket addresses would be written over another bucket's row, or past the window.
-            let slot = (row as u64)
-                .checked_sub(lo)
-                .and_then(|at| window.get_mut(at as usize))
-                .ok_or_else(|| {
-                    BuildError::Invalid(format!(
-                        "attribute '{}': bucket {k} of the keyword ordinals holds row {row}, \
-                         outside the range [{lo}, {hi}) it addresses",
-                        attribute.name
-                    ))
-                })?;
-            *slot = ordinal;
-        }
-        store.delete(k)?;
-        for slice in window.chunks(VALUE_CHUNK) {
-            writer
-                .push(&Codes::U32(slice.to_vec().into()))
-                .map_err(|e| BuildError::io(values_path, e))?;
-        }
-    }
-    Ok(dict_path)
-}
-
-/// Merge the sorted runs into the dictionary, writing each row's ordinal into `ordinals`. Returns
-/// the distinct keys written.
-///
-/// The two guards are [`write_keyword_column`]'s to explain; this is where they are made.
-fn merge_keyword_runs(
-    dict_path: &Path,
-    attribute: &crate::config::Attribute,
-    receipts: &[spill::SpillReceipt],
-    rows: u64,
-    mut partition: spill::Partition,
-) -> Result<KeywordOrdinals> {
-    let spilled: u64 = receipts.iter().map(|receipt| receipt.count).sum();
-    if spilled != rows {
-        return Err(BuildError::Invalid(format!(
-            "attribute '{}': the keyword runs hold {spilled} rows where the column has {rows} — a \
-             run file is missing or was not merged, and the rows it held would take the first \
-             key's ordinal",
-            attribute.name
-        )));
-    }
-
-    let dict_file = std::fs::File::create(dict_path).map_err(|e| BuildError::io(dict_path, e))?;
-    let mut dict = mosaica_filter::SortedDictWriter::new(std::io::BufWriter::new(dict_file))
-        .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
-    let mut merge = TextRunMerge::open(receipts, spill::RunPayload::Rows)?;
-    let mut keys = 0u64;
-    let mut emitted = 0u64;
-    // The selected key, copied out of the merge so that the rows it carries may be drained while
-    // the messages below still name it. One copy per distinct key, not per row.
-    let mut selected: Vec<u8> = Vec::new();
-    while merge.next_term()? {
-        selected.clear();
-        selected.extend_from_slice(merge.term());
-        let key = std::str::from_utf8(&selected).map_err(|e| {
-            BuildError::Invalid(format!(
-                "attribute '{}': a merged key is not UTF-8 ({e}) — the column holds `&str`, so \
-                 this is a corrupted run rather than a corpus value",
-                attribute.name
-            ))
-        })?;
-        let ordinal = dict
-            .push(key)
-            .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
-        if ordinal as u64 != keys {
-            return Err(BuildError::Invalid(format!(
-                "attribute '{}': the key {key:?} was written at dictionary ordinal {ordinal} and \
-                 is the {keys}th distinct key of the merge — the values file would name another \
-                 key's value",
-                attribute.name
-            )));
-        }
-        keys += 1;
-        merge.drain(&mut |row, _| {
-            if row as u64 >= rows {
-                return Err(BuildError::Invalid(format!(
-                    "attribute '{}': the key {key:?} is carried by row {row}, which is past the \
-                     {rows} rows the column has",
-                    attribute.name
-                )));
-            }
-            let mut record = [0u8; KEYWORD_ORDINAL_RECORD];
-            record[..4].copy_from_slice(&row.to_le_bytes());
-            record[4..].copy_from_slice(&ordinal.to_le_bytes());
-            partition.push(&record)?;
-            emitted += 1;
-            Ok(())
-        })?;
-    }
-    dict.finish()
-        .map_err(|e| BuildError::io(dict_path, std::io::Error::from(e)))?;
-
-    if emitted != rows {
-        return Err(BuildError::Invalid(format!(
-            "attribute '{}': the keyword merge yielded {emitted} rows where the column has \
-             {rows} — the rows it did not yield would take the first key's ordinal",
-            attribute.name
-        )));
-    }
-    let ranges = (0..partition.buckets())
+    let ranges: Vec<(u64, u64)> = (0..partition.buckets())
         .map(|k| {
             let (lo, hi) = partition.range(k);
-            (lo as u64, hi.min(rows))
+            (lo as u64, hi.min(chunks.len() as u64))
         })
         .collect();
-    Ok(KeywordOrdinals {
-        ranges,
-        store: partition.finish()?,
-    })
-}
+    {
+        let dict_file =
+            std::fs::File::create(&dict_path).map_err(|e| BuildError::io(&dict_path, e))?;
+        let mut dict = mosaica_filter::SortedDictWriter::new(std::io::BufWriter::new(dict_file))
+            .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
+        let mut merge = TextRunMerge::open(&runs, spill::RunPayload::Rows)?;
+        let mut keys = 0u64;
+        let mut emitted = 0u64;
+        let mut selected: Vec<u8> = Vec::new();
+        while merge.next_term()? {
+            selected.clear();
+            selected.extend_from_slice(merge.term());
+            let key = std::str::from_utf8(&selected).map_err(|e| {
+                refuse(format!(
+                    "a merged key is not UTF-8 ({e}) — the column holds `&str`, so this is a \
+                     corrupted run rather than a corpus value"
+                ))
+            })?;
+            let ordinal = dict
+                .push(key)
+                .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
+            if ordinal as u64 != keys {
+                return Err(refuse(format!(
+                    "the key {key:?} was written at dictionary ordinal {ordinal} and is the \
+                     {keys}th distinct key of the merge — the values file would name another \
+                     key's value"
+                )));
+            }
+            keys += 1;
+            merge.drain(&mut |chunk, _| {
+                if chunk as usize >= chunks.len() {
+                    return Err(refuse(format!(
+                        "the key {key:?} is carried by chunk {chunk}, past the {} chunks the \
+                         column has",
+                        chunks.len()
+                    )));
+                }
+                let mut record = [0u8; KEYWORD_REMAP_RECORD];
+                record[..4].copy_from_slice(&chunk.to_le_bytes());
+                record[4..].copy_from_slice(&ordinal.to_le_bytes());
+                partition.push(&record)?;
+                emitted += 1;
+                Ok(())
+            })?;
+        }
+        dict.finish()
+            .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
+        if emitted != keys_held {
+            return Err(refuse(format!(
+                "the keyword merge yielded {emitted} chunk keys where the chunks hold {keys_held}"
+            )));
+        }
+    }
+    let mut store = partition.finish()?;
+    for run in &runs {
+        std::fs::remove_file(&run.path).map_err(|e| BuildError::io(&run.path, e))?;
+    }
 
-/// The `(row, ordinal)` partition the merge filled, with each bucket's row range clipped to the
-/// column's own row count — which is what sizes the window the bucket is scattered into.
-struct KeywordOrdinals {
-    ranges: Vec<(u64, u64)>,
-    store: spill::PartitionStore,
+    // ---- 4. the values file, in row order --------------------------------------------------------
+    let mut id_reader = IdReader::open(&ids, id_count)?;
+    let mut perm_reader = IdReader::open(&perms, perm_count)?;
+    let mut out: Vec<u32> = Vec::with_capacity(VALUE_CHUNK);
+    let mut translated = 0u64;
+    for (k, &(lo, hi)) in ranges.iter().enumerate() {
+        let mut remaps: Vec<Vec<u32>> = vec![Vec::new(); hi.saturating_sub(lo) as usize];
+        for record in store.load(k)?.as_chunks::<KEYWORD_REMAP_RECORD>().0 {
+            let chunk = u32::from_le_bytes(record[..4].try_into().expect("a record is 8 bytes"));
+            let ordinal = u32::from_le_bytes(record[4..].try_into().expect("a record is 8 bytes"));
+            let remap = (chunk as u64)
+                .checked_sub(lo)
+                .and_then(|at| remaps.get_mut(at as usize))
+                .ok_or_else(|| {
+                    refuse(format!(
+                        "bucket {k} of the keyword remap holds chunk {chunk}, outside the range \
+                         [{lo}, {hi}) it addresses"
+                    ))
+                })?;
+            if remap.last().is_some_and(|&previous| ordinal <= previous) {
+                return Err(refuse(format!(
+                    "chunk {chunk}'s remap does not ascend: {ordinal} follows {:?} — both the \
+                     chunk's keys and the dictionary are sorted, so a correct remap does",
+                    remap.last()
+                )));
+            }
+            remap.push(ordinal);
+        }
+        store.delete(k)?;
+
+        for (chunk, remap) in (lo..hi).zip(remaps) {
+            let meta = &chunks[chunk as usize];
+            if remap.len() != meta.keys as usize {
+                return Err(refuse(format!(
+                    "chunk {chunk} holds {} keys and the merge remapped {}",
+                    meta.keys,
+                    remap.len()
+                )));
+            }
+            let table = match meta.mode {
+                ChunkMode::Sort => remap,
+                ChunkMode::Hash => {
+                    let mut table = Vec::with_capacity(remap.len());
+                    let mut left = meta.keys as u64;
+                    while left > 0 {
+                        let ranks = perm_reader.take(left)?;
+                        left -= ranks.len() as u64;
+                        for &rank in ranks {
+                            table.push(*remap.get(rank as usize).ok_or_else(|| {
+                                refuse(format!(
+                                    "chunk {chunk}'s perm names rank {rank} of its {} keys",
+                                    meta.keys
+                                ))
+                            })?);
+                        }
+                    }
+                    table
+                }
+            };
+            let mut left = meta.rows;
+            while left > 0 {
+                let ids = id_reader.take(left)?;
+                left -= ids.len() as u64;
+                for &id in ids {
+                    out.push(*table.get(id as usize).ok_or_else(|| {
+                        refuse(format!(
+                            "chunk {chunk} gives a row id {id} of its {} keys",
+                            meta.keys
+                        ))
+                    })?);
+                    if out.len() == VALUE_CHUNK {
+                        writer
+                            .push(&Codes::U32(std::mem::take(&mut out).into()))
+                            .map_err(|e| BuildError::io(values_path, e))?;
+                        out.reserve(VALUE_CHUNK);
+                    }
+                }
+            }
+            translated += meta.rows;
+        }
+    }
+    if !out.is_empty() {
+        writer
+            .push(&Codes::U32(out.into()))
+            .map_err(|e| BuildError::io(values_path, e))?;
+    }
+    id_reader.finish()?;
+    perm_reader.finish()?;
+    if translated != rows {
+        return Err(refuse(format!(
+            "the keyword pass translated {translated} rows where the column has {rows}"
+        )));
+    }
+    for path in [&ids.path, &perms.path] {
+        std::fs::remove_file(path).map_err(|e| BuildError::io(path, e))?;
+    }
+    Ok(dict_path)
 }
 
 /// Values pushed to the column writer at a time. The writer spools each chunk as it arrives, so
@@ -6736,7 +6899,7 @@ mod tests {
     }
 
     /// The corpus both keyword tests read. Every shape the dictionary pass has to survive: keys
-    /// shorter than the eight bytes [`KeywordPair`] compares on, keys agreeing in exactly those
+    /// shorter than the eight bytes [`mosaica_filter_write::KeyRef`] compares on, keys agreeing in exactly those
     /// eight and differing after them, a key that is a proper prefix of another, a key carried by
     /// a seventh of the corpus, keys carried by exactly one entity, a non-ASCII key, and absent
     /// runs.
@@ -6801,10 +6964,26 @@ mod tests {
         keys
     }
 
-    /// The chunk sizes both keyword tests run under. `1` spills a run per row and cascades — 257
+    /// The chunk sizes the keyword tests run under. `1` spills a run per row and cascades — 257
     /// runs over a fan-in of 128 — and `4_096` is one chunk for the whole column; the rest divide
     /// the corpus, and do not, and align to the 64-entity words presence is stored in, and do not.
     const KEYWORD_CHUNKS: [usize; 7] = [1, 2, 3, 7, 64, 300, 4_096];
+
+    /// Every plan the keyword tests run under: each chunk size hashed throughout, sorted
+    /// throughout, and choosing per chunk over windows short enough that the fixture's chunks
+    /// switch between the two.
+    fn keyword_plans() -> Vec<KeywordDictPlan> {
+        let mut plans = Vec::new();
+        for chunk in KEYWORD_CHUNKS {
+            for mode in [ChunkMode::Hash, ChunkMode::Sort] {
+                plans.push(KeywordDictPlan::explicit(chunk, 1 << 20, Some(mode)));
+            }
+            for window in [1, 5, 16] {
+                plans.push(KeywordDictPlan::explicit(chunk, window, None));
+            }
+        }
+        plans
+    }
 
     /// **The route a keyword column's characters take is not in its artefacts.** Its dictionary,
     /// its ordinals and its presence bitmap are the same three files whether the pass reads an
@@ -6856,7 +7035,7 @@ mod tests {
                 &attribute,
                 values,
                 extents,
-                KeywordDictPlan::explicit(7),
+                KeywordDictPlan::explicit(7, 5, None),
             )
             .expect("keyword column");
             assert!(written.presence, "the fixture has absent entities");
@@ -6903,7 +7082,7 @@ mod tests {
         let values = keyword_fixture_column(&scratch);
 
         let mut emitted: Vec<[Vec<u8>; 3]> = Vec::new();
-        for (k, chunk_rows) in KEYWORD_CHUNKS.into_iter().enumerate() {
+        for (k, plan) in keyword_plans().into_iter().enumerate() {
             let column_dir = dir.path().join(format!("plan-{k}"));
             std::fs::create_dir_all(&column_dir).expect("column dir");
             let values_path = column_dir.join("values.arrow");
@@ -6915,7 +7094,7 @@ mod tests {
                 &attribute,
                 &values,
                 None,
-                KeywordDictPlan::explicit(chunk_rows),
+                plan,
             )
             .expect("keyword column");
             assert!(written.presence, "the fixture has absent entities");
@@ -6932,7 +7111,7 @@ mod tests {
                 })
                 .collect();
             left.sort();
-            assert!(left.is_empty(), "chunk {chunk_rows} left {left:?} behind");
+            assert!(left.is_empty(), "plan {plan:?} left {left:?} behind");
             emitted.push([
                 std::fs::read(&dict_path).expect("dict"),
                 std::fs::read(&values_path).expect("values"),
@@ -6960,8 +7139,9 @@ mod tests {
         let values = keyword_fixture_column(&scratch);
         let expected = keyword_fixture_keys();
 
-        for chunk_rows in KEYWORD_CHUNKS {
-            let column_dir = dir.path().join(format!("chunk-{chunk_rows}"));
+        for (k, plan) in keyword_plans().into_iter().enumerate() {
+            let label = format!("{plan:?}");
+            let column_dir = dir.path().join(format!("plan-{k}"));
             std::fs::create_dir_all(&column_dir).expect("column dir");
             let values_path = column_dir.join("values.arrow");
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
@@ -6972,7 +7152,7 @@ mod tests {
                 &attribute,
                 &values,
                 None,
-                KeywordDictPlan::explicit(chunk_rows),
+                plan,
             )
             .expect("keyword column");
 
@@ -6981,14 +7161,14 @@ mod tests {
                 mosaica_filter::Access::Read,
             )
             .expect("the dictionary opens");
-            assert_eq!(dict.len() as usize, expected.len(), "chunk {chunk_rows}");
+            assert_eq!(dict.len() as usize, expected.len(), "plan {label}");
             let mut scratch_key = Vec::new();
             for (ordinal, key) in expected.iter().enumerate() {
                 assert_eq!(
                     dict.key_of(ordinal as u32, &mut scratch_key)
                         .expect("the key resolves"),
                     key,
-                    "chunk {chunk_rows}: ordinal {ordinal}"
+                    "plan {label}: ordinal {ordinal}"
                 );
             }
 
@@ -7007,10 +7187,10 @@ mod tests {
                             dict.key_of(ordinal, &mut scratch_key)
                                 .expect("the key resolves"),
                             key,
-                            "chunk {chunk_rows}: entity {entity}"
+                            "plan {label}: entity {entity}"
                         );
                     }
-                    _ => assert_eq!(ordinal, None, "chunk {chunk_rows}: entity {entity}"),
+                    _ => assert_eq!(ordinal, None, "plan {label}: entity {entity}"),
                 }
             }
         }

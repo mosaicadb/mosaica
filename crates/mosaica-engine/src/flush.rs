@@ -1297,19 +1297,8 @@ fn extent_values<'a>(
         }
         // This extent's own dictionary, over this batch alone: its ordinals are not comparable
         // with the base's or any other extent's.
-        let mut keys: Vec<&str> = held.clone();
-        keys.sort_unstable();
-        keys.dedup();
-        let mut ordinals = Vec::with_capacity(held.len());
-        for text in held {
-            let ordinal = keys.binary_search(&text).map_err(|_| {
-                MaintenanceFailed(format!(
-                    "column '{}': the value {text:?} is absent from the dictionary built from it",
-                    spec.name
-                ))
-            })?;
-            ordinals.push(ordinal as u32);
-        }
+        let (ordinals, keys) = mosaica_filter_write::dictionary_of(&held)
+            .map_err(|e| MaintenanceFailed(format!("column '{}': {e}", spec.name)))?;
         return Ok(ExtentColumn {
             codes: Codes::U32(ordinals.into()),
             presence,

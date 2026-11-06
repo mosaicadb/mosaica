@@ -72,6 +72,7 @@
 //! built one over the same live entities are the same bytes — and it is why one crate holds both
 //! producers' emit rather than each holding its own.
 
+mod chunk_dict;
 mod keyword;
 mod positions;
 mod record;
@@ -89,6 +90,10 @@ use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 use mosaica_filter::{Codes, ColumnKind, ValueColumn, ValueColumnWriter};
 use mosaica_roaring::RankedRuns;
 
+pub use chunk_dict::{
+    dictionary_of, key_order, key_prefix, prefers_sort, rank_rows, rank_table, KeyRef, KeyRow,
+    KeyTable, Lookup, Vacant, KEY_WINDOW_ROWS,
+};
 pub use keyword::{coalesce_keyword_extents, fold_keyword_column, KeywordLayer};
 pub use record::{
     coalesce_record_extents, fold_record_blob, merge_record_rows, write_prose, write_text_rows,
