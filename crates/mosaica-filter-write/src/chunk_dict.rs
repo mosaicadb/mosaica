@@ -30,13 +30,8 @@ pub fn prefers_sort(new_keys: u64, rows: u64) -> bool {
     new_keys.saturating_mul(10) > rows
 }
 
-/// When a hashed chunk stops hashing: at the end of a window whose new keys [`prefers_sort`], and
-/// no fewer than four fifths of the window's before.
-///
-/// **A table learning a column's keys sees its rate of new keys fall** window on window, towards
-/// what the whole chunk will end at; a column whose keys keep arriving at one rate is one the
-/// table will not learn. So a chunk's first window, where it meets its keys, is never judged, and
-/// a rate that is still falling is left to fall.
+/// When a hashed chunk stops hashing: at the end of a window, never its first, whose new keys
+/// [`prefers_sort`] and are more than four fifths of the window's before.
 #[derive(Default)]
 pub struct WindowRule {
     rows: u64,
@@ -142,8 +137,6 @@ pub fn rank_rows<'k, E>(
     let mut distinct = 0u32;
     let mut start = 0usize;
     while start < rows.len() {
-        // The rows are in key order and their keys in row order, so each key read is a miss; the
-        // key some rows on is asked for now, to arrive while this one is used.
         if let Some(ahead) = rows.get(start + PREFETCH_ROWS) {
             prefetch(bytes(&ahead.key));
         }
@@ -184,22 +177,20 @@ fn prefetch(bytes: &[u8]) {
 /// Rank a table's distinct keys: `perm[id]` becomes the rank of provisional id `id`, and `emit`
 /// is called once per key, ascending. Returns the distinct count.
 ///
-/// The table's slots are released first, so they are not held beside the sort; a table ranked is
-/// [`KeyTable::clear`]ed before its next key.
+/// The table is left empty, its memory released before the sort.
 pub fn rank_table<'k, E>(
     table: &mut KeyTable,
     bytes: impl Fn(&KeyRef) -> &'k [u8] + Sync,
     perm: &mut Vec<u32>,
     emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
-    table.slots = Vec::new();
-    table.last = None;
-    let mut rows: Vec<KeyRow> = table
-        .entries
+    let entries = std::mem::take(table).entries;
+    let mut rows: Vec<KeyRow> = entries
         .iter()
         .enumerate()
         .map(|(id, &key)| KeyRow::new(bytes(&key), key, id as u32))
         .collect();
+    drop(entries);
     perm.clear();
     perm.resize(rows.len(), 0);
     rank_rows(&mut rows, bytes, perm, emit)
@@ -245,13 +236,7 @@ impl KeyTable {
         self.entries.is_empty()
     }
 
-    /// The table's own memory: its slots and entries, not the key bytes its owner holds.
-    pub fn heap_bytes(&self) -> usize {
-        self.slots.capacity() * std::mem::size_of::<u64>()
-            + self.entries.capacity() * std::mem::size_of::<KeyRef>()
-    }
-
-    /// Empty the table, keeping its capacity.
+    /// Empty the table, keeping the capacity it has.
     pub fn clear(&mut self) {
         self.slots.fill(EMPTY);
         self.entries.clear();
@@ -525,8 +510,8 @@ mod tests {
         assert!(prefers_sort(11, 100));
     }
 
-    /// Feed `windows` windows of 100 rows, the `i`-th bringing `new[i]` new keys, and say which
-    /// window first stops the hashing.
+    /// Feed windows of 100 rows, the `i`-th bringing `new[i]` new keys, and say which window first
+    /// stops the hashing.
     fn first_stop(new: &[u64]) -> Option<usize> {
         let mut rule = WindowRule::default();
         for (i, &keys) in new.iter().enumerate() {

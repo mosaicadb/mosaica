@@ -4340,7 +4340,7 @@ const KEYWORD_ROW_BYTES: usize =
 /// What one distinct key of a hashed chunk costs beyond its characters at the table's peak, which
 /// is while it grows: its entry, twice over because a vector that has just grown is half empty,
 /// and six slots, the two of the table at half load and the four of the table it grows into.
-/// Ranking releases the slots before it sorts, and its 24 B row and 4 B rank fit inside them.
+/// Ranking releases the table before it sorts, and its 24 B row and 4 B rank are within this.
 const KEYWORD_KEY_BYTES: usize =
     2 * std::mem::size_of::<mosaica_filter_write::KeyRef>() + 6 * std::mem::size_of::<u64>();
 
@@ -4400,26 +4400,40 @@ impl KeySender {
         }
     }
 
+    /// Add a key, sending the batch once it holds `size` keys or [`KEYWORD_BATCH_BYTES`] of
+    /// characters.
     fn push(&mut self, key: &[u8]) -> Result<()> {
         self.batch.text.extend_from_slice(key);
         self.batch.ends.push(self.batch.text.len());
-        if self.batch.ends.len() >= self.size {
+        if self.batch.ends.len() >= self.size || self.batch.text.len() >= KEYWORD_BATCH_BYTES {
             self.flush()?;
         }
         Ok(())
     }
 
-    /// Send the keys held. A writer that has stopped refuses them; its own error is the one to
-    /// report, and is returned when it is joined.
+    /// Send the keys held.
     fn flush(&mut self) -> Result<()> {
         if self.batch.ends.is_empty() {
             return Ok(());
         }
+        let batch = KeyBatch {
+            text: Vec::with_capacity(KEYWORD_BATCH_BYTES),
+            ends: Vec::with_capacity(self.size),
+        };
         self.queue
-            .send(std::mem::take(&mut self.batch))
-            .map_err(|_| BuildError::Invalid("a keyword writer stopped".to_string()))
+            .send(std::mem::replace(&mut self.batch, batch))
+            .map_err(|_| writer_stopped())
     }
 }
+
+/// The error a send to a writer thread that has stopped returns. The writer's own error is the one
+/// reported, when it is joined.
+fn writer_stopped() -> BuildError {
+    BuildError::Invalid("a keyword writer thread stopped".to_string())
+}
+
+/// The characters a [`KeyBatch`] holds before it is sent, whatever its key count.
+const KEYWORD_BATCH_BYTES: usize = 1 << 20;
 
 /// Ids per record of the id and perm streams. A record is a block rather than one id so the
 /// stream's anchor and buffering are paid per block; the last block is padded with zeros.
@@ -4630,8 +4644,9 @@ impl<'a> KeywordChunks<'a> {
                 }
             }
             ChunkMode::Sort => {
-                if self.pairs.capacity() == 0 {
-                    let rows = (self.plan.chunk_rows as u64).min(self.rows_left.max(1));
+                if self.pairs.len() == self.pairs.capacity() {
+                    let room = self.plan.chunk_rows.saturating_sub(self.pairs.len());
+                    let rows = (room as u64).min(self.rows_left.max(1)).max(1);
                     self.pairs.reserve_exact(rows as usize);
                 }
                 let row = u32::try_from(self.pairs.len()).map_err(|_| {
@@ -4669,8 +4684,7 @@ impl<'a> KeywordChunks<'a> {
             let (mode, size) = (self.mode, self.plan.merge_batch);
             let (text, table, pairs) = (&self.text, &mut self.table, &mut self.pairs);
             let (scratch, ids, perms) = (&mut self.scratch, &mut self.ids, &mut self.perms);
-            // The run is written on its own thread while the chunk is ranked, as the merge's
-            // writers are.
+            // The run is written on its own thread while the chunk is ranked.
             let (keys, run) = std::thread::scope(|scope| -> Result<(u32, spill::SpillReceipt)> {
                 let (queue, batches) =
                     std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
@@ -4731,8 +4745,8 @@ impl<'a> KeywordChunks<'a> {
         self.rows = 0;
         self.rule = mosaica_filter_write::WindowRule::default();
         let next = self.plan.forced.or(switch).unwrap_or(next);
-        // A buffer keeps its capacity for a next chunk of its own mode, which wants it, and is
-        // released for one of the other, so the two modes' budgets are never held at once.
+        // A buffer keeps its capacity for a next chunk of its own mode and is released for one of
+        // the other, so the two modes' buffers are never held at once.
         self.text.clear();
         self.scratch.clear();
         match next {
@@ -4775,8 +4789,8 @@ impl<'a> KeywordChunks<'a> {
 ///    pushed to the values writer in [`VALUE_CHUNK`] slices.
 ///
 /// Disk is 4 B per row of ids, 8 B per chunk key of remap and 4 B per hashed chunk key of perm,
-/// beside the runs. Memory is one chunk while chunking, and one chunk's remap and table, 4 to 8 B
-/// a key, while translating.
+/// beside the runs. Memory is one chunk while chunking, and while translating one remap
+/// partition bucket's remaps, 4 B a key, beside one hashed chunk's table, 4 B a key.
 ///
 /// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
 /// sorted distinct key set and a row's ordinal is its key's position in it; neither depends on
@@ -4845,9 +4859,8 @@ fn write_keyword_column(
             (lo as u64, hi.min(chunks.len() as u64))
         })
         .collect();
-    // **Three threads, joined by bounded queues**: the merge itself, the dictionary's writer and
-    // the remap's. Each of the three is a third of the step on its own, and what passes between
-    // them is batches of keys and records, a few megabytes in flight.
+    // Three threads, joined by bounded queues of batches: the merge, the dictionary's writer and
+    // the remap's.
     let (keys, emitted, partition) = std::thread::scope(|scope| {
         let (key_queue, key_batches) =
             std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
@@ -4896,9 +4909,6 @@ fn write_keyword_column(
 
         let mut merged_keys = KeySender::new(key_queue, plan.merge_batch);
         let merged = (|| -> Result<(u64, u64)> {
-            // A queue whose writer has stopped refuses the send; the writer's own error is the
-            // one returned, below.
-            let stopped = || refuse("a keyword merge writer stopped".to_string());
             let mut merge = TextRunMerge::open(&runs, spill::RunPayload::Rows)?;
             let mut records: Vec<u8> = Vec::new();
             let (mut keys, mut emitted) = (0u64, 0u64);
@@ -4923,11 +4933,11 @@ fn write_keyword_column(
                 if records.len() >= plan.merge_batch * KEYWORD_REMAP_RECORD {
                     record_queue
                         .send(std::mem::take(&mut records))
-                        .map_err(|_| stopped())?;
+                        .map_err(|_| writer_stopped())?;
                 }
             }
             merged_keys.flush()?;
-            record_queue.send(records).map_err(|_| stopped())?;
+            record_queue.send(records).map_err(|_| writer_stopped())?;
             Ok((keys, emitted))
         })();
         drop(merged_keys);
@@ -4959,8 +4969,7 @@ fn write_keyword_column(
     let mut out: Vec<u32> = Vec::with_capacity(VALUE_CHUNK);
     let mut translated = 0u64;
     for (k, &(lo, hi)) in ranges.iter().enumerate() {
-        // Streamed into remaps sized to their chunks, so a bucket costs 4 B a key and not the
-        // bucket's bytes beside them.
+        // Streamed into remaps sized to their chunks.
         let mut remaps: Vec<Vec<u32>> = (lo..hi)
             .map(|chunk| Vec::with_capacity(chunks[chunk as usize].keys as usize))
             .collect();
