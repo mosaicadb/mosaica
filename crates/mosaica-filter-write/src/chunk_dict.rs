@@ -10,7 +10,8 @@
 //!   there is nothing for a table to save, and the sort's 8-byte prefix settles most comparisons
 //!   without reading the keys.
 //!
-//! [`prefers_sort`] is the rule between them, shared by the build's keyword pass and the flush.
+//! [`prefers_sort`] and [`WindowRule`] are the rule between them, shared by the build's keyword
+//! pass and the flush.
 //! Either way the output is the same: the ranks name the sorted distinct keys, so which way a
 //! chunk took is not in any artefact.
 
@@ -20,19 +21,48 @@ use rayon::slice::ParallelSliceMut;
 
 use crate::invalid;
 
-/// Rows a hash chunk reads between two looks at its rate of new keys ([`prefers_sort`]).
+/// Rows a hashed chunk reads between two looks at its rate of new keys ([`WindowRule`]).
 pub const KEY_WINDOW_ROWS: u64 = 1 << 20;
 
-/// Whether a window of `rows` rows that brought `new_keys` keys not seen before is better ranked
-/// by sorting every row than by hashing.
-///
-/// Above one new key in ten rows, a sort of the rows is faster than a table probe per row plus a
-/// sort of the keys it collects: at 10⁷ rows the two cost the same at about 10% distinct for
-/// random 36-byte keys and about 40% for keys sharing a long prefix. The lower figure is taken:
-/// a chunk sorted that hashing would have served costs at most the sort, and a chunk hashed that
-/// sorting would have served costs up to six times as much.
+/// Whether rows of which more than one in ten brought a key not seen before are better ranked by
+/// sorting every row than by hashing.
 pub fn prefers_sort(new_keys: u64, rows: u64) -> bool {
     new_keys.saturating_mul(10) > rows
+}
+
+/// When a hashed chunk stops hashing: at the end of a window whose new keys [`prefers_sort`], and
+/// no fewer than four fifths of the window's before.
+///
+/// **A table learning a column's keys sees its rate of new keys fall** window on window, towards
+/// what the whole chunk will end at; a column whose keys keep arriving at one rate is one the
+/// table will not learn. So a chunk's first window, where it meets its keys, is never judged, and
+/// a rate that is still falling is left to fall.
+#[derive(Default)]
+pub struct WindowRule {
+    rows: u64,
+    new_keys: u64,
+    previous: Option<u64>,
+}
+
+impl WindowRule {
+    /// Count one row of a window of `window` rows, `new` where its key was not in the table.
+    /// Returns whether the chunk should stop hashing.
+    pub fn row(&mut self, new: bool, window: u64) -> bool {
+        self.rows += 1;
+        self.new_keys += u64::from(new);
+        if self.rows < window {
+            return false;
+        }
+        let new_keys = std::mem::take(&mut self.new_keys);
+        self.rows = 0;
+        match self.previous.replace(new_keys) {
+            Some(previous) => {
+                prefers_sort(new_keys, window)
+                    && new_keys.saturating_mul(5) > previous.saturating_mul(4)
+            }
+            None => false,
+        }
+    }
 }
 
 /// Where one key's bytes are in its owner's storage. `at` is the owner's to interpret, an offset
@@ -130,12 +160,17 @@ pub fn rank_rows<'k, E>(
 
 /// Rank a table's distinct keys: `perm[id]` becomes the rank of provisional id `id`, and `emit`
 /// is called once per key, ascending. Returns the distinct count.
+///
+/// The table's slots are released first, so they are not held beside the sort; a table ranked is
+/// [`KeyTable::clear`]ed before its next key.
 pub fn rank_table<'k, E>(
-    table: &KeyTable,
+    table: &mut KeyTable,
     bytes: impl Fn(&KeyRef) -> &'k [u8] + Sync,
     perm: &mut Vec<u32>,
     emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
+    table.slots = Vec::new();
+    table.last = None;
     let mut rows: Vec<KeyRow> = table
         .entries
         .iter()
@@ -295,8 +330,7 @@ fn hash_tag(key: &[u8]) -> u32 {
 /// One batch's dictionary, held in memory: the sorted distinct keys, and each value's ordinal into
 /// them. The flush's keyword extent is this.
 ///
-/// The batch is hashed while its new-key rate stays at or below [`prefers_sort`]'s line, checked
-/// every [`KEY_WINDOW_ROWS`] rows; past it, the whole batch is sorted instead.
+/// The batch is hashed until [`WindowRule`] says to sort it, and then the whole batch is sorted.
 pub fn dictionary_of<'a>(values: &[&'a str]) -> io::Result<(Vec<u32>, Vec<&'a str>)> {
     if u32::try_from(values.len()).is_err() {
         return Err(invalid(format!(
@@ -310,27 +344,26 @@ pub fn dictionary_of<'a>(values: &[&'a str]) -> io::Result<(Vec<u32>, Vec<&'a st
 
     let mut table = KeyTable::default();
     let mut ids: Vec<u32> = Vec::with_capacity(values.len());
-    let mut window_new = 0u64;
+    let mut rule = WindowRule::default();
     let mut sorted = false;
     for (row, value) in values.iter().enumerate() {
-        let id = match table.find(value.as_bytes(), bytes) {
-            Lookup::Found(id) => id,
-            Lookup::Vacant(vacant) => {
-                window_new += 1;
-                table.insert(vacant, KeyRef::new(value.as_bytes(), row as u32)?)?
-            }
+        let (id, new) = match table.find(value.as_bytes(), bytes) {
+            Lookup::Found(id) => (id, false),
+            Lookup::Vacant(vacant) => (
+                table.insert(vacant, KeyRef::new(value.as_bytes(), row as u32)?)?,
+                true,
+            ),
         };
         ids.push(id);
-        if (row as u64 + 1).is_multiple_of(KEY_WINDOW_ROWS) {
-            if prefers_sort(window_new, KEY_WINDOW_ROWS) {
-                sorted = true;
-                break;
-            }
-            window_new = 0;
+        if rule.row(new, KEY_WINDOW_ROWS) {
+            sorted = true;
+            break;
         }
     }
 
     if sorted {
+        drop(table);
+        drop(ids);
         let mut rows: Vec<KeyRow> = values
             .iter()
             .enumerate()
@@ -348,7 +381,7 @@ pub fn dictionary_of<'a>(values: &[&'a str]) -> io::Result<(Vec<u32>, Vec<&'a st
     }
 
     let mut perm = Vec::new();
-    rank_table(&table, bytes, &mut perm, |key| {
+    rank_table(&mut table, bytes, &mut perm, |key| {
         keys.push(values[key.at as usize]);
         Ok::<(), io::Error>(())
     })?;
@@ -401,11 +434,11 @@ mod tests {
         assert_eq!(dictionary_of(&[]).expect("empty"), (vec![], vec![]));
     }
 
-    /// Past the first window a batch of unique keys is sorted rather than hashed, and its
+    /// After its second window a batch of unique keys is sorted rather than hashed, and its
     /// dictionary is the same as a batch hashed throughout.
     #[test]
     fn a_batch_that_switches_to_sorting_writes_the_same_dictionary() {
-        let n = KEY_WINDOW_ROWS as usize + 10;
+        let n = 2 * KEY_WINDOW_ROWS as usize + 10;
         let owned: Vec<String> = (0..n)
             .map(|i| format!("{:08x}", (i * 2_654_435_761) % n))
             .collect();
@@ -432,7 +465,7 @@ mod tests {
         }
         let mut perm = Vec::new();
         let mut from_table = Vec::new();
-        rank_table(&table, bytes, &mut perm, |k| {
+        rank_table(&mut table, bytes, &mut perm, |k| {
             from_table.push(bytes(k).to_vec());
             Ok::<(), ()>(())
         })
@@ -467,5 +500,33 @@ mod tests {
         assert!(!prefers_sort(0, 100));
         assert!(!prefers_sort(10, 100));
         assert!(prefers_sort(11, 100));
+    }
+
+    /// Feed `windows` windows of 100 rows, the `i`-th bringing `new[i]` new keys, and say which
+    /// window first stops the hashing.
+    fn first_stop(new: &[u64]) -> Option<usize> {
+        let mut rule = WindowRule::default();
+        for (i, &keys) in new.iter().enumerate() {
+            let mut stop = false;
+            for row in 0..100 {
+                stop |= rule.row(row < keys, 100);
+            }
+            if stop {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn a_window_rule_judges_neither_the_first_window_nor_a_falling_rate() {
+        // Every key new: the first window is not judged, the second is.
+        assert_eq!(first_stop(&[100, 100, 100]), Some(1));
+        // A table learning its keys: the rate falls by more than a fifth each window.
+        assert_eq!(first_stop(&[90, 60, 40, 26, 17, 11, 7]), None);
+        // Falling, then flat above one in ten.
+        assert_eq!(first_stop(&[90, 60, 50, 45]), Some(2));
+        // At or below one in ten, never.
+        assert_eq!(first_stop(&[10, 10, 10]), None);
     }
 }

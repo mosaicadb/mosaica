@@ -1072,19 +1072,16 @@ pub(crate) fn entity_order_residency(
         });
     }
     // The keyword dictionary's `(chunk, ordinal)` remap partition, where a column is indexed at
-    // all.
+    // all: its writer buffers while the merge fills it. The translate that reads it back holds one
+    // chunk's remap and table, 4 to 8 B a key, which is less than the chunk itself held and is
+    // left out of the model with it (`pipeline::KeywordDictPlan`, beside the text pass's).
     if columns
         .iter()
         .any(|column| matches!(column.ty, ScalarType::Keyword))
     {
         terms.push(Term {
-            what: "the keyword dictionary's (chunk, ordinal) partition: writer buffers, one \
-                   loaded bucket at 8 B a record and the u32 table one chunk's ids are \
-                   translated by"
-                .into(),
-            bytes: buffers(crate::spill::PARTITION_BUCKETS as u64, 8)
-                .saturating_add(bucket(8))
-                .saturating_add(bucket(4)),
+            what: "the keyword dictionary's (chunk, ordinal) partition: writer buffers".into(),
+            bytes: buffers(crate::spill::PARTITION_BUCKETS as u64, 8),
             mapped: false,
             phases: Phases::INDEX,
             constant: true,

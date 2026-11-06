@@ -4247,6 +4247,17 @@ pub(crate) enum KeywordValues<'a> {
     Extents(&'a crate::extents::OpenExtents),
 }
 
+impl KeywordValues<'_> {
+    /// A ceiling on the present rows, for sizing a sorted chunk: the column's entities, or the
+    /// extents' rows before their live sets take the overwritten ones out.
+    fn rows_hint(&self) -> u64 {
+        match self {
+            KeywordValues::Column(values) => values.len() as u64,
+            KeywordValues::Extents(extents) => extents.blobs.iter().map(|blob| blob.rows()).sum(),
+        }
+    }
+}
+
 /// How one indexed keyword column's dictionary pass is sized: the rows a sorted chunk buffers, the
 /// distinct keys a hashed chunk holds, and the characters either holds.
 ///
@@ -4322,10 +4333,12 @@ pub(crate) enum ChunkMode {
 const KEYWORD_ROW_BYTES: usize =
     std::mem::size_of::<mosaica_filter_write::KeyRow>() + std::mem::size_of::<u32>();
 
-/// What one distinct key of a hashed chunk costs beyond its characters: its entry, and two table
-/// slots at half load, doubled because a table that has just grown is half empty.
+/// What one distinct key of a hashed chunk costs beyond its characters at the table's peak, which
+/// is while it grows: its entry, twice over because a vector that has just grown is half empty,
+/// and six slots, the two of the table at half load and the four of the table it grows into.
+/// Ranking releases the slots before it sorts, and its 24 B row and 4 B rank fit inside them.
 const KEYWORD_KEY_BYTES: usize =
-    std::mem::size_of::<mosaica_filter_write::KeyRef>() + 4 * std::mem::size_of::<u64>();
+    2 * std::mem::size_of::<mosaica_filter_write::KeyRef>() + 6 * std::mem::size_of::<u64>();
 
 /// The partition the merge pushes `(chunk, ordinal)` into, one record per key of each chunk.
 const KEYWORD_REMAP_PARTITION: &str = "keyword-remap";
@@ -4429,11 +4442,16 @@ impl IdReader {
 
     /// Check that every id was read and the stream's anchor holds.
     fn finish(mut self) -> Result<()> {
-        if self.left != 0 || self.records.next_record()?.is_some() {
+        if self.left != 0 {
             return Err(BuildError::Invalid(format!(
                 "a keyword id stream holds {} ids past the last chunk",
                 self.left
             )));
+        }
+        if self.records.next_record()?.is_some() {
+            return Err(BuildError::Invalid(
+                "a keyword id stream holds a block past the ids it counted".to_string(),
+            ));
         }
         Ok(())
     }
@@ -4463,8 +4481,9 @@ struct KeywordChunks<'a> {
     table: mosaica_filter_write::KeyTable,
     pairs: Vec<mosaica_filter_write::KeyRow>,
     rows: u64,
-    window_rows: u64,
-    window_new: u64,
+    /// Rows the column may still hold, so a sorted chunk is sized once and not grown.
+    rows_left: u64,
+    rule: mosaica_filter_write::WindowRule,
     ids: IdWriter,
     perms: IdWriter,
     runs: Vec<spill::SpillReceipt>,
@@ -4478,7 +4497,7 @@ fn chunk_key<'t>(text: &'t [u8], key: &mosaica_filter_write::KeyRef) -> &'t [u8]
 }
 
 impl<'a> KeywordChunks<'a> {
-    fn create(dir: &'a Path, plan: KeywordDictPlan) -> Result<KeywordChunks<'a>> {
+    fn create(dir: &'a Path, plan: KeywordDictPlan, rows_hint: u64) -> Result<KeywordChunks<'a>> {
         Ok(KeywordChunks {
             dir,
             plan,
@@ -4487,8 +4506,8 @@ impl<'a> KeywordChunks<'a> {
             table: mosaica_filter_write::KeyTable::default(),
             pairs: Vec::new(),
             rows: 0,
-            window_rows: 0,
-            window_new: 0,
+            rows_left: rows_hint,
+            rule: mosaica_filter_write::WindowRule::default(),
             ids: IdWriter::create(&dir.join("keyword-ids.spill"))?,
             perms: IdWriter::create(&dir.join("keyword-perms.spill"))?,
             runs: Vec::new(),
@@ -4516,35 +4535,31 @@ impl<'a> KeywordChunks<'a> {
         match self.mode {
             ChunkMode::Hash => {
                 let text = &self.text;
-                let id = match self.table.find(key.as_bytes(), |k| chunk_key(text, k)) {
-                    mosaica_filter_write::Lookup::Found(id) => id,
+                let (id, new) = match self.table.find(key.as_bytes(), |k| chunk_key(text, k)) {
+                    mosaica_filter_write::Lookup::Found(id) => (id, false),
                     mosaica_filter_write::Lookup::Vacant(vacant) => {
-                        self.window_new += 1;
                         let at = self.buffer(key)?;
-                        self.table
+                        let id = self
+                            .table
                             .insert(vacant, at)
-                            .map_err(|e| BuildError::Invalid(e.to_string()))?
+                            .map_err(|e| BuildError::Invalid(e.to_string()))?;
+                        (id, true)
                     }
                 };
                 self.ids.push(id)?;
-                self.window_rows += 1;
                 if self.table.len() >= self.plan.chunk_keys
                     || self.text.len() >= self.plan.chunk_bytes
                 {
                     self.close(None)?;
-                } else if self.window_rows >= self.plan.window {
-                    // A chunk's first window is where it meets its keys, so it is not judged.
-                    if self.plan.forced.is_none()
-                        && self.rows > self.plan.window
-                        && mosaica_filter_write::prefers_sort(self.window_new, self.window_rows)
-                    {
-                        self.close(Some(ChunkMode::Sort))?;
-                    }
-                    self.window_rows = 0;
-                    self.window_new = 0;
+                } else if self.plan.forced.is_none() && self.rule.row(new, self.plan.window) {
+                    self.close(Some(ChunkMode::Sort))?;
                 }
             }
             ChunkMode::Sort => {
+                if self.pairs.capacity() == 0 {
+                    let rows = (self.plan.chunk_rows as u64).min(self.rows_left.max(1));
+                    self.pairs.reserve_exact(rows as usize);
+                }
                 let row = u32::try_from(self.pairs.len()).map_err(|_| {
                     BuildError::Invalid(
                         "a sorted keyword chunk holds more rows than a u32 can number; give the \
@@ -4586,7 +4601,7 @@ impl<'a> KeywordChunks<'a> {
             let keys = match self.mode {
                 ChunkMode::Hash => {
                     let keys = mosaica_filter_write::rank_table(
-                        &self.table,
+                        &mut self.table,
                         |k| chunk_key(text, k),
                         &mut self.scratch,
                         &mut emit,
@@ -4623,16 +4638,31 @@ impl<'a> KeywordChunks<'a> {
                 keys,
             });
         }
-        // Cleared rather than replaced: these buffers' capacity is the plan's budget, which is
-        // what the next chunk wants.
-        self.text.clear();
-        self.table.clear();
-        self.pairs.clear();
+        self.rows_left = self.rows_left.saturating_sub(self.rows);
         self.rows = 0;
-        self.window_rows = 0;
-        self.window_new = 0;
-        self.mode = self.plan.forced.or(switch).unwrap_or(next);
+        self.rule = mosaica_filter_write::WindowRule::default();
+        let next = self.plan.forced.or(switch).unwrap_or(next);
+        // A buffer keeps its capacity for a next chunk of its own mode, which wants it, and is
+        // released for one of the other, so the two modes' budgets are never held at once.
+        self.text.clear();
+        self.scratch.clear();
+        match next {
+            ChunkMode::Hash if self.mode == ChunkMode::Hash => self.table.clear(),
+            ChunkMode::Sort if self.mode == ChunkMode::Sort => self.pairs.clear(),
+            _ => {
+                self.table = mosaica_filter_write::KeyTable::default();
+                self.pairs = Vec::new();
+                self.scratch = Vec::new();
+            }
+        }
+        self.mode = next;
         Ok(())
+    }
+
+    /// Close the last chunk and hand back the streams and runs, releasing the chunk's buffers.
+    fn finish(mut self) -> Result<(IdWriter, IdWriter, Vec<spill::SpillReceipt>, Vec<ChunkMeta>)> {
+        self.close(None)?;
+        Ok((self.ids, self.perms, self.runs, self.chunks))
     }
 }
 
@@ -4655,7 +4685,9 @@ impl<'a> KeywordChunks<'a> {
 ///    hashed chunk, its perm) is loaded and each id becomes `remap[perm[id]]` or `remap[id]`,
 ///    pushed to the values writer in [`VALUE_CHUNK`] slices.
 ///
-/// Disk is 4 B per row of ids and 8 B per chunk key of remap; memory is one chunk.
+/// Disk is 4 B per row of ids, 8 B per chunk key of remap and 4 B per hashed chunk key of perm,
+/// beside the runs. Memory is one chunk while chunking, and one chunk's remap and table, 4 to 8 B
+/// a key, while translating.
 ///
 /// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
 /// sorted distinct key set and a row's ordinal is its key's position in it; neither depends on
@@ -4683,18 +4715,11 @@ fn write_keyword_column(
         |detail: String| BuildError::Invalid(format!("attribute '{}': {detail}", attribute.name));
 
     // ---- 1. the chunk pass ---------------------------------------------------------------------
-    let mut chunks = KeywordChunks::create(column_dir, plan)?;
+    let mut chunker = KeywordChunks::create(column_dir, plan, values.rows_hint())?;
     let rows = for_each_keyword(attribute, values, presence, &mut |_row, text| {
-        chunks.push(text)
+        chunker.push(text)
     })?;
-    chunks.close(None)?;
-    let KeywordChunks {
-        ids,
-        perms,
-        runs,
-        chunks,
-        ..
-    } = chunks;
+    let (ids, perms, runs, chunks) = chunker.finish()?;
     let (ids, id_count) = ids.finish()?;
     let (perms, perm_count) = perms.finish()?;
     let chunked: u64 = chunks.iter().map(|chunk| chunk.rows).sum();
@@ -4795,27 +4820,43 @@ fn write_keyword_column(
     let mut out: Vec<u32> = Vec::with_capacity(VALUE_CHUNK);
     let mut translated = 0u64;
     for (k, &(lo, hi)) in ranges.iter().enumerate() {
-        let mut remaps: Vec<Vec<u32>> = vec![Vec::new(); hi.saturating_sub(lo) as usize];
-        for record in store.load(k)?.as_chunks::<KEYWORD_REMAP_RECORD>().0 {
+        // Streamed into remaps sized to their chunks, so a bucket costs 4 B a key and not the
+        // bucket's bytes beside them.
+        let mut remaps: Vec<Vec<u32>> = (lo..hi)
+            .map(|chunk| Vec::with_capacity(chunks[chunk as usize].keys as usize))
+            .collect();
+        // The closure answers in the store's error type, so a refusal is held here and returned
+        // once the read, and the anchor check that ends it, are done.
+        let mut refused: Option<BuildError> = None;
+        store.read_each(k, |record| {
+            if refused.is_some() {
+                return Ok(());
+            }
             let chunk = u32::from_le_bytes(record[..4].try_into().expect("a record is 8 bytes"));
             let ordinal = u32::from_le_bytes(record[4..].try_into().expect("a record is 8 bytes"));
-            let remap = (chunk as u64)
+            let Some(remap) = (chunk as u64)
                 .checked_sub(lo)
                 .and_then(|at| remaps.get_mut(at as usize))
-                .ok_or_else(|| {
-                    refuse(format!(
-                        "bucket {k} of the keyword remap holds chunk {chunk}, outside the range \
-                         [{lo}, {hi}) it addresses"
-                    ))
-                })?;
+            else {
+                refused = Some(refuse(format!(
+                    "bucket {k} of the keyword remap holds chunk {chunk}, outside the range \
+                     [{lo}, {hi}) it addresses"
+                )));
+                return Ok(());
+            };
             if remap.last().is_some_and(|&previous| ordinal <= previous) {
-                return Err(refuse(format!(
+                refused = Some(refuse(format!(
                     "chunk {chunk}'s remap does not ascend: {ordinal} follows {:?} — both the \
                      chunk's keys and the dictionary are sorted, so a correct remap does",
                     remap.last()
                 )));
+                return Ok(());
             }
             remap.push(ordinal);
+            Ok(())
+        })?;
+        if let Some(refusal) = refused {
+            return Err(refusal);
         }
         store.delete(k)?;
 
@@ -4845,6 +4886,7 @@ fn write_keyword_column(
                             })?);
                         }
                     }
+                    drop(remap);
                     table
                 }
             };
@@ -6900,10 +6942,10 @@ mod tests {
     }
 
     /// The corpus both keyword tests read. Every shape the dictionary pass has to survive: keys
-    /// shorter than the eight bytes [`mosaica_filter_write::KeyRef`] compares on, keys agreeing in exactly those
-    /// eight and differing after them, a key that is a proper prefix of another, a key carried by
-    /// a seventh of the corpus, keys carried by exactly one entity, a non-ASCII key, and absent
-    /// runs.
+    /// shorter than the eight bytes [`mosaica_filter_write::key_prefix`] takes, keys agreeing in
+    /// exactly those eight and differing after them, a key that is a proper prefix of another, a
+    /// key carried by a seventh of the corpus, keys carried by exactly one entity, a non-ASCII
+    /// key, and absent runs.
     const N_KEYWORD: usize = 300;
 
     fn keyword_fixture_key(entity: usize) -> ScalarValue {
