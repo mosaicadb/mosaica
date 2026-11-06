@@ -4280,6 +4280,8 @@ pub(crate) struct KeywordDictPlan {
     window: u64,
     /// One way for every chunk, for the tests that must reach each; `None` chooses per chunk.
     forced: Option<ChunkMode>,
+    /// Keys, and records, per batch the merge hands to its writers.
+    merge_batch: usize,
 }
 
 /// The floor on a chunk, so a tiny `--memory-budget` cannot derive a plan that spills a run every
@@ -4300,12 +4302,13 @@ impl KeywordDictPlan {
             chunk_bytes: (allowance as usize).max(KEYWORD_MIN_CHUNK_BYTES),
             window: mosaica_filter_write::KEY_WINDOW_ROWS,
             forced: None,
+            merge_batch: KEYWORD_MERGE_BATCH,
         }
     }
 
-    /// An explicit plan, for the tests that must force several chunks and a cascade out of a
-    /// corpus small enough to assert over: `chunk` bounds both a sorted chunk's rows and a hashed
-    /// chunk's keys.
+    /// An explicit plan, for the tests that must force several chunks, a cascade and several merge
+    /// batches out of a corpus small enough to assert over: `chunk` bounds both a sorted chunk's
+    /// rows and a hashed chunk's keys.
     #[cfg(test)]
     fn explicit(chunk: usize, window: u64, forced: Option<ChunkMode>) -> KeywordDictPlan {
         KeywordDictPlan {
@@ -4314,6 +4317,7 @@ impl KeywordDictPlan {
             chunk_bytes: usize::MAX,
             window: window.max(1),
             forced,
+            merge_batch: 3,
         }
     }
 }
@@ -4346,6 +4350,28 @@ const KEYWORD_REMAP_PARTITION: &str = "keyword-remap";
 /// One `(chunk, ordinal)` record of that partition: two little-endian `u32`s, the chunk first
 /// because it is the key the partition routes on.
 const KEYWORD_REMAP_RECORD: usize = 8;
+
+/// Keys, and records, per batch the merge hands to the dictionary's and the remap's writers, at
+/// [`KeywordDictPlan::for_budget`].
+const KEYWORD_MERGE_BATCH: usize = 1 << 14;
+
+/// Batches in flight to each writer.
+const KEYWORD_MERGE_DEPTH: usize = 4;
+
+/// A scoped thread's result, with its panic resumed on the joining thread rather than lost.
+fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
+    handle
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+/// Merged keys on their way to the dictionary's writer: the characters end to end, and where
+/// each key ends.
+#[derive(Default)]
+struct KeyBatch {
+    text: Vec<u8>,
+    ends: Vec<usize>,
+}
 
 /// Ids per record of the id and perm streams. A record is a block rather than one id so the
 /// stream's anchor and buffering are paid per block; the last block is padded with zeros.
@@ -4756,58 +4782,116 @@ fn write_keyword_column(
             (lo as u64, hi.min(chunks.len() as u64))
         })
         .collect();
-    {
-        let dict_file =
-            std::fs::File::create(&dict_path).map_err(|e| BuildError::io(&dict_path, e))?;
-        let mut dict = mosaica_filter::SortedDictWriter::new(std::io::BufWriter::new(dict_file))
-            .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
-        let mut merge = TextRunMerge::open(&runs, spill::RunPayload::Rows)?;
-        let mut keys = 0u64;
-        let mut emitted = 0u64;
-        let mut selected: Vec<u8> = Vec::new();
-        while merge.next_term()? {
-            selected.clear();
-            selected.extend_from_slice(merge.term());
-            let key = std::str::from_utf8(&selected).map_err(|e| {
-                refuse(format!(
-                    "a merged key is not UTF-8 ({e}) — the column holds `&str`, so this is a \
-                     corrupted run rather than a corpus value"
-                ))
-            })?;
-            let ordinal = dict
-                .push(key)
-                .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
-            if ordinal as u64 != keys {
-                return Err(refuse(format!(
-                    "the key {key:?} was written at dictionary ordinal {ordinal} and is the \
-                     {keys}th distinct key of the merge — the values file would name another \
-                     key's value"
-                )));
-            }
-            keys += 1;
-            merge.drain(&mut |chunk, _| {
-                if chunk as usize >= chunks.len() {
-                    return Err(refuse(format!(
-                        "the key {key:?} is carried by chunk {chunk}, past the {} chunks the \
-                         column has",
-                        chunks.len()
-                    )));
+    // **Three threads, joined by bounded queues**: the merge itself, the dictionary's writer and
+    // the remap's. Each of the three is a third of the step on its own, and what passes between
+    // them is batches of keys and records, a few megabytes in flight.
+    let (keys, emitted, partition) = std::thread::scope(|scope| {
+        let (key_queue, key_batches) =
+            std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
+        let (record_queue, record_batches) =
+            std::sync::mpsc::sync_channel::<Vec<u8>>(KEYWORD_MERGE_DEPTH);
+        let dict_writer = scope.spawn(|| -> Result<u64> {
+            let dict_file =
+                std::fs::File::create(&dict_path).map_err(|e| BuildError::io(&dict_path, e))?;
+            let mut dict =
+                mosaica_filter::SortedDictWriter::new(std::io::BufWriter::new(dict_file))
+                    .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
+            let mut keys = 0u64;
+            for batch in key_batches {
+                let mut start = 0usize;
+                for &end in &batch.ends {
+                    let key = std::str::from_utf8(&batch.text[start..end]).map_err(|e| {
+                        refuse(format!(
+                            "a merged key is not UTF-8 ({e}) — the column holds `&str`, so this \
+                             is a corrupted run rather than a corpus value"
+                        ))
+                    })?;
+                    start = end;
+                    let ordinal = dict
+                        .push(key)
+                        .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
+                    if ordinal as u64 != keys {
+                        return Err(refuse(format!(
+                            "the key {key:?} was written at dictionary ordinal {ordinal} and is \
+                             the {keys}th distinct key of the merge — the values file would name \
+                             another key's value"
+                        )));
+                    }
+                    keys += 1;
                 }
-                let mut record = [0u8; KEYWORD_REMAP_RECORD];
-                record[..4].copy_from_slice(&chunk.to_le_bytes());
-                record[4..].copy_from_slice(&ordinal.to_le_bytes());
-                partition.push(&record)?;
-                emitted += 1;
-                Ok(())
-            })?;
-        }
-        dict.finish()
-            .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
-        if emitted != keys_held {
+            }
+            dict.finish()
+                .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
+            Ok(keys)
+        });
+        let remap_writer = scope.spawn(move || -> Result<spill::Partition> {
+            for records in record_batches {
+                for record in records.as_chunks::<KEYWORD_REMAP_RECORD>().0 {
+                    partition.push(record)?;
+                }
+            }
+            Ok(partition)
+        });
+
+        let merged = (|| -> Result<(u64, u64)> {
+            // A queue whose writer has stopped refuses the send; the writer's own error is the
+            // one returned, below.
+            let stopped = || refuse("a keyword merge writer stopped".to_string());
+            let mut merge = TextRunMerge::open(&runs, spill::RunPayload::Rows)?;
+            let mut batch = KeyBatch::default();
+            let mut records: Vec<u8> = Vec::new();
+            let (mut keys, mut emitted) = (0u64, 0u64);
+            while merge.next_term()? {
+                let ordinal = u32::try_from(keys).map_err(|_| {
+                    refuse("the column has more distinct keys than a u32 can number".to_string())
+                })?;
+                batch.text.extend_from_slice(merge.term());
+                batch.ends.push(batch.text.len());
+                merge.drain(&mut |chunk, _| {
+                    if chunk as usize >= chunks.len() {
+                        return Err(refuse(format!(
+                            "a key is carried by chunk {chunk}, past the {} chunks the column has",
+                            chunks.len()
+                        )));
+                    }
+                    records.extend_from_slice(&chunk.to_le_bytes());
+                    records.extend_from_slice(&ordinal.to_le_bytes());
+                    emitted += 1;
+                    Ok(())
+                })?;
+                keys += 1;
+                if batch.ends.len() == plan.merge_batch {
+                    key_queue
+                        .send(std::mem::take(&mut batch))
+                        .map_err(|_| stopped())?;
+                }
+                if records.len() >= plan.merge_batch * KEYWORD_REMAP_RECORD {
+                    record_queue
+                        .send(std::mem::take(&mut records))
+                        .map_err(|_| stopped())?;
+                }
+            }
+            key_queue.send(batch).map_err(|_| stopped())?;
+            record_queue.send(records).map_err(|_| stopped())?;
+            Ok((keys, emitted))
+        })();
+        drop(key_queue);
+        drop(record_queue);
+        let written = joined(dict_writer)?;
+        let partition = joined(remap_writer)?;
+        let (keys, emitted) = merged?;
+        if written != keys {
             return Err(refuse(format!(
-                "the keyword merge yielded {emitted} chunk keys where the chunks hold {keys_held}"
+                "the keyword merge selected {keys} keys and the dictionary took {written}"
             )));
         }
+        Ok((keys, emitted, partition))
+    })?;
+    if emitted != keys_held {
+        return Err(refuse(format!(
+            "the keyword merge yielded {emitted} chunk keys over {keys} keys where the chunks \
+             hold {keys_held}"
+        )));
     }
     let mut store = partition.finish()?;
     for run in &runs {
