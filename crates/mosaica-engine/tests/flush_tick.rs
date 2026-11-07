@@ -400,6 +400,13 @@ fn a_retry_that_finds_nothing_to_flush_still_reaches_the_promised_number() {
     wait_until("the flush fails", WAIT, || {
         engine.write_executor_stats().flush_failures >= 1
     });
+    wait_until("the failed flush's record ends", WAIT, || {
+        engine.jobs().is_empty()
+    });
+    let failed = engine
+        .last_job(JobKind::Flush)
+        .expect("its last record is kept");
+    assert_eq!(failed.state, JobState::Failed, "{failed:?}");
     let second = engine.request_flush_publication();
     assert_eq!(
         second,

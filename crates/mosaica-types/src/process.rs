@@ -121,7 +121,8 @@ pub fn resident_bytes() -> Resident {
 }
 
 /// A byte count to three significant figures in binary units, such as `18.2 GiB` or `512 B`, as
-/// every report of memory and file sizes prints it.
+/// the progress records' readers and the build's reports of the term images and unique indexes
+/// print it.
 pub fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
     let mut value = bytes as f64;
@@ -142,6 +143,16 @@ pub fn human_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_byte_count_reads_to_three_figures_in_binary_units() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.00 KiB");
+        assert_eq!(human_bytes(19_565_460), "18.7 MiB");
+        assert_eq!(human_bytes(19_542_626_304), "18.2 GiB");
+        assert_eq!(human_bytes(200 << 30), "200 GiB");
+    }
 
     /// The three figures are read from the running process, so the only property a unit test can
     /// hold is the one a mis-parse breaks: this process has anonymous memory, and the total is at

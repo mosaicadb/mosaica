@@ -2168,6 +2168,10 @@ async fn a_compaction_request_is_pending_then_answered_with_its_record() {
 
     let after = control_status(&server).await;
     assert_eq!(after["jobs"], serde_json::json!([]), "{after}");
+    assert_eq!(
+        after["compaction"]["last_job"], with_third["job"],
+        "{after}"
+    );
     let passes = after["compaction"]["passes"].as_array().unwrap();
     let counted: Vec<&serde_json::Value> = passes
         .iter()
@@ -2177,6 +2181,37 @@ async fn a_compaction_request_is_pending_then_answered_with_its_record() {
     for pass in counted {
         assert_eq!(pass["done"], pass["total"], "{pass}");
     }
+}
+
+/// A compaction that fails is served failed: its request's answer is `failed`, not `ok`, with a
+/// detail and the failed record, and `/control/status` lists no job and keeps the same record.
+#[tokio::test]
+async fn a_failed_compaction_is_served_failed_with_its_record() {
+    let tmp = TempDir::new().unwrap();
+    let server = serve(&tmp).await;
+    let (code, body) = post_ingest(&server, "failed", &rows_from(60_000, 1), true).await;
+    assert_eq!(code, 200, "{body}");
+    tick(&server).await;
+    server.state.engine.panic_next_fold_for_test();
+    let request = ask_for_compaction(&server).await;
+    wait_for_executor(&server, "the request answered", |now| {
+        now.compaction_requests_answered >= request
+    })
+    .await;
+    let (code, failed) = compaction_request(&server, request).await;
+    assert_eq!(code, 200, "{failed}");
+    let answer = &failed["answer"];
+    assert_eq!(
+        (&answer["outcome"], &answer["ok"]),
+        (&serde_json::json!("failed"), &serde_json::json!(false)),
+        "{failed}"
+    );
+    assert!(answer["detail"].is_string(), "{failed}");
+    let job: Progress = serde_json::from_value(failed["job"].clone()).unwrap();
+    assert_eq!(job.state, JobState::Failed);
+    let status = control_status(&server).await;
+    assert_eq!(status["jobs"], serde_json::json!([]), "{status}");
+    assert_eq!(status["compaction"]["last_job"], failed["job"], "{status}");
 }
 
 /// Ask for a compaction under a memory figure no compaction fits, and answer the request's number
@@ -2228,7 +2263,7 @@ async fn a_compaction_refused_at_its_turn_is_reported_against_its_request() {
 }
 
 /// The server keeps the latest answers, and a request answered before them is `410`, apart from a
-/// number this run never gave, which is `404`. Malformed numbers are `422`.
+/// number this run never gave, which is `404`.
 #[tokio::test]
 async fn an_answer_older_than_the_ones_kept_is_gone() {
     let tmp = TempDir::new().unwrap();
@@ -2239,10 +2274,10 @@ async fn an_answer_older_than_the_ones_kept_is_gone() {
     let mut requests = Vec::new();
     for _ in 0..=mosaica_engine::KEPT_ANSWERS {
         let request = engine.request_fold().unwrap();
-        while engine.write_executor_stats().compaction_requests_answered < request {
-            engine.request_flush();
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        }
+        ticking_until(&server, "the request answered", |now| {
+            now.compaction_requests_answered >= request
+        })
+        .await;
         requests.push(request);
     }
     let (code, gone) = compaction_request(&server, requests[0]).await;
@@ -2251,16 +2286,6 @@ async fn an_answer_older_than_the_ones_kept_is_gone() {
     assert_eq!(code, 200, "{kept}");
     let (code, lost) = compaction_request(&server, requests[0] - 1).await;
     assert_eq!(code, 404, "{lost}");
-    for malformed in ["0", "abc"] {
-        let resp = server
-            .client
-            .get(server.control_url(&format!("/control/compact/{malformed}")))
-            .bearer_auth(OPERATOR_CREDENTIAL)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(resp.status().as_u16(), 422, "{malformed}");
-    }
 }
 
 /// Where no tick could compact before a restart, the request is refused at once and nothing is

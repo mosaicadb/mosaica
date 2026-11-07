@@ -22,7 +22,7 @@ use mosaica_store::read::open_bundle;
 use mosaica_types::EntityId;
 
 mod common;
-use common::mosaica;
+use common::{mosaica, progress_records};
 
 const ENTITIES: u64 = 30;
 /// `world` holds the first twenty; the group's two views overlap in the middle, so an entity is in
@@ -343,10 +343,8 @@ fn the_whole_declaration_builds_and_verifies() {
     assert!(built.status.success(), "{stderr}");
 
     // Each view's tiler sort is a step of its own.
-    let tiler_sorts: std::collections::BTreeSet<Option<String>> = stderr
-        .lines()
-        .filter(|line| line.starts_with('{'))
-        .map(|line| serde_json::from_str::<mosaica_types::progress::Progress>(line).unwrap())
+    let tiler_sorts: std::collections::BTreeSet<Option<String>> = progress_records(&built)
+        .into_iter()
         .filter(|p| p.step == "tiler_sort")
         .map(|p| p.context)
         .collect();

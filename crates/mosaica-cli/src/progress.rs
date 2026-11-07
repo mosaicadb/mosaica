@@ -32,8 +32,8 @@ const BAR_CELLS: usize = 24;
 pub(crate) struct Renderer {
     /// `Auto` decided against stderr.
     mode: Mode,
-    /// The step of the last snapshot printed: its phase, name and context.
-    shown: Option<(u32, String, Option<String>)>,
+    /// The step of the last snapshot printed.
+    shown: Option<u64>,
     printed: Option<Instant>,
     /// Whether the bar is on the screen, with the cursor at the start of its first line.
     drawn: bool,
@@ -58,8 +58,17 @@ impl Renderer {
     pub(crate) fn interval(&self) -> Duration {
         match self.mode {
             Mode::Bar => BAR_EVERY,
-            Mode::Plain => PLAIN_EVERY,
             _ => JSON_EVERY,
+        }
+    }
+
+    /// How often the mode prints while a step runs, `None` for a mode that prints nothing.
+    fn every(&self) -> Option<Duration> {
+        match self.mode {
+            Mode::Plain => Some(PLAIN_EVERY),
+            Mode::Json => Some(JSON_EVERY),
+            Mode::Bar => Some(BAR_EVERY),
+            Mode::Auto | Mode::None => None,
         }
     }
 
@@ -70,26 +79,19 @@ impl Renderer {
         }
     }
 
-    /// The first snapshot of a step that has begun.
-    pub(crate) fn step_begun(&mut self, progress: &Progress) {
-        match self.mode {
-            Mode::Plain | Mode::Json => self.print(progress),
-            _ => self.tick(progress),
-        }
-    }
-
-    /// A snapshot taken while the job runs, printed when it shows a step the last print did not,
-    /// or when the mode's interval has passed since the last print.
-    pub(crate) fn tick(&mut self, progress: &Progress) {
-        let since = self.printed.map(|at| at.elapsed());
-        let due = match self.mode {
-            // Ticked every 30 s, so a tick soon after a step's line is the one left out.
-            Mode::Plain => since.is_none_or(|s| s >= PLAIN_EVERY / 2),
-            Mode::Json => since.is_none_or(|s| s >= JSON_EVERY),
-            Mode::Bar => since.is_none_or(|s| s >= BAR_EVERY / 2),
-            Mode::Auto | Mode::None => false,
+    /// A snapshot taken while the job runs, given about once an [`Self::interval`]. It is
+    /// printed where it shows a step the last print did not, or where the mode's own interval has
+    /// passed since the last print, give or take half a source's interval, so a reading that falls
+    /// a little early is not left out.
+    pub(crate) fn show(&mut self, progress: &Progress) {
+        let Some(every) = self.every() else {
+            return;
         };
-        if due || self.mode != Mode::Bar && self.shown != Some(step_of(progress)) {
+        let begun = self.shown != Some(progress.step_id);
+        let due = self
+            .printed
+            .is_none_or(|at| at.elapsed() + self.interval() / 2 >= every);
+        if begun || due {
             self.print(progress);
         }
     }
@@ -147,18 +149,9 @@ impl Renderer {
             Mode::Auto | Mode::None => Ok(()),
         };
         let _ = err.flush();
-        self.shown = Some(step_of(progress));
+        self.shown = Some(progress.step_id);
         self.printed = Some(Instant::now());
     }
-}
-
-/// The phase, name and context that tell one step from another.
-fn step_of(progress: &Progress) -> (u32, String, Option<String>) {
-    (
-        progress.phase.index,
-        progress.step.to_string(),
-        progress.context.clone(),
-    )
 }
 
 /// The step, its count, rate, time remaining, the job's elapsed time and resident memory, and
@@ -222,7 +215,6 @@ fn unit_name(unit: Unit) -> &'static str {
         Unit::Pairs => " pairs",
         Unit::Terms => " terms",
         Unit::Bytes => "",
-        Unit::Pages => " pages",
     }
 }
 
@@ -293,7 +285,7 @@ impl Feed {
     }
 
     pub(crate) fn step_begun(&self) {
-        self.with(Renderer::step_begun);
+        self.with(Renderer::show);
     }
 
     fn with(&self, show: impl FnOnce(&mut Renderer, &Progress)) {
@@ -329,7 +321,7 @@ pub(crate) fn run<T>(
             if stop.load(Ordering::Relaxed) {
                 break;
             }
-            feed.with(Renderer::tick);
+            feed.with(Renderer::show);
         });
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
         stop.store(true, Ordering::Relaxed);

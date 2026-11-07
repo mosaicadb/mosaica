@@ -942,8 +942,8 @@ async fn flush(
 
 /// `POST /control/compact`: sets a flag the executor reads at its next tick, and answers 202 with
 /// the request's number. At most one compaction is in flight. A request that arrives while one
-/// runs is held until it lands. `/control/status`'s `compaction.requests` says when the request is
-/// answered and whether it was refused. A 503 where no tick could compact before a restart.
+/// runs is held until it lands. `GET /control/compact/{request}` says when the request is answered
+/// and how. A 503 where no tick could compact before a restart.
 async fn compact(
     State(state): State<Arc<AppState>>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
@@ -993,11 +993,11 @@ async fn compaction_request(
             let refusal = match answer.outcome {
                 mosaica_engine::RequestOutcome::Refused {
                     gate,
-                    detail,
                     shard,
                     need_bytes,
                     had_bytes,
-                } => Some((gate, detail, shard.map(|s| s.raw()), need_bytes, had_bytes)),
+                    ..
+                } => Some((gate, shard.map(|s| s.raw()), need_bytes, had_bytes)),
                 _ => None,
             };
             serde_json::json!({
@@ -1009,13 +1009,19 @@ async fn compaction_request(
                     "outcome": answer.outcome.as_str(),
                     "ok": answer.outcome.succeeded(),
                     "gate": refusal.map(|r| r.0),
-                    "detail": refusal.map(|r| r.1),
-                    "shard": refusal.and_then(|r| r.2),
-                    "need_bytes": refusal.and_then(|r| r.3),
-                    "had_bytes": refusal.and_then(|r| r.4),
+                    "detail": answer.detail(),
+                    "shard": refusal.and_then(|r| r.1),
+                    "need_bytes": refusal.and_then(|r| r.2),
+                    "had_bytes": refusal.and_then(|r| r.3),
                 },
                 "job": answer.job,
             })
+        }
+        mosaica_engine::RequestState::Abandoned => {
+            return Err(ApiError::Unavailable(
+                "the write executor has stopped, so this request will not be answered; restart \
+                 the server, which loses the request, and ask for a compaction again",
+            ))
         }
         mosaica_engine::RequestState::Forgotten => {
             return Err(ApiError::Gone(format!(

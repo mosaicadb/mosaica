@@ -353,18 +353,25 @@ pub(crate) enum DropCommand {
 pub(crate) struct CompactArgs {
     #[command(flatten)]
     control: Control,
-    /// Wait until the request is answered, reading `GET /control/compact/{request}` once a second.
-    /// It exits 1 when the server refused the request, when a compaction for it failed, and when
-    /// the server restarted after the request was made and so lost it.
+    /// Ask for nothing, and read the request with this number instead: print what
+    /// `GET /control/compact/{request}` answers, or with `--wait` wait for it.
+    #[arg(long, value_name = "N")]
+    request: Option<u64>,
+    /// Wait until the request is answered, reading `GET /control/compact/{request}` once a second,
+    /// then print the route's answer on stdout in place of the request's number, which a line on
+    /// stderr names. Its `answer.outcome` tells a compaction from a request with nothing to
+    /// compact. It exits 1 when the server refused the request, when a
+    /// compaction for it failed, and when the server restarted after the request was made and so
+    /// lost it, and prints the server's detail on stderr.
     #[arg(long)]
     wait: bool,
     /// Show the progress of the compaction in flight while `--wait` waits, on stderr, from the
     /// record `GET /control/compact/{request}` serves: its phase, its step and the shard, the
     /// step's count, rate and time remaining, the time elapsed and the server's resident memory.
     ///
-    /// The modes are `mosaica build --progress`'s. Where a compaction ran for the request, each
-    /// mode ends with that compaction's last record as the route serves it, its state `finished`
-    /// or `failed`.
+    /// The modes are `mosaica build --progress`'s, except that a step's end is not seen, so no
+    /// line is printed for it. Where a compaction ran for the request, each mode ends with that
+    /// compaction's last record as the route serves it, its state `finished` or `failed`.
     #[arg(
         long,
         value_name = "MODE",
@@ -494,18 +501,29 @@ pub(crate) fn flush(args: FlushArgs) -> ExitCode {
 }
 
 pub(crate) fn compact(args: CompactArgs) -> ExitCode {
+    let path = |request: u64| format!("/control/compact/{request}");
     if !args.wait {
-        return finish(
-            "compact",
-            args.control
+        let answer = match args.request {
+            Some(request) => args
+                .control
+                .call("GET", &path(request), None, WRITE_TIMEOUT),
+            None => args
+                .control
                 .call("POST", "/control/compact", None, WRITE_TIMEOUT),
-        );
+        };
+        return finish("compact", answer);
     }
-    match args
-        .control
-        .writer()
-        .and_then(|plane| compact_and_wait(&plane, args.progress))
-    {
+    let waited = args.control.writer().and_then(|plane| {
+        let request = match args.request {
+            Some(request) => request,
+            None => ask_for_compaction(&plane)?,
+        };
+        let mut renderer = Renderer::new(args.progress);
+        let outcome = wait_for_compaction(&plane, &path(request), &mut renderer);
+        renderer.clear();
+        outcome
+    });
+    match waited {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::FAILURE,
         Err(e) => {
@@ -518,34 +536,25 @@ pub(crate) fn compact(args: CompactArgs) -> ExitCode {
 /// How often `compact --wait` reads `GET /control/compact/{request}`.
 const COMPACT_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Ask for a compaction, print the answer, and read `GET /control/compact/{request}` until the
-/// request is answered, showing the compaction serving it. Returns the answer's `ok`.
-fn compact_and_wait(plane: &Plane, mode: Mode) -> Result<bool, String> {
+/// Ask for a compaction, and answer the request's number, which a line on stderr names, since
+/// stdout carries only the answer the wait ends with.
+fn ask_for_compaction(plane: &Plane) -> Result<u64, String> {
     let answer = plane.call("POST", "/control/compact", None)?.accepted()?;
-    println!("{}", answer.text());
     let request = answer.json()["request"]
         .as_u64()
         .ok_or_else(|| format!("the answer names no request: {}", answer.text()))?;
-    let mut renderer = Renderer::new(mode);
-    let outcome = wait_for_compaction(plane, request, &mut renderer);
-    renderer.clear();
-    outcome
+    eprintln!("mosaica compact: waiting for request {request}");
+    Ok(request)
 }
 
-/// [`compact_and_wait`]'s wait for request `request`, read from `GET /control/compact/{request}`,
-/// which ends with the outcome the server answered it with.
-fn wait_for_compaction(
-    plane: &Plane,
-    request: u64,
-    renderer: &mut Renderer,
-) -> Result<bool, String> {
-    let path = format!("/control/compact/{request}");
-    let mut shown: Option<Progress> = None;
-    let mut ticked = std::time::Instant::now();
-    let state = loop {
+/// Read the request at `path` until it is answered, showing the compaction serving it, then
+/// print the answer on stdout and the server's detail on stderr where it did not succeed. Returns
+/// the answer's `ok`.
+fn wait_for_compaction(plane: &Plane, path: &str, renderer: &mut Renderer) -> Result<bool, String> {
+    let (state, text) = loop {
         // A reading no server answered is read again, so a restart shows as a 404 once the server
         // is back rather than ending the wait.
-        let Ok(answer) = plane.call("GET", &path, None) else {
+        let Ok(answer) = plane.call("GET", path, None) else {
             std::thread::sleep(COMPACT_POLL);
             continue;
         };
@@ -555,43 +564,26 @@ fn wait_for_compaction(
                 .unwrap_or_default()
                 .to_owned());
         }
-        let state = answer.accepted()?.json();
+        let answer = answer.accepted()?;
+        let state = answer.json();
         if state["answered"] == Value::Bool(true) {
-            break state;
+            break (state, answer.text());
         }
         if let Ok(record) = serde_json::from_value::<Progress>(state["job"].clone()) {
-            let same_step = |shown: &Progress| {
-                (shown.phase.index, &shown.step, &shown.context)
-                    == (record.phase.index, &record.step, &record.context)
-            };
-            if !shown.as_ref().is_some_and(same_step) {
-                renderer.step_begun(&record);
-                ticked = std::time::Instant::now();
-            } else if ticked.elapsed() >= renderer.interval() {
-                renderer.tick(&record);
-                ticked = std::time::Instant::now();
-            }
-            shown = Some(record);
+            renderer.show(&record);
         }
         std::thread::sleep(COMPACT_POLL);
     };
     if let Ok(last) = serde_json::from_value::<Progress>(state["job"].clone()) {
         renderer.finish(&last);
     }
+    println!("{text}");
     let answer = &state["answer"];
-    match answer["outcome"].as_str().unwrap_or_default() {
-        "refused" => eprintln!(
-            "mosaica compact: request {request} was refused at {}: {}",
-            answer["gate"].as_str().unwrap_or_default(),
-            answer["detail"].as_str().unwrap_or_default()
-        ),
-        "failed" => eprintln!(
-            "mosaica compact: a compaction for request {request} failed; its last record names \
-             the step it stopped in"
-        ),
-        _ => {}
+    let ok = answer["ok"] == Value::Bool(true);
+    if let Some(detail) = answer["detail"].as_str().filter(|_| !ok) {
+        eprintln!("mosaica compact: {detail}");
     }
-    Ok(answer["ok"] == Value::Bool(true))
+    Ok(ok)
 }
 
 pub(crate) fn status(control: Control) -> ExitCode {

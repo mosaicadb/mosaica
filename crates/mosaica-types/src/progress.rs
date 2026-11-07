@@ -43,7 +43,6 @@ pub enum Unit {
     Pairs,
     Terms,
     Bytes,
-    Pages,
 }
 
 /// Whether the job is still running.
@@ -89,6 +88,10 @@ pub struct Progress {
     /// The step's stable name, such as `filter_postings`, for scripts and for comparison with
     /// `--stage-timings`.
     pub step: Cow<'static, str>,
+    /// Which step this is: a number no other step begun in the same process has, unchanged while
+    /// the step's count or context changes, so a reader can tell a step that began from one it
+    /// read before.
+    pub step_id: u64,
     /// What part of the step is running, for a person, such as `view papers (1 of 2)`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
@@ -120,8 +123,13 @@ pub struct Tracker {
     step: Mutex<Step>,
 }
 
+/// The number the next step begun in this process is given.
+static NEXT_STEP_ID: AtomicU64 = AtomicU64::new(1);
+
 #[derive(Debug)]
 struct Step {
+    /// See [`Progress::step_id`].
+    id: u64,
     state: JobState,
     phase: Phase,
     step: Cow<'static, str>,
@@ -145,10 +153,6 @@ impl Tracker {
             done: AtomicU64::new(0),
             step: Mutex::new(Step::new(phase, Cow::Borrowed(step), None, None, now)),
         }
-    }
-
-    pub fn job(&self) -> JobKind {
-        self.job
     }
 
     /// Begin a step, resetting the count. `counted` is the step's total and what it counts, or
@@ -233,6 +237,7 @@ impl Tracker {
             state: current.state,
             phase: current.phase.clone(),
             step: current.step.clone(),
+            step_id: current.id,
             context: current.context.clone(),
             done: current.counted.map(|_| done),
             total: current.counted.map(|(total, _)| total),
@@ -467,6 +472,7 @@ impl Step {
         now: Instant,
     ) -> Self {
         Step {
+            id: NEXT_STEP_ID.fetch_add(1, Ordering::Relaxed),
             state: JobState::Running,
             phase,
             step,
@@ -479,8 +485,9 @@ impl Step {
 
     /// The rate from the oldest sample within the window to now, and record now as a sample.
     ///
-    /// The step's start is the first sample, so a reader that polls rarely gets the step's
-    /// average rate.
+    /// The step's start is the first sample, so the first reading gets the rate since the step
+    /// began, and a reader that reads less often than once a window gets the rate since its
+    /// previous reading.
     fn rate(&mut self, now: Instant, done: u64) -> Option<f64> {
         while self.samples.len() > 1
             && now.saturating_duration_since(self.samples[1].0) >= RATE_WINDOW
@@ -668,6 +675,19 @@ mod tests {
     }
 
     #[test]
+    fn a_step_keeps_its_id_through_its_count_and_context_and_the_next_step_has_another() {
+        let tracker = Tracker::new(JobKind::Ingest, READING, "pages");
+        let first = tracker.snapshot().step_id;
+        tracker.count(10, Unit::Rows);
+        tracker.context(Some("page (2 of 5)".into()));
+        assert_eq!(tracker.snapshot().step_id, first);
+        tracker.begin(READING, "pages", None, None);
+        let other = Tracker::new(JobKind::Flush, READING, "rows");
+        let ids = [tracker.snapshot().step_id, other.snapshot().step_id];
+        assert!(!ids.contains(&first) && ids[0] != ids[1], "{first} {ids:?}");
+    }
+
+    #[test]
     fn a_snapshot_round_trips_through_json() {
         let t0 = Instant::now();
         let tracker = Tracker::new_at(JobKind::Ingest, READING, "pages", t0);
@@ -675,7 +695,7 @@ mod tests {
             READING,
             "pages",
             Some("view papers".into()),
-            Some((5, Unit::Pages)),
+            Some((5, Unit::Rows)),
             t0,
         );
         tracker.advance(2);

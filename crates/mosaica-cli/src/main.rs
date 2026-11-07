@@ -147,10 +147,11 @@ enum Command {
         /// Show the build's progress on stderr: its phase, the step running, the step's count,
         /// rate and time remaining, the time elapsed and resident memory.
         ///
-        /// `bar` redraws two lines in place. `plain` prints a line when a step begins and every
-        /// 30 seconds while it runs, with no terminal control codes. `json` prints one progress
-        /// record per line when a step begins and at most once a second while it runs. Each
-        /// mode ends with a record whose state is `finished` or `failed`. `none` prints nothing.
+        /// `bar` redraws two lines in place. `plain` prints a line when a step begins, a line
+        /// with its final count when it ends, and a line every 30 seconds while it runs, with no
+        /// terminal control codes. `json` prints one progress record per line when a step begins,
+        /// when it ends and at most once a second while it runs. Each mode ends with a record
+        /// whose state is `finished` or `failed`. `none` prints nothing.
         /// `auto` is `bar` when stderr is a terminal and `plain` otherwise.
         #[arg(long, value_name = "MODE", value_enum, default_value = "auto")]
         progress: progress::Mode,
@@ -471,8 +472,8 @@ enum Command {
     /// A compaction removes deleted items' rows from disc, one shard after another, and runs for
     /// minutes to hours on a large corpus. `GET /control/compact/{request}` says whether the
     /// request is answered, how, and with the progress record of its compaction, which `--wait`
-    /// reads. Needs `write`, and with `--wait` also `admin`, and the credential is read from
-    /// `MOSAICA_CREDENTIAL`.
+    /// reads, and `--request` reads a request already made. Needs `write`, and with `--wait` or
+    /// `--request` also `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
     Compact(writes::CompactArgs),
     /// Print the server's status report, from `GET /control/status`: how far writes have got,
     /// queue depths, compaction, shards, and the limits on each write request. Needs `admin`, and

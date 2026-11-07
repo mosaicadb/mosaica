@@ -904,8 +904,7 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     assert_eq!(nowhere["refused_pages"][0]["status"], 404, "{nowhere}");
 }
 
-/// A control plane that answers each request as `plan` says, in order: `None` closes the
-/// connection without an answer, and `Some(body)` answers `200` with it. It records each
+/// A control plane that answers each request as its plan says, in order, and records each
 /// request's batch id and body.
 struct Planned {
     url: String,
@@ -915,8 +914,9 @@ struct Planned {
 /// Each request a [`Planned`] plane received: its batch id and its body.
 type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
-/// A plane that answers each request in turn with the status and JSON body `plan` holds, and
-/// closes the connection unanswered where it holds `None`.
+/// A plane that answers each request in turn with the status and JSON body `plan` holds, closes
+/// the connection unanswered where it holds `None`, and answers `500` once the plan is spent, so a
+/// command that reads once more than planned fails rather than waits.
 fn planned(plan: Vec<Option<(u16, String)>>) -> Planned {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -931,7 +931,11 @@ fn planned(plan: Vec<Option<(u16, String)>>) -> Planned {
                 recorded.lock().unwrap().push((batch, request.body));
             }
             let mut stream = reader.into_inner();
-            match plan.next().flatten() {
+            let spent = r#"{"error": "fail-closed", "detail": "the plan is spent"}"#;
+            match plan
+                .next()
+                .unwrap_or_else(|| Some((500, spent.to_string())))
+            {
                 Some((status, answer)) => {
                     let _ = write!(
                         stream,
@@ -977,11 +981,12 @@ fn compact_wait_ends_with_the_outcome_the_server_states() {
     assert_eq!(records, Vec::new(), "no compaction ran for it");
 
     let record = r#"{"job": "compaction", "state": "failed",
-        "phase": {"index": 4, "of": 4, "name": "Publishing"}, "step": "flip",
+        "phase": {"index": 4, "of": 4, "name": "Publishing"}, "step": "flip", "step_id": 9,
         "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0, "rss_bytes": 1024}"#;
     let failed = format!(
         r#"{{"request": 3, "answered": true, "job": {record}, "answer": {{"first": 3,
-        "last": 3, "outcome": "failed", "ok": false, "gate": null, "detail": null, "shard": null,
+        "last": 3, "outcome": "failed", "ok": false, "gate": null, "detail": "failed in flip",
+        "shard": null,
         "need_bytes": null, "had_bytes": null}}}}"#
     );
     let (ok, records) = compact_answered(200, &failed);
@@ -1007,6 +1012,63 @@ fn compact_wait_ends_with_the_outcome_the_server_states() {
         !compact_answered(404, lost).0,
         "a lost request fails the command"
     );
+
+    // The answer is older than the ones the server keeps.
+    let gone = r#"{"error": "gone", "detail": "no longer kept"}"#;
+    assert!(
+        !compact_answered(410, gone).0,
+        "an answer no longer kept fails the command"
+    );
+}
+
+/// `compact --wait` shows the compaction serving the request while it is pending, reads the
+/// request again through a connection the server dropped, and ends with the answered record.
+#[test]
+fn compact_wait_shows_the_running_record_then_the_answered_one() {
+    let dir = TempDir::new().unwrap();
+    let record = |state: &str, step: &str, step_id: u64| {
+        format!(
+            r#"{{"job": "compaction", "state": "{state}",
+            "phase": {{"index": 4, "of": 4, "name": "Publishing"}}, "step": "{step}",
+            "step_id": {step_id}, "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0,
+            "rss_bytes": 1024}}"#
+        )
+    };
+    let (running, answered) = (
+        record("running", "warm", 7),
+        record("finished", "reclaim", 8),
+    );
+    let pending =
+        format!(r#"{{"request": 3, "answered": false, "answer": null, "job": {running}}}"#);
+    let done = format!(
+        r#"{{"request": 3, "answered": true, "job": {answered}, "answer": {{"first": 3,
+        "last": 3, "outcome": "compacted", "ok": true, "gate": null, "detail": null,
+        "shard": null, "need_bytes": null, "had_bytes": null}}}}"#
+    );
+    let plane = planned(vec![
+        Some((202, r#"{"request": 3}"#.to_string())),
+        Some((200, pending)),
+        None,
+        Some((200, done.clone())),
+    ]);
+    let args = [
+        "compact",
+        "--wait",
+        "--progress",
+        "json",
+        "--control",
+        &plane.url,
+    ];
+    let output = run(dir.path(), &args, &[OPERATOR], b"");
+    assert!(output.status.success(), "{output:?}");
+    let shown = progress_records(&output);
+    let expected: Vec<Progress> = [running, answered]
+        .iter()
+        .map(|record| serde_json::from_str(record).unwrap())
+        .collect();
+    assert_eq!(shown, expected);
+    let printed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["answer"]["outcome"], "compacted", "{printed}");
 }
 
 #[test]
@@ -1025,6 +1087,8 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
                 "10",
                 "--page-bytes",
                 "1m",
+                "--progress",
+                "json",
                 "--control",
                 url,
             ],
@@ -1051,9 +1115,15 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[0].1, rows);
 
-    // Unanswered twice: the insert stops there, having sent the page twice and no more.
-    let silent = planned(Vec::new());
-    let report = refused(insert(&silent.url));
+    // Unanswered twice: the insert stops there, having sent the page twice and no more, and its
+    // last record is failed.
+    let silent = planned(vec![None, None]);
+    let output = insert(&silent.url);
+    let last = progress_records(&output)
+        .pop()
+        .expect("the insert printed its progress");
+    assert_eq!(last.state, JobState::Failed);
+    let report = refused(output);
     assert!(report["stopped"].is_string(), "{report}");
     assert_eq!(
         report["refused_pages"][0]["status"],

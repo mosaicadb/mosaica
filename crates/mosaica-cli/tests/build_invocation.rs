@@ -811,7 +811,8 @@ fn json_progress_runs_through_every_phase_in_order_and_ends_finished() {
     );
     let mut distinct = phases.clone();
     distinct.dedup();
-    assert_eq!(distinct, [1, 2, 3, 4, 5]);
+    let of = records[0].phase.of;
+    assert_eq!(distinct, (1..=of).collect::<Vec<u32>>());
     assert!(records.iter().all(|r| r.job == JobKind::Build));
     assert!(
         records.iter().all(|r| r.done <= r.total),

@@ -487,6 +487,32 @@ pub struct RequestAnswer {
     pub job: Option<mosaica_types::progress::Progress>,
 }
 
+impl RequestAnswer {
+    /// What a request that did not succeed should know, in a sentence: for a refusal, what the
+    /// gate means and what to do, and for a failure, the step the compaction stopped in. `None`
+    /// where it succeeded.
+    pub fn detail(&self) -> Option<String> {
+        match self.outcome {
+            RequestOutcome::Refused { detail, .. } => Some(detail.to_string()),
+            RequestOutcome::Failed => Some(match &self.job {
+                Some(job) => format!(
+                    "a compaction for the request failed in its step `{}`{}, and published \
+                     nothing; ask for a compaction again to retry it",
+                    job.step,
+                    job.context
+                        .as_deref()
+                        .map(|context| format!(" ({context})"))
+                        .unwrap_or_default()
+                ),
+                None => "a compaction for the request failed before its first step, and \
+                         published nothing; ask for a compaction again to retry it"
+                    .to_string(),
+            }),
+            RequestOutcome::Compacted | RequestOutcome::NothingToDo => None,
+        }
+    }
+}
+
 /// Where one compaction request is.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RequestState {
@@ -498,6 +524,8 @@ pub enum RequestState {
     Answered(RequestAnswer),
     /// Answered, and older than every answer kept.
     Forgotten,
+    /// Not answered, and never to be: the write executor has stopped.
+    Abandoned,
 }
 
 impl ExecutorHealth {
@@ -509,14 +537,20 @@ impl ExecutorHealth {
         {
             return None;
         }
+        // Read before the answers: an answer is kept before `answered` rises past it, so where
+        // this reading covers the request and the list does not hold its answer, it was let go.
+        let answered = self.compaction_requests_answered.load(Ordering::SeqCst);
         let answers = lock_recover(&self.answers);
         let at = answers.partition_point(|answer| answer.last < request);
         if let Some(answer) = answers.get(at).filter(|answer| answer.first <= request) {
             return Some(RequestState::Answered(answer.clone()));
         }
         drop(answers);
-        if request <= self.compaction_requests_answered.load(Ordering::SeqCst) {
+        if request <= answered {
             return Some(RequestState::Forgotten);
+        }
+        if self.posture() == ExecutorPosture::Dead {
+            return Some(RequestState::Abandoned);
         }
         let serving = request <= self.compaction_serving_through.load(Ordering::SeqCst);
         let job = serving

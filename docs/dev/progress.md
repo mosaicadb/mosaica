@@ -23,18 +23,19 @@ A job is a fixed list of **phases**, named for a person. Each phase runs one or 
 | `state` | `running`, `finished` or `failed`. A failed job's record keeps the step it stopped in. |
 | `phase` | Position among the job's phases, counted from 1, and the phase's name. |
 | `step` | The step's stable name. For a build it is the stage name that `--stage-timings` prints. |
-| `context` | Which part of the step is running, such as a view, a batch, a column or a shard. Absent when the step has one part. |
+| `step_id` | Which step this is: a number no other step begun in the same process has, unchanged while the step's count or context changes. A reader that sees a new `step_id` knows a step began, which the name alone cannot tell when two compactions run the same steps one after the other. |
+| `context` | Which part of the step is running, such as a view, a batch, a column or a shard. Absent when the step has one part with no name of its own. |
 | `done`, `total`, `unit` | The step's count. All three are absent for a step that counts nothing, such as a sort. |
 | `rate` | Units per second, measured over the last 20 seconds of the step. |
 | `eta_s` | Seconds until `done` reaches `total` at `rate`. |
 | `elapsed_s`, `step_elapsed_s` | Wall time since the job and the step began. |
 | `rss_bytes` | The process's resident memory when the record was taken. A build's limit is `--memory-budget`. |
 
-`eta_s` is the only estimate the record carries, and it covers the current step only. The steps of one job scale differently, since the sorts are n log n, the digest is linear in bytes and several passes depend on the size of the source files rather than on the item count, so a time remaining for the whole job would be a model fitted to other corpora. A step with no count has no `eta_s`, and neither does a step younger than two seconds, because its first batches measure start-up rather than throughput. A reader that polls less often than every 20 seconds gets the step's average rate since it began.
+`eta_s` is the only estimate the record carries, and it covers the current step only. The steps of one job scale differently, since the sorts are n log n, the digest is linear in bytes and several passes depend on the size of the source files rather than on the item count, so a time remaining for the whole job would be a model fitted to other corpora. A step with no count has no `eta_s`, and neither does a step younger than two seconds, because its first batches measure start-up rather than throughput. The first reading of a step gets the rate since the step began, and a reader that reads less often than every 20 seconds gets the rate since its previous reading.
 
 ### Cost
 
-A `mosaica_types::progress::Tracker` holds the job's current step. The workers of a step call `advance(n)` once per batch, which is one relaxed atomic add. A pass that meets its units one at a time keeps its count in a local `Batched`, which calls `advance` once per `ADVANCE_EVERY` (65,536) units. A step whose total is known only after it has begun sets it with `count`, which keeps the step's clock. Totals that take work to find, such as the row counts in the Parquet footers or the sizes of the bundle's files, are read only when the job has a tracker. A reader calls `snapshot()` when it wants a record, which takes a lock and reads `/proc/self/status`, so a job with no reader pays only the adds. The build's renderer reads four times a second in `bar` mode and once a second otherwise, and the server reads when `/control/status` is requested.
+A `mosaica_types::progress::Tracker` holds the job's current step. The workers of a step call `advance(n)` once per batch, which is one relaxed atomic add. A pass that meets its units one at a time keeps its count in a local `Batched`, which calls `advance` once per `ADVANCE_EVERY` (65,536) units. A step whose total is known only after it has begun sets it with `count`, which keeps the step's clock. Totals that take work to find, such as the row counts in the Parquet footers or the sizes of the bundle's files, are read only when the job has a tracker. A reader calls `snapshot()` when it wants a record, which takes a lock and reads `/proc/self/status`, so a job with no reader pays only the adds. The CLI's renderer reads four times a second in `bar` mode and once a second otherwise, and prints at most every 30 seconds in `plain` mode and once a second in `json` mode, besides a line when a step begins and when it ends. The server reads when `/control/status` or `GET /control/compact/{request}` is requested, and when a job ends, to keep its last record.
 
 ## Jobs
 
@@ -92,7 +93,7 @@ The client that sends an ingest makes its record, because the server sees one re
 
 `GET /control/compact/{request}` says where one compaction request is: pending, with `job` the record of the compaction serving it, or answered, with `answer` holding the outcome and `ok`, and `job` the record of the compaction that answered it. `docs/openapi/mosaica.yaml` describes the route once, with how requests are numbered, merged and kept and the order the outcomes take.
 
-A client that waits for a compaction reads the route about once a second until `answered` is `true`, showing `job` while it waits, then shows the answered `job` and takes `ok` as whether the request succeeded. A reading that reaches no server is read again after the same pause, so a restart shows as a `404` once the server is back and a dropped connection does not end the wait. A `404` means the server restarted after the request was made and the request was lost, and a `410` means the request was answered and its answer is no longer kept. The wait has no bound of its own: the CLI stops when it is interrupted, and the clients take a signal or an interrupt.
+A client that waits for a compaction reads the route about once a second until `answered` is `true`, showing `job` while it waits and treating a new `step_id` as a step that began, then shows the answered `job` and takes `ok` as whether the request succeeded, and `answer.detail` as what to tell its caller where it did not. A reading that reaches no server is read again after the same pause, so a restart shows as a `404` once the server is back and a dropped connection does not end the wait. A `404` means the server restarted after the request was made and the request was lost, a `410` means the request was answered and its answer is no longer kept, and a `503` means the write executor has stopped and the request will not be answered. The wait has no bound of its own: the CLI stops when it is interrupted, and the clients take a signal or an interrupt.
 
 ### CLI
 
@@ -112,7 +113,7 @@ A `plain` line reads as follows.
 12:04:31Z [3/5 Indexing records] filter_postings column category (3 of 7)  41.2M/74.0M items  1.83M/s  ~18s  7m12s  rss 18.2 GiB
 ```
 
-`mosaica compact --wait` takes `--progress` and waits as the HTTP section describes, showing the compaction's record, and exits non-zero when the request was refused, a compaction for it failed, or the server lost it. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints the status as JSON, so its `jobs` array holds the running jobs.
+`mosaica compact --wait` takes `--progress` and waits as the HTTP section describes, showing the compaction's record, and prints the route's answer on stdout once the request is answered. It exits non-zero when the request was refused, a compaction for it failed, or the server lost it, and prints the server's `detail` on stderr. `mosaica compact --request N` prints what the route answers for request `N`, and `--request N --wait` waits for it. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints the status as JSON, so its `jobs` array holds the running jobs.
 
 ### Python
 

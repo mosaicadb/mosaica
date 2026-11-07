@@ -2954,6 +2954,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/Unknown"
+        "503":
+          description: "`503 not-ready`: the request is pending and the write executor has stopped, so it will not be answered. Restarting the server loses the request; ask for a compaction again after it."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "410":
           description: "`410 gone`: the request was answered, and its answer is older than the latest 1,024 the server keeps. `compaction.folds` and `compaction.fold_failures` on `/control/status` count the compactions that published and failed."
           content:
@@ -7052,7 +7058,7 @@ components:
         request:
           type: integer
           minimum: 1
-          description: This request's number. Each run of the server numbers its requests from the wall clock in milliseconds when it started, one more for each request, so a number an earlier run gave is below every number this run gives.
+          description: This request's number, which `GET /control/compact/{request}` reads. That route says how requests are numbered.
 
     CompactionRequest:
       type: object
@@ -7093,7 +7099,7 @@ components:
                   description: For `refused`, one of `fold_refusals_by_gate`'s names; `null` otherwise.
                 detail:
                   type: [string, "null"]
-                  description: For `refused`, what the gate means and what to do about it, in a sentence; `null` otherwise.
+                  description: For `refused`, what the gate means and what to do about it, and for `failed`, the step the compaction stopped in, each in a sentence; `null` where the request succeeded.
                 shard:
                   type: [integer, "null"]
                   minimum: 0
@@ -9195,7 +9201,7 @@ components:
         requests:
           type: object
           additionalProperties: false
-          description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried. Each run of the server numbers its requests from the wall clock in milliseconds when it started, and `GET /control/compact/{request}` says how each was answered."
+          description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried, numbered as `GET /control/compact/{request}` says. That route says how each was answered."
           required: [accepted, answered]
           properties:
             accepted:
@@ -9229,7 +9235,7 @@ components:
                 minimum: 0
                 description: The total the pass counted towards; `null` for a pass that counts nothing.
         last_job:
-          description: The last record of the last compaction to end since the server started, with `state` `finished` or `failed`, and `null` before the first. A failed compaction's record keeps the step it stopped in. A client that waits for a request reads it once `requests.answered` reaches the request's number.
+          description: The last record of the last compaction to end since the server started, with `state` `finished` or `failed`, and `null` before the first. A failed compaction's record keeps the step it stopped in.
           oneOf:
             - type: "null"
             - $ref: "#/components/schemas/Progress"
@@ -9238,7 +9244,7 @@ components:
       type: object
       additionalProperties: false
       description: How far a long-running job has gone. A job is a fixed list of phases, each of which runs one or more steps, and a step that processes a known number of things counts them.
-      required: [job, state, phase, step, elapsed_s, step_elapsed_s, rss_bytes]
+      required: [job, state, phase, step, step_id, elapsed_s, step_elapsed_s, rss_bytes]
       properties:
         job:
           type: string
@@ -9259,9 +9265,13 @@ components:
         step:
           type: string
           description: The step's stable name, such as `postings` for a compaction or `rows` for a flush.
+        step_id:
+          type: integer
+          minimum: 1
+          description: Which step this is. No other step begun in the same process has it, and it does not change while the step's count or context does, so a reader that sees a different `step_id` from the last record it read knows a step began.
         context:
           type: string
-          description: Which part of the step is running, such as a shard, a view or a page. Absent when the step has one part.
+          description: Which part of the step is running, such as a shard, a view or a page. Absent when the step has one part with no name of its own.
         done:
           type: integer
           minimum: 0
@@ -9271,7 +9281,7 @@ components:
           minimum: 0
         unit:
           type: string
-          enum: [items, rows, pairs, terms, bytes, pages]
+          enum: [items, rows, pairs, terms, bytes]
         rate:
           type: number
           minimum: 0
