@@ -543,7 +543,12 @@ fn wait_for_compaction(
     let mut shown: Option<Progress> = None;
     let mut ticked = std::time::Instant::now();
     let state = loop {
-        let answer = plane.call("GET", &path, None)?;
+        // A reading no server answered is read again, so a restart shows as a 404 once the server
+        // is back rather than ending the wait.
+        let Ok(answer) = plane.call("GET", &path, None) else {
+            std::thread::sleep(COMPACT_POLL);
+            continue;
+        };
         if answer.status == 404 {
             return Err(answer.json()["detail"]
                 .as_str()

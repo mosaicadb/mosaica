@@ -92,7 +92,7 @@ The client that sends an ingest makes its record, because the server sees one re
 
 `GET /control/compact/{request}` says where one compaction request is: pending, with `job` the record of the compaction serving it, or answered, with `answer` holding the outcome and `ok`, and `job` the record of the compaction that answered it. `docs/openapi/mosaica.yaml` describes the route once, with how requests are numbered, merged and kept and the order the outcomes take.
 
-A client that waits for a compaction reads the route about once a second until `answered` is `true`, showing `job` while it waits, then shows the answered `job` and takes `ok` as whether the request succeeded. A `404` means the server restarted after the request was made and the request was lost, and a `410` means the request was answered and its answer is no longer kept.
+A client that waits for a compaction reads the route about once a second until `answered` is `true`, showing `job` while it waits, then shows the answered `job` and takes `ok` as whether the request succeeded. A reading that reaches no server is read again after the same pause, so a restart shows as a `404` once the server is back and a dropped connection does not end the wait. A `404` means the server restarted after the request was made and the request was lost, and a `410` means the request was answered and its answer is no longer kept. The wait has no bound of its own: the CLI stops when it is interrupted, and the clients take a signal or an interrupt.
 
 ### CLI
 
