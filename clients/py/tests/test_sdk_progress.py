@@ -1,10 +1,10 @@
 """The progress a commit and a waited compaction show, and the outcome the wait returns.
 
 A first commit's records are the build's, a later commit's are the ingest record it makes, and a
-waited compaction's are read from `/control/status`. Each is tested through `progress=` with a
-function that keeps the records, against a real server. The outcomes a real server cannot be made
-to give on demand (a refused or failed compaction, a restart that lost the request, an answer
-replaced before it was read) come from a scripted `/control/status`.
+waited compaction's are read from `GET /control/compact/{request}`. Each is tested through
+`progress=` with a function that keeps the records, against a real server. The outcomes a real
+server cannot be made to give on demand (a refused or failed compaction, a restart that lost the
+request, a refused reading) come from a scripted route.
 """
 
 from __future__ import annotations
@@ -62,12 +62,14 @@ def test_a_first_commit_without_progress_writes_nothing_to_stderr(tmp_path, capf
         db.close()
 
 
-def test_both_commits_draw_their_progress_by_default(tmp_path):
+def test_commits_and_a_waited_compaction_draw_their_progress_by_default(tmp_path):
     db, rows = small(tmp_path / "db")
     try:
         assert db.commit().ok
         db.insert("map", rows.assign(id=[3, 4]), x="x", y="y", access="access")
         assert db.commit().ok
+        assert db.remove({"id": [1]}).accepted == 1
+        assert db.compact(wait=True)["ok"]
     finally:
         db.close()
 
@@ -164,29 +166,33 @@ def test_a_progress_that_is_neither_a_flag_nor_a_function_is_refused_before_anyt
 # ---------------------------------------------------------------------------- a real compaction
 
 
-def test_a_waited_compaction_ends_with_the_outcome_the_server_served(tmp_path):
+def test_a_waited_compaction_of_a_deletion_ends_compacted_with_its_record(tmp_path):
     db, _ = small(tmp_path / "db")
     records: list[dict] = []
     try:
         assert db.commit(progress=False).ok
         assert db.remove({"id": [1]}).accepted == 1
         answer = db.control.compact(wait=True, progress=records.append)
-        served = db.status()["compaction"]
         waited = answer.waited
         assert answer.status == 202 and set(answer.body) == {"request"}
         assert (waited["ok"], waited["ended"]) == (True, "answered")
-        assert waited["last_answer"] == served["requests"]["last_answer"]
-        assert waited["last_answer"]["outcome"] in ("compacted", "nothing_to_do")
-        assert {one["job"] for one in records} <= {"compaction"}
-        if waited["last_answer"]["outcome"] == "compacted":
-            assert waited["last_job"] == served["last_job"] == records[-1]
-            assert records[-1]["state"] == "finished"
-        else:
-            assert "last_job" not in waited
+        assert waited["answer"]["outcome"] == "compacted"
+        assert waited["answer"]["first"] <= answer.body["request"] <= waited["answer"]["last"]
+        assert {one["job"] for one in records} == {"compaction"}
+        assert waited["job"] == records[-1] and records[-1]["state"] == "finished"
+        served = db.control.compaction(answer.body["request"]).body
+        assert (served["answered"], served["answer"], served["job"]) == (
+            True, waited["answer"], waited["job"])
+    finally:
+        db.close()
 
-        assert db.remove({"id": [2]}).accepted == 1
-        waited = db.compact(wait=True, progress=False)
-        assert waited["ok"] and waited["last_answer"]["first"] <= waited["request"]
+
+def test_a_request_the_server_never_numbered_is_not_found(tmp_path):
+    db, _ = small(tmp_path / "db")
+    try:
+        assert db.commit(progress=False).ok
+        accepted = db.status()["compaction"]["requests"]["accepted"]
+        assert db.control.compaction(accepted + 1).status == 404
     finally:
         db.close()
 
@@ -194,40 +200,38 @@ def test_a_waited_compaction_ends_with_the_outcome_the_server_served(tmp_path):
 # ---------------------------------------------------------------------------- scripted outcomes
 
 
-def job(state: str = "running", step: str = "row_space") -> dict:
+def job(state: str = "running", step: str = "row_space", shard: int = 0) -> dict:
     return {"job": "compaction", "state": state,
             "phase": {"index": 1, "of": 4, "name": "Rewriting rows"}, "step": step,
-            "context": "shard 0", "elapsed_s": 1.0, "step_elapsed_s": 1.0, "rss_bytes": 1}
+            "context": f"shard {shard}", "elapsed_s": 1.0 + shard, "step_elapsed_s": 1.0,
+            "rss_bytes": 1}
 
 
-def status(accepted: int, answered: int, last_answer=None, jobs=(), last_job=None) -> dict:
-    return {"jobs": list(jobs),
-            "compaction": {"requests": {"accepted": accepted, "answered": answered,
-                                        "last_answer": last_answer, "last_refusal": None},
-                           "last_job": last_job}}
+def pending(running: dict | None = None) -> tuple:
+    return 200, {"request": 3, "answered": False, "answer": None, "job": running}
 
 
-def answer(first: int, last: int, outcome: str, gate=None, detail=None) -> dict:
-    return {"first": first, "last": last, "outcome": outcome, "gate": gate, "detail": detail}
+def answered(outcome: str, ran: dict | None = None, gate=None, detail=None) -> tuple:
+    answer = {"first": 2, "last": 3, "outcome": outcome, "gate": gate, "detail": detail}
+    return 200, {"request": 3, "answered": True, "answer": answer, "job": ran}
 
 
 class _Scripted(http.server.BaseHTTPRequestHandler):
-    """Numbers a compaction request `request`, and answers each read of `/control/status` with the
-    next of `statuses`, the last one again once they run out, or with `refusal` where it is set."""
+    """Numbers a compaction request 3, and answers each reading of its route with the next of
+    `readings`, a status and a body, the last one again once they run out."""
 
-    request = 3
-    statuses: list = []
-    refusal: int | None = None
+    readings: list = []
 
     def do_POST(self) -> None:  # noqa: N802, the base class's spelling
-        self.answer(202, {"request": _Scripted.request})
+        self.answer(202, {"request": 3})
 
     def do_GET(self) -> None:  # noqa: N802
-        if _Scripted.refusal is not None:
-            self.answer(_Scripted.refusal, {"error": "forbidden", "detail": "no"})
+        if self.path != "/control/compact/3":
+            self.answer(404, {"error": "not_found", "detail": self.path})
             return
-        body = _Scripted.statuses.pop(0) if len(_Scripted.statuses) > 1 else _Scripted.statuses[0]
-        self.answer(200, body)
+        many = _Scripted.readings
+        code, body = many.pop(0) if len(many) > 1 else many[0]
+        self.answer(code, body)
 
     def answer(self, code: int, body: dict) -> None:
         text = json.dumps(body).encode()
@@ -245,9 +249,7 @@ def scripted(monkeypatch):
     """A control plane that answers from a script, read with no interval between readings, and
     its address."""
     monkeypatch.setattr(_control, "COMPACT_POLL_S", 0.0)
-    _Scripted.request = 3
-    _Scripted.statuses = []
-    _Scripted.refusal = None
+    _Scripted.readings = []
     server, base = serving(_Scripted)
     yield base
     server.shutdown()
@@ -256,60 +258,40 @@ def scripted(monkeypatch):
 
 def waited(base: str) -> tuple:
     records: list[dict] = []
-    answered = Control(base, "credential").compact(wait=True, progress=records.append)
-    assert answered.ok and answered.body == {"request": _Scripted.request}
-    return answered.waited, records
+    accepted = Control(base, "credential").compact(wait=True, progress=records.append)
+    assert accepted.ok and accepted.body == {"request": 3}
+    return accepted.waited, records
 
 
-def test_a_refused_request_returns_the_served_answer_and_ends_on_no_job(scripted):
-    refused = answer(2, 3, "refused", "disk", "the disc is full; free some space")
-    _Scripted.statuses = [
-        status(3, 1, jobs=[job()]),
-        status(3, 3, refused, last_job=job("finished")),
-    ]
+@pytest.mark.parametrize(
+    ("outcome", "ok"), [("compacted", True), ("nothing_to_do", True), ("failed", False)]
+)
+def test_an_answered_request_ends_on_the_record_of_the_compaction_that_answered_it(
+    scripted, outcome, ok
+):
+    ended = job("failed" if outcome == "failed" else "finished", "postings", shard=1)
+    ran = None if outcome == "nothing_to_do" else ended
+    _Scripted.readings = [pending(), pending(job()), pending(job(shard=1)), answered(outcome, ran)]
     waited_, records = waited(scripted)
-    assert waited_ == {"ok": False, "ended": "answered", "last_answer": refused}
+    assert waited_ == {"ok": ok, "ended": "answered", "answer": answered(outcome)[1]["answer"],
+                       "job": ran}
+    assert records == [job(), job(shard=1)] + ([ran] if ran else [])
+
+
+def test_a_refused_request_returns_its_gate_and_detail(scripted):
+    _Scripted.readings = [answered("refused", gate="disk", detail="the disc is full")]
+    waited_, records = waited(scripted)
+    assert not waited_["ok"] and waited_["ended"] == "answered"
+    assert (waited_["answer"]["gate"], waited_["answer"]["detail"]) == ("disk", "the disc is full")
+    assert records == []
+
+
+@pytest.mark.parametrize(("code", "ended"), [(404, "lost"), (403, "unread")])
+def test_a_reading_that_is_not_found_or_refused_ends_the_wait_with_it(scripted, code, ended):
+    _Scripted.readings = [pending(job()), (code, {"error": "no", "detail": "no"})]
+    waited_, records = waited(scripted)
+    assert (waited_["ok"], waited_["ended"], waited_["read"].status) == (False, ended, code)
     assert records == [job()]
-
-
-def test_a_failed_compaction_ends_on_the_last_job_as_served(scripted):
-    failed = job("failed", "postings")
-    _Scripted.statuses = [
-        status(3, 2, jobs=[job()]),
-        status(3, 2, jobs=[job(step="postings")]),
-        status(3, 3, answer(3, 3, "failed"), last_job=failed),
-    ]
-    waited_, records = waited(scripted)
-    assert waited_ == {"ok": False, "ended": "answered", "last_answer": answer(3, 3, "failed"),
-                       "last_job": failed}
-    assert records == [job(), job(step="postings"), failed]
-
-
-def test_a_request_with_nothing_to_compact_shows_no_last_job(scripted):
-    _Scripted.statuses = [status(3, 3, answer(3, 3, "nothing_to_do"), last_job=job("finished"))]
-    waited_, records = waited(scripted)
-    assert waited_ == {"ok": True, "ended": "answered", "last_answer": answer(3, 3, "nothing_to_do")}
-    assert records == []
-
-
-def test_a_server_that_restarted_after_the_request_has_lost_it(scripted):
-    _Scripted.statuses = [status(1, 1, answer(1, 1, "compacted"))]
-    waited_, _ = waited(scripted)
-    assert waited_ == {"ok": False, "ended": "lost", "accepted": 1}
-
-
-def test_an_answer_replaced_before_it_was_read_leaves_the_outcome_unknown(scripted):
-    later = answer(4, 5, "compacted")
-    _Scripted.statuses = [status(5, 5, later, last_job=job("finished"))]
-    waited_, records = waited(scripted)
-    assert waited_ == {"ok": False, "ended": "unknown", "last_answer": later}
-    assert records == []
-
-
-def test_a_refused_reading_of_the_status_ends_the_wait_with_its_answer(scripted):
-    _Scripted.refusal = 403
-    waited_, _ = waited(scripted)
-    assert (waited_["ok"], waited_["ended"], waited_["status"].status) == (False, "unread", 403)
 
 
 def test_a_database_raises_unless_the_request_compacted_or_had_nothing_to_do(
@@ -319,19 +301,18 @@ def test_a_database_raises_unless_the_request_compacted_or_had_nothing_to_do(
     try:
         assert db.commit(progress=False).ok
         monkeypatch.setattr(Database, "control", property(lambda self: Control(scripted, "c")))
-        _Scripted.statuses = [status(3, 3, answer(3, 3, "nothing_to_do"))]
-        assert db.compact(wait=True)["last_answer"]["outcome"] == "nothing_to_do"
-        for script in (
-            [status(3, 3, answer(3, 3, "refused", "disk", "the disc is full"))],
-            [status(3, 3, answer(3, 3, "failed"), last_job=job("failed"))],
-            [status(1, 1)],
-            [status(5, 5, answer(4, 5, "compacted"))],
+        _Scripted.readings = [answered("nothing_to_do")]
+        assert db.compact(wait=True)["answer"]["outcome"] == "nothing_to_do"
+        for reading, status in (
+            (answered("refused", gate="disk", detail="the disc is full"), None),
+            (answered("failed", job("failed")), None),
+            ((404, {"error": "not_found", "detail": "lost"}), 404),
+            ((403, {"error": "forbidden", "detail": "no"}), 403),
         ):
-            _Scripted.statuses = script
-            with pytest.raises(Refusal):
+            _Scripted.readings = [reading]
+            with pytest.raises(Refusal) as raised:
                 db.compact(wait=True)
-        _Scripted.refusal = 403
-        with pytest.raises(Refusal):
-            db.compact(wait=True)
+            assert raised.value.report["request"] == 3 and not raised.value.report["ok"]
+            assert raised.value.status == status
     finally:
         db.close()

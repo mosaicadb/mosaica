@@ -2,7 +2,7 @@ import {Field, Float64, List, Null, RecordBatch, Schema, Struct, Table, tableToI
 import {afterAll, beforeAll, describe, expect, it, vi, type TestContext} from 'vitest';
 import {clusterLayerDeclaration, labelLayerDeclaration} from '../../scripts/operator.js';
 import {MosaicaClient} from '../src/client.js';
-import {Control, type CompactAccepted, type CompactWait, type ControlStatus, type Progress} from '../src/control.js';
+import {Control, type CompactAccepted, type CompactionRequest, type CompactWait, type ControlStatus, type Progress} from '../src/control.js';
 import type {Meta, ViewportRequest} from '../src/types.js';
 import {start, type Served} from './served.js';
 
@@ -317,31 +317,39 @@ describe('Control against a live server', () => {
     const asked = await control.compact({wait: true, onProgress: (record) => records.push(record)});
     expect(asked).toMatchObject({
       status: 202,
-      waited: {ok: true, ended: 'answered', last_answer: {outcome: 'compacted'}, last_job: {job: 'compaction', state: 'finished'}}
+      waited: {ok: true, ended: 'answered', answer: {outcome: 'compacted'}, job: {job: 'compaction', state: 'finished'}}
     });
     const waited = asked.waited as Extract<CompactWait, {ended: 'answered'}>;
     const request = (asked.body as CompactAccepted).request;
-    expect(waited.last_answer.first).toBeLessThanOrEqual(request);
-    expect(waited.last_answer.last).toBeGreaterThanOrEqual(request);
-    expect(records.at(-1)).toEqual(waited.last_job);
+    expect(waited.answer.first).toBeLessThanOrEqual(request);
+    expect(waited.answer.last).toBeGreaterThanOrEqual(request);
+    expect(records.at(-1)).toEqual(waited.job);
     expect(await folds()).toBeGreaterThan(before);
     expect((await seen()).visible).toBe(3n);
     expect((await byKey()).has('row-0')).toBe(false);
-  });
+  }, 180_000);
 
-  it('answers a fold asked for without waiting through the status, whose last answer covers the request', async (ctx) => {
+  it('follows a fold asked for without waiting through its own route, which keeps its answer, and answers a number it never gave as lost', async (ctx) => {
     live(ctx);
-    const requests = async () => (await compaction()).requests;
     const asked = await control.compact();
     expect(asked.status).toBe(202);
     expect(asked).not.toHaveProperty('waited');
     const request = (asked.body as CompactAccepted).request;
-    await vi.waitFor(async () => expect((await requests()).answered).toBeGreaterThanOrEqual(request), {timeout: 30_000, interval: 50});
-    const answer = (await requests()).last_answer!;
-    expect(answer.first).toBeLessThanOrEqual(request);
-    expect(answer.last).toBeGreaterThanOrEqual(request);
-    expect(['compacted', 'nothing_to_do']).toContain(answer.outcome);
-  });
+    const read = async () => {
+      const answer = await control.compactionRequest(request);
+      expect(answer).toMatchObject({status: 200, body: {request}});
+      return answer.body as CompactionRequest;
+    };
+    await vi.waitFor(async () => expect((await read()).answered).toBe(true), {timeout: 120_000, interval: 50});
+    const served = await read();
+    expect(served.answered && ['compacted', 'nothing_to_do'].includes(served.answer.outcome)).toBe(true);
+    // The answer is kept: a later request leaves this one's as it was.
+    const later = await control.compact({wait: true});
+    expect(later.waited?.ok).toBe(true);
+    expect(await read()).toEqual(served);
+    const accepted = (await compaction()).requests.accepted;
+    expect((await control.compactionRequest(accepted + 1)).status).toBe(404);
+  }, 240_000);
 
   it('drops the layer, which the viewer then no longer lists', async (ctx) => {
     live(ctx);

@@ -125,6 +125,7 @@ const CONTROL_CALLS: Record<string, (c: Control) => Promise<unknown>> = {
   status: (c) => c.status(),
   flush: (c) => c.flush(),
   compact: (c) => c.compact(),
+  compactionRequest: (c) => c.compactionRequest(7),
   declareAttribute: (c) => c.declareAttribute({}),
   declareShards: (c) => c.declareShards({}),
   declareVocabulary: (c) => c.declareVocabulary('genre', {}),
