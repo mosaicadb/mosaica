@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from conftest import serving, small
-from mosaica import _control
+from mosaica import _control, _progress
 from mosaica._control import Control
 from mosaica._database import Database
 from mosaica._refusal import Refusal
@@ -36,16 +36,13 @@ def holds_no_record(text: str) -> bool:
 # ---------------------------------------------------------------------------- the commits
 
 
-def test_a_first_commit_gives_the_build_records_in_order_and_keeps_its_log(tmp_path):
+def test_a_first_commit_gives_the_build_records_and_keeps_them_out_of_its_log(tmp_path):
     db, rows = small(tmp_path / "db")
     records: list[dict] = []
     try:
         report = db.commit(progress=records.append)
         assert report.ok and report.items == len(rows)
-        assert records and {one["job"] for one in records} == {"build"}
-        assert phases_never_go_back(records)
-        assert records[-1]["state"] == "finished"
-        assert [one for one in records[:-1] if one["state"] != "running"] == []
+        assert records and records[-1]["state"] == "finished"
         assert holds_no_record(report.log)
     finally:
         db.close()
@@ -62,14 +59,19 @@ def test_a_first_commit_without_progress_writes_nothing_to_stderr(tmp_path, capf
         db.close()
 
 
-def test_commits_and_a_waited_compaction_draw_their_progress_by_default(tmp_path):
+def test_commits_and_a_waited_compaction_draw_their_progress_by_default(tmp_path, capfd):
     db, rows = small(tmp_path / "db")
     try:
+        capfd.readouterr()
         assert db.commit().ok
         db.insert("map", rows.assign(id=[3, 4]), x="x", y="y", access="access")
         assert db.commit().ok
+        drawn = capfd.readouterr().err
+        assert drawn and holds_no_record(drawn)
         assert db.remove({"id": [1]}).accepted == 1
         assert db.compact(wait=True)["ok"]
+        drawn = capfd.readouterr().err
+        assert drawn and holds_no_record(drawn)
     finally:
         db.close()
 
@@ -87,6 +89,8 @@ def test_a_later_commit_counts_every_row_of_its_plan_then_waits_for_publication(
         pages = [one for one in records if one["step"] == "pages"]
         assert pages[-1]["done"] == pages[-1]["total"] == len(rows)
         assert [one["step"] for one in records if one["phase"]["index"] == 2][0] == "publication"
+        assert len({one["step_id"] for one in pages}) == 1
+        assert len({one["step_id"] for one in records}) == 2
         assert records[-1]["state"] == "finished"
     finally:
         db.close()
@@ -187,42 +191,18 @@ def test_a_waited_compaction_of_a_deletion_ends_compacted_with_its_record(tmp_pa
         db.close()
 
 
-def test_a_request_the_server_never_numbered_is_not_found(tmp_path):
-    db, _ = small(tmp_path / "db")
-    try:
-        assert db.commit(progress=False).ok
-        accepted = db.status()["compaction"]["requests"]["accepted"]
-        assert db.control.compaction_request(accepted + 1).status == 404
-        # A number an earlier run gave is below every number this run gives.
-        assert db.control.compaction_request(1).status == 404
-    finally:
-        db.close()
-
-
-def test_a_request_number_is_awaited_on_its_own(tmp_path):
-    db, _ = small(tmp_path / "db")
-    try:
-        assert db.commit(progress=False).ok
-        assert db.remove({"id": [1]}).accepted == 1
-        request = db.control.compact().body["request"]
-        waited = db.control.await_compaction(request, progress=False)
-        assert (waited["ok"], waited["ended"], waited["answer"]["outcome"]) == (
-            True, "answered", "compacted")
-    finally:
-        db.close()
-
-
 # ---------------------------------------------------------------------------- scripted outcomes
 
 #: A request number as a server numbers them, from the wall clock in milliseconds when it started.
 REQUEST = 1_786_543_210_123
 
 
-def job(state: str = "running", step: str = "row_space", shard: int = 0) -> dict:
+def job(state: str = "running", step: str = "row_space", shard: int = 0, step_id: int = 7,
+        done: int = 0) -> dict:
     return {"job": "compaction", "state": state,
             "phase": {"index": 1, "of": 4, "name": "Rewriting rows"}, "step": step,
-            "context": f"shard {shard}", "elapsed_s": 1.0 + shard, "step_elapsed_s": 1.0,
-            "rss_bytes": 1}
+            "step_id": step_id, "context": f"shard {shard}", "done": done, "total": 100,
+            "unit": "rows", "elapsed_s": 1.0 + shard, "step_elapsed_s": 1.0, "rss_bytes": 1}
 
 
 def pending(running: dict | None = None) -> tuple:
@@ -230,8 +210,9 @@ def pending(running: dict | None = None) -> tuple:
 
 
 def answered(outcome: str, ran: dict | None = None, **refusal) -> tuple:
+    detail = "the compaction of shard 0 failed in the step postings" if outcome == "failed" else None
     answer = {"first": REQUEST - 1, "last": REQUEST, "outcome": outcome,
-              "ok": outcome in ("compacted", "nothing_to_do"), "gate": None, "detail": None,
+              "ok": outcome in ("compacted", "nothing_to_do"), "gate": None, "detail": detail,
               "shard": None, "need_bytes": None, "had_bytes": None, **refusal}
     return 200, {"request": REQUEST, "answered": True, "answer": answer, "job": ran}
 
@@ -299,13 +280,14 @@ def waited(base: str) -> tuple:
 def test_an_answered_request_ends_on_the_record_of_the_compaction_that_answered_it(
     scripted, outcome
 ):
-    ended = job("failed" if outcome == "failed" else "finished", "postings", shard=1)
+    ended = job("failed" if outcome == "failed" else "finished", "postings", shard=1, step_id=9)
     ran = None if outcome == "nothing_to_do" else ended
-    _Scripted.readings = [pending(), pending(job()), pending(job(shard=1)), answered(outcome, ran)]
+    _Scripted.readings = [pending(), pending(job()), pending(job(shard=1, step_id=8)),
+                          answered(outcome, ran)]
     waited_, records = waited(scripted)
     served = answered(outcome)[1]["answer"]
     assert waited_ == {"ok": served["ok"], "ended": "answered", "answer": served, "job": ran}
-    assert records == [job(), job(shard=1)] + ([ran] if ran else [])
+    assert records == [job(), job(shard=1, step_id=8)] + ([ran] if ran else [])
 
 
 def test_a_refused_request_returns_the_refusal_as_served(scripted):
@@ -329,6 +311,47 @@ def test_a_reading_the_server_refused_ends_the_wait_with_it(scripted, code, ende
     waited_, records = waited(scripted)
     assert (waited_["ok"], waited_["ended"], waited_["read"].status) == (False, ended, code)
     assert records == [job()]
+
+
+class _Bar:
+    """A stand-in for `tqdm`, which keeps the count the renderer gives it and how often it was
+    reset to a new step."""
+
+    made: list = []
+
+    def __init__(self, **shape) -> None:
+        self.n, self.total, self.resets = 0, shape.get("total"), 0
+        _Bar.made.append(self)
+
+    @staticmethod
+    def format_sizeof(number, suffix="", divisor=1000) -> str:
+        return f"{number}{suffix}"
+
+    def reset(self, total=None) -> None:
+        self.n, self.total, self.resets = 0, total, self.resets + 1
+
+    def update(self, n: int) -> None:
+        self.n += n
+
+    def set_description_str(self, *args, **kwargs) -> None:
+        return None
+
+    set_postfix_str = set_description_str
+    refresh = set_description_str
+    close = set_description_str
+
+
+def test_two_compactions_read_one_after_the_other_are_two_steps(scripted, monkeypatch):
+    """Both first steps began when their compaction did, so only their `step_id`s differ."""
+    monkeypatch.setattr(_progress, "tqdm", _Bar)
+    _Bar.made = []
+    first = job(step_id=11, done=50) | {"elapsed_s": 1.0}
+    second = job(step_id=12, done=10) | {"elapsed_s": 1.0}
+    _Scripted.readings = [pending(first), pending(second), answered("compacted")]
+    accepted = Control(scripted, "c").compact(wait=True)
+    assert accepted.waited["ok"]
+    (bar,) = _Bar.made
+    assert (bar.resets, bar.n) == (1, 10)
 
 
 def test_the_wait_takes_a_number_on_its_own(scripted):

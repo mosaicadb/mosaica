@@ -596,18 +596,16 @@ def _fixture_bundle_is_usable(bundle_root: Path, wanted: dict) -> bool:
         return False
 
 
-def compaction_answered(before: dict, now: dict) -> bool:
-    """Whether a `POST /control/compact` is answered, from `/control/status`'s `compaction` block
-    read before the request (`before`) and since (`now`). The request is answered when
-    `fold_requested` falls. Raises `RuntimeError` when a compaction fails, or when the request is
-    answered with none published."""
-    if now["fold_failures"] > before["fold_failures"]:
-        raise RuntimeError(f"the compaction failed: {now}")
-    if now["fold_requested"]:
+def compaction_answered(request: dict) -> bool:
+    """Whether a compaction request is answered, from `GET /control/compact/{request}`'s body.
+    Raises `RuntimeError` with the server's detail where the server answered it and the answer's
+    `ok` is false, which is a refusal or a failure."""
+    if not request["answered"]:
         return False
-    if now["folds"] > before["folds"]:
-        return True
-    raise RuntimeError(f"the compaction was refused: {now}")
+    answer = request["answer"]
+    if not answer["ok"]:
+        raise RuntimeError(f"the compaction was {answer['outcome']}: {answer['detail']}")
+    return True
 
 
 class Server:
@@ -952,22 +950,33 @@ class Server:
         assert resp.status_code == 202 and resp.json()["visible"], resp.text
 
     def compact(self, timeout: float = 300.0) -> None:
-        """Ask for a compaction and wait until the server answers the request. The server compacts
-        every shard with something to reclaim, one after another, and keeps `fold_requested`
-        raised until the last publishes. Raises `RuntimeError` as [`compaction_answered`] does."""
-        before = self.status()["compaction"]
+        """Ask for a compaction and wait until the server answers the request, reading
+        `GET /control/compact/{request}`. Raises `RuntimeError` as [`compaction_answered`]
+        does."""
         resp = requests.post(
             f"{self.control_base}/control/compact",
             headers={"Authorization": f"Bearer {self.operator_credential}"},
             timeout=10,
         )
         resp.raise_for_status()
+        request = resp.json()["request"]
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if compaction_answered(before, self.status()["compaction"]):
+            if compaction_answered(self.compaction_request(request)):
                 return
             time.sleep(0.2)
         raise TimeoutError(f"the compaction request was not answered within {timeout}s")
+
+    def compaction_request(self, request: int) -> dict:
+        """`GET /control/compact/{request}`: where one compaction request is. Raises for a status
+        outside the 200s, such as the `404` of a request a restart lost."""
+        resp = requests.get(
+            f"{self.control_base}/control/compact/{request}",
+            headers={"Authorization": f"Bearer {self.operator_credential}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
 
 def write_config(

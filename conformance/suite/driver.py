@@ -1423,21 +1423,20 @@ class Fold(Stage):
         self._counts: dict | None = None
 
     @staticmethod
-    def _request(h: SuiteHarness) -> None:
+    def _request(h: SuiteHarness) -> int:
+        """`POST /control/compact`, and the request's number."""
         resp = requests.post(
             f"{h.server.control_base}/control/compact",
             headers={"Authorization": f"Bearer {OPERATOR_CREDENTIAL}"},
             timeout=10,
         )
         resp.raise_for_status()
+        return resp.json()["request"]
 
     def apply(self, h: SuiteHarness) -> None:
         self._counts = _publication_counts(h)
-        self._snap = {
-            "compaction": h.status()["compaction"],
-            "refreshes": h.executor()["flush"]["refreshes"],
-        }
-        self._request(h)
+        self._snap = {"refreshes": h.executor()["flush"]["refreshes"]}
+        self._snap["request"] = self._request(h)
 
     def provoke(self, h: SuiteHarness) -> None:
         """Request the fold, and wait for nothing (base doc)."""
@@ -1445,7 +1444,7 @@ class Fold(Stage):
 
     def barrier(self, h: SuiteHarness) -> None:
         poll(
-            lambda: compaction_answered(self._snap["compaction"], h.status()["compaction"]),
+            lambda: compaction_answered(h.server.compaction_request(self._snap["request"])),
             "the compaction request was not answered",
             timeout=300.0,
         )
