@@ -355,9 +355,10 @@ its own operator credential under `.mosaica/`, owner-only, and its catalogue of 
 credentials and grants under `.mosaica/catalogue`. The operator credential authenticates the
 server's superuser, and the database uses it for every write and to mint every token, so nobody
 has to set up principals to read their own data. `commit()` starts `mosaica serve` as a child
-process on loopback at port 0 and reads the three bound addresses from the JSON line the child
-prints once all three planes are listening; `db.viewer_url`, `db.session_url` and
-`db.operator_credential` are what a token is minted against.
+process on loopback, on the port the database states or else 9141 or the next free port above
+it, and reads the bound address from the JSON line the child prints once every plane is
+listening; `db.viewer_url`, `db.session_url` and `db.operator_credential` are what a token is
+minted against.
 The child is killed by its pid at `close()` and at interpreter exit, and is started with
 `--exit-on-stdin-close`, so it also stops when the Python process ends in any other way. A
 database `create()` made with no path is removed at both, after its child has stopped. Its

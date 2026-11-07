@@ -170,7 +170,7 @@ struct RawDisclosure {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawServe {
-    /// The viewer plane's address and port, such as `"127.0.0.1:8141"`: `/v1/meta`,
+    /// The viewer plane's address and port, such as `"127.0.0.1:9141"`: `/v1/meta`,
     /// `/v1/viewport`, `/v1/items`, `/v1/artifacts` and `/v1/categories`, for requests carrying a
     /// viewer token. `mosaica serve` refuses to start without it, and `mosaica health` probes it.
     /// Port 0 takes a free port, which the server prints when it starts.
