@@ -269,7 +269,7 @@ fn clock(now: SystemTime) -> String {
 /// A job's tracker and the renderer its snapshots go to.
 ///
 /// Every snapshot is taken and shown under the renderer's lock, by the job as a step ends or
-/// begins and by [`show`]'s thread at the renderer's interval, so the renderer sees them in the
+/// begins and by [`run`]'s thread at the renderer's interval, so the renderer sees them in the
 /// order they were taken.
 pub(crate) struct Feed {
     tracker: Tracker,

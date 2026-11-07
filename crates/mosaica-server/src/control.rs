@@ -155,7 +155,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/control/flush", post(flush))
         .route("/control/compact", post(compact))
         .route_layer(axum::middleware::from_fn(require_write));
-    let admin_routes = Router::new().route("/control/status", get(status));
+    let admin_routes = Router::new()
+        .route("/control/status", get(status))
+        .route("/control/compact/{request}", get(compaction_request));
     // Fault arming exists only in a fault-injection build, behind the credential like every route.
     #[cfg(feature = "fault-injection")]
     let admin_routes = admin_routes
@@ -953,6 +955,53 @@ async fn compact(
         Err(mosaica_engine::CompactionRefused::NotRunning) => Err(ApiError::NotReady),
         Err(refused) => Err(ApiError::Unavailable(refused.detail())),
     }
+}
+
+/// `GET /control/compact/{request}`: where one compaction request is. Pending, with the record of
+/// the compaction in flight, or answered, with its outcome, the requests answered with it and the
+/// record of the compaction that answered them. A number the server has not given since it
+/// started is `404`, since numbering starts again at 1 after a restart.
+async fn compaction_request(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(request): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let lost = || {
+        ApiError::Unknown(format!(
+            "this server has given no compaction request the number {request}: request numbers \
+             start again at 1 when the server restarts, so a request made before a restart is \
+             lost; ask for a compaction again"
+        ))
+    };
+    let number = request.parse::<u64>().map_err(|_| lost())?;
+    let body = match state.engine.compaction_request(number).ok_or_else(lost)? {
+        mosaica_engine::RequestState::Pending { job } => serde_json::json!({
+            "request": number,
+            "answered": false,
+            "answer": null,
+            "job": job,
+        }),
+        mosaica_engine::RequestState::Answered(answer) => {
+            let (gate, detail) = match answer.outcome {
+                mosaica_engine::RequestOutcome::Refused { gate, detail } => {
+                    (Some(gate), Some(detail))
+                }
+                _ => (None, None),
+            };
+            serde_json::json!({
+                "request": number,
+                "answered": true,
+                "answer": {
+                    "first": answer.first,
+                    "last": answer.last,
+                    "outcome": answer.outcome.as_str(),
+                    "gate": gate,
+                    "detail": detail,
+                },
+                "job": answer.job,
+            })
+        }
+    };
+    Ok(Json(body))
 }
 
 /// `PUT /control/layers`: registers one annotation layer. Synchronous: the answer follows the
@@ -2868,6 +2917,12 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
     let ingest = state.ingest_admission.status();
     let sessions = state.sessions.lock().stats();
     let segments: Vec<mosaica_engine::ViewSegments> = live.segments;
+    // The jobs in flight before the last compaction to end, so a compaction that ends between the
+    // two reads is in one of them.
+    let jobs = state.engine.jobs();
+    let last_compaction = state
+        .engine
+        .last_job(mosaica_types::progress::JobKind::Compaction);
     Ok(Json(serde_json::json!({
         "entity_id_high_water": state.engine.allocator_high_water(),
         "shards": {
@@ -3131,22 +3186,6 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "requests": {
                 "accepted": executor.compaction_requests_accepted,
                 "answered": executor.compaction_requests_answered,
-                // How the last answer answered the requests it covered, merged ones included.
-                "last_answer": executor.last_answer.map(|answer| {
-                    let (gate, detail) = match answer.outcome {
-                        mosaica_engine::RequestOutcome::Refused { gate, detail } => {
-                            (Some(gate), Some(detail))
-                        }
-                        _ => (None, None),
-                    };
-                    serde_json::json!({
-                        "first": answer.first,
-                        "last": answer.last,
-                        "outcome": answer.outcome.as_str(),
-                        "gate": gate,
-                        "detail": detail,
-                    })
-                }),
                 "last_refusal": executor.last_request_refusal.map(|r| serde_json::json!({
                     "request": r.request,
                     "shard": r.shard.map(|s| s.raw()),
@@ -3170,11 +3209,11 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
                     "total": p.total,
                 }))
                 .collect::<Vec<_>>(),
-            "last_job": state.engine.last_job(mosaica_types::progress::JobKind::Compaction),
+            "last_job": last_compaction,
         },
-        // The record of the flush and of the compaction running. Served on the control plane
+        // The record of the flush and of the compaction in flight. Served on the control plane
         // only, since a compaction's counts are over the whole corpus.
-        "jobs": state.engine.jobs(),
+        "jobs": jobs,
         // How scattered ingested postings are: entity ids are sorted by term signature only within
         // one allocation run, so small runs erode compression. Measured over delta tiers as each is
         // flushed; base postings are excluded. The ratios are `null` until the first flush.

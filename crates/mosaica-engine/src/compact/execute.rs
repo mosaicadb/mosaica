@@ -134,8 +134,8 @@ fn file_len(path: &Path) -> u64 {
 }
 
 /// Runs the fold's passes into `ctx.to_prefix_dir` on one dedicated thread, each entered in
-/// `stairs`, which is in the first from the dispatch. A failure discards the fold: its files are orphans under a prefix `CURRENT` does not
-/// name, and there is no resume.
+/// `stairs`, which the dispatch began in the first. A failure discards the fold: its files are
+/// orphans under a prefix `CURRENT` does not name, and there is no resume.
 pub(crate) fn execute(
     plan: FoldPlan,
     ctx: FoldContext,
@@ -145,7 +145,8 @@ pub(crate) fn execute(
     let terms_dir = ctx.to_prefix_dir.join(layout.terms_rel());
     let entities_dir = ctx.to_prefix_dir.join(layout.entities_rel());
     for dir in [&terms_dir, &entities_dir] {
-        std::fs::create_dir_all(dir).map_err(failed("creating the new prefix"))?;
+        std::fs::create_dir_all(dir)
+            .map_err(failed(Pass::RowSpace.at("creating the new prefix")))?;
     }
 
     let mut out = FoldOutput::default();
@@ -183,7 +184,8 @@ pub(crate) fn execute(
     derive_field_tallies(&plan, &ctx, &segments, &mut out)?;
     ctx.going_on()?;
 
-    // No pass 4b: the term dictionary is carried to the new prefix by a hard link at publication.
+    // The term dictionary is carried to the new prefix by a hard link at publication, so no pass
+    // writes it.
     stairs.enter(Pass::Digests, None);
     let files = digest_and_sync(&out, stairs.record())?;
     stairs.close();

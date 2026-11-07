@@ -915,7 +915,9 @@ struct Planned {
 /// Each request a [`Planned`] plane received: its batch id and its body.
 type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
-fn planned(plan: Vec<Option<&'static str>>) -> Planned {
+/// A plane that answers each request in turn with the status and JSON body `plan` holds, and
+/// closes the connection unanswered where it holds `None`.
+fn planned(plan: Vec<Option<(u16, String)>>) -> Planned {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let seen: Seen = Default::default();
@@ -930,10 +932,10 @@ fn planned(plan: Vec<Option<&'static str>>) -> Planned {
             }
             let mut stream = reader.into_inner();
             match plan.next().flatten() {
-                Some(answer) => {
+                Some((status, answer)) => {
                     let _ = write!(
                         stream,
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: \
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: \
                          {}\r\nconnection: close\r\n\r\n{answer}",
                         answer.len()
                     );
@@ -947,11 +949,12 @@ fn planned(plan: Vec<Option<&'static str>>) -> Planned {
     Planned { url, seen }
 }
 
-/// `compact --wait` against a control plane that answers request 3 with `status`: its exit
-/// status and the progress records it printed.
-fn compact_answered(status: &'static str) -> (bool, Vec<Progress>) {
+/// `compact --wait` against a control plane that numbers the request 3 and then answers
+/// `GET /control/compact/3` with `state`: its exit status and the progress records it printed.
+fn compact_answered(status: u16, state: &str) -> (bool, Vec<Progress>) {
     let dir = TempDir::new().unwrap();
-    let plane = planned(vec![Some(r#"{"request": 3}"#), Some(status)]);
+    let numbered = (202, r#"{"request": 3}"#.to_string());
+    let plane = planned(vec![Some(numbered), Some((status, state.to_string()))]);
     let args = [
         "compact",
         "--wait",
@@ -964,58 +967,42 @@ fn compact_answered(status: &'static str) -> (bool, Vec<Progress>) {
     (output.status.success(), progress_records(&output))
 }
 
-/// A served compaction record that failed in the publishing phase.
-const FAILED_RECORD: &str = r#"{"job": "compaction", "state": "failed",
-    "phase": {"index": 4, "of": 4, "name": "Publishing"}, "step": "flip",
-    "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0, "rss_bytes": 1024}"#;
-
 #[test]
 fn compact_wait_ends_with_the_outcome_the_server_states() {
-    let status = |answer: &str, job: &str| -> &'static str {
-        format!(
-            r#"{{"jobs": [], "compaction": {{"last_job": {job}, "requests":
-            {{"accepted": 3, "answered": 3, "last_answer": {answer}}}}}}}"#
-        )
-        .leak()
-    };
-    let answer = |outcome: &str, gate: &str| {
-        format!(
-            r#"{{"first": 2, "last": 3, "outcome": "{outcome}", "gate": {gate},
-            "detail": {gate}}}"#
-        )
-    };
-
-    let refused = status(&answer("refused", r#""insufficient_memory""#), "null");
-    let (ok, records) = compact_answered(refused);
+    let refused = r#"{"request": 3, "answered": true, "job": null, "answer": {"first": 2,
+        "last": 3, "outcome": "refused", "gate": "insufficient_memory", "detail": "more"}}"#;
+    let (ok, records) = compact_answered(200, refused);
     assert!(!ok, "a refused request fails the command");
     assert_eq!(records, Vec::new(), "no compaction ran for it");
 
-    let failed = status(&answer("failed", "null"), FAILED_RECORD);
-    let (ok, records) = compact_answered(failed);
+    let record = r#"{"job": "compaction", "state": "failed",
+        "phase": {"index": 4, "of": 4, "name": "Publishing"}, "step": "flip",
+        "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0, "rss_bytes": 1024}"#;
+    let failed = format!(
+        r#"{{"request": 3, "answered": true, "job": {record}, "answer": {{"first": 3,
+        "last": 3, "outcome": "failed", "gate": null, "detail": null}}}}"#
+    );
+    let (ok, records) = compact_answered(200, &failed);
     assert!(!ok, "a failed compaction fails the command");
-    let served: Progress = serde_json::from_str(FAILED_RECORD).unwrap();
+    let served: Progress = serde_json::from_str(record).unwrap();
     assert_eq!(
         records.last(),
         Some(&served),
         "the record is printed as served"
     );
 
-    let nothing = status(&answer("nothing_to_do", "null"), "null");
-    assert!(compact_answered(nothing).0, "nothing to do is no failure");
-
-    // The server numbered one request since it started: request 3 was lost with a restart.
-    let restarted = r#"{"jobs": [], "compaction": {"last_job": null, "requests":
-        {"accepted": 1, "answered": 1, "last_answer": null}}}"#;
-    assert!(!compact_answered(restarted).0);
-
-    // A later answer, of request 4, replaced request 3's.
-    let replaced = status(
-        r#"{"first": 4, "last": 4, "outcome": "compacted", "gate": null, "detail": null}"#,
-        "null",
-    );
+    let nothing = r#"{"request": 3, "answered": true, "job": null, "answer": {"first": 3,
+        "last": 3, "outcome": "nothing_to_do", "gate": null, "detail": null}}"#;
     assert!(
-        !compact_answered(replaced).0,
-        "an outcome not known is no success"
+        compact_answered(200, nothing).0,
+        "nothing to do is no failure"
+    );
+
+    // The server restarted and has given no request 3.
+    let lost = r#"{"error": "unknown", "detail": "lost"}"#;
+    assert!(
+        !compact_answered(404, lost).0,
+        "a lost request fails the command"
     );
 }
 
@@ -1046,7 +1033,11 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
     // Answered on the resend: the same bytes under the same batch id, and the row lands once.
     let answered = planned(vec![
         None,
-        Some(r#"{"rows": 1, "created": 1, "mosaica_ids": ["7"], "refused": [], "publication": 3}"#),
+        Some((
+            200,
+            r#"{"rows": 1, "created": 1, "mosaica_ids": ["7"], "refused": [], "publication": 3}"#
+                .to_string(),
+        )),
     ]);
     let report = answer(insert(&answered.url));
     assert_eq!(report["pages"], 1, "{report}");

@@ -469,10 +469,10 @@ enum Command {
     /// request's number in `request`.
     ///
     /// A compaction removes deleted items' rows from disc, one shard after another, and runs for
-    /// minutes to hours on a large corpus. `mosaica status` reports it under
-    /// `compaction.requests`, where `answered` reaches the request's number once it is answered,
-    /// and the running compaction's progress record under `jobs`. Needs `write`, and with
-    /// `--wait` also `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
+    /// minutes to hours on a large corpus. `GET /control/compact/{request}` says whether the
+    /// request is answered, how, and with the progress record of its compaction, which `--wait`
+    /// reads. Needs `write`, and with `--wait` also `admin`, and the credential is read from
+    /// `MOSAICA_CREDENTIAL`.
     Compact(writes::CompactArgs),
     /// Print the server's status report, from `GET /control/status`: how far writes have got,
     /// queue depths, compaction, shards, and the limits on each write request. Needs `admin`, and

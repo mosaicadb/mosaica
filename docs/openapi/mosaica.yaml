@@ -2877,16 +2877,9 @@ paths:
         node has since reached one of the states the `503` below names (`overlay_diverged`,
         `prefix_diverged`, `stepped_down`). `compaction.requests` on `/control/status` reports it.
 
-        The request is answered once `requests.answered` reaches its number: every shard it asked
-        for has been compacted, has failed or been discarded, or has been refused.
-        `requests.last_refusal` holds only the latest refusal that answered a request, and its
-        `request` is the highest request that refusal answered. Read after the request is
-        answered, a `last_refusal.request` below its number means none of its shards was refused;
-        equal to it, a shard was refused while answering it, and `detail` says why and what to
-        do; above it, a later request's refusal has replaced the record, and since requests
-        answered together share a refusal, it may or may not concern this one. A request answered without a refusal may still have failed: to confirm
-        the deleted rows were removed, check that `compaction.folds` rose and `overlay.retirable`
-        fell, and see `compaction.fold_failures` for a compaction that failed or was discarded.
+        The request is answered once every shard it asked for has been compacted, has failed or
+        been discarded, or has been refused. `GET /control/compact/{request}` says whether it is
+        answered, how, and with which compaction's record.
 
         If the write executor stops after the `202`, the request is never answered, and
         `write_executor.posture` reads `dead`.
@@ -2912,6 +2905,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  /control/compact/{request}:
+    get:
+      tags: ["control: compact"]
+      operationId: compactionRequest
+      x-mosaica-permission: admin
+      summary: Where one compaction request is, and how it was answered.
+      description: |
+        A request is pending until every shard it asked for has been compacted, has failed or
+        been discarded, or has been refused. While it is pending, `job` is the record of the
+        compaction in flight, where one is. Once it is answered, `answer` says how, and `job` is
+        the record of the compaction that answered it. A client that waits for a compaction reads
+        this route until `answered` is `true`, showing `job` as it goes, and then reads the
+        outcome.
+
+        Requests made before a tick takes them, or while an earlier one is being answered, are
+        answered together, and each of them is served the same answer. The server keeps every
+        answer for as long as it runs.
+
+        Request numbers start again at 1 when the server restarts, so a number above the last it
+        gave since it started, which `compaction.requests.accepted` on `/control/status` reports,
+        is `404`: the request was made before a restart and was lost with it.
+      security:
+        - controlCredential: []
+      parameters:
+        - name: request
+          in: path
+          required: true
+          description: The number `POST /control/compact` answered.
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Where the request is.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompactionRequest"
+        "401":
+          $ref: "#/components/responses/ControlBadCredential"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/Unknown"
 
   /control/attributes:
     put:
@@ -6996,12 +7034,55 @@ components:
       type: object
       additionalProperties: false
       required: [request]
-      description: A compaction request, numbered so `/control/status`'s `compaction.requests` can say when it is answered and whether it was refused.
+      description: A compaction request, numbered so `GET /control/compact/{request}` can say where it is and how it was answered.
       properties:
         request:
           type: integer
           minimum: 1
           description: This request's number. Numbers rise by one per request, from 1 each time the server starts.
+
+    CompactionRequest:
+      type: object
+      additionalProperties: false
+      required: [request, answered, answer, job]
+      description: One compaction request, pending or answered.
+      properties:
+        request:
+          type: integer
+          minimum: 1
+        answered:
+          type: boolean
+        answer:
+          description: How the request was answered, or `null` while it is pending.
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: false
+              required: [first, last, outcome, gate, detail]
+              properties:
+                first:
+                  type: integer
+                  minimum: 1
+                  description: The first of the requests answered together with this one.
+                last:
+                  type: integer
+                  minimum: 1
+                  description: The last of the requests answered together with this one.
+                outcome:
+                  type: string
+                  enum: [compacted, nothing_to_do, refused, failed]
+                  description: "`refused` where a shard the requests named was refused at `gate`; otherwise `failed` where a compaction they started failed or was discarded; otherwise `compacted` where a compaction they started was published, whether or not other shards had nothing to compact; and `nothing_to_do` where no shard they named had anything to compact."
+                gate:
+                  type: [string, "null"]
+                  description: For `refused`, one of `fold_refusals_by_gate`'s names; `null` otherwise.
+                detail:
+                  type: [string, "null"]
+                  description: For `refused`, what the gate means and what to do about it, in a sentence; `null` otherwise.
+        job:
+          description: While the request is pending, the record of the compaction in flight, or `null` when none is. Once it is answered, the last record of the compaction that answered it, the first to fail where one did and the last to end otherwise, with `state` `finished` or `failed`; a failed record names the step the compaction stopped in. `null` where no compaction ran for the request, which is always so for `nothing_to_do`.
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Progress"
 
     IngestRecords:
       type: array
@@ -8583,7 +8664,7 @@ components:
           $ref: "#/components/schemas/CompactionStatus"
         jobs:
           type: array
-          description: The record of the flush and of the compaction running, each where one is, and empty when neither is. A compaction's counts are over the whole corpus, so the records are served on the control plane only.
+          description: The record of the flush and of the compaction in flight, each where one is, and empty when neither is. A compaction's counts are over the whole corpus, so the records are served on the control plane only.
           items:
             $ref: "#/components/schemas/Progress"
         fragmentation:
@@ -9087,7 +9168,7 @@ components:
           type: object
           additionalProperties: false
           description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried. A scheduled compaction's refusal is not among them."
-          required: [accepted, answered, last_answer, last_refusal]
+          required: [accepted, answered, last_refusal]
           properties:
             accepted:
               type: integer
@@ -9097,32 +9178,6 @@ components:
               type: integer
               minimum: 0
               description: The highest request number every shard of which has published, failed, been discarded or been refused.
-            last_answer:
-              description: How the latest answer answered the requests it covered, or `null` before the first answer since the server started. A request whose number is at most `answered` and below `first` was answered earlier, and its outcome is no longer served.
-              oneOf:
-                - type: "null"
-                - type: object
-                  additionalProperties: false
-                  required: [first, last, outcome, gate, detail]
-                  properties:
-                    first:
-                      type: integer
-                      minimum: 1
-                      description: The first request the answer covers. Requests made before a tick takes them, or while an earlier one is being answered, are answered together.
-                    last:
-                      type: integer
-                      minimum: 1
-                      description: The last request the answer covers, which `answered` has reached.
-                    outcome:
-                      type: string
-                      enum: [compacted, nothing_to_do, refused, failed]
-                      description: "`compacted` where every shard the requests named was compacted and published; `nothing_to_do` where no shard they named had anything to compact; `refused` where a shard was refused at `gate`; `failed` where a compaction they started failed or was discarded, which `last_job` then shows."
-                    gate:
-                      type: [string, "null"]
-                      description: For `refused`, one of `fold_refusals_by_gate`'s names; `null` otherwise.
-                    detail:
-                      type: [string, "null"]
-                      description: For `refused`, what the gate means and what to do about it, in a sentence; `null` otherwise.
             last_refusal:
               description: The latest refusal that answered a request, or `null` where there has been none.
               oneOf:

@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
-use mosaica_engine::{Engine, EngineConfig, RequestOutcome};
+use mosaica_engine::{Engine, EngineConfig, RequestOutcome, RequestState};
 use mosaica_lifecycle::faults::{FaultSwitchboard, PauseAction, PauseSite};
 use mosaica_lifecycle::{ChangeOp, UnallocatedRow};
 use mosaica_types::progress::{JobKind, JobState};
@@ -154,7 +154,7 @@ fn the_current_flip_site_parks_the_fold_with_the_old_prefix_still_committed() {
 }
 
 /// A compaction that fails at its flip leaves the running jobs failed, its last record at the
-/// step it was held in, and the request it answered is answered as failed.
+/// step it was held in, and its request is answered as failed with that record.
 #[test]
 fn a_compaction_failed_at_its_flip_is_recorded_failed_where_it_stopped() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -193,15 +193,15 @@ fn a_compaction_failed_at_its_flip_is_recorded_failed_where_it_stopped() {
     wait_until("the request is answered", WAIT, || {
         engine.write_executor_stats().compaction_requests_answered >= request
     });
-    let answer = engine
-        .write_executor_stats()
-        .last_answer
-        .expect("the request is answered");
-    assert!(
-        answer.first <= request && request <= answer.last,
-        "{answer:?}"
-    );
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(request) else {
+        panic!("request {request} is answered");
+    };
     assert_eq!(answer.outcome, RequestOutcome::Failed);
+    assert_eq!(
+        answer.job,
+        Some(last),
+        "the answer carries the failed record"
+    );
 }
 
 /// **The fold's cost on `/control/status` covers its publication.** The staircase the fold thread

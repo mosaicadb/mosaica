@@ -456,6 +456,7 @@ fn the_description_names_every_route_on_the_three_planes_and_no_other() {
             "/control/attributes",
             "/control/changes",
             "/control/compact",
+            "/control/compact/{request}",
             "/control/flush",
             "/control/grants",
             "/control/grants/revoke",
@@ -600,6 +601,7 @@ fn every_closed_dto_is_declared_closed() {
         "BatchLimits",
         "WriteExecutorStatus",
         "CompactionStatus",
+        "CompactionRequest",
     ] {
         let schema = &doc["components"]["schemas"][name];
         assert!(schema.is_object(), "schema {name} is missing");
@@ -1298,6 +1300,11 @@ async fn every_control_route_needs_its_permission() {
             // Each credential, and whether the route refuses it.
             let cases: Vec<(&str, &str, bool)> = match tag {
                 "control: identity" | "control: status" => vec![
+                    ("write", &writer, true),
+                    ("all but admin", &not_admin, true),
+                    ("admin", &admin, false),
+                ],
+                _ if op["x-mosaica-permission"] == "admin" => vec![
                     ("write", &writer, true),
                     ("all but admin", &not_admin, true),
                     ("admin", &admin, false),
@@ -3027,7 +3034,8 @@ async fn changes_match_the_description() {
     assert_refusal_to(&doc, Some(&post), resp, 422, "contract").await;
 }
 
-/// `GET /control/status`, `POST /control/flush` and `POST /control/compact`.
+/// `GET /control/status`, `POST /control/flush`, `POST /control/compact` and
+/// `GET /control/compact/{request}`.
 #[tokio::test]
 async fn status_flush_and_compact_match_the_description() {
     let doc = description();
@@ -3058,8 +3066,8 @@ async fn status_flush_and_compact_match_the_description() {
         .unwrap();
     assert_refusal_to(&doc, Some(&post), resp, 422, "contract").await;
 
-    // The status of a compaction held after its passes, which serves its progress record, and
-    // of the same compaction answered.
+    // The status and the request of a compaction held after its passes, which serve its progress
+    // record, and of the same compaction answered.
     let engine = &f.server.state.engine;
     engine.set_fold_paused_for_test(true);
     let resp = control(&f.server, &post, "/control/compact")
@@ -3080,6 +3088,11 @@ async fn status_flush_and_compact_match_the_description() {
         .unwrap();
     let status = assert_answer(&doc, &get, resp, 200).await;
     assert!(status["publication"].as_u64().unwrap() >= answer["publication"].as_u64().unwrap());
+    let resp = control(&f.server, &get, "/control/compact/1")
+        .send()
+        .await
+        .unwrap();
+    assert_answer(&doc, &get, resp, 200).await;
 
     engine.set_fold_paused_for_test(false);
     wait_until(
@@ -3093,6 +3106,17 @@ async fn status_flush_and_compact_match_the_description() {
         .await
         .unwrap();
     assert_answer(&doc, &get, resp, 200).await;
+    let resp = control(&f.server, &get, "/control/compact/1")
+        .send()
+        .await
+        .unwrap();
+    assert_answer(&doc, &get, resp, 200).await;
+    // A number the server has not given.
+    let resp = control(&f.server, &get, "/control/compact/2")
+        .send()
+        .await
+        .unwrap();
+    assert_refusal_to(&doc, Some(&get), resp, 404, "unknown").await;
     let resp = f
         .server
         .client
