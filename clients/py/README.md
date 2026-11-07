@@ -100,7 +100,8 @@ db.check()                                         # what the declaration reads,
 db.commit()                                        # mosaica check, mosaica build, mosaica serve
 ```
 
-No call prints. Each returns a report that shows as a short summary of what happened, in numbers,
+Only starting the server prints, one line naming the address it serves at. Every other call
+returns a report that shows as a short summary of what happened, in numbers,
 with every refusal and finding in full; a notebook cell that ends in one shows it. The detail is
 on the report's attributes: an insert's `read` and `ignored` columns, a check's or a first
 commit's `findings` and `log` (the declaration check's and the build's text), a later commit's
@@ -115,6 +116,14 @@ the extension adds is a refusal naming the block it is about. Every block names 
 and the column names its inserts gave it. The directory is everything the binary reads, so
 `db.save("~/somewhere")` and `mosaica serve --deployment ~/somewhere/mosaica.toml` on another
 machine serve the same database.
+
+The server listens on this machine only, and its viewer, session and control planes share one
+port: 9141, or the next free port above it while 9141 is taken. `mosaica.create(port=9200)` states
+another, which the database keeps and `mosaica.open(path, port=...)` changes, and `port=0` lets
+the system choose. A stated port that is taken is refused rather than moved. The notebook's map
+reads from the viewer plane in the browser, so with the kernel on another machine, forward that
+port to the same port on yours, as `ssh -L 9141:127.0.0.1:9141 host` does. A deployment written
+by hand can give the session and control planes addresses of their own.
 
 `declare_view_group` is the group surface: its views and their metadata come from
 `insert(group, roster=table, key=, **metadata_columns)`, and its rows from one of the two
@@ -346,9 +355,10 @@ its own operator credential under `.mosaica/`, owner-only, and its catalogue of 
 credentials and grants under `.mosaica/catalogue`. The operator credential authenticates the
 server's superuser, and the database uses it for every write and to mint every token, so nobody
 has to set up principals to read their own data. `commit()` starts `mosaica serve` as a child
-process on loopback at port 0 and reads the three bound addresses from the JSON line the child
-prints once all three planes are listening; `db.viewer_url`, `db.session_url` and
-`db.operator_credential` are what a token is minted against.
+process on loopback, on the port the database states or else 9141 or the next free port above
+it, and reads the bound address from the JSON line the child prints once every plane is
+listening; `db.viewer_url`, `db.session_url` and `db.operator_credential` are what a token is
+minted against.
 The child is killed by its pid at `close()` and at interpreter exit, and is started with
 `--exit-on-stdin-close`, so it also stops when the Python process ends in any other way. A
 database `create()` made with no path is removed at both, after its child has stopped. Its

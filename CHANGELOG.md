@@ -6,6 +6,27 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
+## [Unreleased]
+
+### Changed
+
+- **The three planes share one port unless given their own.** `session` and `control` under
+  `[serve]` are now optional, and a plane with no address of its own is served on the viewer's
+  address and port, each route keeping its own credential and CORS rules. A deployment that names
+  all three addresses is served as before. An open server no longer puts the session and control
+  planes one and two ports above the viewer; they share its port unless named.
+- **The Python client serves on port 9141 and prints the address.** A database made with
+  `mosaica.create()` is served on 9141, or the next free port above it, on this machine only, and
+  starting its server prints the address, so a notebook kernel on another machine can be reached
+  by forwarding one port. `create()` and `open()` take `port=` to state another; a stated port
+  that is taken is refused.
+
+### Added
+
+- **`[serve] port_retries`** tries that many ports above a taken one in turn, and the announce
+  line names the port bound. `mosaica serve` binds its addresses before it opens the bundle, so a
+  taken port refuses at once.
+
 ## [0.2.0] - 2026-11-05
 
 An alpha, like 0.1.0. The bundle format has changed, so 0.2.0 refuses a bundle that 0.1.0 built,

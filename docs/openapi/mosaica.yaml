@@ -34,15 +34,16 @@ info:
   version: "1"
   summary: The viewer, session and control planes of a Mosaica server.
   description: |
-    Three listeners. The **viewer plane** answers about the corpus as one principal may see it and
+    Three planes, each served on the viewer plane's listener unless the deployment gives it an
+    address of its own. The **viewer plane** answers about the corpus as one principal may see it and
     is authenticated by a *session token*; `POST /v1/login` mints one from a password, an API key
     or an OIDC access token. The **session plane** lets an integrator's backend mint a session
     for another principal, with an API key holding `authorise-as`; it is never browser-facing.
     The **control plane** declares, ingests, deletes, suppresses and publishes, reports the
     node's state, and manages principals, credentials, groups, grants, OIDC providers and
     sessions. It takes the operator credential, an API key or an OIDC access token. `/healthz`
-    and `/readyz` sit on the viewer and session listeners, unauthenticated, bare status codes with
-    no body.
+    and `/readyz` sit on the viewer's listener and on a session listener of its own,
+    unauthenticated, bare status codes with no body.
 
     `api_version` is published by `GET /v1/meta` and by nothing else. There is no version header,
     on any plane. A client does not send one to negotiate, and a server does not refuse a client
@@ -96,14 +97,14 @@ servers:
       viewer-host:
         default: 127.0.0.1:8080
   - url: http://{session-host}
-    description: The session plane's listener, `serve.session`. Routes under `/session/`, and the probes.
+    description: The session plane's listener, `serve.session`, or the viewer's where that is not set. Routes under `/session/`, and the probes on a listener of its own.
     x-mosaica-plane: session
     x-mosaica-route-prefix: /session/
     variables:
       session-host:
         default: 127.0.0.1:8081
   - url: http://{control-host}
-    description: "The control plane's listener, `serve.control`: a TCP address, or a Unix socket written `unix:<path>`. The server does not check that a TCP address is loopback. Routes under `/control/`."
+    description: "The control plane's listener, `serve.control`: a TCP address, or a Unix socket written `unix:<path>`, or the viewer's where that is not set. The server does not check that a TCP address is loopback. Routes under `/control/`."
     x-mosaica-plane: control
     x-mosaica-route-prefix: /control/
     variables:
@@ -116,7 +117,7 @@ tags:
   - name: viewer
     description: Logging in, and the corpus as one principal sees it. Authenticated by a session token.
   - name: probes
-    description: Liveness and readiness, on the viewer and session listeners, unauthenticated, no body.
+    description: Liveness and readiness, on the viewer's listener and on a session listener of its own, unauthenticated, no body.
   - name: basemaps
     description: Map backgrounds compiled into the server, the same for every principal. Authenticated by a session token.
   - name: "control: ingest"

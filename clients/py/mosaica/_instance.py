@@ -1,13 +1,15 @@
 """The local server: the deployment file, its secret, and the `mosaica serve` child process.
 
 `commit()` starts `mosaica serve` as a child of the kernel over the directory's `mosaica.toml`.
-The three planes are on loopback at port 0, so the kernel picks no ports and the child says which
-ones it bound by printing one JSON line on stdout. The line is written once all three planes are
-listening, so the announced viewer address is already answering when it arrives.
+The three planes share one port on loopback, 9141 unless another is stated. A database that
+states no port moves up to the next free one when 9141 is taken, and the child says which one it
+bound by printing one JSON line on stdout. The line is written once every plane is listening, so
+the announced viewer address is already answering when it arrives.
 
-There is no fallback that guesses a port. A guess is a second process's port as readily as this
-one's, and the notebook would then hold a URL answering for somebody else's server. A child that
-announces nothing is a refusal carrying what the child wrote.
+The child chooses the port, by binding it; this process never guesses one. A guess is a second
+process's port as readily as this one's, and the notebook would then hold a URL answering for
+somebody else's server. A child that announces nothing is a refusal carrying what the child
+wrote.
 
 The child is started with `--exit-on-stdin-close`, and this process holds the pipe to its
 standard input. Closing the pipe stops it, which is how `close()`, a `Database` no longer
@@ -47,6 +49,7 @@ import sys
 import tempfile
 import threading
 import time
+import tomllib
 from dataclasses import dataclass
 from importlib.machinery import ExtensionFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -62,6 +65,11 @@ SERVE_TIMEOUT = 30.0
 
 #: How many of the child's lines are kept for a refusal message.
 KEPT_LINES = 200
+
+#: The port a database is served on when none is stated, and how many ports above it are tried in
+#: turn while the one tried is taken.
+PORT = 9141
+PORT_RETRIES = 50
 
 
 def serve_timeout() -> float:
@@ -244,7 +252,8 @@ class ServeRefused(Refusal):
 @dataclass
 class Listening:
     """The addresses a database's server listens on, each as `host:port`, which
-    `Database.serve()` returns.
+    `Database.serve()` returns. The three are one address unless the database's `mosaica.toml`
+    gives a plane an address of its own.
 
     - `viewer`: the viewer plane, which readers read from with a token.
     - `session`: the session plane, where the operator credential or an API key holding
@@ -257,21 +266,58 @@ class Listening:
     control: str
 
 
-def write_deployment(directory: Path) -> Path:
+def checked_port(port: int | None) -> int | None:
+    """`port`, refused unless it is `None` or a port number."""
+    if port is not None and (
+        not isinstance(port, int) or isinstance(port, bool) or not 0 <= port <= 65535
+    ):
+        raise Refusal(
+            f"port must be a whole number from 0 to 65535, not {port!r}; 0 lets the system "
+            f"choose a free port"
+        )
+    return port
+
+
+def listen(deployment: Path, port: int | None) -> dict:
+    """The `[serve]` keys that say where the server listens: on loopback at `port`, or, with no
+    port stated, where `deployment` already says, or at `PORT` or the next free port above it.
+    """
+    if port is not None:
+        return {"viewer": f"127.0.0.1:{checked_port(port)}", "port_retries": 0}
+    try:
+        written = tomllib.loads(deployment.read_text(encoding="utf-8")).get("serve", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        written = {}
+    if "viewer" in written:
+        return {"viewer": written["viewer"], "port_retries": written.get("port_retries", 0)}
+    return {"viewer": f"127.0.0.1:{PORT}", "port_retries": PORT_RETRIES}
+
+
+def state_port(directory: Path, port: int) -> None:
+    """Serve the database in `directory` on `port` from its next start, changing only where its
+    `mosaica.toml` says the server listens."""
+    deployment = directory / "mosaica.toml"
+    document = tomllib.loads(deployment.read_text(encoding="utf-8"))
+    serve = document.setdefault("serve", {})
+    for key in ("viewer", "session", "control", "port_retries"):
+        serve.pop(key, None)
+    document["serve"] = {**listen(deployment, port), **serve}
+    deployment.write_text(dumps(document), encoding="utf-8")
+
+
+def write_deployment(directory: Path, port: int | None = None) -> Path:
     """Write `mosaica.toml`, which `mosaica build` and `mosaica serve` both read.
 
     Every path in it resolves against this file's own directory, so the database directory serves
     from wherever it is copied to.
 
-    `serve.cors_loopback` lets a page served from this machine read from the server, which is
-    what a notebook's map needs, since its page's address is not known in advance. The server
-    listens on this machine only. The catalogue of principals, credentials and grants is kept
-    under `.mosaica/catalogue`.
+    The three planes share one port on loopback, which `listen` chooses. `serve.cors_loopback`
+    lets a page served from this machine read from the server, which is what a notebook's map
+    needs, since its page's address is not known in advance. The catalogue of principals,
+    credentials and grants is kept under `.mosaica/catalogue`.
     """
     serve = {
-        "viewer": "127.0.0.1:0",
-        "session": "127.0.0.1:0",
-        "control": "127.0.0.1:0",
+        **listen(directory / "mosaica.toml", port),
         "operator_credential_file": ".mosaica/operator.cred",
         "cors_loopback": True,
     }
