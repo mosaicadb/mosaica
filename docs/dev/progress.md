@@ -63,13 +63,15 @@ A compaction rewrites one shard at a time, and one compaction runs at a time. `c
 | 1. Rewriting rows | `row_space` |
 | 2. Indexing records | `postings`, `term_images`, `unique_indexes`, `edited_items`, `attributes`, `entity_terms`, `field_tallies` |
 | 3. Verifying | `digests` |
-| 4. Publishing | `publish` |
+| 4. Publishing | `hand_off`, `memberships`, `derived`, `report`, `manifest`, `flip`, `retire`, `open`, `adopt`, `warm`, `wal`, `reclaim` |
 
-The steps are the passes of `compact::execute`, which already checks between passes whether the engine has closed. A pass that loops over the shard's rows or terms counts them.
+The steps of phases 1 to 3 are the passes of `compact::execute` on the compaction's own thread, and the steps of phase 4 are the parts of `publish_fold` on the write executor. The `Staircase` that times each pass for `compaction.passes` opens its step, so a pass's cost row and its step are one boundary. `row_space` counts the rows it reads, `postings` the terms of the dictionary and `digests` the bytes it digests. The other steps count nothing.
 
 ### Flush
 
-A flush has one phase, Flushing, whose steps are the flush's stages from planning to publication. The `rows` step counts the rows it writes out of the rows the flush took from the buffer. The other steps count nothing, because a flush lasts seconds and its record exists so that a reader of `/control/status` can see that one is running and for how long. `flush --wait` holds its request until the flush is visible and shows no progress while it waits.
+A flush has one phase, Flushing, whose steps are the stages of its execution on the worker pool, from `promote` to `drop_plan`. The flush laps that time those stages open the steps. The `rows` step counts the rows it writes out of the rows the flush took from the buffer.
+
+Not built yet: the flush's planning and its publication on the write executor are timed by a separate mechanism and have no steps, so `jobs` lists a flush only while it executes on the pool. `/control/status` shows that a flush is in flight for the whole of it. The other steps count nothing, because a flush lasts seconds and its record exists so that a reader of `/control/status` can see that one is running and for how long. `flush --wait` holds its request until the flush is visible and shows no progress while it waits.
 
 ### Ingest
 
@@ -77,14 +79,16 @@ The client that sends an ingest makes its record, because the server sees one re
 
 | Phase | Step | What it counts |
 |---|---|---|
-| 1. Sending | `pages` | Rows sent, out of the rows planned. `context` names the page, such as `page 37 of 120`. |
-| 2. Waiting for publication | `publication` | Nothing. `context` names the publication number that is awaited. |
+| 1. Sending | `pages` | Rows sent, out of the rows in the Parquet file's footer. `context` names the page, such as `page 37 of 120`. An Arrow IPC or NDJSON file has no total, so its pages are not counted and `context` reads `page 37`. |
+| 2. Waiting for publication | `publication` | Nothing. Only with `--wait`, so an insert without it has one phase. |
 
 ## Surfaces
 
 ### HTTP
 
-`GET /control/status` has a `jobs` array that holds the record of each running flush and compaction, and an empty array when none is running. The records are served only on the control plane, because a compaction's counts are totals over the whole corpus rather than counts within one viewer's visible set. A client that waits for a compaction polls `/control/status` until `compaction.requests.answered` reaches its request number, and shows the compaction's record while it waits.
+`GET /control/status` has a `jobs` array that holds the record of each running flush and compaction, and an empty array when none is running. `compaction.last_job` holds the record of the last compaction to end, finished or failed, or `null` before the first, and each entry of `compaction.passes` carries its step's final `done` and `total`. The records are served only on the control plane, because a compaction's counts are totals over the whole corpus rather than counts within one viewer's visible set.
+
+A client that waits for a compaction polls `/control/status` until `compaction.requests.answered` reaches its request number, and shows the compaction's record from `jobs` while it waits. It ends with `compaction.last_job`, because a compaction shorter than the polling interval is never seen in `jobs`, and a failed compaction's record says which step it stopped in.
 
 ### CLI
 
@@ -104,7 +108,7 @@ A `plain` line reads as follows.
 12:04:31Z [3/5 Indexing records] filter_postings column category (3 of 7)  41.2M/74.0M items  1.83M/s  ~18s  7m12s  rss 18.2 GiB
 ```
 
-`mosaica compact --wait` takes `--progress` and shows the compaction's record from `/control/status` until the request is answered. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints each running job in the `plain` form.
+`mosaica compact --wait` takes `--progress` and shows the compaction's record from `/control/status` until the request is answered, and exits non-zero when the compaction is refused or fails. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints the status as JSON, so its `jobs` array holds the running jobs.
 
 ### Python
 
