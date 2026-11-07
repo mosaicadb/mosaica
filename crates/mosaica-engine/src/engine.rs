@@ -1232,10 +1232,13 @@ impl Engine {
         config: EngineConfig,
     ) -> Result<Engine> {
         config.check()?;
+        let mut lap = Lap::start();
         let mut bundle = open_bundle(bundle_root).map_err(EngineError::Store)?;
         let side = merge_side_declarations(&mut bundle);
+        let bundle_ms = lap.next();
 
         let mut readers = PrefixReaders::open(bundle_root, &bundle)?;
+        let readers_ms = lap.next();
         let ReconstructedWrites {
             mut deny,
             buffers,
@@ -1243,6 +1246,7 @@ impl Engine {
             vocabularies,
         } = reconstruct_writes(wal_path, &bundle, &readers, side)?;
         open_logged_shards(bundle_root, &mut bundle, &mut readers, &state)?;
+        let replay_ms = lap.next();
 
         let fragments = Arc::new(FragmentCache::new(cache_dir, authorisation_rule_hash()));
         // Built now, not lazily on first request: a pool that cannot be built is a fact about this
@@ -1298,6 +1302,7 @@ impl Engine {
             buffers,
             &pool,
         )?;
+        let generation_ms = lap.next();
         let (artifact_projections, shapes) =
             adopt_derived_structures(cache_dir, &readers, &bundle, &state);
 
@@ -1378,6 +1383,7 @@ impl Engine {
             ladders.sweep(&live);
         });
 
+        let shapes_ms = lap.next();
         // Every level's row form, built before this engine serves a request: left lazy, the cost
         // lands on whichever request of a fresh process arrives first.
         let warmed = engine.warm_artifact_projections();
@@ -1400,6 +1406,16 @@ impl Engine {
             .health()
             .buffered_items
             .store(buffered, Ordering::SeqCst);
+        tracing::info!(
+            bundle_ms,
+            readers_ms,
+            replay_ms,
+            generation_ms,
+            shapes_ms,
+            projections_ms = lap.next(),
+            elapsed_ms = lap.total(),
+            "the engine opened the bundle"
+        );
         Ok(engine)
     }
 
@@ -1629,6 +1645,33 @@ pub(crate) fn open_rotation(
             space_contents,
         },
     ))
+}
+
+/// Milliseconds since the last lap and since the start, for the open's one log line.
+struct Lap {
+    start: std::time::Instant,
+    last: std::time::Instant,
+}
+
+impl Lap {
+    fn start() -> Lap {
+        let now = std::time::Instant::now();
+        Lap {
+            start: now,
+            last: now,
+        }
+    }
+
+    fn next(&mut self) -> u64 {
+        let now = std::time::Instant::now();
+        let ms = (now - self.last).as_millis() as u64;
+        self.last = now;
+        ms
+    }
+
+    fn total(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
 }
 
 pub(crate) fn read_current(root: &Path) -> Result<CurrentPointer> {

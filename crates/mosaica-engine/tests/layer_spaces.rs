@@ -751,11 +751,11 @@ fn served_file(fx: &Fixture, rel: &str) -> std::path::PathBuf {
     fx.root.join(current_prefix(&fx.root)).join(rel)
 }
 
-/// **A record pack and a member pack a running service writes are digested in the side-manifest
-/// naming them**, so a corrupt record pack is a publication that does not verify, and the open
+/// **A record pack and a member pack a running service writes are listed in the side-manifest
+/// naming them**, so a record pack cut short is a publication that does not verify, and the open
 /// steps down past it rather than serving it.
 #[test]
-fn a_corrupt_runtime_record_pack_steps_the_partition_down() {
+fn a_short_runtime_record_pack_steps_the_partition_down() {
     let fx = fixture();
     let published = {
         let engine = fx.open();
@@ -781,10 +781,8 @@ fn a_corrupt_runtime_record_pack_steps_the_partition_down() {
     );
 
     let path = served_file(&fx, records);
-    let mut bytes = std::fs::read(&path).unwrap();
-    let last = bytes.len() - 1;
-    bytes[last] ^= 0x01;
-    std::fs::write(&path, bytes).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    std::fs::write(&path, &bytes[..bytes.len() - 1]).unwrap();
     let bundle = mosaica_store::open_bundle(&fx.root).expect("an older publication verifies");
     let partition = &bundle.partitions[PARTITION];
     assert!(partition.stepped_down());

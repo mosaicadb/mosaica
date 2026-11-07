@@ -732,10 +732,22 @@ impl Bundle {
 /// Open `root` (a bundle directory containing `CURRENT`) following the read protocol
 /// (contracts §2.3): `CURRENT` → digest-checked `MANIFEST.json` (refusing a `bundle_format` other
 /// than this reader's own) → per partition, the highest `SEGMENTS-<n>.json` whose listed files (and
-/// `MANIFEST.json`'s) all verify by size and SHA-256, stepping down on failure. Any failure at
-/// any stage is a typed error — fail-closed, per the invariant this method exists to uphold:
-/// serving must never treat a partially-verified bundle as ready.
+/// `MANIFEST.json`'s) are all present at their listed sizes, stepping down on failure. Any failure
+/// at any stage is a typed error: serving never treats a partially written bundle as ready.
+///
+/// Only the files read through unchecked bitmap views ([`read_unchecked`]) are hashed: hashing
+/// every file reads the whole bundle, which at corpus scale is minutes at every start.
+/// [`open_bundle_with_digests`] hashes them all, and `mosaica verify` uses it.
 pub fn open_bundle(root: &Path) -> Result<Bundle> {
+    open_current(root, Verification::Sizes)
+}
+
+/// [`open_bundle`], with every named file read and checked against its SHA-256 as well.
+pub fn open_bundle_with_digests(root: &Path) -> Result<Bundle> {
+    open_current(root, Verification::Digests)
+}
+
+fn open_current(root: &Path, verification: Verification) -> Result<Bundle> {
     let current_path = root.join("CURRENT");
     let current_bytes = read_to_vec(&current_path)?;
     let current: CurrentPointer =
@@ -759,24 +771,18 @@ pub fn open_bundle(root: &Path) -> Result<Bundle> {
     // (§2.1 — `CURRENT` is the only mutable file), but building the bundle from a re-read would
     // make the digest a claim about one read and the bundle a product of another, on the one file
     // whose digest *is* the bundle identity.
-    open_prefix(
-        root,
-        &current.prefix,
-        manifest_bytes,
-        Verification::Digests,
-        None,
-    )
+    open_prefix(root, &current.prefix, manifest_bytes, verification, None)
 }
 
-/// How much of a prefix an open re-checks before mapping it — see [`open_written_prefix`] for the
-/// one caller that may answer anything but [`Verification::Digests`].
+/// How much of a prefix an open re-checks before mapping it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Verification {
-    /// The read protocol in full: every file named by either `files` map is read and hashed, and
-    /// `permutation.bin`'s row bound is re-validated. What every bundle arriving from storage
-    /// gets, because a bundle whose bytes were not checked is a bundle whose authorisation data
-    /// was not checked.
+    /// Every file named by either `files` map is read and hashed, and `permutation.bin`'s rows
+    /// are validated.
     Digests,
+    /// Every named file is present at its named size, those [`read_unchecked`] names are hashed,
+    /// and `permutation.bin`'s rows are validated.
+    Sizes,
     /// The bytes were produced and digested by *this process*, moments ago — see
     /// [`open_written_prefix`].
     JustWritten,
@@ -788,7 +794,7 @@ pub fn database_of(root: &Path) -> Result<[u8; 16]> {
     Ok(open_bundle(root)?.manifest.identity.database())
 }
 
-/// Open a prefix **this process just wrote**, skipping the digest sweep and the permutation's row
+/// Open a prefix **this process just wrote**, skipping the size sweep and the permutation's row
 /// validation. The fourth bundle constructor, and the one a compaction's publication needs.
 ///
 /// # Why this exists rather than a second [`open_bundle`] call
@@ -798,17 +804,14 @@ pub fn database_of(root: &Path) -> Result<[u8; 16]> {
 /// dictionary lookup rebuild and every session re-established. [`Bundle`]'s three incremental
 /// constructors ([`Bundle::with_segment`], [`Bundle::with_merged`], [`Bundle::with_manifest`]) all
 /// work *within* one prefix, so none of them can express a prefix change; [`open_bundle`] can, and
-/// re-reads and re-hashes every byte both `files` maps name — tens of gigabytes the fold has just
-/// finished writing and hashing — and re-pays `Permutation::validate_rows` over the whole entity
-/// space on top.
+/// re-pays `Permutation::validate_rows` over the whole entity space.
 ///
 /// # What is skipped, and what is emphatically not
 ///
 /// Skipped: the two `verify_files` sweeps, and `Permutation::validate_rows`. **Both are checks on
-/// bytes that arrived from storage**, and the premise here is that they did not: the fold hashed
-/// each file as it wrote it (compaction §3, pass 5), and the digests in the manifest this call
-/// parses are the ones it computed from the bytes it had in hand. Re-reading them proves nothing
-/// that the write did not already prove, and costs the whole bundle in IO.
+/// bytes that arrived from storage**, and the premise here is that they did not: the fold wrote
+/// each file and computed the sizes and digests in the manifest this call parses from the bytes it
+/// had in hand.
 ///
 /// **What `validate_rows` also produces is taken from the writer instead of dropped.** Besides
 /// checking the file, that scan records that the mapping is onto `[0, row_count)`, which is what
@@ -911,8 +914,8 @@ fn open_prefix(
     // verified once, up front — it isn't partition-specific, and the reader protocol requires
     // every one of these entries to verify regardless of which SEGMENTS-<n>.json a partition
     // settles on.
-    if verification == Verification::Digests {
-        verify_files(&prefix_dir, &manifest.files)?;
+    if verification != Verification::JustWritten {
+        verify_files(&prefix_dir, &manifest.files, verification)?;
     }
 
     // Row space above the build bound is rebuilt from each flush segment's own `mosaica_id`
@@ -1085,7 +1088,7 @@ fn open_shard(
         // indexes `columns.arrow` out of range.
         if is_base_segment {
             match verification {
-                Verification::Digests => view_entry
+                Verification::Digests | Verification::Sizes => view_entry
                     .row_space
                     .base()
                     .validate_rows(seg_desc.row_count)?,
@@ -1563,7 +1566,9 @@ fn load_verifying_segments_manifest(
         }
 
         let verified = match verification {
-            Verification::Digests => verify_files(prefix_dir, &segments_manifest.partition.files),
+            Verification::Digests | Verification::Sizes => {
+                verify_files(prefix_dir, &segments_manifest.partition.files, verification)
+            }
             // The step-down walk still runs: a just-written prefix carries exactly the one
             // manifest its publication wrote, so there is nothing to step past, and leaving the
             // walk in place keeps one code path rather than two.
@@ -1939,35 +1944,54 @@ pub(crate) fn safe_join(base: &Path, rel: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// `true` if `rel` names a key run (`*.keys`, [`crate::key_index`]), which the open does not
-/// digest: each of its pages carries its own checksum, checked the first time the page is read, so
-/// a unique index is not read whole before its first lookup. `mosaica verify --deep` digests it.
+/// `true` if `rel` names a key run (`*.keys`, [`crate::key_index`]), which no open touches: each of
+/// its pages carries its own checksum, checked the first time the page is read, so a unique index
+/// is not read whole before its first lookup. `mosaica verify --deep` digests it.
 fn is_deferred(rel: &str) -> bool {
     rel.ends_with(".keys")
 }
 
-/// Verify one named file's size and digest. The per-file half of [`verify_files`], split out so
-/// the sweep can run them concurrently.
+/// `true` if `rel` names a file read through unchecked frozen Roaring views, whose bytes every
+/// open hashes: a corrupt byte there is undefined behaviour rather than a wrong answer.
+fn read_unchecked(rel: &str) -> bool {
+    let extension = Path::new(rel).extension().and_then(|e| e.to_str());
+    [
+        crate::derived::TERM_IMAGES_EXTENSION,
+        crate::derived::ROW_MEMBERS_EXTENSION,
+        crate::tenancy::EXTENSION,
+    ]
+    .into_iter()
+    .any(|unchecked| extension == Some(unchecked))
+}
+
+/// Check one named file's size, and its SHA-256 under [`Verification::Digests`] or where
+/// [`read_unchecked`] names it.
 ///
-/// **TOCTOU note:** this reads each file's bytes once, here, to check size+digest; the loader
-/// (`Permutation::load`, `MortonSlice::load`, `ColumnsRef::load`) then separately mmaps the
-/// same path. These two accesses are not atomic. That gap is accepted, not overlooked: every
-/// file a manifest names is contractually immutable once published (contracts §2.1 — "every
-/// other file is immutable; the prefix grows only by whole new files named in a newer
-/// side-manifest"), so a well-behaved bundle publisher never mutates a file after naming it in
-/// a digest-verified manifest. A concurrent adversarial rewrite between these two reads is the
-/// same class of hazard as any other mmap-of-a-file-another-process-can-touch situation in this
-/// codebase (see `mosaica-authz`'s postings reader) — it is an operational/deployment concern
-/// (read-only bundle storage, no writer with access to a serving replica's files), not one this
-/// module's checks can close from inside a single process.
-fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
+/// The bytes are mapped by their loaders after this check, so a file rewritten in between is not
+/// caught: every file a manifest names is immutable once published, and a writer able to rewrite a
+/// serving replica's files is a deployment fault no in-process check can close.
+fn verify_one(
+    base: &Path,
+    rel_path: &str,
+    digest: &FileDigest,
+    verification: Verification,
+) -> Result<()> {
     let path = safe_join(base, rel_path)?;
-    // The path is still validated (above) even when its bytes are not read here, so an
-    // unsafe `files`-map key cannot hide behind the deferral.
+    // The path is still validated (above) even when the file is not touched here, so an unsafe
+    // `files`-map key cannot hide behind the deferral.
     if is_deferred(rel_path) {
         return Ok(());
     }
-    let FileDigest { size, sha256: actual } = crate::flush::digest_of(&path)?;
+    let hashed = verification == Verification::Digests || read_unchecked(rel_path);
+    let (size, actual) = if hashed {
+        let FileDigest { size, sha256 } = crate::flush::digest_of(&path)?;
+        (size, Some(sha256))
+    } else {
+        let size = std::fs::metadata(&path)
+            .map_err(|source| StoreError::Io { path: path.clone(), source })?
+            .len();
+        (size, None)
+    };
     if size != digest.size {
         return Err(StoreError::FileVerificationFailed {
             path,
@@ -1977,7 +2001,7 @@ fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
             ),
         });
     }
-    if actual != digest.sha256 {
+    if let Some(actual) = actual.filter(|actual| *actual != digest.sha256) {
         return Err(StoreError::FileVerificationFailed {
             path,
             reason: format!(
@@ -1989,41 +2013,33 @@ fn verify_one(base: &Path, rel_path: &str, digest: &FileDigest) -> Result<()> {
     Ok(())
 }
 
-/// Hash every file the manifest names, in full, before the bundle is served.
-///
-/// The verification is unconditional — a bundle whose bytes were not checked is a bundle whose
-/// authorisation data was not checked (fail closed) — with one exemption, the key runs
-/// ([`is_deferred`]).
-///
-/// **The sweep is parallel because it is I/O-bound, not hash-bound, and the two have different
-/// remedies.** SHA-256 runs at ~2.3 GB/s on one core with the hardware extensions this CPU has, but
-/// a *serial* read-and-hash delivered only ~310–390 MB/s — so the serial sweep was leaving the
-/// device's queue depth idle, not the CPU. Measured over 4.46 GB in eight files: **11.4–15.0 s
-/// serial against 1.74–1.89 s across eight workers, 6.5–8×**, with the parallel rate landing at
-/// ~2.4–2.6 GB/s, which is the device rather than the hash. (Measured with `sha256sum` and
-/// `xargs -P`, so it sizes the effect rather than this code path exactly.) At 10⁹ with sixteen
-/// declared filter columns `attrs/` alone is ~64 GB, where that ratio is minutes against seconds.
-///
-/// **Deferring the value columns to first touch was considered and declined** (owner ruling,
-/// 2026-08-10). It would have paid off only for columns nobody filters on — every declared column
-/// is opened at generation build, so "first touch" has to mean *first scan* to buy anything, and
-/// that puts a multi-second hash of a 4 GB column on a request path budgeted at 0.5–1 s. A value
-/// column is the largest artefact in the bundle. Parallelism takes the wall clock without touching
-/// the fail-closed rule, which is why `attrs/` is **not** in `is_deferred`.
-///
-/// **The error is deterministic and does not depend on which worker lost.** Results are collected
-/// and the failure reported is the first in the manifest's own (sorted) order, so a bundle with two
-/// corrupt files refuses with the same message on every run.
-fn verify_files(base: &Path, files: &BTreeMap<String, FileDigest>) -> Result<()> {
+/// Check every file the manifest names, in parallel: hashing is bound by the device's queue depth,
+/// which one reader leaves idle. The failure reported is the first in the manifest's own order, so
+/// a bundle with two bad files refuses with the same message on every run.
+fn verify_files(
+    base: &Path,
+    files: &BTreeMap<String, FileDigest>,
+    verification: Verification,
+) -> Result<()> {
     use rayon::prelude::*;
 
     files
         .par_iter()
-        .map(|(rel_path, digest)| verify_one(base, rel_path, digest))
+        .map(|(rel_path, digest)| verify_one(base, rel_path, digest, verification))
         .collect::<Vec<_>>()
         .into_iter()
         .find(|outcome| outcome.is_err())
         .unwrap_or(Ok(()))
+}
+
+/// Whether `values` ascend, `strictly` or not, checked across threads: the files checked at open
+/// hold a value a row or a cell.
+pub(crate) fn ascending(values: &[u32], strictly: bool) -> bool {
+    use rayon::prelude::*;
+
+    values
+        .par_windows(2)
+        .all(|w| w[0] < w[1] || (!strictly && w[0] == w[1]))
 }
 
 pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
@@ -2099,7 +2115,7 @@ impl MortonSlice {
         // §2.5/§2.6: "Morton order"); a hand-corrupted or wrongly-built `morton.u32` that isn't
         // sorted would make `partition_point` silently return a wrong (not merely imprecise)
         // range instead of erroring — checked once here, fail-closed, rather than trusted.
-        if !view.u32().windows(2).all(|w| w[0] <= w[1]) {
+        if !ascending(view.u32(), false) {
             return Err(StoreError::MalformedBundle {
                 detail: format!("{}: codes are not sorted ascending", path.display()),
             });
@@ -2229,7 +2245,7 @@ impl CutIndex {
                 }
             }
         }
-        if !starts.windows(2).all(|w| w[0] < w[1]) {
+        if !ascending(starts, true) {
             return Err(malformed(
                 "cell starts are not strictly ascending".to_string(),
             ));

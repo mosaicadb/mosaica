@@ -273,10 +273,10 @@ fn the_blob_files_are_under_the_manifest_digest() {
     }
 }
 
-/// The open rule's digest half: a corrupted `blocks.bin` fails the bundle open, exactly as any
-/// digested file does — the blob is not outside the rule every other artefact is under.
+/// The digest rule: a corrupted `blocks.bin` fails the digest check, exactly as any digested file
+/// does — the blob is not outside the rule every other artefact is under.
 #[test]
-fn a_corrupted_blob_file_refuses_the_bundle_open() {
+fn a_corrupted_blob_file_fails_the_digest_check() {
     let dir = build_with(blob_schema(), &note_of);
     let out = dir.path().join("bundle");
     let blocks = record_dir(&out).join("blocks.bin");
@@ -284,7 +284,7 @@ fn a_corrupted_blob_file_refuses_the_bundle_open() {
     bytes[0] ^= 0xFF;
     std::fs::write(&blocks, &bytes).unwrap();
     assert!(
-        open_bundle(&out).is_err(),
+        mosaica_store::open_bundle_with_digests(&out).is_err(),
         "a blob file that fails its digest must refuse the open"
     );
 }

@@ -1287,6 +1287,12 @@ pub struct DerivedFile {
 /// The derived kind, and directory, term images are filed under.
 pub const TERM_IMAGES_KIND: &str = "term-images";
 
+/// The extension of a term images file, read through unchecked frozen bitmap views.
+pub(crate) const TERM_IMAGES_EXTENSION: &str = "timg";
+
+/// The extension of a row members file, read through unchecked frozen bitmap views.
+pub(crate) const ROW_MEMBERS_EXTENSION: &str = "tsrm";
+
 /// Make the directory one view's term images go in and name the file
 /// (`crate::term_images` for what it holds).
 ///
@@ -1304,7 +1310,7 @@ pub fn term_image_file(
     index.term_images += 1;
     let dir_rel = layout.derived_rel(TERM_IMAGES_KIND);
     let dir = derived_dir(prefix_dir, &dir_rel)?;
-    let name = derived_name(TERM_IMAGES_KIND, n, position, "timg");
+    let name = derived_name(TERM_IMAGES_KIND, n, position, TERM_IMAGES_EXTENSION);
     Ok(DerivedFile {
         path: dir.join(&name),
         dir,
@@ -1344,7 +1350,7 @@ pub fn file_derived(
                 layout: ServingLayout::RowMajorList,
             } => (&mut index.row_column, "tsll"),
             DerivedForm::RowColumn { .. } => (&mut index.row_column, "tslb"),
-            DerivedForm::RowMembers => (&mut index.row_members, "tsrm"),
+            DerivedForm::RowMembers => (&mut index.row_members, ROW_MEMBERS_EXTENSION),
             DerivedForm::ShapeRows { .. } => (&mut index.shape_rows, "tssr"),
             DerivedForm::ShapeHeld => (&mut index.shape_held, "tssh"),
             DerivedForm::LevelLabels => (&mut index.labels, "tslb"),

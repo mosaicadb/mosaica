@@ -11,7 +11,7 @@ use croaring::Bitmap;
 
 use mosaica_spatial::{split32, tiles_for_bbox, tiles_for_bbox_count, Bounds, Tile};
 use mosaica_store::manifest::{CurrentPointer, EntitySet};
-use mosaica_store::{open_bundle, tile_ranges, StoreError};
+use mosaica_store::{open_bundle, open_bundle_with_digests, tile_ranges, StoreError};
 use mosaica_types::EntityId;
 
 mod fixture;
@@ -700,7 +700,7 @@ fn a_manifest_naming_a_projection_outside_the_set_is_refused() {
 }
 
 #[test]
-fn open_bundle_fails_closed_on_a_corrupted_columns_arrow_byte() {
+fn a_digest_check_fails_closed_on_a_corrupted_columns_arrow_byte() {
     let dir = tempfile::tempdir().expect("tempdir");
     build_bundle(dir.path(), 50);
 
@@ -715,7 +715,8 @@ fn open_bundle_fails_closed_on_a_corrupted_columns_arrow_byte() {
     bytes[mid] ^= 0xFF;
     fs::write(&columns_path, &bytes).expect("rewrite corrupted columns.arrow");
 
-    let err = open_bundle(dir.path()).expect_err("corrupted columns.arrow must fail open_bundle");
+    let err = open_bundle_with_digests(dir.path())
+        .expect_err("corrupted columns.arrow must fail the digest check");
     // With only one SEGMENTS-<n>.json candidate (n=0), the outer error is always
     // `NoVerifyingSegmentsManifest` — but it must carry the *specific* reason the candidate
     // failed, not silently swallow it (the bug this replaces: `FileVerificationFailed` was
@@ -739,6 +740,31 @@ fn open_bundle_fails_closed_on_a_corrupted_columns_arrow_byte() {
         other => panic!(
             "expected NoVerifyingSegmentsManifest with a digest-mismatch reason, got: {other}"
         ),
+    }
+}
+
+/// A file shorter than its manifest says, as a write cut short leaves it, refuses the open.
+#[test]
+fn open_bundle_fails_closed_on_a_short_columns_arrow() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    build_bundle(dir.path(), 50);
+
+    let columns_path = dir
+        .path()
+        .join("v00000")
+        .join(seg_file("seg0", "columns.arrow"));
+    let bytes = fs::read(&columns_path).expect("read columns.arrow");
+    fs::write(&columns_path, &bytes[..bytes.len() - 1]).expect("shorten columns.arrow");
+
+    match open_bundle(dir.path()).expect_err("a short columns.arrow must fail open_bundle") {
+        StoreError::NoVerifyingSegmentsManifest {
+            highest_candidate_error: Some(reason),
+            ..
+        } => assert!(
+            reason.contains("columns.arrow"),
+            "reason should name columns.arrow, got: {reason}"
+        ),
+        other => panic!("expected NoVerifyingSegmentsManifest naming the file, got: {other}"),
     }
 }
 
@@ -1151,11 +1177,10 @@ fn a_just_written_prefix_opens_to_the_same_bundle_without_re_verifying_it() {
 
 /// **What the trusted constructor skips is bytes-from-storage checks, and nothing else.**
 ///
-/// A file whose content no longer matches its digest opens here — that is the whole premise, and
-/// stating it as a test is what stops the premise from being quietly widened. `open_bundle` on the
-/// same tree fails closed, which is the half that must never change.
+/// A file whose content no longer matches its digest opens here, which is the whole premise; the
+/// digest check on the same tree fails closed.
 #[test]
-fn a_just_written_prefix_skips_the_digest_sweep_and_open_bundle_does_not() {
+fn a_just_written_prefix_skips_the_digest_check() {
     let dir = tempfile::tempdir().expect("tempdir");
     build_bundle(dir.path(), 40);
 
@@ -1172,9 +1197,8 @@ fn a_just_written_prefix_skips_the_digest_sweep_and_open_bundle_does_not() {
     fs::write(&columns_path, &bytes).expect("rewrite columns.arrow");
 
     assert!(
-        open_bundle(dir.path()).is_err(),
-        "a bundle whose bytes were not checked is a bundle whose authorisation data was not \
-         checked — this direction is unconditional and must stay so"
+        open_bundle_with_digests(dir.path()).is_err(),
+        "the digest check refuses a flipped byte"
     );
     assert!(
         mosaica_store::open_written_prefix(dir.path(), "v00000").is_ok(),
