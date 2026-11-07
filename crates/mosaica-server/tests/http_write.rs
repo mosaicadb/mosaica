@@ -2164,8 +2164,6 @@ async fn a_compaction_request_is_pending_then_answered_with_its_record() {
         ),
         (&serde_json::json!(second), &serde_json::json!(third))
     );
-    let (code, lost) = compaction_request(&server, third + 1).await;
-    assert_eq!(code, 404, "{lost}");
 
     let after = control_status(&server).await;
     assert_eq!(after["jobs"], serde_json::json!([]), "{after}");
@@ -2181,49 +2179,36 @@ async fn a_compaction_request_is_pending_then_answered_with_its_record() {
 }
 
 /// Ask for a compaction under a memory figure no compaction fits, and answer the request's number
-/// and `compaction.requests` once the request is answered.
+/// and what `GET /control/compact/{request}` answers once the request is answered.
 async fn compact_refused_for_memory(server: &TestServer) -> (u64, serde_json::Value) {
     server.state.engine.set_fold_memory_for_test(Some(1));
-    let resp = server
-        .client
-        .post(server.control_url("/control/compact"))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status().as_u16(), 202);
-    let request = resp.json::<serde_json::Value>().await.unwrap()["request"]
-        .as_u64()
-        .expect("a 202 carries the request's number");
+    let request = ask_for_compaction(server).await;
     wait_for_executor(server, "the request answered", |now| {
         now.compaction_requests_answered >= request
     })
     .await;
     let status = control_status(server).await;
     assert_eq!(status["compaction"]["fold_requested"], false, "{status}");
-    (request, status["compaction"]["requests"].clone())
+    let (code, answered) = compaction_request(server, request).await;
+    assert_eq!(code, 200, "{answered}");
+    (request, answered)
 }
 
-/// A compaction refused when its turn comes is reported against the request that asked for it,
-/// and a restart remembers neither: the numbering starts again and the gate is checked anew.
+/// A compaction refused when its turn comes is answered as refused, with the shard and the byte
+/// figures. A restart loses the request, and the next run numbers its requests above every
+/// number the last run gave.
 #[tokio::test]
 async fn a_compaction_refused_at_its_turn_is_reported_against_its_request() {
     let tmp = TempDir::new().unwrap();
     let server = serve(&tmp).await;
-    let (request, requests) = compact_refused_for_memory(&server).await;
-    assert_eq!(request, 1);
-    assert_eq!(requests["accepted"], 1, "{requests}");
-    let refusal = &requests["last_refusal"];
-    assert_eq!(refusal["request"], 1, "{requests}");
-    assert_eq!(refusal["gate"], "insufficient_memory");
-    assert!(refusal["shard"].is_u64());
-    assert!(refusal["detail"].as_str().is_some_and(|d| !d.is_empty()));
-    assert_eq!(refusal["had_bytes"], 1);
-    assert!(refusal["need_bytes"].as_u64().unwrap() > 1);
-    let (_, refused) = compaction_request(&server, 1).await;
+    let (request, refused) = compact_refused_for_memory(&server).await;
     let answer = &refused["answer"];
     assert_eq!(answer["outcome"], "refused", "{refused}");
     assert_eq!(answer["gate"], "insufficient_memory");
+    assert!(answer["shard"].is_u64(), "{refused}");
+    assert!(answer["detail"].as_str().is_some_and(|d| !d.is_empty()));
+    assert_eq!(answer["had_bytes"], 1);
+    assert!(answer["need_bytes"].as_u64().unwrap() > 1);
     assert_eq!(
         refused["job"],
         serde_json::Value::Null,
@@ -2231,17 +2216,49 @@ async fn a_compaction_refused_at_its_turn_is_reported_against_its_request() {
     );
 
     let server = restart(server, &tmp).await;
-    let (code, lost) = compaction_request(&server, 1).await;
+    let (code, lost) = compaction_request(&server, request).await;
     assert_eq!(code, 404, "the request was lost with the restart: {lost}");
     let requests = control_status(&server).await["compaction"]["requests"].clone();
-    assert_eq!(
-        requests,
-        serde_json::json!({ "accepted": 0, "answered": 0, "last_refusal": null })
-    );
-    let (request, requests) = compact_refused_for_memory(&server).await;
-    assert_eq!(request, 1);
-    assert_eq!(requests["last_refusal"]["request"], 1);
-    assert_eq!(requests["last_refusal"]["gate"], "insufficient_memory");
+    assert_eq!(requests["accepted"], requests["answered"], "{requests}");
+    let (next, refused) = compact_refused_for_memory(&server).await;
+    assert!(next > request, "{next} repeats a number before {request}");
+    assert_eq!(refused["answer"]["gate"], "insufficient_memory");
+}
+
+/// The server keeps the latest answers, and a request answered before them is `410`, apart from a
+/// number this run never gave, which is `404`. Malformed numbers are `422`.
+#[tokio::test]
+async fn an_answer_older_than_the_ones_kept_is_gone() {
+    let tmp = TempDir::new().unwrap();
+    let server = serve(&tmp).await;
+    let engine = &server.state.engine;
+    // Each refused at once, so each is answered alone and quickly.
+    engine.set_fold_memory_for_test(Some(1));
+    let mut requests = Vec::new();
+    for _ in 0..=mosaica_engine::KEPT_ANSWERS {
+        let request = engine.request_fold().unwrap();
+        while engine.write_executor_stats().compaction_requests_answered < request {
+            engine.request_flush();
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        requests.push(request);
+    }
+    let (code, gone) = compaction_request(&server, requests[0]).await;
+    assert_eq!(code, 410, "{gone}");
+    let (code, kept) = compaction_request(&server, requests[1]).await;
+    assert_eq!(code, 200, "{kept}");
+    let (code, lost) = compaction_request(&server, requests[0] - 1).await;
+    assert_eq!(code, 404, "{lost}");
+    for malformed in ["0", "abc"] {
+        let resp = server
+            .client
+            .get(server.control_url(&format!("/control/compact/{malformed}")))
+            .bearer_auth(OPERATOR_CREDENTIAL)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 422, "{malformed}");
+    }
 }
 
 /// Where no tick could compact before a restart, the request is refused at once and nothing is
@@ -2262,7 +2279,10 @@ async fn a_compaction_no_tick_could_start_is_refused_at_once() {
         assert!(body["detail"].as_str().is_some_and(|d| !d.is_empty()));
         let stats = server.state.engine.write_executor_stats();
         assert!(!stats.fold_requested);
-        assert_eq!(stats.compaction_requests_accepted, 0);
+        assert_eq!(
+            stats.compaction_requests_accepted, stats.compaction_requests_answered,
+            "no request was numbered"
+        );
     };
 
     let tmp = TempDir::new().unwrap();
@@ -2396,23 +2416,23 @@ async fn a_request_held_when_the_overlay_diverges_is_refused() {
         requests["answered"].as_u64().unwrap() >= second,
         "{requests}"
     );
-    let refusal = &requests["last_refusal"];
-    assert_eq!(refusal["request"], second, "{requests}");
-    assert_eq!(refusal["gate"], "overlay_diverged");
-    assert!(refusal["shard"].is_null());
-    assert!(refusal["detail"].as_str().is_some_and(|d| !d.is_empty()));
+    let (_, refused) = compaction_request(&server, second).await;
+    let answer = &refused["answer"];
+    assert_eq!(answer["outcome"], "refused", "{refused}");
+    assert_eq!(answer["gate"], "overlay_diverged");
+    assert!(answer["shard"].is_null());
+    assert!(answer["detail"].as_str().is_some_and(|d| !d.is_empty()));
 }
 
-/// A refusal of a compaction the schedule started does not replace the one that answered a
-/// request.
+/// A refusal of a compaction the schedule started does not change the answer to a request.
 #[tokio::test]
 async fn a_scheduled_refusal_leaves_the_requests_refusal() {
     let tmp = TempDir::new().unwrap();
     let mut config = default_engine_config();
     config.compaction.after_deletions = Some(1);
     let (server, _faults) = serve_with_faults_and_config(&tmp, config).await;
-    let (_, requested) = compact_refused_for_memory(&server).await;
-    assert_eq!(requested["last_refusal"]["had_bytes"], 1, "{requested}");
+    let (request, requested) = compact_refused_for_memory(&server).await;
+    assert_eq!(requested["answer"]["had_bytes"], 1, "{requested}");
     let before = server.state.engine.write_executor_stats().fold_refusals;
     // A different figure, so the scheduled refusal's record differs from the request's.
     server.state.engine.set_fold_memory_for_test(Some(2));
@@ -2443,7 +2463,7 @@ async fn a_scheduled_refusal_leaves_the_requests_refusal() {
         "insufficient_memory"
     );
     assert_eq!(status["compaction"]["last_refusal"]["had_bytes"], 2, "{status}");
-    assert_eq!(status["compaction"]["requests"], requested, "{status}");
+    assert_eq!(compaction_request(&server, request).await.1, requested);
 }
 
 /// **The stage barriers of `/control/status` move when their stages run** (contracts §3.4's
@@ -4199,20 +4219,6 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/compaction/requests", "object"),
     ("/compaction/requests/accepted", "integer"),
     ("/compaction/requests/answered", "integer"),
-    ("/compaction/requests/last_refusal", "null|object"),
-    ("/compaction/requests/last_refusal/at_unix", "integer"),
-    ("/compaction/requests/last_refusal/detail", "string"),
-    ("/compaction/requests/last_refusal/gate", "string"),
-    (
-        "/compaction/requests/last_refusal/had_bytes",
-        "integer|null",
-    ),
-    (
-        "/compaction/requests/last_refusal/need_bytes",
-        "integer|null",
-    ),
-    ("/compaction/requests/last_refusal/request", "integer"),
-    ("/compaction/requests/last_refusal/shard", "integer|null"),
     ("/compaction/passes", "array"),
     ("/compaction/passes/*", "object"),
     ("/compaction/passes/*/anon_bytes", "integer"),

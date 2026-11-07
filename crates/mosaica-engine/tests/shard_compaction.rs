@@ -9,8 +9,9 @@ use std::os::unix::fs::MetadataExt;
 use std::time::Duration;
 
 use common::*;
-use mosaica_engine::{CompactionSchedule, Engine, EngineConfig};
+use mosaica_engine::{CompactionSchedule, Engine, EngineConfig, RequestOutcome, RequestState};
 use mosaica_lifecycle::wal::ChangeOp;
+use mosaica_types::progress::{JobKind, JobState};
 use mosaica_types::{ShardId, Target};
 
 /// Each shard's `(identity, suppressed, deleted)` as the served side-manifest records them.
@@ -256,6 +257,40 @@ fn a_request_compacts_every_shard_with_something_to_reclaim() {
     });
     assert_ne!(identity(&several.root, 0), zero, "shard 0 is compacted");
     assert_eq!(engine.retirable_deletions(), 0);
+}
+
+/// A request whose first compaction fails and whose second publishes is answered failed with the
+/// failed compaction's record, though the second ended after it.
+#[test]
+fn a_request_keeps_the_record_of_its_compaction_that_failed() {
+    let several = two_shards();
+    let engine = several.open_writing();
+    engine
+        .accept_changes(vec![
+            (item_in(0, 5), ChangeOp::Delete),
+            (item_in(1, 6), ChangeOp::Delete),
+        ])
+        .unwrap();
+    let before = engine.write_executor_stats();
+    engine.panic_next_fold_for_test();
+    let request = engine.request_fold().unwrap();
+    wait_until("the request is answered", Duration::from_secs(120), || {
+        engine.write_executor_stats().compaction_requests_answered >= request
+    });
+    let after = engine.write_executor_stats();
+    assert_eq!(
+        (after.fold_failures, after.folds),
+        (before.fold_failures + 1, before.folds + 1),
+        "one compaction failed and the other published"
+    );
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(request) else {
+        panic!("request {request} is answered");
+    };
+    assert_eq!(answer.outcome, RequestOutcome::Failed);
+    let kept = answer.job.expect("a compaction ran for the request");
+    assert_eq!(kept.state, JobState::Failed);
+    let last = engine.last_job(JobKind::Compaction).unwrap();
+    assert_eq!(last.state, JobState::Finished, "the second ended last");
 }
 
 /// With nothing to reclaim anywhere, a request compacts the shard the schedule ranks first.

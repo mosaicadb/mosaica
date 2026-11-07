@@ -3070,7 +3070,8 @@ async fn status_flush_and_compact_match_the_description() {
         .await
         .unwrap();
     let compact = assert_answer(&doc, &post, resp, 202).await;
-    assert_eq!(compact["request"], 1);
+    let request = compact["request"].as_u64().unwrap();
+    let route = format!("/control/compact/{request}");
     wait_until(
         "the compaction holds",
         std::time::Duration::from_secs(60),
@@ -3083,17 +3084,14 @@ async fn status_flush_and_compact_match_the_description() {
         .unwrap();
     let status = assert_answer(&doc, &get, resp, 200).await;
     assert!(status["publication"].as_u64().unwrap() >= answer["publication"].as_u64().unwrap());
-    let resp = control(&f.server, &get, "/control/compact/1")
-        .send()
-        .await
-        .unwrap();
+    let resp = control(&f.server, &get, &route).send().await.unwrap();
     assert_answer(&doc, &get, resp, 200).await;
 
     engine.set_fold_paused_for_test(false);
     wait_until(
         "the compaction answered",
         std::time::Duration::from_secs(60),
-        async || engine.write_executor_stats().compaction_requests_answered >= 1,
+        async || engine.write_executor_stats().compaction_requests_answered >= request,
     )
     .await;
     let resp = control(&f.server, &get, "/control/status")
@@ -3101,17 +3099,16 @@ async fn status_flush_and_compact_match_the_description() {
         .await
         .unwrap();
     assert_answer(&doc, &get, resp, 200).await;
-    let resp = control(&f.server, &get, "/control/compact/1")
-        .send()
-        .await
-        .unwrap();
+    let resp = control(&f.server, &get, &route).send().await.unwrap();
     assert_answer(&doc, &get, resp, 200).await;
-    // A number the server has not given.
-    let resp = control(&f.server, &get, "/control/compact/2")
-        .send()
-        .await
-        .unwrap();
+    // A number this run has not given, and two that are no request's number.
+    let next = format!("/control/compact/{}", request + 1);
+    let resp = control(&f.server, &get, &next).send().await.unwrap();
     assert_refusal_to(&doc, Some(&get), resp, 404, "unknown").await;
+    for malformed in ["/control/compact/0", "/control/compact/abc"] {
+        let resp = control(&f.server, &get, malformed).send().await.unwrap();
+        assert_refusal_to(&doc, Some(&get), resp, 422, "contract").await;
+    }
     let resp = f
         .server
         .client

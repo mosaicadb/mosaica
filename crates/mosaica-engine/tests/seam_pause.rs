@@ -204,6 +204,47 @@ fn a_compaction_failed_at_its_flip_is_recorded_failed_where_it_stopped() {
     );
 }
 
+/// A compaction that panics fails as one that errs does: the failure is counted, its record ends
+/// failed, its request is answered as failed with that record, and the next compaction runs.
+#[test]
+fn a_compaction_that_panics_is_counted_failed_and_the_next_one_runs() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let (engine, _faults) = engine_with_faults(tmp.path(), &root);
+    let deleted = EntityId::new(source_to_new_map(&root, "v00000")[&4]);
+    engine
+        .accept_change(deleted, ChangeOp::Delete)
+        .expect("a delete is accepted");
+    let before = engine.write_executor_stats();
+
+    engine.panic_next_fold_for_test();
+    let request = engine.request_fold().unwrap();
+    wait_until("the request is answered", WAIT, || {
+        engine.write_executor_stats().compaction_requests_answered >= request
+    });
+    let after = engine.write_executor_stats();
+    assert_eq!(after.fold_failures, before.fold_failures + 1);
+    assert_eq!(after.folds, before.folds);
+    let last = engine
+        .last_job(JobKind::Compaction)
+        .expect("its last record is kept");
+    assert_eq!(last.state, JobState::Failed);
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(request) else {
+        panic!("request {request} is answered");
+    };
+    assert_eq!(answer.outcome, RequestOutcome::Failed);
+    assert_eq!(answer.job, Some(last));
+
+    let next = engine.request_fold().unwrap();
+    wait_until("the next request is answered", WAIT, || {
+        engine.write_executor_stats().compaction_requests_answered >= next
+    });
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(next) else {
+        panic!("request {next} is answered");
+    };
+    assert_eq!(answer.outcome, RequestOutcome::Compacted);
+}
+
 /// **The fold's cost on `/control/status` covers its publication.** The staircase the fold thread
 /// records ends at its fifth pass; the executor continues it through the publication's phases, so
 /// the shard's compaction seconds and the pass list report the fold from the thread's entry to the
