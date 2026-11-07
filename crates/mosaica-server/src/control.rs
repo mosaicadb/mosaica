@@ -3131,6 +3131,22 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "requests": {
                 "accepted": executor.compaction_requests_accepted,
                 "answered": executor.compaction_requests_answered,
+                // How the last answer answered the requests it covered, merged ones included.
+                "last_answer": executor.last_answer.map(|answer| {
+                    let (gate, detail) = match answer.outcome {
+                        mosaica_engine::RequestOutcome::Refused { gate, detail } => {
+                            (Some(gate), Some(detail))
+                        }
+                        _ => (None, None),
+                    };
+                    serde_json::json!({
+                        "first": answer.first,
+                        "last": answer.last,
+                        "outcome": answer.outcome.as_str(),
+                        "gate": gate,
+                        "detail": detail,
+                    })
+                }),
                 "last_refusal": executor.last_request_refusal.map(|r| serde_json::json!({
                     "request": r.request,
                     "shard": r.shard.map(|s| s.raw()),

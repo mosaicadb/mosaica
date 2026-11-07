@@ -17,7 +17,9 @@ use mosaica_types::progress::{JobKind, JobState, Progress};
 use serde_json::Value;
 use tempfile::TempDir;
 
-use common::{deployment_with_control, mosaica, Bound, Ports, Server, OPERATOR_CREDENTIAL};
+use common::{
+    deployment_with_control, mosaica, progress_records, Bound, Ports, Server, OPERATOR_CREDENTIAL,
+};
 
 const OPERATOR: (&str, &str) = ("MOSAICA_CREDENTIAL", OPERATOR_CREDENTIAL);
 
@@ -191,14 +193,6 @@ fn a_group_with_category_metadata_declared_again_answers_its_views_as_held() {
     for (request, status) in requests(&after) {
         assert_eq!(status, 200, "after a restart, {request}: {after}");
     }
-}
-
-/// The progress records a command printed on stderr with `--progress json`.
-fn progress_records(output: &Output) -> Vec<Progress> {
-    String::from_utf8_lossy(&output.stderr)
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect()
 }
 
 /// `insert --progress json` ends with its pages step at its total, and `compact --wait --progress
@@ -951,6 +945,78 @@ fn planned(plan: Vec<Option<&'static str>>) -> Planned {
         }
     });
     Planned { url, seen }
+}
+
+/// `compact --wait` against a control plane that answers request 3 with `status`: its exit
+/// status and the progress records it printed.
+fn compact_answered(status: &'static str) -> (bool, Vec<Progress>) {
+    let dir = TempDir::new().unwrap();
+    let plane = planned(vec![Some(r#"{"request": 3}"#), Some(status)]);
+    let args = [
+        "compact",
+        "--wait",
+        "--progress",
+        "json",
+        "--control",
+        &plane.url,
+    ];
+    let output = run(dir.path(), &args, &[OPERATOR], b"");
+    (output.status.success(), progress_records(&output))
+}
+
+/// A served compaction record that failed in the publishing phase.
+const FAILED_RECORD: &str = r#"{"job": "compaction", "state": "failed",
+    "phase": {"index": 4, "of": 4, "name": "Publishing"}, "step": "flip",
+    "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0, "rss_bytes": 1024}"#;
+
+#[test]
+fn compact_wait_ends_with_the_outcome_the_server_states() {
+    let status = |answer: &str, job: &str| -> &'static str {
+        format!(
+            r#"{{"jobs": [], "compaction": {{"last_job": {job}, "requests":
+            {{"accepted": 3, "answered": 3, "last_answer": {answer}}}}}}}"#
+        )
+        .leak()
+    };
+    let answer = |outcome: &str, gate: &str| {
+        format!(
+            r#"{{"first": 2, "last": 3, "outcome": "{outcome}", "gate": {gate},
+            "detail": {gate}}}"#
+        )
+    };
+
+    let refused = status(&answer("refused", r#""insufficient_memory""#), "null");
+    let (ok, records) = compact_answered(refused);
+    assert!(!ok, "a refused request fails the command");
+    assert_eq!(records, Vec::new(), "no compaction ran for it");
+
+    let failed = status(&answer("failed", "null"), FAILED_RECORD);
+    let (ok, records) = compact_answered(failed);
+    assert!(!ok, "a failed compaction fails the command");
+    let served: Progress = serde_json::from_str(FAILED_RECORD).unwrap();
+    assert_eq!(
+        records.last(),
+        Some(&served),
+        "the record is printed as served"
+    );
+
+    let nothing = status(&answer("nothing_to_do", "null"), "null");
+    assert!(compact_answered(nothing).0, "nothing to do is no failure");
+
+    // The server numbered one request since it started: request 3 was lost with a restart.
+    let restarted = r#"{"jobs": [], "compaction": {"last_job": null, "requests":
+        {"accepted": 1, "answered": 1, "last_answer": null}}}"#;
+    assert!(!compact_answered(restarted).0);
+
+    // A later answer, of request 4, replaced request 3's.
+    let replaced = status(
+        r#"{"first": 4, "last": 4, "outcome": "compacted", "gate": null, "detail": null}"#,
+        "null",
+    );
+    assert!(
+        !compact_answered(replaced).0,
+        "an outcome not known is no success"
+    );
 }
 
 #[test]

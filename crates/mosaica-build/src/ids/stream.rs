@@ -33,7 +33,7 @@ use rayon::prelude::*;
 use mosaica_lifecycle::resolve::{self, Batch, Named, Refusal};
 use mosaica_store::key_index::{Key, KeySpill};
 use mosaica_store::unique::{KeyKind, UniqueKey};
-use mosaica_types::progress::Unit;
+use mosaica_types::progress::{Part, Unit};
 use mosaica_types::{EntityId, ItemAt, ShardId};
 
 use super::report::{Tally, OUTSIDE_LIMIT};
@@ -42,7 +42,7 @@ use super::{
     check_cap, CarriedField, Limit, Limited, Numbering, Numbers, Read, ReadInput, ReadRows,
 };
 use crate::error::{BuildError, Result};
-use crate::observer::{BuildStage, Part, Steps};
+use crate::observer::{BuildStage, Steps};
 use crate::row_groups::FileGroups;
 use crate::spill::{self, boundaries_uniform, mix64, MappedArray, Partition};
 

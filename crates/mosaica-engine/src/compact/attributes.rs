@@ -1,9 +1,11 @@
 use mosaica_spatial::tiler::ScalarType;
 use mosaica_store::manifest::{AttrExtent, DeclaredScalar, ScopedScalar};
+use mosaica_types::progress::Stage;
 use mosaica_types::view::ViewIncarnation;
 
 use crate::flush::{failed, MaintenanceFailed};
 
+use super::cost::Pass;
 use super::execute::{FoldContext, FoldOutput};
 use super::plan::FoldPlan;
 
@@ -96,14 +98,14 @@ pub(super) fn fold_text_columns(
         let column_rel = job.rel.clone();
         let from_dir = ctx.from_prefix_dir.join(&column_rel);
         let to_dir = ctx.to_prefix_dir.join(&column_rel);
-        std::fs::create_dir_all(&to_dir).map_err(failed("pass 4a (text)"))?;
+        std::fs::create_dir_all(&to_dir).map_err(failed(Pass::Attributes.at("text")))?;
 
         // Dictionaries are read sequentially; postings and positions are not, since the merge
         // interleaves layers.
         let open_layer = |files: &mosaica_filter::TextIndexFiles,
                           what: &str|
          -> Result<OpenedText, MaintenanceFailed> {
-            let unreadable = format!("pass 4a (text: {what})");
+            let unreadable = Pass::Attributes.at(format!("text: {what}"));
             Ok(OpenedText {
                 dict: mosaica_filter::SortedDict::open(
                     &files.dict,
@@ -151,8 +153,9 @@ pub(super) fn fold_text_columns(
                 present: &layer.present,
             })
             .collect();
-        mosaica_filter_write::merge_text_layers(&inputs, &plan.tombstones, to.clone())
-            .map_err(failed(format!("pass 4a (text: column '{}')", job.name)))?;
+        mosaica_filter_write::merge_text_layers(&inputs, &plan.tombstones, to.clone()).map_err(
+            failed(Pass::Attributes.at(format!("text: column '{}'", job.name))),
+        )?;
 
         for (name, path) in [
             mosaica_filter::DICT_FILE,
@@ -189,7 +192,8 @@ fn fold_scoped_prose(
     out: &mut FoldOutput,
 ) -> Result<(), MaintenanceFailed> {
     let unreadable = |e: &dyn std::fmt::Display| {
-        MaintenanceFailed(format!("pass 4a (text: the prose of '{}'): {e}", job.name))
+        let part = format!("text: the prose of '{}'", job.name);
+        MaintenanceFailed(format!("{}: {e}", Pass::Attributes.at(part)))
     };
     let prose_rel = format!("{}/{}", job.rel, mosaica_store::manifest::SCOPED_PROSE_DIR);
     let names = [
@@ -213,7 +217,8 @@ fn fold_scoped_prose(
     {
         let Some(prose) = &extent.prose else {
             return Err(MaintenanceFailed(format!(
-                "pass 4a (text): an extent of group-scoped column '{}' names no prose",
+                "{}: an extent of group-scoped column '{}' names no prose",
+                Pass::Attributes.at("text"),
                 job.name
             )));
         };
@@ -285,7 +290,7 @@ fn fold_value_column(
     let column_rel = job.rel.clone();
     let from_dir = ctx.from_prefix_dir.join(&column_rel);
     let to_dir = ctx.to_prefix_dir.join(&column_rel);
-    std::fs::create_dir_all(&to_dir).map_err(failed("pass 4a (attributes)"))?;
+    std::fs::create_dir_all(&to_dir).map_err(failed(Pass::Attributes.name()))?;
 
     let mut opened = Vec::new();
     if job.has_base {
@@ -294,7 +299,7 @@ fn fold_value_column(
                 &from_dir,
                 mosaica_filter::Access::MappedSequential,
             )
-            .map_err(failed("pass 4a (attributes: the base column)"))?,
+            .map_err(failed(Pass::Attributes.at("the base column")))?,
         );
         out.read(
             &from_dir,
@@ -308,7 +313,7 @@ fn fold_value_column(
                 &ctx.from_prefix_dir.join(&extent.presence),
                 mosaica_filter::Access::MappedSequential,
             )
-            .map_err(failed("pass 4a (attributes: an extent)"))?,
+            .map_err(failed(Pass::Attributes.at("an extent")))?,
         );
         out.read(&ctx.from_prefix_dir, [&extent.values, &extent.presence]);
     }
@@ -322,14 +327,15 @@ fn fold_value_column(
                     &from_dir,
                     mosaica_filter::Access::MappedSequential,
                 )
-                .map_err(failed("pass 4a (attributes: the base dictionary)"))?,
+                .map_err(failed(Pass::Attributes.at("the base dictionary")))?,
             );
         }
         for extent in &extents {
             let Some(dict_rel) = extent.dict.as_ref() else {
                 return Err(MaintenanceFailed(format!(
-                    "pass 4a (attributes): keyword column '{}' has an extent with no \
-                     dictionary; its ordinals name nothing",
+                    "{}: keyword column '{}' has an extent with no dictionary; its ordinals name \
+                     nothing",
+                    Pass::Attributes.name(),
                     job.name
                 )));
             };
@@ -338,7 +344,7 @@ fn fold_value_column(
                     &ctx.from_prefix_dir.join(dict_rel),
                     mosaica_filter::Access::MappedSequential,
                 )
-                .map_err(failed("pass 4a (attributes: an extent dictionary)"))?,
+                .map_err(failed(Pass::Attributes.at("an extent dictionary")))?,
             );
         }
     }
@@ -351,12 +357,15 @@ fn fold_value_column(
     let dict_path = ctx.to_prefix_dir.join(&dict_rel);
     // A column dense to this bound writes no presence bitmap.
     let bound = u32::try_from(plan.entity_bound).map_err(|_| {
-        MaintenanceFailed("pass 4a (attributes): the entity bound exceeds u32".to_string())
+        MaintenanceFailed(format!(
+            "{}: the entity bound exceeds u32",
+            Pass::Attributes.name()
+        ))
     })?;
     let partial = if layers.is_empty() {
         // No layer holds the column yet: the base an empty shard is written with.
         mosaica_store::empty_shard::write_empty_value_column(&to_dir, job.arrow_type, job.category)
-            .map_err(failed("pass 4a (attributes: an empty base)"))?;
+            .map_err(failed(Pass::Attributes.at("an empty base")))?;
         if job.arrow_type == mosaica_spatial::tiler::ScalarType::Keyword {
             out.wrote(dict_rel, dict_path.clone());
         }
@@ -369,7 +378,7 @@ fn fold_value_column(
             &values_path,
             &presence_path,
         )
-        .map_err(failed("pass 4a (attributes: the merge)"))?
+        .map_err(failed(Pass::Attributes.at("the merge")))?
     } else {
         let keyword_layers: Vec<mosaica_filter_write::KeywordLayer<'_>> = layers
             .iter()
@@ -384,7 +393,7 @@ fn fold_value_column(
             &presence_path,
             &dict_path,
         )
-        .map_err(failed("pass 4a (attributes: the keyword merge)"))?;
+        .map_err(failed(Pass::Attributes.at("the keyword merge")))?;
         out.wrote(dict_rel, dict_path.clone());
         partial
     };
@@ -402,7 +411,7 @@ fn fold_value_column(
         partial.then_some(presence_path.as_path()),
         mosaica_filter::Access::Mapped,
     )
-    .map_err(failed("pass 4a (attributes: reopening the folded column)"))?;
+    .map_err(failed(Pass::Attributes.at("reopening the folded column")))?;
     let postings_rel = format!("{column_rel}/{}", mosaica_filter::POSTINGS_FILE);
     let postings_path = ctx.to_prefix_dir.join(&postings_rel);
     mosaica_filter_write::write_category_postings(
@@ -411,7 +420,7 @@ fn fold_value_column(
         &folded,
         mosaica_filter_write::POSTINGS_BAND_ROWS,
     )
-    .map_err(failed("pass 4a (attributes: the postings rebuild)"))?;
+    .map_err(failed(Pass::Attributes.at("the postings rebuild")))?;
     out.wrote(postings_rel, postings_path);
 
     Ok(())
@@ -435,17 +444,17 @@ pub(super) fn fold_record_blob(
         .iter()
         .any(|d| !ctx.unbased.contains(&d.name) && d.blob_resident(&ctx.vocabularies));
     if !blob_resident && !plan.record_extents.is_empty() {
-        return Err(MaintenanceFailed(
-            "pass 4a (record blob): the manifest names record extents but the schema declares no \
-             blob-resident column, so folding would discard their bytes"
-                .to_string(),
-        ));
+        return Err(MaintenanceFailed(format!(
+            "{}: the manifest names record extents but the schema declares no blob-resident \
+             column, so folding would discard their bytes",
+            Pass::Attributes.at("record blob")
+        )));
     }
     if blob_resident {
         let record_rel = plan.layout().record_rel();
         let from_dir = ctx.from_prefix_dir.join(&record_rel);
         let to_dir = ctx.to_prefix_dir.join(&record_rel);
-        std::fs::create_dir_all(&to_dir).map_err(failed("pass 4a (record blob)"))?;
+        std::fs::create_dir_all(&to_dir).map_err(failed(Pass::Attributes.at("record blob")))?;
 
         let mut opened = Vec::with_capacity(plan.record_extents.len() + 1);
         if based_blob_resident {
@@ -454,7 +463,7 @@ pub(super) fn fold_record_blob(
                     &from_dir,
                     mosaica_filter::Access::MappedSequential,
                 )
-                .map_err(failed("pass 4a (record blob: the base)"))?,
+                .map_err(failed(Pass::Attributes.at("record blob: the base")))?,
             );
             out.read(
                 &from_dir,
@@ -473,7 +482,7 @@ pub(super) fn fold_record_blob(
                     &ctx.from_prefix_dir.join(&extent.directory),
                     mosaica_filter::Access::MappedSequential,
                 )
-                .map_err(failed("pass 4a (record blob: an extent)"))?,
+                .map_err(failed(Pass::Attributes.at("record blob: an extent")))?,
             );
             out.read(&ctx.from_prefix_dir, extent.files());
         }
@@ -494,7 +503,7 @@ pub(super) fn fold_record_blob(
                 mosaica_filter::RECORD_BLOCK_TARGET,
             )
             .and_then(|writer| writer.finish())
-            .map_err(failed("pass 4a (record blob: an empty base)"))?;
+            .map_err(failed(Pass::Attributes.at("record blob: an empty base")))?;
         } else {
             mosaica_filter_write::fold_record_blob(
                 &layers,
@@ -504,7 +513,7 @@ pub(super) fn fold_record_blob(
                 &directory_path,
                 mosaica_filter::RECORD_BLOCK_TARGET,
             )
-            .map_err(failed("pass 4a (record blob: the rewrite)"))?;
+            .map_err(failed(Pass::Attributes.at("record blob: the rewrite")))?;
         }
         for (rel, path) in [
             (blocks_rel, blocks_path),
@@ -529,7 +538,7 @@ pub(super) fn fold_entity_terms(
     let terms_rel = plan.layout().entity_terms_rel();
     let from_dir = ctx.from_prefix_dir.join(&terms_rel);
     let to_dir = ctx.to_prefix_dir.join(&terms_rel);
-    std::fs::create_dir_all(&to_dir).map_err(failed("pass 4c (entity terms)"))?;
+    std::fs::create_dir_all(&to_dir).map_err(failed(Pass::EntityTerms.name()))?;
 
     let mut extent_paths = Vec::with_capacity(plan.entity_terms_extents.len());
     for extent in &plan.entity_terms_extents {
@@ -551,18 +560,18 @@ pub(super) fn fold_entity_terms(
         ],
     );
     let layers = mosaica_store::EntityTermsStack::open(Some(&from_dir), &extent_paths)
-        .map_err(failed("pass 4c (entity terms: the layers)"))?;
+        .map_err(failed(Pass::EntityTerms.at("the layers")))?;
     let mut writer = mosaica_store::EntityTermsWriter::create(&to_dir)
-        .map_err(failed("pass 4c (entity terms: the rewrite)"))?;
+        .map_err(failed(Pass::EntityTerms.at("the rewrite")))?;
     // Ascending, the order the writer requires.
     layers
         .for_each_list(&plan.tombstones, &mut |entity, terms| {
             writer.push(entity, &terms)
         })
-        .map_err(failed("pass 4c (entity terms)"))?;
+        .map_err(failed(Pass::EntityTerms.name()))?;
     for path in writer
         .finish()
-        .map_err(failed("pass 4c (entity terms: the rewrite)"))?
+        .map_err(failed(Pass::EntityTerms.at("the rewrite")))?
     {
         let rel = format!(
             "{terms_rel}/{}",

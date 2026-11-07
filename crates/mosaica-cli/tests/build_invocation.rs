@@ -10,6 +10,8 @@
 //! deployment file and its refusal when there is none, the environment key and its `.env`, the
 //! `--file` override, and the flags that no longer exist.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -19,6 +21,7 @@ use std::sync::Arc;
 use arrow::array::{Float64Array, StringArray, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use common::progress_records;
 use mosaica_types::progress::{JobKind, JobState, Progress};
 use parquet::arrow::ArrowWriter;
 const N: u64 = 64;
@@ -744,17 +747,6 @@ fn the_schema_path_comes_from_the_deployment_config() {
 // -------------------------------------------------------------------------------------------
 // --progress
 // -------------------------------------------------------------------------------------------
-
-/// The lines of stderr that are JSON objects, each read as a progress record.
-fn progress_records(output: &Output) -> Vec<Progress> {
-    stderr(output)
-        .lines()
-        .filter(|line| line.starts_with('{'))
-        .map(|line| {
-            serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: not a record: {line}"))
-        })
-        .collect()
-}
 
 /// A project whose declaration also indexes a keyword column, `tag`, and a text column, `note`,
 /// with `tag` taken from `tag_of`.

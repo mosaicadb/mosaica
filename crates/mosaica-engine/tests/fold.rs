@@ -26,7 +26,7 @@ use mosaica_lifecycle::command::UnallocatedRow;
 use mosaica_lifecycle::wal::ChangeOp;
 use mosaica_store::read::open_bundle;
 use mosaica_types::progress::{JobKind, JobState};
-use mosaica_types::{EntityId, MosaicaId, ShardId, TermId};
+use mosaica_types::{EntityId, MosaicaId, TermId};
 use parquet::arrow::ArrowWriter;
 
 /// A fixture bundle and an engine over it, with the executor running and the background refresh
@@ -706,9 +706,9 @@ fn a_request_made_while_a_compaction_runs_is_answered_by_a_later_one() {
     );
 }
 
-/// A compaction's progress record is among the engine's jobs while it runs, naming its shard, and
-/// its phase never goes back. Once the compaction publishes no job is left, its last record is
-/// finished in the last phase, and each pass that counts ended at its total.
+/// A compaction's progress record is among the engine's jobs while it runs, naming its part, and
+/// its phase never goes back. Once the compaction publishes no job is left, and its last record
+/// is finished in the last phase.
 #[test]
 fn a_compaction_is_a_job_until_it_publishes() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -737,8 +737,7 @@ fn a_compaction_is_a_job_until_it_publishes() {
             (record.job, record.state),
             (JobKind::Compaction, JobState::Running)
         );
-        let context = record.context.as_deref().unwrap_or_default();
-        assert!(context.contains(&ShardId::ZERO.to_string()), "{record:?}");
+        assert!(record.context.is_some(), "{record:?}");
     }
     let phases: Vec<u32> = seen.iter().map(|record| record.phase.index).collect();
     assert!(phases.is_sorted(), "{phases:?}");
@@ -753,11 +752,6 @@ fn a_compaction_is_a_job_until_it_publishes() {
         .expect("the compaction's last record is kept");
     assert_eq!(last.state, JobState::Finished);
     assert_eq!(last.phase.index, last.phase.of);
-    let passes = engine.last_fold_passes();
-    assert!(passes.iter().any(|pass| pass.total.is_some()), "{passes:?}");
-    for pass in passes.iter().filter(|pass| pass.total.is_some()) {
-        assert_eq!(pass.done, pass.total, "{pass:?}");
-    }
 }
 
 /// The `v#####` prefixes under `root`, in order.

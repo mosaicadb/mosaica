@@ -138,7 +138,7 @@ pub struct FoldRowSpaceSpec<'a> {
     /// `high_water` at the snapshot, not against the row count this pass will emit,
     /// which is smaller whenever any tombstone applies.
     pub permutation_bound: u64,
-    /// Where the rows read from the inputs are counted, one by one, dropped rows included.
+    /// Where the rows read from the inputs are counted, dropped rows included.
     pub progress: Option<&'a mosaica_types::progress::Tracker>,
 }
 

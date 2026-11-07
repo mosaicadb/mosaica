@@ -72,6 +72,12 @@ impl Phase {
             name: Cow::Borrowed(name),
         }
     }
+
+    /// The phase at `at`, counted from 0, of a job whose phases are `phases` in the order they
+    /// run.
+    pub const fn nth(phases: &'static [&'static str], at: usize) -> Self {
+        Phase::new(at as u32 + 1, phases.len() as u32, phases[at])
+    }
 }
 
 /// A snapshot of a job, as every surface serves it.
@@ -189,6 +195,14 @@ impl Tracker {
         self.lock().context = context;
     }
 
+    /// The open step's count and total, or `None` for a step that counts nothing, without the
+    /// rest of a snapshot.
+    pub fn counted(&self) -> Option<(u64, u64)> {
+        let current = self.lock();
+        let done = self.done.load(Ordering::Relaxed);
+        current.counted.map(|(total, _)| (done, total))
+    }
+
     /// Mark the job finished or failed. The step is left as it was, so a failed job's last
     /// snapshot says where it stopped.
     pub fn end(&self, state: JobState) {
@@ -238,6 +252,160 @@ impl Tracker {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
+
+/// A stage of a job, which runs as one step of the job's record.
+pub trait Stage: Copy {
+    /// The step's stable name.
+    fn name(self) -> &'static str;
+    fn phase(self) -> Phase;
+}
+
+/// The stage a job is in and when it began, so that the stage the record shows and the stage its
+/// time is charged to are the same: entering a stage ends the one open and opens the new one's
+/// step in the job's tracker.
+#[derive(Debug, Clone)]
+pub struct Stages<S> {
+    /// The stage the job was made at, until [`Stages::start`] begins it.
+    queued: Option<S>,
+    open: Option<(S, Instant)>,
+}
+
+impl<S: Stage> Stages<S> {
+    /// A job of kind `job` whose first stage, `first`, begins now, and its tracker.
+    pub fn begin(
+        job: JobKind,
+        first: S,
+        context: Option<String>,
+        counted: Option<(u64, Unit)>,
+    ) -> (Self, Tracker) {
+        let tracker = Self::tracker(job, first, context, counted);
+        let stages = Stages {
+            queued: None,
+            open: Some((first, Instant::now())),
+        };
+        (stages, tracker)
+    }
+
+    /// A job of kind `job` that waits before its first stage, `first`, begins at
+    /// [`Stages::start`], and its tracker, whose step is `first` meanwhile.
+    pub fn queued(job: JobKind, first: S) -> (Self, Tracker) {
+        let tracker = Self::tracker(job, first, None, None);
+        let stages = Stages {
+            queued: Some(first),
+            open: None,
+        };
+        (stages, tracker)
+    }
+
+    fn tracker(
+        job: JobKind,
+        first: S,
+        context: Option<String>,
+        counted: Option<(u64, Unit)>,
+    ) -> Tracker {
+        let tracker = Tracker::new(job, first.phase(), first.name());
+        tracker.context(context);
+        if let Some((total, unit)) = counted {
+            tracker.count(total, unit);
+        }
+        tracker
+    }
+
+    /// Begin the first stage of a job made by [`Stages::queued`], and end the open one if any.
+    pub fn start(
+        &mut self,
+        tracker: &Tracker,
+        context: Option<String>,
+        counted: Option<(u64, Unit)>,
+    ) -> Option<(S, Duration)> {
+        let first = self.queued.take()?;
+        self.enter(tracker, first, context, counted)
+    }
+
+    /// End the open stage and begin `stage`, opening its step in `tracker`. `counted` is the
+    /// step's total and what it counts, or `None` for a stage that counts nothing. Returns the
+    /// stage ended and how long it ran.
+    pub fn enter(
+        &mut self,
+        tracker: &Tracker,
+        stage: S,
+        context: Option<String>,
+        counted: Option<(u64, Unit)>,
+    ) -> Option<(S, Duration)> {
+        let ended = self.close();
+        tracker.begin(stage.phase(), stage.name(), context, counted);
+        self.open = Some((stage, Instant::now()));
+        ended
+    }
+
+    /// End the open stage. Its step stays the record's until the next stage begins.
+    pub fn close(&mut self) -> Option<(S, Duration)> {
+        self.open
+            .take()
+            .map(|(stage, began)| (stage, began.elapsed()))
+    }
+}
+
+/// One part of a step that runs more than once, as its context names it: a batch, a view, a
+/// shard, a file, a column or a page, the `index`th counted from 0, of `of` where the job knows
+/// how many there are.
+///
+/// The context reads `view papers (1 of 2)`, or `page (37)` where the number of parts is not
+/// known. A part that is the only one leaves its position out, and one with no name of its own,
+/// such as a batch or a shard, is then left out whole.
+#[derive(Debug, Clone, Copy)]
+pub struct Part<'a> {
+    noun: &'static str,
+    name: &'a str,
+    index: usize,
+    of: Option<usize>,
+}
+
+impl<'a> Part<'a> {
+    pub fn new(noun: &'static str, name: &'a str, index: usize, of: usize) -> Self {
+        Part {
+            noun,
+            name,
+            index,
+            of: Some(of),
+        }
+    }
+
+    /// The `index`th part of a source that does not say how many it has.
+    pub fn open(noun: &'static str, name: &'a str, index: usize) -> Self {
+        Part {
+            noun,
+            name,
+            index,
+            of: None,
+        }
+    }
+}
+
+/// The context of a step that is the part `parts` names, outermost first.
+pub fn context(parts: &[Part<'_>]) -> Option<String> {
+    let mut out = String::new();
+    for part in parts {
+        let alone = part.of.is_some_and(|of| of <= 1);
+        if part.name.is_empty() && alone {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(", ");
+        }
+        out.push_str(part.noun);
+        if !part.name.is_empty() {
+            out.push(' ');
+            out.push_str(part.name);
+        }
+        match part.of {
+            Some(of) if of > 1 => out.push_str(&format!(" ({} of {of})", part.index + 1)),
+            None => out.push_str(&format!(" ({})", part.index + 1)),
+            Some(_) => {}
+        }
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// How many units [`Batched`] counts between two calls of [`Tracker::advance`].
@@ -478,6 +646,25 @@ mod tests {
             batched.reach(ADVANCE_EVERY * 3);
         }
         assert_eq!(tracker.snapshot().done, Some(ADVANCE_EVERY * 3));
+    }
+
+    #[test]
+    fn a_context_gives_a_position_only_where_there_is_more_than_one_part() {
+        let view = Part::new("view", "papers", 0, 2);
+        let shard = Part::new("shard", "", 2, 3);
+        assert_eq!(
+            context(&[view, shard]).as_deref(),
+            Some("view papers (1 of 2), shard (3 of 3)")
+        );
+        assert_eq!(context(&[Part::new("shard", "", 0, 1)]), None);
+        assert_eq!(
+            context(&[Part::new("shard", "4", 0, 1)]).as_deref(),
+            Some("shard 4")
+        );
+        assert_eq!(
+            context(&[Part::open("page", "", 36)]).as_deref(),
+            Some("page (37)")
+        );
     }
 
     #[test]

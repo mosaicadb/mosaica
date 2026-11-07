@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use mosaica_types::progress::{JobKind, Phase, Tracker, Unit};
+use mosaica_types::progress::{context, JobKind, Part, Phase, Stage, Stages, Tracker, Unit};
 use mosaica_types::ShardId;
-
-use crate::write::{Job, Jobs};
 
 /// Resident bytes: total, anonymous, file-backed. Files written through a mapping are
 /// file-backed and can be reclaimed once written back; anonymous memory cannot.
@@ -55,15 +53,15 @@ pub(crate) enum Pass {
 }
 
 /// The phases of a compaction, in the order they run.
-const PHASES: [&str; 4] = [
+static PHASES: [&str; 4] = [
     "Rewriting rows",
     "Indexing records",
     "Verifying",
     "Publishing",
 ];
 
-impl Pass {
-    pub(crate) fn name(self) -> &'static str {
+impl Stage for Pass {
+    fn name(self) -> &'static str {
         match self {
             Pass::RowSpace => "row_space",
             Pass::Postings => "postings",
@@ -89,8 +87,7 @@ impl Pass {
         }
     }
 
-    /// The phase this pass runs in. The match has no wildcard arm, so a new pass does not compile
-    /// until it has a phase.
+    /// The match has no wildcard arm, so a new pass does not compile until it has a phase.
     fn phase(self) -> Phase {
         let at = match self {
             Pass::RowSpace => 0,
@@ -115,77 +112,85 @@ impl Pass {
             | Pass::Wal
             | Pass::Reclaim => 3,
         };
-        Phase::new(at as u32 + 1, PHASES.len() as u32, PHASES[at])
+        Phase::nth(&PHASES, at)
+    }
+}
+
+impl Pass {
+    /// What a failure in `part` of this pass names, so that the error and the step its record
+    /// stopped in agree.
+    pub(crate) fn at(self, part: impl std::fmt::Display) -> String {
+        format!("{} ({part})", self.name())
     }
 }
 
 /// A compaction's passes: each pass's cost row, and its step of the compaction's record, which
-/// `/control/status` serves while the compaction runs.
+/// `/control/status` serves while the compaction is in flight.
 ///
-/// Entering a pass ends the one open and begins the next, so the step a reader sees and the pass
-/// the time is charged to are the same. The compaction's thread enters its passes, and the
+/// [`Stages`] opens each pass's step as the pass begins, so the step a reader sees and the cost
+/// row the time is charged to are the same. The compaction's thread enters its passes, and the
 /// publication goes on with a clone that the completed fold carries, so the cost rows and the
-/// record cover the compaction end to end. The record is among the running jobs until
-/// [`Staircase::finish`] ends it, or until every clone is dropped, which fails it.
+/// record cover the compaction end to end.
 #[derive(Clone)]
 pub(crate) struct Staircase {
     cost: Vec<PassCost>,
-    open: Option<(Pass, std::time::Instant)>,
-    job: Arc<Job>,
-    shard: String,
+    stages: Stages<Pass>,
+    record: Arc<Tracker>,
+    shard: Option<String>,
 }
 
 impl Staircase {
-    /// The staircase of a compaction of `shard`, its record listed in `jobs` from now.
-    pub(crate) fn start(jobs: &Arc<Jobs>, shard: ShardId) -> Self {
-        let first = Pass::RowSpace;
-        let shard = format!("shard {shard}");
-        let tracker = Tracker::new(JobKind::Compaction, first.phase(), first.name());
-        tracker.begin(first.phase(), first.name(), Some(shard.clone()), None);
-        Self {
-            cost: Vec::with_capacity(21),
-            open: None,
-            job: Arc::new(Job::begin(jobs, tracker)),
+    /// The staircase of a compaction of `shard`, whose views hold `rows` rows, in its first pass
+    /// from now, and the compaction's record.
+    pub(crate) fn start(shard: ShardId, rows: u64) -> (Self, Arc<Tracker>) {
+        let shard = context(&[Part::new("shard", &shard.to_string(), 0, 1)]);
+        let counted = Some((rows, Unit::Rows));
+        let (stages, record) =
+            Stages::begin(JobKind::Compaction, Pass::RowSpace, shard.clone(), counted);
+        let record = Arc::new(record);
+        let stairs = Self {
+            cost: Vec::new(),
+            stages,
+            record: Arc::clone(&record),
             shard,
-        }
+        };
+        (stairs, record)
     }
 
     /// End the open pass and begin `pass`. `counted` is the pass's total and what it counts, or
     /// `None` for a pass that counts nothing.
     pub(crate) fn enter(&mut self, pass: Pass, counted: Option<(u64, Unit)>) {
         self.close();
-        self.tracker()
-            .begin(pass.phase(), pass.name(), Some(self.shard.clone()), counted);
-        self.open = Some((pass, std::time::Instant::now()));
+        self.stages
+            .enter(&self.record, pass, self.shard.clone(), counted);
     }
 
-    /// End the open pass: its cost row takes the wall clock since it began and the resident set
-    /// now. Its step stays the record's until the next pass begins.
+    /// End the open pass: its cost row takes its wall clock, its count and the resident set now.
+    /// Its step stays the record's until the next pass begins.
     pub(crate) fn close(&mut self) {
-        let Some((pass, began)) = self.open.take() else {
+        let Some((pass, elapsed)) = self.stages.close() else {
             return;
         };
         let (rss, anon, _) = resident_set();
-        let step = self.tracker().snapshot();
+        let counted = self.record.counted();
         self.cost.push(PassCost {
             pass: pass.name(),
-            elapsed: began.elapsed(),
+            elapsed,
             rss,
             anon,
-            done: step.done,
-            total: step.total,
+            done: counted.map(|(done, _)| done),
+            total: counted.map(|(_, total)| total),
         });
     }
 
     /// The record the passes count their work into.
     pub(crate) fn tracker(&self) -> &Tracker {
-        self.job.tracker()
+        &self.record
     }
 
-    /// End the open pass and the compaction, and return the cost rows.
+    /// End the open pass, and return the cost rows.
     pub(crate) fn finish(mut self) -> Vec<PassCost> {
         self.close();
-        self.job.finish();
         self.cost
     }
 }

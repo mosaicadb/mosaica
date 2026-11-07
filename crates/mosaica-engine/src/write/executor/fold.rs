@@ -509,6 +509,18 @@ pub(in crate::write) struct Compactions {
     last: Option<ShardId>,
     /// The thread of the compaction dispatched last.
     thread: Option<CompactionThread>,
+    /// The request being answered, from the tick that takes it until it is answered.
+    answering: Option<Answering>,
+}
+
+/// What a request's answer is made from: the number its range of merged requests begins at, the
+/// compaction counters when a tick took it, and the refusal that answers it, where one does. Only
+/// the request's compactions run while it is answered, so the counters' rise is theirs.
+struct Answering {
+    first: u64,
+    folds: u64,
+    failures: u64,
+    refused: Option<RequestOutcome>,
 }
 
 /// A compaction's thread and the flag that abandons it. Dropping it raises the flag and joins the
@@ -1184,6 +1196,21 @@ impl Executor {
             self.compactions.requested = None;
         }
         if self.compactions.requested.is_none() {
+            if let Some(answering) = self.compactions.answering.take() {
+                let failures = self.health.fold_failures.load(Ordering::SeqCst);
+                let folds = self.health.folds.load(Ordering::SeqCst);
+                let outcome = match answering.refused {
+                    Some(refused) => refused,
+                    None if failures > answering.failures => RequestOutcome::Failed,
+                    None if folds > answering.folds => RequestOutcome::Compacted,
+                    None => RequestOutcome::NothingToDo,
+                };
+                *lock_recover(&self.health.last_answer) = Some(RequestAnswer {
+                    first: answering.first,
+                    last: self.compactions.requested_through,
+                    outcome,
+                });
+            }
             self.health
                 .compaction_requests_answered
                 .fetch_max(self.compactions.requested_through, Ordering::SeqCst);
@@ -1249,16 +1276,48 @@ impl Executor {
         }
     }
 
+    /// Take the request numbered `request`, merged into the one being answered where there is one.
+    fn take_request(&mut self, request: u64) {
+        self.compactions.requested_through = request;
+        if self.compactions.answering.is_none() {
+            self.compactions.answering = Some(Answering {
+                first: self
+                    .health
+                    .compaction_requests_answered
+                    .load(Ordering::SeqCst)
+                    + 1,
+                folds: self.health.folds.load(Ordering::SeqCst),
+                failures: self.health.fold_failures.load(Ordering::SeqCst),
+                refused: None,
+            });
+        }
+    }
+
+    /// Record that `reason` refused a shard of the request being answered. A shard with nothing
+    /// to compact refuses nothing the request asked for.
+    fn refuse_requested(&mut self, reason: crate::compact::NoFold) {
+        if reason == crate::compact::NoFold::NothingToFold {
+            return;
+        }
+        if let Some(answering) = &mut self.compactions.answering {
+            answering.refused.get_or_insert(RequestOutcome::Refused {
+                gate: reason.gauge().0,
+                detail: reason.detail(),
+            });
+        }
+    }
+
     /// Answer the request held or being worked through with `reason`, a state that stops this node
     /// publishing until a restart.
     fn refuse_request_unpublishable(&mut self, reason: crate::compact::NoFold) {
         if let Some(request) = self.health.take_compaction_request() {
-            self.compactions.requested_through = request.request;
+            self.take_request(request.request);
         } else if self.compactions.requested.is_none() {
             return;
         }
         self.health
             .record_fold_refusal(reason, Some((self.compactions.requested_through, None)));
+        self.refuse_requested(reason);
         self.compactions.requested = None;
         self.request_answered();
         tracing::warn!(
@@ -1303,7 +1362,7 @@ impl Executor {
         }
         // A request is resolved to its shards at this tick, against the gauges as they stand.
         if let Some(request) = self.health.take_compaction_request() {
-            self.compactions.requested_through = request.request;
+            self.take_request(request.request);
             let shards = self.requested_shards(generation, request);
             match &mut self.compactions.requested {
                 Some(left) => {
@@ -1345,9 +1404,13 @@ impl Executor {
             Err(reason) => {
                 // Recorded before the request is answered, so a caller that reads it answered
                 // finds the refusal.
-                let answering = matches!(from, Dispatching::Requested)
-                    .then_some((self.compactions.requested_through, Some(shard_id)));
+                let requested = matches!(from, Dispatching::Requested);
+                let answering =
+                    requested.then_some((self.compactions.requested_through, Some(shard_id)));
                 self.health.record_fold_refusal(reason, answering);
+                if requested {
+                    self.refuse_requested(reason);
+                }
                 self.compaction_taken(shard_id, from);
                 self.request_answered();
                 tracing::warn!(
@@ -1482,8 +1545,9 @@ impl Executor {
         self.health
             .compaction_shard
             .store(shard_id.raw(), Ordering::SeqCst);
-        let unit = self.fold.start();
-        let stairs = crate::compact::Staircase::start(&self.health.jobs, shard_id);
+        let rows = plan.views.iter().map(|view| view.rows).sum();
+        let (stairs, record) = crate::compact::Staircase::start(shard_id, rows);
+        let unit = self.fold.start_recorded(&self.health.jobs, record);
         let health = Arc::clone(&self.health);
         let switches = Arc::clone(&self.deps.switches);
         let abandoned = Arc::clone(&ctx.abandoned);
@@ -1576,8 +1640,8 @@ impl Executor {
             return false;
         }
         let mut any = false;
-        while let Some(completed) = self.fold.next_completed() {
-            self.publish_fold(completed);
+        while let Some((completed, job)) = self.fold.next_completed() {
+            self.publish_fold(completed, job);
             any = true;
         }
         if any {
@@ -1836,14 +1900,17 @@ impl Executor {
     /// orphans, every consumed artefact still stands, and the next trigger re-plans. A failure
     /// after the flip is alarmed instead: the bundle on disc is the new one, but this process goes
     /// on serving the old geometry it still holds mapped, until restarted.
-    pub(super) fn publish_fold(&mut self, completed: crate::compact::CompletedFold) {
+    ///
+    /// `job` is the compaction's record, finished once it publishes and failed by a discard.
+    pub(super) fn publish_fold(
+        &mut self,
+        completed: crate::compact::CompletedFold,
+        job: Option<crate::write::Job>,
+    ) {
         let started = std::time::Instant::now();
         let mut stairs = completed.stairs.clone();
         let live = self.generation.load_full();
         let plan = &completed.plan;
-        if !self.may_publish() {
-            return;
-        }
         // One closure for every discard below, since each is the same posture: nothing happened,
         // the files are orphans, the next trigger re-plans.
         let discard = {
@@ -1859,6 +1926,10 @@ impl Executor {
                 );
             }
         };
+        if let Some(gate) = self.health.unpublishable() {
+            discard(gate.detail());
+            return;
+        }
 
         let FoldApplies {
             forward,
@@ -2586,6 +2657,9 @@ impl Executor {
         });
         self.reclaim_superseded_prefixes();
         let cost = stairs.finish();
+        if let Some(job) = job {
+            job.finish();
+        }
 
         let (passes, fold_secs, staircase_rss) = self.health.record_fold_cost(
             shard_id,

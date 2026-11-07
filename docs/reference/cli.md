@@ -523,8 +523,8 @@ A compaction removes deleted items' rows from disc, one shard after another, and
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
-| `--wait` |  |  | Wait until the request is answered, reading `/control/status` once a second, and exit 1 when the server refused the request or a compaction failed while it waited. |
-| `--progress` | `MODE` | `auto` | Show the progress of the compaction running while `--wait` waits, on stderr, from the record `/control/status` serves under `jobs`: its phase, its step and the shard, the step's count, rate and time remaining, the time elapsed and the server's resident memory. The modes are `mosaica build --progress`'s. Where a compaction ended while it waited, each mode ends with the record of the last to end, its state `finished`, or `failed` when the request was refused or a compaction failed. |
+| `--wait` |  |  | Wait until the request is answered, reading `/control/status` once a second. It exits 1 unless the server answers the request as compacted or as having nothing to compact, which `compaction.requests.last_answer` states; when the server restarted after the request and so lost it; and when a later request's answer has replaced its outcome before it was read. |
+| `--progress` | `MODE` | `auto` | Show the progress of the compaction in flight while `--wait` waits, on stderr, from the record `/control/status` serves under `jobs`: its phase, its step and the shard, the step's count, rate and time remaining, the time elapsed and the server's resident memory. The modes are `mosaica build --progress`'s. Where the request was answered as compacted or failed, each mode ends with the last compaction's record as `compaction.last_job` serves it, its state `finished` or `failed`. |
 
 ## `mosaica status`
 

@@ -1,5 +1,5 @@
-//! The records of the flush and the compaction running beside the executor, which
-//! `/control/status` serves, and the last record of each kind of job that has ended.
+//! The records of the flush and the compaction in flight, which `/control/status` serves, and the
+//! last record of each kind of job that has ended.
 
 use std::sync::{Arc, Mutex};
 
@@ -18,7 +18,11 @@ impl Jobs {
     /// A record of each job running.
     pub(crate) fn running(&self) -> Vec<Progress> {
         let running = lock_recover(&self.running).clone();
-        running.iter().map(|tracker| tracker.snapshot()).collect()
+        running
+            .iter()
+            .map(|tracker| tracker.snapshot())
+            .filter(|record| record.state == JobState::Running)
+            .collect()
     }
 
     /// The last record of the last job of kind `job` to end, `finished` or `failed`.
@@ -39,8 +43,7 @@ pub(crate) struct Job {
 }
 
 impl Job {
-    pub(crate) fn begin(jobs: &Arc<Jobs>, tracker: Tracker) -> Job {
-        let tracker = Arc::new(tracker);
+    pub(crate) fn begin(jobs: &Arc<Jobs>, tracker: Arc<Tracker>) -> Job {
         lock_recover(&jobs.running).push(Arc::clone(&tracker));
         Job {
             jobs: Arc::clone(jobs),
@@ -48,31 +51,30 @@ impl Job {
         }
     }
 
-    pub(crate) fn tracker(&self) -> &Tracker {
-        &self.tracker
-    }
-
-    pub(crate) fn finish(&self) {
+    pub(crate) fn finish(self) {
         self.end(JobState::Finished);
     }
 
-    /// Take the job from the running ones and keep its last record, once.
+    /// Keep the job's last record among the ended ones, then take it from the running ones, under
+    /// the running list's lock, so a reader of the running list and then the ended one finds it
+    /// in one of the two. The second call does nothing.
     fn end(&self, state: JobState) {
+        let mut running = lock_recover(&self.jobs.running);
+        let Some(at) = running
+            .iter()
+            .position(|held| Arc::ptr_eq(held, &self.tracker))
+        else {
+            return;
+        };
+        let mut last = self.tracker.snapshot();
+        last.state = state;
         {
-            let mut running = lock_recover(&self.jobs.running);
-            let Some(at) = running
-                .iter()
-                .position(|held| Arc::ptr_eq(held, &self.tracker))
-            else {
-                return;
-            };
-            running.remove(at);
+            let mut ended = lock_recover(&self.jobs.ended);
+            ended.retain(|held| held.job != last.job);
+            ended.push(last);
         }
         self.tracker.end(state);
-        let last = self.tracker.snapshot();
-        let mut ended = lock_recover(&self.jobs.ended);
-        ended.retain(|held| held.job != last.job);
-        ended.push(last);
+        running.remove(at);
     }
 }
 

@@ -21,11 +21,11 @@ use mosaica_store::manifest::{DictExtent, FileDigest, Quantisation, RecordExtent
 use mosaica_store::permutation::SegmentExtent;
 use mosaica_store::read::SegmentData;
 use mosaica_store::{write_flush_segment, FlushInput, FlushRow, ShardLayout};
-use mosaica_types::progress::{Batched, JobKind, Phase, Tracker, Unit};
+use mosaica_types::progress::{Batched, Phase, Stage, Stages, Tracker, Unit};
 use mosaica_types::{EntityId, IdentityKey, ShardId, TermId};
 use rustc_hash::FxHashMap;
 
-use crate::write::{Job, Jobs, StageMark};
+use crate::write::StageMark;
 use crate::Generation;
 
 /// The small/large postings threshold for this module's delta-tier writes, fixed rather than
@@ -266,51 +266,66 @@ impl FlushStage {
 /// The one phase of a flush's record.
 const FLUSHING: Phase = Phase::new(1, 1, "Flushing");
 
+impl Stage for FlushStage {
+    fn name(self) -> &'static str {
+        FlushStage::name(self)
+    }
+
+    fn phase(self) -> Phase {
+        FLUSHING
+    }
+}
+
 /// One `execute_flush`'s stages. Each stage begun opens its step in the flush's record, which
-/// `/control/status` serves while the flush runs, and under `bench-timing` each stage's time is
-/// kept here and added to the executor's health when the call returns, so a flush still running
-/// is in no total.
+/// `/control/status` serves while the flush is in flight, and under `bench-timing` each stage's
+/// time is kept here and added to the executor's health when the call returns, so a flush still
+/// running is in no total.
 pub(crate) struct FlushLaps {
     /// Compiles to nothing without `bench-timing`.
     #[cfg_attr(not(feature = "bench-timing"), allow(dead_code))]
     pub(crate) nanos: [u64; FlushStage::COUNT],
-    job: Job,
-    /// The stage running, and when it began.
-    open: Option<(FlushStage, StageMark)>,
+    record: Arc<Tracker>,
+    stages: Stages<FlushStage>,
 }
 
 impl FlushLaps {
-    /// The laps of a flush, its record listed in `jobs` from now until [`Self::finish`], or
-    /// until the laps are dropped, which fails it.
-    pub(crate) fn new(jobs: &Arc<Jobs>) -> Self {
-        let first = FlushStage::Promote;
+    /// The laps of a flush whose `record` was made with `stages` when it was dispatched.
+    pub(crate) fn new(record: Arc<Tracker>, stages: Stages<FlushStage>) -> Self {
         FlushLaps {
             nanos: [0; FlushStage::COUNT],
-            job: Job::begin(jobs, Tracker::new(JobKind::Flush, FLUSHING, first.name())),
-            open: None,
+            record,
+            stages,
         }
+    }
+
+    /// Begin the stage the flush was dispatched at.
+    fn start(&mut self) {
+        let ended = self.stages.start(&self.record, None, None);
+        self.charge(ended, false);
     }
 
     /// End the open stage and begin `stage`. `counted` is its step's total and what it counts, or
     /// `None` for a stage that counts nothing.
     fn begin(&mut self, stage: FlushStage, counted: Option<(u64, Unit)>) {
-        self.end(false);
-        self.job
-            .tracker()
-            .begin(FLUSHING, stage.name(), None, counted);
-        self.open = Some((stage, StageMark::now()));
+        let ended = self.stages.enter(&self.record, stage, None, counted);
+        self.charge(ended, false);
     }
 
     /// End the open stage, its time charged to it, or to `Failed` where it failed.
     fn end(&mut self, failed: bool) {
-        if let Some((stage, mark)) = self.open.take() {
-            self.lap(if failed { FlushStage::Failed } else { stage }, mark);
-        }
+        let ended = self.stages.close();
+        self.charge(ended, failed);
     }
 
-    /// The flush's record leaves the running jobs, finished.
-    pub(crate) fn finish(&self) {
-        self.job.finish();
+    /// Charge a stage that ended, or `Failed` for its time where it failed. A no-op without
+    /// `bench-timing`.
+    #[allow(unused_variables)]
+    fn charge(&mut self, ended: Option<(FlushStage, std::time::Duration)>, failed: bool) {
+        #[cfg(feature = "bench-timing")]
+        if let Some((stage, ran)) = ended {
+            let stage = if failed { FlushStage::Failed } else { stage };
+            self.nanos[stage as usize] += ran.as_nanos() as u64;
+        }
     }
 
     /// Charge the time since `mark` to `stage`, and return a fresh mark. A no-op without
@@ -619,7 +634,7 @@ fn execute_flush_stages(
     ctx: FlushContext,
     laps: &mut FlushLaps,
 ) -> Result<CompletedFlush, MaintenanceFailed> {
-    laps.begin(FlushStage::Promote, None);
+    laps.start();
     let consumed: Vec<EntityId> = plan.items.iter().map(|(entity, _)| *entity).collect();
     let numbers = numbers_of(&plan, &ctx)?;
     let tenancies = ctx.tenancy.of_each(numbers.iter().copied());
@@ -633,7 +648,7 @@ fn execute_flush_stages(
         FlushStage::Rows,
         Some((plan.items.len() as u64, Unit::Rows)),
     );
-    let mut written = Batched::new(Some(laps.job.tracker()));
+    let mut written = Batched::new(Some(&laps.record));
     let mut rows: Vec<FlushRow> = Vec::with_capacity(plan.items.len());
     for (((entity, item), number), tenancy) in plan.items.iter().zip(&numbers).zip(tenancies) {
         let mut scalars = Vec::with_capacity(ctx.render_indices.len() + ctx.scoped_render.len());

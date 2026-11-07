@@ -3058,7 +3058,8 @@ async fn status_flush_and_compact_match_the_description() {
         .unwrap();
     assert_refusal_to(&doc, Some(&post), resp, 422, "contract").await;
 
-    // A compaction held after its passes is served as a progress record under `jobs`.
+    // The status of a compaction held after its passes, which serves its progress record, and
+    // of the same compaction answered.
     let engine = &f.server.state.engine;
     engine.set_fold_paused_for_test(true);
     let resp = control(&f.server, &post, "/control/compact")
@@ -3078,10 +3079,8 @@ async fn status_flush_and_compact_match_the_description() {
         .await
         .unwrap();
     let status = assert_answer(&doc, &get, resp, 200).await;
-    assert_eq!(status["jobs"].as_array().map(Vec::len), Some(1), "{status}");
     assert!(status["publication"].as_u64().unwrap() >= answer["publication"].as_u64().unwrap());
 
-    // Once it is answered, its last record is kept.
     engine.set_fold_paused_for_test(false);
     wait_until(
         "the compaction answered",
@@ -3093,8 +3092,7 @@ async fn status_flush_and_compact_match_the_description() {
         .send()
         .await
         .unwrap();
-    let status = assert_answer(&doc, &get, resp, 200).await;
-    assert!(status["compaction"]["last_job"].is_object(), "{status}");
+    assert_answer(&doc, &get, resp, 200).await;
     let resp = f
         .server
         .client

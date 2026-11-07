@@ -9087,16 +9087,42 @@ components:
           type: object
           additionalProperties: false
           description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried. A scheduled compaction's refusal is not among them."
-          required: [accepted, answered, last_refusal]
+          required: [accepted, answered, last_answer, last_refusal]
           properties:
             accepted:
               type: integer
               minimum: 0
-              description: The number the latest request was given.
+              description: The number the latest request was given. The numbers start again at 1 when the server restarts, so a client holding a number above this one made its request before a restart, and the request was lost with it.
             answered:
               type: integer
               minimum: 0
-              description: The highest request number every shard of which has published, failed, been discarded or been refused. A request answered without a refusal was not necessarily compacted; `fold_failures` counts the compactions that failed or were discarded.
+              description: The highest request number every shard of which has published, failed, been discarded or been refused.
+            last_answer:
+              description: How the latest answer answered the requests it covered, or `null` before the first answer since the server started. A request whose number is at most `answered` and below `first` was answered earlier, and its outcome is no longer served.
+              oneOf:
+                - type: "null"
+                - type: object
+                  additionalProperties: false
+                  required: [first, last, outcome, gate, detail]
+                  properties:
+                    first:
+                      type: integer
+                      minimum: 1
+                      description: The first request the answer covers. Requests made before a tick takes them, or while an earlier one is being answered, are answered together.
+                    last:
+                      type: integer
+                      minimum: 1
+                      description: The last request the answer covers, which `answered` has reached.
+                    outcome:
+                      type: string
+                      enum: [compacted, nothing_to_do, refused, failed]
+                      description: "`compacted` where every shard the requests named was compacted and published; `nothing_to_do` where no shard they named had anything to compact; `refused` where a shard was refused at `gate`; `failed` where a compaction they started failed or was discarded, which `last_job` then shows."
+                    gate:
+                      type: [string, "null"]
+                      description: For `refused`, one of `fold_refusals_by_gate`'s names; `null` otherwise.
+                    detail:
+                      type: [string, "null"]
+                      description: For `refused`, what the gate means and what to do about it, in a sentence; `null` otherwise.
             last_refusal:
               description: The latest refusal that answered a request, or `null` where there has been none.
               oneOf:

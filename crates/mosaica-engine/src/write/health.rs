@@ -169,6 +169,9 @@ pub struct ExecutorHealth {
     /// The last refusal that answered a request, which a scheduled or closing refusal does not
     /// replace.
     pub(crate) last_request_refusal: Mutex<Option<RequestRefusal>>,
+    /// The requests the last answer covered and how it answered them. Written before
+    /// [`Self::compaction_requests_answered`] rises to its last number.
+    pub(crate) last_answer: Mutex<Option<RequestAnswer>>,
     /// The WAL as the last sample found it. Sampled on the executor thread at a tick, at most once a
     /// period, so a status poll costs the node nothing.
     pub(crate) wal_gauge: Mutex<WalGauge>,
@@ -476,6 +479,43 @@ pub struct RequestRefusal {
     pub detail: &'static str,
 }
 
+/// How the compaction requests numbered `first` to `last` were answered. Requests made before a
+/// tick takes them, or while an earlier one is being answered, are merged and answered together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestAnswer {
+    pub first: u64,
+    pub last: u64,
+    pub outcome: RequestOutcome,
+}
+
+/// How a compaction request was answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestOutcome {
+    /// Every shard it named was compacted and published.
+    Compacted,
+    /// No shard it named had anything to compact.
+    NothingToDo,
+    /// A shard it named was refused at the gate named, which `detail` explains.
+    Refused {
+        gate: &'static str,
+        detail: &'static str,
+    },
+    /// A compaction it started failed or was discarded.
+    Failed,
+}
+
+impl RequestOutcome {
+    /// The outcome's name on `/control/status`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RequestOutcome::Compacted => "compacted",
+            RequestOutcome::NothingToDo => "nothing_to_do",
+            RequestOutcome::Refused { .. } => "refused",
+            RequestOutcome::Failed => "failed",
+        }
+    }
+}
+
 /// The write-ahead log's size and its rotation bound, sampled at the executor's tick.
 ///
 /// `members` is the direct signal: steady state is two, and a growing count is a rotation that
@@ -563,6 +603,7 @@ pub struct ExecutorStats {
     pub compaction_requests_accepted: u64,
     pub compaction_requests_answered: u64,
     pub last_request_refusal: Option<RequestRefusal>,
+    pub last_answer: Option<RequestAnswer>,
     /// The WAL as the last sample found it — see [`WalGauge`].
     pub wal: WalGauge,
     pub last_fold_attr_read: u64,
@@ -704,6 +745,7 @@ impl ExecutorHealth {
             compaction_requests_accepted: AtomicU64::new(0),
             compaction_requests_answered: AtomicU64::new(0),
             last_request_refusal: Mutex::new(None),
+            last_answer: Mutex::new(None),
             wal_gauge: Mutex::new(WalGauge::default()),
             fold_ended_unix: AtomicU64::new(0),
             last_compactions: Mutex::new(BTreeMap::new()),
@@ -962,6 +1004,7 @@ impl ExecutorHealth {
             compaction_requests_accepted: self.compaction_requests_accepted.load(Ordering::SeqCst),
             compaction_requests_answered: self.compaction_requests_answered.load(Ordering::SeqCst),
             last_request_refusal: *lock_recover(&self.last_request_refusal),
+            last_answer: *lock_recover(&self.last_answer),
             wal: *lock_recover(&self.wal_gauge),
             last_fold_attr_read: self.last_fold_attr_read.load(Ordering::Relaxed),
             last_fold_attr_written: self.last_fold_attr_written.load(Ordering::Relaxed),

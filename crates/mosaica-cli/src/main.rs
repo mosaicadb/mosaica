@@ -1434,11 +1434,11 @@ fn main() -> ExitCode {
                 progress: (progress != progress::Mode::None)
                     .then(|| progress::Feed::new(mosaica_build::observer::tracker(), progress)),
             };
-            let build = || mosaica_build::build_framed(&args, &framings, &observer);
-            let built = match &observer.progress {
-                Some(feed) => progress::show(feed, build),
-                None => std::panic::catch_unwind(std::panic::AssertUnwindSafe(build)),
-            };
+            let built = progress::run(
+                observer.progress.as_ref(),
+                || mosaica_build::build_framed(&args, &framings, &observer),
+                Result::is_ok,
+            );
             // Written whether the build succeeded, failed or panicked: a build that died in
             // `layers` is exactly the one whose per-stage record is worth having, and the records
             // collected before the failure are as true as any other.

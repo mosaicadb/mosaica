@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use mosaica_types::progress::{Batched, JobKind, Phase, Tracker, Unit};
+use mosaica_types::progress::{context, Batched, JobKind, Part, Phase, Tracker, Unit};
 
 /// The pipeline's stages. [`BuildStage::ALL`] lists them in the order they run.
 ///
@@ -128,7 +128,7 @@ impl BuildStage {
     /// The phase of a build this stage runs in, as `docs/dev/progress.md` names them. The match
     /// has no wildcard arm, so a new stage does not compile until it has a phase.
     pub fn phase(&self) -> Phase {
-        phase(match self {
+        let at = match self {
             BuildStage::SourceIds
             | BuildStage::Dictionary
             | BuildStage::PairsPack
@@ -147,7 +147,8 @@ impl BuildStage {
             | BuildStage::ArtifactPass
             | BuildStage::TermImages => 3,
             BuildStage::Manifests => 4,
-        })
+        };
+        Phase::nth(&PHASES, at)
     }
 
     pub const ALL: [BuildStage; 19] = [
@@ -174,17 +175,13 @@ impl BuildStage {
 }
 
 /// The phases of a build, in the order they run.
-const PHASES: [&str; 5] = [
+static PHASES: [&str; 5] = [
     "Reading sources",
     "Assigning ids",
     "Indexing records",
     "Laying out views",
     "Verifying the bundle",
 ];
-
-const fn phase(at: usize) -> Phase {
-    Phase::new(at as u32 + 1, PHASES.len() as u32, PHASES[at])
-}
 
 /// A tracker for one build, its step the build's first stage until the build begins one.
 pub fn tracker() -> Tracker {
@@ -308,52 +305,6 @@ impl<'a> StageTimer<'a> {
             .stage_end(stage, elapsed, rows, peak_rss_kib());
         self.start += elapsed;
     }
-}
-
-/// One part of a stage that runs more than once, as a step's context names it: a batch, a view, a
-/// shard, a file or a column, the `index`th of `of` counted from 0.
-///
-/// The context reads `view papers (1 of 2)`. A part that is the only one leaves its position out,
-/// and one with no name of its own, a batch or a shard, is left out whole.
-#[derive(Clone, Copy)]
-pub(crate) struct Part<'a> {
-    noun: &'static str,
-    name: &'a str,
-    index: usize,
-    of: usize,
-}
-
-impl<'a> Part<'a> {
-    pub(crate) fn new(noun: &'static str, name: &'a str, index: usize, of: usize) -> Self {
-        Part {
-            noun,
-            name,
-            index,
-            of,
-        }
-    }
-}
-
-/// The context of a step that is the part `parts` names, outermost first.
-fn context(parts: &[Part<'_>]) -> Option<String> {
-    let mut out = String::new();
-    for part in parts {
-        if part.name.is_empty() && part.of <= 1 {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push_str(", ");
-        }
-        out.push_str(part.noun);
-        if !part.name.is_empty() {
-            out.push(' ');
-            out.push_str(part.name);
-        }
-        if part.of > 1 {
-            out.push_str(&format!(" ({} of {})", part.index + 1, part.of));
-        }
-    }
-    (!out.is_empty()).then_some(out)
 }
 
 /// The steps of a build, opened in the [`BuildObserver::progress`] tracker. It is copied into the

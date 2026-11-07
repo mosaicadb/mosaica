@@ -20,7 +20,7 @@ use arrow::ipc::reader::{FileReader, StreamReader};
 use arrow::ipc::writer::StreamWriter;
 use arrow::record_batch::RecordBatch;
 use clap::{ArgGroup, Args, Subcommand, ValueEnum};
-use mosaica_types::progress::{JobKind, JobState, Phase, Progress, Tracker, Unit};
+use mosaica_types::progress::{context, JobKind, Part, Phase, Progress, Tracker, Unit};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ProjectionMask;
 use serde_json::{json, Map, Value};
@@ -353,17 +353,19 @@ pub(crate) enum DropCommand {
 pub(crate) struct CompactArgs {
     #[command(flatten)]
     control: Control,
-    /// Wait until the request is answered, reading `/control/status` once a second, and exit 1
-    /// when the server refused the request or a compaction failed while it waited.
+    /// Wait until the request is answered, reading `/control/status` once a second. It exits 1
+    /// unless the server answers the request as compacted or as having nothing to compact, which
+    /// `compaction.requests.last_answer` states; when the server restarted after the request and
+    /// so lost it; and when a later request's answer has replaced its outcome before it was read.
     #[arg(long)]
     wait: bool,
-    /// Show the progress of the compaction running while `--wait` waits, on stderr, from the
+    /// Show the progress of the compaction in flight while `--wait` waits, on stderr, from the
     /// record `/control/status` serves under `jobs`: its phase, its step and the shard, the step's
     /// count, rate and time remaining, the time elapsed and the server's resident memory.
     ///
-    /// The modes are `mosaica build --progress`'s. Where a compaction ended while it waited, each
-    /// mode ends with the record of the last to end, its state `finished`, or `failed` when the
-    /// request was refused or a compaction failed.
+    /// The modes are `mosaica build --progress`'s. Where the request was answered as compacted
+    /// or failed, each mode ends with the last compaction's record as `compaction.last_job`
+    /// serves it, its state `finished` or `failed`.
     #[arg(
         long,
         value_name = "MODE",
@@ -518,77 +520,102 @@ pub(crate) fn compact(args: CompactArgs) -> ExitCode {
 const COMPACT_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Ask for a compaction, print the answer, and read `/control/status` until the request is
-/// answered, showing the running compaction's record. Returns whether the request was answered
-/// with no refusal and no compaction failing meanwhile.
+/// answered, showing the compaction in flight. Returns whether the server answered the request
+/// as compacted or as having nothing to do.
 fn compact_and_wait(plane: &Plane, mode: Mode) -> Result<bool, String> {
-    let before = control_status(plane)?;
-    let answer = plane.call("POST", "/control/compact", None)?;
-    if !answer.ok() {
-        return Err(format!(
-            "the server answered {}: {}",
-            answer.status,
-            answer.text()
-        ));
-    }
+    let answer = plane.call("POST", "/control/compact", None)?.accepted()?;
     println!("{}", answer.text());
     let request = answer.json()["request"]
         .as_u64()
         .ok_or_else(|| format!("the answer names no request: {}", answer.text()))?;
     let mut renderer = Renderer::new(mode);
+    let outcome = wait_for_compaction(plane, request, &mut renderer);
+    renderer.clear();
+    outcome
+}
+
+/// [`compact_and_wait`]'s wait for request `request`, which ends with the request's served
+/// outcome.
+fn wait_for_compaction(
+    plane: &Plane,
+    request: u64,
+    renderer: &mut Renderer,
+) -> Result<bool, String> {
+    let mut shown: Option<Progress> = None;
+    let mut ticked = std::time::Instant::now();
     let status = loop {
         let status = control_status(plane)?;
-        let running = status["jobs"].as_array().into_iter().flatten();
-        for record in running.filter_map(|job| serde_json::from_value::<Progress>(job.clone()).ok())
-        {
-            if record.job == JobKind::Compaction {
-                renderer.tick(&record);
-            }
+        let requests = &status["compaction"]["requests"];
+        if requests["accepted"].as_u64() < Some(request) {
+            return Err(format!(
+                "the server has numbered fewer requests than {request} since it started, so it \
+                 restarted after this request was made and the request was lost; ask again"
+            ));
         }
-        if status["compaction"]["requests"]["answered"].as_u64() >= Some(request) {
+        let running = status["jobs"].as_array().into_iter().flatten();
+        let compacting = running
+            .filter_map(|job| serde_json::from_value::<Progress>(job.clone()).ok())
+            .find(|record| record.job == JobKind::Compaction);
+        if let Some(record) = compacting {
+            let same_step = |shown: &Progress| {
+                (shown.phase.index, &shown.step, &shown.context)
+                    == (record.phase.index, &record.step, &record.context)
+            };
+            if !shown.as_ref().is_some_and(same_step) {
+                renderer.step_begun(&record);
+                ticked = std::time::Instant::now();
+            } else if ticked.elapsed() >= renderer.interval() {
+                renderer.tick(&record);
+                ticked = std::time::Instant::now();
+            }
+            shown = Some(record);
+        }
+        if requests["answered"].as_u64() >= Some(request) {
             break status;
         }
         std::thread::sleep(COMPACT_POLL);
     };
-    let compaction = |status: &Value, key: &str| status["compaction"][key].as_u64().unwrap_or(0);
-    let refusal = &status["compaction"]["requests"]["last_refusal"];
-    let refused = refusal["request"].as_u64() == Some(request);
-    let failed =
-        refused || compaction(&status, "fold_failures") > compaction(&before, "fold_failures");
-    let ended = ["folds", "fold_failures"]
-        .iter()
-        .any(|key| compaction(&status, key) > compaction(&before, key));
-    let last = serde_json::from_value::<Progress>(status["compaction"]["last_job"].clone()).ok();
-    if let Some(mut last) = last.filter(|_| ended) {
-        if failed {
-            last.state = JobState::Failed;
+    let answer = &status["compaction"]["requests"]["last_answer"];
+    let covers =
+        answer["first"].as_u64() <= Some(request) && answer["last"].as_u64() >= Some(request);
+    if !covers {
+        return Err(format!(
+            "request {request} was answered, and a later answer has replaced its outcome on \
+             /control/status, so its outcome is not known"
+        ));
+    }
+    let outcome = answer["outcome"].as_str().unwrap_or_default();
+    if matches!(outcome, "compacted" | "failed") {
+        if let Ok(last) =
+            serde_json::from_value::<Progress>(status["compaction"]["last_job"].clone())
+        {
+            renderer.finish(&last);
         }
-        renderer.finish(&last);
     }
-    if refused {
-        eprintln!(
-            "mosaica compact: request {request} was refused: {}",
-            refusal["detail"].as_str().unwrap_or_default()
-        );
-    } else if failed {
-        eprintln!(
-            "mosaica compact: a compaction failed while request {request} was answered; \
-             `mosaica status` counts it under `compaction.fold_failures`"
-        );
+    match outcome {
+        "compacted" | "nothing_to_do" => Ok(true),
+        "refused" => {
+            eprintln!(
+                "mosaica compact: request {request} was refused at {}: {}",
+                answer["gate"].as_str().unwrap_or_default(),
+                answer["detail"].as_str().unwrap_or_default()
+            );
+            Ok(false)
+        }
+        _ => {
+            eprintln!("mosaica compact: request {request} was answered {outcome}");
+            Ok(false)
+        }
     }
-    Ok(!failed)
 }
 
 /// `/control/status`, or why it could not be read.
 fn control_status(plane: &Plane) -> Result<Value, String> {
-    let answer = plane.call("GET", "/control/status", None)?;
-    if !answer.ok() {
-        return Err(format!(
-            "/control/status answered {}: {}",
-            answer.status,
-            answer.text()
-        ));
-    }
-    Ok(answer.json())
+    Ok(plane
+        .call("GET", "/control/status", None)?
+        .accepted()
+        .map_err(|e| format!("/control/status: {e}"))?
+        .json())
 }
 
 pub(crate) fn status(control: Control) -> ExitCode {
@@ -765,14 +792,19 @@ fn values_body(rows: &[Value]) -> Vec<u8> {
 // Paged writes
 // ---------------------------------------------------------------------------------------------
 
+/// The phases of an insert's record: the pages it sends, then under `--wait` the publication it
+/// waits for.
+static INSERT_PHASES: [&str; 2] = ["Sending", "Waiting for publication"];
+
+/// The steps of an insert's record, one in each of [`INSERT_PHASES`].
+const PAGES: &str = "pages";
+const PUBLICATION: &str = "publication";
+
 pub(crate) fn insert(args: InsertArgs) -> ExitCode {
-    let phases = if args.wait { 2 } else { 1 };
+    let phases = &INSERT_PHASES[..if args.wait { 2 } else { 1 }];
     let feed = (args.progress != Mode::None).then(|| {
-        let sending = Phase::new(1, phases, "Sending");
-        Feed::new(
-            Tracker::new(JobKind::Ingest, sending, "pages"),
-            args.progress,
-        )
+        let tracker = Tracker::new(JobKind::Ingest, Phase::nth(phases, 0), PAGES);
+        Feed::new(tracker, args.progress)
     });
     let sending = Sending {
         feed: feed.as_ref(),
@@ -786,43 +818,29 @@ pub(crate) fn insert(args: InsertArgs) -> ExitCode {
                 None => insert_rows(&plane, &args, sending),
             })
     };
-    let report = match &feed {
-        Some(feed) => {
-            // A report with a refused request is the job failing, as the exit status says.
-            let mut report = Err(String::new());
-            let shown = crate::progress::show(feed, || {
-                report = insert();
-                match &report {
-                    Ok(report) if report.ok() => Ok(()),
-                    _ => Err(()),
-                }
-            });
-            if let Err(panic) = shown {
-                std::panic::resume_unwind(panic);
-            }
-            report
-        }
-        None => insert(),
-    };
+    // A report with a refused request is the job failing, as the exit status says.
+    let report = crate::progress::run(feed.as_ref(), insert, |report| {
+        report.as_ref().is_ok_and(Report::ok)
+    })
+    .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
     print_report("insert", report)
 }
 
-/// An insert's record, where its progress is shown: the pages it sends, then under `--wait` the
-/// publication it waits for. With no record, each call does nothing.
+/// An insert's record, where its progress is shown. With no record, each call does nothing.
 #[derive(Clone, Copy, Default)]
 struct Sending<'a> {
     feed: Option<&'a Feed>,
-    /// The insert's phases: the second is the wait for publication.
-    phases: u32,
+    /// The insert's phases, the wait for publication among them under `--wait`.
+    phases: &'static [&'static str],
 }
 
 impl Sending<'_> {
     /// Begin sending pages, `rows` in all where the input says.
     fn begin(self, rows: Option<u64>) {
         if let Some(feed) = self.feed {
-            let counted = rows.map(|rows| (rows, Unit::Rows));
-            let sending = Phase::new(1, self.phases, "Sending");
-            feed.tracker().begin(sending, "pages", None, counted);
+            if let Some(rows) = rows {
+                feed.tracker().count(rows, Unit::Rows);
+            }
             feed.step_begun();
         }
     }
@@ -831,12 +849,12 @@ impl Sending<'_> {
     /// input says.
     fn page(self, first: usize, page_rows: usize, rows: Option<u64>) {
         if let Some(feed) = self.feed {
-            let page = first / page_rows + 1;
-            let context = match rows.map(|rows| rows.div_ceil(page_rows as u64)) {
-                Some(pages) => format!("page {page} of {pages}"),
-                None => format!("page {page}"),
+            let index = first / page_rows;
+            let page = match rows.map(|rows| rows.div_ceil(page_rows as u64)) {
+                Some(pages) => Part::new("page", "", index, pages as usize),
+                None => Part::open("page", "", index),
             };
-            feed.tracker().context(Some(context));
+            feed.tracker().context(context(&[page]));
         }
     }
 
@@ -851,21 +869,13 @@ impl Sending<'_> {
     fn waiting(self, publication: Option<u64>) {
         if let Some(feed) = self.feed {
             feed.step_ended();
-            let waiting = Phase::new(2, self.phases, "Waiting for publication");
-            let context = publication.map(|n| format!("publication {n}"));
-            feed.tracker().begin(waiting, "publication", context, None);
+            let number = publication.map(|n| n.to_string());
+            let awaited = number.and_then(|n| context(&[Part::new("publication", &n, 0, 1)]));
+            let waiting = Phase::nth(self.phases, 1);
+            feed.tracker().begin(waiting, PUBLICATION, awaited, None);
             feed.step_begun();
         }
     }
-}
-
-/// The rows in `path` where its format says, which a Parquet file's footer does.
-fn planned_rows(path: &Path, input: &Input) -> Option<u64> {
-    if path == Path::new("-") || input_format(path, input.format).ok()? != InputFormat::Parquet {
-        return None;
-    }
-    let builder = ParquetRecordBatchReaderBuilder::try_new(File::open(path).ok()?).ok()?;
-    u64::try_from(builder.metadata().file_metadata().num_rows()).ok()
 }
 
 pub(crate) fn change(args: ChangeArgs, op: &'static str) -> ExitCode {
@@ -888,7 +898,7 @@ fn insert_rows(plane: &Plane, args: &InsertArgs, sending: Sending) -> Result<Rep
         ),
     )?;
     let mut ids = args.ids_out.clone().map(Ids::new).transpose()?;
-    let rows = open_rows(&args.file, &args.input, limits.rows)?;
+    let (rows, planned) = open_rows(&args.file, &args.input, limits.rows)?;
     let path = format!("/control/ingest{}", query(args.strict, false));
     // The file's name, for a server log to say which file a batch came from, reduced to what a
     // header may carry.
@@ -900,9 +910,6 @@ fn insert_rows(plane: &Plane, args: &InsertArgs, sending: Sending) -> Result<Rep
             .collect(),
         _ => "stdin".to_owned(),
     };
-    let planned = sending
-        .feed
-        .and_then(|_| planned_rows(&args.file, &args.input));
     sending.begin(planned);
     let mut report = Report::default();
     let read = paged(rows, limits.rows, |first, page| {
@@ -956,11 +963,8 @@ fn insert_values(
             mosaica_server::control::DECLARATION_MAX_BODY_BYTES,
         ),
     )?;
-    let rows = open_rows(&args.file, &args.input, limits.rows)?;
+    let (rows, planned) = open_rows(&args.file, &args.input, limits.rows)?;
     let path = format!("/control/vocabularies/{}/values", segment(name));
-    let planned = sending
-        .feed
-        .and_then(|_| planned_rows(&args.file, &args.input));
     sending.begin(planned);
     let mut report = Report::default();
     let read = paged(rows, limits.rows, |first, page| {
@@ -1004,11 +1008,14 @@ fn changes(plane: &Plane, args: &ChangeArgs, op: &'static str) -> Result<Report,
         }
     }
     let rows = match &args.file {
-        Some(file) => Some(open_rows(
-            file,
-            &args.input,
-            mosaica_server::control::CHANGES_MAX_ITEMS,
-        )?),
+        Some(file) => Some(
+            open_rows(
+                file,
+                &args.input,
+                mosaica_server::control::CHANGES_MAX_ITEMS,
+            )?
+            .0,
+        ),
         None => None,
     };
     let limits = Limits::read(
@@ -1531,8 +1538,9 @@ fn input_format(path: &Path, flag: Option<InputFormat>) -> Result<InputFormat, S
     }
 }
 
-/// The rows of `path`, or of stdin for `-`, read `batch_rows` at a time where the format allows.
-fn open_rows(path: &Path, input: &Input, batch_rows: usize) -> Result<Rows, String> {
+/// The rows of `path`, or of stdin for `-`, read `batch_rows` at a time where the format allows,
+/// and how many there are where the file says, which a Parquet file's footer does.
+fn open_rows(path: &Path, input: &Input, batch_rows: usize) -> Result<(Rows, Option<u64>), String> {
     let format = input_format(path, input.format)?;
     let stdin = path == Path::new("-");
     let name = if stdin {
@@ -1552,7 +1560,7 @@ fn open_rows(path: &Path, input: &Input, batch_rows: usize) -> Result<Rows, Stri
             } else {
                 Box::new(BufReader::new(open()?))
             };
-            Ok(Rows::Lines(reader, input.columns.clone()))
+            Ok((Rows::Lines(reader, input.columns.clone()), None))
         }
         InputFormat::Parquet => {
             if stdin {
@@ -1564,6 +1572,7 @@ fn open_rows(path: &Path, input: &Input, batch_rows: usize) -> Result<Rows, Stri
             }
             let builder =
                 ParquetRecordBatchReaderBuilder::try_new(open()?).map_err(|e| unreadable(&e))?;
+            let held = u64::try_from(builder.metadata().file_metadata().num_rows()).ok();
             let builder = match &input.columns {
                 Some(names) => {
                     let mask = ProjectionMask::roots(
@@ -1578,9 +1587,8 @@ fn open_rows(path: &Path, input: &Input, batch_rows: usize) -> Result<Rows, Stri
                 .with_batch_size(batch_rows)
                 .build()
                 .map_err(|e| unreadable(&e))?;
-            Ok(Rows::Batches(Box::new(
-                reader.map(move |batch| batch.map_err(|e| unreadable(&e))),
-            )))
+            let rows = reader.map(move |batch| batch.map_err(|e| unreadable(&e)));
+            Ok((Rows::Batches(Box::new(rows)), held))
         }
         InputFormat::Ipc => {
             let (schema, batches): (_, Box<dyn Iterator<Item = Result<RecordBatch, ArrowError>>>) =
@@ -1606,13 +1614,14 @@ fn open_rows(path: &Path, input: &Input, batch_rows: usize) -> Result<Rows, Stri
                 Some(names) => Some(indices(&schema, names, &name)?),
                 None => None,
             };
-            Ok(Rows::Batches(Box::new(batches.map(move |batch| {
+            let rows = batches.map(move |batch| {
                 let batch = batch.map_err(|e| unreadable(&e))?;
                 match &projection {
                     Some(indices) => batch.project(indices).map_err(|e| unreadable(&e)),
                     None => Ok(batch),
                 }
-            }))))
+            });
+            Ok((Rows::Batches(Box::new(rows)), None))
         }
     }
 }

@@ -2082,8 +2082,9 @@ async fn control_compact_is_accepted_and_deferred() {
 }
 
 /// `/control/status` serves the running compaction's progress record under `jobs`, which is an
-/// empty array when nothing runs, and keeps the last compaction's record under
-/// `compaction.last_job` once it has ended.
+/// empty array when nothing runs. Once the request is answered it serves the request's outcome,
+/// the compaction's last record under `compaction.last_job`, and each pass that counts at its
+/// total.
 #[tokio::test]
 async fn status_serves_a_running_compaction_under_jobs() {
     let tmp = TempDir::new().unwrap();
@@ -2098,17 +2099,7 @@ async fn status_serves_a_running_compaction_under_jobs() {
     assert_eq!(code, 200, "{body}");
     tick(&server).await;
     engine.set_fold_paused_for_test(true);
-    let resp = server
-        .client
-        .post(server.control_url("/control/compact"))
-        .bearer_auth(OPERATOR_CREDENTIAL)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status().as_u16(), 202);
-    let request = resp.json::<serde_json::Value>().await.unwrap()["request"]
-        .as_u64()
-        .unwrap();
+    let request = ask_for_compaction(&server).await;
     wait_until(
         "the compaction holds",
         std::time::Duration::from_secs(60),
@@ -2130,11 +2121,26 @@ async fn status_serves_a_running_compaction_under_jobs() {
     .await;
     let after = control_status(&server).await;
     assert_eq!(after["jobs"], serde_json::json!([]), "{after}");
+    let answer = &after["compaction"]["requests"]["last_answer"];
+    assert!(
+        answer["first"].as_u64() <= Some(request) && answer["last"].as_u64() >= Some(request),
+        "{answer}"
+    );
+    assert_eq!(answer["outcome"], "compacted", "{answer}");
     let last: Progress = serde_json::from_value(after["compaction"]["last_job"].clone()).unwrap();
     assert_eq!(
         (last.job, last.state),
         (JobKind::Compaction, JobState::Finished)
     );
+    let passes = after["compaction"]["passes"].as_array().unwrap();
+    let counted: Vec<&serde_json::Value> = passes
+        .iter()
+        .filter(|pass| !pass["total"].is_null())
+        .collect();
+    assert!(!counted.is_empty(), "{passes:?}");
+    for pass in counted {
+        assert_eq!(pass["done"], pass["total"], "{pass}");
+    }
 }
 
 /// Ask for a compaction under a memory figure no compaction fits, and answer the request's number
@@ -2177,12 +2183,25 @@ async fn a_compaction_refused_at_its_turn_is_reported_against_its_request() {
     assert!(refusal["detail"].as_str().is_some_and(|d| !d.is_empty()));
     assert_eq!(refusal["had_bytes"], 1);
     assert!(refusal["need_bytes"].as_u64().unwrap() > 1);
+    let answer = &requests["last_answer"];
+    assert_eq!(
+        (&answer["first"], &answer["last"], &answer["outcome"]),
+        (
+            &serde_json::json!(1),
+            &serde_json::json!(1),
+            &serde_json::json!("refused")
+        ),
+        "{requests}"
+    );
+    assert_eq!(answer["gate"], "insufficient_memory");
 
     let server = restart(server, &tmp).await;
     let requests = control_status(&server).await["compaction"]["requests"].clone();
     assert_eq!(
         requests,
-        serde_json::json!({ "accepted": 0, "answered": 0, "last_refusal": null })
+        serde_json::json!({
+            "accepted": 0, "answered": 0, "last_answer": null, "last_refusal": null
+        })
     );
     let (request, requests) = compact_refused_for_memory(&server).await;
     assert_eq!(request, 1);
@@ -4145,6 +4164,12 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/compaction/requests", "object"),
     ("/compaction/requests/accepted", "integer"),
     ("/compaction/requests/answered", "integer"),
+    ("/compaction/requests/last_answer", "null|object"),
+    ("/compaction/requests/last_answer/detail", "null|string"),
+    ("/compaction/requests/last_answer/first", "integer"),
+    ("/compaction/requests/last_answer/gate", "null|string"),
+    ("/compaction/requests/last_answer/last", "integer"),
+    ("/compaction/requests/last_answer/outcome", "string"),
     ("/compaction/requests/last_refusal", "null|object"),
     ("/compaction/requests/last_refusal/at_unix", "integer"),
     ("/compaction/requests/last_refusal/detail", "string"),
@@ -4599,9 +4624,9 @@ fn status_shape(value: &serde_json::Value, path: &str, shape: &mut Shape) {
 }
 
 /// `/control/status` serves only the key paths and types in [`STATUS_SHAPE`], serves a key
-/// whenever it serves the object holding it, and shows every pinned type in one of three reads:
-/// fresh, with a pinned log and a derived-geometry lookup, and after a flush, a fold and a refused
-/// fold.
+/// whenever it serves the object holding it, and shows every pinned type in one of its reads:
+/// fresh, with a pinned log and a derived-geometry lookup, after a flush and a fold, and after each
+/// kind of refused fold.
 #[tokio::test]
 async fn control_status_serves_its_pinned_shape() {
     const LAYER: &str = "clusters/status";
@@ -4693,6 +4718,7 @@ async fn control_status_serves_its_pinned_shape() {
     reads.push(pinned_and_derived);
 
     flush_and_fold(&server, None).await;
+    reads.push(control_status(&server).await);
     // A memory figure no compaction fits refuses one with its byte figures.
     let (request, _) = compact_refused_for_memory(&server).await;
     reads.push(control_status(&server).await);

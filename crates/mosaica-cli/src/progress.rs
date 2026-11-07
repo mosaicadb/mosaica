@@ -2,7 +2,7 @@
 //!
 //! [`Renderer`] takes snapshots from any source and decides what to print for the chosen
 //! [`Mode`]: a source that polls gives it each snapshot as a tick, and a job that runs in this
-//! process also tells it when each step ends and begins. [`Feed`] and [`show`] are that source for
+//! process also tells it when each step ends and begins. [`Feed`] and [`run`] are that source for
 //! a job that counts into a [`Tracker`].
 
 use std::io::Write;
@@ -99,6 +99,14 @@ impl Renderer {
         self.print(progress);
         if self.drawn {
             eprint!("\n\n");
+            self.drawn = false;
+        }
+    }
+
+    /// Erase the bar, where one is drawn, for a job that ends with no last snapshot to print.
+    pub(crate) fn clear(&mut self) {
+        if self.drawn {
+            eprint!("\x1b[J");
             self.drawn = false;
         }
     }
@@ -294,14 +302,21 @@ impl Feed {
     }
 }
 
-/// Run `job` on this thread while another gives `feed`'s renderer a snapshot at its interval,
-/// then mark the job finished or failed by what `job` returned, or failed where it panicked, and
-/// print its last snapshot. A panic is returned for the caller to resume once it has done what a
-/// failed job still owes.
-pub(crate) fn show<T, E>(
-    feed: &Feed,
-    job: impl FnOnce() -> Result<T, E>,
-) -> std::thread::Result<Result<T, E>> {
+/// Run `job` on this thread and return what it returned, or its panic for the caller to resume
+/// once it has done what a failed job still owes.
+///
+/// Where there is a `feed`, another thread gives its renderer a snapshot at the renderer's
+/// interval while `job` runs, and then the job is marked finished where `finished` says what
+/// `job` returned is the job finishing, and failed otherwise or where it panicked, and its last
+/// snapshot is printed.
+pub(crate) fn run<T>(
+    feed: Option<&Feed>,
+    job: impl FnOnce() -> T,
+    finished: impl FnOnce(&T) -> bool,
+) -> std::thread::Result<T> {
+    let Some(feed) = feed else {
+        return std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+    };
     let interval = feed
         .renderer
         .lock()
@@ -321,11 +336,11 @@ pub(crate) fn show<T, E>(
         ticker.thread().unpark();
         outcome
     });
-    let finished = matches!(outcome, Ok(Ok(_)));
-    feed.tracker.end(match finished {
+    let state = match outcome.as_ref().is_ok_and(finished) {
         true => JobState::Finished,
         false => JobState::Failed,
-    });
+    };
+    feed.tracker.end(state);
     feed.with(Renderer::finish);
     outcome
 }

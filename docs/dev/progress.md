@@ -50,13 +50,13 @@ The build's 19 stages fall into five phases. A stage's phase is given by a `matc
 | 4. Laying out views | `tiler_sort`, `segment_write`, `artifact_pass`, `term_images` | Rows for `segment_write`, terms for `term_images`, nothing for the sort or `artifact_pass`. Runs once per view, and `context` names the view. `term_images` includes the view's field tallies. The containment partitions are composed by one more `artifact_pass` step with no context, after the last view. |
 | 5. Verifying the bundle | `manifests` | Bytes digested, out of the bundle's size. |
 
-`filter_postings` and `text_index` share one loop over the declared columns, so each column is its own step, and the record shows them in the order they run. A stage that runs once per shard as well, such as `segment_write` or a column's `filter_postings`, names the shard in `context` when the bundle has more than one, so that two consecutive steps always differ. A context reads like `view s0 (1 of 2), shard (2 of 3)`: a part that is the only one of its kind has no position, and an unnamed part such as a batch or a shard is left out when it is the only one. Where a stage has work of its own after its parts, such as `filter_postings` after its columns, its step is opened again with no context.
+`filter_postings` and `text_index` share one loop over the declared columns, so each column is its own step, and the record shows them in the order they run. A stage that runs once per shard as well, such as `segment_write` or a column's `filter_postings`, names the shard in `context` when the bundle has more than one, so that two consecutive steps always differ. A context reads like `view s0 (1 of 2), shard (2 of 3)`: a part that is the only one of its kind has no position, and an unnamed part such as a batch or a shard is left out when it is the only one. A part of a source that does not say how many it has reads like `page (37)`. Every job builds its context with `mosaica_types::progress::context`. Where a stage has work of its own after its parts, such as `filter_postings` after its columns, its step is opened again with no context.
 
 `StageTimer` opens each stage's step and times the stage, so for any second of the build the step in the record and the stage that `--stage-timings` charges are the same, and the stages' times sum to the build's wall time. `--stage-timings` and `--stage-timings-json` still report each stage's total when it ends. Byte figures in the build's reports are in binary units, as the progress record's are.
 
 ### Compaction
 
-A compaction rewrites one shard at a time, and one compaction runs at a time. `context` names the shard.
+A compaction rewrites one shard at a time, and one compaction runs at a time. `context` names the shard, such as `shard 3`.
 
 | Phase | Steps |
 |---|---|
@@ -65,13 +65,15 @@ A compaction rewrites one shard at a time, and one compaction runs at a time. `c
 | 3. Verifying | `digests` |
 | 4. Publishing | `hand_off`, `memberships`, `derived`, `report`, `manifest`, `flip`, `retire`, `open`, `adopt`, `warm`, `wal`, `reclaim` |
 
-The steps of phases 1 to 3 are the passes of `compact::execute` on the compaction's own thread, and the steps of phase 4 are the parts of `publish_fold` on the write executor. The `Staircase` that times each pass for `compaction.passes` opens its step, so a pass's cost row and its step are one boundary. `row_space` counts the rows it reads, `postings` the terms of the dictionary and `digests` the bytes it digests. The other steps count nothing.
+The steps of phases 1 to 3 are the passes of `compact::execute` on the compaction's own thread, and the steps of phase 4 are the parts of `publish_fold` on the write executor. The `Staircase` that times each pass for `compaction.passes` opens its step through `mosaica_types::progress::Stages`, so a pass's cost row and its step are one boundary, and the error of a pass that fails names its step. `row_space` counts the rows it reads, `postings` the terms of the dictionary and `digests` the bytes it digests. The other steps count nothing.
+
+A compaction's record is listed from its dispatch until its publication ends, and it is failed where the compaction fails on its thread or is discarded at publication.
 
 ### Flush
 
-A flush has one phase, Flushing, whose steps are the stages of its execution on the worker pool, from `promote` to `drop_plan`. The flush laps that time those stages open the steps. The `rows` step counts the rows it writes out of the rows the flush took from the buffer.
+A flush has one phase, Flushing, whose steps are the stages of its execution on the worker pool, from `promote` to `drop_plan`. The flush laps that time those stages open the steps through `Stages`. The `rows` step counts the rows it writes out of the rows the flush took from the buffer. The other steps count nothing, because a flush lasts seconds and its record exists so that a reader of `/control/status` can see that one is running and for how long.
 
-Not built yet: the flush's planning and its publication on the write executor are timed by a separate mechanism and have no steps, so `jobs` lists a flush only while it executes on the pool. `/control/status` shows that a flush is in flight for the whole of it. The other steps count nothing, because a flush lasts seconds and its record exists so that a reader of `/control/status` can see that one is running and for how long. `flush --wait` holds its request until the flush is visible and shows no progress while it waits.
+A flush's record is listed for the whole time the flush is in flight, from its dispatch to its publication, and it is failed where the flush fails or is discarded at publication. Not built yet: the flush's publication on the write executor is timed by a separate mechanism and has no steps, so while the flush publishes its record shows `drop_plan`, the last of its pool stages, and while it waits for a worker it shows `promote`, the first. `flush --wait` holds its request until the flush is visible and shows no progress while it waits.
 
 ### Ingest
 
@@ -79,16 +81,18 @@ The client that sends an ingest makes its record, because the server sees one re
 
 | Phase | Step | What it counts |
 |---|---|---|
-| 1. Sending | `pages` | Rows sent, out of the rows in the Parquet file's footer. `context` names the page, such as `page 37 of 120`. An Arrow IPC or NDJSON file has no total, so its pages are not counted and `context` reads `page 37`. |
+| 1. Sending | `pages` | Rows sent, out of the rows in the Parquet file's footer. `context` names the page, such as `page (37 of 120)`. An Arrow IPC or NDJSON file has no total, so its pages are not counted and `context` reads `page (37)`. |
 | 2. Waiting for publication | `publication` | Nothing. Only with `--wait`, so an insert without it has one phase. |
 
 ## Surfaces
 
 ### HTTP
 
-`GET /control/status` has a `jobs` array that holds the record of each running flush and compaction, and an empty array when none is running. `compaction.last_job` holds the record of the last compaction to end, finished or failed, or `null` before the first, and each entry of `compaction.passes` carries its step's final `done` and `total`. The records are served only on the control plane, because a compaction's counts are totals over the whole corpus rather than counts within one viewer's visible set.
+`GET /control/status` has a `jobs` array that holds the record of each flush and compaction in flight, and an empty array when none is. `compaction.last_job` holds the record of the last compaction to end, finished or failed, or `null` before the first, and each entry of `compaction.passes` carries its step's final `done` and `total`. The records are served only on the control plane, because a compaction's counts are totals over the whole corpus rather than counts within one viewer's visible set.
 
-A client that waits for a compaction polls `/control/status` until `compaction.requests.answered` reaches its request number, and shows the compaction's record from `jobs` while it waits. It ends with `compaction.last_job`, because a compaction shorter than the polling interval is never seen in `jobs`, and a failed compaction's record says which step it stopped in.
+`compaction.requests.last_answer` says how the server answered the latest compaction request: the range of request numbers it covers, `first` to `last`, since requests made before a tick takes them or while an earlier one is answered are answered together, and its `outcome`, which is `compacted`, `nothing_to_do`, `refused` with the `gate` and its `detail`, or `failed`. The server decides the outcome, so every client reads the same answer.
+
+A client that waits for a compaction polls `/control/status` until `compaction.requests.answered` reaches its request number, and shows the compaction's record from `jobs` while it waits. It then reads the outcome from `last_answer`, and the request has failed unless the outcome is `compacted` or `nothing_to_do`. Where `accepted` is below its request number the server restarted and lost the request, and where `answered` has reached the number but `last_answer` begins after it, a later answer has replaced its outcome, which is then not known. Where the outcome is `compacted` or `failed` the client ends with `compaction.last_job` as served, because a compaction shorter than the polling interval is never seen in `jobs`, and a failed compaction's record says which step it stopped in.
 
 ### CLI
 
@@ -108,7 +112,7 @@ A `plain` line reads as follows.
 12:04:31Z [3/5 Indexing records] filter_postings column category (3 of 7)  41.2M/74.0M items  1.83M/s  ~18s  7m12s  rss 18.2 GiB
 ```
 
-`mosaica compact --wait` takes `--progress` and shows the compaction's record from `/control/status` until the request is answered, and exits non-zero when the compaction is refused or fails. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints the status as JSON, so its `jobs` array holds the running jobs.
+`mosaica compact --wait` takes `--progress` and shows the compaction's record from `/control/status` until the request is answered, and exits non-zero unless the server answered it as `compacted` or `nothing_to_do`. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints the status as JSON, so its `jobs` array holds the running jobs.
 
 ### Python
 

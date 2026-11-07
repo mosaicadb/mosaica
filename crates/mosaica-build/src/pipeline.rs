@@ -160,13 +160,13 @@ use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 use crate::column::EntityColumn;
 use crate::error::{BuildError, Result};
 use crate::input;
-use crate::observer::{BuildObserver, BuildStage, Part, StageTimer, Steps};
+use crate::observer::{BuildObserver, BuildStage, StageTimer, Steps};
 use crate::spill;
 use crate::{
     fsync_file, validate_args, write_manifests, BuildArgs, BuildReport, BundleFiles,
     PairsParquetWriter, PREFIX, SEG_ID,
 };
-use mosaica_types::progress::{Batched, Unit};
+use mosaica_types::progress::{Batched, Part, Unit};
 
 /// One item's position in the signature sort. 16 bytes, four-byte aligned — every field is a
 /// component of the sort key, and holding the key in the record is what keeps the comparator a
