@@ -100,8 +100,12 @@ db.check()                                         # what the declaration reads,
 db.commit()                                        # mosaica check, mosaica build, mosaica serve
 ```
 
-No call prints. Each returns a report that shows as a short summary of what happened, in numbers,
-with every refusal and finding in full; a notebook cell that ends in one shows it. The detail is
+Each call returns a report that shows as a short summary of what happened, in numbers,
+with every refusal and finding in full; a notebook cell that ends in one shows it. While they run,
+`commit()` and `compact(wait=True)` also draw how far they have gone, with `tqdm` where it is
+installed and as a line on stderr where it is not. `progress=False` turns it off, and
+`progress=fn` hands each record to `fn` as a `dict` instead, in the shape `/control/status`
+serves under `jobs`. The detail is
 on the report's attributes: an insert's `read` and `ignored` columns, a check's or a first
 commit's `findings` and `log` (the declaration check's and the build's text), a later commit's
 `plan`, `rows_accepted` and `refusals`. `db.path` is where the database is and `db.binary` the
@@ -602,6 +606,7 @@ for a set of terms, since it is made for no principal of the catalogue.
 ```python
 db.status()                                    # the watermarks, queues and pagination units
 db.compact()                                   # ask for the fold that removes a deletion's rows
+db.compact(wait=True)                          # and wait for the server's answer
 db.drop_layer("clusters/kmeans")               # the inverse of declare_layer
 db.drop_view("slices", "a")                    # remove one view of a view group
 ```
@@ -622,7 +627,9 @@ minutes.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call
-returns. After `drop_layer()` the name may be declared again, as a new layer that none of the
+returns. `compact(wait=True)` reads `/control/status` once a second, showing the compaction's
+progress, until the server has answered the request, and returns the answer's `outcome`; it raises
+`Refusal` unless the outcome is `compacted` or `nothing_to_do`. After `drop_layer()` the name may be declared again, as a new layer that none of the
 dropped layer's `mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
 items it leaves in no view, as `remove()` deletes one, and the answer's `deleted` says how many.
 

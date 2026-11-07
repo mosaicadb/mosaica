@@ -41,12 +41,13 @@ import datetime
 import json
 import numbers
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import pyarrow as pa
 
 from ._control import UNANSWERED, Answer, Control, arrow_body, batch_id
 from . import _declaration as _D
+from . import _progress
 from ._declaration import rows_of
 from ._inserts import SHAPE_COLUMNS, SHAPE_FIELDS, SHAPE_RECORD_FIELD, axes
 from ._refusal import Refusal
@@ -1289,8 +1290,19 @@ def _records(table: pa.Table, insert) -> list[dict]:
 
 # ---------------------------------------------------------------------------- the run
 
+#: The phases of a later commit's ingest record: the pages it sends, then the publication its
+#: closing flush waits for.
+INGEST_PHASES = ["Sending", "Waiting for publication"]
 
-def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -> list[Page]:
+
+
+def run(
+    control: Control,
+    pages: Sequence[Page],
+    report,
+    strict: bool = False,
+    show: Callable[[dict], Any] | None = None,
+) -> list[Page]:
     """Send the plan, in order, then flush once and wait for the publication that flush arms. A
     page no server answers stops the plan there.
 
@@ -1299,10 +1311,20 @@ def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -
     the executor's own period. Where nothing was accepted there is nothing to publish and no flush
     is sent. Returns the pages other than the plan's own flushes that were accepted. `strict` is
     passed to every route that takes rows.
+
+    `show` is given the commit's ingest record as each page goes and when the wait begins and
+    ends. The step `pages` counts the rows of each page answered out of the rows of every page in
+    the plan, and its context names the page among the plan's.
     """
+    tracker = _progress.Tracker("ingest", INGEST_PHASES)
+    tracker.begin(0, "pages", sum(page.rows for page in pages), "rows")
+    show = show or (lambda one: None)
     accepted = []
-    for page in pages:
+    for at, page in enumerate(pages):
+        tracker.context = _progress.page_context(at, len(pages))
+        show(tracker.snapshot())
         answer = _send(control, page, strict)
+        tracker.advance(page.rows)
         _fold(report, page, answer)
         if answer.status == UNANSWERED:
             # No server answered, a page of rows not even when sent once more: the pages after
@@ -1310,8 +1332,13 @@ def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -
             break
         if answer.ok and page.kind != "flush":
             accepted.append(page)
+    show(tracker.snapshot())
     if accepted:
+        tracker.begin(1, "publication")
+        show(tracker.snapshot())
         _waited(report, control.flush(wait=True))
+    tracker.end("finished" if report.ok else "failed")
+    show(tracker.snapshot())
     return accepted
 
 

@@ -30,11 +30,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from . import _progress
 from ._auth import request_headers
 from ._refusal import listed, retry_after
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 ARROW = "application/vnd.apache.arrow.stream"
 JSON = "application/json"
@@ -47,6 +48,9 @@ MAX_BACKOFF = 30.0
 #: out and the request sent again while the waits stay within this; the `429` whose wait would take
 #: them past it is the answer.
 RETRY_BUDGET_S = 300.0
+
+#: How often `compact(wait=True)` reads `/control/status`, in seconds.
+COMPACT_POLL_S = 1.0
 
 #: The status an answer carries when the request reached no server at all. Not an HTTP status: the
 #: request was never answered, so there is none to report.
@@ -75,7 +79,8 @@ class Answer:
     - `status`: the HTTP status, or 0 when no server answered.
     - `body`: the answer's JSON object. It is `{}` when the answer was not JSON, and a JSON value
       that is not an object is under `"value"`.
-    - `detail`: the answer's text, or why no answer came.
+    - `detail`: the answer's text, or why no answer came. For `Control.compact(wait=True)` it
+      says what the compaction's outcome means.
     - `attempts`: how many times the request was sent, which is more than 1 when the server asked
       the client to wait with a `429`, or when an ingest that got no answer was sent again.
     - `seconds`: how long the request took, from its first attempt to its answer.
@@ -418,22 +423,96 @@ class Control:
             "DELETE", f"/control/views/{_segment(group)}/{_segment(key)}" + _wait(wait)
         )
 
-    def compact(self) -> Answer:
+    def compact(self, wait: bool = False, progress: bool | Callable[[dict], Any] = True) -> Answer:
         """Ask the server for a compaction, which removes the rows of deleted items from disc
-        (`POST /control/compact`).
+        (`POST /control/compact`), and wait for its outcome where `wait` is `True`.
 
         The server answers `202` at once with the request's number in `body["request"]`, and then
-        compacts every shard with something to reclaim. The outcome is read from `status()`. The
-        request has been answered once `compaction.requests.answered` reaches its number. A
-        `compaction.requests.last_refusal` whose `request` is that number means a shard was refused
-        while answering it, with `detail` saying why and what to do. A higher number means a later
-        refusal has replaced the record, and that refusal may or may not concern yours. A request
-        answered without a refusal can still have failed, so to confirm that the rows are gone,
-        check that `compaction.folds` rose and `overlay.retirable` fell; `compaction.fold_failures`
-        counts the compactions that failed or were discarded. When no compaction can start until the
-        server restarts, the answer is `503` and nothing is requested.
+        compacts every shard with something to reclaim. When no compaction can start until the
+        server restarts, the answer is `503` and nothing is requested. With `wait` `False`, the
+        default, the method returns that answer, and the outcome is read from `status()`: the
+        request has been answered once `compaction.requests.answered` reaches its number, and
+        `compaction.requests.last_answer` says how, for the requests from its `first` to its
+        `last`.
+
+        - `wait`: `True` reads `status()` about once a second until the request is answered, and
+          returns the `202` with the outcome added to its body.
+        - `progress`: how the wait shows the compaction's record, which `status()` serves under
+          `jobs` while the compaction runs and under `compaction.last_job` once it has ended. It
+          takes what `Database.commit`'s `progress` takes, and the default is `True`. Where the
+          outcome is `compacted` or `failed`, the last record shown is `compaction.last_job` as
+          served, with `state` `finished` or `failed`. A compaction that runs for less than the
+          interval between two reads is shown only by that last record.
+
+        The waited answer's body holds `request`, `outcome`, `last_answer` and `last_job`.
+        `outcome` is the outcome the server served for the request: `compacted`, `nothing_to_do`,
+        `refused` or `failed`. It is `lost` where the server has numbered fewer requests than this
+        one since it started, because it restarted and lost the request, and `unknown` where a
+        later answer had replaced this one before it was read. `last_answer` is
+        `compaction.requests.last_answer` as served where it covers the request, naming the `gate`
+        and its `detail` for `refused`, and `None` otherwise. `last_job` is `compaction.last_job`
+        as served where the outcome is `compacted` or `failed`, and `None` otherwise. `detail`
+        says in a sentence what the outcome means. The compaction succeeded where the outcome is
+        `compacted` or `nothing_to_do`, and the answer's `ok` says that the server accepted the
+        request whatever the outcome. Where the server refuses a read of `status()`, or does not
+        answer one, the method returns that answer with `request` added to its body.
         """
-        return self._send("POST", "/control/compact", b"")
+        show = _progress.shown(progress) if wait else None
+        answer = self._send("POST", "/control/compact", b"")
+        request = answer.body.get("request")
+        if show is None or not answer.ok or not isinstance(request, int):
+            return answer
+        with show:
+            return self._compaction(answer, request, show)
+
+    def _compaction(self, asked: Answer, request: int, show) -> Answer:
+        """`compact`'s wait for request number `request`, which `asked` accepted."""
+        started = time.monotonic() - asked.seconds
+
+        def answered(outcome: str, detail: str, last_answer=None, last_job=None) -> Answer:
+            body = {"request": request, "outcome": outcome, "last_answer": last_answer,
+                    "last_job": last_job}
+            return Answer(asked.status, body, detail, asked.attempts, time.monotonic() - started)
+
+        while True:
+            read = self.status_answer()
+            if not read.ok:
+                return replace(read, body={**read.body, "request": request})
+            requests = read.body.get("compaction", {}).get("requests", {})
+            if int(requests.get("accepted", 0)) < request:
+                return answered(
+                    "lost",
+                    f"the server has numbered fewer requests than {request} since it started, so "
+                    "it restarted after this request was made and the request was lost; ask again",
+                )
+            for job in read.body.get("jobs", []):
+                if job.get("job") == "compaction":
+                    show(job)
+                    break
+            if int(requests.get("answered", 0)) >= request:
+                break
+            sleep(COMPACT_POLL_S)
+        last_answer = requests.get("last_answer") or {}
+        if not last_answer.get("first", request + 1) <= request <= last_answer.get("last", 0):
+            return answered(
+                "unknown",
+                f"request {request} was answered, and a later answer has replaced its outcome on "
+                "/control/status, so its outcome is not known",
+            )
+        outcome = str(last_answer.get("outcome"))
+        last_job = None
+        if outcome in ("compacted", "failed"):
+            last_job = read.body.get("compaction", {}).get("last_job")
+            if isinstance(last_job, dict):
+                show(last_job)
+        if outcome == "refused":
+            detail = (
+                f"request {request} was refused at {last_answer.get('gate')}: "
+                f"{last_answer.get('detail')}"
+            )
+        else:
+            detail = f"request {request} was answered {outcome}"
+        return answered(outcome, detail, last_answer, last_job)
 
     def flush(self, wait: bool = False) -> Answer:
         """Make the writes sent so far visible to readers sooner, by bringing the next publication

@@ -7,7 +7,10 @@ import {
   UNANSWERED,
   type Answer,
   type ChangeItem,
+  type CompactionAnswered,
+  type ControlStatus,
   type GrowRequest,
+  type Progress,
   type PublishRequest,
   type StrictOptions,
   type WriteOptions
@@ -357,5 +360,160 @@ describe('an answer', () => {
   it('limits is the status body’s limits block', async () => {
     recording({status: 200, body: {limits: {changes: {max_changes_per_request: 10_000}}}});
     expect(await control.limits()).toEqual({changes: {max_changes_per_request: 10_000}});
+  });
+});
+
+describe('compact with wait', () => {
+  const RUNNING: Progress = {
+    job: 'compaction',
+    state: 'running',
+    phase: {index: 2, of: 4, name: 'Indexing records'},
+    step: 'postings',
+    context: 'shard 0',
+    done: 1200,
+    total: 4000,
+    unit: 'terms',
+    elapsed_s: 3.5,
+    step_elapsed_s: 1.25,
+    rss_bytes: 1 << 30
+  };
+  const FINISHED: Progress = {
+    job: 'compaction',
+    state: 'finished',
+    phase: {index: 4, of: 4, name: 'Publishing'},
+    step: 'reclaim',
+    context: 'shard 0',
+    elapsed_s: 9,
+    step_elapsed_s: 0.5,
+    rss_bytes: 1 << 30
+  };
+  const FAILED: Progress = {...RUNNING, state: 'failed', phase: {index: 3, of: 4, name: 'Verifying'}, step: 'digests', unit: 'bytes'};
+  const FLUSHING: Progress = {job: 'flush', state: 'running', phase: {index: 1, of: 1, name: 'Flushing'}, step: 'promote', elapsed_s: 0.2, step_elapsed_s: 0.2, rss_bytes: 1 << 30};
+
+  const answered = (first: number, last: number, outcome: CompactionAnswered['outcome'], gate: string | null = null, detail: string | null = null): CompactionAnswered => ({
+    first,
+    last,
+    outcome,
+    gate,
+    detail
+  });
+
+  /** A `/control/status` body with the given compaction requests, jobs and last record, and fields the client does not read. */
+  const status = (requests: {accepted: number; answered: number; last_answer: CompactionAnswered | null}, jobs: Progress[] = [], lastJob: Progress | null = null): {status: number; body: ControlStatus} => ({
+    status: 200,
+    body: {publication: 12, jobs, compaction: {folds: 3, last_job: lastJob, requests: {...requests, last_refusal: null}}}
+  });
+
+  const ACCEPTED = {status: 202, body: {request: 5}};
+
+  it('without wait sends one request and answers it as before', async () => {
+    const sent = recording(ACCEPTED, status({accepted: 5, answered: 5, last_answer: answered(5, 5, 'compacted')}));
+    const seen: Progress[] = [];
+    const answer = await control.compact({onProgress: (record) => seen.push(record)});
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://control/control/compact']);
+    expect(answer).toMatchObject({status: 202, ok: true, body: {request: 5}});
+    expect(answer).not.toHaveProperty('waited');
+    expect(seen).toEqual([]);
+  });
+
+  it('reads the status about once a second until the request is answered, passing the running record and then last_job as served', async () => {
+    vi.useFakeTimers();
+    const served = answered(4, 5, 'compacted');
+    const sent = recording(
+      ACCEPTED,
+      status({accepted: 5, answered: 3, last_answer: answered(3, 3, 'nothing_to_do')}, [FLUSHING, RUNNING]),
+      status({accepted: 5, answered: 5, last_answer: served}, [], FINISHED)
+    );
+    const seen: Progress[] = [];
+    const pending = control.compact({wait: true, onProgress: (record) => seen.push(record)});
+    await vi.advanceTimersByTimeAsync(999);
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://control/control/compact', 'GET http://control/control/status']);
+    await vi.advanceTimersByTimeAsync(1);
+    const answer = await pending;
+    expect(sent).toHaveLength(3);
+    expect(sent[2]!.headers).toMatchObject({authorization: 'Bearer op-cred'});
+    expect(answer).toMatchObject({status: 202, ok: true, body: {request: 5}});
+    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', answer: served, last_job: FINISHED});
+    expect(seen).toStrictEqual([RUNNING, FINISHED]);
+  });
+
+  it('answers nothing_to_do as succeeded, without the last_job of an earlier compaction', async () => {
+    const served = answered(5, 5, 'nothing_to_do');
+    recording(ACCEPTED, status({accepted: 5, answered: 5, last_answer: served}, [], FINISHED));
+    const seen: Progress[] = [];
+    const answer = await control.compact({wait: true, onProgress: (record) => seen.push(record)});
+    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', answer: served});
+    expect(seen).toEqual([]);
+  });
+
+  it('answers a refusal as the server served it, gate and detail included', async () => {
+    const served = answered(5, 6, 'refused', 'insufficient_disc', 'the disc holding the bundle has too little free space');
+    recording(ACCEPTED, status({accepted: 6, answered: 6, last_answer: served}, [], FINISHED));
+    const answer = await control.compact({wait: true});
+    expect(answer.ok).toBe(true);
+    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', answer: served});
+  });
+
+  it('answers a failure with the failed record as served, which onProgress receives last', async () => {
+    vi.useFakeTimers();
+    const served = answered(5, 5, 'failed');
+    recording(ACCEPTED, status({accepted: 5, answered: 4, last_answer: null}, [RUNNING]), status({accepted: 5, answered: 5, last_answer: served}, [], FAILED));
+    const seen: Progress[] = [];
+    const pending = control.compact({wait: true, onProgress: (record) => seen.push(record)});
+    await vi.runAllTimersAsync();
+    const answer = await pending;
+    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', answer: served, last_job: FAILED});
+    expect(seen).toStrictEqual([RUNNING, FAILED]);
+  });
+
+  it('ends as lost where the server has numbered fewer requests than this one', async () => {
+    const sent = recording(ACCEPTED, status({accepted: 2, answered: 2, last_answer: answered(1, 2, 'compacted')}));
+    const answer = await control.compact({wait: true});
+    expect(answer.waited).toStrictEqual({ok: false, ended: 'lost', accepted: 2});
+    expect(sent).toHaveLength(2);
+  });
+
+  it('ends as replaced where a later answer has replaced the request’s outcome', async () => {
+    const later = answered(6, 7, 'compacted');
+    recording(ACCEPTED, status({accepted: 7, answered: 7, last_answer: later}, [], FINISHED));
+    expect((await control.compact({wait: true})).waited).toStrictEqual({ok: false, ended: 'replaced', answer: later});
+  });
+
+  it('ends as replaced where the request is answered and no answer is served', async () => {
+    recording(ACCEPTED, status({accepted: 5, answered: 5, last_answer: null}));
+    expect((await control.compact({wait: true})).waited).toStrictEqual({ok: false, ended: 'replaced', answer: null});
+  });
+
+  it('ends as unread with the status answer where reading the status is refused', async () => {
+    const sent = recording(ACCEPTED, {status: 403, body: {error: 'forbidden', detail: 'admin'}});
+    const answer = await control.compact({wait: true});
+    expect(answer).toMatchObject({status: 202, ok: true, waited: {ok: false, ended: 'unread', status: {status: 403, ok: false}}});
+    expect(sent).toHaveLength(2);
+  });
+
+  it('does not wait for a request the server refused', async () => {
+    const sent = recording({status: 503, body: {error: 'not-ready', detail: 'the write side is not running'}});
+    const answer = await control.compact({wait: true});
+    expect(answer).toMatchObject({status: 503, ok: false});
+    expect(answer).not.toHaveProperty('waited');
+    expect(sent).toHaveLength(1);
+  });
+
+  it('rejects with the signal’s reason when it aborts between two readings, and reads no more', async () => {
+    vi.useFakeTimers();
+    const sent = recording(ACCEPTED, status({accepted: 5, answered: 4, last_answer: null}, [RUNNING]));
+    const controller = new AbortController();
+    const outcome = control.compact({wait: true, signal: controller.signal}).then(
+      () => 'resolved',
+      (reason: unknown) => reason
+    );
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(sent).toHaveLength(4);
+    const reason = new Error('stop');
+    controller.abort(reason);
+    expect(await outcome).toBe(reason);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sent).toHaveLength(4);
+    expect(sent.every((s) => s.signal === controller.signal)).toBe(true);
   });
 });
