@@ -1,16 +1,17 @@
 use std::borrow::Cow;
 
 use croaring::Bitmap;
-use mosaica_filter::resolve_union;
+use mosaica_filter::{resolve_union, ColumnPostings};
 use mosaica_types::AttrLocalId;
 
-use super::{ColumnLayers, FilterColumns, Route, TextLayer};
+use super::{ColumnLayers, FilterColumns, Layer, Route, TextLayer};
 use crate::cancel::CancelToken;
 use crate::filter::declared::Placement;
 use crate::filter::error::FilterError;
 use crate::filter::expr::{
-    evaluate_text, FilterExpr, FilterOperand, MemberOfArtifact, RoutedFilter, RowExpr,
-    RowLeafResolvers, TextQuery, TextResolver, UniqueResolver, MEMBER_OF_COLUMN, REGION_COLUMN,
+    evaluate_leaf, FilterExpr, FilterOperand, LeafQuery, LeafResolver, MemberOfArtifact,
+    RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, UniqueResolver, MEMBER_OF_COLUMN,
+    REGION_COLUMN,
 };
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 use crate::filter::scan::text::{phrase_match, text_match};
@@ -35,17 +36,17 @@ impl FilterColumns {
         operand: &FilterOperand,
         candidate: &Bitmap,
     ) -> Result<Bitmap, FilterError> {
-        self.resolve_until(column, operand, candidate, &evaluate_text, &None)
+        self.resolve_until(column, operand, candidate, &evaluate_leaf, &None)
     }
 
-    /// [`Self::resolve`], with a text leaf answered through `text`, ended with
+    /// [`Self::resolve`], with a text or value leaf answered through `leaves`, ended with
     /// [`FilterError::Cancelled`] once the request holding `cancel` has gone.
     fn resolve_until(
         &self,
         column: &str,
         operand: &FilterOperand,
         candidate: &Bitmap,
-        text: &TextResolver<'_>,
+        leaves: &LeafResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         let name = column;
@@ -60,7 +61,7 @@ impl FilterColumns {
             ColumnLayers::Text {
                 layers, analyser, ..
             } => {
-                return resolve_text(name, layers, analyser, operand, candidate, text, cancel);
+                return resolve_text(name, layers, analyser, operand, candidate, leaves, cancel);
             }
             ColumnLayers::Values {
                 layers,
@@ -70,27 +71,9 @@ impl FilterColumns {
             } => (layers, postings.as_deref(), *route),
         };
 
-        // The base build's answer comes from the postings; every extent layer is scanned, since
-        // no flush writes postings.
-        if let (Route::Postings, Some(postings), Some(values)) =
-            (route, postings, codes_of(operand))
-        {
-            let mut out = resolve_union(postings, values)
-                .map_err(|e| FilterError::postings_unreadable(name, e))?
-                .and(candidate);
-            // Selected by the absence of a manifest path, not position: a coalesce appends its
-            // replacement at the end of the list.
-            for layer in layers.iter().filter(|l| l.values_rel.is_some()) {
-                out |= scan(&layer.values, operand, candidate);
-            }
-            return Ok(out);
-        }
-
-        let mut out = Bitmap::new();
-        for layer in layers {
-            out |= scan_layer(name, layer, operand, candidate)?;
-        }
-        Ok(out)
+        leaves(name, LeafQuery::Value(operand), candidate, &|candidate| {
+            resolve_values(name, layers, postings, route, operand, candidate)
+        })
     }
 
     /// Evaluate a filter expression against `candidate`.
@@ -105,7 +88,7 @@ impl FilterColumns {
                 detail: "this evaluation holds no unique index".to_string(),
             })
         };
-        self.eval(expr, candidate, &no_index, &evaluate_text, &None)
+        self.eval(expr, candidate, &no_index, &evaluate_leaf, &None)
     }
 
     /// The keys a leaf names where its column's unique index answers it: `eq` or `in` on a unique
@@ -145,7 +128,7 @@ impl FilterColumns {
         operand: &FilterOperand,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
-        text: &TextResolver<'_>,
+        leaves: &LeafResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         if let Some(keys) = self.unique_keys(column, operand) {
@@ -162,7 +145,7 @@ impl FilterColumns {
                 operator: operator_name(operand).to_string(),
             });
         }
-        self.resolve_until(column, operand, candidate, text, cancel)
+        self.resolve_until(column, operand, candidate, leaves, cancel)
     }
 
     /// Evaluate a filter expression's entity-space part and route the rest.
@@ -191,7 +174,7 @@ impl FilterColumns {
                 expr,
                 candidate,
                 resolvers.unique,
-                resolvers.text,
+                resolvers.leaves,
                 cancel,
             )?));
         }
@@ -327,7 +310,7 @@ impl FilterColumns {
                 expr,
                 candidate,
                 resolvers.unique,
-                resolvers.text,
+                resolvers.leaves,
                 cancel,
             )?));
         }
@@ -362,20 +345,20 @@ impl FilterColumns {
         expr: &FilterExpr,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
-        text: &TextResolver<'_>,
+        leaves: &LeafResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
         match expr {
             FilterExpr::Leaf { column, operand } => {
                 check_cancelled(cancel)?;
-                self.eval_leaf(column, operand, candidate, unique, text, cancel)
+                self.eval_leaf(column, operand, candidate, unique, leaves, cancel)
             }
             FilterExpr::Region(_) => Err(FilterError::RegionInEntitySpace),
             FilterExpr::MemberOf(_) => Err(FilterError::MemberOfInEntitySpace),
             FilterExpr::AllOf(kids) => {
                 let mut live = candidate.clone();
                 for kid in kids {
-                    live = self.eval(kid, &live, unique, text, cancel)?;
+                    live = self.eval(kid, &live, unique, leaves, cancel)?;
                     if live.is_empty() {
                         break;
                     }
@@ -385,7 +368,7 @@ impl FilterColumns {
             FilterExpr::AnyOf(kids) => {
                 let mut out = Bitmap::new();
                 for kid in kids {
-                    out |= self.eval(kid, candidate, unique, text, cancel)?;
+                    out |= self.eval(kid, candidate, unique, leaves, cancel)?;
                 }
                 Ok(out)
             }
@@ -393,7 +376,7 @@ impl FilterColumns {
                 let mut out = candidate.clone();
                 for kid in kids {
                     // Under `out`, not `candidate`, the same narrowing `AllOf` does.
-                    out.andnot_inplace(&self.eval(kid, &out, unique, text, cancel)?);
+                    out.andnot_inplace(&self.eval(kid, &out, unique, leaves, cancel)?);
                     if out.is_empty() {
                         break;
                     }
@@ -404,6 +387,35 @@ impl FilterColumns {
     }
 }
 
+/// A leaf over one column's value layers under `candidate`. The base build's answer comes from
+/// the postings where the column's route reads them; every extent layer is scanned, since no flush
+/// writes postings.
+fn resolve_values(
+    name: &str,
+    layers: &[Layer],
+    postings: Option<&ColumnPostings>,
+    route: Route,
+    operand: &FilterOperand,
+    candidate: &Bitmap,
+) -> Result<Bitmap, FilterError> {
+    if let (Route::Postings, Some(postings), Some(values)) = (route, postings, codes_of(operand)) {
+        let mut out = resolve_union(postings, values)
+            .map_err(|e| FilterError::postings_unreadable(name, e))?
+            .and(candidate);
+        // Selected by the absence of a manifest path, not position: a coalesce appends its
+        // replacement at the end of the list.
+        for layer in layers.iter().filter(|l| l.values_rel.is_some()) {
+            out |= scan(&layer.values, operand, candidate);
+        }
+        return Ok(out);
+    }
+    let mut out = Bitmap::new();
+    for layer in layers {
+        out |= scan_layer(name, layer, operand, candidate)?;
+    }
+    Ok(out)
+}
+
 /// A `match` or a `phrase` over one text column's layers: [`FilterColumns::resolve`]'s text half,
 /// answered through `resolver`.
 fn resolve_text(
@@ -412,13 +424,13 @@ fn resolve_text(
     analyser: &mosaica_analyse::Analyser,
     operand: &FilterOperand,
     candidate: &Bitmap,
-    resolver: &TextResolver<'_>,
+    resolver: &LeafResolver<'_>,
     cancel: &Option<CancelToken>,
 ) -> Result<Bitmap, FilterError> {
     let Some(query) = text_query(analyser, operand) else {
         return Ok(Bitmap::new());
     };
-    resolver(name, &query, candidate, &|candidate| {
+    resolver(name, LeafQuery::Text(&query), candidate, &|candidate| {
         text_answer(name, text, &query, candidate, cancel)
     })
 }

@@ -118,12 +118,21 @@ def test_stop_kills_by_pid_and_leaves_nothing_running():
     assert pid not in _instance._running
 
 
-def test_the_deployment_file_names_three_loopback_planes_at_port_zero(tmp_path):
+def test_the_deployment_file_serves_every_plane_on_one_loopback_port(tmp_path):
+    import tomllib
+
     path = _instance.write_deployment(tmp_path)
     text = path.read_text()
-    assert 'viewer = "127.0.0.1:0"' in text
-    assert 'session = "127.0.0.1:0"' in text
-    assert 'control = "127.0.0.1:0"' in text
+    serve = tomllib.loads(text)["serve"]
+    assert serve["viewer"] == f"127.0.0.1:{_instance.PORT}"
+    assert serve["port_retries"] == _instance.PORT_RETRIES
+    assert "session" not in serve and "control" not in serve
+    # A stated port is written exactly and kept by a later write that states none.
+    _instance.write_deployment(tmp_path, 0)
+    assert tomllib.loads(path.read_text())["serve"]["viewer"] == "127.0.0.1:0"
+    _instance.write_deployment(tmp_path)
+    serve = tomllib.loads(path.read_text())["serve"]
+    assert (serve["viewer"], serve["port_retries"]) == ("127.0.0.1:0", 0)
     assert "[disclosure]\ntoken_max_lifetime = 3600" in text
     # The widget's page is served from a loopback address, and its origin cannot be enumerated.
     assert "cors_loopback = true" in text
@@ -302,7 +311,11 @@ def ended(how: str, where) -> tuple[subprocess.Popen, dict]:
         stderr=subprocess.PIPE,
         text=True,
     )
-    return process, json.loads(process.stdout.readline())
+    # Starting the server prints its address first; the child's own record is the JSON line.
+    for line in process.stdout:
+        if line.startswith("{"):
+            return process, json.loads(line)
+    raise AssertionError(f"the child printed no record: {process.stderr.read()}")
 
 
 @pytest.mark.parametrize("how", ["os._exit", "SIGTERM", "SIGKILL", "uncommitted"])
@@ -688,3 +701,76 @@ def test_a_copy_inside_the_database_it_copies_is_refused(tmp_path):
         assert not (tmp_path / "db" / "copies").exists()
     finally:
         db.close()
+
+
+def committed(path=None, port=None):
+    """A database of two items, committed and so served."""
+    import pyarrow as pa
+
+    import mosaica as td
+    from conftest import binary
+
+    binary()
+    db = td.create(path, port=port)
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    rows = pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0], "access": [["public"], ["public"]]})
+    db.insert("map", rows, x="x", y="y", access="access")
+    db.commit()
+    return db
+
+
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def test_the_planes_share_one_port_from_9141_up_and_the_address_is_printed(capsys):
+    first, second = committed(), committed()
+    try:
+        output = capsys.readouterr().out
+        ports = set()
+        for db in (first, second):
+            listening = db.listening
+            assert listening.viewer == listening.session == listening.control
+            host, port = listening.viewer.rsplit(":", 1)
+            assert host == "127.0.0.1"
+            assert _instance.PORT <= int(port) <= _instance.PORT + _instance.PORT_RETRIES
+            assert db.viewer_url in output
+            assert db.view("map").count() == 2
+            ports.add(port)
+        assert len(ports) == 2
+    finally:
+        first.close()
+        second.close()
+
+
+def test_a_stated_port_is_served_exactly_kept_and_changed_by_open(tmp_path):
+    import mosaica as td
+
+    port = free_port()
+    db = committed(tmp_path / "db", port=port)
+    assert db.listening.viewer == f"127.0.0.1:{port}"
+    with pytest.raises(Refusal):
+        committed(tmp_path / "taken", port=port)
+    db.close()
+
+    reopened = td.open(tmp_path / "db")
+    assert reopened.serve().viewer == f"127.0.0.1:{port}"
+    reopened.close()
+
+    moved = free_port()
+    changed = td.open(tmp_path / "db", port=moved)
+    assert changed.serve().viewer == f"127.0.0.1:{moved}"
+    assert changed.view("map").count() == 2
+    changed.close()
+
+
+def test_a_port_that_is_not_a_port_number_is_refused(tmp_path):
+    import mosaica as td
+
+    for port in (-1, 65536, "9141", 1.5, True):
+        with pytest.raises(Refusal):
+            td.create(tmp_path / str(port), port=port)

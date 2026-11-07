@@ -210,11 +210,13 @@ enum Command {
     },
     /// Verify a bundle's files and every row's `mosaica_id`.
     ///
-    /// It opens the bundle as the server does. That checks every manifest digest, the size and
-    /// SHA-256 of every file except the unique indexes' runs, and that each segment's permutation
-    /// maps one-to-one onto its rows. `--deep` hashes those runs too. It then confirms that the row space holds exactly the rows the segments claim, and computes
-    /// each row's `mosaica_id` again from the identity key, failing on the first row that
-    /// differs.
+    /// It checks every manifest digest, the size and SHA-256 of every file except the unique
+    /// indexes' runs, and that each segment's permutation maps one-to-one onto its rows.
+    /// `--deep` hashes those runs too. It then confirms that the row space holds exactly the rows
+    /// the segments claim, and computes each row's `mosaica_id` again from the identity key,
+    /// failing on the first row that differs. A server opening the bundle checks the sizes and
+    /// the permutations, and hashes only the few files it reads without checking their
+    /// structure: hashing every file would read the whole bundle at every start.
     ///
     /// It also prints to stderr each indexed keyword column's count of distinct values against
     /// its rows, with a warning for a column whose values are unique per row. A warning does not
@@ -1761,7 +1763,7 @@ fn main() -> ExitCode {
             open,
         } => {
             // Diagnostics on stderr, because stdout carries one thing: the JSON line naming the
-            // three bound addresses, which a supervisor reads as the process's first stdout line
+            // planes' bound addresses, which a supervisor reads as the process's first stdout line
             // (`mosaica_server::serve_announcing`).
             // Colour only for a terminal, so a container's or a supervisor's log is plain text.
             tracing_subscriber::fmt()
@@ -1786,10 +1788,14 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            // Bound before the bundle opens, so a taken port refuses in a moment rather than
+            // after the open.
             let prepared = match mosaica_config::load_serving(&deployment, open)
                 .map_err(mosaica_server::BoxError::from)
-                .and_then(mosaica_server::prepare_config)
-            {
+                .and_then(|config| {
+                    let listeners = mosaica_server::bind(&config)?;
+                    Ok((mosaica_server::prepare_config(config)?, listeners))
+                }) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("mosaica serve: refused to start: {e}");
@@ -1810,6 +1816,7 @@ fn main() -> ExitCode {
             // Derived rather than asserted-against: `serving_blocking_threads` covers every bound
             // plus a reserve, so there is no configuration in which an admitted request finds no
             // thread.
+            let (prepared, listeners) = prepared;
             let blocking_threads = mosaica_config::serving_blocking_threads(&prepared.config);
             let runtime = match tokio::runtime::Builder::new_multi_thread()
                 .max_blocking_threads(blocking_threads)
@@ -1822,7 +1829,7 @@ fn main() -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match runtime.block_on(mosaica_server::run(prepared)) {
+            match runtime.block_on(mosaica_server::run(prepared, listeners)) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
                     eprintln!("mosaica serve: {e}");

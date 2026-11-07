@@ -1,11 +1,12 @@
 """The reports that `check()`, `commit()`, `insert()`, `declare_columns()` and the change methods
 return.
 
-Each report shows as a short summary of what happened, in numbers, so that a notebook cell ending
-in one displays it and `print()` shows the same lines. A call prints nothing else, apart from the
-progress `commit()` draws while it runs, which `progress=False` turns off. The summary
-carries every refusal and every finding in full, and the detail is in the report's attributes,
-which each class's docstring lists.
+A call prints nothing apart from the line naming the address when one starts the server and
+the progress `commit()` and `compact(wait=True)` draw while they run, which `progress=False` turns
+off. Each report shows as a short summary of what happened, in numbers, so that a notebook cell
+ending in one displays it and `print()` shows the same lines. The summary carries every refusal and
+every finding in full, and the detail is in the report's attributes, which each class's docstring
+lists.
 """
 
 from __future__ import annotations

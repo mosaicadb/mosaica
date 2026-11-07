@@ -554,11 +554,12 @@ async fn stage_timing_header_respects_the_compile_gate_and_carries_no_identifier
 
         let fields: Vec<&str> = text.split(',').collect();
         // 22 engine-side fields, one position no figure fills, the occupancy walk's
-        // duration and the tiles answered from the bands. Fields are appended, so the bench
-        // harnesses' positions before each are unchanged.
+        // duration, the tiles answered from the bands, and the filter's evaluation, crossing and
+        // admitted entities. Fields are appended, so the bench harnesses' positions before each
+        // are unchanged.
         assert_eq!(
             fields.len(),
-            25,
+            28,
             "stage header field count is a contract with the bench harnesses: {text}"
         );
         for f in &fields {
@@ -601,6 +602,8 @@ async fn stage_timing_header_respects_the_compile_gate_and_carries_no_identifier
             underlay_cells, 0,
             "no underlay was requested, so no cells were evaluated"
         );
+        // The request carries no filter, so the filter's three fields are zero.
+        assert_eq!(&fields[25..28], ["0", "0", "0"], "{text}");
     } else {
         assert!(
             stage_ns.is_none(),

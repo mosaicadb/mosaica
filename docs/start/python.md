@@ -52,6 +52,34 @@ If you have a corpus and an analysis of your own and want to see them together, 
     marimo edit 02_analysing_a_map.py
     ```
 
+## Running the notebook on another machine
+
+The notebook's map reads straight from the database's server, which listens on the machine the notebook runs on, on port 9141, or the next free port above it when 9141 is taken. The server prints its address when it starts:
+
+```
+mosaica: serving /dev/shm/mosaica-3k2j8x at http://127.0.0.1:9141
+```
+
+If you reach Jupyter or marimo on another machine through an SSH tunnel, forward that port as well as the notebook's. Jupyter's is 8888 and marimo's 2718:
+
+```bash
+ssh -L 8888:127.0.0.1:8888 -L 9141:127.0.0.1:9141 you@host
+```
+
+`db.map()` gives your browser the address the server printed, so forward the port to the same number on your machine. To keep the port from moving, state it: `mosaica.create(port=9141)` serves on 9141 or refuses to start, and `mosaica.open(path, port=9141)` does the same for a database you reopen.
+
+If that port is taken on your machine, forward another one and give the map that address yourself. `mosaica.Map` takes the address your browser reaches the server at, and `db.token()` the token `db.map()` reads with:
+
+```bash
+ssh -L 8888:127.0.0.1:8888 -L 9200:127.0.0.1:9141 you@host
+```
+
+``` {.python notest}
+mosaica.Map("http://127.0.0.1:9200", token=db.token(), view="map")
+```
+
+The same works for any route from your browser to the server, such as a proxy in front of it: give `Map` the address the browser uses. The notebook's own requests still go to the address the server printed. The notebook page must itself be served from `localhost`, `127.0.0.1` or `[::1]`, as it is through a tunnel, since those are the pages a database the client makes lets the map read from.
+
 ## Next
 
 - The [Python client reference](../reference/python/index.md) covers every call, from `create()` to the notebook map.

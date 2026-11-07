@@ -367,11 +367,11 @@ impl Engine {
         self.region_cache.set_bound_bytes(bytes);
     }
 
-    /// Bound the text filter leaves' answers (`serve.text_filter_cache_bytes`). Zero keeps none
+    /// Bound the filter leaves' kept answers (`serve.filter_cache_bytes`). Zero keeps none
     /// and evaluates every leaf. Unset, an embedder gets
-    /// [`crate::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES`].
-    pub fn set_text_filter_cache_bytes(&self, bytes: u64) {
-        self.text_filter_cache.set_bound_bytes(bytes);
+    /// [`crate::filter_cache::DEFAULT_FILTER_CACHE_BYTES`].
+    pub fn set_filter_cache_bytes(&self, bytes: u64) {
+        self.filter_cache.set_bound_bytes(bytes);
     }
 
     /// `serve.max_region_cells`: the boundary-cell budget a region's descent stops at, published
@@ -385,9 +385,9 @@ impl Engine {
         self.region_cache.stats()
     }
 
-    /// The text filter cache's gauges.
-    pub fn text_filter_cache_stats(&self) -> mosaica_cache::CacheStats {
-        self.text_filter_cache.stats()
+    /// The filter cache's gauges.
+    pub fn filter_cache_stats(&self) -> mosaica_cache::CacheStats {
+        self.filter_cache.stats()
     }
 
     /// The occupancy memo's gauges, one entry per `(session, view, depth, generation)` rung.
@@ -402,13 +402,13 @@ impl Engine {
     }
 
     /// How long a request waits on another request's in-flight row-projection or fragment build
-    /// before it is refused, or on a text filter leaf's evaluation before it evaluates the leaf
+    /// before it is refused, or on a filter leaf's evaluation before it evaluates the leaf
     /// itself (`serve.single_flight_wait_ms`). Unset, an embedder gets
     /// [`crate::DEFAULT_SINGLE_FLIGHT_WAIT_MS`].
     pub fn set_single_flight_wait_ms(&self, wait_budget_ms: u64) {
         self.row_projection_cache.set_wait_budget_ms(wait_budget_ms);
         self.fragments.set_wait_budget_ms(wait_budget_ms);
-        self.text_filter_cache.set_wait_budget_ms(wait_budget_ms);
+        self.filter_cache.set_wait_budget_ms(wait_budget_ms);
     }
 
     /// The row count at which a commit window closes (`ingest.commit_window_max_items`, which

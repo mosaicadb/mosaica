@@ -2808,7 +2808,7 @@ fn verified_open(
     root: &Path,
     direct_window_rows: u64,
 ) -> Result<(mosaica_store::read::Bundle, VerifyReport)> {
-    let bundle = mosaica_store::read::open_bundle(root)?;
+    let bundle = mosaica_store::read::open_bundle_with_digests(root)?;
     // The key is parsed here, not by `open_bundle`: `IdentityDescriptor::validate` (run at
     // open) checks `construction` and `rounds` but never parses `key`'s hex, since
     // `mosaica-store` has no need to hold a live `IdentityKey` at all — only `mosaica verify`

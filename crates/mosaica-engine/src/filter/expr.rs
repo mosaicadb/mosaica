@@ -265,33 +265,40 @@ pub enum TextQuery {
     Phrase { words: Vec<String> },
 }
 
-/// How a text leaf is answered in entity space: given its column, its query, the candidate it is
-/// evaluated under and the evaluation itself, an answer equal to `evaluate(candidate)`.
-pub type TextResolver<'a> = dyn Fn(
-        &str,
-        &TextQuery,
-        &Bitmap,
-        &dyn Fn(&Bitmap) -> Result<Bitmap, FilterError>,
-    ) -> Result<Bitmap, FilterError>
-    + 'a;
+/// A leaf as the entity-space evaluation hands it to its [`LeafResolver`]: a text leaf as its
+/// column's analyser reads it, or a leaf answered from a column's value layers.
+#[derive(Debug, Clone, Copy)]
+pub enum LeafQuery<'a> {
+    Text(&'a TextQuery),
+    Value(&'a FilterOperand),
+}
 
-/// The [`TextResolver`] that evaluates every leaf it is asked.
-pub fn evaluate_text(
+/// The evaluation of one leaf under a candidate, which a [`LeafResolver`] may run on any thread.
+pub type LeafEvaluation<'a> = dyn Fn(&Bitmap) -> Result<Bitmap, FilterError> + Sync + 'a;
+
+/// How a text or value leaf is answered in entity space: given its column, its query, the
+/// candidate it is evaluated under and the evaluation itself, an answer equal to
+/// `evaluate(candidate)`.
+pub type LeafResolver<'a> =
+    dyn Fn(&str, LeafQuery<'_>, &Bitmap, &LeafEvaluation<'_>) -> Result<Bitmap, FilterError> + 'a;
+
+/// The [`LeafResolver`] that evaluates every leaf it is asked, on the calling thread.
+pub fn evaluate_leaf(
     _column: &str,
-    _query: &TextQuery,
+    _query: LeafQuery<'_>,
     candidate: &Bitmap,
-    evaluate: &dyn Fn(&Bitmap) -> Result<Bitmap, FilterError>,
+    evaluate: &LeafEvaluation<'_>,
 ) -> Result<Bitmap, FilterError> {
     evaluate(candidate)
 }
 
 /// The two row-space leaves' resolvers, how many levels a layer a `member_of` names holds where
 /// `/v1/meta` lists it to this principal (`None` where not, refused before either resolver runs),
-/// the unique columns' lookup and the text leaves' answers.
+/// the unique columns' lookup and the text and value leaves' answers.
 pub struct RowLeafResolvers<'a> {
     pub regions: &'a RegionResolver<'a>,
     pub members: &'a MemberResolver<'a>,
     pub layers: &'a dyn Fn(&str) -> Option<u32>,
     pub unique: &'a UniqueResolver<'a>,
-    pub text: &'a TextResolver<'a>,
+    pub leaves: &'a LeafResolver<'a>,
 }

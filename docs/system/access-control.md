@@ -38,7 +38,7 @@ Every session gives the viewer a token, a random string that carries nothing its
 
 The viewer can log in, with `POST /v1/login` at the viewer address, using a password, an API key or an OIDC access token. The session then holds the user's attributes, and `read-all` if they have it.
 
-Or your own server starts the session for the viewer. It calls `POST /session/authorise` at the session address with an API key whose user holds `authorise-as`, naming the user to act for: a Mosaica user by name, or a provider's user by their access token. That session holds the user's attributes and never their `read-all`. Because the session address takes a key that can act as any viewer, it has a listener of its own, which only your server reaches.
+Or your own server starts the session for the viewer. It calls `POST /session/authorise` at the session address with an API key whose user holds `authorise-as`, naming the user to act for: a Mosaica user by name, or a provider's user by their access token. That session holds the user's attributes and never their `read-all`. The session address shares the viewer's unless `mosaica.toml` gives it one of its own. Because it takes a key that can act as any viewer, a deployment whose viewer address others reach gives it its own, which only your server reaches.
 
 Finally, the operator credential can start a session at the session address that holds exactly a list of attributes, belonging to no user, or one that sees everything.
 

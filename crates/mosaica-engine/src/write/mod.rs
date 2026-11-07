@@ -1304,7 +1304,7 @@ pub(crate) struct MaintenanceDeps {
     >,
     /// The text filter leaves' answers, pruned at every publication of the shards they were
     /// taken over.
-    pub(crate) text_filter_cache: Arc<crate::text_filter_cache::TextFilterCache>,
+    pub(crate) filter_cache: Arc<crate::filter_cache::FilterCache>,
     /// The spatial levels' held shapes and per-segment pieces (`crate::shapes`): filled by the
     /// flush before its publication, rebuilt at a publication into a shape layer, re-resolved at
     /// the fold and the merge.

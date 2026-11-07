@@ -170,7 +170,7 @@ struct RawDisclosure {
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawServe {
-    /// The viewer plane's address and port, such as `"127.0.0.1:8141"`: `/v1/meta`,
+    /// The viewer plane's address and port, such as `"127.0.0.1:9141"`: `/v1/meta`,
     /// `/v1/viewport`, `/v1/items`, `/v1/artifacts` and `/v1/categories`, for requests carrying a
     /// viewer token. `mosaica serve` refuses to start without it, and `mosaica health` probes it.
     /// Port 0 takes a free port, which the server prints when it starts.
@@ -179,21 +179,27 @@ struct RawServe {
     viewer: Option<String>,
     /// The session plane's address and port: `POST /session/authorise`, where a principal holding
     /// `authorise-as` mints a session for another principal by API key, and
-    /// `POST /session/revoke`. `mosaica serve` refuses to start without it, except an open server
-    /// (`open`), which takes the viewer's address one port up, or port 0 where the viewer's port
-    /// is 0.
+    /// `POST /session/revoke`. Without it the session plane is served on the viewer's address and
+    /// port. Give it an address of its own to keep it off a network the viewer plane faces.
     ///
-    /// Default: not set.
+    /// Default: the viewer's address.
     session: Option<String>,
     /// The control plane's address and port, or `"unix:<path>"` for a Unix socket: ingest,
     /// deletion and suppression, declarations, flush, compaction and status, all under
-    /// `/control`. `mosaica serve` refuses to start without it, except an open server (`open`),
-    /// which takes the viewer's address two ports up, or port 0 where the viewer's port is 0. A
-    /// relative socket path is read from the server's working directory, not from this file's
-    /// directory, and a file already at the path is removed.
+    /// `/control`. Without it the control plane is served on the viewer's address and port. Give
+    /// it an address of its own to keep it off a network the viewer plane faces. A relative
+    /// socket path is read from the server's working directory, not from this file's directory,
+    /// and a file already at the path is removed.
     ///
-    /// Default: not set.
+    /// Default: the viewer's address.
     control: Option<String>,
+    /// How many ports above a taken one `mosaica serve` tries in turn, for each address in this
+    /// table whose port is taken when it starts. Planes that share an address move together, and
+    /// the announced line names the ports bound. `0` serves on the stated ports or not at all.
+    /// A port of 0 is never taken, since the system chooses a free one.
+    ///
+    /// Default: `0`.
+    port_retries: Option<u16>,
     /// A file holding the operator credential. It authenticates the built-in superuser, which
     /// holds every permission, `read-all` and `write-all` among them, and is not in the catalogue,
     /// so an empty catalogue still has an administrator. Its contents are trimmed. Changing the
@@ -360,14 +366,16 @@ struct RawServe {
     ///
     /// Default: `268435456` (256 MiB).
     region_cache_bytes: Option<u64>,
-    /// Bytes of the items each `match` and `phrase` filter matches, kept for reuse by every viewer
-    /// with the same access until the next flush, coalesce or compaction, so panning and zooming
-    /// with a search does not run it again. One entry is a bitmap over a shard's items, about
-    /// 12 MB at 10⁸ items for a phrase that half of them contain. Each request in flight can hold
-    /// one evicted entry beside the bound. `0` keeps none.
+    /// Bytes of the items each filter condition matches, kept for reuse by every viewer with the
+    /// same access until the next flush, coalesce or compaction, so panning and zooming with a
+    /// filter does not run it again. A condition is a `match` or `phrase`, or a range, an `eq` or
+    /// an `in` on a column, each kept apart so a combined filter reuses its parts. One entry is a
+    /// bitmap over a shard's items, about 12 MB at 10⁸ items for a condition half of them match,
+    /// scattered. Each request in flight can hold one evicted entry beside the bound. `0` keeps
+    /// none.
     ///
     /// Default: `268435456` (256 MiB).
-    text_filter_cache_bytes: Option<u64>,
+    filter_cache_bytes: Option<u64>,
     /// The most values one page of `GET /v1/categories/{column}` returns, and the page size of a
     /// request that names none. A larger `limit` is lowered to it.
     ///
@@ -675,8 +683,11 @@ pub struct Config {
     pub token_max_lifetime: Option<u64>,
     /// `None` when the file declares no `[serve]` addresses; `prepare` refuses to serve then.
     pub viewer_addr: Option<SocketAddr>,
+    /// `None` serves the session plane on the viewer's listener.
     pub session_addr: Option<SocketAddr>,
+    /// `None` serves the control plane on the viewer's listener.
     pub control_listen: Option<ControlListen>,
+    pub port_retries: u16,
     pub max_k: usize,
     pub k_min: usize,
     pub k_max_marks: usize,
@@ -720,7 +731,7 @@ pub struct Config {
     /// An aggregate page's Arrow bytes, before compression.
     pub aggregate_page_bytes: usize,
     pub region_cache_bytes: u64,
-    pub text_filter_cache_bytes: u64,
+    pub filter_cache_bytes: u64,
     /// Add `stage_ns` to a viewport response's trailer; does nothing in a binary built without
     /// `bench-timing`.
     pub stage_timing: bool,
@@ -1136,6 +1147,7 @@ fn parse_serving(text: &str, open: bool) -> Result<Config> {
         viewer_addr,
         session_addr,
         control_listen,
+        port_retries: serve.port_retries.unwrap_or(0),
         max_k: serve.max_k.unwrap_or(DEFAULT_MAX_K),
         k_min: serve.k_min.unwrap_or(DEFAULT_K_MIN),
         k_max_marks: serve.k_max_marks.unwrap_or(DEFAULT_K_MAX_MARKS),
@@ -1197,9 +1209,9 @@ fn parse_serving(text: &str, open: bool) -> Result<Config> {
         region_cache_bytes: serve
             .region_cache_bytes
             .unwrap_or(DEFAULT_REGION_CACHE_BYTES),
-        text_filter_cache_bytes: serve
-            .text_filter_cache_bytes
-            .unwrap_or(mosaica_engine::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES),
+        filter_cache_bytes: serve
+            .filter_cache_bytes
+            .unwrap_or(mosaica_engine::filter_cache::DEFAULT_FILTER_CACHE_BYTES),
         stage_timing: serve.stage_timing.unwrap_or(false),
         request_log: serve.request_log,
         dev_cors_origins,
@@ -1316,22 +1328,9 @@ impl Config {
 
     /// Serve every request as the operator, as `[serve] open = true` does. Refused when an
     /// address is not loopback, or beside a setting that is for a server with users: a page whose
-    /// token is lost must never see everything on such a server. What only tokens and the other
-    /// planes need takes a default: the session and control planes listen on the viewer's address
-    /// one and two ports up, or on free ports where the viewer's port is 0.
+    /// token is lost must never see everything on such a server. What only tokens need takes a
+    /// default.
     fn open_locally(&mut self) -> Result<()> {
-        if let Some(viewer) = self.viewer_addr {
-            let above = |n: u16| {
-                let port = match viewer.port() {
-                    0 => 0,
-                    port => port.saturating_add(n),
-                };
-                SocketAddr::new(viewer.ip(), port)
-            };
-            self.session_addr.get_or_insert(above(1));
-            self.control_listen
-                .get_or_insert(ControlListen::Tcp(above(2)));
-        }
         self.catalogue_dir
             .get_or_insert_with(|| PathBuf::from(DEFAULT_OPEN_CATALOGUE_DIR));
         self.token_max_lifetime
@@ -2225,32 +2224,27 @@ max_artifacts_per_tile = 20"))
         assert!(parse(&valid_toml("open = true\ncors_loopback = true")).is_ok());
     }
 
-    /// An open server needs a bundle and a viewer address, and nothing that only tokens or the
-    /// other planes use.
+    /// An open server needs a bundle and a viewer address, and nothing that only tokens use.
     #[test]
     fn an_open_deployment_needs_only_a_bundle_and_a_viewer_address() {
         let minimal = "[bundle]\npath = \"bundle\"\n[serve]\nviewer = \"127.0.0.1:9141\"\n";
         let config = parse(&format!("{minimal}open = true\n")).expect("a minimal open file loads");
         assert!(config.open);
-        assert_eq!(config.session_addr, Some("127.0.0.1:9142".parse().unwrap()));
-        assert!(matches!(
-            config.control_listen,
-            Some(ControlListen::Tcp(addr)) if addr == "127.0.0.1:9143".parse().unwrap()
-        ));
+        assert!(config.session_addr.is_none() && config.control_listen.is_none());
         assert!(config.catalogue_dir.is_some());
         assert!(config.token_max_lifetime_secs().is_ok());
         assert_eq!(config.cache_dir, PathBuf::from(DEFAULT_CACHE_DIR));
         assert_eq!(config.wal_path, PathBuf::from(DEFAULT_WAL));
         let opened = parse_serving(minimal, true).expect("--open loads it too");
-        assert_eq!(opened.session_addr, config.session_addr);
+        assert!(opened.open && opened.catalogue_dir.is_some());
 
-        // What is written is kept, and a viewer on port 0 puts the others on free ports.
+        // What is written is kept.
         let named = parse(
             "[bundle]\npath = \"b\"\n[serve]\nviewer = \"127.0.0.1:0\"\n\
              control = \"unix:/tmp/c.sock\"\nopen = true\n",
         )
         .unwrap();
-        assert_eq!(named.session_addr, Some("127.0.0.1:0".parse().unwrap()));
+        assert!(named.session_addr.is_none());
         assert!(matches!(named.control_listen, Some(ControlListen::Unix(_))));
 
         // Not open, the same file serves nothing it has not named.

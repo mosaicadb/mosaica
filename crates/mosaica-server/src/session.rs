@@ -24,6 +24,12 @@ use crate::health::{healthz, readyz};
 use crate::state::{bearer_token, ApiJson, AppState, Principal};
 
 pub fn router(state: Arc<AppState>) -> Router {
+    routes(state, true)
+}
+
+/// The session plane's routes, with `/healthz` and `/readyz` when `health` is set, as on a
+/// listener the viewer plane does not share.
+pub(crate) fn routes(state: Arc<AppState>, health: bool) -> Router {
     // The development CORS list covers this plane, since a browser on a laptop authorises here
     // first. The production list never does: this plane's credential must never be held by a
     // browser, and `session_layer` reads only the development list.
@@ -32,9 +38,15 @@ pub fn router(state: Arc<AppState>) -> Router {
     let state_for_open = Arc::clone(&state);
     let router = Router::new()
         .route("/session/authorise", post(authorise))
-        .route("/session/revoke", post(revoke))
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+        .route("/session/revoke", post(revoke));
+    let router = if health {
+        router
+            .route("/healthz", get(healthz))
+            .route("/readyz", get(readyz))
+    } else {
+        router
+    };
+    let router = router
         // Mask fragments for new principals are built here, so this plane trims the allocator too.
         .layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),

@@ -112,8 +112,8 @@ pub struct Engine {
     /// `serve.max_region_cells` — the most boundary cells a region's descent may hold at one
     /// depth before it answers a cover instead.
     pub(crate) max_region_cells: AtomicU64,
-    /// Each text filter leaf's answer per shard and grant ([`crate::text_filter_cache`]).
-    pub(crate) text_filter_cache: Arc<crate::text_filter_cache::TextFilterCache>,
+    /// Each text or value filter leaf's answer per shard and grant ([`crate::filter_cache`]).
+    pub(crate) filter_cache: Arc<crate::filter_cache::FilterCache>,
     /// Artifact memberships in row space, one entry per `(view, layer, level)`. Keyed per
     /// *deployment*, unlike the session-keyed caches below, so it moves only when a layer is
     /// published.
@@ -1237,10 +1237,13 @@ impl Engine {
         config: EngineConfig,
     ) -> Result<Engine> {
         config.check()?;
+        let mut lap = Lap::start();
         let mut bundle = open_bundle(bundle_root).map_err(EngineError::Store)?;
         let side = merge_side_declarations(&mut bundle);
+        let bundle_ms = lap.next();
 
         let mut readers = PrefixReaders::open(bundle_root, &bundle)?;
+        let readers_ms = lap.next();
         let ReconstructedWrites {
             mut deny,
             buffers,
@@ -1248,6 +1251,7 @@ impl Engine {
             vocabularies,
         } = reconstruct_writes(wal_path, &bundle, &readers, side)?;
         open_logged_shards(bundle_root, &mut bundle, &mut readers, &state)?;
+        let replay_ms = lap.next();
 
         let fragments = Arc::new(FragmentCache::new(cache_dir, authorisation_rule_hash()));
         // Built now, not lazily on first request: a pool that cannot be built is a fact about this
@@ -1303,13 +1307,14 @@ impl Engine {
             buffers,
             &pool,
         )?;
+        let generation_ms = lap.next();
         let (artifact_projections, shapes) =
             adopt_derived_structures(cache_dir, &readers, &bundle, &state);
 
         let row_projection_cache = Arc::new(RowProjectionCache::new(u64::MAX));
         let region_cache = Arc::new(mosaica_cache::SingleFlightCache::new(u64::MAX));
-        let text_filter_cache = Arc::new(mosaica_cache::SingleFlightCache::new(
-            crate::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES,
+        let filter_cache = Arc::new(mosaica_cache::SingleFlightCache::new(
+            crate::filter_cache::DEFAULT_FILTER_CACHE_BYTES,
         ));
         let refresh_in_flight = Arc::new(AtomicU64::new(crate::refresh::NO_REFRESH));
         let switches = Arc::new(TestSwitches::default());
@@ -1337,7 +1342,7 @@ impl Engine {
             fragments,
             region_cache: Arc::clone(&region_cache),
             max_region_cells: AtomicU64::new(crate::region::DEFAULT_MAX_REGION_CELLS as u64),
-            text_filter_cache,
+            filter_cache,
             artifact_projections: Arc::clone(&artifact_projections),
             shapes: Arc::clone(&shapes),
             figures: Arc::new(crate::figures::FiguresCache::new(
@@ -1383,6 +1388,7 @@ impl Engine {
             ladders.sweep(&live);
         });
 
+        let shapes_ms = lap.next();
         // Every level's row form, built before this engine serves a request: left lazy, the cost
         // lands on whichever request of a fresh process arrives first.
         let warmed = engine.warm_artifact_projections();
@@ -1405,6 +1411,16 @@ impl Engine {
             .health()
             .buffered_items
             .store(buffered, Ordering::SeqCst);
+        tracing::info!(
+            bundle_ms,
+            readers_ms,
+            replay_ms,
+            generation_ms,
+            shapes_ms,
+            projections_ms = lap.next(),
+            elapsed_ms = lap.total(),
+            "the engine opened the bundle"
+        );
         Ok(engine)
     }
 
@@ -1482,7 +1498,7 @@ impl Engine {
             fragments: Arc::clone(&self.fragments),
             ladders: Arc::clone(&self.stage.ladders),
             region_cache: Arc::clone(&self.region_cache),
-            text_filter_cache: Arc::clone(&self.text_filter_cache),
+            filter_cache: Arc::clone(&self.filter_cache),
             shapes: Arc::clone(&self.shapes),
             lineages: Arc::clone(&self.lineages),
             level_contents: Arc::clone(&self.level_contents),
@@ -1634,6 +1650,33 @@ pub(crate) fn open_rotation(
             space_contents,
         },
     ))
+}
+
+/// Milliseconds since the last lap and since the start, for the open's one log line.
+struct Lap {
+    start: std::time::Instant,
+    last: std::time::Instant,
+}
+
+impl Lap {
+    fn start() -> Lap {
+        let now = std::time::Instant::now();
+        Lap {
+            start: now,
+            last: now,
+        }
+    }
+
+    fn next(&mut self) -> u64 {
+        let now = std::time::Instant::now();
+        let ms = (now - self.last).as_millis() as u64;
+        self.last = now;
+        ms
+    }
+
+    fn total(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
 }
 
 pub(crate) fn read_current(root: &Path) -> Result<CurrentPointer> {

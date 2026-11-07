@@ -2101,6 +2101,7 @@ dependencies = [
  "mosaica-types",
  "proptest",
  "rand 0.8.8",
+ "rayon",
  "rustc-hash 1.1.0",
  "sha2",
  "tempfile",
@@ -2280,6 +2281,7 @@ dependencies = [
  "mosaica-authz",
  "mosaica-roaring",
  "mosaica-types",
+ "rayon",
  "tempfile",
  "zstd",
 ]
