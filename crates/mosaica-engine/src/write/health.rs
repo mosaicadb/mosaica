@@ -169,9 +169,10 @@ pub struct ExecutorHealth {
     /// The last refusal that answered a request, which a scheduled or closing refusal does not
     /// replace.
     pub(crate) last_request_refusal: Mutex<Option<RequestRefusal>>,
-    /// The requests the last answer covered and how it answered them. Written before
-    /// [`Self::compaction_requests_answered`] rises to its last number.
-    pub(crate) last_answer: Mutex<Option<RequestAnswer>>,
+    /// Every answer since the executor started, in the order given: the requests each covered
+    /// and how it answered them. One is added before [`Self::compaction_requests_answered`] rises
+    /// to its last number.
+    pub(crate) answers: Mutex<Vec<RequestAnswer>>,
     /// The WAL as the last sample found it. Sampled on the executor thread at a tick, at most once a
     /// period, so a status poll costs the node nothing.
     pub(crate) wal_gauge: Mutex<WalGauge>,
@@ -481,11 +482,46 @@ pub struct RequestRefusal {
 
 /// How the compaction requests numbered `first` to `last` were answered. Requests made before a
 /// tick takes them, or while an earlier one is being answered, are merged and answered together.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RequestAnswer {
     pub first: u64,
     pub last: u64,
     pub outcome: RequestOutcome,
+    /// The last record of the compaction that answered them: the first that failed where one
+    /// did, and the last to end otherwise. `None` where no compaction ran for them.
+    pub job: Option<mosaica_types::progress::Progress>,
+}
+
+/// Where one compaction request is.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RequestState {
+    /// Not yet answered. `job` is the record of the compaction in flight, where one is.
+    Pending {
+        job: Option<mosaica_types::progress::Progress>,
+    },
+    Answered(RequestAnswer),
+}
+
+impl ExecutorHealth {
+    /// Where request `request` is, or `None` for a number this executor has not given, which is
+    /// every number above the last it gave once the server has restarted.
+    pub(crate) fn request_state(&self, request: u64) -> Option<RequestState> {
+        if request == 0 || request > self.compaction_requests_accepted.load(Ordering::SeqCst) {
+            return None;
+        }
+        let answers = lock_recover(&self.answers);
+        let at = answers.partition_point(|answer| answer.last < request);
+        if let Some(answer) = answers.get(at).filter(|answer| answer.first <= request) {
+            return Some(RequestState::Answered(answer.clone()));
+        }
+        drop(answers);
+        let job = self
+            .jobs
+            .running()
+            .into_iter()
+            .find(|job| job.job == mosaica_types::progress::JobKind::Compaction);
+        Some(RequestState::Pending { job })
+    }
 }
 
 /// How a compaction request was answered.
@@ -505,7 +541,7 @@ pub enum RequestOutcome {
 }
 
 impl RequestOutcome {
-    /// The outcome's name on `/control/status`.
+    /// The outcome's name on `GET /control/compact/{request}`.
     pub fn as_str(self) -> &'static str {
         match self {
             RequestOutcome::Compacted => "compacted",
@@ -603,7 +639,6 @@ pub struct ExecutorStats {
     pub compaction_requests_accepted: u64,
     pub compaction_requests_answered: u64,
     pub last_request_refusal: Option<RequestRefusal>,
-    pub last_answer: Option<RequestAnswer>,
     /// The WAL as the last sample found it — see [`WalGauge`].
     pub wal: WalGauge,
     pub last_fold_attr_read: u64,
@@ -745,7 +780,7 @@ impl ExecutorHealth {
             compaction_requests_accepted: AtomicU64::new(0),
             compaction_requests_answered: AtomicU64::new(0),
             last_request_refusal: Mutex::new(None),
-            last_answer: Mutex::new(None),
+            answers: Mutex::new(Vec::new()),
             wal_gauge: Mutex::new(WalGauge::default()),
             fold_ended_unix: AtomicU64::new(0),
             last_compactions: Mutex::new(BTreeMap::new()),
@@ -1004,7 +1039,6 @@ impl ExecutorHealth {
             compaction_requests_accepted: self.compaction_requests_accepted.load(Ordering::SeqCst),
             compaction_requests_answered: self.compaction_requests_answered.load(Ordering::SeqCst),
             last_request_refusal: *lock_recover(&self.last_request_refusal),
-            last_answer: *lock_recover(&self.last_answer),
             wal: *lock_recover(&self.wal_gauge),
             last_fold_attr_read: self.last_fold_attr_read.load(Ordering::Relaxed),
             last_fold_attr_written: self.last_fold_attr_written.load(Ordering::Relaxed),

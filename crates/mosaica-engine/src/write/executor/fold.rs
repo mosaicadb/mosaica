@@ -521,6 +521,11 @@ struct Answering {
     folds: u64,
     failures: u64,
     refused: Option<RequestOutcome>,
+    /// Compactions ended when [`Self::job`] was last brought up to date.
+    ended: u64,
+    /// The record of the compaction that answers the request: the first that failed where one
+    /// did, and the last to end otherwise.
+    job: Option<mosaica_types::progress::Progress>,
 }
 
 /// A compaction's thread and the flag that abandons it. Dropping it raises the flag and joins the
@@ -1195,6 +1200,7 @@ impl Executor {
         {
             self.compactions.requested = None;
         }
+        self.note_compaction_ended();
         if self.compactions.requested.is_none() {
             if let Some(answering) = self.compactions.answering.take() {
                 let failures = self.health.fold_failures.load(Ordering::SeqCst);
@@ -1205,10 +1211,11 @@ impl Executor {
                     None if folds > answering.folds => RequestOutcome::Compacted,
                     None => RequestOutcome::NothingToDo,
                 };
-                *lock_recover(&self.health.last_answer) = Some(RequestAnswer {
+                lock_recover(&self.health.answers).push(RequestAnswer {
                     first: answering.first,
                     last: self.compactions.requested_through,
                     outcome,
+                    job: answering.job,
                 });
             }
             self.health
@@ -1280,16 +1287,49 @@ impl Executor {
     fn take_request(&mut self, request: u64) {
         self.compactions.requested_through = request;
         if self.compactions.answering.is_none() {
+            let folds = self.health.folds.load(Ordering::SeqCst);
+            let failures = self.health.fold_failures.load(Ordering::SeqCst);
             self.compactions.answering = Some(Answering {
                 first: self
                     .health
                     .compaction_requests_answered
                     .load(Ordering::SeqCst)
                     + 1,
-                folds: self.health.folds.load(Ordering::SeqCst),
-                failures: self.health.fold_failures.load(Ordering::SeqCst),
+                folds,
+                failures,
                 refused: None,
+                ended: folds + failures,
+                job: None,
             });
+        }
+    }
+
+    /// Keep the record of a compaction of the request being answered that has ended since the
+    /// last look. Called with no compaction in flight, before the next is dispatched and when the
+    /// request is answered, so the last record to end is that compaction's. A failed record is
+    /// kept over any later one.
+    fn note_compaction_ended(&mut self) {
+        if self.fold.outstanding() {
+            return;
+        }
+        let Some(answering) = &mut self.compactions.answering else {
+            return;
+        };
+        let ended = self.health.folds.load(Ordering::SeqCst)
+            + self.health.fold_failures.load(Ordering::SeqCst);
+        if ended == answering.ended {
+            return;
+        }
+        answering.ended = ended;
+        let failed = |job: &Option<mosaica_types::progress::Progress>| {
+            job.as_ref()
+                .is_some_and(|job| job.state == mosaica_types::progress::JobState::Failed)
+        };
+        if !failed(&answering.job) {
+            answering.job = self
+                .health
+                .jobs
+                .last_ended(mosaica_types::progress::JobKind::Compaction);
         }
     }
 
@@ -1462,12 +1502,22 @@ impl Executor {
                 })
                 .collect()
         };
+        // The compaction is in flight, and its record listed, from here, so a failure to name its
+        // prefix is the record's failure too.
+        let rows = plan.views.iter().map(|view| view.rows).sum();
+        let stairs = crate::compact::Staircase::start(shard_id, rows);
+        let unit = self
+            .fold
+            .start_recorded(&self.health.jobs, Arc::clone(stairs.record()));
         let to_prefix = match crate::compact::next_prefix_name(&self.deps.bundle_root) {
             Ok(prefix) => prefix,
             Err(e) => {
+                // Counted before the record ends and the request is answered, so the answer is a
+                // failure.
+                self.health.fold_failures.fetch_add(1, Ordering::Relaxed);
+                drop(unit);
                 self.compaction_taken(shard_id, from);
                 self.request_answered();
-                self.health.fold_failures.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(error = %e, "could not name a new prefix for the fold");
                 return;
             }
@@ -1545,9 +1595,6 @@ impl Executor {
         self.health
             .compaction_shard
             .store(shard_id.raw(), Ordering::SeqCst);
-        let rows = plan.views.iter().map(|view| view.rows).sum();
-        let (stairs, record) = crate::compact::Staircase::start(shard_id, rows);
-        let unit = self.fold.start_recorded(&self.health.jobs, record);
         let health = Arc::clone(&self.health);
         let switches = Arc::clone(&self.deps.switches);
         let abandoned = Arc::clone(&ctx.abandoned);
@@ -1556,7 +1603,20 @@ impl Executor {
             .spawn(move || {
                 let abandoned = Arc::clone(&ctx.abandoned);
                 let to_prefix_dir = ctx.to_prefix_dir.clone();
-                let outcome = crate::compact::execute(plan, ctx, stairs);
+                // A pass that panics fails the compaction as an error does.
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::compact::execute(plan, ctx, stairs)
+                }))
+                .unwrap_or_else(|panic| {
+                    let what = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_default();
+                    Err(crate::flush::MaintenanceFailed(format!(
+                        "a pass of the compaction panicked: {what}"
+                    )))
+                });
                 // Test hook; always false otherwise. See `Engine::set_fold_paused_for_test`.
                 if outcome.is_ok() {
                     health.fold_holding.store(true, Ordering::SeqCst);

@@ -150,11 +150,11 @@ pub(crate) fn execute(
 
     let mut out = FoldOutput::default();
 
-    let segments = fold_row_spaces(&plan, &ctx, stairs.tracker(), &mut out)?;
+    let segments = fold_row_spaces(&plan, &ctx, stairs.record(), &mut out)?;
     ctx.going_on()?;
 
     stairs.enter(Pass::Postings, Some((plan.dict_len.into(), Unit::Terms)));
-    let postings_path = fold_postings(&plan, &ctx, stairs.tracker(), &terms_dir, &mut out)?;
+    let postings_path = fold_postings(&plan, &ctx, stairs.record(), &terms_dir, &mut out)?;
     ctx.going_on()?;
 
     stairs.enter(Pass::TermImages, None);
@@ -185,7 +185,7 @@ pub(crate) fn execute(
 
     // No pass 4b: the term dictionary is carried to the new prefix by a hard link at publication.
     stairs.enter(Pass::Digests, None);
-    let files = digest_and_sync(&out, stairs.tracker())?;
+    let files = digest_and_sync(&out, stairs.record())?;
     stairs.close();
 
     Ok(CompletedFold {

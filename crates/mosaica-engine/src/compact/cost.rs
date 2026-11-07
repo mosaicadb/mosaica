@@ -141,24 +141,23 @@ pub(crate) struct Staircase {
 
 impl Staircase {
     /// The staircase of a compaction of `shard`, whose views hold `rows` rows, in its first pass
-    /// from now, and the compaction's record.
-    pub(crate) fn start(shard: ShardId, rows: u64) -> (Self, Arc<Tracker>) {
+    /// from now.
+    pub(crate) fn start(shard: ShardId, rows: u64) -> Self {
         let shard = context(&[Part::new("shard", &shard.to_string(), 0, 1)]);
         let counted = Some((rows, Unit::Rows));
         let (stages, record) =
             Stages::begin(JobKind::Compaction, Pass::RowSpace, shard.clone(), counted);
-        let record = Arc::new(record);
-        let stairs = Self {
+        Self {
             cost: Vec::new(),
             stages,
-            record: Arc::clone(&record),
+            record: Arc::new(record),
             shard,
-        };
-        (stairs, record)
+        }
     }
 
     /// End the open pass and begin `pass`. `counted` is the pass's total and what it counts, or
-    /// `None` for a pass that counts nothing.
+    /// `None` for a pass that counts nothing. The open pass is closed first, so its cost row reads
+    /// its own count before the next pass's step begins.
     pub(crate) fn enter(&mut self, pass: Pass, counted: Option<(u64, Unit)>) {
         self.close();
         self.stages
@@ -183,8 +182,8 @@ impl Staircase {
         });
     }
 
-    /// The record the passes count their work into.
-    pub(crate) fn tracker(&self) -> &Tracker {
+    /// The compaction's record, which the passes count their work into.
+    pub(crate) fn record(&self) -> &Arc<Tracker> {
         &self.record
     }
 
