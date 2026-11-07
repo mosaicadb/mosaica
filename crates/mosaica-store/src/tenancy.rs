@@ -47,9 +47,12 @@ const VERSION: u16 = 1;
 /// CRoaring's frozen reader needs its bytes 32-byte aligned, and a mapping is page-aligned.
 const HEADER_LEN: usize = 32;
 
+/// The extension of a tenancy file, read through an unchecked frozen bitmap view.
+pub(crate) const EXTENSION: &str = "tenancy";
+
 /// The file bit `bit` is written to.
 pub fn file_name(bit: u32) -> String {
-    format!("bit-{bit:02}.tenancy")
+    format!("bit-{bit:02}.{EXTENSION}")
 }
 
 fn malformed(path: &Path, detail: impl std::fmt::Display) -> StoreError {

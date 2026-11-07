@@ -65,7 +65,7 @@ mosaica verify [OPTIONS] <BUNDLE>
 
 Verify a bundle's files and every row's `mosaica_id`.
 
-It opens the bundle as the server does. That checks every manifest digest, the size and SHA-256 of every file except the unique indexes' runs, and that each segment's permutation maps one-to-one onto its rows. `--deep` hashes those runs too. It then confirms that the row space holds exactly the rows the segments claim, and computes each row's `mosaica_id` again from the identity key, failing on the first row that differs.
+It checks every manifest digest, the size and SHA-256 of every file except the unique indexes' runs, and that each segment's permutation maps one-to-one onto its rows. `--deep` hashes those runs too. It then confirms that the row space holds exactly the rows the segments claim, and computes each row's `mosaica_id` again from the identity key, failing on the first row that differs. A server opening the bundle checks the sizes and the permutations, and hashes only the few files it reads without checking their structure: hashing every file would read the whole bundle at every start.
 
 It also prints to stderr each indexed keyword column's count of distinct values against its rows, with a warning for a column whose values are unique per row. A warning does not fail the verify.
 

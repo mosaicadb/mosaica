@@ -177,29 +177,24 @@ fn walk_dict_records(
     let mut offset = 0;
     while offset < data.len() {
         if offset + 4 > data.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "dictionary extent {}: incomplete length field",
-                    path.display()
-                ),
-            ));
+            return Err(incomplete(path, "length field"));
         }
         let len = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
         let end = offset + 4 + len;
         if end > data.len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "dictionary extent {}: incomplete descriptor",
-                    path.display()
-                ),
-            ));
+            return Err(incomplete(path, "descriptor"));
         }
         on_record(&data[offset..end])?;
         offset = end;
     }
     Ok(())
+}
+
+fn incomplete(path: &Path, what: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("dictionary extent {}: incomplete {what}", path.display()),
+    )
 }
 
 /// Concatenate `inputs` into one extent at `out`, and return how many records it carries.
@@ -232,20 +227,28 @@ pub fn coalesce_dict_extents(inputs: &[PathBuf], out: &Path) -> io::Result<u64> 
 /// The descriptors are held once, concatenated in ordinal order, so an ordinal's descriptor is a
 /// slice and a descriptor's ordinal is one hash probe checked against that slice. A descriptor
 /// whose hash an earlier one already holds is kept in a second map, which a 64-bit hash leaves
-/// empty in practice.
+/// empty in practice. The hash map is split into [`SHARDS`] by the hash's top bits, so a load
+/// builds the shards on separate threads.
 #[derive(Clone)]
 pub struct Dict {
     /// Every descriptor's bytes, in ordinal order.
     bytes: Vec<u8>,
     /// Where each ordinal's descriptor ends in `bytes`.
     ends: Vec<u64>,
-    /// Descriptor hash to the first ordinal with that hash.
-    by_hash: FxHashMap<u64, TermId>,
+    /// Descriptor hash to the first ordinal with that hash, one map per shard.
+    by_hash: Vec<FxHashMap<u64, TermId>>,
     /// The descriptors whose hash an earlier descriptor holds.
     collided: FxHashMap<Box<[u8]>, TermId>,
     /// The labels indexed under a key of their own, shared between a dictionary and its
     /// extensions until an extension adds one.
     labels: Arc<LabelIndex>,
+}
+
+const SHARD_BITS: u32 = 6;
+const SHARDS: usize = 1 << SHARD_BITS;
+
+fn shard_of(hash: u64) -> usize {
+    (hash >> (64 - SHARD_BITS)) as usize
 }
 
 fn descriptor_hash(descriptor: &[u8]) -> u64 {
@@ -254,6 +257,98 @@ fn descriptor_hash(descriptor: &[u8]) -> u64 {
     hasher.write(descriptor);
     hasher.write_usize(descriptor.len());
     hasher.finish()
+}
+
+/// Descriptors read for an extension, in the order they arrived, before any is deduplicated.
+#[derive(Default)]
+struct Found {
+    bytes: Vec<u8>,
+    ends: Vec<u64>,
+}
+
+impl Found {
+    /// Append the records of the extent at `path`: one pass finds where each descriptor ends, and
+    /// the descriptors are then copied out in parallel.
+    fn read_extent(&mut self, path: &Path) -> io::Result<()> {
+        use rayon::prelude::*;
+
+        let file = File::open(path)?;
+        if file.metadata()?.len() == 0 {
+            return Ok(());
+        }
+        // SAFETY: an extent is immutable once written.
+        let data = unsafe { memmap2::MmapOptions::new().populate().map(&file) }?;
+        let first = self.ends.len();
+        let base = self.bytes.len() as u64;
+        let mut offset = 0;
+        let mut end = base;
+        while offset < data.len() {
+            let Some(prefix) = data.get(offset..offset + 4) else {
+                return Err(incomplete(path, "length field"));
+            };
+            let len = u32::from_le_bytes(prefix.try_into().expect("four bytes")) as usize;
+            if offset + 4 + len > data.len() {
+                return Err(incomplete(path, "descriptor"));
+            }
+            end += len as u64;
+            self.ends.push(end);
+            offset += 4 + len;
+        }
+
+        if self.bytes.is_empty() {
+            // Zeroed lazily by the allocator, so the pages are first touched by the copy below.
+            self.bytes = vec![0; end as usize];
+        } else {
+            self.bytes.resize(end as usize, 0);
+        }
+        let ends = &self.ends[first..];
+        let chunk = ends.len().div_ceil(rayon::current_num_threads()).max(1);
+        let mut pieces = Vec::new();
+        let mut rest = &mut self.bytes[base as usize..];
+        let mut at = base;
+        for (c, ends) in ends.chunks(chunk).enumerate() {
+            let stop = *ends.last().expect("a chunk is not empty");
+            let (piece, tail) = rest.split_at_mut((stop - at) as usize);
+            pieces.push((c * chunk, ends, at, piece));
+            rest = tail;
+            at = stop;
+        }
+        pieces
+            .into_par_iter()
+            .for_each(|(record, ends, start, piece)| {
+                let mut from = start;
+                for (k, &to) in ends.iter().enumerate() {
+                    // Each record before this one carries a four-byte length ahead of it.
+                    let source = (from - base) as usize + 4 * (record + k + 1);
+                    let len = (to - from) as usize;
+                    piece[(from - start) as usize..][..len]
+                        .copy_from_slice(&data[source..source + len]);
+                    from = to;
+                }
+            });
+        Ok(())
+    }
+
+    fn push(&mut self, descriptor: &[u8]) {
+        self.bytes.extend_from_slice(descriptor);
+        self.ends.push(self.bytes.len() as u64);
+    }
+
+    fn get(&self, at: usize) -> &[u8] {
+        let start = match at {
+            0 => 0,
+            _ => self.ends[at - 1] as usize,
+        };
+        &self.bytes[start..self.ends[at] as usize]
+    }
+}
+
+/// One shard's part of an extension: its map, the arrivals already present, and the arrivals
+/// whose hash a different descriptor holds, each under its provisional ordinal.
+struct ShardBuilt {
+    map: FxHashMap<u64, TermId>,
+    repeats: Vec<u32>,
+    collided: Vec<TermId>,
 }
 
 impl Dict {
@@ -267,7 +362,7 @@ impl Dict {
         Dict {
             bytes: Vec::new(),
             ends: Vec::new(),
-            by_hash: FxHashMap::default(),
+            by_hash: vec![FxHashMap::default(); SHARDS],
             collided: FxHashMap::default(),
             labels: Arc::default(),
         }
@@ -279,57 +374,179 @@ impl Dict {
         &self.labels
     }
 
-    /// Give `descriptor` the next ordinal unless it already has one: skip-if-present, not
-    /// insert-and-count. See [`Dict::load`]'s doc.
-    fn intern(&mut self, descriptor: &[u8]) {
-        if self.lookup(descriptor).is_some() {
-            return;
-        }
-        let id = TermId::new(self.ends.len() as u32);
-        self.bytes.extend_from_slice(descriptor);
-        self.ends.push(self.bytes.len() as u64);
-        match self.by_hash.entry(descriptor_hash(descriptor)) {
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(id);
-            }
-            std::collections::hash_map::Entry::Occupied(_) => {
-                self.collided.insert(descriptor.into(), id);
-            }
-        }
-        if crate::label::label_of_key(descriptor).is_some() {
-            Arc::make_mut(&mut self.labels).add(id, descriptor);
-        }
-    }
-
     /// A dictionary covering this one's descriptors plus the extents at `paths`, whose ordinals
     /// continue from `self.len()`. Existing ordinals are preserved: a session's granted terms
     /// are resolved once and never re-resolved, so renumbering one would evaluate against a
     /// different term than granted. A descriptor already present is not re-interned.
     pub fn load_extending(&self, paths: &[PathBuf]) -> io::Result<Dict> {
-        let mut extended = self.clone();
+        let mut found = Found::default();
         for path in paths {
-            walk_dict_records(path, |record| {
-                extended.intern(&record[4..]);
-                Ok(())
-            })?;
+            found.read_extent(path)?;
         }
-        Ok(extended)
+        Ok(self.extended_by(found))
     }
 
     /// The same extension as [`Dict::load_extending`], from descriptors already in memory, so a
     /// flush's live dictionary is not routed through a disk round-trip. `descriptors` must be
     /// the same sequence, in the same order, that the extent file records.
     pub fn extended_with(&self, descriptors: &[Vec<u8>]) -> Dict {
-        let mut extended = self.clone();
+        let mut found = Found::default();
         for descriptor in descriptors {
-            extended.intern(descriptor);
+            found.push(descriptor);
         }
+        self.extended_by(found)
+    }
+
+    /// This dictionary with `found` interned in order, each descriptor not yet present taking the
+    /// next ordinal. Each arrival is first given the provisional ordinal `self.len()` plus its
+    /// position; the shards are built in parallel against those, and renumbered once the repeats
+    /// are known.
+    fn extended_by(&self, found: Found) -> Dict {
+        use rayon::prelude::*;
+
+        let base = self.len();
+        let count = found.ends.len();
+        let provisional = |at: usize| TermId::new(base + at as u32);
+        let hashes: Vec<u64> = (0..count)
+            .into_par_iter()
+            .map(|at| descriptor_hash(found.get(at)))
+            .collect();
+
+        // Each shard's arrivals in arrival order: chunks are bucketed in parallel and a shard
+        // reads its bucket of every chunk in chunk order.
+        let chunk = count.div_ceil(rayon::current_num_threads()).max(1);
+        let buckets: Vec<Vec<Vec<u32>>> = hashes
+            .par_chunks(chunk)
+            .enumerate()
+            .map(|(c, hashes)| {
+                let mut buckets = vec![Vec::new(); SHARDS];
+                for (offset, &hash) in hashes.iter().enumerate() {
+                    buckets[shard_of(hash)].push((c * chunk + offset) as u32);
+                }
+                buckets
+            })
+            .collect();
+
+        let descriptor_of = |id: TermId| match id.raw().checked_sub(base) {
+            Some(at) => found.get(at as usize),
+            None => self
+                .descriptor(id)
+                .expect("a held ordinal has a descriptor"),
+        };
+        let mut shards: Vec<ShardBuilt> = (0..SHARDS)
+            .into_par_iter()
+            .map(|shard| {
+                let arrivals = buckets.iter().flat_map(|chunk| &chunk[shard]);
+                let mut map = self.by_hash[shard].clone();
+                map.reserve(buckets.iter().map(|chunk| chunk[shard].len()).sum());
+                let mut repeats = Vec::new();
+                let mut collided: FxHashMap<&[u8], TermId> = FxHashMap::default();
+                for &at in arrivals {
+                    let descriptor = found.get(at as usize);
+                    match map.entry(hashes[at as usize]) {
+                        std::collections::hash_map::Entry::Vacant(slot) => {
+                            slot.insert(provisional(at as usize));
+                        }
+                        std::collections::hash_map::Entry::Occupied(held) => {
+                            if descriptor_of(*held.get()) == descriptor
+                                || self.collided.contains_key(descriptor)
+                                || collided.contains_key(descriptor)
+                            {
+                                repeats.push(at);
+                            } else {
+                                collided.insert(descriptor, provisional(at as usize));
+                            }
+                        }
+                    }
+                }
+                ShardBuilt {
+                    map,
+                    repeats,
+                    collided: collided.into_values().collect(),
+                }
+            })
+            .collect();
+
+        let repeats: usize = shards.iter().map(|shard| shard.repeats.len()).sum();
+        let mut repeated = vec![false; if repeats == 0 { 0 } else { count }];
+        for at in shards.iter().flat_map(|shard| &shard.repeats) {
+            repeated[*at as usize] = true;
+        }
+        let is_repeat = |at: usize| repeats > 0 && repeated[at];
+        // In arrival order, which is ordinal order: a label's id is the order it was first added.
+        let labelled: Vec<usize> = (0..count)
+            .into_par_iter()
+            .filter(|&at| !is_repeat(at) && crate::label::label_of_key(found.get(at)).is_some())
+            .collect();
+
+        // Each arrival's final ordinal, where a repeat moved it from its provisional one.
+        let mut final_of: Vec<u32> = Vec::new();
+        if repeats > 0 {
+            let mut next = base;
+            final_of = repeated
+                .iter()
+                .map(|&repeat| {
+                    let ordinal = next;
+                    next += u32::from(!repeat);
+                    ordinal
+                })
+                .collect();
+            let renumber = |id: &mut TermId| {
+                if let Some(at) = id.raw().checked_sub(base) {
+                    *id = TermId::new(final_of[at as usize]);
+                }
+            };
+            shards.par_iter_mut().for_each(|shard| {
+                shard.map.values_mut().for_each(renumber);
+                shard.collided.iter_mut().for_each(renumber);
+            });
+        }
+        let ordinal_of = |at: usize| match final_of.get(at) {
+            Some(&ordinal) => TermId::new(ordinal),
+            None => provisional(at),
+        };
+
+        let (bytes, ends) = if base == 0 && repeats == 0 {
+            (found.bytes, found.ends)
+        } else {
+            let mut bytes = self.bytes.clone();
+            let mut ends = self.ends.clone();
+            bytes.reserve(found.bytes.len());
+            ends.reserve(count);
+            for at in (0..count).filter(|&at| !is_repeat(at)) {
+                bytes.extend_from_slice(found.get(at));
+                ends.push(bytes.len() as u64);
+            }
+            (bytes, ends)
+        };
+        let mut extended = Dict {
+            bytes,
+            ends,
+            by_hash: Vec::with_capacity(SHARDS),
+            collided: self.collided.clone(),
+            labels: Arc::default(),
+        };
+        for shard in shards {
+            for id in shard.collided {
+                let descriptor = extended.descriptor(id).expect("a new ordinal").into();
+                extended.collided.insert(descriptor, id);
+            }
+            extended.by_hash.push(shard.map);
+        }
+        let mut labels = Arc::clone(&self.labels);
+        for at in labelled {
+            let ordinal = ordinal_of(at);
+            let descriptor = extended.descriptor(ordinal).expect("a new ordinal");
+            Arc::make_mut(&mut labels).add(ordinal, descriptor);
+        }
+        extended.labels = labels;
         extended
     }
 
     /// Look up a descriptor and return its term ID if present.
     pub fn lookup(&self, descriptor: &[u8]) -> Option<TermId> {
-        match self.by_hash.get(&descriptor_hash(descriptor)) {
+        let hash = descriptor_hash(descriptor);
+        match self.by_hash[shard_of(hash)].get(&hash) {
             Some(&id) if self.descriptor(id) == Some(descriptor) => Some(id),
             Some(_) => self.collided.get(descriptor).copied(),
             None => None,
@@ -469,6 +686,43 @@ mod tests {
             writer.append(d).unwrap();
         }
         writer.finish().unwrap()
+    }
+
+    proptest::proptest! {
+        /// Every descriptor takes the ordinal of its first arrival across the extents and the
+        /// in-memory extension, repeats taking none, however the arrivals fall into shards.
+        #[test]
+        fn every_descriptor_takes_the_ordinal_of_its_first_arrival(
+            extents in proptest::collection::vec(
+                proptest::collection::vec(proptest::collection::vec(0u8..4, 0..4), 0..200),
+                0..4,
+            ),
+            extension in proptest::collection::vec(proptest::collection::vec(0u8..4, 0..4), 0..50),
+        ) {
+            let tmp = TempDir::new().unwrap();
+            let paths: Vec<PathBuf> = extents
+                .iter()
+                .enumerate()
+                .flat_map(|(n, extent)| {
+                    let records: Vec<&[u8]> = extent.iter().map(Vec::as_slice).collect();
+                    extent_of(&tmp.path().join(n.to_string()), &records)
+                })
+                .collect();
+            let dict = Dict::load(&paths).unwrap().extended_with(&extension);
+
+            let mut first: Vec<&[u8]> = Vec::new();
+            for descriptor in extents.iter().flatten().chain(&extension) {
+                if !first.contains(&descriptor.as_slice()) {
+                    first.push(descriptor);
+                }
+            }
+            proptest::prop_assert_eq!(dict.len() as usize, first.len());
+            for (ordinal, descriptor) in first.iter().enumerate() {
+                let id = TermId::new(ordinal as u32);
+                proptest::prop_assert_eq!(dict.lookup(descriptor), Some(id));
+                proptest::prop_assert_eq!(dict.descriptor(id), Some(*descriptor));
+            }
+        }
     }
 
     /// `load(a ++ b)` must equal `load(a).load_extending(b)`, including when `b` repeats a

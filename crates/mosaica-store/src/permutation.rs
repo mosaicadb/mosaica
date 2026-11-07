@@ -61,6 +61,7 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use memmap2::Mmap;
@@ -76,20 +77,17 @@ use crate::error::{Result, StoreError};
 /// is 1 GB of transient memory there, paid by every view at bundle open and twice again by
 /// `mosaica verify`; a bit a row is 125 MB. The check is unchanged: a row whose bit is already
 /// set is claimed by a second entity.
-struct RowsSeen(Vec<u64>);
+struct RowsSeen(Vec<AtomicU64>);
 
 impl RowsSeen {
     fn new(rows: usize) -> RowsSeen {
-        RowsSeen(vec![0u64; rows.div_ceil(64)])
+        RowsSeen((0..rows.div_ceil(64)).map(|_| AtomicU64::new(0)).collect())
     }
 
     /// Claim `row`, returning whether it was already claimed.
-    fn claim(&mut self, row: usize) -> bool {
+    fn claim(&self, row: usize) -> bool {
         let bit = 1u64 << (row & 63);
-        let word = &mut self.0[row >> 6];
-        let already = *word & bit != 0;
-        *word |= bit;
-        already
+        self.0[row >> 6].fetch_or(bit, Ordering::Relaxed) & bit != 0
     }
 }
 
@@ -865,41 +863,53 @@ impl Permutation {
     /// rows than the descriptor declares takes the general path, where the image is read rather
     /// than assumed.
     pub fn validate_rows(&self, row_count: u32) -> Result<()> {
-        let row_count_usize = row_count as usize;
-        let mut seen = RowsSeen::new(row_count_usize);
-        let mut claimed: u64 = 0;
-        let mut present = croaring::Bitmap::new();
-        let mut scratch: Vec<u32> = Vec::new();
-        for page in 0..self.page_count {
-            let Some(slots) = self.page_of(page) else {
-                continue;
-            };
-            add_page_entities(&mut present, page, slots, &mut scratch);
-            for (offset, &slot) in slots.iter().enumerate() {
-                if slot == ROW_ABSENT {
-                    continue;
-                }
-                let entity = page * PAGE_ENTRIES + offset;
-                if slot >= row_count {
-                    return Err(StoreError::InvalidPermutation {
-                        path: self.path.clone(),
-                        detail: format!(
-                            "entity {entity} maps to row {slot}, out of bound for row_count \
-                             {row_count}"
-                        ),
-                    });
-                }
-                if seen.claim(slot as usize) {
-                    return Err(StoreError::InvalidPermutation {
-                        path: self.path.clone(),
-                        detail: format!(
-                            "row {slot} is claimed by more than one entity (not a bijection)"
-                        ),
-                    });
-                }
-                claimed += 1;
-            }
-        }
+        use rayon::prelude::*;
+
+        let seen = RowsSeen::new(row_count as usize);
+        let invalid = |detail: String| StoreError::InvalidPermutation {
+            path: self.path.clone(),
+            detail,
+        };
+        // Pages are scanned in parallel: a claim is an atomic bit, so two entities claiming one
+        // row are caught whichever thread sees the second.
+        let (claimed, mut present) = (0..self.page_count)
+            .into_par_iter()
+            .try_fold(
+                || (0u64, croaring::Bitmap::new(), Vec::new()),
+                |(mut claimed, mut present, mut scratch), page| {
+                    let Some(slots) = self.page_of(page) else {
+                        return Ok((claimed, present, scratch));
+                    };
+                    add_page_entities(&mut present, page, slots, &mut scratch);
+                    for (offset, &slot) in slots.iter().enumerate() {
+                        if slot == ROW_ABSENT {
+                            continue;
+                        }
+                        let entity = page * PAGE_ENTRIES + offset;
+                        if slot >= row_count {
+                            return Err(invalid(format!(
+                                "entity {entity} maps to row {slot}, out of bound for row_count \
+                                 {row_count}"
+                            )));
+                        }
+                        if seen.claim(slot as usize) {
+                            return Err(invalid(format!(
+                                "row {slot} is claimed by more than one entity (not a bijection)"
+                            )));
+                        }
+                        claimed += 1;
+                    }
+                    Ok((claimed, present, scratch))
+                },
+            )
+            .map(|folded| folded.map(|(claimed, present, _)| (claimed, present)))
+            .try_reduce(
+                || (0, croaring::Bitmap::new()),
+                |(a, mut left), (b, right)| {
+                    left.or_inplace(&right);
+                    Ok((a + b, left))
+                },
+            )?;
         if claimed == u64::from(row_count) {
             let _ = self.dense_rows.set(row_count);
         }
@@ -1591,7 +1601,7 @@ impl SegmentExtent {
             return false;
         }
         let count = self.row_count();
-        let mut seen = RowsSeen::new(count as usize);
+        let seen = RowsSeen::new(count as usize);
         for row in self
             .rows
             .iter()

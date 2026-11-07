@@ -26,6 +26,7 @@ mosaica-access = { workspace = true }
 # machine and its rules exist once.
 mosaica-cache = { workspace = true }
 rustc-hash = "1"
+rayon = { workspace = true }
 arrow = { workspace = true }
 memmap2 = { workspace = true }
 sha2 = { workspace = true }

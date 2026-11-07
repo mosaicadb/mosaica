@@ -582,45 +582,57 @@ pub(crate) fn read_posting(array: &LargeBinaryArray, idx: usize) -> io::Result<P
 /// bytes to the unsafe zero-copy `BitmapView::deserialize` for tag-1 records. A malformed record
 /// fails `open` closed rather than causing undefined behaviour on first lookup.
 pub(crate) fn validate_records(array: &LargeBinaryArray) -> io::Result<()> {
-    for idx in 0..array.len() {
-        let bytes = array.value(idx);
-        let (tag, payload) = bytes
-            .split_first()
-            .ok_or_else(|| invalid_data(format!("postings.arrow: term {idx} has no tag byte")))?;
+    use rayon::prelude::*;
 
-        match tag {
-            0 => {
-                if payload.len() % 4 != 0 {
-                    return Err(invalid_data(format!(
-                        "postings.arrow: term {idx} tag-0 payload length {} is not a multiple \
-                         of 4",
-                        payload.len()
-                    )));
-                }
-            }
-            1 => {
-                let bitmap = Bitmap::try_deserialize::<Portable>(payload).ok_or_else(|| {
-                    invalid_data(format!(
-                        "postings.arrow: term {idx} tag-1 payload is not a valid portable \
-                         Roaring bitmap"
-                    ))
-                })?;
-                let consumed = bitmap.get_serialized_size_in_bytes::<Portable>();
-                if consumed != payload.len() {
-                    return Err(invalid_data(format!(
-                        "postings.arrow: term {idx} tag-1 payload has {} trailing byte(s) \
-                         beyond the {consumed}-byte serialised bitmap (payload is \
-                         {} bytes) — BitmapView::deserialize requires an exact-length buffer",
-                        payload.len().saturating_sub(consumed),
-                        payload.len()
-                    )));
-                }
-            }
-            other => {
+    // The first bad record in term order, whichever thread found it.
+    match (0..array.len())
+        .into_par_iter()
+        .filter_map(|idx| validate_record(array, idx).err())
+        .find_first(|_| true)
+    {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn validate_record(array: &LargeBinaryArray, idx: usize) -> io::Result<()> {
+    let bytes = array.value(idx);
+    let (tag, payload) = bytes
+        .split_first()
+        .ok_or_else(|| invalid_data(format!("postings.arrow: term {idx} has no tag byte")))?;
+
+    match tag {
+        0 => {
+            if payload.len() % 4 != 0 {
                 return Err(invalid_data(format!(
-                    "postings.arrow: term {idx} has unknown tag byte {other}"
-                )))
+                    "postings.arrow: term {idx} tag-0 payload length {} is not a multiple \
+                     of 4",
+                    payload.len()
+                )));
             }
+        }
+        1 => {
+            let bitmap = Bitmap::try_deserialize::<Portable>(payload).ok_or_else(|| {
+                invalid_data(format!(
+                    "postings.arrow: term {idx} tag-1 payload is not a valid portable \
+                     Roaring bitmap"
+                ))
+            })?;
+            let consumed = bitmap.get_serialized_size_in_bytes::<Portable>();
+            if consumed != payload.len() {
+                return Err(invalid_data(format!(
+                    "postings.arrow: term {idx} tag-1 payload has {} trailing byte(s) \
+                     beyond the {consumed}-byte serialised bitmap (payload is \
+                     {} bytes) — BitmapView::deserialize requires an exact-length buffer",
+                    payload.len().saturating_sub(consumed),
+                    payload.len()
+                )));
+            }
+        }
+        other => {
+            return Err(invalid_data(format!(
+                "postings.arrow: term {idx} has unknown tag byte {other}"
+            )))
         }
     }
     Ok(())

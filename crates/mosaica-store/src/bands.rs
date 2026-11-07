@@ -1257,7 +1257,7 @@ impl CellCodes {
         let codes = CellCodes { map };
         // Tile ranges and occupancy binary-search the codes, so codes out of order would give a
         // wrong range rather than an error.
-        if !codes.codes().windows(2).all(|w| w[0] < w[1]) {
+        if !crate::read::ascending(codes.codes(), true) {
             return Err(malformed(
                 &path,
                 "cell codes are not strictly ascending; rebuild the bundle",
