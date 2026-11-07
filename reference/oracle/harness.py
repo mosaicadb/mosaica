@@ -598,13 +598,13 @@ def _fixture_bundle_is_usable(bundle_root: Path, wanted: dict) -> bool:
 
 def compaction_answered(request: dict) -> bool:
     """Whether a compaction request is answered, from `GET /control/compact/{request}`'s body.
-    Raises `RuntimeError` with the server's detail where the server answered it and the answer's
-    `ok` is false, which is a refusal or a failure."""
+    Raises `RuntimeError` where the server answered it with anything but `compacted`: a refusal,
+    a failure, or nothing compacted, since every caller asks for a compaction it expects to run."""
     if not request["answered"]:
         return False
     answer = request["answer"]
-    if not answer["ok"]:
-        raise RuntimeError(f"the compaction was {answer['outcome']}: {answer['detail']}")
+    if answer["outcome"] != "compacted":
+        raise RuntimeError(f"the compaction was answered {answer['outcome']}: {answer['detail']}")
     return True
 
 
