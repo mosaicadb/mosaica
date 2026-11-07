@@ -1926,8 +1926,7 @@ mod tests {
 
     #[test]
     fn a_group_is_every_view_of_it_and_a_name_that_is_neither_is_refused() {
-        let group =
-            |name: &str| (name == "years").then(|| vec!["years:1".into(), "years:2".into()]);
+        let group = |name: &str| (name == "years").then(|| vec!["years:1".into(), "years:2".into()]);
         let view = |name: &str| name == "papers";
         let declared = |names: &[&str]| names.iter().map(|n| n.to_string()).collect::<Vec<_>>();
         assert_eq!(
@@ -1942,20 +1941,13 @@ mod tests {
 
     #[test]
     fn a_scoped_layer_names_only_its_key_sets_groups_and_their_views() {
-        let groups = [
-            ("years", None),
-            ("decades", Some("years")),
-            ("regions", None),
-        ];
+        let groups = [("years", None), ("decades", Some("years")), ("regions", None)];
         let view_group = |name: &str| name.split_once(':').map(|(group, _)| group.to_string());
         let check = |names: &[&str]| {
             let declared: Vec<String> = names.iter().map(|n| n.to_string()).collect();
             check_scoped_views(&declared, "years", groups, view_group)
         };
-        assert_eq!(
-            check(&["years", "decades", "years:2010", "decades:2010"]),
-            Ok(())
-        );
+        assert_eq!(check(&["years", "decades", "years:2010", "decades:2010"]), Ok(()));
         let sharing = vec!["years".to_string(), "decades".to_string()];
         assert_eq!(
             check(&["years", "papers"]),
@@ -2073,10 +2065,7 @@ mod tests {
     #[test]
     fn the_ask_vocabulary_is_the_centroid_and_the_box() {
         for word in ComputedProperty::ASK_VOCABULARY {
-            assert_eq!(
-                ComputedProperty::parse_ask(word),
-                ComputedProperty::parse(word)
-            );
+            assert_eq!(ComputedProperty::parse_ask(word), ComputedProperty::parse(word));
         }
         assert_eq!(ComputedProperty::parse_ask("shape"), None);
         assert_eq!(ComputedProperty::parse_ask("hull"), None);
@@ -2309,10 +2298,7 @@ mod tests {
         d.artifact_visibility.default = MemberDefault::Label(" red ".into());
         d.validate().unwrap();
         assert_eq!(d.visibility.as_deref(), Some("team"));
-        assert_eq!(
-            d.artifact_visibility.default,
-            MemberDefault::Label("red".into())
-        );
+        assert_eq!(d.artifact_visibility.default, MemberDefault::Label("red".into()));
 
         let mut d = decl(HierarchyKind::Flat, vec![]);
         d.visibility = Some(" public ".into());

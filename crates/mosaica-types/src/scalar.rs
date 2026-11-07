@@ -251,7 +251,10 @@ mod tests {
     fn an_integer_type_holds_exactly_its_rust_types_values() {
         assert_eq!(ScalarType::U8.integer_range(), Some((0, 255)));
         assert_eq!(ScalarType::I8.integer_range(), Some((-128, 127)));
-        assert_eq!(ScalarType::U64.integer_range(), Some((0, u64::MAX.into())));
+        assert_eq!(
+            ScalarType::U64.integer_range(),
+            Some((0, u64::MAX.into()))
+        );
         assert_eq!(
             ScalarType::TimestampUs.integer_range(),
             ScalarType::I64.integer_range()
