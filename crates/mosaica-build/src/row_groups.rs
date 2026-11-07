@@ -84,6 +84,11 @@ impl FileGroups {
         self.metadata.metadata().row_group(group).num_rows().max(0) as u64
     }
 
+    /// The rows of `groups`, together.
+    pub(crate) fn rows_of(&self, groups: &[usize]) -> u64 {
+        groups.iter().map(|&group| self.group_rows(group)).sum()
+    }
+
     /// The projection of the file's root columns at `roots`.
     pub(crate) fn projection(&self, roots: &[usize]) -> ProjectionMask {
         ProjectionMask::roots(self.metadata.metadata().file_metadata().schema_descr(), roots.to_vec())

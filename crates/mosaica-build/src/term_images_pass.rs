@@ -35,13 +35,11 @@ use mosaica_store::term_images::{
 use mosaica_store::{Permutation, RowSpace};
 
 use crate::error::{BuildError, Result};
+use mosaica_types::progress::ADVANCE_EVERY;
 
 /// **Zero, because a build is publication zero**: the file is named after the manifest generation
 /// it belongs to, and a build writes `SEGMENTS-0.json`.
 const MANIFEST_N: u64 = 0;
-
-/// Terms read between two additions to the step's count.
-const TERMS_PER_ADVANCE: u32 = 1 << 16;
 
 /// The most workers this pass runs across, whatever the machine offers.
 ///
@@ -92,9 +90,9 @@ impl TermImageReport {
              {:.1} s",
             crate::thousands(u64::from(self.kept)),
             crate::thousands(u64::from(self.terms)),
-            crate::unique_key::human_bytes(self.payload_bytes),
-            crate::unique_key::human_bytes(self.table_bytes),
-            crate::unique_key::human_bytes(self.largest_image_bytes),
+            mosaica_types::process::human_bytes(self.payload_bytes),
+            mosaica_types::process::human_bytes(self.table_bytes),
+            mosaica_types::process::human_bytes(self.largest_image_bytes),
             self.wall_s,
         )
     }
@@ -157,17 +155,17 @@ pub(crate) fn run(
     let file = mosaica_store::derived::term_image_file(prefix_dir, layout, MANIFEST_N, index)?;
 
     // The derivation reads the terms one after another in term order, so each block of
-    // `TERMS_PER_ADVANCE` is counted as its last term is read.
+    // `ADVANCE_EVERY` terms is counted as its last term is read, and the rest at the end.
     let walk: PostingWalk<'_> = &|term, visit| {
-        if term % TERMS_PER_ADVANCE == TERMS_PER_ADVANCE - 1 {
-            steps.advance(u64::from(TERMS_PER_ADVANCE));
+        if (u64::from(term) + 1) % ADVANCE_EVERY == 0 {
+            steps.advance(ADVANCE_EVERY);
         }
         walk_posting(postings, term, visit)
     };
     let options = DeriveOptions { threads };
     let summary = derive_term_images(&space, dict_len, walk, &stamp, &file.path, options)
         .map_err(|e| BuildError::io(&file.path, e))?;
-    steps.advance(u64::from(dict_len % TERMS_PER_ADVANCE));
+    steps.advance(u64::from(dict_len) % ADVANCE_EVERY);
     // The derivation syncs the file. The directory entry has to be durable too, or a crash leaves
     // a manifest naming a file whose name was never written.
     crate::fsync_dir(&file.dir)?;

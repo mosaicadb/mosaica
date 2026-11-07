@@ -171,10 +171,17 @@ impl Tracker {
         *current = Step::new(phase, Cow::Borrowed(step), context, counted, now);
     }
 
-    /// Add `n` to the step's count. Call it once per batch, not once per unit.
+    /// Add `n` to the step's count. Call it once per batch, not once per unit; a pass that meets
+    /// its units one at a time counts them with [`Batched`].
     #[inline]
     pub fn advance(&self, n: u64) {
         self.done.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Give the open step a total and a unit, for a step whose total is known only once it has
+    /// begun. The step's count and clock carry on.
+    pub fn count(&self, total: u64, unit: Unit) {
+        self.lock().counted = Some((total, unit));
     }
 
     /// Mark the job finished or failed. The step is left as it was, so a failed job's last
@@ -225,6 +232,56 @@ impl Tracker {
         self.step
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+/// How many units [`Batched`] counts between two calls of [`Tracker::advance`].
+pub const ADVANCE_EVERY: u64 = 1 << 16;
+
+/// A count kept by a pass that meets its units one at a time, and added to a tracker once per
+/// [`ADVANCE_EVERY`] units and once more when it is dropped. With no tracker it adds to nothing.
+pub struct Batched<'a> {
+    tracker: Option<&'a Tracker>,
+    at: u64,
+    added: u64,
+}
+
+impl<'a> Batched<'a> {
+    pub fn new(tracker: Option<&'a Tracker>) -> Self {
+        Batched {
+            tracker,
+            at: 0,
+            added: 0,
+        }
+    }
+
+    /// Count `n` more units.
+    #[inline]
+    pub fn add(&mut self, n: u64) {
+        self.reach(self.at + n);
+    }
+
+    /// Count every unit before `position`, for a pass that visits its units in ascending order
+    /// and skips some.
+    #[inline]
+    pub fn reach(&mut self, position: u64) {
+        self.at = position;
+        if self.at - self.added >= ADVANCE_EVERY {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if let Some(tracker) = self.tracker {
+            tracker.advance(self.at - self.added);
+        }
+        self.added = self.at;
+    }
+}
+
+impl Drop for Batched<'_> {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -378,6 +435,44 @@ mod tests {
             (p.state, p.step.as_ref(), p.done),
             (JobState::Failed, "text_index", Some(61))
         );
+    }
+
+    #[test]
+    fn a_count_given_after_the_step_began_keeps_its_clock_and_count() {
+        let t0 = Instant::now();
+        let tracker = Tracker::new_at(JobKind::Build, READING, "manifests", t0);
+        tracker.begin_at(READING, "manifests", None, None, t0);
+        tracker.advance(30);
+        tracker.count(120, Unit::Bytes);
+        let p = tracker.snapshot_at(at(t0, 10), 0);
+        assert_eq!(
+            (p.done, p.total, p.unit),
+            (Some(30), Some(120), Some(Unit::Bytes))
+        );
+        assert_eq!(
+            (p.step_elapsed_s, p.rate, p.eta_s),
+            (10.0, Some(3.0), Some(30.0))
+        );
+    }
+
+    #[test]
+    fn a_batched_count_reaches_the_tracker_whole_once_dropped() {
+        let tracker = Tracker::new(JobKind::Build, READING, "assignment");
+        tracker.begin(
+            READING,
+            "assignment",
+            None,
+            Some((ADVANCE_EVERY * 3, Unit::Items)),
+        );
+        {
+            let mut batched = Batched::new(Some(&tracker));
+            for _ in 0..ADVANCE_EVERY + 5 {
+                batched.add(1);
+            }
+            assert_eq!(tracker.snapshot().done, Some(ADVANCE_EVERY));
+            batched.reach(ADVANCE_EVERY * 3);
+        }
+        assert_eq!(tracker.snapshot().done, Some(ADVANCE_EVERY * 3));
     }
 
     #[test]

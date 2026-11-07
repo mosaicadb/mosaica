@@ -918,7 +918,7 @@ struct StageTimings {
     print: bool,
     /// Collect the records — `--stage-timings-json`. `None` when only the lines were asked for.
     json: Option<mosaica_build::observer::JsonStageTimings>,
-    /// The build's progress — `--progress`. `None` for `--progress none`.
+    /// The build's progress, for `--progress`, and `None` for `--progress none`.
     progress: Option<progress::Feed>,
 }
 
@@ -953,9 +953,15 @@ impl mosaica_build::observer::BuildObserver for StageTimings {
         self.progress.as_ref().map(progress::Feed::tracker)
     }
 
+    fn step_ended(&self) {
+        if let Some(feed) = &self.progress {
+            feed.step_ended();
+        }
+    }
+
     fn step_begun(&self) {
         if let Some(feed) = &self.progress {
-            feed.queue();
+            feed.step_begun();
         }
     }
 }
@@ -1422,23 +1428,17 @@ fn main() -> ExitCode {
                 memory_budget,
                 ..args
             };
-            let first = mosaica_build::BuildStage::SourceIds;
             let observer = StageTimings {
                 print: stage_timings,
                 json: stage_timings_json
                     .is_some()
                     .then(mosaica_build::observer::JsonStageTimings::new),
-                progress: (progress != progress::Mode::None).then(|| {
-                    progress::Feed::new(mosaica_types::progress::Tracker::new(
-                        mosaica_types::progress::JobKind::Build,
-                        first.phase(),
-                        first.name(),
-                    ))
-                }),
+                progress: (progress != progress::Mode::None)
+                    .then(|| progress::Feed::new(mosaica_build::observer::tracker(), progress)),
             };
             let build = || mosaica_build::build_framed(&args, &framings, &observer);
             let built = match &observer.progress {
-                Some(feed) => progress::show(progress, feed, build),
+                Some(feed) => progress::show(feed, build),
                 None => build(),
             };
             // Written whether the build succeeded or failed: a build that died in `layers` is

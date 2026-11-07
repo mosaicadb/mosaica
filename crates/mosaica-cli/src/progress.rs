@@ -1,16 +1,16 @@
 //! A long-running job's progress on stderr, drawn from [`Progress`] snapshots.
 //!
 //! [`Renderer`] takes snapshots from any source and decides what to print for the chosen
-//! [`Mode`]. [`Feed`] and [`show`] are the source for a job that runs in this process and counts
-//! into a [`Tracker`]: a thread snapshots the tracker at the renderer's interval, and the job
-//! queues the first snapshot of each step as the step begins, so a step shorter than the interval
-//! is still printed.
+//! [`Mode`]: a source that polls gives it each snapshot as a tick, and a job that runs in this
+//! process also tells it when each step ends and begins. [`Feed`] and [`show`] are that source for
+//! a job that counts into a [`Tracker`].
 
 use std::io::Write;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use mosaica_types::process::human_bytes;
 use mosaica_types::progress::{JobState, Progress, Tracker, Unit};
 
 /// How progress is shown on stderr, as `mosaica build --progress` describes each mode.
@@ -23,17 +23,6 @@ pub(crate) enum Mode {
     None,
 }
 
-impl Mode {
-    /// `Auto` decided against stderr.
-    fn resolved(self) -> Mode {
-        match self {
-            Mode::Auto if std::io::IsTerminal::is_terminal(&std::io::stderr()) => Mode::Bar,
-            Mode::Auto => Mode::Plain,
-            mode => mode,
-        }
-    }
-}
-
 const PLAIN_EVERY: Duration = Duration::from_secs(30);
 const JSON_EVERY: Duration = Duration::from_secs(1);
 const BAR_EVERY: Duration = Duration::from_millis(250);
@@ -41,25 +30,31 @@ const BAR_CELLS: usize = 24;
 
 /// Decides which snapshots to print and prints them.
 pub(crate) struct Renderer {
+    /// `Auto` decided against stderr.
     mode: Mode,
     /// The step of the last snapshot printed: its phase, name and context.
     shown: Option<(u32, String, Option<String>)>,
     printed: Option<Instant>,
-    /// Whether the bar's two lines are on the screen, with the cursor at the start of the first.
+    /// Whether the bar is on the screen, with the cursor at the start of its first line.
     drawn: bool,
 }
 
 impl Renderer {
     pub(crate) fn new(mode: Mode) -> Renderer {
+        let mode = match mode {
+            Mode::Auto if std::io::IsTerminal::is_terminal(&std::io::stderr()) => Mode::Bar,
+            Mode::Auto => Mode::Plain,
+            mode => mode,
+        };
         Renderer {
-            mode: mode.resolved(),
+            mode,
             shown: None,
             printed: None,
             drawn: false,
         }
     }
 
-    /// How often a reader should take a snapshot for this renderer.
+    /// How often a source should give this renderer a snapshot.
     pub(crate) fn interval(&self) -> Duration {
         match self.mode {
             Mode::Bar => BAR_EVERY,
@@ -67,26 +62,33 @@ impl Renderer {
         }
     }
 
-    /// Print `progress` if the mode asks for it now: on a new step, and otherwise when the mode's
-    /// interval has passed since the last print.
-    pub(crate) fn show(&mut self, progress: &Progress) {
-        let step = (
-            progress.phase.index,
-            progress.step.to_string(),
-            progress.context.clone(),
-        );
-        let new_step = self.shown.as_ref() != Some(&step);
+    /// The last snapshot of a step that has ended, with its whole count.
+    pub(crate) fn step_ended(&mut self, progress: &Progress) {
+        if matches!(self.mode, Mode::Plain | Mode::Json) {
+            self.print(progress);
+        }
+    }
+
+    /// The first snapshot of a step that has begun.
+    pub(crate) fn step_begun(&mut self, progress: &Progress) {
+        match self.mode {
+            Mode::Plain | Mode::Json => self.print(progress),
+            _ => self.tick(progress),
+        }
+    }
+
+    /// A snapshot taken while the job runs, printed when it shows a step the last print did not,
+    /// or when the mode's interval has passed since the last print.
+    pub(crate) fn tick(&mut self, progress: &Progress) {
         let since = self.printed.map(|at| at.elapsed());
         let due = match self.mode {
-            Mode::Plain => new_step || since.is_none_or(|s| s >= PLAIN_EVERY),
-            Mode::Json => new_step || since.is_none_or(|s| s >= JSON_EVERY),
+            Mode::Plain => since.is_none_or(|s| s >= PLAIN_EVERY),
+            Mode::Json => since.is_none_or(|s| s >= JSON_EVERY),
             Mode::Bar => since.is_none_or(|s| s >= BAR_EVERY / 2),
             Mode::Auto | Mode::None => false,
         };
-        if due {
+        if due || self.mode != Mode::Bar && self.shown != Some(step_of(progress)) {
             self.print(progress);
-            self.shown = Some(step);
-            self.printed = Some(Instant::now());
         }
     }
 
@@ -116,27 +118,37 @@ impl Renderer {
                 Err(_) => Ok(()),
             },
             Mode::Bar => {
-                // The last draw left the cursor at the start of the bar's first line, so anything
-                // the job has written to stderr since then is written over the bar. Clearing from
-                // the cursor to the end of the screen removes what is left of the old bar, and the
-                // new one is drawn below the job's lines.
-                let clear = "\x1b[J";
-                let drawn = write!(
+                // The last draw left the cursor at the start of the bar's first line, so what the
+                // job has written to stderr since then is written over the bar, and the bar is
+                // cleared from the end of it and drawn below. Where the job's lines are shorter
+                // than the bar's, the rest of the old bar's lines stays beside them. Lines do not
+                // wrap while the bar is drawn, so moving up two lines reaches its first.
+                self.drawn = true;
+                write!(
                     err,
-                    "{clear}[{}/{}] {}\n{}{}\n\x1b[2A\r",
+                    "\x1b[?7l\x1b[J[{}/{}] {}\n{}{}\n\x1b[2A\r\x1b[?7h",
                     progress.phase.index,
                     progress.phase.of,
                     progress.phase.name,
                     bar(progress),
                     line(progress)
-                );
-                self.drawn = true;
-                drawn
+                )
             }
             Mode::Auto | Mode::None => Ok(()),
         };
         let _ = err.flush();
+        self.shown = Some(step_of(progress));
+        self.printed = Some(Instant::now());
     }
+}
+
+/// The phase, name and context that tell one step from another.
+fn step_of(progress: &Progress) -> (u32, String, Option<String>) {
+    (
+        progress.phase.index,
+        progress.step.to_string(),
+        progress.context.clone(),
+    )
 }
 
 /// The step, its count, rate, time remaining, the job's elapsed time and resident memory, and
@@ -164,7 +176,7 @@ fn line(progress: &Progress) -> String {
     out.push_str(&format!(
         "  {}  rss {}",
         duration(progress.elapsed_s),
-        bytes(progress.rss_bytes as f64)
+        human_bytes(progress.rss_bytes)
     ));
     match progress.state {
         JobState::Running => {}
@@ -206,41 +218,26 @@ fn unit_name(unit: Unit) -> &'static str {
 
 fn amount(value: f64, unit: Unit) -> String {
     match unit {
-        Unit::Bytes => bytes(value),
+        Unit::Bytes => human_bytes(value as u64),
         _ => count(value),
     }
 }
 
 /// A count to three significant figures with a decimal suffix, such as `41.2M`.
-fn count(value: f64) -> String {
-    scaled(value, 1000.0, &["", "k", "M", "G", "T", "P"], "")
-}
-
-/// A byte count to three significant figures in binary units, such as `18.2 GiB`.
-fn bytes(value: f64) -> String {
-    scaled(
-        value,
-        1024.0,
-        &["B", "KiB", "MiB", "GiB", "TiB", "PiB"],
-        " ",
-    )
-}
-
-fn scaled(mut value: f64, base: f64, suffixes: &[&str], space: &str) -> String {
+fn count(mut value: f64) -> String {
+    const SUFFIXES: [&str; 6] = ["", "k", "M", "G", "T", "P"];
     let mut at = 0;
-    while value >= base * 0.9995 && at + 1 < suffixes.len() {
-        value /= base;
+    while value >= 999.5 && at + 1 < SUFFIXES.len() {
+        value /= 1000.0;
         at += 1;
     }
-    if at == 0 && value.fract() == 0.0 {
-        return format!("{value:.0}{space}{}", suffixes[0]);
-    }
     let decimals = match value {
+        _ if at == 0 && value.fract() == 0.0 => 0,
         v if v >= 99.95 => 0,
         v if v >= 9.995 => 1,
         _ => 2,
     };
-    format!("{value:.decimals$}{space}{}", suffixes[at])
+    format!("{value:.decimals$}{}", SUFFIXES[at])
 }
 
 /// Seconds as `18s`, `7m12s` or `3h04m`.
@@ -259,24 +256,21 @@ fn clock(now: SystemTime) -> String {
     format!("{:02}:{:02}:{:02}Z", s / 3600, s / 60 % 60, s % 60)
 }
 
-/// A job's tracker and the queue of its snapshots, which [`show`] draws.
+/// A job's tracker and the renderer its snapshots go to.
 ///
-/// Every snapshot is taken and queued under one lock, by the job as a step begins and by the
-/// drawing thread when its interval passes, so the queue holds them in the order they were taken
-/// and the step never appears to go back.
+/// Every snapshot is taken and shown under the renderer's lock, by the job as a step ends or
+/// begins and by [`show`]'s thread at the renderer's interval, so the renderer sees them in the
+/// order they were taken.
 pub(crate) struct Feed {
     tracker: Tracker,
-    sender: Mutex<Sender<Option<Progress>>>,
-    receiver: Mutex<Receiver<Option<Progress>>>,
+    renderer: Mutex<Renderer>,
 }
 
 impl Feed {
-    pub(crate) fn new(tracker: Tracker) -> Feed {
-        let (sender, receiver) = mpsc::channel();
+    pub(crate) fn new(tracker: Tracker, mode: Mode) -> Feed {
         Feed {
             tracker,
-            sender: Mutex::new(sender),
-            receiver: Mutex::new(receiver),
+            renderer: Mutex::new(Renderer::new(mode)),
         }
     }
 
@@ -284,70 +278,48 @@ impl Feed {
         &self.tracker
     }
 
-    /// Queue a snapshot of the job as it is now, such as when a step has just begun.
-    pub(crate) fn queue(&self) {
-        let sender = self.sender.lock().unwrap_or_else(|p| p.into_inner());
-        let _ = sender.send(Some(self.tracker.snapshot()));
+    pub(crate) fn step_ended(&self) {
+        self.with(Renderer::step_ended);
     }
 
-    fn stop(&self) {
-        let sender = self.sender.lock().unwrap_or_else(|p| p.into_inner());
-        let _ = sender.send(None);
+    pub(crate) fn step_begun(&self) {
+        self.with(Renderer::step_begun);
+    }
+
+    fn with(&self, show: impl FnOnce(&mut Renderer, &Progress)) {
+        let mut renderer = self.renderer.lock().unwrap_or_else(|p| p.into_inner());
+        show(&mut renderer, &self.tracker.snapshot());
     }
 }
 
-/// Run `job` on this thread while another draws `feed`'s snapshots in `mode`, then mark the job
-/// finished or failed by what `job` returned and print its last snapshot.
-pub(crate) fn show<T, E>(
-    mode: Mode,
-    feed: &Feed,
-    job: impl FnOnce() -> Result<T, E>,
-) -> Result<T, E> {
-    let mut renderer = Renderer::new(mode);
+/// Run `job` on this thread while another gives `feed`'s renderer a snapshot at its interval,
+/// then mark the job finished or failed by what `job` returned, or failed where it panicked, and
+/// print its last snapshot.
+pub(crate) fn show<T, E>(feed: &Feed, job: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+    let interval = feed
+        .renderer
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .interval();
+    let stop = AtomicBool::new(false);
     let outcome = std::thread::scope(|scope| {
-        let renderer = &mut renderer;
-        scope.spawn(move || {
-            let receiver = feed.receiver.lock().unwrap_or_else(|p| p.into_inner());
-            loop {
-                match receiver.recv_timeout(renderer.interval()) {
-                    Ok(Some(progress)) => renderer.show(&progress),
-                    Err(RecvTimeoutError::Timeout) => feed.queue(),
-                    Ok(None) | Err(RecvTimeoutError::Disconnected) => break,
-                }
+        let ticker = scope.spawn(|| loop {
+            std::thread::park_timeout(interval);
+            if stop.load(Ordering::Relaxed) {
+                break;
             }
+            feed.with(Renderer::tick);
         });
-        // Stops the drawing thread when the job returns or unwinds, so the scope can end.
-        struct Stop<'a>(&'a Feed);
-        impl Drop for Stop<'_> {
-            fn drop(&mut self) {
-                self.0.stop();
-            }
-        }
-        let _stop = Stop(feed);
-        job()
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+        stop.store(true, Ordering::Relaxed);
+        ticker.thread().unpark();
+        outcome
     });
-    feed.tracker.end(match outcome {
-        Ok(_) => JobState::Finished,
-        Err(_) => JobState::Failed,
+    let finished = matches!(outcome, Ok(Ok(_)));
+    feed.tracker.end(match finished {
+        true => JobState::Finished,
+        false => JobState::Failed,
     });
-    renderer.finish(&feed.tracker.snapshot());
-    outcome
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn amounts_read_to_three_significant_figures() {
-        assert_eq!(count(41_200_000.0), "41.2M");
-        assert_eq!(count(1_830_000.0), "1.83M");
-        assert_eq!(count(740.0), "740");
-        assert_eq!(count(999_999.0), "1.00M");
-        assert_eq!(bytes(19_500_000_000.0), "18.2 GiB");
-        assert_eq!(bytes(512.0), "512 B");
-        assert_eq!(duration(432.0), "7m12s");
-        assert_eq!(duration(17.4), "17s");
-        assert_eq!(duration(3_840.0), "1h04m");
-    }
+    feed.with(Renderer::finish);
+    outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }

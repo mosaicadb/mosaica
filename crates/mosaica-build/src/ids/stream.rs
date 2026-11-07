@@ -42,7 +42,7 @@ use super::{
     check_cap, CarriedField, Limit, Limited, Numbering, Numbers, Read, ReadInput, ReadRows,
 };
 use crate::error::{BuildError, Result};
-use crate::observer::{BuildStage, Steps};
+use crate::observer::{BuildStage, Part, Steps};
 use crate::row_groups::FileGroups;
 use crate::spill::{self, boundaries_uniform, mix64, MappedArray, Partition};
 
@@ -85,6 +85,7 @@ pub(super) fn number_with(
         .memory_budget
         .unwrap_or_else(crate::pipeline::detect_memory_budget);
     let mut pass = Pass {
+        steps,
         tmp: tmp.to_path_buf(),
         sort_bytes: (budget / SORT_SHARE).clamp(SORT_MIN, SORT_MAX) as usize,
         held: BTreeMap::new(),
@@ -100,7 +101,8 @@ pub(super) fn number_with(
     };
     let reads = super::reads(args)?;
     for (index, read) in reads.iter().enumerate() {
-        let (rows, refused) = pass.read(args, read, steps, (index + 1, reads.len()))?;
+        let file = Part::new("file", &read.source, index, reads.len());
+        let (rows, refused) = pass.read(args, read, file)?;
         if args.strict && refused.iter().any(super::RefusedRows::is_refusal) {
             return Err(strict_refusal(&refused));
         }
@@ -259,7 +261,9 @@ impl Drop for KeyStream {
 }
 
 /// What the files read so far hold, per unique field. The held runs' files go with it.
-struct Pass {
+struct Pass<'a> {
+    /// Each file is a step of its own.
+    steps: Steps<'a>,
     tmp: PathBuf,
     sort_bytes: usize,
     held: BTreeMap<u16, Vec<HeldRun>>,
@@ -270,7 +274,7 @@ struct Pass {
     sequence: u64,
 }
 
-impl Drop for Pass {
+impl Drop for Pass<'_> {
     fn drop(&mut self) {
         for run in self.held.values().flatten() {
             let _ = std::fs::remove_file(&run.receipt.path);
@@ -340,7 +344,7 @@ fn candidate_key(row: u32, field: usize) -> u64 {
 /// one more than the row before it naming the same item.
 const LINK: u64 = 0xffff;
 
-impl Pass {
+impl Pass<'_> {
     /// A file's numbers, every row no item until the pass decides it: mapped for a file, held for
     /// the few members a declaration or an artifacts file lists.
     fn rows(&mut self, input: &Input<'_>, total: u64) -> Result<Rows> {
@@ -364,21 +368,14 @@ impl Pass {
         self.tmp.join(name)
     }
 
-    /// Number one file's rows, as the `part`th of the build's files.
+    /// Number one file's rows, as the step `file` names.
     fn read(
         &mut self,
         args: &crate::BuildArgs,
         read: &Read,
-        steps: Steps<'_>,
-        part: (usize, usize),
+        file: Part<'_>,
     ) -> Result<(ReadRows, Vec<super::RefusedRows>)> {
-        let begin = |rows: u64| {
-            steps.begin_in(
-                BuildStage::SourceIds,
-                format_args!("{} ({} of {})", read.source, part.0, part.1),
-                Some((rows, Unit::Rows)),
-            )
-        };
+        self.steps.begin(BuildStage::SourceIds, &[file], None);
         match &read.input {
             ReadInput::File {
                 path,
@@ -411,10 +408,13 @@ impl Pass {
                         u32::MAX - 1
                     )));
                 }
-                begin(file.kept_groups().map_or(groups.rows(), |kept| {
-                    kept.iter().map(|&group| groups.group_rows(group)).sum()
-                }));
-                let (rows, tally) = self.number_rows(read, Input::File(&file), steps)?;
+                let kept = file.kept_groups();
+                self.steps.count(Unit::Rows, || {
+                    Ok(kept
+                        .as_ref()
+                        .map_or(groups.rows(), |kept| groups.rows_of(kept)))
+                })?;
+                let (rows, tally) = self.number_rows(read, Input::File(&file))?;
                 let values = file.values_at(&tally.sampled())?;
                 let refused = tally.finish(&read.source, &read.object, |row| {
                     values
@@ -424,7 +424,7 @@ impl Pass {
                 });
                 Ok((
                     ReadRows {
-                        groups: file.kept_groups(),
+                        groups: kept,
                         ..rows
                     },
                     refused,
@@ -432,8 +432,8 @@ impl Pass {
             }
             ReadInput::Lists(lists) => {
                 let scanned = Limited::lists(self.limited.as_ref(), lists);
-                begin(lists.len() as u64);
-                let (rows, tally) = self.number_rows(read, Input::Lists(lists, &scanned), steps)?;
+                self.steps.count(Unit::Rows, || Ok(lists.len() as u64))?;
+                let (rows, tally) = self.number_rows(read, Input::Lists(lists, &scanned))?;
                 let refused = tally.finish(&read.source, &read.object, |row| {
                     lists.texts[row as usize].clone()
                 });
@@ -442,12 +442,8 @@ impl Pass {
         }
     }
 
-    fn number_rows(
-        &mut self,
-        read: &Read,
-        input: Input<'_>,
-        steps: Steps<'_>,
-    ) -> Result<(ReadRows, Tally)> {
+    fn number_rows(&mut self, read: &Read, input: Input<'_>) -> Result<(ReadRows, Tally)> {
+        let steps = self.steps;
         let (carried, total, takes_every_row, mosaica) = match &input {
             Input::File(file) => (
                 file.carried,

@@ -335,12 +335,22 @@ fn the_whole_declaration_builds_and_verifies() {
 
     let built = mosaica()
         .current_dir(dir.path())
-        .arg("build")
+        .args(["build", "--progress", "json"])
         .output()
         .expect("the build runs");
     let stderr = String::from_utf8_lossy(&built.stderr).to_string();
     let stdout = String::from_utf8_lossy(&built.stdout).to_string();
     assert!(built.status.success(), "{stderr}");
+
+    // Each view's tiler sort is a step of its own.
+    let tiler_sorts: std::collections::BTreeSet<Option<String>> = stderr
+        .lines()
+        .filter(|line| line.starts_with('{'))
+        .map(|line| serde_json::from_str::<mosaica_types::progress::Progress>(line).unwrap())
+        .filter(|p| p.step == "tiler_sort")
+        .map(|p| p.context)
+        .collect();
+    assert_eq!(tiler_sorts.len(), 5, "{tiler_sorts:?}");
 
     // **One row space per view, each its own population** (`views.md` §8).
     let rows_of = |range: std::ops::Range<u64>| range.end - range.start;

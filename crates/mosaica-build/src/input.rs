@@ -227,11 +227,7 @@ impl<'a> Source<'a> {
             return Ok(0);
         };
         let groups = FileGroups::open(path)?;
-        Ok(self
-            .groups(&groups)
-            .into_iter()
-            .map(|group| groups.group_rows(group))
-            .sum())
+        Ok(groups.rows_of(&self.groups(&groups)))
     }
 
     /// Every row of the file, numbered by its position: for a caller reading a file on its own.

@@ -82,7 +82,7 @@ impl KeywordCardinality {
             crate::thousands(self.distinct),
             crate::thousands(self.present),
             crate::thousands(self.rows),
-            human_bytes(self.index_bytes)
+            mosaica_types::process::human_bytes(self.index_bytes)
         )
     }
 
@@ -107,8 +107,8 @@ impl KeywordCardinality {
             crate::thousands(self.distinct),
             crate::thousands(self.present),
             self.present_fraction() * 100.0,
-            human_bytes(self.index_bytes),
-            human_bytes(bundle_bytes),
+            mosaica_types::process::human_bytes(self.index_bytes),
+            mosaica_types::process::human_bytes(bundle_bytes),
         ))
     }
 }
@@ -283,22 +283,6 @@ fn bytes_under(dir_rel: &str, files: &[&BTreeMap<String, FileDigest>]) -> u64 {
         .sum()
 }
 
-/// A byte count at the unit an operator compares by eye, decimal, as the campaign's figures are.
-pub(crate) fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit + 1 < UNITS.len() {
-        value /= 1000.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.2} {}", UNITS[unit])
-    }
-}
-
 /// What a Parquet footer records about one column's distinct values, summed over its row groups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FooterCount {
@@ -412,7 +396,7 @@ mod tests {
             .expect("a unique key warns");
         assert!(warning.contains("UNIQUE KEY INDEXED"), "{warning}");
         assert!(
-            warning.contains("8.00 GB of the 40.00 GB bundle (20.0%)"),
+            warning.contains("7.45 GiB of the 37.3 GiB bundle (20.0%)"),
             "{warning}"
         );
         assert!(warning.contains("233,055,986 distinct key(s)"), "{warning}");
@@ -444,15 +428,6 @@ mod tests {
             bytes_under(&format!("{attrs}/uuid/q/2026"), &[&files]),
             5000
         );
-    }
-
-    #[test]
-    fn bytes_read_at_the_unit_an_operator_compares() {
-        assert_eq!(human_bytes(0), "0 B");
-        assert_eq!(human_bytes(999), "999 B");
-        assert_eq!(human_bytes(1_000), "1.00 KB");
-        assert_eq!(human_bytes(8_012_345_678), "8.01 GB");
-        assert_eq!(human_bytes(39_970_000_000), "39.97 GB");
     }
 
     /// The footer's rule is the same fraction; a footer with no distinct count says nothing.

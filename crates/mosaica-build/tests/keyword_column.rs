@@ -427,3 +427,25 @@ fn an_indexed_unique_key_is_warned_about_at_build_and_verify_and_a_repeating_one
     assert_eq!(verified.keyword_cardinalities, report.keyword_cardinalities);
     assert_eq!(verified.bundle_bytes, report.bundle_bytes);
 }
+
+/// Every step of the build that counts reaches its total, here where the keyword columns' last
+/// entities carry no value and the pass over their values never visits them.
+#[test]
+fn every_counted_step_ends_at_its_total() {
+    let dir = tempfile::tempdir().unwrap();
+    let points = dir.path().join("points.parquet");
+    let pairs = dir.path().join("pairs.parquet");
+    write_points(&points, &|e| {
+        (e < 5).then(|| format!("10.1000/journal-{e}"))
+    });
+    write_empty_pairs(&pairs);
+    let log = common::StepLog::new();
+    let args = args(
+        &points,
+        &pairs,
+        dir.path().join("bundle"),
+        parse_schema(KEYWORD_SCHEMA),
+    );
+    mosaica_build::build_observed(&args, &log).expect("the build succeeds");
+    log.assert_every_count_reached_its_total();
+}

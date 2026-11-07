@@ -338,3 +338,50 @@ pub fn rewrite_publication(prefix_dir: &Path, n: u64, edit: impl FnOnce(&mut ser
     }
     mosaica_store::write_publication(prefix_dir, "default", n, &manifest, None).unwrap();
 }
+
+/// An observer that keeps the last snapshot of every step the build opens in its tracker.
+#[allow(dead_code)]
+pub struct StepLog {
+    tracker: mosaica_types::progress::Tracker,
+    ended: std::sync::Mutex<Vec<mosaica_types::progress::Progress>>,
+}
+
+#[allow(dead_code)]
+impl StepLog {
+    pub fn new() -> Self {
+        StepLog {
+            tracker: mosaica_build::observer::tracker(),
+            ended: Default::default(),
+        }
+    }
+
+    /// Every step's last snapshot, in the order the steps ended.
+    pub fn ended(&self) -> Vec<mosaica_types::progress::Progress> {
+        self.ended.lock().unwrap().clone()
+    }
+
+    /// Every step that counts ended with its count at its total.
+    pub fn assert_every_count_reached_its_total(&self) {
+        let ended = self.ended();
+        assert!(ended.iter().any(|p| p.total.is_some()), "no step counted");
+        for p in &ended {
+            assert_eq!(
+                p.done, p.total,
+                "{} {:?} ended short or over",
+                p.step, p.context
+            );
+        }
+    }
+}
+
+impl mosaica_build::BuildObserver for StepLog {
+    fn stage_end(&self, _: mosaica_build::BuildStage, _: std::time::Duration, _: u64, _: u64) {}
+
+    fn progress(&self) -> Option<&mosaica_types::progress::Tracker> {
+        Some(&self.tracker)
+    }
+
+    fn step_ended(&self) {
+        self.ended.lock().unwrap().push(self.tracker.snapshot());
+    }
+}

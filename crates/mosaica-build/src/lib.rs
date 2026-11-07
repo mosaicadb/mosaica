@@ -982,7 +982,7 @@ impl AccessPlan {
 /// (`views.md` §7). The view index is what lets the caller count each view's contribution
 /// separately, which is how the label-agreement refusal is made exact.
 ///
-/// Each source's rows are added to `steps` a batch at a time, out of [`access_rows`].
+/// Each file's rows are added to `steps` a batch at a time, out of [`SourceRows::access`].
 pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>>(
     args: &BuildArgs,
     plan: &AccessPlan,
@@ -991,15 +991,10 @@ pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>
     mut visit: F,
 ) -> Result<input::AccessFill> {
     use crate::config::AccessSource;
-    if let AccessRoute::SharedRelation(path) = access_route(args)? {
+    if let Some(source) = shared_access_source(args, numbering)? {
         // Scanned **once**, not once per view: its rows are entity space, and a second pass over
         // them would double every posting.
-        let fields = config::Fields::canonical("point_visibility");
-        let rows = numbering
-            .of(ids::ReadKind::Access)
-            .expect("the access relation is numbered");
-        let source = input::Source::new(Some(path), &fields, rows).counted(steps);
-        input::scan_pairs(source, |id, term| visit(0, id, term))?;
+        input::scan_pairs(source.counted(steps), |id, term| visit(0, id, term))?;
         return Ok(input::AccessFill::default());
     }
     let mut fill = input::AccessFill::default();
@@ -1028,18 +1023,41 @@ pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>
     Ok(fill)
 }
 
-/// The rows [`scan_access`] reads, from the footers of the files it reads them from.
-pub(crate) fn access_rows(args: &BuildArgs, numbering: &ids::Numbering) -> Result<u64> {
-    if let AccessRoute::SharedRelation(path) = access_route(args)? {
-        let fields = config::Fields::canonical("point_visibility");
+/// The access relation every view shares, with the rows of it the build numbered, where the views
+/// read their labels from one.
+fn shared_access_source<'a>(
+    args: &'a BuildArgs,
+    numbering: &'a ids::Numbering,
+) -> Result<Option<input::Source<'a>>> {
+    static FIELDS: std::sync::LazyLock<config::Fields> =
+        std::sync::LazyLock::new(|| config::Fields::canonical("point_visibility"));
+    Ok(shared_relation(args)?.map(|path| {
         let rows = numbering
             .of(ids::ReadKind::Access)
             .expect("the access relation is numbered");
-        return input::Source::new(Some(path), &fields, rows).kept_rows();
+        input::Source::new(Some(path), &FIELDS, rows)
+    }))
+}
+
+/// The rows the reading stages read, from the footers of the files they read them from.
+pub(crate) struct SourceRows {
+    /// Every view's points.
+    pub views: u64,
+    /// What [`scan_access`] reads: the shared access relation, or the views' points.
+    pub access: u64,
+}
+
+impl SourceRows {
+    pub(crate) fn of(args: &BuildArgs, numbering: &ids::Numbering) -> Result<SourceRows> {
+        let views = (0..args.views.len())
+            .map(|index| view_source(args, index, numbering).kept_rows())
+            .sum::<Result<u64>>()?;
+        let access = match shared_access_source(args, numbering)? {
+            Some(source) => source.kept_rows()?,
+            None => views,
+        };
+        Ok(SourceRows { views, access })
     }
-    (0..args.views.len())
-        .map(|index| view_source(args, index, numbering).kept_rows())
-        .sum()
 }
 
 /// Say how many points carried terms of their own and how many took the view's default.
@@ -2511,11 +2529,12 @@ fn write_manifests(
                 .flat_map(|(_, runs)| runs.iter().map(|run| &run.path))
         }))
         .collect();
-    let total = all_paths
-        .iter()
-        .map(|path| Ok(std::fs::metadata(path).map_err(|e| BuildError::io(path, e))?.len()))
-        .sum::<Result<u64>>()?;
-    steps.begin(observer::BuildStage::Manifests, Some((total, Unit::Bytes)));
+    steps.count(Unit::Bytes, || {
+        all_paths
+            .iter()
+            .map(|path| Ok(std::fs::metadata(path).map_err(|e| BuildError::io(path, e))?.len()))
+            .sum()
+    })?;
     let manifest_files: BTreeMap<String, FileDigest> = all_paths
         .into_par_iter()
         .map(|path| {

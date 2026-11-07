@@ -937,3 +937,38 @@ fn a_build_of_exactly_the_size_is_sealed_and_one_item_past_it_opens_a_second_sha
         mosaica_build::verify(&root).expect("the bundle verifies");
     }
 }
+
+/// Every step of a build of several shards, views and indexed columns, group-scoped ones among
+/// them, that counts reaches its total, and the steps of different shards are told apart.
+#[test]
+fn every_counted_step_ends_at_its_total_in_every_shard() {
+    let dir = tempfile::tempdir().unwrap();
+    let all: Vec<u64> = (0..ITEMS).collect();
+    let log = common::StepLog::new();
+    let args = args(
+        &corpus(dir.path(), Some(128), &all),
+        &dir.path().join("bundle"),
+    );
+    mosaica_build::build_observed(&args, &log).expect("the build runs");
+    log.assert_every_count_reached_its_total();
+    let ended = log.ended();
+    // The steps of `step` that are one part of it, and how many parts they name.
+    let named = |step: &str| {
+        let parts: Vec<_> = ended
+            .iter()
+            .filter(|p| p.step == step)
+            .filter_map(|p| p.context.clone())
+            .collect();
+        (parts.len(), parts.iter().collect::<BTreeSet<_>>().len())
+    };
+    for step in [
+        "segment_write",
+        "term_images",
+        "filter_postings",
+        "text_index",
+    ] {
+        let (steps, contexts) = named(step);
+        assert!(steps > 1, "{step}: {steps} step(s)");
+        assert_eq!(steps, contexts, "{step}: two steps share a context");
+    }
+}
