@@ -1937,14 +1937,11 @@ class Database:
         nothing.
 
         - `wait`: `False`, the default, returns `{"request": n}` once the server has accepted the
-          request, before the work is done, and `control.compaction(n)` says where the request is.
-          `True` waits until the server has answered the request, and returns `{"request": n}`
-          with the `waited` of `Control.compact(wait=True)` merged into it, whose `answer` says
-          whether the server compacted or had nothing to do and whose `job` is the record of the
-          compaction that answered the request, or `None` where none ran. It raises `Refusal`,
-          saying why, where the request was refused or failed, where the server restarted and
-          lost it, and where its outcome could not be read. The refusal's `report` is the same
-          dictionary, and its `status` is the HTTP status of a reading that was refused.
+          request, before the work is done, and `control.compaction_request(n)` says where the
+          request is. `True` waits as `Control.await_compaction` does and returns `{"request": n}`
+          with what it returned merged in. It raises `Refusal` saying why where the request did
+          not succeed or its outcome could not be read, with that same dictionary as the
+          refusal's `report` and the HTTP status of a reading that was refused as its `status`.
         - `progress`: how the wait shows the compaction's record, as `commit` takes it. The
           default is `True`.
 
@@ -1956,17 +1953,17 @@ class Database:
         waited = answer.waited
         if waited is None:
             return body
-        request = body.get("request")
+        request = body["request"]
         result = {**body, **waited}
         if waited["ok"]:
             return result
         read = waited.get("read")
-        if waited["ended"] == "unnumbered":
-            why = "the server accepted the request without numbering it, so it cannot be followed"
-        elif waited["ended"] == "lost":
+        if waited["ended"] == "lost":
+            why = f"the server restarted after request {request} was made and lost it. Ask again"
+        elif waited["ended"] == "gone":
             why = (
-                f"the server has restarted since request {request} was made, and lost it. Ask "
-                "again"
+                f"request {request} was answered, and its answer is older than those the server "
+                "keeps"
             )
         elif waited["ended"] == "unread":
             why = (

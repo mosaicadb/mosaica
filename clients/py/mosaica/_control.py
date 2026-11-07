@@ -48,7 +48,7 @@ MAX_BACKOFF = 30.0
 #: them past it is the answer.
 RETRY_BUDGET_S = 300.0
 
-#: How often `compact(wait=True)` reads `/control/compact/{request}`, in seconds.
+#: How often `await_compaction` reads `/control/compact/{request}`, in seconds.
 COMPACT_POLL_S = 1.0
 
 #: The status an answer carries when the request reached no server at all. Not an HTTP status: the
@@ -106,11 +106,12 @@ class Control:
     `Database.control` returns one for a database you made, and `Control(base, credential)` makes
     one for a database someone else runs. Each route method sends one HTTP request and returns its
     `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. The
-    exception is `compact(wait=True)`, which also reads `compaction(request)` until the request is
-    answered and returns how that ended in the answer's `waited`. It raises `Refusal` for a
-    `progress` it does not take, and passes on what a `progress` function raises. When a busy
-    server answers `429`, the method waits as long as the server asks, up to 30 seconds, and sends
-    the request again. It returns the `429` once the waits would pass five minutes in all.
+    exceptions are `await_compaction`, which reads `compaction_request` until the request is
+    answered and returns how that ended, and `compact(wait=True)`, which calls it. Both raise
+    `Refusal` for a `progress` they do not take, and pass on what a `progress` function raises.
+    When a busy server answers `429`, the method waits as long as the server asks, up to 30
+    seconds, and sends the request again. It returns the `429` once the waits would pass five
+    minutes in all.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token, or `None` for a
@@ -431,78 +432,73 @@ class Control:
         """Ask the server for a compaction, which removes the rows of deleted items from disc
         (`POST /control/compact`), and wait for its outcome where `wait` is `True`.
 
-        The server answers `202` at once with the request's number in `body["request"]`, and then
-        compacts every shard with something to reclaim. When no compaction can start until the
-        server restarts, the answer is `503` and nothing is requested. A compaction can still be
-        refused when its turn comes, for example for lack of disc space, or it can fail. Without
-        `wait`, follow the request with `compaction(request)`.
+        The server answers `202` with the request's number in `body["request"]`, or `503` where no
+        compaction can start until it restarts, and then compacts every shard with something to
+        reclaim. `compaction_request` reads where the request is.
 
-        - `wait`: `True` reads `compaction(request)` about once a second until the request is
-          answered, and returns the `202` as the server sent it, with `waited` set to how the wait
-          ended.
-        - `progress`: how the wait shows the compaction's record, the route's `job`. It takes
-          what `Database.commit`'s `progress` takes, and the default is `True`. Once the request
-          is answered, the last record shown is the record of the compaction that answered it,
-          where one ran. A compaction shorter than the interval between two readings is shown
-          only by that record.
-
-        `waited` is a dictionary whose `ok` is `True` only where the server answered the request as
-        `compacted` or `nothing_to_do`, and whose `ended` says how the wait ended:
-
-        - `answered`: `answer` and `job` are the route's, as served. `answer["outcome"]` is
-          `compacted`, `nothing_to_do`, `refused`, with its `gate` and `detail`, or `failed`, and
-          `job` is the record of the compaction that answered the request, which for a failed one
-          names the step it stopped in, or `None` where none ran.
-        - `lost`: the route answered `404`, because the server restarted after the request was
-          made and lost it. `read` is that `Answer`. Ask again.
-        - `unread`: the route answered another status than `200`, or did not answer, and `read`
-          is that `Answer`.
-        - `unnumbered`: the server accepted the request without a number in `body["request"]`, so
-          there was nothing to wait for.
+        - `wait`: `True` passes the number to `await_compaction` and returns the `202` as the
+          server sent it, with `waited` set to what `await_compaction` returned.
+        - `progress`: what `await_compaction` takes. It is checked before the request is sent.
         """
-        show = _progress.shown(progress)
+        _progress.shown(progress)
         answer = self._send("POST", "/control/compact", b"")
-        request = answer.body.get("request")
         if not wait or not answer.ok:
             return answer
-        if not isinstance(request, int):
-            return replace(answer, waited={"ok": False, "ended": "unnumbered"})
-        with show:
-            return replace(answer, waited=self._compaction(request, show))
+        return replace(answer, waited=self.await_compaction(answer.body["request"], progress))
 
-    def compaction(self, request: int) -> Answer:
-        """Return where one compaction request is (`GET /control/compact/{request}`).
+    def compaction_request(self, request: int) -> Answer:
+        """Return where one compaction request is, pending or answered
+        (`GET /control/compact/{request}`).
 
-        The body's `answered` is `False` while the request is pending, and its `job` is then the
-        record of the compaction in flight, or `None` when none is. Once the request is answered,
-        `answer` holds its `outcome`, the requests `first` to `last` answered with it and, for
-        `refused`, the `gate` and its `detail`, and `job` is the record of the compaction that
-        answered it, or `None` where none ran. The answer is `404` where the server has restarted
-        since the request was made, which lost it.
+        `request` is the number `compact` answered. The route's description in
+        `docs/openapi/mosaica.yaml` says what the body holds and when it is `404` or `410`.
         """
         return self._send("GET", f"/control/compact/{int(request)}")
 
-    def _compaction(self, request: int, show: Callable[[dict], Any]) -> dict:
-        """`compact`'s wait for request number `request`, as `compact` describes `waited`."""
-        while True:
-            read = self.compaction(request)
-            if read.status == 404:
-                return {"ok": False, "ended": "lost", "read": read}
-            if read.status != 200:
-                return {"ok": False, "ended": "unread", "read": read}
-            job = read.body.get("job")
-            if job:
-                show(job)
-            if read.body.get("answered"):
-                break
-            sleep(COMPACT_POLL_S)
-        answer = read.body.get("answer") or {}
-        return {
-            "ok": answer.get("outcome") in ("compacted", "nothing_to_do"),
-            "ended": "answered",
-            "answer": read.body.get("answer"),
-            "job": job,
-        }
+    def await_compaction(
+        self, request: int, progress: bool | Callable[[dict], Any] = True
+    ) -> dict:
+        """Wait until the server has answered compaction request number `request`, reading
+        `compaction_request(request)` about once a second, and return how the wait ended.
+
+        - `progress`: how the wait shows the compaction serving the request, the route's `job`, as
+          `Database.commit`'s `progress` takes it. The default is `True`. Once the request is
+          answered, the last record shown is that of the compaction that answered it, where one
+          ran. A compaction shorter than the interval between two readings is shown only by that
+          record.
+
+        A reading that no server answered is read again a second later, so a server that
+        restarts while the call waits ends the wait as `lost` once it is back. The wait has no
+        bound of its own: to stop it, interrupt it, or call `compaction_request` in a loop of
+        your own instead.
+
+        The dictionary returned has `ok`, which is `True` only where the request succeeded, and
+        `ended`, which says how the wait ended:
+
+        - `answered`: `answer` and `job` are the route's, as served, and `ok` is the answer's.
+        - `lost`: the route answered `404`, because the server restarted after the request was
+          made. `read` is that `Answer`. Ask again.
+        - `gone`: the route answered `410`, because the answer is older than those the server
+          keeps. `read` is that `Answer`.
+        - `unread`: the route answered another status outside the 200s, and `read` is that
+          `Answer`.
+        """
+        ended = {404: "lost", 410: "gone"}
+        with _progress.shown(progress) as show:
+            while True:
+                read = self.compaction_request(request)
+                if read.status == UNANSWERED:
+                    sleep(COMPACT_POLL_S)
+                    continue
+                if not read.ok:
+                    return {"ok": False, "ended": ended.get(read.status, "unread"), "read": read}
+                job = read.body.get("job")
+                if job:
+                    show(job)
+                if read.body.get("answered"):
+                    answer = read.body["answer"]
+                    return {"ok": answer["ok"], "ended": "answered", "answer": answer, "job": job}
+                sleep(COMPACT_POLL_S)
 
     def flush(self, wait: bool = False) -> Answer:
         """Make the writes sent so far visible to readers sooner, by bringing the next publication
