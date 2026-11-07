@@ -243,7 +243,11 @@ mod tests {
         assert_eq!(ts("9223372036854775808"), Err(OutOfRange));
         assert_eq!(ts("2020-01-01 12:00:00"), Err(NoOffset));
         for text in ["+", "-", "5+", "++5", "+-5", "-+5", " 5"] {
-            assert_eq!(WrittenAs::Integer.parse(text), Err(NotAnInteger), "{text:?}");
+            assert_eq!(
+                WrittenAs::Integer.parse(text),
+                Err(NotAnInteger),
+                "{text:?}"
+            );
         }
         assert_eq!(
             WrittenAs::Integer.parse("170141183460469231731687303715884105728"),

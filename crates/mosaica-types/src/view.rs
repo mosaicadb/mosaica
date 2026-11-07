@@ -407,9 +407,11 @@ pub struct DeadIncarnation {
 /// second copy of the charset is how a key that builds and a key that creates come to differ.
 pub fn check_view_key(key: &str) -> Result<(), String> {
     if key.trim().is_empty() {
-        return Err("the name is empty. A view's name is its identity — it addresses the view on \
+        return Err(
+            "the name is empty. A view's name is its identity — it addresses the view on \
                     every verb and names its directory in the bundle"
-            .to_string());
+                .to_string(),
+        );
     }
     for reserved in [':', '@'] {
         if key.contains(reserved) {
@@ -425,11 +427,13 @@ pub fn check_view_key(key: &str) -> Result<(), String> {
         .bytes()
         .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
     {
-        return Err("a view name is limited to the column-name charset — ASCII letters, digits, \
+        return Err(
+            "a view name is limited to the column-name charset — ASCII letters, digits, \
                     `_` and `-` (views §3.2). It is a path segment in the bundle \
                     (`views/<group>/<key>/`) and an identifier on the wire, so the set is closed \
                     here rather than escaped at every use site"
-            .to_string());
+                .to_string(),
+        );
     }
     Ok(())
 }

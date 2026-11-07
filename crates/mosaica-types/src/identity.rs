@@ -641,7 +641,10 @@ mod tests {
         assert_eq!(rejected.len(), 3);
         for v in rejected {
             if let Some(space) = v.get("space") {
-                assert!(LayerSpace::new(space.as_u64().unwrap() as u32).is_err(), "{v}");
+                assert!(
+                    LayerSpace::new(space.as_u64().unwrap() as u32).is_err(),
+                    "{v}"
+                );
                 continue;
             }
             let shard = v["shard"].as_u64().unwrap() as u32;
