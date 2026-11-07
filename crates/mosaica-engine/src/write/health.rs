@@ -562,7 +562,10 @@ impl RequestOutcome {
     /// Whether the request succeeded: every shard it named was compacted or had nothing to
     /// compact.
     pub fn succeeded(self) -> bool {
-        matches!(self, RequestOutcome::Compacted | RequestOutcome::NothingToDo)
+        matches!(
+            self,
+            RequestOutcome::Compacted | RequestOutcome::NothingToDo
+        )
     }
 
     /// The outcome's name on `GET /control/compact/{request}`.

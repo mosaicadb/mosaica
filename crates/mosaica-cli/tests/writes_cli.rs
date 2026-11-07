@@ -970,7 +970,8 @@ fn compact_answered(status: u16, state: &str) -> (bool, Vec<Progress>) {
 #[test]
 fn compact_wait_ends_with_the_outcome_the_server_states() {
     let refused = r#"{"request": 3, "answered": true, "job": null, "answer": {"first": 2,
-        "last": 3, "outcome": "refused", "gate": "insufficient_memory", "detail": "more"}}"#;
+        "last": 3, "outcome": "refused", "ok": false, "gate": "insufficient_memory",
+        "detail": "more", "shard": 0, "need_bytes": 2, "had_bytes": 1}}"#;
     let (ok, records) = compact_answered(200, refused);
     assert!(!ok, "a refused request fails the command");
     assert_eq!(records, Vec::new(), "no compaction ran for it");
@@ -980,7 +981,8 @@ fn compact_wait_ends_with_the_outcome_the_server_states() {
         "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0, "rss_bytes": 1024}"#;
     let failed = format!(
         r#"{{"request": 3, "answered": true, "job": {record}, "answer": {{"first": 3,
-        "last": 3, "outcome": "failed", "gate": null, "detail": null}}}}"#
+        "last": 3, "outcome": "failed", "ok": false, "gate": null, "detail": null, "shard": null,
+        "need_bytes": null, "had_bytes": null}}}}"#
     );
     let (ok, records) = compact_answered(200, &failed);
     assert!(!ok, "a failed compaction fails the command");
@@ -992,7 +994,8 @@ fn compact_wait_ends_with_the_outcome_the_server_states() {
     );
 
     let nothing = r#"{"request": 3, "answered": true, "job": null, "answer": {"first": 3,
-        "last": 3, "outcome": "nothing_to_do", "gate": null, "detail": null}}"#;
+        "last": 3, "outcome": "nothing_to_do", "ok": true, "gate": null, "detail": null,
+        "shard": null, "need_bytes": null, "had_bytes": null}}"#;
     assert!(
         compact_answered(200, nothing).0,
         "nothing to do is no failure"

@@ -515,12 +515,11 @@ pub(crate) fn compact(args: CompactArgs) -> ExitCode {
     }
 }
 
-/// How often `compact --wait` reads `/control/status`.
+/// How often `compact --wait` reads `GET /control/compact/{request}`.
 const COMPACT_POLL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Ask for a compaction, print the answer, and read `/control/status` until the request is
-/// answered, showing the compaction in flight. Returns whether the server answered the request
-/// as compacted or as having nothing to do.
+/// Ask for a compaction, print the answer, and read `GET /control/compact/{request}` until the
+/// request is answered, showing the compaction serving it. Returns the answer's `ok`.
 fn compact_and_wait(plane: &Plane, mode: Mode) -> Result<bool, String> {
     let answer = plane.call("POST", "/control/compact", None)?.accepted()?;
     println!("{}", answer.text());
@@ -546,10 +545,10 @@ fn wait_for_compaction(
     let state = loop {
         let answer = plane.call("GET", &path, None)?;
         if answer.status == 404 {
-            return Err(format!(
-                "the server has lost request {request}: {}",
-                answer.json()["detail"].as_str().unwrap_or_default()
-            ));
+            return Err(answer.json()["detail"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned());
         }
         let state = answer.accepted()?.json();
         if state["answered"] == Value::Bool(true) {
@@ -576,27 +575,18 @@ fn wait_for_compaction(
     }
     let answer = &state["answer"];
     match answer["outcome"].as_str().unwrap_or_default() {
-        "compacted" | "nothing_to_do" => Ok(true),
-        "refused" => {
-            eprintln!(
-                "mosaica compact: request {request} was refused at {}: {}",
-                answer["gate"].as_str().unwrap_or_default(),
-                answer["detail"].as_str().unwrap_or_default()
-            );
-            Ok(false)
-        }
-        "failed" => {
-            eprintln!(
-                "mosaica compact: a compaction for request {request} failed; its last record \
-                 names the step it stopped in"
-            );
-            Ok(false)
-        }
-        outcome => {
-            eprintln!("mosaica compact: request {request} was answered {outcome}");
-            Ok(false)
-        }
+        "refused" => eprintln!(
+            "mosaica compact: request {request} was refused at {}: {}",
+            answer["gate"].as_str().unwrap_or_default(),
+            answer["detail"].as_str().unwrap_or_default()
+        ),
+        "failed" => eprintln!(
+            "mosaica compact: a compaction for request {request} failed; its last record names \
+             the step it stopped in"
+        ),
+        _ => {}
     }
+    Ok(answer["ok"] == Value::Bool(true))
 }
 
 pub(crate) fn status(control: Control) -> ExitCode {

@@ -2149,6 +2149,7 @@ async fn a_compaction_request_is_pending_then_answered_with_its_record() {
     let (_, answered) = compaction_request(&server, first).await;
     assert_eq!(answered["answered"], true, "{answered}");
     assert_eq!(answered["answer"]["outcome"], "compacted", "{answered}");
+    assert_eq!(answered["answer"]["ok"], true, "{answered}");
     let last: Progress = serde_json::from_value(answered["job"].clone()).unwrap();
     assert_eq!(
         (last.job, last.state),
@@ -2204,6 +2205,7 @@ async fn a_compaction_refused_at_its_turn_is_reported_against_its_request() {
     let (request, refused) = compact_refused_for_memory(&server).await;
     let answer = &refused["answer"];
     assert_eq!(answer["outcome"], "refused", "{refused}");
+    assert_eq!(answer["ok"], false, "{refused}");
     assert_eq!(answer["gate"], "insufficient_memory");
     assert!(answer["shard"].is_u64(), "{refused}");
     assert!(answer["detail"].as_str().is_some_and(|d| !d.is_empty()));
