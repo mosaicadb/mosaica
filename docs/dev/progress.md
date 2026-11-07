@@ -46,11 +46,13 @@ The build's 19 stages fall into five phases. A stage's phase is given by a `matc
 |---|---|---|
 | 1. Reading sources | `source_ids`, `dictionary`, `pairs_pack`, `geometry_read` | Rows of the source file. The total is read from the Parquet footer before a row is read. |
 | 2. Assigning ids | `signature_sort`, `assignment` | Nothing in the sort. `assignment` counts items. Both run once per batch when the build does not fit in memory, and `context` names the batch. |
-| 3. Indexing records | `postings_write`, `attribute_tail`, `layers`, `unique_indexes`, `filter_postings`, `text_index`, `record_blob`, `column_release` | Items, per column for `filter_postings` and `text_index`, with the column in `context`. |
-| 4. Laying out views | `tiler_sort`, `segment_write`, `artifact_pass`, `term_images` | Rows for the writes, nothing for the sort, terms for `term_images`. Runs once per view, and `context` names the view. |
+| 3. Indexing records | `postings_write`, `attribute_tail`, `layers`, `unique_indexes`, `filter_postings`, `text_index`, `record_blob`, `column_release` | Pairs for `postings_write`. Items for each indexed column in `filter_postings` and each text column in `text_index`, with the column in `context`. The other stages count nothing. |
+| 4. Laying out views | `tiler_sort`, `segment_write`, `artifact_pass`, `term_images` | Rows for `segment_write`, terms for `term_images`, nothing for the sort or `artifact_pass`. Runs once per view, and `context` names the view. The view's containment partitions are composed by one more `artifact_pass` step with no context, after the last view. |
 | 5. Verifying the bundle | `manifests` | Bytes digested, out of the bundle's size. |
 
-`filter_postings` and `text_index` share one loop over the declared columns, so each column is its own step, and the record shows them in the order they run. `--stage-timings` and `--stage-timings-json` are unchanged and still report each stage's total when it ends.
+`filter_postings` and `text_index` share one loop over the declared columns, so each column is its own step, and the record shows them in the order they run. A stage that runs once per shard as well, such as `segment_write` or a column's `filter_postings`, names the shard in `context` when the bundle has more than one, so that two consecutive steps always differ.
+
+A step begins where its stage's timing begins, so for any second of the build the step in the record and the stage that `--stage-timings` charges are the same. `--stage-timings` and `--stage-timings-json` still report each stage's total when it ends.
 
 ### Compaction
 
@@ -92,14 +94,14 @@ The client that sends an ingest makes its record, because the server sees one re
 |---|---|
 | `auto` | `bar` when stderr is a terminal, and `plain` otherwise. The default. |
 | `bar` | Two lines redrawn in place: the phase, then the step with its count, rate, time remaining, elapsed time and resident memory. |
-| `plain` | A line when a step begins or ends, and a line every 30 seconds while a step runs. No terminal control codes. |
-| `json` | One `Progress` object per line, when a step begins and at most once a second while it runs, and a last object with `state` `finished` or `failed`. |
+| `plain` | A line when a step begins, a line with its final count when it ends, and a line every 30 seconds while it runs. Times are UTC. No terminal control codes. |
+| `json` | One `Progress` object per line, when a step begins, when it ends and at most once a second while it runs, and a last object with `state` `finished` or `failed`. |
 | `none` | Nothing. |
 
 A `plain` line reads as follows.
 
 ```
-12:04:31 [3/5 Indexing records] filter_postings column category (3 of 7)  41.2M/74.0M items  1.83M/s  ~18s  7m12s  rss 18.2 GiB
+12:04:31Z [3/5 Indexing records] filter_postings column category (3 of 7)  41.2M/74.0M items  1.83M/s  ~18s  7m12s  rss 18.2 GiB
 ```
 
 `mosaica compact --wait` takes `--progress` and shows the compaction's record from `/control/status` until the request is answered. `mosaica insert` takes `--progress` and shows its ingest record. `mosaica status` prints each running job in the `plain` form.
