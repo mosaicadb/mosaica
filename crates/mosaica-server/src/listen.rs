@@ -144,6 +144,7 @@ fn bind_tcp(
     planes: Planes,
 ) -> Result<std::net::TcpListener, BoxError> {
     let tries = if addr.port() == 0 { 0 } else { retries };
+    let mut taken = None;
     for step in 0..=tries {
         let Some(port) = addr.port().checked_add(step) else {
             break;
@@ -153,7 +154,9 @@ fn bind_tcp(
                 listener.set_nonblocking(true)?;
                 return Ok(listener);
             }
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                taken.get_or_insert(e);
+            }
             Err(e) => {
                 return Err(format!(
                     "the {} address {addr} cannot be bound: {e}",
@@ -164,15 +167,16 @@ fn bind_tcp(
         }
     }
     let what = planes.names();
+    let e = taken.expect("a port was tried");
     Err(if tries == 0 {
         format!(
-            "the {what} address {addr} is in use; stop what is listening there, name another \
-             port under `[serve]`, or set `port_retries` to try the ports above it"
+            "the {what} address {addr} cannot be bound: {e}; stop what is listening there, name \
+             another port under `[serve]`, or set `port_retries` to try the ports above it"
         )
     } else {
         format!(
-            "the {what} address {addr} is in use, and so is every port up to {tries} above it; \
-             stop what is listening there, name another port under `[serve]`, or raise \
+            "the {what} address {addr} cannot be bound: {e}, nor can any port up to {tries} above \
+             it; stop what is listening there, name another port under `[serve]`, or raise \
              `port_retries`"
         )
     }
