@@ -30,7 +30,10 @@ const STAGE_FIELDS = [
   'underlay_cells_evaluated',
   'shape_guard_fired',
   'theta_occupancy_ns',
-  'tiles_from_bands'
+  'tiles_from_bands',
+  'filter_eval_ns',
+  'filter_cross_ns',
+  'filter_matched'
 ] as const;
 
 const INTERESTING = ['count_ns', 'select_ns', 'gather_ns', 'arrow_serialise_ns', 'total_ns'];
