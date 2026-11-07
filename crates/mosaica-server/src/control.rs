@@ -1007,6 +1007,7 @@ async fn compaction_request(
                     "first": answer.first,
                     "last": answer.last,
                     "outcome": answer.outcome.as_str(),
+                    "ok": answer.outcome.succeeded(),
                     "gate": refusal.map(|r| r.0),
                     "detail": refusal.map(|r| r.1),
                     "shard": refusal.and_then(|r| r.2),

@@ -7071,7 +7071,7 @@ components:
             - type: "null"
             - type: object
               additionalProperties: false
-              required: [first, last, outcome, gate, detail, shard, need_bytes, had_bytes]
+              required: [first, last, outcome, ok, gate, detail, shard, need_bytes, had_bytes]
               properties:
                 first:
                   type: integer
@@ -7085,6 +7085,9 @@ components:
                   type: string
                   enum: [compacted, nothing_to_do, refused, failed]
                   description: "`refused` where a shard the requests named was refused at `gate`; otherwise `failed` where a compaction they started failed or was discarded; otherwise `compacted` where a compaction they started was published, whether or not other shards had nothing to compact; and `nothing_to_do` where no shard they named had anything to compact."
+                ok:
+                  type: boolean
+                  description: Whether the request succeeded, which is so for `compacted` and `nothing_to_do` alone.
                 gate:
                   type: [string, "null"]
                   description: For `refused`, one of `fold_refusals_by_gate`'s names; `null` otherwise.
