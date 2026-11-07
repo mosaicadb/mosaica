@@ -118,12 +118,21 @@ def test_stop_kills_by_pid_and_leaves_nothing_running():
     assert pid not in _instance._running
 
 
-def test_the_deployment_file_names_three_loopback_planes_at_port_zero(tmp_path):
+def test_the_deployment_file_serves_every_plane_on_one_loopback_port(tmp_path):
+    import tomllib
+
     path = _instance.write_deployment(tmp_path)
     text = path.read_text()
-    assert 'viewer = "127.0.0.1:0"' in text
-    assert 'session = "127.0.0.1:0"' in text
-    assert 'control = "127.0.0.1:0"' in text
+    serve = tomllib.loads(text)["serve"]
+    assert serve["viewer"] == f"127.0.0.1:{_instance.PORT}"
+    assert serve["port_retries"] == _instance.PORT_RETRIES
+    assert "session" not in serve and "control" not in serve
+    # A stated port is written exactly and kept by a later write that states none.
+    _instance.write_deployment(tmp_path, 0)
+    assert tomllib.loads(path.read_text())["serve"]["viewer"] == "127.0.0.1:0"
+    _instance.write_deployment(tmp_path)
+    serve = tomllib.loads(path.read_text())["serve"]
+    assert (serve["viewer"], serve["port_retries"]) == ("127.0.0.1:0", 0)
     assert "[disclosure]\ntoken_max_lifetime = 3600" in text
     # The widget's page is served from a loopback address, and its origin cannot be enumerated.
     assert "cors_loopback = true" in text
@@ -302,7 +311,11 @@ def ended(how: str, where) -> tuple[subprocess.Popen, dict]:
         stderr=subprocess.PIPE,
         text=True,
     )
-    return process, json.loads(process.stdout.readline())
+    # Starting the server prints its address first; the child's own record is the JSON line.
+    for line in process.stdout:
+        if line.startswith("{"):
+            return process, json.loads(line)
+    raise AssertionError(f"the child printed no record: {process.stderr.read()}")
 
 
 @pytest.mark.parametrize("how", ["os._exit", "SIGTERM", "SIGKILL", "uncommitted"])
