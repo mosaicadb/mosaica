@@ -1295,13 +1295,12 @@ def _records(table: pa.Table, insert) -> list[dict]:
 INGEST_PHASES = ["Sending", "Waiting for publication"]
 
 
-
 def run(
     control: Control,
     pages: Sequence[Page],
     report,
     strict: bool = False,
-    show: Callable[[dict], Any] | None = None,
+    show: Callable[[dict], Any] = _progress.Sink(),
 ) -> list[Page]:
     """Send the plan, in order, then flush once and wait for the publication that flush arms. A
     page no server answers stops the plan there.
@@ -1318,7 +1317,6 @@ def run(
     """
     tracker = _progress.Tracker("ingest", INGEST_PHASES)
     tracker.begin(0, "pages", sum(page.rows for page in pages), "rows")
-    show = show or (lambda one: None)
     accepted = []
     for at, page in enumerate(pages):
         tracker.context = _progress.page_context(at, len(pages))

@@ -91,9 +91,27 @@ def shown(progress: Any) -> Sink:
     )
 
 
-def _step(one: dict) -> tuple:
-    """The phase, name and context that tell one step from another."""
-    return (one.get("phase", {}).get("index"), one.get("step"), one.get("context"))
+def _begins(last: dict | None, one: dict) -> bool:
+    """Whether `one` is the first record of a step that `last` is not of.
+
+    A step begins where the phase or the step's name changes, or where the context changes and
+    the step's clock starts again, as the build's steps over each column or view do. The pages
+    of an ingest are one step whose context names the page and whose clock carries on.
+    """
+    if last is None:
+        return True
+    if (last.get("phase", {}).get("index"), last.get("step")) != (
+        one.get("phase", {}).get("index"),
+        one.get("step"),
+    ):
+        return True
+    return last.get("context") != one.get("context") and one.get(
+        "step_elapsed_s", 0.0
+    ) <= last.get("step_elapsed_s", 0.0)
+
+
+def _ended(one: dict) -> bool:
+    return one.get("state", "running") != "running"
 
 
 class _Lines(Sink):
@@ -102,26 +120,23 @@ class _Lines(Sink):
     --progress plain` prints them."""
 
     def __init__(self) -> None:
-        self.shown: tuple | None = None
+        self.last: dict | None = None
         self.printed = 0.0
-        #: The last record given and not printed.
+        #: The last record given, where it was not printed.
         self.held: dict | None = None
 
     def __call__(self, one: dict) -> None:
-        if one.get("state", "running") != "running":
-            self.held = None
+        if _ended(one):
             self._print(one)
-            return
-        if _step(one) != self.shown:
+        elif _begins(self.last, one):
             if self.held is not None:
                 self._print(self.held)
-            self.held = None
             self._print(one)
         elif time.monotonic() - self.printed >= LINE_EVERY_S:
-            self.held = None
             self._print(one)
         else:
             self.held = one
+        self.last = one
 
     def _print(self, one: dict) -> None:
         phase = one.get("phase", {})
@@ -131,8 +146,8 @@ class _Lines(Sink):
             file=sys.stderr,
             flush=True,
         )
-        self.shown = _step(one)
         self.printed = time.monotonic()
+        self.held = None
 
 
 class _Bar(Sink):
@@ -142,34 +157,38 @@ class _Bar(Sink):
     def __init__(self, tqdm) -> None:
         self.tqdm = tqdm
         self.bar = None
-        self.shown: tuple | None = None
+        self.last: dict | None = None
 
     def __call__(self, one: dict) -> None:
-        counted = one.get("total") is not None
-        if self.bar is None:
-            self.bar = self.tqdm(dynamic_ncols=True)
-        if _step(one) != self.shown:
-            self.shown = _step(one)
-            phase = one.get("phase", {})
-            context = f" {one['context']}" if one.get("context") else ""
-            bytes_ = one.get("unit") == "bytes"
-            self.bar.unit = "B" if bytes_ else f" {one.get('unit')}" if counted else ""
-            self.bar.unit_scale = counted
-            self.bar.unit_divisor = 1024 if bytes_ else 1000
+        total = one.get("total")
+        phase = one.get("phase", {})
+        context = f" {one['context']}" if one.get("context") else ""
+        shape = {
+            "desc": f"[{phase.get('index')}/{phase.get('of')} {phase.get('name')}] "
+            f"{one.get('step')}{context}",
+            "total": total,
+            "unit": "B" if one.get("unit") == "bytes" else f" {one.get('unit')}",
+            "unit_scale": total is not None and (one.get("unit") == "bytes" or total >= 1000),
+            "unit_divisor": 1024 if one.get("unit") == "bytes" else 1000,
             # A step that counts nothing shows its name and how long it has run.
-            self.bar.bar_format = None if counted else "{desc} [{elapsed}{postfix}]"
-            self.bar.set_description_str(
-                f"[{phase.get('index')}/{phase.get('of')} {phase.get('name')}] "
-                f"{one.get('step')}{context}",
-                refresh=False,
-            )
-            self.bar.reset(total=one.get("total"))
-        ended = one.get("state", "running") != "running"
+            "bar_format": None if total is not None else "{desc} [{elapsed}{postfix}]",
+        }
         postfix = f"rss {_bytes(int(one.get('rss_bytes') or 0))}"
-        self.bar.set_postfix_str(postfix + (f", {one['state']}" if ended else ""), refresh=False)
-        if counted:
+        postfix += f", {one['state']}" if _ended(one) else ""
+        if self.bar is None:
+            self.bar = self.tqdm(dynamic_ncols=True, postfix=postfix, **shape)
+        elif _begins(self.last, one):
+            for name in ("unit", "unit_scale", "unit_divisor", "bar_format"):
+                setattr(self.bar, name, shape[name])
+            self.bar.set_description_str(shape["desc"], refresh=False)
+            self.bar.reset(total=total)
+        else:
+            self.bar.set_description_str(shape["desc"], refresh=False)
+        self.last = one
+        self.bar.set_postfix_str(postfix, refresh=False)
+        if total is not None:
             self.bar.update(max(int(one.get("done") or 0) - self.bar.n, 0))
-        if ended or not counted:
+        if _ended(one) or total is None:
             self.bar.refresh()
 
     def close(self) -> None:

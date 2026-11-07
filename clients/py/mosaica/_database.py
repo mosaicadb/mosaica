@@ -1445,7 +1445,7 @@ class Database:
     # ------------------------------------------------------------------ the paged commit
 
     def _paged(
-        self, sent: bool, strict: bool = False, show: _progress.Sink | None = None
+        self, sent: bool, strict: bool = False, show: _progress.Sink = _progress.Sink()
     ) -> PagedReport:
         """The plan over what was inserted since the last commit, run where `sent`, giving `show`
         the commit's ingest record."""
@@ -1465,8 +1465,8 @@ class Database:
             return report
         if report.findings:
             raise Refusal(str(report), report)
-        with show or _progress.Sink() as shown:
-            accepted = C.run(control, pages, report, strict, shown)
+        with show:
+            accepted = C.run(control, pages, report, strict, show)
         self._record_committed_layers(page.body for page in accepted if page.kind == "layer")
         self.pending.clear()
         self._save_state()
@@ -1939,11 +1939,13 @@ class Database:
 
         - `wait`: `False`, the default, returns `{"request": n}` once the server has accepted the
           request, before the work is done, and the request is followed in `status()` as
-          `Control.compact` describes. `True` waits until the server has answered the request,
-          and returns the body `Control.compact(wait=True)` returns, whose `outcome` is
-          `compacted` or `nothing_to_do`. Any other outcome raises `Refusal` saying what it
-          means: a shard was refused, the compaction failed, the server restarted and lost the
-          request, or a later answer replaced this one before it was read.
+          `Control.compact` describes. `True` waits until the server has answered the request and
+          returns `{"request": n}` with the `waited` of `Control.compact(wait=True)` merged into
+          it, whose `last_answer` says whether the server compacted or had nothing to do, and
+          whose `last_job` is the last compaction's record where one ran. It raises `Refusal`,
+          saying why, where the request was refused or failed, where the server restarted and
+          lost it, where a later answer replaced its outcome before it was read, and where
+          `/control/status` could not be read.
         - `progress`: how the wait shows the compaction's record, as `commit` takes it. The
           default is `True`.
 
@@ -1952,9 +1954,41 @@ class Database:
         self._refuse_before_the_first_commit("compact")
         answer = self.control.compact(wait=wait, progress=progress)
         body = _accepted(answer, "compact")
-        if wait and body.get("outcome") not in ("compacted", "nothing_to_do"):
-            raise Refusal(f"compact: {answer.detail}")
-        return body
+        waited = answer.waited
+        if waited is None:
+            return body
+        request = body["request"]
+        if waited["ended"] == "unread":
+            read = waited["status"]
+            raise Refusal(
+                f"compact: request {request} was accepted, and reading its outcome from "
+                f"/control/status was refused ({read.status}): {read.detail[:1000]}"
+            )
+        if waited["ended"] == "lost":
+            raise Refusal(
+                f"compact: the server has numbered {waited['accepted']} requests since it "
+                f"started, fewer than {request}, so it restarted after this request was made and "
+                "the request was lost. Ask again"
+            )
+        if waited["ended"] == "unknown":
+            raise Refusal(
+                f"compact: request {request} was answered, and a later answer has replaced its "
+                "outcome on /control/status, so its outcome is not known. Read "
+                "status()['compaction'] for the last compaction's record"
+            )
+        last_answer = waited["last_answer"]
+        if last_answer["outcome"] == "refused":
+            raise Refusal(
+                f"compact: request {request} was refused at {last_answer['gate']}: "
+                f"{last_answer['detail']}"
+            )
+        if not waited["ok"]:
+            step = waited.get("last_job", {}).get("step")
+            raise Refusal(
+                f"compact: request {request} was answered {last_answer['outcome']}"
+                + (f", and the compaction stopped in the step {step}" if step else "")
+            )
+        return {**body, **waited}
 
     def drop_layer(self, name: str, wait: bool = False) -> dict:
         """Remove an annotation layer or a label set, and return the server's answer.

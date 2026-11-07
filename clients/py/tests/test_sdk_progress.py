@@ -109,16 +109,23 @@ def test_a_waited_compaction_ends_with_the_outcome_the_server_served(tmp_path):
     try:
         assert db.commit(progress=False).ok
         assert db.remove({"id": [1]}).accepted == 1
-        body = db.compact(wait=True, progress=records.append)
+        answer = db.control.compact(wait=True, progress=records.append)
         served = db.status()["compaction"]
-        assert body["outcome"] in ("compacted", "nothing_to_do")
-        assert body["last_answer"]["first"] <= body["request"] <= body["last_answer"]["last"]
+        waited = answer.waited
+        assert answer.status == 202 and set(answer.body) == {"request"}
+        assert (waited["ok"], waited["ended"]) == (True, "answered")
+        assert waited["last_answer"] == served["requests"]["last_answer"]
+        assert waited["last_answer"]["outcome"] in ("compacted", "nothing_to_do")
         assert {one["job"] for one in records} <= {"compaction"}
-        if body["outcome"] == "compacted":
-            assert body["last_job"] == served["last_job"] == records[-1]
+        if waited["last_answer"]["outcome"] == "compacted":
+            assert waited["last_job"] == served["last_job"] == records[-1]
             assert records[-1]["state"] == "finished"
         else:
-            assert body["last_job"] is None
+            assert "last_job" not in waited
+
+        assert db.remove({"id": [2]}).accepted == 1
+        waited = db.compact(wait=True, progress=False)
+        assert waited["ok"] and waited["last_answer"]["first"] <= waited["request"]
     finally:
         db.close()
 
@@ -190,19 +197,18 @@ def scripted(monkeypatch):
 def waited(base: str) -> tuple:
     records: list[dict] = []
     answered = Control(base, "credential").compact(wait=True, progress=records.append)
-    return answered, records
+    assert answered.ok and answered.body == {"request": _Scripted.request}
+    return answered.waited, records
 
 
-def test_a_refused_request_returns_the_served_gate_and_ends_on_no_job(scripted):
+def test_a_refused_request_returns_the_served_answer_and_ends_on_no_job(scripted):
     refused = answer(2, 3, "refused", "disk", "the disc is full; free some space")
     _Scripted.statuses = [
         status(3, 1, jobs=[job()]),
         status(3, 3, refused, last_job=job("finished")),
     ]
-    answered, records = waited(scripted)
-    assert answered.ok and answered.status == 202
-    assert answered.body == {"request": 3, "outcome": "refused", "last_answer": refused,
-                             "last_job": None}
+    waited_, records = waited(scripted)
+    assert waited_ == {"ok": False, "ended": "answered", "last_answer": refused}
     assert records == [job()]
 
 
@@ -213,40 +219,40 @@ def test_a_failed_compaction_ends_on_the_last_job_as_served(scripted):
         status(3, 2, jobs=[job(step="postings")]),
         status(3, 3, answer(3, 3, "failed"), last_job=failed),
     ]
-    answered, records = waited(scripted)
-    assert answered.body["outcome"] == "failed"
-    assert answered.body["last_job"] == failed
+    waited_, records = waited(scripted)
+    assert waited_ == {"ok": False, "ended": "answered", "last_answer": answer(3, 3, "failed"),
+                       "last_job": failed}
     assert records == [job(), job(step="postings"), failed]
 
 
 def test_a_request_with_nothing_to_compact_shows_no_last_job(scripted):
     _Scripted.statuses = [status(3, 3, answer(3, 3, "nothing_to_do"), last_job=job("finished"))]
-    answered, records = waited(scripted)
-    assert (answered.body["outcome"], answered.body["last_job"]) == ("nothing_to_do", None)
+    waited_, records = waited(scripted)
+    assert waited_ == {"ok": True, "ended": "answered", "last_answer": answer(3, 3, "nothing_to_do")}
     assert records == []
 
 
 def test_a_server_that_restarted_after_the_request_has_lost_it(scripted):
     _Scripted.statuses = [status(1, 1, answer(1, 1, "compacted"))]
-    answered, _ = waited(scripted)
-    assert answered.body["outcome"] == "lost"
-    assert answered.body["last_answer"] is None
+    waited_, _ = waited(scripted)
+    assert waited_ == {"ok": False, "ended": "lost", "accepted": 1}
 
 
 def test_an_answer_replaced_before_it_was_read_leaves_the_outcome_unknown(scripted):
-    _Scripted.statuses = [status(5, 5, answer(4, 5, "compacted"), last_job=job("finished"))]
-    answered, records = waited(scripted)
-    assert answered.body["outcome"] == "unknown"
-    assert answered.body["last_answer"] is None and records == []
+    later = answer(4, 5, "compacted")
+    _Scripted.statuses = [status(5, 5, later, last_job=job("finished"))]
+    waited_, records = waited(scripted)
+    assert waited_ == {"ok": False, "ended": "unknown", "last_answer": later}
+    assert records == []
 
 
-def test_a_refused_read_of_the_status_is_the_answer_with_the_request_number(scripted):
+def test_a_refused_reading_of_the_status_ends_the_wait_with_its_answer(scripted):
     _Scripted.refusal = 403
-    answered, _ = waited(scripted)
-    assert answered.status == 403 and answered.body["request"] == 3
+    waited_, _ = waited(scripted)
+    assert (waited_["ok"], waited_["ended"], waited_["status"].status) == (False, "unread", 403)
 
 
-def test_a_database_raises_for_an_outcome_other_than_compacted_or_nothing_to_do(
+def test_a_database_raises_unless_the_request_compacted_or_had_nothing_to_do(
     tmp_path, monkeypatch, scripted
 ):
     db, _ = small(tmp_path / "db")
@@ -254,10 +260,18 @@ def test_a_database_raises_for_an_outcome_other_than_compacted_or_nothing_to_do(
         assert db.commit(progress=False).ok
         monkeypatch.setattr(Database, "control", property(lambda self: Control(scripted, "c")))
         _Scripted.statuses = [status(3, 3, answer(3, 3, "nothing_to_do"))]
-        assert db.compact(wait=True)["outcome"] == "nothing_to_do"
-        for outcome in ("refused", "failed"):
-            _Scripted.statuses = [status(3, 3, answer(3, 3, outcome))]
+        assert db.compact(wait=True)["last_answer"]["outcome"] == "nothing_to_do"
+        for script in (
+            [status(3, 3, answer(3, 3, "refused", "disk", "the disc is full"))],
+            [status(3, 3, answer(3, 3, "failed"), last_job=job("failed"))],
+            [status(1, 1)],
+            [status(5, 5, answer(4, 5, "compacted"))],
+        ):
+            _Scripted.statuses = script
             with pytest.raises(Refusal):
                 db.compact(wait=True)
+        _Scripted.refusal = 403
+        with pytest.raises(Refusal):
+            db.compact(wait=True)
     finally:
         db.close()

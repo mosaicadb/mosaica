@@ -628,8 +628,8 @@ minutes.
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call
 returns. `compact(wait=True)` reads `/control/status` once a second, showing the compaction's
-progress, until the server has answered the request, and returns the answer's `outcome`; it raises
-`Refusal` unless the outcome is `compacted` or `nothing_to_do`. After `drop_layer()` the name may be declared again, as a new layer that none of the
+progress, until the server has answered the request, and returns the answer the server served in
+`last_answer`. It raises `Refusal` unless the server answered `compacted` or `nothing_to_do`. After `drop_layer()` the name may be declared again, as a new layer that none of the
 dropped layer's `mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
 items it leaves in no view, as `remove()` deletes one, and the answer's `deleted` says how many.
 
