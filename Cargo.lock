@@ -2281,6 +2281,7 @@ dependencies = [
  "mosaica-authz",
  "mosaica-roaring",
  "mosaica-types",
+ "rayon",
  "tempfile",
  "zstd",
 ]

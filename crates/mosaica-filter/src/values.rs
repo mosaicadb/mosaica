@@ -60,8 +60,9 @@
 //! always-compiled counter would buy the assertion with a permanent regression on the arm that can
 //! least afford one, and a shared atomic would additionally put a contended cache line under every
 //! parallel scan. Thread-local also makes the count correct under the test harness, which runs tests
-//! concurrently in one process; the limit to read with it is that a scan handed to another thread is
-//! not counted by the thread that asked for it. Read the release consequence too: a `--release` test
+//! concurrently in one process. A scan split across a pool hands each piece's count back to the
+//! thread that asked for the scan, so the count is the scan's wherever its pieces ran. Read the
+//! release consequence too: a `--release` test
 //! run finds a counter that never moves, so the work assertions fail loudly rather than passing
 //! vacuously — they are debug-build assertions, and the gate builds them that way.
 
@@ -242,6 +243,10 @@ enum Packing {
 /// The match density, per block, at or above which packing pays. The measured crossover sits between
 /// 1% and 5% selectivity; a thirty-second is inside that band and is a shift.
 const PACK_MIN_DENSITY: u32 = (pack::BLOCK as u32) / 32;
+
+/// The fewest candidate entities a partial column's block must hold to be packed: below this the
+/// block's 1,024 words cost more to clear and stamp than the per-entity walk does.
+const PARTIAL_PACK_MIN: u64 = mosaica_roaring::ARRAY_MAX as u64;
 
 /// One candidate run that spans at least one whole 2¹⁶-aligned block: the aligned interior is packed
 /// into Roaring containers, the ragged ends either side of it walked per entity. Returns whether the
@@ -654,6 +659,80 @@ pub fn take_scan_work() -> ScanWork {
     ScanWork::default()
 }
 
+/// `f`'s result and the work it traversed on this thread, leaving this thread's counter as it was:
+/// what a piece of a parallel scan hands back to the thread that asked for the scan.
+#[cfg(debug_assertions)]
+fn counted<R>(f: impl FnOnce() -> R) -> (R, ScanWork) {
+    let outer = take_scan_work();
+    let out = f();
+    let mine = take_scan_work();
+    SCAN_WORK.with(|w| w.set(outer));
+    (out, mine)
+}
+
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+fn counted<R>(f: impl FnOnce() -> R) -> (R, ScanWork) {
+    (f(), ScanWork::default())
+}
+
+/// Add work traversed on another thread to this thread's counter.
+#[cfg(debug_assertions)]
+fn add_scan_work(work: ScanWork) {
+    SCAN_WORK.with(|w| {
+        let mut total = w.get();
+        total.runs += work.runs;
+        total.slots += work.slots;
+        w.set(total);
+    });
+}
+
+#[cfg(not(debug_assertions))]
+#[inline(always)]
+fn add_scan_work(_work: ScanWork) {}
+
+/// The smallest candidate a scan splits across the pool. A piece is at least a quarter of this,
+/// about a millisecond of scanning, which is well above rayon's cost per task.
+const PARALLEL_MIN: u64 = 1 << 20;
+
+/// `candidate` cut into pieces of about equal cardinality at 2¹⁶-aligned boundaries, one per
+/// quarter of a thread of the current rayon pool, each as the inclusive entity range it covers.
+/// Empty where the scan should run on the calling thread: off any pool, on a pool of one thread,
+/// or below [`PARALLEL_MIN`].
+///
+/// The cut is a function of the candidate and the pool alone, so it adds no dependence on the
+/// value sought. Aligned boundaries keep every 2¹⁶ block in one piece, where packing reads it whole.
+fn scan_pieces(candidate: &Bitmap) -> Vec<std::ops::RangeInclusive<u32>> {
+    if rayon::current_thread_index().is_none() {
+        return Vec::new();
+    }
+    let threads = rayon::current_num_threads() as u64;
+    let card = candidate.cardinality();
+    let Some(last) = candidate.maximum() else {
+        return Vec::new();
+    };
+    if threads < 2 || card < PARALLEL_MIN {
+        return Vec::new();
+    }
+    let pieces = (threads * 4).min(card / (PARALLEL_MIN / 4));
+    let mut starts = vec![0u32];
+    for i in 1..pieces {
+        // Below `card`, which is at most 2³², so the rank fits.
+        let rank = (i * card / pieces) as u32;
+        if let Some(at) = candidate.select(rank) {
+            let at = at & !0xFFFF;
+            if at > *starts.last().expect("starts begins with 0") {
+                starts.push(at);
+            }
+        }
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, &start)| start..=starts.get(i + 1).map_or(last, |next| next - 1))
+        .collect()
+}
+
 /// One filterable column: its values in entity order, and how an entity id reaches one.
 #[derive(Debug)]
 pub struct ValueColumn {
@@ -786,10 +865,21 @@ impl ValueColumn {
                 // candidate's runs against the presence.
                 let live = candidate.and(presence);
                 for (lo, hi, rank) in mosaica_roaring::RankedRuns::new(presence, &live) {
-                    let slot0 = rank as usize;
-                    let count = (hi - lo) as usize + 1;
-                    if slot0 < len {
-                        f(slot0, count.min(len - slot0), lo);
+                    // Cut at 2¹⁶ blocks, so a block's runs are the same whether the scan walks it
+                    // here or packs it in `walk_partial`, and the counted work with them.
+                    let (mut lo, mut rank) = (lo, rank);
+                    loop {
+                        let last = hi.min(lo | 0xFFFF);
+                        let slot0 = rank as usize;
+                        let count = (last - lo) as usize + 1;
+                        if slot0 < len {
+                            f(slot0, count.min(len - slot0), lo);
+                        }
+                        if last == hi {
+                            break;
+                        }
+                        rank += count as u64;
+                        lo = last + 1;
                     }
                 }
             }
@@ -803,17 +893,174 @@ impl ValueColumn {
     /// call through a closure that cannot be specialised. This takes the slice directly, so the
     /// inner loop is a monomorphic index and comparison over `&[T]` — which is what a fixed-width
     /// column can actually go fast on.
+    ///
+    /// Run on a rayon pool, a large candidate is cut into pieces at 2¹⁶ blocks ([`scan_pieces`])
+    /// and the pieces scanned in parallel. Their results cover disjoint blocks, so the union is
+    /// exact; each piece decides its own packing from its own first block.
     #[inline]
-    fn walk_typed<T, F>(&self, candidate: &Bitmap, values: &[T], mut pred: F) -> Bitmap
+    fn walk_typed<T, F>(&self, candidate: &Bitmap, values: &[T], pred: F) -> Bitmap
+    where
+        T: Sync,
+        F: Fn(&T) -> bool + Sync,
+    {
+        use rayon::prelude::*;
+        let pieces = scan_pieces(candidate);
+        if pieces.is_empty() {
+            return self.walk_one(candidate, values, &pred);
+        }
+        let parts: Vec<(Bitmap, ScanWork)> = pieces
+            .into_par_iter()
+            .map(|range| {
+                let piece = candidate.and(&Bitmap::from_range(range));
+                counted(|| self.walk_one(&piece, values, &pred))
+            })
+            .collect();
+        let mut out = Bitmap::new();
+        for (part, work) in parts {
+            add_scan_work(work);
+            out.or_inplace(&part);
+        }
+        out
+    }
+
+    /// One piece of [`Self::walk_typed`]: a partial column through [`Self::walk_partial`], a
+    /// universal one through [`Self::walk_runs`].
+    #[inline]
+    fn walk_one<T, F>(&self, candidate: &Bitmap, values: &[T], pred: &F) -> Bitmap
+    where
+        F: Fn(&T) -> bool,
+    {
+        match &self.presence {
+            Some(presence) => self.walk_partial(presence, candidate, values, pred),
+            None => self.walk_runs(candidate, values, |x| pred(x)),
+        }
+    }
+
+    /// A partial column's scan: each 2¹⁶ block where the candidate holds at least half the
+    /// block's present entities is packed, and the rest walked per entity by [`Self::walk_runs`].
+    ///
+    /// A block's present entities hold consecutive slots, so its values are one contiguous slice.
+    /// The predicate is evaluated over the whole slice and each result masked by the candidate's
+    /// bit before it is stamped at its entity, so the block's matches, and the packing decision
+    /// taken from them, are the candidate's alone. The work is the block's present entities,
+    /// whatever matches, so a value the principal cannot see costs what one that does not exist
+    /// costs. Whether a block qualifies is a function of the candidate and the presence.
+    ///
+    /// As in [`pack_run`], the first block packed decides by its match density whether the rest
+    /// of the scan packs: measured on a universal column at 10⁹, packing is flat at about 0.8 ns
+    /// an entity, and the per-entity walk 0.28 ns where the processor predicts the branch and
+    /// 5.9 ns where it does not.
+    #[inline(never)]
+    fn walk_partial<T, F>(
+        &self,
+        presence: &Bitmap,
+        candidate: &Bitmap,
+        values: &[T],
+        pred: &F,
+    ) -> Bitmap
+    where
+        F: Fn(&T) -> bool,
+    {
+        let mut live = candidate.and(presence);
+        let ranks = self
+            .block_ranks
+            .get_or_init(|| mosaica_roaring::BlockRanks::of(presence));
+        let mut packed = pack::Sink::new();
+        let mut packed_blocks: Vec<u32> = Vec::new();
+        let mut state = Packing::Undecided;
+        let mut present: Vec<u32> = Vec::new();
+        let mut members: Vec<u32> = Vec::new();
+        let mut held = [0u64; pack::WORDS];
+        let mut words = [0u64; pack::WORDS];
+        let mut live_cursor = live.cursor();
+        let mut present_cursor = presence.cursor();
+        let mut next = live.minimum();
+        while let Some(at) = next {
+            if state == Packing::Abandoned {
+                break;
+            }
+            let block = at >> 16;
+            let span = block << 16..=(block << 16) | 0xFFFF;
+            next = if block == u32::MAX >> 16 {
+                None
+            } else {
+                live_cursor.reset_at_or_after((block + 1) << 16);
+                live_cursor.current()
+            };
+            let in_live = live.range_cardinality(span.clone());
+            let in_presence = presence.range_cardinality(span.clone());
+            if in_live < PARTIAL_PACK_MIN || in_live * 2 < in_presence {
+                continue;
+            }
+            present_cursor.reset_at_or_after(*span.start());
+            let first = present_cursor
+                .current()
+                .expect("a block with live members has present ones");
+            let rank = ranks
+                .rank_of(presence, first)
+                .expect("the cursor stands on a member") as usize;
+            present.resize(in_presence as usize, 0);
+            let read = present_cursor.read_many(&mut present);
+            debug_assert_eq!(read, present.len(), "the block's present entities, read whole");
+            members.resize(in_live as usize, 0);
+            let mut block_cursor = live.cursor();
+            block_cursor.reset_at_or_after(*span.start());
+            let read = block_cursor.read_many(&mut members);
+            debug_assert_eq!(read, members.len(), "the block's live entities, read whole");
+            for m in &members {
+                let low = (m & 0xFFFF) as usize;
+                held[low >> 6] |= 1 << (low & 63);
+            }
+            let slice = &values[rank..rank + present.len()];
+            let mut card = 0u32;
+            for (v, e) in slice.iter().zip(&present) {
+                let low = (e & 0xFFFF) as usize;
+                let hit = u64::from(pred(v)) & (held[low >> 6] >> (low & 63));
+                words[low >> 6] |= (hit & 1) << (low & 63);
+                card += (hit & 1) as u32;
+            }
+            packed.push_block(block as u16, card, &words);
+            held.fill(0);
+            words.fill(0);
+            #[cfg(debug_assertions)]
+            mosaica_roaring::for_each_run_in(
+                &live,
+                *span.start()..span.end().saturating_add(1),
+                &mut |run| record_slot_run(run.len()),
+            );
+            packed_blocks.push(block);
+            if state == Packing::Undecided {
+                state = if card >= in_live as u32 / 32 {
+                    Packing::On
+                } else {
+                    Packing::Abandoned
+                };
+            }
+        }
+        if packed_blocks.is_empty() {
+            return self.walk_runs(&live, values, |x| pred(x));
+        }
+        for block in &packed_blocks {
+            live.remove_range(block << 16..=(block << 16) | 0xFFFF);
+        }
+        let mut out = self.walk_runs(&live, values, |x| pred(x));
+        out.or_inplace(&packed.finish());
+        out
+    }
+
+    /// The serial scan of one candidate over a typed slice, packing whole blocks of a universal
+    /// column and walking everything else per entity.
+    #[inline]
+    fn walk_runs<T, F>(&self, candidate: &Bitmap, values: &[T], mut pred: F) -> Bitmap
     where
         F: FnMut(&T) -> bool,
     {
         let mut hits = Hits::new();
         let mut packed = pack::Sink::new();
         let mut words = [0u64; pack::WORDS];
-        // Slot and entity coincide only where the entity id *is* the array index. A presence bitmap
-        // makes a block's values a rank-addressed subsequence rather than a contiguous slice, so it
-        // keeps the per-entity path — see `pack`'s module docs.
+        // Slot and entity coincide only where the entity id *is* the array index. A partial column
+        // packs its blocks in `walk_partial` before reaching here, and what it leaves is walked per
+        // entity.
         let positional = self.presence.is_none();
         let mut packing = Packing::Undecided;
 
@@ -1473,6 +1720,129 @@ mod tests {
         let mut b = Bitmap::new();
         b.add_many(&all.into_iter().collect::<Vec<_>>());
         b
+    }
+
+    /// A reproducible stream of pseudo-random words.
+    fn noise(seed: u64) -> impl FnMut() -> u64 {
+        let mut x = seed | 1;
+        move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        }
+    }
+
+    /// `[lo, hi]` as a range operand.
+    fn between(lo: i128, hi: i128) -> (Option<Endpoint>, Option<Endpoint>) {
+        let at = |v| {
+            Some(Endpoint {
+                value: Scalar::Int(v),
+                inclusive: true,
+            })
+        };
+        (at(lo), at(hi))
+    }
+
+    /// The members of `candidate` whose value in `column` lies in `[lo, hi]`, one entity at a time.
+    fn by_hand(column: &ValueColumn, candidate: &Bitmap, lo: i128, hi: i128) -> Bitmap {
+        let mut out = Bitmap::new();
+        for e in candidate.iter() {
+            if let Some(RecordValue::U16(v)) = column.record_value_of(e) {
+                if (lo..=hi).contains(&i128::from(v)) {
+                    out.add(e);
+                }
+            }
+        }
+        out
+    }
+
+    fn pool(threads: usize) -> rayon::ThreadPool {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap()
+    }
+
+    /// The candidates a scan is asked under: the whole span, two thirds of it, a fifth of it, and
+    /// a narrow stretch inside one block.
+    fn candidates(span: u32) -> Vec<Bitmap> {
+        vec![
+            Bitmap::from_range(0..span),
+            candidate((0..span).filter(|e| e % 3 != 0)),
+            candidate((0..span).filter(|e| e % 5 == 0)),
+            Bitmap::from_range(70_000..71_000),
+        ]
+    }
+
+    /// **A range answers the same on a pool and off one**, over a universal and a partial column,
+    /// under broad, holed and scattered candidates, for a range matching most values, a few and
+    /// none, and each answer is the one-entity-at-a-time answer.
+    #[test]
+    fn a_range_answers_alike_on_a_pool_and_off_one() {
+        const SPAN: u32 = 40 * 65_536;
+        let mut next = noise(7);
+        let values: Vec<u16> = (0..SPAN).map(|_| (next() % 1_000) as u16).collect();
+        let universal = ValueColumn::universal(Codes::U16(values.clone().into()));
+        // Roughly 30% present, in uneven stretches, as a field most items leave empty.
+        let mut present = Bitmap::new();
+        let mut e = 0u32;
+        while e < SPAN {
+            let len = (next() % 40) as u32 + 1;
+            if next() % 10 < 3 {
+                present.add_range(e..(e + len).min(SPAN));
+            }
+            e += len;
+        }
+        let kept: Vec<u16> = present.iter().map(|e| values[e as usize]).collect();
+        let partial = ValueColumn::partial(Codes::U16(kept.into()), present).unwrap();
+        let four = pool(4);
+        for column in [&universal, &partial] {
+            for candidate in candidates(SPAN) {
+                for (lo, hi) in [(0, 899), (100, 109), (2_000, 3_000)] {
+                    let (a, b) = between(lo, hi);
+                    let want = by_hand(column, &candidate, lo, hi);
+                    assert_eq!(column.scan_range(&candidate, a, b), want);
+                    let on_pool = four.install(|| column.scan_range(&candidate, a, b));
+                    assert_eq!(on_pool, want);
+                }
+            }
+        }
+    }
+
+    /// **A partial column's scan does the same work whatever is sought**: a range matching most of
+    /// the candidate, one matching a few and one matching nothing traverse the same slots and
+    /// runs, though the first packs its blocks and the others do not, and a scan split over a pool
+    /// traverses the same slots as one that is not.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_partial_scan_does_the_same_work_whatever_is_sought() {
+        const SPAN: u32 = 24 * 65_536;
+        let mut next = noise(11);
+        let present = candidate((0..SPAN).filter(|e| e % 3 != 1));
+        let kept: Vec<u16> = (0..present.cardinality())
+            .map(|_| (next() % 1_000) as u16)
+            .collect();
+        let column = ValueColumn::partial(Codes::U16(kept.into()), present).unwrap();
+        let four = pool(4);
+        for candidate in candidates(SPAN) {
+            let work_of = |lo, hi| {
+                let (a, b) = between(lo, hi);
+                let _ = take_scan_work();
+                let _ = column.scan_range(&candidate, a, b);
+                take_scan_work()
+            };
+            let broad = work_of(0, 989);
+            assert_eq!(work_of(500, 501), broad);
+            assert_eq!(work_of(5_000, 6_000), broad);
+            let pooled = four.install(|| {
+                let (a, b) = between(0, 989);
+                let _ = take_scan_work();
+                let _ = column.scan_range(&candidate, a, b);
+                take_scan_work()
+            });
+            assert_eq!(pooled.slots, broad.slots);
+        }
     }
 
     #[test]

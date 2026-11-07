@@ -1086,10 +1086,11 @@ impl Engine {
     /// Route this request's filter expressions in one side under `candidate`. Every scan returns a
     /// subset of the candidate. A region or `member_of` leaf `resolved` holds is answered from it,
     /// and one it does not is resolved and kept there; the caller holds it only while `served` and
-    /// its mask are the ones it was filled under. A text leaf is answered from the text filter
-    /// cache, whose entry is computed over the session's fragment only when the leaf is evaluated
-    /// under the whole candidate ([`crate::text_filter_cache`]). `body` is handed a `route` that
-    /// puts one expression through them.
+    /// its mask are the ones it was filled under. A text or value leaf is answered from the filter
+    /// cache ([`crate::filter_cache`]), whose entry is computed over the session's fragment where
+    /// the whole candidate is known: for a text leaf only when it is evaluated under the whole
+    /// candidate, and for a value leaf under any part of it. A value leaf is evaluated on the
+    /// engine's pool. `body` is handed a `route` that puts one expression through them.
     pub(crate) fn route_filters_under<T>(
         &self,
         served: &ServedView<'_>,
@@ -1101,7 +1102,7 @@ impl Engine {
             &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
         ) -> Result<T>,
     ) -> Result<T> {
-        // The fragment a text leaf's kept answer is taken over, where the whole candidate is known.
+        // The fragment a leaf's kept answer is taken over, where the whole candidate is known.
         let fragment = match candidate {
             FilterCandidate::Within(_) => None,
             FilterCandidate::Compose | FilterCandidate::Whole(_) => Some(self.fragment_for(
@@ -1129,21 +1130,34 @@ impl Engine {
             unique_holders(served.generation, side.shard, column, keys)
         };
         let fragment = fragment.as_ref().map(|fragment| fragment.view());
-        let text: &crate::filter::TextResolver<'_> = &|column, query, at, evaluate| {
-            let at_whole = whole.is_some_and(|whole| std::ptr::eq(whole, at) || whole == at);
-            crate::text_filter_cache::answer(
-                &self.text_filter_cache,
+        let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, evaluate| {
+            // A phrase can cost far more over the fragment than over a narrowed candidate, so a
+            // text leaf is kept only where it is asked under the whole one. A value leaf costs at
+            // most one scan of the fragment, about what the first leaf under the whole candidate
+            // costs, and every later request reads it for an intersection.
+            let keep = match query {
+                crate::filter::LeafQuery::Text(_) => {
+                    whole.is_some_and(|whole| std::ptr::eq(whole, at) || whole == at)
+                }
+                crate::filter::LeafQuery::Value(_) => whole.is_some(),
+            };
+            let on_pool = |candidate: &croaring::Bitmap| match query {
+                crate::filter::LeafQuery::Text(_) => evaluate(candidate),
+                crate::filter::LeafQuery::Value(_) => self.pool.install(|| evaluate(candidate)),
+            };
+            crate::filter_cache::answer(
+                &self.filter_cache,
                 side.shard,
-                crate::text_filter_cache::key_of(
+                crate::filter_cache::key_of(
                     side.shard,
                     served.session.terms_digest(),
                     column,
                     query,
                 ),
-                fragment.as_deref().filter(|_| at_whole),
+                fragment.as_deref().filter(|_| keep),
                 at,
                 cancel,
-                evaluate,
+                &on_pool,
             )
         };
         let resolvers = crate::filter::RowLeafResolvers {
@@ -1151,7 +1165,7 @@ impl Engine {
             members: &members,
             layers: &layers,
             unique: &unique,
-            text,
+            leaves,
         };
         body(&|expr: &crate::filter::FilterExpr, prefer_row: bool| {
             side.shard
