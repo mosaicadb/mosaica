@@ -100,26 +100,8 @@ pub fn bind(config: &Config) -> Result<Listeners, BoxError> {
         ControlListen::Tcp(addr) => Target::Tcp(addr),
         ControlListen::Unix(path) => Target::Unix(path),
     });
-    let rest: [(Option<Target>, fn(&mut Planes)); 2] = [
-        (session, |p| p.session = true),
-        (control, |p| p.control = true),
-    ];
-    for (target, plane) in rest {
-        let shared = match &target {
-            None => Some(0),
-            Some(Target::Tcp(addr)) if addr.port() == 0 => None,
-            Some(target) => wanted.iter().position(|(t, _)| t == target),
-        };
-        match (shared, target) {
-            (Some(at), _) => plane(&mut wanted[at].1),
-            (None, Some(target)) => {
-                let mut planes = Planes::default();
-                plane(&mut planes);
-                wanted.push((target, planes));
-            }
-            (None, None) => unreachable!("an undeclared plane shares the viewer's listener"),
-        }
-    }
+    on(&mut wanted, session).session = true;
+    on(&mut wanted, control).control = true;
 
     let mut bound = Vec::with_capacity(wanted.len());
     for (target, planes) in wanted {
@@ -135,6 +117,25 @@ pub fn bind(config: &Config) -> Result<Listeners, BoxError> {
         bound.push((socket, planes));
     }
     Ok(Listeners { bound })
+}
+
+/// The planes of the listener for `target`: the viewer's when it is `None`, an earlier one naming
+/// the same address and port, or a new one. A port of 0 is never shared.
+fn on(wanted: &mut Vec<(Target, Planes)>, target: Option<Target>) -> &mut Planes {
+    let at = match target {
+        None => 0,
+        Some(target) => {
+            let shared = match &target {
+                Target::Tcp(addr) if addr.port() == 0 => None,
+                _ => wanted.iter().position(|(t, _)| *t == target),
+            };
+            shared.unwrap_or_else(|| {
+                wanted.push((target, Planes::default()));
+                wanted.len() - 1
+            })
+        }
+    };
+    &mut wanted[at].1
 }
 
 fn bind_tcp(
