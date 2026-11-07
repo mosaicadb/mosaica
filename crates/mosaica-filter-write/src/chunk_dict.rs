@@ -316,12 +316,10 @@ impl KeyTable {
 fn hash_tag(key: &[u8]) -> u32 {
     const K: u64 = 0x517c_c1b7_2722_0a95;
     let mut h = key.len() as u64;
-    let mut words = key.chunks_exact(8);
-    for word in &mut words {
-        let w = u64::from_le_bytes(word.try_into().expect("an 8-byte chunk"));
-        h = (h.rotate_left(5) ^ w).wrapping_mul(K);
+    let (words, rest) = key.as_chunks::<8>();
+    for word in words {
+        h = (h.rotate_left(5) ^ u64::from_le_bytes(*word)).wrapping_mul(K);
     }
-    let rest = words.remainder();
     if !rest.is_empty() {
         let mut w = [0u8; 8];
         w[..rest.len()].copy_from_slice(rest);
