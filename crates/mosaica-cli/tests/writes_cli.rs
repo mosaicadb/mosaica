@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use arrow::array::{Array, ArrayRef, Float64Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use mosaica_types::progress::{JobKind, JobState, Progress};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -190,6 +191,73 @@ fn a_group_with_category_metadata_declared_again_answers_its_views_as_held() {
     for (request, status) in requests(&after) {
         assert_eq!(status, 200, "after a restart, {request}: {after}");
     }
+}
+
+/// The progress records a command printed on stderr with `--progress json`.
+fn progress_records(output: &Output) -> Vec<Progress> {
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// `insert --progress json` ends with its pages step at its total, and `compact --wait --progress
+/// json` waits for its compaction and ends with the compaction's record, finished.
+#[test]
+fn insert_and_compact_show_their_progress() {
+    let served = serve(false, "");
+    let dir = served.dir.path().to_owned();
+    let control = served.bound.control.clone();
+    let write = |args: &[&str]| {
+        let mut all = args.to_vec();
+        all.extend(["--control", control.as_str()]);
+        run(&dir, &all, &[OPERATOR], b"")
+    };
+    write_parquet(
+        &dir.join("new.parquet"),
+        vec![
+            (
+                "id",
+                Arc::new(UInt64Array::from_iter_values(7000..7005)) as ArrayRef,
+            ),
+            ("x", Arc::new(Float64Array::from(vec![1.0; 5]))),
+            ("y", Arc::new(Float64Array::from(vec![2.0; 5]))),
+        ],
+    );
+    let inserted = write(&[
+        "insert",
+        "new.parquet",
+        "--view",
+        "s0",
+        "--page-rows",
+        "2",
+        "--progress",
+        "json",
+    ]);
+    let records = progress_records(&inserted);
+    assert_eq!(answer(inserted)["created"], 5);
+    let last = records.last().expect("the insert printed its progress");
+    assert_eq!(
+        (last.job, last.state),
+        (JobKind::Ingest, JobState::Finished)
+    );
+    assert_eq!((last.done, last.total), (Some(5), Some(5)), "{last:?}");
+
+    assert_eq!(
+        answer(write(&["delete", "--match", r#"{"id": "7000"}"#]))["accepted"],
+        1
+    );
+    let compacted = write(&["compact", "--wait", "--progress", "json"]);
+    let records = progress_records(&compacted);
+    answer(compacted);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.job == JobKind::Compaction),
+        "{records:?}"
+    );
+    let last = records.last().expect("the compaction's record is shown");
+    assert_eq!(last.state, JobState::Finished);
 }
 
 fn answer(output: Output) -> Value {
@@ -810,18 +878,7 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     assert_eq!(served_ids(&served, &token, "s0", &first), vec![4, 5, 6]);
 
     // A compaction removes the deleted rows; the items stay as they were.
-    let request = answer(write(&["compact"], b""))["request"]
-        .as_u64()
-        .unwrap();
-    let started = Instant::now();
-    loop {
-        let status = answer(write(&["status"], b""));
-        if status["compaction"]["requests"]["answered"].as_u64() >= Some(request) {
-            break;
-        }
-        assert!(started.elapsed() < Duration::from_secs(120), "{status}");
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    answer(write(&["compact", "--wait", "--progress", "none"], b""));
     assert_eq!(served_ids(&served, &token, "s0", &first), vec![4, 5, 6]);
 
     let served = restart(served);
@@ -1095,14 +1152,7 @@ fn a_database_keeps_its_log_through_flushes_compactions_restarts_and_a_copy() {
     assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 2, 3, 9000]);
 
     assert_eq!(write(&served, &["delete", "--match", r#"{"id": "2"}"#])["accepted"], 1);
-    let request = write(&served, &["compact"])["request"].as_u64().unwrap();
-    let started = Instant::now();
-    while write(&served, &["status"])["compaction"]["requests"]["answered"].as_u64()
-        < Some(request)
-    {
-        assert!(started.elapsed() < Duration::from_secs(120));
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    write(&served, &["compact", "--wait", "--progress", "none"]);
     let served = restart(served);
     let token = self::token(&served);
     assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 3, 9000]);

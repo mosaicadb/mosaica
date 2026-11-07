@@ -8271,7 +8271,7 @@ components:
       type: object
       additionalProperties: false
       description: The `GET /control/status` document. Counters count from the process's start; gauges are read when the request is answered. Byte figures are bytes and times are in the unit their name gives.
-      required: [entity_id_high_water, shards, publication, partitions, compute, bulk, artifacts, write_executor, ingest, limits, segments, overlay, layer_spaces, compaction, fragmentation, row_projection_cache, projection_builds_by_route, fragment_cache, sessions, masked_count_cache, region_cache, text_filter_cache, derived_cache, suggest_sets, occupancy, heap]
+      required: [entity_id_high_water, shards, publication, partitions, compute, bulk, artifacts, write_executor, ingest, limits, segments, overlay, layer_spaces, compaction, jobs, fragmentation, row_projection_cache, projection_builds_by_route, fragment_cache, sessions, masked_count_cache, region_cache, text_filter_cache, derived_cache, suggest_sets, occupancy, heap]
       properties:
         entity_id_high_water:
           type: integer
@@ -8581,6 +8581,11 @@ components:
               description: Deleted artifacts, whose records leave at the compaction of the last shard that lists them. The schedule counts each in the gauge of every shard that lists it, and one no shard lists in the open shard's.
         compaction:
           $ref: "#/components/schemas/CompactionStatus"
+        jobs:
+          type: array
+          description: The record of the flush and of the compaction running, each where one is, and empty when neither is. A compaction's counts are over the whole corpus, so the records are served on the control plane only.
+          items:
+            $ref: "#/components/schemas/Progress"
         fragmentation:
           type: object
           additionalProperties: false
@@ -9019,7 +9024,7 @@ components:
       type: object
       additionalProperties: false
       description: Compaction folds. Alarm on `fold_failures`, and on `fold_refusals` rising while `folds` does not.
-      required: [live_rows, folds, fold_failures, fold_requested, fold_refusals, fold_refusals_by_gate, last_refusal, requests, last_attr_bytes_read, last_attr_bytes_written, passes]
+      required: [live_rows, folds, fold_failures, fold_requested, fold_refusals, fold_refusals_by_gate, last_refusal, requests, last_attr_bytes_read, last_attr_bytes_written, passes, last_job]
       properties:
         live_rows:
           type: integer
@@ -9130,13 +9135,85 @@ components:
         last_attr_bytes_written: { type: integer, minimum: 0 }
         passes:
           type: array
-          description: The last fold's passes, in order.
+          description: The last compaction's passes, in order, each named as its step in the compaction's progress record.
           items:
             type: object
             additionalProperties: false
-            required: [pass, ms, rss_bytes, anon_bytes]
+            required: [pass, ms, rss_bytes, anon_bytes, done, total]
             properties:
               pass: { type: string }
               ms: { type: integer, minimum: 0 }
               rss_bytes: { type: integer, minimum: 0 }
               anon_bytes: { type: integer, minimum: 0 }
+              done:
+                type: [integer, "null"]
+                minimum: 0
+                description: What the pass counted when it ended, in its step's unit; `null` for a pass that counts nothing.
+              total:
+                type: [integer, "null"]
+                minimum: 0
+                description: The total the pass counted towards; `null` for a pass that counts nothing.
+        last_job:
+          description: The last record of the last compaction to end since the server started, with `state` `finished` or `failed`, and `null` before the first. A failed compaction's record keeps the step it stopped in. A client that waits for a request reads it once `requests.answered` reaches the request's number.
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/Progress"
+
+    Progress:
+      type: object
+      additionalProperties: false
+      description: How far a long-running job has gone. A job is a fixed list of phases, each of which runs one or more steps, and a step that processes a known number of things counts them.
+      required: [job, state, phase, step, elapsed_s, step_elapsed_s, rss_bytes]
+      properties:
+        job:
+          type: string
+          enum: [build, ingest, flush, compaction]
+        state:
+          type: string
+          enum: [running, finished, failed]
+          description: A failed job's record keeps the step it stopped in.
+        phase:
+          type: object
+          additionalProperties: false
+          required: [index, of, name]
+          description: The phase's position among the job's phases, counted from 1, and its name.
+          properties:
+            index: { type: integer, minimum: 1 }
+            of: { type: integer, minimum: 1 }
+            name: { type: string }
+        step:
+          type: string
+          description: The step's stable name, such as `postings` for a compaction or `rows` for a flush.
+        context:
+          type: string
+          description: Which part of the step is running, such as a shard, a view or a page. Absent when the step has one part.
+        done:
+          type: integer
+          minimum: 0
+          description: How much of the step is done, in `unit`. `done`, `total` and `unit` are absent for a step that counts nothing.
+        total:
+          type: integer
+          minimum: 0
+        unit:
+          type: string
+          enum: [items, rows, pairs, terms, bytes, pages]
+        rate:
+          type: number
+          minimum: 0
+          description: Units per second, measured over the last 20 seconds of the step. Absent for a step that counts nothing and for one younger than two seconds.
+        eta_s:
+          type: number
+          minimum: 0
+          description: Seconds until `done` reaches `total` at `rate`, for the step only. Absent where `rate` is absent or zero.
+        elapsed_s:
+          type: number
+          minimum: 0
+          description: Seconds since the job began.
+        step_elapsed_s:
+          type: number
+          minimum: 0
+          description: Seconds since the step began.
+        rss_bytes:
+          type: integer
+          minimum: 0
+          description: The resident memory of the process running the job when the record was taken.

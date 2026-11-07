@@ -17,7 +17,7 @@ mod plan;
 mod retire;
 mod schedule;
 
-pub(crate) use cost::Staircase;
+pub(crate) use cost::{Pass, Staircase};
 pub use cost::PassCost;
 pub(crate) use execute::{execute, next_prefix_name, CompletedFold, FoldContext};
 pub use plan::NoFold;

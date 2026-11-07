@@ -138,6 +138,8 @@ pub struct FoldRowSpaceSpec<'a> {
     /// `high_water` at the snapshot, not against the row count this pass will emit,
     /// which is smaller whenever any tombstone applies.
     pub permutation_bound: u64,
+    /// Where the rows read from the inputs are counted, one by one, dropped rows included.
+    pub progress: Option<&'a mosaica_types::progress::Tracker>,
 }
 
 /// What [`fold_row_space`] produced.
@@ -260,7 +262,9 @@ pub fn fold_row_space(
     // anything computed before this row's drop decision. This is what makes the shift a dropped
     // row causes to every later row automatic rather than something tracked.
     let mut row_count: u32 = 0;
+    let mut read = mosaica_types::progress::Batched::new(spec.progress);
     while let Some(Reverse((morton, mosaica_raw, index))) = heap.pop() {
+        read.add(1);
         let cursor = &mut cursors[index];
         let row = cursor.row;
         let mosaica_id = MosaicaId::new(mosaica_raw);
@@ -436,6 +440,7 @@ mod tests {
                 absent_ok: &[],
                 tombstones,
                 permutation_bound: 8,
+                progress: None,
             },
         )
         .expect("fold")

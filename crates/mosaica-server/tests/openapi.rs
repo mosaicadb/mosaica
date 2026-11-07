@@ -3058,20 +3058,43 @@ async fn status_flush_and_compact_match_the_description() {
         .unwrap();
     assert_refusal_to(&doc, Some(&post), resp, 422, "contract").await;
 
+    // A compaction held after its passes is served as a progress record under `jobs`.
+    let engine = &f.server.state.engine;
+    engine.set_fold_paused_for_test(true);
     let resp = control(&f.server, &post, "/control/compact")
         .send()
         .await
         .unwrap();
     let compact = assert_answer(&doc, &post, resp, 202).await;
     assert_eq!(compact["request"], 1);
-
-    // After a flush has published, the status still matches.
+    wait_until(
+        "the compaction holds",
+        std::time::Duration::from_secs(60),
+        async || engine.fold_is_holding_for_test(),
+    )
+    .await;
     let resp = control(&f.server, &get, "/control/status")
         .send()
         .await
         .unwrap();
     let status = assert_answer(&doc, &get, resp, 200).await;
+    assert_eq!(status["jobs"].as_array().map(Vec::len), Some(1), "{status}");
     assert!(status["publication"].as_u64().unwrap() >= answer["publication"].as_u64().unwrap());
+
+    // Once it is answered, its last record is kept.
+    engine.set_fold_paused_for_test(false);
+    wait_until(
+        "the compaction answered",
+        std::time::Duration::from_secs(60),
+        async || engine.write_executor_stats().compaction_requests_answered >= 1,
+    )
+    .await;
+    let resp = control(&f.server, &get, "/control/status")
+        .send()
+        .await
+        .unwrap();
+    let status = assert_answer(&doc, &get, resp, 200).await;
+    assert!(status["compaction"]["last_job"].is_object(), "{status}");
     let resp = f
         .server
         .client

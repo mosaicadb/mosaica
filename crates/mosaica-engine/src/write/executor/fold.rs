@@ -1483,6 +1483,7 @@ impl Executor {
             .compaction_shard
             .store(shard_id.raw(), Ordering::SeqCst);
         let unit = self.fold.start();
+        let stairs = crate::compact::Staircase::start(&self.health.jobs, shard_id);
         let health = Arc::clone(&self.health);
         let switches = Arc::clone(&self.deps.switches);
         let abandoned = Arc::clone(&ctx.abandoned);
@@ -1491,7 +1492,7 @@ impl Executor {
             .spawn(move || {
                 let abandoned = Arc::clone(&ctx.abandoned);
                 let to_prefix_dir = ctx.to_prefix_dir.clone();
-                let outcome = crate::compact::execute(plan, ctx);
+                let outcome = crate::compact::execute(plan, ctx, stairs);
                 // Test hook; always false otherwise. See `Engine::set_fold_paused_for_test`.
                 if outcome.is_ok() {
                     health.fold_holding.store(true, Ordering::SeqCst);
@@ -1515,7 +1516,7 @@ impl Executor {
                 }
                 match outcome {
                     Ok(mut completed) => {
-                        completed.finished = std::time::Instant::now();
+                        completed.stairs.enter(crate::compact::Pass::HandOff, None);
                         // Before the in-flight flag clears, so a tick that observes the fold
                         // finished also observes when. See `fold_floor_from`.
                         health
@@ -1837,8 +1838,7 @@ impl Executor {
     /// on serving the old geometry it still holds mapped, until restarted.
     pub(super) fn publish_fold(&mut self, completed: crate::compact::CompletedFold) {
         let started = std::time::Instant::now();
-        let mut stairs =
-            crate::compact::Staircase::resume(completed.cost.clone(), completed.finished);
+        let mut stairs = completed.stairs.clone();
         let live = self.generation.load_full();
         let plan = &completed.plan;
         if !self.may_publish() {
@@ -1896,7 +1896,7 @@ impl Executor {
         // prefix rather than carried forward or dropped. `repack_all` drops exactly the executed
         // deletions: a suppressed member keeps its bit (Rule S).
         let to_prefix_dir = self.deps.bundle_root.join(&completed.prefix);
-        stairs.record("6 hand-off");
+        stairs.enter(crate::compact::Pass::Memberships, None);
         // An artifact deletion this shard must remove leaves its slice here. One no other shard
         // still holds is executed: an artifact has no rows, and its record, content and members
         // leave the files this compaction writes. One another shard holds stays, denied, until
@@ -1952,7 +1952,7 @@ impl Executor {
                 }
             };
 
-        stairs.record("7 memberships");
+        stairs.enter(crate::compact::Pass::Derived, None);
 
         // The levels the retirement below is about to move, and has not yet
         // ([`PendingRetirement`]): the store still holds pre-retirement records, so a level in the
@@ -1969,7 +1969,7 @@ impl Executor {
             others: rewritten,
             moved,
         } = self.write_fold_derived(&live, &to_prefix_dir, &completed, manifest_n, &pending);
-        stairs.record("8 derived");
+        stairs.enter(crate::compact::Pass::Report, None);
 
         // ---- the report, before anything retires ---------------------------------------------------
         //
@@ -1979,7 +1979,7 @@ impl Executor {
         let degraded = self
             .live
             .with_artifacts(|store| store.degradations(&pending.retired));
-        stairs.record("9 report");
+        stairs.enter(crate::compact::Pass::Manifest, None);
 
         // ---- assemble `SEGMENTS-<n>` from the live partition manifest ------------------------------
         //
@@ -2423,7 +2423,7 @@ impl Executor {
             ));
             return;
         }
-        stairs.record("10 manifest");
+        stairs.enter(crate::compact::Pass::Flip, None);
 
         self.pause_point(PauseSiteArg::BeforeCurrentFlip);
         if let Err(e) = mosaica_store::write_current(
@@ -2434,7 +2434,7 @@ impl Executor {
             discard(&format!("CURRENT would not flip ({e})"));
             return;
         }
-        stairs.record("11 flip");
+        stairs.enter(crate::compact::Pass::Retire, None);
 
         // Retires the resident store here, before the new generation is installed: the published
         // overlay already carries the executed deletions retired, so retiring after would leave a
@@ -2493,7 +2493,7 @@ impl Executor {
             .map(|record| record.deltas.clone())
             .unwrap_or_default();
         *lock_recover(&self.health.last_fold_report) = degraded;
-        stairs.record("12 retire");
+        stairs.enter(crate::compact::Pass::Open, None);
 
         let segments_version = live.segments_version + 1;
         if let Err(reason) = self.swap_onto_folded_prefix(
@@ -2512,7 +2512,7 @@ impl Executor {
         let mut generations =
             std::mem::take(&mut *self.superseded.lock().unwrap_or_else(|e| e.into_inner()));
         generations.push(Arc::downgrade(&live));
-        stairs.record("13 open");
+        stairs.enter(crate::compact::Pass::Adopt, None);
 
         // Only the files written over a view's live incarnation, as an open adopts them.
         let swapped = self.generation.load();
@@ -2539,14 +2539,14 @@ impl Executor {
                 &enumerated,
             )
         });
-        stairs.record("14 adopt");
+        stairs.enter(crate::compact::Pass::Warm, None);
 
         // Must run after both the swap and the retire above: built before the swap, a projection
         // would be keyed to a generation no reader can ask for; built before the retire, it would
         // be keyed to a store version the retire is about to bump, discarding the warm.
         self.warm_artifact_caches();
         self.deps.shapes.clear_staged();
-        stairs.record("15 warm");
+        stairs.enter(crate::compact::Pass::Wal, None);
 
         // ---- rotate the WAL ---------------------------------------------------------------------
         //
@@ -2563,7 +2563,7 @@ impl Executor {
             compacted.with_allocator(|alloc| alloc.release_after(freed.position, freeing.ids));
         }
         self.rotate_wal();
-        stairs.record("16 wal");
+        stairs.enter(crate::compact::Pass::Reclaim, None);
         self.live.with_attributes(|attributes| {
             attributes.retire_folded(&folded.entity, &folded.scoped)
         });
@@ -2585,8 +2585,7 @@ impl Executor {
             prefix_dir: from_prefix_dir,
         });
         self.reclaim_superseded_prefixes();
-        stairs.record("17 reclaim");
-        let cost = stairs.into_cost();
+        let cost = stairs.finish();
 
         let (passes, fold_secs, staircase_rss) = self.health.record_fold_cost(
             shard_id,

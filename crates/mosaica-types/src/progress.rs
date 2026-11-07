@@ -183,6 +183,12 @@ impl Tracker {
         self.lock().counted = Some((total, unit));
     }
 
+    /// Name the part of the open step that is running, for a step whose parts share one count,
+    /// such as the pages of an ingest. The step's count and clock carry on.
+    pub fn context(&self, context: Option<String>) {
+        self.lock().context = context;
+    }
+
     /// Mark the job finished or failed. The step is left as it was, so a failed job's last
     /// snapshot says where it stopped.
     pub fn end(&self, state: JobState) {

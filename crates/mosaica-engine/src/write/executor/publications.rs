@@ -1543,7 +1543,7 @@ impl Executor {
             if unit.abandoned() {
                 return;
             }
-            let mut laps = crate::flush::FlushLaps::default();
+            let mut laps = crate::flush::FlushLaps::new(&health.jobs);
             match crate::flush::execute_flush(plan, context, &mut laps) {
                 Ok(completed) => {
                     health.record_flush_execution(&laps, Some(completed.consumed.len()));
@@ -1560,6 +1560,7 @@ impl Executor {
                         background::discard_written(&prefix_dir, completed.files.keys());
                         return;
                     }
+                    laps.finish();
                     unit.complete(completed);
                 }
                 Err(e) => {

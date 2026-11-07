@@ -612,6 +612,21 @@ impl Engine {
         self.write.health().last_fold_passes()
     }
 
+    /// A record of the flush and of the compaction running, each where one is. The counts are over
+    /// the whole corpus, not a viewer's visible set.
+    pub fn jobs(&self) -> Vec<mosaica_types::progress::Progress> {
+        self.write.health().jobs.running()
+    }
+
+    /// The last record of the last job of kind `job` to end since the executor started, with its
+    /// state `finished` or `failed`.
+    pub fn last_job(
+        &self,
+        job: mosaica_types::progress::JobKind,
+    ) -> Option<mosaica_types::progress::Progress> {
+        self.write.health().jobs.last_ended(job)
+    }
+
     /// What the last fold's deletions degraded: artifacts that lost members, supplied content that
     /// lost a source. Unmasked, on the operator credential only: no viewer-facing route may carry
     /// these numbers. The durable copy is `reports/fold-<prefix>.json` in the bundle root; no HTTP

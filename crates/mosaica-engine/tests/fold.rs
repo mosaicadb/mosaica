@@ -25,7 +25,8 @@ use mosaica_engine::{Engine, EngineConfig};
 use mosaica_lifecycle::command::UnallocatedRow;
 use mosaica_lifecycle::wal::ChangeOp;
 use mosaica_store::read::open_bundle;
-use mosaica_types::{EntityId, MosaicaId, TermId};
+use mosaica_types::progress::{JobKind, JobState};
+use mosaica_types::{EntityId, MosaicaId, ShardId, TermId};
 use parquet::arrow::ArrowWriter;
 
 /// A fixture bundle and an engine over it, with the executor running and the background refresh
@@ -703,6 +704,60 @@ fn a_request_made_while_a_compaction_runs_is_answered_by_a_later_one() {
         0,
         "the deletion accepted during the first compaction is retired by the second"
     );
+}
+
+/// A compaction's progress record is among the engine's jobs while it runs, naming its shard, and
+/// its phase never goes back. Once the compaction publishes no job is left, its last record is
+/// finished in the last phase, and each pass that counts ended at its total.
+#[test]
+fn a_compaction_is_a_job_until_it_publishes() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let engine = engine_over_fixture(tmp.path(), &root, config_uncapped());
+    engine
+        .accept_change(entity_of_source(&root, "v00000", 4), ChangeOp::Delete)
+        .unwrap();
+    assert_eq!(engine.jobs(), Vec::new(), "nothing runs before the request");
+
+    engine.set_fold_paused_for_test(true);
+    let before = engine.write_executor_stats();
+    engine.request_fold().unwrap();
+    let mut seen = Vec::new();
+    wait_for("the compaction's passes to finish", || {
+        seen.extend(engine.jobs());
+        engine.fold_is_holding_for_test()
+    });
+    seen.extend(engine.jobs());
+    engine.set_fold_paused_for_test(false);
+    wait_for_fold_publication(&engine, &before);
+
+    assert!(!seen.is_empty(), "a held compaction is a job");
+    for record in &seen {
+        assert_eq!(
+            (record.job, record.state),
+            (JobKind::Compaction, JobState::Running)
+        );
+        let context = record.context.as_deref().unwrap_or_default();
+        assert!(context.contains(&ShardId::ZERO.to_string()), "{record:?}");
+    }
+    let phases: Vec<u32> = seen.iter().map(|record| record.phase.index).collect();
+    assert!(phases.is_sorted(), "{phases:?}");
+
+    assert_eq!(
+        engine.jobs(),
+        Vec::new(),
+        "the published compaction left the jobs"
+    );
+    let last = engine
+        .last_job(JobKind::Compaction)
+        .expect("the compaction's last record is kept");
+    assert_eq!(last.state, JobState::Finished);
+    assert_eq!(last.phase.index, last.phase.of);
+    let passes = engine.last_fold_passes();
+    assert!(passes.iter().any(|pass| pass.total.is_some()), "{passes:?}");
+    for pass in passes.iter().filter(|pass| pass.total.is_some()) {
+        assert_eq!(pass.done, pass.total, "{pass:?}");
+    }
 }
 
 /// The `v#####` prefixes under `root`, in order.

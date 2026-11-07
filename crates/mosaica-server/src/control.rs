@@ -3150,9 +3150,15 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
                     "ms": p.elapsed.as_millis() as u64,
                     "rss_bytes": p.rss,
                     "anon_bytes": p.anon,
+                    "done": p.done,
+                    "total": p.total,
                 }))
                 .collect::<Vec<_>>(),
+            "last_job": state.engine.last_job(mosaica_types::progress::JobKind::Compaction),
         },
+        // The record of the flush and of the compaction running. Served on the control plane
+        // only, since a compaction's counts are over the whole corpus.
+        "jobs": state.engine.jobs(),
         // How scattered ingested postings are: entity ids are sorted by term signature only within
         // one allocation run, so small runs erode compression. Measured over delta tiers as each is
         // flushed; base postings are excluded. The ratios are `null` until the first flush.

@@ -189,6 +189,8 @@ pub struct ExecutorHealth {
     pub(crate) flush_holding: AtomicBool,
     /// A fold has finished its passes and is holding at the test hook. Always `false` outside tests.
     pub(crate) fold_holding: AtomicBool,
+    /// The records of the flush and the compaction running, which `/control/status` serves.
+    pub(crate) jobs: Arc<Jobs>,
     /// How many commands have been put on the work queue, for a test to wait on.
     #[cfg(feature = "fault-injection")]
     pub(crate) work_enqueued: AtomicU64,
@@ -713,6 +715,7 @@ impl ExecutorHealth {
             #[cfg(feature = "fault-injection")]
             work_enqueued: AtomicU64::new(0),
             fold_holding: AtomicBool::new(false),
+            jobs: Arc::default(),
             apply_nanos_total: AtomicU64::new(0),
             stage_nanos: Default::default(),
             flush_stage_nanos: std::array::from_fn(|_| AtomicU64::new(0)),

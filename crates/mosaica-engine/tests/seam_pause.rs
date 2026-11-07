@@ -181,32 +181,32 @@ fn the_fold_status_covers_the_publication() {
     let passes = engine.last_fold_passes();
     let names: Vec<&str> = passes.iter().map(|p| p.pass).collect();
     let publication = [
-        "6 hand-off",
-        "7 memberships",
-        "8 derived",
-        "9 report",
-        "10 manifest",
-        "11 flip",
-        "12 retire",
-        "13 open",
-        "14 adopt",
-        "15 warm",
-        "16 wal",
-        "17 reclaim",
+        "hand_off",
+        "memberships",
+        "derived",
+        "report",
+        "manifest",
+        "flip",
+        "retire",
+        "open",
+        "adopt",
+        "warm",
+        "wal",
+        "reclaim",
     ];
     assert_eq!(
         &names[names.len() - publication.len()..],
         &publication,
         "the publication's phases follow the thread's passes, in execution order: {names:?}"
     );
-    assert_eq!(names[0], "entry");
+    assert_eq!(names[0], "row_space");
     assert!(
-        names.contains(&"5 digests + fsync"),
+        names.contains(&"digests"),
         "and the thread's passes are still there: {names:?}"
     );
     let flip = passes
         .iter()
-        .find(|p| p.pass == "11 flip")
+        .find(|p| p.pass == "flip")
         .expect("the flip is a row");
     assert!(
         flip.elapsed >= held,

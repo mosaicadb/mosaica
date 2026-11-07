@@ -19,6 +19,7 @@ use tempfile::TempDir;
 
 use mosaica_engine::viewport::ViewportRequest;
 use mosaica_engine::{Engine, EngineConfig};
+use mosaica_types::progress::{JobKind, JobState, Progress};
 
 use common::*;
 use mosaica_catalogue::Permission;
@@ -2080,6 +2081,62 @@ async fn control_compact_is_accepted_and_deferred() {
     );
 }
 
+/// `/control/status` serves the running compaction's progress record under `jobs`, which is an
+/// empty array when nothing runs, and keeps the last compaction's record under
+/// `compaction.last_job` once it has ended.
+#[tokio::test]
+async fn status_serves_a_running_compaction_under_jobs() {
+    let tmp = TempDir::new().unwrap();
+    let server = serve(&tmp).await;
+    let engine = &server.state.engine;
+    let idle = control_status(&server).await;
+    assert_eq!(idle["jobs"], serde_json::json!([]), "{idle}");
+    assert_eq!(idle["compaction"]["last_job"], serde_json::Value::Null);
+
+    // A point to fold, flushed, then a compaction held after its passes.
+    let (code, body) = post_ingest(&server, "jobs", &rows_from(50_000, 1), true).await;
+    assert_eq!(code, 200, "{body}");
+    tick(&server).await;
+    engine.set_fold_paused_for_test(true);
+    let resp = server
+        .client
+        .post(server.control_url("/control/compact"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 202);
+    let request = resp.json::<serde_json::Value>().await.unwrap()["request"]
+        .as_u64()
+        .unwrap();
+    wait_until(
+        "the compaction holds",
+        std::time::Duration::from_secs(60),
+        async || engine.fold_is_holding_for_test(),
+    )
+    .await;
+    let held = control_status(&server).await;
+    let jobs: Vec<Progress> = serde_json::from_value(held["jobs"].clone()).unwrap();
+    assert_eq!(jobs.len(), 1, "{held}");
+    assert_eq!(
+        (jobs[0].job, jobs[0].state),
+        (JobKind::Compaction, JobState::Running)
+    );
+
+    engine.set_fold_paused_for_test(false);
+    wait_for_executor(&server, "the request answered", |now| {
+        now.compaction_requests_answered >= request
+    })
+    .await;
+    let after = control_status(&server).await;
+    assert_eq!(after["jobs"], serde_json::json!([]), "{after}");
+    let last: Progress = serde_json::from_value(after["compaction"]["last_job"].clone()).unwrap();
+    assert_eq!(
+        (last.job, last.state),
+        (JobKind::Compaction, JobState::Finished)
+    );
+}
+
 /// Ask for a compaction under a memory figure no compaction fits, and answer the request's number
 /// and `compaction.requests` once the request is answered.
 async fn compact_refused_for_memory(server: &TestServer) -> (u64, serde_json::Value) {
@@ -4078,6 +4135,7 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/compaction/folds", "integer"),
     ("/compaction/last_attr_bytes_read", "integer"),
     ("/compaction/last_attr_bytes_written", "integer"),
+    ("/compaction/last_job", "null|object"),
     ("/compaction/last_refusal", "null|object"),
     ("/compaction/last_refusal/at_unix", "integer"),
     ("/compaction/last_refusal/gate", "string"),
@@ -4104,9 +4162,11 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/compaction/passes", "array"),
     ("/compaction/passes/*", "object"),
     ("/compaction/passes/*/anon_bytes", "integer"),
+    ("/compaction/passes/*/done", "integer|null"),
     ("/compaction/passes/*/ms", "integer"),
     ("/compaction/passes/*/pass", "string"),
     ("/compaction/passes/*/rss_bytes", "integer"),
+    ("/compaction/passes/*/total", "integer|null"),
     ("/compute", "object"),
     ("/compute/admission", "integer"),
     ("/compute/in_flight", "integer"),
@@ -4163,6 +4223,7 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
     ("/ingest/admission", "integer"),
     ("/ingest/in_flight", "integer"),
     ("/ingest/shed_total", "integer"),
+    ("/jobs", "array"),
     ("/layer_spaces", "object"),
     ("/layer_spaces/count", "integer"),
     ("/layer_spaces/depth", "integer"),
@@ -4501,6 +4562,11 @@ const STATUS_SHAPE: &[(&str, &str)] = &[
 
 type Shape = std::collections::BTreeMap<String, std::collections::BTreeSet<&'static str>>;
 
+/// The paths that hold progress records, whose fields [`status_shape`] does not list: a record
+/// leaves out the fields its step has no value for rather than serving them null, and
+/// `tests/openapi.rs` checks each against the description's `Progress` schema.
+const PROGRESS_RECORDS: &[&str] = &["/jobs", "/compaction/last_job"];
+
 /// Records each key path under `path` in `value` with the JSON type found there.
 fn status_shape(value: &serde_json::Value, path: &str, shape: &mut Shape) {
     use serde_json::Value;
@@ -4514,6 +4580,9 @@ fn status_shape(value: &serde_json::Value, path: &str, shape: &mut Shape) {
         Value::Object(_) => "object",
     };
     shape.entry(path.to_owned()).or_default().insert(kind);
+    if PROGRESS_RECORDS.contains(&path) {
+        return;
+    }
     match value {
         Value::Array(items) => {
             for item in items {
