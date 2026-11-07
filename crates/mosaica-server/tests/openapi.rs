@@ -1304,11 +1304,6 @@ async fn every_control_route_needs_its_permission() {
                     ("all but admin", &not_admin, true),
                     ("admin", &admin, false),
                 ],
-                _ if op["x-mosaica-permission"] == "admin" => vec![
-                    ("write", &writer, true),
-                    ("all but admin", &not_admin, true),
-                    ("admin", &admin, false),
-                ],
                 _ if op["x-mosaica-permission"] == "write-all" => {
                     writes += 1;
                     declarations += 1;

@@ -958,22 +958,31 @@ async fn compact(
 }
 
 /// `GET /control/compact/{request}`: where one compaction request is. Pending, with the record of
-/// the compaction in flight, or answered, with its outcome, the requests answered with it and the
-/// record of the compaction that answered them. A number the server has not given since it
-/// started is `404`, since numbering starts again at 1 after a restart.
+/// the compaction serving it, or answered, with its outcome, the requests answered with it and the
+/// record of the compaction that answered them. A number this run of the server has not given is
+/// `404`, and an answer older than the ones kept is `410`.
 async fn compaction_request(
     State(state): State<Arc<AppState>>,
     axum::extract::Path(request): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let lost = || {
+    let number = request
+        .parse::<u64>()
+        .ok()
+        .filter(|number| *number > 0)
+        .ok_or_else(|| {
+            ApiError::Contract(format!(
+                "`{request}` is not a compaction request's number; write the number `POST \
+                 /control/compact` answered"
+            ))
+        })?;
+    let found = state.engine.compaction_request(number).ok_or_else(|| {
         ApiError::Unknown(format!(
-            "this server has given no compaction request the number {request}: request numbers \
-             start again at 1 when the server restarts, so a request made before a restart is \
-             lost; ask for a compaction again"
+            "this run of the server has given no compaction request the number {number}: a \
+             number from before the server restarted is lost with the request; ask for a \
+             compaction again"
         ))
-    };
-    let number = request.parse::<u64>().map_err(|_| lost())?;
-    let body = match state.engine.compaction_request(number).ok_or_else(lost)? {
+    })?;
+    let body = match found {
         mosaica_engine::RequestState::Pending { job } => serde_json::json!({
             "request": number,
             "answered": false,
@@ -981,11 +990,15 @@ async fn compaction_request(
             "job": job,
         }),
         mosaica_engine::RequestState::Answered(answer) => {
-            let (gate, detail) = match answer.outcome {
-                mosaica_engine::RequestOutcome::Refused { gate, detail } => {
-                    (Some(gate), Some(detail))
-                }
-                _ => (None, None),
+            let refusal = match answer.outcome {
+                mosaica_engine::RequestOutcome::Refused {
+                    gate,
+                    detail,
+                    shard,
+                    need_bytes,
+                    had_bytes,
+                } => Some((gate, detail, shard.map(|s| s.raw()), need_bytes, had_bytes)),
+                _ => None,
             };
             serde_json::json!({
                 "request": number,
@@ -994,11 +1007,22 @@ async fn compaction_request(
                     "first": answer.first,
                     "last": answer.last,
                     "outcome": answer.outcome.as_str(),
-                    "gate": gate,
-                    "detail": detail,
+                    "gate": refusal.map(|r| r.0),
+                    "detail": refusal.map(|r| r.1),
+                    "shard": refusal.and_then(|r| r.2),
+                    "need_bytes": refusal.and_then(|r| r.3),
+                    "had_bytes": refusal.and_then(|r| r.4),
                 },
                 "job": answer.job,
             })
+        }
+        mosaica_engine::RequestState::Forgotten => {
+            return Err(ApiError::Gone(format!(
+                "request {number} was answered, and its answer is older than the latest {} this \
+                 server keeps; `compaction.folds` and `compaction.fold_failures` on \
+                 /control/status count the compactions that published and failed",
+                mosaica_engine::KEPT_ANSWERS
+            )))
         }
     };
     Ok(Json(body))
@@ -3186,15 +3210,6 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "requests": {
                 "accepted": executor.compaction_requests_accepted,
                 "answered": executor.compaction_requests_answered,
-                "last_refusal": executor.last_request_refusal.map(|r| serde_json::json!({
-                    "request": r.request,
-                    "shard": r.shard.map(|s| s.raw()),
-                    "gate": r.refusal.gate,
-                    "detail": r.detail,
-                    "need_bytes": r.refusal.need_bytes,
-                    "had_bytes": r.refusal.had_bytes,
-                    "at_unix": r.refusal.at_unix,
-                })),
             },
             "last_attr_bytes_read": executor.last_fold_attr_read,
             "last_attr_bytes_written": executor.last_fold_attr_written,

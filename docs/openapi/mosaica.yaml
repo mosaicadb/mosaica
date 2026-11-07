@@ -124,7 +124,7 @@ tags:
   - name: "control: changes"
     description: Deletions, suppressions and lifted suppressions. Control plane.
   - name: "control: status"
-    description: The node's state, counters and published limits. Control plane.
+    description: The node's state, counters and published limits, and where each compaction request is. Control plane.
   - name: "control: flush"
     description: Publishing buffered writes ahead of the next tick. Control plane.
   - name: "control: compact"
@@ -2875,7 +2875,7 @@ paths:
         A compaction can still be refused when its turn comes: for want of memory or disc, while
         the write-ahead log is poisoned, where the shard holds nothing to compact, or because the
         node has since reached one of the states the `503` below names (`overlay_diverged`,
-        `prefix_diverged`, `stepped_down`). `compaction.requests` on `/control/status` reports it.
+        `prefix_diverged`, `stepped_down`). `GET /control/compact/{request}` reports it.
 
         The request is answered once every shard it asked for has been compacted, has failed or
         been discarded, or has been refused. `GET /control/compact/{request}` says whether it is
@@ -2908,25 +2908,27 @@ paths:
 
   /control/compact/{request}:
     get:
-      tags: ["control: compact"]
+      tags: ["control: status"]
       operationId: compactionRequest
-      x-mosaica-permission: admin
       summary: Where one compaction request is, and how it was answered.
       description: |
         A request is pending until every shard it asked for has been compacted, has failed or
         been discarded, or has been refused. While it is pending, `job` is the record of the
-        compaction in flight, where one is. Once it is answered, `answer` says how, and `job` is
-        the record of the compaction that answered it. A client that waits for a compaction reads
-        this route until `answered` is `true`, showing `job` as it goes, and then reads the
-        outcome.
+        compaction serving it, once a tick has taken the request and while one is in flight, and
+        `null` otherwise. Once it is answered, `answer` says how, and `job` is the record of the
+        compaction that answered it. A client that waits for a compaction reads this route until
+        `answered` is `true`, showing `job` as it goes, and then reads the outcome.
 
         Requests made before a tick takes them, or while an earlier one is being answered, are
-        answered together, and each of them is served the same answer. The server keeps every
-        answer for as long as it runs.
+        answered together, and each of them is served the same answer. The server keeps the
+        latest 1,024 answers, so a request answered before them is `410`.
 
-        Request numbers start again at 1 when the server restarts, so a number above the last it
-        gave since it started, which `compaction.requests.accepted` on `/control/status` reports,
-        is `404`: the request was made before a restart and was lost with it.
+        Each run of the server numbers its requests from the wall clock in milliseconds when it
+        started, one more for each request, so a number an earlier run gave is below every number
+        this run gives. A number below this run's first, or above `compaction.requests.accepted`
+        on `/control/status`, is `404`: the request was made before a restart and was lost with
+        it. Numbering assumes the clock was not set back between the two runs, and that no run gave
+        more numbers than the milliseconds it lasted.
       security:
         - controlCredential: []
       parameters:
@@ -2944,12 +2946,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CompactionRequest"
+        "400":
+          $ref: "#/components/responses/PathNotUtf8"
         "401":
           $ref: "#/components/responses/ControlBadCredential"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/Unknown"
+        "410":
+          description: "`410 gone`: the request was answered, and its answer is older than the latest 1,024 the server keeps. `compaction.folds` and `compaction.fold_failures` on `/control/status` count the compactions that published and failed."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          $ref: "#/components/responses/Contract"
 
   /control/attributes:
     put:
@@ -4966,6 +4978,7 @@ components:
             - backpressure
             - fail-closed
             - not-ready
+            - gone
         detail:
           type: string
           description: Human-readable. On the viewer plane a `404`'s detail is the same for every reason, so it tells a caller nothing about what exists. On the control plane it says what was refused. It may name the caller's own batch id or values, as the ingest route's `409`s do, and otherwise names a row or member by its position in the batch.
@@ -7039,7 +7052,7 @@ components:
         request:
           type: integer
           minimum: 1
-          description: This request's number. Numbers rise by one per request, from 1 each time the server starts.
+          description: This request's number. Each run of the server numbers its requests from the wall clock in milliseconds when it started, one more for each request, so a number an earlier run gave is below every number this run gives.
 
     CompactionRequest:
       type: object
@@ -7058,7 +7071,7 @@ components:
             - type: "null"
             - type: object
               additionalProperties: false
-              required: [first, last, outcome, gate, detail]
+              required: [first, last, outcome, gate, detail, shard, need_bytes, had_bytes]
               properties:
                 first:
                   type: integer
@@ -7078,8 +7091,20 @@ components:
                 detail:
                   type: [string, "null"]
                   description: For `refused`, what the gate means and what to do about it, in a sentence; `null` otherwise.
+                shard:
+                  type: [integer, "null"]
+                  minimum: 0
+                  description: For `refused`, the shard refused, or `null` where the request was refused because this node may not publish (`overlay_diverged` or `prefix_diverged`); `null` otherwise.
+                need_bytes:
+                  type: [integer, "null"]
+                  minimum: 0
+                  description: For a memory or disc refusal, what the compaction needs; `null` otherwise.
+                had_bytes:
+                  type: [integer, "null"]
+                  minimum: 0
+                  description: For a memory or disc refusal, what the host had; `null` otherwise.
         job:
-          description: While the request is pending, the record of the compaction in flight, or `null` when none is. Once it is answered, the last record of the compaction that answered it, the first to fail where one did and the last to end otherwise, with `state` `finished` or `failed`; a failed record names the step the compaction stopped in. `null` where no compaction ran for the request, which is always so for `nothing_to_do`.
+          description: While the request is pending, the record of the compaction serving it, or `null` until a tick has taken the request or while none is in flight. Once it is answered, the last record of the compaction that answered it, the first to fail where one did and the last to end otherwise, with `state` `finished` or `failed`; a failed record names the step the compaction stopped in. `null` where no compaction ran for the request, which is always so for `nothing_to_do`.
           oneOf:
             - type: "null"
             - $ref: "#/components/schemas/Progress"
@@ -9167,51 +9192,17 @@ components:
         requests:
           type: object
           additionalProperties: false
-          description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried. A scheduled compaction's refusal is not among them."
-          required: [accepted, answered, last_refusal]
+          description: "`POST /control/compact`'s requests since the server started, by the number each `202` carried. Each run of the server numbers its requests from the wall clock in milliseconds when it started, and `GET /control/compact/{request}` says how each was answered."
+          required: [accepted, answered]
           properties:
             accepted:
               type: integer
               minimum: 0
-              description: The number the latest request was given. The numbers start again at 1 when the server restarts, so a client holding a number above this one made its request before a restart, and the request was lost with it.
+              description: The number the latest request was given, or one below this run's first number before the first request.
             answered:
               type: integer
               minimum: 0
-              description: The highest request number every shard of which has published, failed, been discarded or been refused.
-            last_refusal:
-              description: The latest refusal that answered a request, or `null` where there has been none.
-              oneOf:
-                - type: "null"
-                - type: object
-                  additionalProperties: false
-                  required: [request, shard, gate, detail, need_bytes, had_bytes, at_unix]
-                  properties:
-                    request:
-                      type: integer
-                      minimum: 1
-                      description: The highest request number it answered. Requests made before a tick takes them are answered together.
-                    shard:
-                      type: [integer, "null"]
-                      minimum: 0
-                      description: The shard refused, or `null` where the request was refused because this node may not publish (`overlay_diverged` or `prefix_diverged`), whether or not some of its shards had been compacted before.
-                    gate:
-                      type: string
-                      description: One of `fold_refusals_by_gate`'s names.
-                    detail:
-                      type: string
-                      description: What the gate means and what to do about it, in a sentence.
-                    need_bytes:
-                      type: [integer, "null"]
-                      minimum: 0
-                      description: For a memory or disc refusal, what the compaction needs; `null` otherwise.
-                    had_bytes:
-                      type: [integer, "null"]
-                      minimum: 0
-                      description: For a memory or disc refusal, what the host had; `null` otherwise.
-                    at_unix:
-                      type: integer
-                      minimum: 0
-                      description: When, in seconds since the Unix epoch.
+              description: The highest request number every shard of which has published, failed, been discarded or been refused, or one below this run's first number before the first answer.
         last_attr_bytes_read: { type: integer, minimum: 0 }
         last_attr_bytes_written: { type: integer, minimum: 0 }
         passes:

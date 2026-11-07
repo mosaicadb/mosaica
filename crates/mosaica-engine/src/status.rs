@@ -618,9 +618,10 @@ impl Engine {
         self.write.health().jobs.running()
     }
 
-    /// Where compaction request `request` is: pending, with the record of the compaction in
-    /// flight, or answered. `None` for a number the executor has not given, which after a restart
-    /// is every number the requests before it were given, since numbering starts again at 1.
+    /// Where compaction request `request` is: pending, with the record of the compaction serving
+    /// it once a tick has taken it, answered, or answered and no longer kept. `None` for a number
+    /// this run of the server has not given: one above the last it gave, or one an earlier run
+    /// gave, which is below this run's first, since each run numbers from the wall clock.
     pub fn compaction_request(&self, request: u64) -> Option<crate::RequestState> {
         self.write.health().request_state(request)
     }

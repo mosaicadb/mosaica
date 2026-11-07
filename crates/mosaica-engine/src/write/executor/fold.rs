@@ -1211,12 +1211,15 @@ impl Executor {
                     None if folds > answering.folds => RequestOutcome::Compacted,
                     None => RequestOutcome::NothingToDo,
                 };
-                lock_recover(&self.health.answers).push(RequestAnswer {
+                self.health.keep_answer(RequestAnswer {
                     first: answering.first,
                     last: self.compactions.requested_through,
                     outcome,
                     job: answering.job,
                 });
+                self.health
+                    .compaction_serving_through
+                    .store(0, Ordering::SeqCst);
             }
             self.health
                 .compaction_requests_answered
@@ -1286,6 +1289,9 @@ impl Executor {
     /// Take the request numbered `request`, merged into the one being answered where there is one.
     fn take_request(&mut self, request: u64) {
         self.compactions.requested_through = request;
+        self.health
+            .compaction_serving_through
+            .store(request, Ordering::SeqCst);
         if self.compactions.answering.is_none() {
             let folds = self.health.folds.load(Ordering::SeqCst);
             let failures = self.health.fold_failures.load(Ordering::SeqCst);
@@ -1333,16 +1339,21 @@ impl Executor {
         }
     }
 
-    /// Record that `reason` refused a shard of the request being answered. A shard with nothing
-    /// to compact refuses nothing the request asked for.
-    fn refuse_requested(&mut self, reason: crate::compact::NoFold) {
+    /// Record that `reason` refused `shard` of the request being answered, or the whole request
+    /// where `shard` is `None`. A shard with nothing to compact refuses nothing the request asked
+    /// for.
+    fn refuse_requested(&mut self, reason: crate::compact::NoFold, shard: Option<ShardId>) {
         if reason == crate::compact::NoFold::NothingToFold {
             return;
         }
         if let Some(answering) = &mut self.compactions.answering {
+            let (gate, need_bytes, had_bytes) = reason.gauge();
             answering.refused.get_or_insert(RequestOutcome::Refused {
-                gate: reason.gauge().0,
+                gate,
                 detail: reason.detail(),
+                shard,
+                need_bytes,
+                had_bytes,
             });
         }
     }
@@ -1355,9 +1366,8 @@ impl Executor {
         } else if self.compactions.requested.is_none() {
             return;
         }
-        self.health
-            .record_fold_refusal(reason, Some((self.compactions.requested_through, None)));
-        self.refuse_requested(reason);
+        self.health.record_fold_refusal(reason);
+        self.refuse_requested(reason, None);
         self.compactions.requested = None;
         self.request_answered();
         tracing::warn!(
@@ -1444,12 +1454,9 @@ impl Executor {
             Err(reason) => {
                 // Recorded before the request is answered, so a caller that reads it answered
                 // finds the refusal.
-                let requested = matches!(from, Dispatching::Requested);
-                let answering =
-                    requested.then_some((self.compactions.requested_through, Some(shard_id)));
-                self.health.record_fold_refusal(reason, answering);
-                if requested {
-                    self.refuse_requested(reason);
+                self.health.record_fold_refusal(reason);
+                if matches!(from, Dispatching::Requested) {
+                    self.refuse_requested(reason, Some(shard_id));
                 }
                 self.compaction_taken(shard_id, from);
                 self.request_answered();
@@ -1605,16 +1612,16 @@ impl Executor {
                 let to_prefix_dir = ctx.to_prefix_dir.clone();
                 // A pass that panics fails the compaction as an error does.
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // Test hook; always false otherwise. See `Engine::panic_next_fold_for_test`.
+                    if switches.fold_panics.swap(false, Ordering::SeqCst) {
+                        panic!("the test hook made the compaction panic");
+                    }
                     crate::compact::execute(plan, ctx, stairs)
                 }))
                 .unwrap_or_else(|panic| {
-                    let what = panic
-                        .downcast_ref::<&str>()
-                        .map(|s| s.to_string())
-                        .or_else(|| panic.downcast_ref::<String>().cloned())
-                        .unwrap_or_default();
                     Err(crate::flush::MaintenanceFailed(format!(
-                        "a pass of the compaction panicked: {what}"
+                        "a pass of the compaction panicked: {}",
+                        crate::engine::panic_message(panic.as_ref())
                     )))
                 });
                 // Test hook; always false otherwise. See `Engine::set_fold_paused_for_test`.
@@ -1681,7 +1688,9 @@ impl Executor {
                 }
             }
             Err(e) => {
-                // The closure was dropped without running, which cleared the in-flight flag.
+                // The closure was dropped without running, which cleared the in-flight flag and
+                // ended its record failed before the failure is counted here. No request is
+                // answered in between: the executor answers only on this thread, at a later tick.
                 self.health.fold_failures.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(error = %e, "the OS refused a thread for the compaction fold");
             }

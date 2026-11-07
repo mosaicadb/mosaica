@@ -195,8 +195,8 @@ pub use compact::NoFold;
 pub use write::{
     AcceptError, CompactionRefused, ExecutorHealth, ExecutorPosture, ExecutorStartError,
     ExecutorStats, FoldRefusal, PendingChange, PublishGeometryError, RequestAnswer, RequestOutcome,
-    RequestRefusal, RequestState, VocabularyDeclared, VocabularyValues, WalGauge, WriteStage,
-    DENY_DURABILITY_ATTEMPTS, DENY_WINDOW_MAX_ENTRIES, FOLD_GATES,
+    RequestState, VocabularyDeclared, VocabularyValues, WalGauge, WriteStage,
+    DENY_DURABILITY_ATTEMPTS, DENY_WINDOW_MAX_ENTRIES, FOLD_GATES, KEPT_ANSWERS,
 };
 // The flush's own laps, beside `WriteStage`'s and read by the same status block.
 pub use flush::FlushStage;

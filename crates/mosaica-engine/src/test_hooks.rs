@@ -125,6 +125,14 @@ impl Engine {
         self.switches.fold_paused.store(paused, Ordering::SeqCst);
     }
 
+    /// Make the next compaction panic as its thread begins its passes, so a test can see a panic
+    /// failed as an error is.
+    #[cfg(feature = "fault-injection")]
+    #[doc(hidden)]
+    pub fn panic_next_fold_for_test(&self) {
+        self.switches.fold_panics.store(true, Ordering::SeqCst);
+    }
+
     /// Have a compaction's memory pre-flight take the host to have `bytes`, or measure it again
     /// with `None`.
     #[cfg(feature = "fault-injection")]

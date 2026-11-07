@@ -26,6 +26,9 @@ pub enum ApiError {
     Forbidden(String),
     /// 404: a named view, unique value, or handle this bundle/session has never heard of.
     Unknown(String),
+    /// 410: something that existed and is no longer kept, such as the answer to an old
+    /// compaction request.
+    Gone(String),
     /// 409: the request conflicts with what is already held, such as a batch id replayed with a
     /// different body. It had no effect.
     Conflict(String),
@@ -145,6 +148,7 @@ impl ApiError {
             ),
             ApiError::Forbidden(detail) => (StatusCode::FORBIDDEN, "forbidden", detail.clone()),
             ApiError::Unknown(detail) => (StatusCode::NOT_FOUND, "unknown", detail.clone()),
+            ApiError::Gone(detail) => (StatusCode::GONE, "gone", detail.clone()),
             ApiError::Conflict(detail) => (StatusCode::CONFLICT, "conflict", detail.clone()),
             ApiError::Contract(detail) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "contract", detail.clone())
@@ -185,6 +189,7 @@ impl ApiError {
             | ApiError::ExpiredToken
             | ApiError::Forbidden(_)
             | ApiError::Unknown(_)
+            | ApiError::Gone(_)
             | ApiError::Conflict(_)
             | ApiError::Contract(_)
             | ApiError::FailClosed(_)
