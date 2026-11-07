@@ -98,6 +98,7 @@ export {
   type Answer,
   type ArtifactsPublished,
   type Attachment,
+  type AwaitCompactionOptions,
   type CallOptions,
   type CatalogueChange,
   type ChangeItem,
@@ -125,10 +126,11 @@ export {
   type MemberTable,
   type MembershipsGrown,
   type Permission,
-  type Phase,
   type PrincipalChange,
   type PrincipalRecord,
   type Progress,
+  type ProgressPhase,
+  type ProgressUnit,
   type ProviderDeclaration,
   type ProviderRecord,
   type PublicationAck,
@@ -143,7 +145,6 @@ export {
   type SessionsToEnd,
   type ShapeReport,
   type StrictOptions,
-  type Unit,
   type WriteOptions
 } from './control.js';
 export * from './types.js';

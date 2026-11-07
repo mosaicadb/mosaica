@@ -327,29 +327,20 @@ describe('Control against a live server', () => {
     expect(await folds()).toBeGreaterThan(before);
     expect((await seen()).visible).toBe(3n);
     expect((await byKey()).has('row-0')).toBe(false);
-  }, 180_000);
+  });
 
-  it('follows a fold asked for without waiting through its own route, which keeps its answer, and answers a number it never gave as lost', async (ctx) => {
+  it('asks for a fold without waiting, then waits on its number, which ends with the answer the route serves', async (ctx) => {
     live(ctx);
     const asked = await control.compact();
-    expect(asked.status).toBe(202);
-    expect(asked).not.toHaveProperty('waited');
+    expect(asked).toMatchObject({status: 202, ok: true});
     const request = (asked.body as CompactAccepted).request;
-    const read = async () => {
-      const answer = await control.compactionRequest(request);
-      expect(answer).toMatchObject({status: 200, body: {request}});
-      return answer.body as CompactionRequest;
-    };
-    await vi.waitFor(async () => expect((await read()).answered).toBe(true), {timeout: 120_000, interval: 50});
-    const served = await read();
-    expect(served.answered && ['compacted', 'nothing_to_do'].includes(served.answer.outcome)).toBe(true);
-    // The answer is kept: a later request leaves this one's as it was.
-    const later = await control.compact({wait: true});
-    expect(later.waited?.ok).toBe(true);
-    expect(await read()).toEqual(served);
-    const accepted = (await compaction()).requests.accepted;
-    expect((await control.compactionRequest(accepted + 1)).status).toBe(404);
-  }, 240_000);
+    const waited = await control.awaitCompaction(request, {signal: AbortSignal.timeout(50_000)});
+    expect(waited).toMatchObject({ok: true, ended: 'answered'});
+    const read = await control.compactionRequest(request);
+    expect(read).toMatchObject({status: 200, body: {request, answered: true}});
+    const {answer, job} = read.body as CompactionRequest;
+    expect(waited).toEqual({ok: answer!.ok, ended: 'answered', answer, job});
+  });
 
   it('drops the layer, which the viewer then no longer lists', async (ctx) => {
     live(ctx);

@@ -197,12 +197,13 @@ line('cluster', describe(afterDelete.get(`${clusterLayer}::c0`)));
 line('label', describe(afterDelete.get(`${labelLayer}::l-c0`)));
 
 console.log('\n3. run a fold');
-const fold = await control.compact({wait: true});
+const fold = await control.compact({wait: true, signal: AbortSignal.timeout(30 * 60_000)});
 accepted('compact', fold);
-if (!fold.waited?.ok) {
-  throw new Error(`the fold did not succeed: ${JSON.stringify(fold.waited)}`);
+const waited = fold.waited;
+if (waited?.ended !== 'answered' || waited.answer.outcome !== 'compacted') {
+  throw new Error(`no fold was published, so nothing below means anything: ${JSON.stringify(waited)}`);
 }
-line('outcome', fold.waited.answer.outcome);
+line('outcome', waited.answer.outcome);
 
 console.log('\n4. and afterwards');
 const afterFold = await artifacts(token, [clusterLayer, labelLayer]);

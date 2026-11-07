@@ -651,14 +651,14 @@ export type JobState = 'running' | 'finished' | 'failed';
  *
  * @category Control plane
  */
-export type Unit = 'items' | 'rows' | 'pairs' | 'terms' | 'bytes' | 'pages';
+export type ProgressUnit = 'items' | 'rows' | 'pairs' | 'terms' | 'bytes' | 'pages';
 
 /**
  * A phase of a job: its position among the job's phases, counted from 1, and its name.
  *
  * @category Control plane
  */
-export type Phase = {
+export type ProgressPhase = {
   /** The phase's position, from 1. */
   index: number;
   /** How many phases the job has. */
@@ -669,9 +669,9 @@ export type Phase = {
 
 /**
  * How far a long-running job has gone, as `/control/status` serves it in `jobs` and in
- * `compaction.last_job`. A job is a fixed list of phases, each of which runs one or more steps, and
- * a step that processes a known number of things counts them. An optional field is absent from the
- * record, never `null`.
+ * `compaction.last_job`, and {@link Control.compactionRequest} in `job`. A job is a fixed list of
+ * phases, each of which runs one or more steps, and a step that processes a known number of things
+ * counts them. An optional field is absent from the record, never `null`.
  *
  * @category Control plane
  */
@@ -681,7 +681,7 @@ export type Progress = {
   /** Whether the job is running, finished or failed. */
   state: JobState;
   /** The phase the job is in. */
-  phase: Phase;
+  phase: ProgressPhase;
   /** The step's stable name, such as `postings` for a compaction or `rows` for a flush. */
   step: string;
   /** Which part of the step is running, such as `shard 3`. Absent when the step has one part. */
@@ -691,7 +691,7 @@ export type Progress = {
   /** The count `done` is going towards. */
   total?: number;
   /** What `done` and `total` count. */
-  unit?: Unit;
+  unit?: ProgressUnit;
   /** Units per second over the last 20 seconds of the step. Absent for a step that counts nothing and for one younger than two seconds. */
   rate?: number;
   /** Seconds until `done` reaches `total` at `rate`, for the step only. Absent where `rate` is absent or zero. */
@@ -705,23 +705,16 @@ export type Progress = {
 };
 
 /**
- * How the server answered a compaction request. Where several apply, the first in this list is
- * the outcome.
- *
- * - `refused`: a shard the requests named was refused at `gate`.
- * - `failed`: a compaction they started failed or was discarded.
- * - `compacted`: a compaction they started was published, whether or not other shards had nothing
- *   to compact.
- * - `nothing_to_do`: no shard they named had anything to compact.
+ * How the server answered a compaction request, as `GET /control/compact/{request}` in the HTTP
+ * reference defines each value.
  *
  * @category Control plane
  */
 export type CompactionOutcome = 'compacted' | 'nothing_to_do' | 'refused' | 'failed';
 
 /**
- * How a compaction request was answered, in {@link CompactionRequest}. Requests made before the
- * server takes them, or while an earlier one is being answered, are answered together, and each of
- * them is served this same answer.
+ * How a compaction request was answered, the `answer` of a {@link CompactionRequest}, in the
+ * route's own field names. The fields after `ok` are `null` except where the outcome is `refused`.
  *
  * @category Control plane
  */
@@ -732,40 +725,44 @@ export type CompactionAnswer = {
   last: number;
   /** How the requests were answered. */
   outcome: CompactionOutcome;
-  /** For `refused`, the gate that refused a shard, one of the names in `compaction.fold_refusals_by_gate`; `null` otherwise. */
+  /** Whether the request succeeded, as the server decided it. */
+  ok: boolean;
+  /** The gate that refused a shard, one of the names in `compaction.fold_refusals_by_gate`. */
   gate: string | null;
-  /** For `refused`, what the gate means and what to do about it, in a sentence; `null` otherwise. */
+  /** What the gate means and what to do about it, in a sentence. */
   detail: string | null;
+  /** The shard refused, or `null` where the request was refused for the whole node. */
+  shard: number | null;
+  /** For a memory or disc refusal, what the compaction needs, in bytes. */
+  need_bytes: number | null;
+  /** For a memory or disc refusal, what the host had, in bytes. */
+  had_bytes: number | null;
 };
 
 /**
- * The body of {@link Control.compactionRequest}: one compaction request, pending or answered.
- * While the request is pending, `answer` is `null` and `job` is the record of the compaction in
- * flight, or `null` when none is. Once it is answered, `job` is the last record of the compaction
- * that answered it, which is the first to fail where one did and the last to end otherwise, or
- * `null` where no compaction ran for the request, as for `nothing_to_do`. A failed record names the
- * step the compaction stopped in.
+ * The body of {@link Control.compactionRequest}: one compaction request, pending or answered, in
+ * the route's own field names. `answer` is `null` while `answered` is `false`.
  *
  * @category Control plane
  */
 export type CompactionRequest = {
   /** The request's number. */
   request: number;
-  /** The record of the compaction in flight or of the one that answered the request, or `null`. */
+  /**
+   * While the request is pending, the record of the compaction serving it, or `null` where none
+   * is serving it yet. Once it is answered, the last record of the compaction that answered it, or
+   * `null` where none ran.
+   */
   job: Progress | null;
 } & ({answered: false; answer: null} | {answered: true; answer: CompactionAnswer});
 
 /**
- * `compaction.requests` in {@link ControlStatus}: the compaction requests made since the server
- * started, by the number each answer to `compact` carried. Its other fields are left untyped.
+ * `compaction.requests` in {@link ControlStatus}.
  *
  * @category Control plane
  */
-export type CompactionRequests = Record<string, unknown> & {
-  /**
-   * The number the latest request was given. The numbers start again at 1 when the server restarts,
-   * so a request whose number is above this one was made before a restart and was lost with it.
-   */
+export type CompactionRequests = {
+  /** The number of the latest request this run of the server gave. */
   accepted: number;
   /** The highest request number that has been answered. */
   answered: number;
@@ -795,27 +792,30 @@ export type ControlStatus = Record<string, unknown> & {
  * @category Control plane
  */
 export type CompactAccepted = {
-  /** The request's number, counted from 1 each time the server starts. */
+  /** The request's number, which {@link Control.compactionRequest} and {@link Control.awaitCompaction} take. */
   request: number;
 };
 
 /**
- * How the wait of `compact` with `wait` ended. `ok` is `true` only where the server answered the
- * request as `compacted` or `nothing_to_do`.
+ * How {@link Control.awaitCompaction} ended. `ok` is `true` only where the request was answered and
+ * the answer's `ok` is `true`. A reading that reached no server does not end the wait, which reads
+ * again a second later.
  *
- * - `answered`: `answer` and `job` are those {@link Control.compactionRequest} served once the
- *   request was answered.
- * - `lost`: `read` is the `404` the route answered, because the server has not given the request's
- *   number since it started, so it restarted after the request was made and the request was lost.
- *   Ask again.
- * - `unread`: `read` is a reading of the route that was not answered with a `2xx` or a `404`, such
- *   as a `403` for a credential without `admin`, or one that reached no server.
+ * - `answered`: the request was answered, and `answer` and `job` are as
+ *   {@link Control.compactionRequest} served them.
+ * - `lost`: a reading was answered `404`, because the server restarted after the request was made
+ *   and the request was lost with it. Ask again.
+ * - `gone`: a reading was answered `410`, because the server no longer keeps the request's answer.
+ * - `unread`: a reading was refused with any other status, such as `403` for a credential without
+ *   `admin`.
+ *
+ * In the last three, `read` is the reading that ended the wait.
  *
  * @category Control plane
  */
 export type CompactWait =
   | {
-      /** `true` where `answer.outcome` is `compacted` or `nothing_to_do`. */
+      /** The answer's `ok`, as served. */
       ok: boolean;
       ended: 'answered';
       /** How the request was answered, as served. */
@@ -825,7 +825,7 @@ export type CompactWait =
     }
   | {
       ok: false;
-      ended: 'lost' | 'unread';
+      ended: 'lost' | 'gone' | 'unread';
       /** The reading of `GET /control/compact/{request}` that ended the wait. */
       read: Answer<CompactionRequest>;
     };
@@ -841,24 +841,30 @@ export type CompactAnswer = Answer<CompactAccepted> & {
 };
 
 /**
- * Options for `compact`.
+ * Options for {@link Control.awaitCompaction}.
  *
  * @category Control plane
  */
-export type CompactOptions = CallOptions & {
+export type AwaitCompactionOptions = CallOptions & {
   /**
-   * Wait until the server has answered the request. The call then reads
-   * {@link Control.compactionRequest} about once a second, which needs `admin`, until the request
-   * is answered, and the answer's `waited` says how. Defaults to `false`.
-   */
-  wait?: boolean;
-  /**
-   * With `wait`, called with the route's `job` at each reading while the request is pending and a
-   * compaction is in flight, and once more with the `job` served once the request is answered,
-   * where one ran. A compaction shorter than a second can end between two readings, so the last
-   * record can be the only one.
+   * Called with the `job` of each reading that has one: the compaction serving the request while
+   * it is pending, and the compaction that answered it at the last reading. A compaction shorter
+   * than a second can begin and end between two readings, so the last record can be the only one.
    */
   onProgress?: (record: Progress) => void;
+};
+
+/**
+ * Options for {@link Control.compact}.
+ *
+ * @category Control plane
+ */
+export type CompactOptions = AwaitCompactionOptions & {
+  /**
+   * Once the request is accepted, wait for its answer with {@link Control.awaitCompaction}, and
+   * return how the wait ended in the answer's `waited`. Defaults to `false`.
+   */
+  wait?: boolean;
 };
 
 /**
@@ -989,7 +995,7 @@ export function retryAfterOf(status: number, header: string | null, body: unknow
   return Number.isFinite(seconds) && seconds > MIN_BACKOFF ? seconds : MIN_BACKOFF;
 }
 
-/** The seconds between two readings of a compaction request while `compact` waits. */
+/** The seconds between two readings of a compaction request while `awaitCompaction` waits. */
 const COMPACT_POLL_S = 1;
 
 /** Resolves after `seconds`, or rejects with the signal's reason when it aborts first. */
@@ -1018,7 +1024,9 @@ function pause(seconds: number, signal: AbortSignal | undefined): Promise<void> 
  * JSON for `grow`, and JSON for everything else.
  *
  * Every method resolves to an {@link Answer}, including refusals and requests that reached no
- * server. A call rejects only if its `signal` aborts, with the signal's reason.
+ * server, and `awaitCompaction` to a {@link CompactWait}. A call rejects only if its `signal`
+ * aborts, with the signal's reason, or if the `onProgress` given to `compact` or
+ * `awaitCompaction` throws.
  *
  * Writes become visible to viewers at the next publication. The server publishes every
  * `ingest.flush_max_age_secs` (90 seconds by default), or sooner once `ingest.flush_max_items`
@@ -1315,54 +1323,52 @@ export class Control {
 
   /**
    * `POST /control/compact`: request a compaction, which removes deleted rows from disc. The answer
-   * is `202`, sent before the compaction runs, with the request's number in `body.request`. The
-   * server compacts each shard that has something to reclaim, one at a time. A request made while a
-   * compaction is running waits for it to finish. If no compaction can start until the server
-   * restarts, the answer is `503` with that detail, and no compaction is requested.
+   * is `202`, sent before the compaction runs, with the request's number in `body.request`. If no
+   * compaction can start until the server restarts, the answer is `503` and no compaction is
+   * requested.
    *
-   * A compaction can be refused when its turn comes, for example for lack of disc space, or it can
-   * fail. Without `wait`, follow the request with {@link Control.compactionRequest}, which says
-   * whether it has been answered and how. A request succeeded where it is answered as `compacted`
-   * or `nothing_to_do`.
-   *
-   * With `wait`, the call does that itself: once the request is accepted, it reads
-   * `GET /control/compact/{request}` about once a second until the request is answered, passes the
-   * compaction's record to `onProgress`, and resolves with the answer to the `POST` and, in
-   * `waited`, how the wait ended, as {@link CompactWait} describes. `waited.ok` is `true` only
-   * where the request succeeded, and a request that was refused, failed or lost, or whose reading
-   * was refused, is returned in `waited`. The call rejects only if its `signal` aborts, during a
-   * request or between two readings, or if `onProgress` throws.
+   * Without `wait`, follow the request with {@link Control.compactionRequest} or
+   * {@link Control.awaitCompaction}. With `wait`, the call waits with `awaitCompaction` once the
+   * request is accepted, passing it `signal` and `onProgress`, and resolves with the `202` and, in
+   * `waited`, how the wait ended, as {@link CompactWait} describes. An abort during the wait
+   * rejects the call and loses the request's number, so a caller that wants to bound the wait and
+   * still follow the request afterwards posts without `wait` and calls `awaitCompaction` itself.
    */
   async compact(options: CompactOptions = {}): Promise<CompactAnswer> {
     const answer = (await this.send('POST', '/control/compact', options)) as CompactAnswer;
-    const request = answer.body.request;
-    if (!options.wait || !answer.ok || typeof request !== 'number') return answer;
-    return {...answer, waited: await this.compaction(request, options)};
+    if (!options.wait || !answer.ok) return answer;
+    return {...answer, waited: await this.awaitCompaction(answer.body.request, options)};
   }
 
-  /** Reads request `request` until it is answered, as `compact` with `wait` describes. */
-  private async compaction(request: number, options: CompactOptions): Promise<CompactWait> {
+  /**
+   * Wait for compaction request `request` to be answered, reading {@link Control.compactionRequest}
+   * about once a second, and resolve with how the wait ended, as {@link CompactWait} describes. The
+   * wait has no bound of its own: it ends when the request is answered or a reading is refused, and
+   * `signal` is the way to stop it sooner. A reading that reaches no server is read again a second
+   * later, so a server that restarts is answered as `lost` once it is back. `onProgress` is called
+   * with the `job` of each reading that has one. The call rejects if `signal` aborts, with its
+   * reason, or if `onProgress` throws, and sends nothing more after either.
+   */
+  async awaitCompaction(request: number, options: AwaitCompactionOptions = {}): Promise<CompactWait> {
     for (;;) {
       const read = await this.compactionRequest(request, options);
-      if (!read.ok) return {ok: false, ended: read.status === 404 ? 'lost' : 'unread', read};
-      const {job} = read.body;
-      if (job) options.onProgress?.(job);
-      if (read.body.answered) {
-        const {answer} = read.body;
-        return {ok: answer.outcome === 'compacted' || answer.outcome === 'nothing_to_do', ended: 'answered', answer, job};
+      if (read.ok) {
+        if (read.body.job) options.onProgress?.(read.body.job);
+        if (read.body.answered) return {ok: read.body.answer.ok, ended: 'answered', answer: read.body.answer, job: read.body.job};
+      } else if (read.status !== UNANSWERED) {
+        return {ok: false, ended: read.status === 404 ? 'lost' : read.status === 410 ? 'gone' : 'unread', read};
       }
       await pause(COMPACT_POLL_S, options.signal);
     }
   }
 
   /**
-   * `GET /control/compact/{request}`: where one compaction request is, and how it was answered, as
-   * {@link CompactionRequest} describes. It needs `admin`. The server keeps every answer for as
-   * long as it runs. A number it has not given since it started is `404`, because the numbers start
-   * again at 1 when it restarts, so a request made before a restart was lost with it.
+   * `GET /control/compact/{request}`: where one compaction request is, and how it was answered,
+   * as {@link CompactionRequest}. It needs `admin`. The HTTP reference describes the route,
+   * including the `404` and `410` it answers for a request it no longer knows.
    */
   compactionRequest(request: number, options: CallOptions = {}): Promise<Answer<CompactionRequest>> {
-    return this.send('GET', `/control/compact/${segment(String(request))}`, options) as Promise<Answer<CompactionRequest>>;
+    return this.send('GET', `/control/compact/${request}`, options) as Promise<Answer<CompactionRequest>>;
   }
 
   /**

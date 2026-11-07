@@ -77,7 +77,7 @@ describe('each route', () => {
     {name: 'dropView', call: (c) => c.dropView('g', 'k'), method: 'DELETE', path: '/control/views/g/k'},
     {name: 'dropView waiting', call: (c) => c.dropView('g', 'k', {wait: true}), method: 'DELETE', path: '/control/views/g/k?wait=visible'},
     {name: 'compact', call: (c) => c.compact(), method: 'POST', path: '/control/compact'},
-    {name: 'compactionRequest', call: (c) => c.compactionRequest(7), method: 'GET', path: '/control/compact/7'},
+    {name: 'compactionRequest', call: (c) => c.compactionRequest(1_762_500_000_123), method: 'GET', path: '/control/compact/1762500000123'},
     {name: 'flush', call: (c) => c.flush(), method: 'POST', path: '/control/flush'},
     {name: 'flush waiting', call: (c) => c.flush({wait: true}), method: 'POST', path: '/control/flush?wait=visible'}
   ];
@@ -364,7 +364,9 @@ describe('an answer', () => {
   });
 });
 
-describe('compact with wait', () => {
+describe('waiting for a compaction', () => {
+  const REQUEST = 1_762_500_000_123;
+  const READ = `GET http://control/control/compact/${REQUEST}`;
   const RUNNING: Progress = {
     job: 'compaction',
     state: 'running',
@@ -390,93 +392,131 @@ describe('compact with wait', () => {
   };
   const FAILED: Progress = {...RUNNING, state: 'failed', phase: {index: 3, of: 4, name: 'Verifying'}, step: 'digests', unit: 'bytes'};
 
-  const outcome = (first: number, last: number, kind: CompactionAnswer['outcome'], gate: string | null = null, detail: string | null = null): CompactionAnswer => ({
-    first,
-    last,
-    outcome: kind,
-    gate,
-    detail
+  const succeeded = (outcome: 'compacted' | 'nothing_to_do'): CompactionAnswer => ({
+    first: REQUEST - 1,
+    last: REQUEST,
+    outcome,
+    ok: true,
+    gate: null,
+    detail: null,
+    shard: null,
+    need_bytes: null,
+    had_bytes: null
+  });
+  const FAILURE: CompactionAnswer = {...succeeded('compacted'), outcome: 'failed', ok: false};
+  const REFUSAL: CompactionAnswer = {
+    ...succeeded('compacted'),
+    outcome: 'refused',
+    ok: false,
+    gate: 'insufficient_disc',
+    detail: 'the disc holding the bundle has too little free space',
+    shard: 3,
+    need_bytes: 61_203_456_000,
+    had_bytes: 18_874_368_000
+  };
+
+  /** A reading while the request is pending, with the compaction serving it or none. */
+  const pending = (job: Progress | null = null): {status: number; body: CompactionRequest} => ({status: 200, body: {request: REQUEST, answered: false, answer: null, job}});
+
+  /** A reading once the request is answered. */
+  const answered = (answer: CompactionAnswer, job: Progress | null = null): {status: number; body: CompactionRequest} => ({
+    status: 200,
+    body: {request: REQUEST, answered: true, answer, job}
   });
 
-  /** `GET /control/compact/5` while the request is pending, with the compaction in flight or none. */
-  const pending = (job: Progress | null = null): {status: number; body: CompactionRequest} => ({status: 200, body: {request: 5, answered: false, answer: null, job}});
+  const ACCEPTED = {status: 202, body: {request: REQUEST}};
 
-  /** `GET /control/compact/5` once the request is answered. */
-  const answered = (answer: CompactionAnswer, job: Progress | null = null): {status: number; body: CompactionRequest} => ({status: 200, body: {request: 5, answered: true, answer, job}});
-
-  const ACCEPTED = {status: 202, body: {request: 5}};
-
-  it('without wait sends one request and answers it as before', async () => {
-    const sent = recording(ACCEPTED, answered(outcome(5, 5, 'compacted'), FINISHED));
+  it('compact without wait sends one request and reads nothing', async () => {
+    const sent = recording(ACCEPTED, answered(succeeded('compacted'), FINISHED));
     const seen: Progress[] = [];
     const answer = await control.compact({onProgress: (record) => seen.push(record)});
     expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://control/control/compact']);
-    expect(answer).toMatchObject({status: 202, ok: true, body: {request: 5}});
+    expect(answer).toMatchObject({status: 202, ok: true, body: {request: REQUEST}});
     expect(answer).not.toHaveProperty('waited');
     expect(seen).toEqual([]);
   });
 
-  it('reads the request about once a second until it is answered, passing the job in flight and then the answered job as served', async () => {
+  it('compact with wait reads the request about once a second until it is answered, passing each job as served', async () => {
     vi.useFakeTimers();
-    const served = outcome(4, 5, 'compacted');
+    const served = succeeded('compacted');
     const sent = recording(ACCEPTED, pending(), pending(RUNNING), answered(served, FINISHED));
     const seen: Progress[] = [];
     const waiting = control.compact({wait: true, onProgress: (record) => seen.push(record)});
-    await vi.advanceTimersByTimeAsync(999);
-    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://control/control/compact', 'GET http://control/control/compact/5']);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://control/control/compact', READ]);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(sent).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(1_000);
     const answer = await waiting;
-    expect(sent).toHaveLength(4);
-    expect(sent[3]!.headers).toMatchObject({authorization: 'Bearer op-cred'});
-    expect(answer).toMatchObject({status: 202, ok: true, body: {request: 5}});
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual(['POST http://control/control/compact', READ, READ, READ]);
+    expect(answer).toMatchObject({status: 202, ok: true, body: {request: REQUEST}});
     expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', answer: served, job: FINISHED});
     expect(seen).toStrictEqual([RUNNING, FINISHED]);
   });
 
-  it('answers nothing_to_do as succeeded, with no job where none ran', async () => {
-    const served = outcome(5, 5, 'nothing_to_do');
-    recording(ACCEPTED, answered(served));
+  it('awaitCompaction waits on a number it is given, without asking for a compaction', async () => {
+    const served = succeeded('compacted');
+    const sent = recording(answered(served, FINISHED));
+    expect(await control.awaitCompaction(REQUEST)).toStrictEqual({ok: true, ended: 'answered', answer: served, job: FINISHED});
+    expect(sent.map((s) => `${s.method} ${s.url}`)).toEqual([READ]);
+  });
+
+  it('answers nothing_to_do with no job where none ran', async () => {
+    const served = succeeded('nothing_to_do');
+    recording(answered(served));
     const seen: Progress[] = [];
-    const answer = await control.compact({wait: true, onProgress: (record) => seen.push(record)});
-    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', answer: served, job: null});
+    expect(await control.awaitCompaction(REQUEST, {onProgress: (record) => seen.push(record)})).toStrictEqual({ok: true, ended: 'answered', answer: served, job: null});
     expect(seen).toEqual([]);
   });
 
-  it('answers a refusal as the server served it, gate and detail included', async () => {
-    const served = outcome(5, 6, 'refused', 'insufficient_disc', 'the disc holding the bundle has too little free space');
-    recording(ACCEPTED, answered(served));
-    const answer = await control.compact({wait: true});
-    expect(answer.ok).toBe(true);
-    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', answer: served, job: null});
+  it('answers a refusal as the server served it, with its gate, shard and bytes', async () => {
+    recording(answered(REFUSAL));
+    expect(await control.awaitCompaction(REQUEST)).toStrictEqual({ok: false, ended: 'answered', answer: REFUSAL, job: null});
+  });
+
+  it('takes ok from the answer as served', async () => {
+    const odd = {...succeeded('compacted'), ok: false};
+    recording(answered(odd));
+    expect(await control.awaitCompaction(REQUEST)).toMatchObject({ok: false, ended: 'answered', answer: odd});
   });
 
   it('answers a failure with the failed record as served, which onProgress receives last', async () => {
     vi.useFakeTimers();
-    const served = outcome(5, 5, 'failed');
-    recording(ACCEPTED, pending(RUNNING), answered(served, FAILED));
+    recording(pending(RUNNING), answered(FAILURE, FAILED));
     const seen: Progress[] = [];
-    const waiting = control.compact({wait: true, onProgress: (record) => seen.push(record)});
+    const waiting = control.awaitCompaction(REQUEST, {onProgress: (record) => seen.push(record)});
     await vi.runAllTimersAsync();
-    const answer = await waiting;
-    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', answer: served, job: FAILED});
+    expect(await waiting).toStrictEqual({ok: false, ended: 'answered', answer: FAILURE, job: FAILED});
     expect(seen).toStrictEqual([RUNNING, FAILED]);
   });
 
-  it('ends as lost with the 404 where the server no longer knows the request', async () => {
-    const sent = recording(ACCEPTED, {status: 404, body: {error: 'unknown', detail: 'no such request'}});
-    const answer = await control.compact({wait: true});
-    expect(answer.waited).toMatchObject({ok: false, ended: 'lost', read: {status: 404, ok: false}});
-    expect(sent).toHaveLength(2);
+  it('keeps waiting through a reading that reached no server, and ends when a later reading answers', async () => {
+    vi.useFakeTimers();
+    const served = succeeded('compacted');
+    let reads = 0;
+    vi.stubGlobal('fetch', async () => {
+      reads += 1;
+      if (reads === 1) throw new TypeError('fetch failed');
+      return new Response(JSON.stringify(answered(served, FINISHED).body), {status: 200});
+    });
+    const waiting = control.awaitCompaction(REQUEST);
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(await waiting).toStrictEqual({ok: true, ended: 'answered', answer: served, job: FINISHED});
+    expect(reads).toBe(2);
   });
 
-  it('ends as unread with the reading where reading the request is refused', async () => {
-    const sent = recording(ACCEPTED, {status: 403, body: {error: 'forbidden', detail: 'admin'}});
-    const answer = await control.compact({wait: true});
-    expect(answer).toMatchObject({status: 202, ok: true, waited: {ok: false, ended: 'unread', read: {status: 403, ok: false}}});
-    expect(sent).toHaveLength(2);
-  });
+  for (const [status, ended, error] of [
+    [404, 'lost', 'unknown'],
+    [410, 'gone', 'gone'],
+    [403, 'unread', 'forbidden']
+  ] as const) {
+    it(`ends as ${ended} with the reading where it is refused with ${status}`, async () => {
+      const sent = recording(ACCEPTED, {status, body: {error, detail: 'refused'}});
+      const answer = await control.compact({wait: true});
+      expect(answer).toMatchObject({status: 202, ok: true, waited: {ok: false, ended, read: {status, ok: false}}});
+      expect(sent).toHaveLength(2);
+    });
+  }
 
   it('does not wait for a request the server refused', async () => {
     const sent = recording({status: 503, body: {error: 'not-ready', detail: 'the write side is not running'}});
@@ -502,5 +542,24 @@ describe('compact with wait', () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(sent).toHaveLength(4);
     expect(sent.every((s) => s.signal === controller.signal)).toBe(true);
+  });
+
+  it('rejects with what onProgress throws, and reads no more', async () => {
+    vi.useFakeTimers();
+    const sent = recording(pending(RUNNING));
+    const thrown = new Error('stop drawing');
+    const outcome = control
+      .awaitCompaction(REQUEST, {
+        onProgress: () => {
+          throw thrown;
+        }
+      })
+      .then(
+        () => 'resolved',
+        (reason: unknown) => reason
+      );
+    expect(await outcome).toBe(thrown);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sent).toHaveLength(1);
   });
 });
