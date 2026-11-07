@@ -2487,6 +2487,8 @@ struct BundleFiles {
 /// Write `SEGMENTS-0.json`, `MANIFEST.json` and `CURRENT` over the files a build produced.
 /// Shared by both build implementations so the two cannot drift in the one place where a
 /// difference would be invisible until a digest failed.
+///
+/// The open step counts the bytes digested, out of the files' sizes.
 #[allow(clippy::too_many_arguments)]
 fn write_manifests(
     args: &BuildArgs,
