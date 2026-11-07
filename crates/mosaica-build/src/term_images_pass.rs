@@ -40,6 +40,9 @@ use crate::error::{BuildError, Result};
 /// it belongs to, and a build writes `SEGMENTS-0.json`.
 const MANIFEST_N: u64 = 0;
 
+/// Terms read between two additions to the step's count.
+const TERMS_PER_ADVANCE: u32 = 1 << 16;
+
 /// The most workers this pass runs across, whatever the machine offers.
 ///
 /// Four. The pass holds one posting per worker in flight, and what that costs is the worker count
@@ -116,7 +119,8 @@ pub struct ViewTermImages {
 /// A view with no rows and a dictionary with no terms both give `None`, and no file and no
 /// manifest entry. Neither has an image to hold: projection maps entities to rows, and a view that
 /// holds no row projects every posting to the empty set.
-pub fn run(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run(
     postings: &PostingsReader,
     prefix_dir: &Path,
     layout: mosaica_store::ShardLayout<'_>,
@@ -124,6 +128,7 @@ pub fn run(
     rows_in_view: u32,
     index: &mut DerivedIndex,
     threads: usize,
+    steps: crate::observer::Steps<'_>,
 ) -> Result<Option<ViewTermImages>> {
     let dict_len = postings.term_count();
     if rows_in_view == 0 || dict_len == 0 {
@@ -151,10 +156,18 @@ pub fn run(
 
     let file = mosaica_store::derived::term_image_file(prefix_dir, layout, MANIFEST_N, index)?;
 
-    let walk: PostingWalk<'_> = &|term, visit| walk_posting(postings, term, visit);
+    // The derivation reads the terms one after another in term order, so each block of
+    // `TERMS_PER_ADVANCE` is counted as its last term is read.
+    let walk: PostingWalk<'_> = &|term, visit| {
+        if term % TERMS_PER_ADVANCE == TERMS_PER_ADVANCE - 1 {
+            steps.advance(u64::from(TERMS_PER_ADVANCE));
+        }
+        walk_posting(postings, term, visit)
+    };
     let options = DeriveOptions { threads };
     let summary = derive_term_images(&space, dict_len, walk, &stamp, &file.path, options)
         .map_err(|e| BuildError::io(&file.path, e))?;
+    steps.advance(u64::from(dict_len % TERMS_PER_ADVANCE));
     // The derivation syncs the file. The directory entry has to be durable too, or a crash leaves
     // a manifest naming a file whose name was never written.
     crate::fsync_dir(&file.dir)?;

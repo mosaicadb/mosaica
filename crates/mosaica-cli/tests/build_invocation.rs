@@ -15,9 +15,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 
-use arrow::array::{Float64Array, UInt32Array, UInt64Array};
+use arrow::array::{Float64Array, StringArray, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use mosaica_types::progress::{JobKind, JobState, Progress};
 use parquet::arrow::ArrowWriter;
 const N: u64 = 64;
 
@@ -737,4 +738,128 @@ fn the_schema_path_comes_from_the_deployment_config() {
     )
     .unwrap();
     assert!(build_in(tmp.path(), &[]).status.success());
+}
+
+// -------------------------------------------------------------------------------------------
+// --progress
+// -------------------------------------------------------------------------------------------
+
+/// The lines of stderr that are JSON objects, each read as a progress record.
+fn progress_records(output: &Output) -> Vec<Progress> {
+    stderr(output)
+        .lines()
+        .filter(|line| line.starts_with('{'))
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: not a record: {line}"))
+        })
+        .collect()
+}
+
+/// `--progress json` reports the build's steps in order, through every phase, and ends with a
+/// record of the finished build.
+#[test]
+fn json_progress_runs_through_every_phase_in_order_and_ends_finished() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    let output = build_in(tmp.path(), &["--progress", "json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let records = progress_records(&output);
+    let phases: Vec<u32> = records.iter().map(|r| r.phase.index).collect();
+    assert!(
+        phases.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{phases:?}"
+    );
+    let mut distinct = phases.clone();
+    distinct.dedup();
+    assert_eq!(distinct, [1, 2, 3, 4, 5]);
+    assert!(records.iter().all(|r| r.job == JobKind::Build));
+    let (last, earlier) = records.split_last().expect("at least one record");
+    assert_eq!(last.state, JobState::Finished);
+    assert!(earlier.iter().all(|r| r.state == JobState::Running));
+}
+
+/// A build that fails after it has started ends with a record of the failed build.
+#[test]
+fn a_build_that_fails_partway_ends_with_a_failed_record() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    // An indexed keyword column with an empty string in it, which the column's index refuses.
+    let schema = std::fs::read_to_string(tmp.path().join("schema.toml")).unwrap();
+    std::fs::write(
+        tmp.path().join("schema.toml"),
+        format!(
+            "{schema}[[attribute]]\nname = \"tag\"\ntype = \"keyword\"\nindex = true\n\
+             source = \"points\"\n"
+        ),
+    )
+    .unwrap();
+    write_points_with_tags(&tmp.path().join("points.parquet"));
+    let output = build_in(tmp.path(), &["--progress", "json"]);
+    assert!(!output.status.success(), "{}", stderr(&output));
+    let records = progress_records(&output);
+    let last = records.last().expect("at least one record");
+    assert_eq!(last.state, JobState::Failed, "{}", stderr(&output));
+    assert!(last.phase.index > 1, "the build failed in {last:?}");
+}
+
+/// `--progress plain` writes no terminal control codes, so a log collector stores it as text.
+#[test]
+fn plain_progress_has_no_control_codes() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    let output = build_in(tmp.path(), &["--progress", "plain"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(!output.stderr.contains(&0x1b), "{}", stderr(&output));
+}
+
+/// `--progress none` adds nothing to what the build prints: its stderr is the `json` build's
+/// with the records taken out.
+#[test]
+fn no_progress_prints_no_progress() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    // A budget stated, because the derived one follows the memory free at the moment.
+    let flags = ["--memory-budget", "4g", "--out"];
+    let json = build_in(
+        tmp.path(),
+        &[&flags[..], &["bundles/a", "--progress", "json"]].concat(),
+    );
+    let none = build_in(
+        tmp.path(),
+        &[&flags[..], &["bundles/b", "--progress", "none"]].concat(),
+    );
+    assert!(json.status.success() && none.status.success());
+    let without_records: Vec<String> = stderr(&json)
+        .lines()
+        .filter(|line| !line.starts_with('{'))
+        .map(|line| line.replace("bundles/a", "bundles/b"))
+        .collect();
+    let none_lines: Vec<String> = stderr(&none).lines().map(str::to_string).collect();
+    assert_eq!(none_lines, without_records);
+}
+
+fn write_points_with_tags(path: &Path) {
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("entity_id", DataType::UInt64, false),
+        Field::new("x", DataType::Float64, false),
+        Field::new("y", DataType::Float64, false),
+        Field::new("tag", DataType::Utf8, true),
+    ]));
+    let ids: Vec<u64> = (0..N).collect();
+    let xs: Vec<f64> = ids.iter().map(|e| (e % 101) as f64).collect();
+    let ys: Vec<f64> = ids.iter().map(|e| ((e % 11) as f64) + 1000.0).collect();
+    let tags: Vec<&str> = ids.iter().map(|e| if *e == 7 { "" } else { "t" }).collect();
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(UInt64Array::from(ids)),
+            Arc::new(Float64Array::from(xs)),
+            Arc::new(Float64Array::from(ys)),
+            Arc::new(StringArray::from(tags)),
+        ],
+    )
+    .unwrap();
+    let mut w = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+    w.write(&batch).unwrap();
+    w.close().unwrap();
 }

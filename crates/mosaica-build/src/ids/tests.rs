@@ -321,7 +321,8 @@ fn same_numbers_within(seed: u64, rows: usize, budget: Option<u64>, limit: Optio
     );
     let scratch = tmp.path().join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
-    let streamed = super::stream::number(&args, &scratch).expect("the sort-merge numbers");
+    let streamed =
+        super::stream::number(&args, &scratch, Default::default()).expect("the sort-merge numbers");
     let linear = super::linear::number(&args).expect("the rule numbers");
     assert_eq!(streamed.items, linear.items, "seed {seed}: items");
     assert_eq!(numbers_of(&args, &streamed), numbers_of(&args, &linear), "seed {seed}");
@@ -539,7 +540,7 @@ fn same_as_the_rule(dir: &Path, trial: u64, what: &str) {
     let args = args(dir, None);
     let scratch = dir.join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
-    let streamed = super::stream::number_with(&args, &scratch, trial).expect("the sort-merge numbers");
+    let streamed = super::stream::number_with(&args, &scratch, trial, Default::default()).expect("the sort-merge numbers");
     let linear = super::linear::number(&args).expect("the rule numbers");
     assert_eq!(numbers_of(&args, &streamed), numbers_of(&args, &linear), "{what}");
     assert_eq!(streamed.refused, linear.refused, "{what}: refused");
@@ -747,7 +748,8 @@ fn an_attribute_file_naming_items_out_of_order_numbers_as_the_rule_does() {
     let args = args(dir, Some(16 << 20));
     let scratch = dir.join("scratch");
     std::fs::create_dir_all(&scratch).unwrap();
-    let streamed = super::stream::number(&args, &scratch).expect("the sort-merge numbers");
+    let streamed =
+        super::stream::number(&args, &scratch, Default::default()).expect("the sort-merge numbers");
     let linear = super::linear::number(&args).expect("the rule numbers");
     assert_eq!(numbers_of(&args, &streamed), numbers_of(&args, &linear));
     assert_eq!(streamed.refused, linear.refused);
@@ -793,7 +795,7 @@ fn scratch_within_forecast(dir: &Path) {
             }
             most
         });
-        let numbered = super::stream::number(&args, &scratch);
+        let numbered = super::stream::number(&args, &scratch, Default::default());
         done.store(true, std::sync::atomic::Ordering::Relaxed);
         numbered.expect("the pass numbers");
         sampler.join().unwrap()

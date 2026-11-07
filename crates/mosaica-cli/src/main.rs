@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 mod http;
 mod identity;
+mod progress;
 mod records;
 mod writes;
 
@@ -142,6 +143,17 @@ enum Command {
         /// `started_at` and `ended_at`. It does not need `--stage-timings`.
         #[arg(long, value_name = "PATH")]
         stage_timings_json: Option<PathBuf>,
+
+        /// Show the build's progress on stderr: its phase, the step running, the step's count,
+        /// rate and time remaining, the time elapsed and resident memory.
+        ///
+        /// `bar` redraws two lines in place. `plain` prints a line when a step begins and every
+        /// 30 seconds while it runs, with no terminal control codes. `json` prints one progress
+        /// record per line when a step begins and at most once a second while it runs. Each
+        /// mode ends with a record whose state is `finished` or `failed`. `none` prints nothing.
+        /// `auto` is `bar` when stderr is a terminal and `plain` otherwise.
+        #[arg(long, value_name = "MODE", value_enum, default_value = "auto")]
+        progress: progress::Mode,
     },
     /// Check the declaration against the column schemas of the files it names, without reading
     /// a row.
@@ -898,14 +910,16 @@ fn collect_bindings(
 /// it only ever rises, so a stage that adds nothing repeats the last figure. What it locates is
 /// the stage the peak arrived in, which is the question `--memory-budget` is answered against.
 ///
-/// **One observer, two sinks**, rather than a second observer for `--stage-timings-json`: the
-/// pipeline takes one, and a wrapper that fanned out to two would have to re-sample nothing but
-/// still be a second place a stage could be dropped from.
+/// **One observer for every sink**, rather than a second observer for `--stage-timings-json` or
+/// `--progress`: the pipeline takes one, and a wrapper that fanned out to several would have to
+/// re-sample nothing but still be a second place a stage could be dropped from.
 struct StageTimings {
     /// Print a line per stage — `--stage-timings`. Off when only the JSON path was asked for.
     print: bool,
     /// Collect the records — `--stage-timings-json`. `None` when only the lines were asked for.
     json: Option<mosaica_build::observer::JsonStageTimings>,
+    /// The build's progress — `--progress`. `None` for `--progress none`.
+    progress: Option<progress::Feed>,
 }
 
 impl mosaica_build::observer::BuildObserver for StageTimings {
@@ -932,6 +946,16 @@ impl mosaica_build::observer::BuildObserver for StageTimings {
                 rows,
                 peak_rss_kib,
             );
+        }
+    }
+
+    fn progress(&self) -> Option<&mosaica_types::progress::Tracker> {
+        self.progress.as_ref().map(progress::Feed::tracker)
+    }
+
+    fn step_begun(&self) {
+        if let Some(feed) = &self.progress {
+            feed.queue();
         }
     }
 }
@@ -1341,6 +1365,7 @@ fn main() -> ExitCode {
             memory_budget,
             stage_timings,
             stage_timings_json,
+            progress,
         } => {
             // **The deployment file first, because everything else is read through it**: where the
             // declaration is and where the bundle goes. A missing one is a refusal naming what to
@@ -1397,16 +1422,24 @@ fn main() -> ExitCode {
                 memory_budget,
                 ..args
             };
+            let first = mosaica_build::BuildStage::SourceIds;
             let observer = StageTimings {
                 print: stage_timings,
                 json: stage_timings_json
                     .is_some()
                     .then(mosaica_build::observer::JsonStageTimings::new),
+                progress: (progress != progress::Mode::None).then(|| {
+                    progress::Feed::new(mosaica_types::progress::Tracker::new(
+                        mosaica_types::progress::JobKind::Build,
+                        first.phase(),
+                        first.name(),
+                    ))
+                }),
             };
-            let built = if stage_timings || stage_timings_json.is_some() {
-                mosaica_build::build_framed(&args, &framings, &observer)
-            } else {
-                mosaica_build::build_framed(&args, &framings, &mosaica_build::NoopObserver)
+            let build = || mosaica_build::build_framed(&args, &framings, &observer);
+            let built = match &observer.progress {
+                Some(feed) => progress::show(progress, feed, build),
+                None => build(),
             };
             // Written whether the build succeeded or failed: a build that died in `layers` is
             // exactly the one whose per-stage record is worth having, and the records collected

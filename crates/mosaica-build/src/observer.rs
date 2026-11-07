@@ -12,7 +12,9 @@
 
 use std::time::Duration;
 
-/// The pipeline's stages, in execution order.
+use mosaica_types::progress::{Phase, Tracker, Unit};
+
+/// The pipeline's stages. [`BuildStage::ALL`] lists them in the order they run.
 ///
 /// Names match the `// ---- n. ...` comments in `pipeline.rs`. Adding a stage means adding a
 /// variant; renaming one means changing both, which is the point — a stage that exists in the
@@ -123,6 +125,31 @@ impl BuildStage {
         }
     }
 
+    /// The phase of a build this stage runs in, as `docs/dev/progress.md` names them. The match
+    /// has no wildcard arm, so a new stage does not compile until it has a phase.
+    pub fn phase(&self) -> Phase {
+        match self {
+            BuildStage::SourceIds
+            | BuildStage::Dictionary
+            | BuildStage::PairsPack
+            | BuildStage::GeometryRead => READING_SOURCES,
+            BuildStage::SignatureSort | BuildStage::Assignment => ASSIGNING_IDS,
+            BuildStage::PostingsWrite
+            | BuildStage::AttributeTail
+            | BuildStage::Layers
+            | BuildStage::UniqueIndexes
+            | BuildStage::FilterPostings
+            | BuildStage::TextIndex
+            | BuildStage::RecordBlob
+            | BuildStage::ColumnRelease => INDEXING_RECORDS,
+            BuildStage::TilerSort
+            | BuildStage::SegmentWrite
+            | BuildStage::ArtifactPass
+            | BuildStage::TermImages => LAYING_OUT_VIEWS,
+            BuildStage::Manifests => VERIFYING_THE_BUNDLE,
+        }
+    }
+
     pub const ALL: [BuildStage; 19] = [
         BuildStage::SourceIds,
         BuildStage::Dictionary,
@@ -146,6 +173,12 @@ impl BuildStage {
     ];
 }
 
+const READING_SOURCES: Phase = Phase::new(1, 5, "Reading sources");
+const ASSIGNING_IDS: Phase = Phase::new(2, 5, "Assigning ids");
+const INDEXING_RECORDS: Phase = Phase::new(3, 5, "Indexing records");
+const LAYING_OUT_VIEWS: Phase = Phase::new(4, 5, "Laying out views");
+const VERIFYING_THE_BUNDLE: Phase = Phase::new(5, 5, "Verifying the bundle");
+
 /// Notified as each stage completes.
 ///
 /// `rows` is whatever the stage counted — items, pairs, terms — and is stage-specific rather than
@@ -153,6 +186,16 @@ impl BuildStage {
 /// at stage end, which is enough to see which stage owns the build's high-water mark.
 pub trait BuildObserver: Send + Sync {
     fn stage_end(&self, stage: BuildStage, elapsed: Duration, rows: u64, peak_rss_kib: u64);
+
+    /// The tracker the build opens a step in as each stage begins and counts that step's work
+    /// into, or `None` for an observer of stage ends alone.
+    fn progress(&self) -> Option<&Tracker> {
+        None
+    }
+
+    /// Called on the build's thread just after a step begins in [`Self::progress`]'s tracker, so
+    /// that a reader can take the step's first snapshot however briefly the step runs.
+    fn step_begun(&self) {}
 }
 
 /// The default: observes nothing, costs nothing.
@@ -216,6 +259,100 @@ impl<'a> StageTimer<'a> {
     }
 }
 
+/// The steps of a build, opened in the [`BuildObserver::progress`] tracker. It is copied into the
+/// passes that count their work, and with no tracker each call is a test of `None`.
+///
+/// A stage's step begins where the stage's work begins, which is not always where the stage
+/// before it ended: [`StageTimer`] charges the time between the two to the later stage, and the
+/// step names the work that is running.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Steps<'a>(Option<(&'a Tracker, &'a dyn BuildObserver)>);
+
+impl<'a> Steps<'a> {
+    pub(crate) fn of(observer: &'a dyn BuildObserver) -> Self {
+        Steps(observer.progress().map(|tracker| (tracker, observer)))
+    }
+
+    /// Begin `stage`'s step. `counted` is its total and unit, or `None` for a stage whose work is
+    /// not a pass over a count known now.
+    pub(crate) fn begin(self, stage: BuildStage, counted: Option<(u64, Unit)>) {
+        if let Some((tracker, observer)) = self.0 {
+            tracker.begin(stage.phase(), stage.name(), None, counted);
+            observer.step_begun();
+        }
+    }
+
+    /// [`Self::begin`] for one part of a stage that runs once per batch, view or column, with
+    /// `context` naming the part. The context is formatted only where there is a tracker.
+    pub(crate) fn begin_in(
+        self,
+        stage: BuildStage,
+        context: std::fmt::Arguments<'_>,
+        counted: Option<(u64, Unit)>,
+    ) {
+        if let Some((tracker, observer)) = self.0 {
+            tracker.begin(
+                stage.phase(),
+                stage.name(),
+                Some(context.to_string()),
+                counted,
+            );
+            observer.step_begun();
+        }
+    }
+
+    /// Add `n` to the step's count. Called once per batch of a pass, never once per unit.
+    #[inline]
+    pub(crate) fn advance(self, n: u64) {
+        if let Some((tracker, _)) = self.0 {
+            tracker.advance(n);
+        }
+    }
+}
+
+/// A count kept by a pass that meets its units one at a time, in a callback or in a loop whose
+/// batches are not its own, and added to the step once per [`Tally::BATCH`] units.
+pub(crate) struct Tally<'a> {
+    steps: Steps<'a>,
+    at: u64,
+    added: u64,
+}
+
+impl<'a> Tally<'a> {
+    const BATCH: u64 = 1 << 16;
+
+    pub(crate) fn new(steps: Steps<'a>) -> Self {
+        Tally {
+            steps,
+            at: 0,
+            added: 0,
+        }
+    }
+
+    /// Count `n` more units.
+    #[inline]
+    pub(crate) fn add(&mut self, n: u64) {
+        self.reach(self.at + n);
+    }
+
+    /// Count every unit before `position`, for a pass that visits its units in ascending order
+    /// and skips some.
+    #[inline]
+    pub(crate) fn reach(&mut self, position: u64) {
+        self.at = position;
+        if self.at - self.added >= Self::BATCH {
+            self.steps.advance(self.at - self.added);
+            self.added = self.at;
+        }
+    }
+}
+
+impl Drop for Tally<'_> {
+    fn drop(&mut self) {
+        self.steps.advance(self.at - self.added);
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The JSON sink — `mosaica build --stage-timings-json <path>`
 // ---------------------------------------------------------------------------------------------
@@ -250,8 +387,8 @@ pub struct StageRecord {
 
 /// Collects every stage's record, for writing as JSON at the end of the build.
 ///
-/// `Mutex` rather than `RefCell` because [`BuildObserver`] is `Send + Sync`; the lock is taken
-/// once per stage, eighteen times in a build, so it costs nothing measurable.
+/// `Mutex` rather than `RefCell` because [`BuildObserver`] is `Send + Sync`. The lock is taken
+/// once per stage report, which is a few dozen times in a build of several batches and views.
 #[derive(Default)]
 pub struct JsonStageTimings {
     records: std::sync::Mutex<Vec<StageRecord>>,
@@ -302,6 +439,19 @@ impl BuildObserver for JsonStageTimings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_stage_has_a_phase_and_the_phases_run_in_order() {
+        let phases: Vec<u32> = BuildStage::ALL.iter().map(|s| s.phase().index).collect();
+        assert!(
+            phases.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{phases:?}"
+        );
+        let mut distinct = phases.clone();
+        distinct.dedup();
+        assert_eq!(distinct, [1, 2, 3, 4, 5]);
+        assert!(BuildStage::ALL.iter().all(|s| s.phase().of == 5));
+    }
 
     #[test]
     fn a_json_sink_records_one_row_per_report_in_order() {

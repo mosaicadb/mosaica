@@ -76,6 +76,7 @@ use mosaica_store::manifest::{
 };
 use mosaica_store::write::{write_permutation, write_segment};
 use mosaica_store::{write_current, write_manifest_json, PairsParquetWriter, ShardLayout};
+use mosaica_types::progress::Unit;
 use mosaica_types::{
     EntityId, IdentityKey, ItemHigh, ShardId, TermId, BUNDLE_FORMAT, IDENTITY_CONSTRUCTION,
     IDENTITY_ROUNDS, SMALL_TERM_THRESHOLD_DEFAULT,
@@ -980,10 +981,13 @@ impl AccessPlan {
 /// **Every view, in [`BuildArgs::views`] order**, because entity space is unioned over them
 /// (`views.md` §7). The view index is what lets the caller count each view's contribution
 /// separately, which is how the label-agreement refusal is made exact.
+///
+/// Each source's rows are added to `steps` a batch at a time, out of [`access_rows`].
 pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>>(
     args: &BuildArgs,
     plan: &AccessPlan,
     numbering: &ids::Numbering,
+    steps: observer::Steps<'_>,
     mut visit: F,
 ) -> Result<input::AccessFill> {
     use crate::config::AccessSource;
@@ -994,9 +998,8 @@ pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>
         let rows = numbering
             .of(ids::ReadKind::Access)
             .expect("the access relation is numbered");
-        input::scan_pairs(input::Source::new(Some(path), &fields, rows), |id, term| {
-            visit(0, id, term)
-        })?;
+        let source = input::Source::new(Some(path), &fields, rows).counted(steps);
+        input::scan_pairs(source, |id, term| visit(0, id, term))?;
         return Ok(input::AccessFill::default());
     }
     let mut fill = input::AccessFill::default();
@@ -1004,7 +1007,7 @@ pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>
     for (index, view) in args.views.iter().enumerate() {
         // One visit per key a row's labels are indexed under.
         let one = input::scan_access_field(
-            view_source(args, index, numbering),
+            view_source(args, index, numbering).counted(steps),
             match &view.access.source {
                 AccessSource::Field(field) => Some(field.as_str()),
                 _ => None,
@@ -1023,6 +1026,20 @@ pub(crate) fn scan_access<F: FnMut(usize, u64, u64) -> std::ops::ControlFlow<()>
         fill.filled += one.filled;
     }
     Ok(fill)
+}
+
+/// The rows [`scan_access`] reads, from the footers of the files it reads them from.
+pub(crate) fn access_rows(args: &BuildArgs, numbering: &ids::Numbering) -> Result<u64> {
+    if let AccessRoute::SharedRelation(path) = access_route(args)? {
+        let fields = config::Fields::canonical("point_visibility");
+        let rows = numbering
+            .of(ids::ReadKind::Access)
+            .expect("the access relation is numbered");
+        return input::Source::new(Some(path), &fields, rows).kept_rows();
+    }
+    (0..args.views.len())
+        .map(|index| view_source(args, index, numbering).kept_rows())
+        .sum()
 }
 
 /// Say how many points carried terms of their own and how many took the view's default.
@@ -1508,6 +1525,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
         args,
         &access,
         &numbering,
+        observer::Steps::default(),
         |_view, source_id, source_term| {
             pairs_by_source
                 .entry(source_id)
@@ -1941,6 +1959,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
             &open_extents,
             args.memory_budget
                 .unwrap_or_else(pipeline::detect_memory_budget),
+            observer::Steps::default(),
         )?;
         paths.extend(pipeline::write_record_blob(
             &prefix_dir.join(layout.record_rel()),
@@ -2177,6 +2196,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
             n as u32,
             &mut derived_index,
             model.sizing.term_image_workers as usize,
+            observer::Steps::default(),
         )?]
     };
 
@@ -2248,6 +2268,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
                 .cloned()
                 .unwrap_or_default(),
         }],
+        observer::Steps::default(),
     )?;
     report.attribute_coverage = attribute_coverage;
     report.refused = numbering.refused;
@@ -2459,6 +2480,7 @@ fn write_manifests(
     minters: &HashMap<String, mosaica_store::vocabulary::VocabularyMinter>,
     published_layers: &crate::layers::PublishedLayers,
     shards: &[ShardWritten],
+    steps: observer::Steps<'_>,
 ) -> Result<BuildReport> {
     let prefix_dir = args.out.join(PREFIX);
     // Contracts §2.2 / §2.3 divide the two `files` maps by *when* a file appeared:
@@ -2489,9 +2511,18 @@ fn write_manifests(
                 .flat_map(|(_, runs)| runs.iter().map(|run| &run.path))
         }))
         .collect();
+    let total = all_paths
+        .iter()
+        .map(|path| Ok(std::fs::metadata(path).map_err(|e| BuildError::io(path, e))?.len()))
+        .sum::<Result<u64>>()?;
+    steps.begin(observer::BuildStage::Manifests, Some((total, Unit::Bytes)));
     let manifest_files: BTreeMap<String, FileDigest> = all_paths
         .into_par_iter()
-        .map(|path| Ok((relative_to(&prefix_dir, path)?, mosaica_store::digest_of(path)?)))
+        .map(|path| {
+            let digest = mosaica_store::digest_of(path)?;
+            steps.advance(digest.size);
+            Ok((relative_to(&prefix_dir, path)?, digest))
+        })
         .collect::<Result<_>>()?;
 
     let bundle_bytes: u64 = manifest_files.values().map(|f| f.size).sum();

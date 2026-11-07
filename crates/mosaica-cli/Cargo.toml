@@ -49,7 +49,7 @@ mosaica-spatial = { workspace = true }
 mosaica-config = { workspace = true }
 mosaica-server = { workspace = true }
 mosaica-store = { workspace = true }
-mosaica-types = { workspace = true }
+mosaica-types = { workspace = true, features = ["serde"] }
 # The `items` and `artifacts` verbs: a bulk read's frames, and the zstd codec its pages may be
 # compressed with.
 mosaica-wire = { workspace = true }

@@ -565,11 +565,15 @@ fn priority_of(key: &IdentityKey, shard: ShardId, entity: u32) -> u16 {
 
 /// Steps 3 to 6: the buckets in Morton order, the permutation, the render tail and the framing
 /// around them.
+///
+/// The rows of its first pass, which writes the Morton column and the row-to-entity table, are
+/// added to `steps` a chunk at a time.
 pub(crate) fn write_segment(
     job: &Assembly<'_>,
     mut rows: PartitionedRows,
     boundaries: &MortonBoundaries,
     plan: PagePlan,
+    steps: crate::observer::Steps<'_>,
 ) -> Result<Assembled> {
     let rows_in_view = u32::try_from(rows.rows).map_err(|_| {
         BuildError::Invalid(format!(
@@ -700,6 +704,7 @@ pub(crate) fn write_segment(
                 pairs.push(&pair)?;
             }
             row += chunk.len() as u64;
+            steps.advance(chunk.len() as u64);
         }
     }
     morton_out
