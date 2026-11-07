@@ -40,6 +40,7 @@ from __future__ import annotations
 import datetime
 import json
 import numbers
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -1290,9 +1291,11 @@ def _records(table: pa.Table, insert) -> list[dict]:
 
 # ---------------------------------------------------------------------------- the run
 
-#: The phases of a later commit's ingest record: the pages it sends, then the publication its
-#: closing flush waits for.
+#: The phases of a later commit's ingest record, and the step each runs: the pages it sends, then
+#: the publication its closing flush waits for.
 INGEST_PHASES = ["Sending", "Waiting for publication"]
+PAGES = "pages"
+PUBLICATION = "publication"
 
 
 def run(
@@ -1311,33 +1314,91 @@ def run(
     is sent. Returns the pages other than the plan's own flushes that were accepted. `strict` is
     passed to every route that takes rows.
 
-    `show` is given the commit's ingest record as each page goes and when the wait begins and
-    ends. The step `pages` counts the rows of each page answered out of the rows of every page in
-    the plan, and its context names the page among the plan's.
+    `show` is given the commit's ingest record before each page is sent, when the pages end, when
+    the wait begins and when the commit ends. The step `pages` counts the rows of each page
+    answered out of the rows of every page in the plan, and its context names the page among the
+    plan's. The last record is `finished` where the report is ok and `failed` where it is not,
+    which includes a refused page, a page no server answered, a finding on the closing flush and
+    a refused flush. An empty plan sends nothing and makes no record.
     """
-    tracker = _progress.Tracker("ingest", INGEST_PHASES)
-    tracker.begin(0, "pages", sum(page.rows for page in pages), "rows")
+    if not pages:
+        return []
+    began = time.monotonic()
+    rows = sum(page.rows for page in pages)
+    sent = 0
+    # The open step: its phase, its name, when it began, its context and whether it counts rows.
+    step: tuple = (0, PAGES, began, None, True)
+
+    def record(state: str = "running") -> dict:
+        at, name, step_began, context, counted = step
+        return _ingest_record(began, at, name, step_began, context,
+                              (sent, rows) if counted else None, state)
+
     accepted = []
     for at, page in enumerate(pages):
-        tracker.context = _progress.page_context(at, len(pages))
-        show(tracker.snapshot())
+        step = (0, PAGES, began, _page_context(at, len(pages)), True)
+        show(record())
         answer = _send(control, page, strict)
-        tracker.advance(page.rows)
         _fold(report, page, answer)
         if answer.status == UNANSWERED:
             # No server answered, a page of rows not even when sent once more: the pages after
             # this one would go the same way.
             break
+        sent += page.rows
         if answer.ok and page.kind != "flush":
             accepted.append(page)
-    show(tracker.snapshot())
+    show(record())
     if accepted:
-        tracker.begin(1, "publication")
-        show(tracker.snapshot())
+        step = (1, PUBLICATION, time.monotonic(), None, False)
+        show(record())
         _waited(report, control.flush(wait=True))
-    tracker.end("finished" if report.ok else "failed")
-    show(tracker.snapshot())
+    show(record("finished" if report.ok else "failed"))
     return accepted
+
+
+def _ingest_record(
+    began: float,
+    phase: int,
+    step: str,
+    step_began: float,
+    context: str | None,
+    counted: tuple[int, int] | None,
+    state: str,
+) -> dict:
+    """The ingest record of a commit that began at `began`, in the shape of `/control/status`'s
+    records, with `counted` the rows sent and the rows planned where the step counts rows."""
+    now = time.monotonic()
+    one: dict = {
+        "job": "ingest",
+        "state": state,
+        "phase": {"index": phase + 1, "of": len(INGEST_PHASES), "name": INGEST_PHASES[phase]},
+        "step": step,
+    }
+    if context is not None:
+        one["context"] = context
+    if counted is not None:
+        one.update(done=counted[0], total=counted[1], unit="rows")
+    one.update(elapsed_s=now - began, step_elapsed_s=now - step_began,
+               rss_bytes=_resident_bytes())
+    return one
+
+
+def _page_context(index: int, of: int) -> str | None:
+    """The context of the page at `index`, counted from 0, of `of`, as `page (37 of 120)`, and
+    none where there is one page, as the build's records name their parts."""
+    return f"page ({index + 1} of {of})" if of > 1 else None
+
+
+def _resident_bytes() -> int:
+    """This process's resident memory from `/proc/self/status`, or 0 where there is none."""
+    try:
+        with open("/proc/self/status", encoding="ascii", errors="replace") as status:
+            for line in status:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
 
 
 def _send(control: Control, page: Page, strict: bool = False) -> Answer:

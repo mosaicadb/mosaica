@@ -49,7 +49,9 @@ class Refusal(ValueError):
     - `retry_after_s`: how many seconds to wait before sending the request again, set when the
       server answers `429` or names a wait, and `None` otherwise.
     - `report`: the report of a `commit`, `remove`, `suppress`, `unsuppress` or `leave` that
-      applied nothing, which says what was refused and why, and `None` otherwise.
+      applied nothing, which says what was refused and why, the dictionary
+      `Database.compact(wait=True)` would have returned where the compaction did not succeed,
+      and `None` otherwise.
 
     ```
     try:

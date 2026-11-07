@@ -24,7 +24,8 @@ classifiers = [
   "Topic :: Scientific/Engineering :: GIS",
 ]
 requires-python = ">=3.12"
-# Two dependencies. pyarrow carries every table the package reads or writes. The companion
+# Three dependencies. pyarrow carries every table the package reads or writes, and tqdm draws the
+# progress of a commit and of a waited compaction. The companion
 # platform wheel `mosaica-native` carries the `mosaica` binary and the `_mosaica` extension
 # module, so `pip install mosaica` can make and serve a database without a Rust toolchain. It is
 # pinned exactly, because the binary and this package change together and a stale database is
@@ -32,10 +33,11 @@ requires-python = ">=3.12"
 # serving a database needs a `mosaica` binary named by `MOSAICA_BIN`. The wheel itself
 # is pure Python, `py3-none-any`.
 #
-# `pip install mosaica --no-deps` skips both. Install `pyarrow>=14.0.1` by hand after it, and
-# point `MOSAICA_BIN` at a `mosaica` binary to make or serve a database.
+# `pip install mosaica --no-deps` skips them. Install `pyarrow>=14.0.1` and `tqdm>=4.66.2` by hand
+# after it, and point `MOSAICA_BIN` at a `mosaica` binary to make or serve a database.
 dependencies = [
   "pyarrow>=14.0.1",
+  "tqdm>=4.66.2",
   "mosaica-native==0.2.0; sys_platform != 'win32' and platform_machine in 'x86_64 aarch64 arm64'",
 ]
 

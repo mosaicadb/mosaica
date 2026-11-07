@@ -17,8 +17,7 @@ first arrived; unanswered twice, it is the answer. Every other status is an answ
 differing part is reported and not retried, since an edit is a delete and a re-ingest, and the SDK
 does not do that on the user's behalf.
 
-The transport is `urllib`, so the SDK's only dependency outside the standard library stays
-pyarrow.
+The transport is `urllib`, so the package depends on no HTTP library.
 """
 
 from __future__ import annotations
@@ -106,9 +105,12 @@ class Control:
 
     `Database.control` returns one for a database you made, and `Control(base, credential)` makes
     one for a database someone else runs. Each route method sends one HTTP request and returns its
-    `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. When a
-    busy server answers `429`, the method waits as long as the server asks, up to 30 seconds, and
-    sends the request again. It returns the `429` once the waits would pass five minutes in all.
+    `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. The
+    exception is `compact(wait=True)`, which also reads `status()` until the request is answered
+    and returns how that ended in the answer's `waited`. It raises `Refusal` for a `progress` it
+    does not take, and passes on what a `progress` function raises. When a busy server answers
+    `429`, the method waits as long as the server asks, up to 30 seconds, and sends the request
+    again. It returns the `429` once the waits would pass five minutes in all.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token, or `None` for a
@@ -461,12 +463,16 @@ class Control:
         - `unknown`: the request was answered, and a later answer, `last_answer`, has replaced its
           outcome on `/control/status`, so its outcome is not known.
         - `unread`: `/control/status` did not answer with a `2xx`, and `status` is its `Answer`.
+        - `unnumbered`: the server accepted the request without a number in `body["request"]`,
+          so there was nothing to wait for.
         """
-        show = _progress.shown(progress) if wait else None
+        show = _progress.shown(progress)
         answer = self._send("POST", "/control/compact", b"")
         request = answer.body.get("request")
-        if show is None or not answer.ok or not isinstance(request, int):
+        if not wait or not answer.ok:
             return answer
+        if not isinstance(request, int):
+            return replace(answer, waited={"ok": False, "ended": "unnumbered"})
         with show:
             return replace(answer, waited=self._compaction(request, show))
 

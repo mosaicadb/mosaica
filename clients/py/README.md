@@ -102,10 +102,8 @@ db.commit()                                        # mosaica check, mosaica buil
 
 Each call returns a report that shows as a short summary of what happened, in numbers,
 with every refusal and finding in full; a notebook cell that ends in one shows it. While they run,
-`commit()` and `compact(wait=True)` also draw how far they have gone, with `tqdm` where it is
-installed and as a line on stderr where it is not. `progress=False` turns it off, and
-`progress=fn` hands each record to `fn` as a `dict` instead, in the shape `/control/status`
-serves under `jobs`. The detail is
+`commit()` and `compact(wait=True)` also draw a `tqdm` bar of how far they have gone, which their
+`progress` argument turns off or hands to a function, as their docstrings say. The detail is
 on the report's attributes: an insert's `read` and `ignored` columns, a check's or a first
 commit's `findings` and `log` (the declaration check's and the build's text), a later commit's
 `plan`, `rows_accepted` and `refusals`. `db.path` is where the database is and `db.binary` the
@@ -627,10 +625,10 @@ minutes.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call
-returns. `compact(wait=True)` reads `/control/status` once a second, showing the compaction's
-progress, until the server has answered the request, and returns the answer the server served in
-`last_answer`. It raises `Refusal` unless the server answered `compacted` or `nothing_to_do`. After `drop_layer()` the name may be declared again, as a new layer that none of the
-dropped layer's `mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
+returns. `compact(wait=True)` waits until the server has answered the request, and raises
+`Refusal` unless it compacted or had nothing to do; its docstring says what it returns. After
+`drop_layer()` the name may be declared again, as a new layer that none of the dropped layer's
+`mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
 items it leaves in no view, as `remove()` deletes one, and the answer's `deleted` says how many.
 
 ## A deployment somebody else runs

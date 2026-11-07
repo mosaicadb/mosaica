@@ -112,6 +112,17 @@ def small(path, size=None):
     return db, rows
 
 
+def serving(handler) -> tuple:
+    """A fake control plane answering with `handler`, a `BaseHTTPRequestHandler` class, started on
+    a thread, and its address. The caller shuts the server down."""
+    import http.server
+    import threading
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}"
+
+
 @pytest.fixture
 def stub_bundle(monkeypatch, tmp_path):
     """The components' bundle, stubbed: no browser here, and nothing reads its text."""

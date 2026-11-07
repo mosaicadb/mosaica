@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import http.server
 import json
-import sys
-import threading
+import os
+from pathlib import Path
 
 import pytest
 
-from conftest import small
-from mosaica import _control, _progress
+from conftest import serving, small
+from mosaica import _control
 from mosaica._control import Control
 from mosaica._database import Database
 from mosaica._refusal import Refusal
@@ -26,6 +26,11 @@ from mosaica._refusal import Refusal
 def phases_never_go_back(records: list[dict]) -> bool:
     indices = [one["phase"]["index"] for one in records]
     return indices == sorted(indices)
+
+
+def holds_no_record(text: str) -> bool:
+    """Whether no line of `text` begins as a serialised progress record does, with `{"job"`."""
+    return not any(line.lstrip().startswith('{"job"') for line in text.splitlines())
 
 
 # ---------------------------------------------------------------------------- the commits
@@ -41,7 +46,7 @@ def test_a_first_commit_gives_the_build_records_in_order_and_keeps_its_log(tmp_p
         assert phases_never_go_back(records)
         assert records[-1]["state"] == "finished"
         assert [one for one in records[:-1] if one["state"] != "running"] == []
-        assert not any(_progress.record(line) for line in report.log.splitlines())
+        assert holds_no_record(report.log)
     finally:
         db.close()
 
@@ -57,15 +62,12 @@ def test_a_first_commit_without_progress_writes_nothing_to_stderr(tmp_path, capf
         db.close()
 
 
-def test_a_first_commit_without_tqdm_writes_plain_lines_to_stderr(tmp_path, capfd, monkeypatch):
-    monkeypatch.setitem(sys.modules, "tqdm", None)
-    monkeypatch.setitem(sys.modules, "tqdm.auto", None)
-    db, _ = small(tmp_path / "db")
+def test_both_commits_draw_their_progress_by_default(tmp_path):
+    db, rows = small(tmp_path / "db")
     try:
-        capfd.readouterr()
         assert db.commit().ok
-        lines = capfd.readouterr().err.splitlines()
-        assert lines and not any(_progress.record(line) for line in lines)
+        db.insert("map", rows.assign(id=[3, 4]), x="x", y="y", access="access")
+        assert db.commit().ok
     finally:
         db.close()
 
@@ -84,6 +86,65 @@ def test_a_later_commit_counts_every_row_of_its_plan_then_waits_for_publication(
         assert pages[-1]["done"] == pages[-1]["total"] == len(rows)
         assert [one["step"] for one in records if one["phase"]["index"] == 2][0] == "publication"
         assert records[-1]["state"] == "finished"
+    finally:
+        db.close()
+
+
+def test_a_later_commit_whose_pages_reach_no_server_ends_failed_without_waiting(
+    tmp_path, monkeypatch
+):
+    db, rows = small(tmp_path / "db")
+    records: list[dict] = []
+    try:
+        assert db.commit(progress=False).ok
+        db.insert("map", rows.assign(id=[3, 4]), x="x", y="y", access="access")
+        # The operator plane this commit's pages go to is an address nothing is listening on, and
+        # the wait before a page is sent once more is not slept.
+        server, base = serving(http.server.BaseHTTPRequestHandler)
+        server.shutdown()
+        server.server_close()
+        monkeypatch.setattr(_control, "sleep", lambda seconds: None)
+        monkeypatch.setattr(Database, "control", property(lambda self: Control(base, "c")))
+        with pytest.raises(Refusal):
+            db.commit(progress=records.append)
+        assert records[-1]["state"] == "failed"
+        assert "publication" not in {one["step"] for one in records}
+    finally:
+        db.close()
+
+
+class _Stopped(Exception):
+    pass
+
+
+def builds_running(path: Path) -> list[str]:
+    """The processes whose command line is a `mosaica build` of the database at `path`."""
+    found = []
+    for entry in Path("/proc").iterdir():
+        try:
+            line = (entry / "cmdline").read_bytes().split(b"\0")
+        except OSError:
+            continue
+        words = [word.decode(errors="replace") for word in line]
+        if "build" in words and any(str(path) in word for word in words):
+            found.append(entry.name)
+    return found
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc"), reason="the build's process is looked for in /proc")
+def test_a_sink_that_raises_stops_the_first_commit_and_a_later_one_builds(tmp_path):
+    db, rows = small(tmp_path / "db")
+
+    def stop(one: dict) -> None:
+        raise _Stopped(one["step"])
+
+    try:
+        with pytest.raises(_Stopped):
+            db.commit(progress=stop)
+        assert not db.built
+        assert builds_running(db.path) == []
+        report = db.commit(progress=False)
+        assert report.ok and report.items == len(rows)
     finally:
         db.close()
 
@@ -181,15 +242,14 @@ class _Scripted(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def scripted(monkeypatch):
-    """A control plane that answers from a script, with the reads' interval not slept, and its
-    address."""
-    monkeypatch.setattr(_control, "sleep", lambda seconds: None)
+    """A control plane that answers from a script, read with no interval between readings, and
+    its address."""
+    monkeypatch.setattr(_control, "COMPACT_POLL_S", 0.0)
     _Scripted.request = 3
     _Scripted.statuses = []
     _Scripted.refusal = None
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Scripted)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_port}"
+    server, base = serving(_Scripted)
+    yield base
     server.shutdown()
     server.server_close()
 

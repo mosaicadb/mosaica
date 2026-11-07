@@ -1348,15 +1348,14 @@ class Database:
 
         - `strict`: `True` refuses the whole build, or the whole request, that carries such a row.
         - `progress`: how the commit shows how far it has gone. `True`, the default, draws it with
-          `tqdm` where `tqdm` can be imported, as a widget in a notebook, and otherwise writes a
-          line to stderr when a step begins and ends and at most every 30 seconds between.
-          `False` shows nothing. A function is called with each record as a `dict`, in the shape
+          `tqdm.auto`, which is a widget in a notebook and a bar on stderr in a terminal. `False`
+          draws nothing. A function is called with each record as a `dict`, in the shape
           `/control/status` serves under `jobs`, and nothing is drawn. The first commit's records
-          are the build's, with the build's five phases from `Reading sources` to `Verifying the
-          bundle`. A later commit makes an `ingest` record: phase 1, `Sending`, counts the rows
-          sent out of the rows its plan sends in the step `pages`, and phase 2, `Waiting for
-          publication`, is the step `publication`, while the closing flush waits. Each job's last
-          record has `state` `finished` or `failed`.
+          are the build's, and a later commit's are an `ingest` record that counts the rows of
+          its pages sent and then waits for publication. The last record has `state` `finished`
+          or `failed`, except where the build was killed by a signal or the commit was
+          interrupted, which leave the last record `running`. A later commit with nothing to send
+          makes no record.
 
         A commit that did nothing raises `Refusal`, with the report as its `report`, which happens
         when a problem is found before anything is sent, when the build fails or when the server
@@ -1381,8 +1380,8 @@ class Database:
         if not ok:
             raise Refusal(_reason_first("commit: the declaration did not check", page, page))
         with show:
-            build = self._build(
-                ["--deployment", str(self.path / "mosaica.toml"),
+            build = self._run(
+                ["build", "--deployment", str(self.path / "mosaica.toml"),
                  "--progress", "none" if progress is False else "json"]
                 + (["--strict"] if strict else []),
                 show,
@@ -1945,7 +1944,8 @@ class Database:
           whose `last_job` is the last compaction's record where one ran. It raises `Refusal`,
           saying why, where the request was refused or failed, where the server restarted and
           lost it, where a later answer replaced its outcome before it was read, and where
-          `/control/status` could not be read.
+          `/control/status` could not be read. The refusal's `report` is the same dictionary,
+          and its `status` is the status of a refused read.
         - `progress`: how the wait shows the compaction's record, as `commit` takes it. The
           default is `True`.
 
@@ -1957,38 +1957,40 @@ class Database:
         waited = answer.waited
         if waited is None:
             return body
-        request = body["request"]
+        request = body.get("request")
+        result = {**body, **waited}
+        if waited["ok"]:
+            return result
         if waited["ended"] == "unread":
             read = waited["status"]
             raise Refusal(
                 f"compact: request {request} was accepted, and reading its outcome from "
-                f"/control/status was refused ({read.status}): {read.detail[:1000]}"
+                f"/control/status was refused ({read.status}): {read.detail[:1000]}",
+                result,
+                status=read.status,
             )
-        if waited["ended"] == "lost":
-            raise Refusal(
-                f"compact: the server has numbered {waited['accepted']} requests since it "
-                f"started, fewer than {request}, so it restarted after this request was made and "
-                "the request was lost. Ask again"
+        if waited["ended"] == "unnumbered":
+            why = "the server accepted the request without numbering it, so it cannot be followed"
+        elif waited["ended"] == "lost":
+            why = (
+                f"the server has numbered {waited['accepted']} requests since it started, fewer "
+                f"than {request}, so it restarted after this request was made and the request was "
+                "lost. Ask again"
             )
-        if waited["ended"] == "unknown":
-            raise Refusal(
-                f"compact: request {request} was answered, and a later answer has replaced its "
-                "outcome on /control/status, so its outcome is not known. Read "
-                "status()['compaction'] for the last compaction's record"
+        elif waited["ended"] == "unknown":
+            why = (
+                f"request {request} was answered, and a later answer has replaced its outcome on "
+                "/control/status, so its outcome is not known"
             )
-        last_answer = waited["last_answer"]
-        if last_answer["outcome"] == "refused":
-            raise Refusal(
-                f"compact: request {request} was refused at {last_answer['gate']}: "
-                f"{last_answer['detail']}"
-            )
-        if not waited["ok"]:
+        elif waited["last_answer"]["outcome"] == "refused":
+            last_answer = waited["last_answer"]
+            why = f"request {request} was refused at {last_answer['gate']}: {last_answer['detail']}"
+        else:
             step = waited.get("last_job", {}).get("step")
-            raise Refusal(
-                f"compact: request {request} was answered {last_answer['outcome']}"
-                + (f", and the compaction stopped in the step {step}" if step else "")
+            why = f"request {request} was answered {waited['last_answer']['outcome']}" + (
+                f", and the compaction stopped in the step {step}" if step else ""
             )
-        return {**body, **waited}
+        raise Refusal(f"compact: {why}", result)
 
     def drop_layer(self, name: str, wait: bool = False) -> dict:
         """Remove an annotation layer or a label set, and return the server's answer.
@@ -2093,50 +2095,58 @@ class Database:
         running."""
         return None if self.listening is None else f"http://{self.listening.session}"
 
-    def _run(self, arguments: Sequence[str]) -> subprocess.CompletedProcess:
-        binary, _ = _instance.find_binary()
-        return subprocess.run(
-            [binary, *arguments],
-            capture_output=True,
-            text=True,
-            cwd=self.path,
-        )
+    def _run(
+        self, arguments: Sequence[str], show: _progress.Sink | None = None
+    ) -> subprocess.CompletedProcess:
+        """Run `mosaica` with `arguments` in the database's directory, and return what it wrote.
 
-    def _build(self, arguments: Sequence[str], show: _progress.Sink) -> subprocess.CompletedProcess:
-        """Run `mosaica build` with `arguments`, giving `show` each progress record its stderr
-        carries as it arrives, and return what it wrote apart from those records.
-
-        stdout is read on a thread of its own while this thread reads stderr, so neither pipe
-        fills while the other is read, and the records reach `show` on the caller's thread.
+        Where there is a `show`, each line of stderr that is a progress record goes to it as it
+        arrives and is left out of the stderr returned. stdout is read on a thread of its own
+        while this thread reads stderr, so neither pipe fills while the other is read, and the
+        records reach `show` on the caller's thread. A byte that is not UTF-8 is read as U+FFFD.
         """
         binary, _ = _instance.find_binary()
-        build = subprocess.Popen(
-            [binary, "build", *arguments],
+        child = subprocess.Popen(
+            [binary, *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             cwd=self.path,
         )
         stdout: list[str] = []
         stderr: list[str] = []
-        reader = threading.Thread(target=lambda: stdout.extend(build.stdout), daemon=True)
-        with build:
+        drained: list[BaseException] = []
+
+        def drain() -> None:
+            try:
+                stdout.extend(child.stdout)
+            except BaseException as why:
+                # A pipe no one reads would hold the child up, so it is stopped and the reason is
+                # raised on the caller's thread.
+                drained.append(why)
+                child.kill()
+
+        reader = threading.Thread(target=drain, daemon=True)
+        with child:
             reader.start()
             try:
-                for line in build.stderr:
-                    one = _progress.record(line)
+                for line in child.stderr:
+                    one = None if show is None else _progress.record(line)
                     if one is None:
                         stderr.append(line)
                     else:
                         show(one)
             except BaseException:
-                # An interrupt, or a sink that raised, ends the build as `subprocess.run` would.
-                build.kill()
+                # An interrupt, or a sink that raised, ends the child as `subprocess.run` would.
+                child.kill()
                 raise
             finally:
                 reader.join()
+        if drained:
+            raise drained[0]
         return subprocess.CompletedProcess(
-            build.args, build.returncode, "".join(stdout), "".join(stderr)
+            child.args, child.returncode, "".join(stdout), "".join(stderr)
         )
 
     def _frames(self, document: dict) -> list[tuple[str, str]]:
