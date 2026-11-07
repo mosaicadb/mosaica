@@ -1071,18 +1071,18 @@ pub(crate) fn entity_order_residency(
             constant: true,
         });
     }
-    // The keyword dictionary's `(row, ordinal)` partition, where a column is indexed at all.
+    // The keyword dictionary's `(chunk, ordinal)` remap partition, where a column is indexed at
+    // all: its writer buffers, and the translate's one loaded bucket of remaps at 4 B a key
+    // beside a hashed chunk's table at 4 B a key.
     if columns
         .iter()
         .any(|column| matches!(column.ty, ScalarType::Keyword))
     {
         terms.push(Term {
-            what: "the keyword dictionary's (row, ordinal) partition: writer buffers, one loaded \
-                   bucket at 8 B a record and the u32 window it is scattered into"
+            what: "the keyword dictionary's (chunk, ordinal) partition: writer buffers, one \
+                   bucket's remaps and a hashed chunk's table"
                 .into(),
-            bytes: buffers(crate::spill::PARTITION_BUCKETS as u64, 8)
-                .saturating_add(bucket(8))
-                .saturating_add(bucket(4)),
+            bytes: buffers(crate::spill::PARTITION_BUCKETS as u64, 8).saturating_add(bucket(8)),
             mapped: false,
             phases: Phases::INDEX,
             constant: true,
@@ -1944,17 +1944,17 @@ pub(crate) fn disk(
         );
         if matches!(attribute.ty, ScalarType::Utf8 | ScalarType::Keyword) {
             // The dictionary pass's own scratch, under the column's directory rather than
-            // `.build-tmp/`: the `(row, ordinal)` partition the merge fills, 8 B a row, and the
-            // sorted runs it merges, both gone by the end of the pass. The partition's buckets go
-            // back one at a time as the values file is written past them, so this is a ceiling
-            // and the pass's own peak is a bucket lower.
+            // `.build-tmp/`: an id per row, 4 B; per key of each chunk, an 8 B remap record and,
+            // for a hashed chunk, a 4 B rank; and the sorted runs it merges. All are gone by the
+            // end of the pass. A chunk holds at most one key a row, so 16 B/item is a ceiling;
+            // a column whose keys repeat spends little more than the ids.
             push(
                 format!(
-                    "attribute '{}': the keyword dictionary's (row, ordinal) partition and \
-                     sorted runs, 8 B/item and a ceiling of half the column's characters",
+                    "attribute '{}': the keyword dictionary's ids, remap and sorted runs, \
+                     16 B/item and a ceiling of half the column's characters",
                     attribute.name
                 ),
-                8 * n + characters / EXTENT_SHARE,
+                16 * n + characters / EXTENT_SHARE,
                 Phases::INDEX,
             );
             // And the dictionary the pass leaves behind, which is in the bundle from there on.
@@ -2698,7 +2698,7 @@ mod tests {
         );
         // **Net of the partitions the column opens.** Its storage is a file and is charged at
         // nothing; what a declared column does cost the machine is the join's `(entity, value)`
-        // partition and, for a keyword one, the dictionary's `(row, ordinal)` partition — both
+        // partition and, for a keyword one, the dictionary's `(chunk, ordinal)` partition — both
         // constants of the key type, both named terms of their own — and, being blob-resident, the
         // record blob's block directory.
         let directory = with_keyword
