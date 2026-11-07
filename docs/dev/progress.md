@@ -34,7 +34,7 @@ A job is a fixed list of **phases**, named for a person. Each phase runs one or 
 
 ### Cost
 
-A `mosaica_types::progress::Tracker` holds the job's current step. The workers of a step call `advance(n)` once per batch, which is one relaxed atomic add, and never once per unit. A reader calls `snapshot()` when it wants a record, which takes a lock and reads `/proc/self/status`, so a job with no reader pays only the adds. The build's renderer reads once a second, and the server reads when `/control/status` is requested.
+A `mosaica_types::progress::Tracker` holds the job's current step. The workers of a step call `advance(n)` once per batch, which is one relaxed atomic add. A pass that meets its units one at a time keeps its count in a local `Batched`, which calls `advance` once per `ADVANCE_EVERY` (65,536) units. A step whose total is known only after it has begun sets it with `count`, which keeps the step's clock. Totals that take work to find, such as the row counts in the Parquet footers or the sizes of the bundle's files, are read only when the job has a tracker. A reader calls `snapshot()` when it wants a record, which takes a lock and reads `/proc/self/status`, so a job with no reader pays only the adds. The build's renderer reads once a second, and the server reads when `/control/status` is requested.
 
 ## Jobs
 
@@ -44,15 +44,15 @@ The build's 19 stages fall into five phases. A stage's phase is given by a `matc
 
 | Phase | Stages | What a step counts |
 |---|---|---|
-| 1. Reading sources | `source_ids`, `dictionary`, `pairs_pack`, `geometry_read` | Rows of the source file. The total is read from the Parquet footer before a row is read. |
+| 1. Reading sources | `source_ids`, `dictionary`, `pairs_pack`, `geometry_read` | Rows, with totals read from the Parquet footers before a row is read. `source_ids` is one step per file it reads, named in `context`, and counts the rows of the row groups it keeps. `dictionary` and `pairs_pack` count the access relation's rows, which are the views' points when each view carries its own access lists. `geometry_read` counts every view's points. |
 | 2. Assigning ids | `signature_sort`, `assignment` | Nothing in the sort. `assignment` counts items. Both run once per batch when the build does not fit in memory, and `context` names the batch. |
-| 3. Indexing records | `postings_write`, `attribute_tail`, `layers`, `unique_indexes`, `filter_postings`, `text_index`, `record_blob`, `column_release` | Pairs for `postings_write`. Items for each indexed column in `filter_postings` and each text column in `text_index`, with the column in `context`. The other stages count nothing. |
-| 4. Laying out views | `tiler_sort`, `segment_write`, `artifact_pass`, `term_images` | Rows for `segment_write`, terms for `term_images`, nothing for the sort or `artifact_pass`. Runs once per view, and `context` names the view. The view's containment partitions are composed by one more `artifact_pass` step with no context, after the last view. |
+| 3. Indexing records | `postings_write`, `attribute_tail`, `layers`, `unique_indexes`, `filter_postings`, `text_index`, `record_blob`, `column_release` | Pairs for `postings_write`. Items for each indexed column in `filter_postings`, and documents tokenised for each text column in `text_index`, with the column in `context`. A view group's own indexed columns are `filter_postings` and `text_index` steps too, with the view and the column in `context`, although they run during `attribute_tail`. The other stages count nothing. |
+| 4. Laying out views | `tiler_sort`, `segment_write`, `artifact_pass`, `term_images` | Rows for `segment_write`, terms for `term_images`, nothing for the sort or `artifact_pass`. Runs once per view, and `context` names the view. `term_images` includes the view's field tallies. The containment partitions are composed by one more `artifact_pass` step with no context, after the last view. |
 | 5. Verifying the bundle | `manifests` | Bytes digested, out of the bundle's size. |
 
-`filter_postings` and `text_index` share one loop over the declared columns, so each column is its own step, and the record shows them in the order they run. A stage that runs once per shard as well, such as `segment_write` or a column's `filter_postings`, names the shard in `context` when the bundle has more than one, so that two consecutive steps always differ.
+`filter_postings` and `text_index` share one loop over the declared columns, so each column is its own step, and the record shows them in the order they run. A stage that runs once per shard as well, such as `segment_write` or a column's `filter_postings`, names the shard in `context` when the bundle has more than one, so that two consecutive steps always differ. A context reads like `view s0 (1 of 2), shard (2 of 3)`: a part that is the only one of its kind has no position, and an unnamed part such as a batch or a shard is left out when it is the only one. Where a stage has work of its own after its parts, such as `filter_postings` after its columns, its step is opened again with no context.
 
-A step begins where its stage's timing begins, so for any second of the build the step in the record and the stage that `--stage-timings` charges are the same. `--stage-timings` and `--stage-timings-json` still report each stage's total when it ends.
+`StageTimer` opens each stage's step and times the stage, so for any second of the build the step in the record and the stage that `--stage-timings` charges are the same, and the stages' times sum to the build's wall time. `--stage-timings` and `--stage-timings-json` still report each stage's total when it ends. Byte figures in the build's reports are in binary units, as the progress record's are.
 
 ### Compaction
 
@@ -93,7 +93,7 @@ The client that sends an ingest makes its record, because the server sees one re
 | Mode | Output on stderr |
 |---|---|
 | `auto` | `bar` when stderr is a terminal, and `plain` otherwise. The default. |
-| `bar` | Two lines redrawn in place: the phase, then the step with its count, rate, time remaining, elapsed time and resident memory. |
+| `bar` | Two lines redrawn in place: the phase, then the step with its count, rate, time remaining, elapsed time and resident memory. Line wrapping is off while the bar draws, so a line wider than the terminal is cut at its edge. Other output on stderr is printed over the bar, and text of the bar can remain beside a line shorter than it. |
 | `plain` | A line when a step begins, a line with its final count when it ends, and a line every 30 seconds while it runs. Times are UTC. No terminal control codes. |
 | `json` | One `Progress` object per line, when a step begins, when it ends and at most once a second while it runs, and a last object with `state` `finished` or `failed`. |
 | `none` | Nothing. |
