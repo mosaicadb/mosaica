@@ -433,7 +433,7 @@ describe('compact with wait', () => {
     expect(sent).toHaveLength(3);
     expect(sent[2]!.headers).toMatchObject({authorization: 'Bearer op-cred'});
     expect(answer).toMatchObject({status: 202, ok: true, body: {request: 5}});
-    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', answer: served, last_job: FINISHED});
+    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', last_answer: served, last_job: FINISHED});
     expect(seen).toStrictEqual([RUNNING, FINISHED]);
   });
 
@@ -442,7 +442,7 @@ describe('compact with wait', () => {
     recording(ACCEPTED, status({accepted: 5, answered: 5, last_answer: served}, [], FINISHED));
     const seen: Progress[] = [];
     const answer = await control.compact({wait: true, onProgress: (record) => seen.push(record)});
-    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', answer: served});
+    expect(answer.waited).toStrictEqual({ok: true, ended: 'answered', last_answer: served});
     expect(seen).toEqual([]);
   });
 
@@ -451,7 +451,7 @@ describe('compact with wait', () => {
     recording(ACCEPTED, status({accepted: 6, answered: 6, last_answer: served}, [], FINISHED));
     const answer = await control.compact({wait: true});
     expect(answer.ok).toBe(true);
-    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', answer: served});
+    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', last_answer: served});
   });
 
   it('answers a failure with the failed record as served, which onProgress receives last', async () => {
@@ -462,7 +462,7 @@ describe('compact with wait', () => {
     const pending = control.compact({wait: true, onProgress: (record) => seen.push(record)});
     await vi.runAllTimersAsync();
     const answer = await pending;
-    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', answer: served, last_job: FAILED});
+    expect(answer.waited).toStrictEqual({ok: false, ended: 'answered', last_answer: served, last_job: FAILED});
     expect(seen).toStrictEqual([RUNNING, FAILED]);
   });
 
@@ -473,15 +473,15 @@ describe('compact with wait', () => {
     expect(sent).toHaveLength(2);
   });
 
-  it('ends as replaced where a later answer has replaced the request’s outcome', async () => {
+  it('ends as unknown where a later answer has replaced the request’s outcome', async () => {
     const later = answered(6, 7, 'compacted');
     recording(ACCEPTED, status({accepted: 7, answered: 7, last_answer: later}, [], FINISHED));
-    expect((await control.compact({wait: true})).waited).toStrictEqual({ok: false, ended: 'replaced', answer: later});
+    expect((await control.compact({wait: true})).waited).toStrictEqual({ok: false, ended: 'unknown', last_answer: later});
   });
 
-  it('ends as replaced where the request is answered and no answer is served', async () => {
+  it('ends as unknown where the request is answered and no answer is served', async () => {
     recording(ACCEPTED, status({accepted: 5, answered: 5, last_answer: null}));
-    expect((await control.compact({wait: true})).waited).toStrictEqual({ok: false, ended: 'replaced', answer: null});
+    expect((await control.compact({wait: true})).waited).toStrictEqual({ok: false, ended: 'unknown', last_answer: null});
   });
 
   it('ends as unread with the status answer where reading the status is refused', async () => {

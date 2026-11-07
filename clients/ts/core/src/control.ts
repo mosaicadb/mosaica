@@ -787,14 +787,14 @@ export type CompactAccepted = {
  * How the wait of `compact` with `wait` ended. `ok` is `true` only where the server answered the
  * request as `compacted` or `nothing_to_do`.
  *
- * - `answered`: `answer` is `compaction.requests.last_answer` as the server served it, and covers
- *   the request. Where its outcome is `compacted` or `failed`, `last_job` is
+ * - `answered`: `last_answer` is `compaction.requests.last_answer` as the server served it, and its
+ *   range covers the request. Where its outcome is `compacted` or `failed`, `last_job` is
  *   `compaction.last_job` as served, which for a failed compaction names the step it stopped in.
  * - `lost`: the server has numbered fewer requests than this one since it started, so it restarted
  *   after the request was made and the request was lost. `accepted` is the number it served. Ask
  *   again.
- * - `replaced`: the request was answered, and a later answer, `answer`, has replaced its outcome on
- *   `/control/status`, so its outcome is not known.
+ * - `unknown`: the request was answered, and a later answer, `last_answer`, has replaced its
+ *   outcome on `/control/status`, so its outcome is not known.
  * - `unread`: `/control/status` did not answer with a `2xx`, and `status` is its answer.
  *
  * @category Control plane
@@ -803,9 +803,9 @@ export type CompactWait = {
   /** `true` where the request was answered as `compacted` or `nothing_to_do`. */
   ok: boolean;
 } & (
-  | {ended: 'answered'; answer: CompactionAnswered; last_job?: Progress}
+  | {ended: 'answered'; last_answer: CompactionAnswered; last_job?: Progress}
   | {ended: 'lost'; accepted: number}
-  | {ended: 'replaced'; answer: CompactionAnswered | null}
+  | {ended: 'unknown'; last_answer: CompactionAnswered | null}
   | {ended: 'unread'; status: Answer<ControlStatus>}
 );
 
@@ -1308,11 +1308,10 @@ export class Control {
    * With `wait`, the call does that itself: once the request is accepted, it reads
    * `/control/status` about once a second until the request is answered, passes the running
    * compaction's record to `onProgress`, and resolves with the answer to the `POST` and, in
-   * `waited`, how the wait ended, as {@link CompactWait} describes. A refused or failed request,
-   * a server that restarted and lost the request, and a reading of `/control/status` that was
-   * refused all end the wait with `waited.ok` false, and none of them is thrown. The call rejects
-   * only if its `signal` aborts, during a request or between two readings, or if `onProgress`
-   * throws.
+   * `waited`, how the wait ended, as {@link CompactWait} describes. `waited.ok` is `true` only
+   * where the request succeeded, and a request that was refused, failed or lost, or whose outcome
+   * cannot be read, is returned in `waited`. The call rejects only if its `signal` aborts, during
+   * a request or between two readings, or if `onProgress` throws.
    */
   async compact(options: CompactOptions = {}): Promise<CompactAnswer> {
     const answer = (await this.send('POST', '/control/compact', options)) as CompactAnswer;
@@ -1336,14 +1335,14 @@ export class Control {
       await pause(COMPACT_POLL_S, options.signal);
     }
     const answer = status.compaction.requests.last_answer;
-    if (!answer || !(answer.first <= request && request <= answer.last)) return {ok: false, ended: 'replaced', answer};
+    if (!answer || !(answer.first <= request && request <= answer.last)) return {ok: false, ended: 'unknown', last_answer: answer};
     const ok = answer.outcome === 'compacted' || answer.outcome === 'nothing_to_do';
     const job = status.compaction.last_job;
     if (job && (answer.outcome === 'compacted' || answer.outcome === 'failed')) {
       options.onProgress?.(job);
-      return {ok, ended: 'answered', answer, last_job: job};
+      return {ok, ended: 'answered', last_answer: answer, last_job: job};
     }
-    return {ok, ended: 'answered', answer};
+    return {ok, ended: 'answered', last_answer: answer};
   }
 
   /**

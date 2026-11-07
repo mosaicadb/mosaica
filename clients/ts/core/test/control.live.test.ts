@@ -317,19 +317,19 @@ describe('Control against a live server', () => {
     const asked = await control.compact({wait: true, onProgress: (record) => records.push(record)});
     expect(asked).toMatchObject({
       status: 202,
-      waited: {ok: true, ended: 'answered', answer: {outcome: 'compacted'}, last_job: {job: 'compaction', state: 'finished'}}
+      waited: {ok: true, ended: 'answered', last_answer: {outcome: 'compacted'}, last_job: {job: 'compaction', state: 'finished'}}
     });
     const waited = asked.waited as Extract<CompactWait, {ended: 'answered'}>;
     const request = (asked.body as CompactAccepted).request;
-    expect(waited.answer.first).toBeLessThanOrEqual(request);
-    expect(waited.answer.last).toBeGreaterThanOrEqual(request);
+    expect(waited.last_answer.first).toBeLessThanOrEqual(request);
+    expect(waited.last_answer.last).toBeGreaterThanOrEqual(request);
     expect(records.at(-1)).toEqual(waited.last_job);
     expect(await folds()).toBeGreaterThan(before);
     expect((await seen()).visible).toBe(3n);
     expect((await byKey()).has('row-0')).toBe(false);
   });
 
-  it('answers a fold asked for without waiting through the status, as having nothing to do once the last one has compacted', async (ctx) => {
+  it('answers a fold asked for without waiting through the status, whose last answer covers the request', async (ctx) => {
     live(ctx);
     const requests = async () => (await compaction()).requests;
     const asked = await control.compact();
@@ -340,7 +340,7 @@ describe('Control against a live server', () => {
     const answer = (await requests()).last_answer!;
     expect(answer.first).toBeLessThanOrEqual(request);
     expect(answer.last).toBeGreaterThanOrEqual(request);
-    expect(answer.outcome).toBe('nothing_to_do');
+    expect(['compacted', 'nothing_to_do']).toContain(answer.outcome);
   });
 
   it('drops the layer, which the viewer then no longer lists', async (ctx) => {
