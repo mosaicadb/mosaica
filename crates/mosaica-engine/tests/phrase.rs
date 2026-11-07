@@ -430,7 +430,7 @@ fn built_items(root: &Path) -> (BTreeMap<u32, String>, BTreeMap<u32, u64>) {
 }
 
 fn cache(engine: &Engine) -> CacheStats {
-    engine.text_filter_cache_stats()
+    engine.filter_cache_stats()
 }
 
 /// **A repeated `match` or `phrase` is answered from the cache with the items an evaluation
@@ -641,7 +641,7 @@ fn a_zero_bound_keeps_no_text_filter_and_answers_alike() {
     build_fixture(&root, tmp.path());
     let (items, _) = built_items(&root);
     let engine = engine_over(tmp.path(), &root);
-    engine.set_text_filter_cache_bytes(0);
+    engine.set_filter_cache_bytes(0);
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     for _ in 0..2 {
         assert_eq!(

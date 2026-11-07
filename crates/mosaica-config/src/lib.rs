@@ -360,14 +360,16 @@ struct RawServe {
     ///
     /// Default: `268435456` (256 MiB).
     region_cache_bytes: Option<u64>,
-    /// Bytes of the items each `match` and `phrase` filter matches, kept for reuse by every viewer
-    /// with the same access until the next flush, coalesce or compaction, so panning and zooming
-    /// with a search does not run it again. One entry is a bitmap over a shard's items, about
-    /// 12 MB at 10⁸ items for a phrase that half of them contain. Each request in flight can hold
-    /// one evicted entry beside the bound. `0` keeps none.
+    /// Bytes of the items each filter condition matches, kept for reuse by every viewer with the
+    /// same access until the next flush, coalesce or compaction, so panning and zooming with a
+    /// filter does not run it again. A condition is a `match` or `phrase`, or a range, an `eq` or
+    /// an `in` on a column, each kept apart so a combined filter reuses its parts. One entry is a
+    /// bitmap over a shard's items, about 12 MB at 10⁸ items for a condition half of them match,
+    /// scattered. Each request in flight can hold one evicted entry beside the bound. `0` keeps
+    /// none.
     ///
     /// Default: `268435456` (256 MiB).
-    text_filter_cache_bytes: Option<u64>,
+    filter_cache_bytes: Option<u64>,
     /// The most values one page of `GET /v1/categories/{column}` returns, and the page size of a
     /// request that names none. A larger `limit` is lowered to it.
     ///
@@ -720,7 +722,7 @@ pub struct Config {
     /// An aggregate page's Arrow bytes, before compression.
     pub aggregate_page_bytes: usize,
     pub region_cache_bytes: u64,
-    pub text_filter_cache_bytes: u64,
+    pub filter_cache_bytes: u64,
     /// Add `stage_ns` to a viewport response's trailer; does nothing in a binary built without
     /// `bench-timing`.
     pub stage_timing: bool,
@@ -1197,9 +1199,9 @@ fn parse_serving(text: &str, open: bool) -> Result<Config> {
         region_cache_bytes: serve
             .region_cache_bytes
             .unwrap_or(DEFAULT_REGION_CACHE_BYTES),
-        text_filter_cache_bytes: serve
-            .text_filter_cache_bytes
-            .unwrap_or(mosaica_engine::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES),
+        filter_cache_bytes: serve
+            .filter_cache_bytes
+            .unwrap_or(mosaica_engine::filter_cache::DEFAULT_FILTER_CACHE_BYTES),
         stage_timing: serve.stage_timing.unwrap_or(false),
         request_log: serve.request_log,
         dev_cors_origins,
