@@ -16,12 +16,6 @@ from tqdm.auto import tqdm
 
 from ._refusal import Refusal
 
-#: How far apart, in seconds, two records' step start times may be and still be one step. The
-#: start is `elapsed_s - step_elapsed_s`, and both are taken at one instant in each record, so two
-#: records of one step give the same start to within floating-point rounding.
-SAME_START_S = 1e-6
-
-
 def record(line: str) -> dict | None:
     """The progress record a line of `mosaica build --progress json` carries, or `None` for a
     line that is not one: a record is a JSON object with a `job` key."""
@@ -75,23 +69,12 @@ def shown(progress: Any) -> Sink:
 
 
 def _begins(last: dict | None, one: dict) -> bool:
-    """Whether `one` is the first record of a step that `last` is not of: its job, phase or step
-    differs, or its step began at another time, as a build's step over the next column or a
-    compaction's over the next shard does. The pages of an ingest are one step, begun once."""
+    """Whether `one` is the first record of a step that `last` is not of. A producer gives each
+    step a `step_id` of its own, kept while the step's count or context changes, and a job is
+    one producer's."""
     if last is None:
         return True
-    if (last.get("job"), last.get("phase", {}).get("index"), last.get("step")) != (
-        one.get("job"),
-        one.get("phase", {}).get("index"),
-        one.get("step"),
-    ):
-        return True
-    return abs(_started(one) - _started(last)) > SAME_START_S
-
-
-def _started(one: dict) -> float:
-    """When the record's step began, in seconds after its job began."""
-    return float(one.get("elapsed_s", 0.0)) - float(one.get("step_elapsed_s", 0.0))
+    return (last.get("job"), last.get("step_id")) != (one.get("job"), one.get("step_id"))
 
 
 class _Bar(Sink):

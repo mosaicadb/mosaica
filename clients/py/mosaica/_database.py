@@ -1939,9 +1939,10 @@ class Database:
         - `wait`: `False`, the default, returns `{"request": n}` once the server has accepted the
           request, before the work is done, and `control.compaction_request(n)` says where the
           request is. `True` waits as `Control.await_compaction` does and returns `{"request": n}`
-          with what it returned merged in. It raises `Refusal` saying why where the request did
-          not succeed or its outcome could not be read, with that same dictionary as the
-          refusal's `report` and the HTTP status of a reading that was refused as its `status`.
+          with what it returned merged in. Where its `ok` is false, it raises `Refusal` with the
+          server's `detail`, from the answer or from the reading that ended the wait, that same
+          dictionary as the refusal's `report`, and the HTTP status of that reading as its
+          `status`.
         - `progress`: how the wait shows the compaction's record, as `commit` takes it. The
           default is `True`.
 
@@ -1958,27 +1959,14 @@ class Database:
         if waited["ok"]:
             return result
         read = waited.get("read")
-        if waited["ended"] == "lost":
-            why = f"the server restarted after request {request} was made and lost it. Ask again"
-        elif waited["ended"] == "gone":
-            why = (
-                f"request {request} was answered, and its answer is older than those the server "
-                "keeps"
-            )
-        elif waited["ended"] == "unread":
-            why = (
-                f"request {request} was accepted, and reading its outcome from "
-                f"/control/compact/{request} was refused ({read.status}): {read.detail[:1000]}"
-            )
-        elif waited["answer"]["outcome"] == "refused":
-            answered = waited["answer"]
-            why = f"request {request} was refused at {answered['gate']}: {answered['detail']}"
+        if read is None:
+            why = waited["answer"]["detail"]
         else:
-            step = (waited.get("job") or {}).get("step")
-            why = f"request {request} was answered {waited['answer']['outcome']}" + (
-                f", and the compaction stopped in the step {step}" if step else ""
-            )
-        raise Refusal(f"compact: {why}", result, status=None if read is None else read.status)
+            why = read.body.get("detail") or read.detail[:1000]
+        raise Refusal(
+            f"compact: request {request}: {why}", result,
+            status=None if read is None else read.status,
+        )
 
     def drop_layer(self, name: str, wait: bool = False) -> dict:
         """Remove an annotation layer or a label set, and return the server's answer.

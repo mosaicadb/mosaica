@@ -38,6 +38,7 @@ durable, and what it wrote can be read after the next publication.
 from __future__ import annotations
 
 import datetime
+import itertools
 import json
 import numbers
 import time
@@ -1297,6 +1298,13 @@ INGEST_PHASES = ["Sending", "Waiting for publication"]
 PAGES = "pages"
 PUBLICATION = "publication"
 
+#: The `step_id` of each ingest step this process begins, one more for each.
+_STEP_IDS = itertools.count(1)
+
+#: A step younger than this has no `rate`, because its first pages measure start-up rather than
+#: throughput.
+RATE_SETTLE_S = 2.0
+
 
 def run(
     control: Control,
@@ -1317,26 +1325,32 @@ def run(
     `show` is given the commit's ingest record before each page is sent, when the pages end, when
     the wait begins and when the commit ends. The step `pages` counts the rows of each page
     answered out of the rows of every page in the plan, and its context names the page among the
-    plan's. The last record is `finished` where the report is ok and `failed` where it is not,
-    which includes a refused page, a page no server answered, a finding on the closing flush and
-    a refused flush. An empty plan sends nothing and makes no record.
+    plan's pages that carry rows, as `mosaica insert` names its pages. The last record is
+    `finished` where the report is ok and `failed` where it is not, which includes a refused
+    page, a page no server answered, a finding on the closing flush and a refused flush. An empty
+    plan sends nothing and makes no record.
     """
     if not pages:
         return []
     began = time.monotonic()
     rows = sum(page.rows for page in pages)
+    carrying = sum(1 for page in pages if page.rows)
     sent = 0
-    # The open step: its phase, its name, when it began, its context and whether it counts rows.
-    step: tuple = (0, PAGES, began, None, True)
+    # The open step: its phase, its name, when it began, its id, its context and whether it
+    # counts rows.
+    step: tuple = (0, PAGES, began, next(_STEP_IDS), None, True)
 
     def record(state: str = "running") -> dict:
-        at, name, step_began, context, counted = step
-        return _ingest_record(began, at, name, step_began, context,
+        at, name, step_began, step_id, context, counted = step
+        return _ingest_record(began, at, name, step_began, step_id, context,
                               (sent, rows) if counted else None, state)
 
     accepted = []
-    for at, page in enumerate(pages):
-        step = (0, PAGES, began, _page_context(at, len(pages)), True)
+    numbered = 0
+    for page in pages:
+        if page.rows:
+            step = step[:4] + (_page_context(numbered, carrying), True)
+            numbered += 1
         show(record())
         answer = _send(control, page, strict)
         _fold(report, page, answer)
@@ -1349,7 +1363,7 @@ def run(
             accepted.append(page)
     show(record())
     if accepted:
-        step = (1, PUBLICATION, time.monotonic(), None, False)
+        step = (1, PUBLICATION, time.monotonic(), next(_STEP_IDS), None, False)
         show(record())
         _waited(report, control.flush(wait=True))
     show(record("finished" if report.ok else "failed"))
@@ -1361,23 +1375,34 @@ def _ingest_record(
     phase: int,
     step: str,
     step_began: float,
+    step_id: int,
     context: str | None,
     counted: tuple[int, int] | None,
     state: str,
 ) -> dict:
     """The ingest record of a commit that began at `began`, in the shape of `/control/status`'s
-    records, with `counted` the rows sent and the rows planned where the step counts rows."""
+    records, with `counted` the rows sent and the rows planned where the step counts rows.
+
+    `rate` is the step's average since it began, from two seconds in, and `eta_s` the time
+    `rate` takes to send the rest.
+    """
     now = time.monotonic()
     one: dict = {
         "job": "ingest",
         "state": state,
         "phase": {"index": phase + 1, "of": len(INGEST_PHASES), "name": INGEST_PHASES[phase]},
         "step": step,
+        "step_id": step_id,
     }
     if context is not None:
         one["context"] = context
     if counted is not None:
-        one.update(done=counted[0], total=counted[1], unit="rows")
+        done, total = counted
+        one.update(done=done, total=total, unit="rows")
+        if now - step_began >= RATE_SETTLE_S:
+            one["rate"] = done / (now - step_began)
+            if one["rate"] > 0:
+                one["eta_s"] = max(total - done, 0) / one["rate"]
     one.update(elapsed_s=now - began, step_elapsed_s=now - step_began,
                rss_bytes=_resident_bytes())
     return one

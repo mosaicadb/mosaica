@@ -651,7 +651,7 @@ export type JobState = 'running' | 'finished' | 'failed';
  *
  * @category Control plane
  */
-export type ProgressUnit = 'items' | 'rows' | 'pairs' | 'terms' | 'bytes' | 'pages';
+export type ProgressUnit = 'items' | 'rows' | 'pairs' | 'terms' | 'bytes';
 
 /**
  * A phase of a job: its position among the job's phases, counted from 1, and its name.
@@ -684,7 +684,13 @@ export type Progress = {
   phase: ProgressPhase;
   /** The step's stable name, such as `postings` for a compaction or `rows` for a flush. */
   step: string;
-  /** Which part of the step is running, such as `shard 3`. Absent when the step has one part. */
+  /**
+   * Which step this is. It stays the same while the step's count or context changes, and no other
+   * step begun in the same process has it, so a record whose `step_id` differs from the last one
+   * read begins a new step.
+   */
+  step_id: number;
+  /** Which part of the step is running, such as `shard 3`. Absent when the step has one part with no name of its own. */
   context?: string;
   /** How much of the step is done, in `unit`. Absent, with `total` and `unit`, for a step that counts nothing. */
   done?: number;
@@ -807,7 +813,7 @@ export type CompactAccepted = {
  *   and the request was lost with it. Ask again.
  * - `gone`: a reading was answered `410`, because the server no longer keeps the request's answer.
  * - `unread`: a reading was refused with any other status, such as `403` for a credential without
- *   `admin`.
+ *   `admin`, or `503` for a request still pending when the server stopped applying writes.
  *
  * In the last three, `read` is the reading that ended the wait.
  *

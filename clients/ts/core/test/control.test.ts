@@ -372,6 +372,7 @@ describe('waiting for a compaction', () => {
     state: 'running',
     phase: {index: 2, of: 4, name: 'Indexing records'},
     step: 'postings',
+    step_id: 11,
     context: 'shard 0',
     done: 1200,
     total: 4000,
@@ -385,12 +386,13 @@ describe('waiting for a compaction', () => {
     state: 'finished',
     phase: {index: 4, of: 4, name: 'Publishing'},
     step: 'reclaim',
+    step_id: 23,
     context: 'shard 0',
     elapsed_s: 9,
     step_elapsed_s: 0.5,
     rss_bytes: 1 << 30
   };
-  const FAILED: Progress = {...RUNNING, state: 'failed', phase: {index: 3, of: 4, name: 'Verifying'}, step: 'digests', unit: 'bytes'};
+  const FAILED: Progress = {...RUNNING, state: 'failed', phase: {index: 3, of: 4, name: 'Verifying'}, step: 'digests', step_id: 17, unit: 'bytes'};
 
   const succeeded = (outcome: 'compacted' | 'nothing_to_do'): CompactionAnswer => ({
     first: REQUEST - 1,

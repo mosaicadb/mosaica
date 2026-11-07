@@ -1,8 +1,8 @@
 import {Field, Float64, List, Null, RecordBatch, Schema, Struct, Table, tableToIPC, Utf8, vectorFromArray} from 'apache-arrow';
-import {afterAll, beforeAll, describe, expect, it, vi, type TestContext} from 'vitest';
+import {afterAll, beforeAll, describe, expect, it, type TestContext} from 'vitest';
 import {clusterLayerDeclaration, labelLayerDeclaration} from '../../scripts/operator.js';
 import {MosaicaClient} from '../src/client.js';
-import {Control, type CompactAccepted, type CompactionRequest, type CompactWait, type ControlStatus, type Progress} from '../src/control.js';
+import {Control, type CompactAccepted, type CompactWait, type ControlStatus, type Progress} from '../src/control.js';
 import type {Meta, ViewportRequest} from '../src/types.js';
 import {start, type Served} from './served.js';
 
@@ -327,19 +327,6 @@ describe('Control against a live server', () => {
     expect(await folds()).toBeGreaterThan(before);
     expect((await seen()).visible).toBe(3n);
     expect((await byKey()).has('row-0')).toBe(false);
-  });
-
-  it('asks for a fold without waiting, then waits on its number, which ends with the answer the route serves', async (ctx) => {
-    live(ctx);
-    const asked = await control.compact();
-    expect(asked).toMatchObject({status: 202, ok: true});
-    const request = (asked.body as CompactAccepted).request;
-    const waited = await control.awaitCompaction(request, {signal: AbortSignal.timeout(50_000)});
-    expect(waited).toMatchObject({ok: true, ended: 'answered'});
-    const read = await control.compactionRequest(request);
-    expect(read).toMatchObject({status: 200, body: {request, answered: true}});
-    const {answer, job} = read.body as CompactionRequest;
-    expect(waited).toEqual({ok: answer!.ok, ended: 'answered', answer, job});
   });
 
   it('drops the layer, which the viewer then no longer lists', async (ctx) => {

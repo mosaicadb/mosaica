@@ -480,8 +480,8 @@ class Control:
           made. `read` is that `Answer`. Ask again.
         - `gone`: the route answered `410`, because the answer is older than those the server
           keeps. `read` is that `Answer`.
-        - `unread`: the route answered another status outside the 200s, and `read` is that
-          `Answer`.
+        - `unread`: the route answered another status outside the 200s, such as `503` once the
+          server's write executor has stopped, and `read` is that `Answer`.
         """
         ended = {404: "lost", 410: "gone"}
         with _progress.shown(progress) as show:
