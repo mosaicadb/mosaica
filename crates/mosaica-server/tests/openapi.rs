@@ -2498,10 +2498,10 @@ async fn every_described_route_requires_its_planes_credential() {
         "/session/authorise and /session/revoke are the session plane's"
     );
     assert_eq!(
-        control_plane, 41,
-        "the control plane's operations are ingest, changes, status, flush, compact, \
-         the attribute, shard size, vocabulary, value-page, view group and plain view \
-         declarations, a group view's create and drop, a layer's registration and drop, an \
+        control_plane, 42,
+        "the control plane's operations are ingest, changes, status, flush, compact, a compaction \
+         request's read, the attribute, shard size, vocabulary, value-page, view group and plain \
+         view declarations, a group view's create and drop, a layer's registration and drop, an \
          artifact publication and growth, and the catalogue's 24 verbs"
     );
 }

@@ -518,13 +518,13 @@ mosaica compact [OPTIONS] --control <ADDRESS>
 
 Ask for a compaction through `POST /control/compact`, and print the server's answer, the request's number in `request`.
 
-A compaction removes deleted items' rows from disc, one shard after another, and runs for minutes to hours on a large corpus. `mosaica status` reports it under `compaction.requests`, where `answered` reaches the request's number once it is answered, and the running compaction's progress record under `jobs`. Needs `write`, and with `--wait` also `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
+A compaction removes deleted items' rows from disc, one shard after another, and runs for minutes to hours on a large corpus. `GET /control/compact/{request}` says whether the request is answered, how, and with the progress record of its compaction, which `--wait` reads. Needs `write`, and with `--wait` also `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
-| `--wait` |  |  | Wait until the request is answered, reading `/control/status` once a second. It exits 1 unless the server answers the request as compacted or as having nothing to compact, which `compaction.requests.last_answer` states; when the server restarted after the request and so lost it; and when a later request's answer has replaced its outcome before it was read. |
-| `--progress` | `MODE` | `auto` | Show the progress of the compaction in flight while `--wait` waits, on stderr, from the record `/control/status` serves under `jobs`: its phase, its step and the shard, the step's count, rate and time remaining, the time elapsed and the server's resident memory. The modes are `mosaica build --progress`'s. Where the request was answered as compacted or failed, each mode ends with the last compaction's record as `compaction.last_job` serves it, its state `finished` or `failed`. |
+| `--wait` |  |  | Wait until the request is answered, reading `GET /control/compact/{request}` once a second. It exits 1 when the server refused the request, when a compaction for it failed, and when the server restarted after the request was made and so lost it. |
+| `--progress` | `MODE` | `auto` | Show the progress of the compaction in flight while `--wait` waits, on stderr, from the record `GET /control/compact/{request}` serves: its phase, its step and the shard, the step's count, rate and time remaining, the time elapsed and the server's resident memory. The modes are `mosaica build --progress`'s. Where a compaction ran for the request, each mode ends with that compaction's last record as the route serves it, its state `finished` or `failed`. |
 
 ## `mosaica status`
 
