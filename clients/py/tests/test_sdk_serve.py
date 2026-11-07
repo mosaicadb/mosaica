@@ -688,3 +688,76 @@ def test_a_copy_inside_the_database_it_copies_is_refused(tmp_path):
         assert not (tmp_path / "db" / "copies").exists()
     finally:
         db.close()
+
+
+def committed(path=None, port=None):
+    """A database of two items, committed and so served."""
+    import pyarrow as pa
+
+    import mosaica as td
+    from conftest import binary
+
+    binary()
+    db = td.create(path, port=port)
+    db.declare_view("map", extent={"x": [0, 10], "y": [0, 10]})
+    rows = pa.table({"x": [1.0, 2.0], "y": [1.0, 2.0], "access": [["public"], ["public"]]})
+    db.insert("map", rows, x="x", y="y", access="access")
+    db.commit()
+    return db
+
+
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def test_the_planes_share_one_port_from_9141_up_and_the_address_is_printed(capsys):
+    first, second = committed(), committed()
+    try:
+        output = capsys.readouterr().out
+        ports = set()
+        for db in (first, second):
+            listening = db.listening
+            assert listening.viewer == listening.session == listening.control
+            host, port = listening.viewer.rsplit(":", 1)
+            assert host == "127.0.0.1"
+            assert _instance.PORT <= int(port) <= _instance.PORT + _instance.PORT_RETRIES
+            assert db.viewer_url in output
+            assert db.view("map").count() == 2
+            ports.add(port)
+        assert len(ports) == 2
+    finally:
+        first.close()
+        second.close()
+
+
+def test_a_stated_port_is_served_exactly_kept_and_changed_by_open(tmp_path):
+    import mosaica as td
+
+    port = free_port()
+    db = committed(tmp_path / "db", port=port)
+    assert db.listening.viewer == f"127.0.0.1:{port}"
+    with pytest.raises(Refusal):
+        committed(tmp_path / "taken", port=port)
+    db.close()
+
+    reopened = td.open(tmp_path / "db")
+    assert reopened.serve().viewer == f"127.0.0.1:{port}"
+    reopened.close()
+
+    moved = free_port()
+    changed = td.open(tmp_path / "db", port=moved)
+    assert changed.serve().viewer == f"127.0.0.1:{moved}"
+    assert changed.view("map").count() == 2
+    changed.close()
+
+
+def test_a_port_that_is_not_a_port_number_is_refused(tmp_path):
+    import mosaica as td
+
+    for port in (-1, 65536, "9141", 1.5, True):
+        with pytest.raises(Refusal):
+            td.create(tmp_path / str(port), port=port)

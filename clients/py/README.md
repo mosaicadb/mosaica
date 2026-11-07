@@ -100,7 +100,8 @@ db.check()                                         # what the declaration reads,
 db.commit()                                        # mosaica check, mosaica build, mosaica serve
 ```
 
-No call prints. Each returns a report that shows as a short summary of what happened, in numbers,
+Only starting the server prints, one line naming the address it serves at. Every other call
+returns a report that shows as a short summary of what happened, in numbers,
 with every refusal and finding in full; a notebook cell that ends in one shows it. The detail is
 on the report's attributes: an insert's `read` and `ignored` columns, a check's or a first
 commit's `findings` and `log` (the declaration check's and the build's text), a later commit's
@@ -115,6 +116,14 @@ the extension adds is a refusal naming the block it is about. Every block names 
 and the column names its inserts gave it. The directory is everything the binary reads, so
 `db.save("~/somewhere")` and `mosaica serve --deployment ~/somewhere/mosaica.toml` on another
 machine serve the same database.
+
+The server listens on this machine only, and its viewer, session and control planes share one
+port: 9141, or the next free port above it while 9141 is taken. `mosaica.create(port=9200)` states
+another, which the database keeps and `mosaica.open(path, port=...)` changes, and `port=0` lets
+the system choose. A stated port that is taken is refused rather than moved. The notebook's map
+reads from the viewer plane in the browser, so with the kernel on another machine, forward that
+port to the same port on yours, as `ssh -L 9141:127.0.0.1:9141 host` does. A deployment written
+by hand can give the session and control planes addresses of their own.
 
 `declare_view_group` is the group surface: its views and their metadata come from
 `insert(group, roster=table, key=, **metadata_columns)`, and its rows from one of the two

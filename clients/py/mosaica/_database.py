@@ -102,11 +102,15 @@ class Database:
     - `pending`: the `Insert` records made since the last commit, which the next commit sends.
     - `listening`: the addresses the server listens on, as `serve()` returns them, or `None`
       while the server is not running.
+    - `port`: the port stated at `create()` or `open()`, or `None` when none was.
     """
 
-    def __init__(self, path: Path, temporary: bool = False) -> None:
+    def __init__(self, path: Path, temporary: bool = False, port: int | None = None) -> None:
         self.path = Path(path)
         self.temporary = temporary
+        #: The port stated at `create()` or `open()`, or `None` to keep the one `mosaica.toml`
+        #: names.
+        self.port = port
         # The server and a temporary directory, released by `close()` or once this is unreferenced.
         self._held = _instance.Held(self.path, temporary)
         weakref.finalize(self, _instance.release, self._held)
@@ -1269,7 +1273,7 @@ class Database:
         self._refuse_when_closed()
         document = self._document()
         (self.path / "schema.toml").write_text(dumps(document), encoding="utf-8")
-        _instance.write_deployment(self.path)
+        _instance.write_deployment(self.path, self.port)
         _instance.secrets_for(self.path)
         self._loaded_text = None
         return document
@@ -1991,15 +1995,28 @@ class Database:
             )
 
     def serve(self) -> _instance.Listening:
-        """Start the database's server if it is not running, and return the addresses it listens on.
+        """Start the database's server if it is not running, print the address it serves at, and
+        return the addresses it listens on.
 
-        Reads and later commits call this themselves.
+        Reads and later commits call this themselves. The server listens on this machine only, on
+        the port stated at `create()` or `open()`, or else on the one its `mosaica.toml` names.
+        To see the map from another machine, forward that port to the same port there, as
+        `ssh -L 9141:127.0.0.1:9141 host` does for 9141.
         """
         if self._held.child is not None:
             return self.listening
         self._refuse_when_closed()
         binary, _ = _instance.find_binary()
+        if self.port is not None:
+            _instance.state_port(self.path, self.port)
         self._held.child, self.listening = _instance.start(binary, self.path / "mosaica.toml")
+        print(f"mosaica: serving {self.path} at {self.viewer_url}")
+        others = {self.listening.session, self.listening.control} - {self.listening.viewer}
+        if others:
+            print(
+                f"mosaica: sessions at {self.listening.session}, control at "
+                f"{self.listening.control}"
+            )
         return self.listening
 
     @property
@@ -2245,7 +2262,9 @@ _BUILT = re.compile(
 # ---------------------------------------------------------------------- create and open
 
 
-def create(path: str | os.PathLike | None = None, replace: bool = False) -> Database:
+def create(
+    path: str | os.PathLike | None = None, replace: bool = False, port: int | None = None
+) -> Database:
     """Make a new, empty database in a directory, and return it as a `Database`.
 
     - `path`: the directory, which must be empty or not yet exist. Without it the database goes in a
@@ -2253,15 +2272,20 @@ def create(path: str | os.PathLike | None = None, replace: bool = False) -> Data
       deleted as `close()` describes.
     - `replace`: `True` deletes a Mosaica database already at `path` first. A non-empty directory
       that is not a Mosaica database is refused either way.
+    - `port`: the port its server listens on, on this machine only, and the database keeps it.
+      A taken port is refused when the server starts, and `0` lets the system choose a free one.
+      `None`, the default, serves on 9141, or on the next free port above it when 9141 is taken.
+      The server prints the address it serves at when it starts.
 
     ```
     db = mosaica.create()
-    db = mosaica.create("~/maps/papers", replace=True)
+    db = mosaica.create("~/maps/papers", replace=True, port=9200)
     ```
     """
+    _instance.checked_port(port)
     if path is None:
         directory = _instance.make_temporary(RAM_BACKED if RAM_BACKED.is_dir() else None)
-        database = Database(directory, temporary=True)
+        database = Database(directory, temporary=True, port=port)
     else:
         directory = Path(path).expanduser()
         if directory.exists() and any(directory.iterdir()):
@@ -2278,13 +2302,13 @@ def create(path: str | os.PathLike | None = None, replace: bool = False) -> Data
                 )
             shutil.rmtree(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        database = Database(directory)
+        database = Database(directory, port=port)
     (database.path / "sources").mkdir(parents=True, exist_ok=True)
     (database.path / ".mosaica").mkdir(parents=True, exist_ok=True)
     return database
 
 
-def open(path: str | os.PathLike) -> Database:  # noqa: A001
+def open(path: str | os.PathLike, port: int | None = None) -> Database:  # noqa: A001
     """Reopen a database kept in a directory, and return it as a `Database`.
 
     A committed database reopens ready to read, and its next commit adds to it. A database saved
@@ -2292,6 +2316,8 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
 
     - `path`: the database's directory, which holds its `mosaica.toml`, or before its first
       commit the package's own record of it.
+    - `port`: the port its server listens on from now on, as `create()` describes. `None`, the
+      default, keeps the one the database was served on.
 
     A temporary directory that a crashed process left behind opens too, unless another live
     process has it open. The next `create()` removes it once you close it, so call `save(path)`
@@ -2300,6 +2326,7 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
         db = mosaica.open("~/maps/papers")
         db.view("papers").count()
     """
+    _instance.checked_port(port)
     directory = Path(path).expanduser()
     state = directory / ".mosaica" / "declaration.json"
     if not (directory / "mosaica.toml").exists() and not state.exists():
@@ -2314,7 +2341,7 @@ def open(path: str | os.PathLike) -> Database:  # noqa: A001
                 f"database. create() makes a new one"
             ) from None
     _instance.hold(directory)
-    database = Database(directory)
+    database = Database(directory, port=port)
     if held is not None:
         _load(database, held)
     elif (directory / "schema.toml").exists():

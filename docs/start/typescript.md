@@ -63,10 +63,10 @@ mosaica serve
 ```
 ...
 2026-10-25T14:08:28.958802Z  WARN mosaica_server: serve.open is set: this server is open to this machine, and every request, with or without a credential, sees and may change everything
-{"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9142","control":"127.0.0.1:9143"}
+{"event":"listening","viewer":"127.0.0.1:9141","session":"127.0.0.1:9141","control":"127.0.0.1:9141"}
 ```
 
-The `WARN` line is the server confirming `open = true`, and the line of JSON says it is ready. Besides the viewer address, that line lists the session and control addresses, which a server with users relies on and this tutorial doesn't need.
+The `WARN` line is the server confirming `open = true`, and the line of JSON says it is ready. Besides the viewer address, that line lists the session and control addresses, which a server with users relies on and this tutorial doesn't need. With no address of their own in `mosaica.toml`, they share the viewer's.
 
 ## Make a web project
 

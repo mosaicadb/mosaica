@@ -199,7 +199,9 @@ fn each_default_the_reference_states_is_the_one_parse_applies() {
 }
 
 /// The keys whose default the page states in words, each checked by the test below.
-const WORDED: [&str; 6] = [
+const WORDED: [&str; 8] = [
+    "serve.session",
+    "serve.control",
     "serve.compute_threads",
     "serve.compute_admission",
     "serve.compute_queue",
@@ -239,6 +241,9 @@ fn each_default_stated_in_words_is_the_one_parse_applies() {
     );
 
     let config = parse(MINIMAL).expect("the minimal file parses");
+    // `None` is served on the viewer's listener (`mosaica_server::bind`).
+    assert!(config.session_addr.is_none(), "session");
+    assert!(config.control_listen.is_none(), "control");
     let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     assert_eq!(config.compute_threads, cpus, "compute_threads");
     assert_eq!(config.compute_admission, 4 * cpus, "compute_admission");
