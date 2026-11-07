@@ -903,16 +903,12 @@ fn collect_bindings(
     Ok(bindings)
 }
 
-/// `--file NAME=PATH`. Split at the **first** `=` so a path may contain one.
-/// Prints one line per pipeline stage as it completes, for `--stage-timings`.
+/// The build's observer: a line per pipeline stage as it completes, for `--stage-timings`, the
+/// records of `--stage-timings-json` and the progress of `--progress`.
 ///
 /// **Peak RSS is the process's high-water at the moment the stage ended**, not the stage's own —
 /// it only ever rises, so a stage that adds nothing repeats the last figure. What it locates is
 /// the stage the peak arrived in, which is the question `--memory-budget` is answered against.
-///
-/// **One observer for every sink**, rather than a second observer for `--stage-timings-json` or
-/// `--progress`: the pipeline takes one, and a wrapper that fanned out to several would have to
-/// re-sample nothing but still be a second place a stage could be dropped from.
 struct StageTimings {
     /// Print a line per stage — `--stage-timings`. Off when only the JSON path was asked for.
     print: bool,
@@ -966,6 +962,7 @@ impl mosaica_build::observer::BuildObserver for StageTimings {
     }
 }
 
+/// `--file NAME=PATH`. Split at the **first** `=` so a path may contain one.
 fn parse_file_binding(raw: &str) -> Result<(String, PathBuf), String> {
     let (key, path) = raw.split_once('=').ok_or_else(|| {
         format!(
@@ -1439,17 +1436,17 @@ fn main() -> ExitCode {
             let build = || mosaica_build::build_framed(&args, &framings, &observer);
             let built = match &observer.progress {
                 Some(feed) => progress::show(feed, build),
-                None => build(),
+                None => std::panic::catch_unwind(std::panic::AssertUnwindSafe(build)),
             };
-            // Written whether the build succeeded or failed: a build that died in `layers` is
-            // exactly the one whose per-stage record is worth having, and the records collected
-            // before the failure are as true as any other.
+            // Written whether the build succeeded, failed or panicked: a build that died in
+            // `layers` is exactly the one whose per-stage record is worth having, and the records
+            // collected before the failure are as true as any other.
             if let (Some(path), Some(json)) = (&stage_timings_json, &observer.json) {
                 if let Err(e) = json.write(path) {
                     eprintln!("stage timings: writing {}: {e}", path.display());
                 }
             }
-            match built {
+            match built.unwrap_or_else(|panic| std::panic::resume_unwind(panic)) {
                 Ok(report) => {
                     // **The other half of the frame report**, and the half the clamp count
                     // cannot see: data far too small for its frame clamps nothing, and every

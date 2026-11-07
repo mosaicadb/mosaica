@@ -58,6 +58,7 @@ impl Renderer {
     pub(crate) fn interval(&self) -> Duration {
         match self.mode {
             Mode::Bar => BAR_EVERY,
+            Mode::Plain => PLAIN_EVERY,
             _ => JSON_EVERY,
         }
     }
@@ -82,7 +83,8 @@ impl Renderer {
     pub(crate) fn tick(&mut self, progress: &Progress) {
         let since = self.printed.map(|at| at.elapsed());
         let due = match self.mode {
-            Mode::Plain => since.is_none_or(|s| s >= PLAIN_EVERY),
+            // Ticked every 30 s, so a tick soon after a step's line is the one left out.
+            Mode::Plain => since.is_none_or(|s| s >= PLAIN_EVERY / 2),
             Mode::Json => since.is_none_or(|s| s >= JSON_EVERY),
             Mode::Bar => since.is_none_or(|s| s >= BAR_EVERY / 2),
             Mode::Auto | Mode::None => false,
@@ -294,8 +296,12 @@ impl Feed {
 
 /// Run `job` on this thread while another gives `feed`'s renderer a snapshot at its interval,
 /// then mark the job finished or failed by what `job` returned, or failed where it panicked, and
-/// print its last snapshot.
-pub(crate) fn show<T, E>(feed: &Feed, job: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+/// print its last snapshot. A panic is returned for the caller to resume once it has done what a
+/// failed job still owes.
+pub(crate) fn show<T, E>(
+    feed: &Feed,
+    job: impl FnOnce() -> Result<T, E>,
+) -> std::thread::Result<Result<T, E>> {
     let interval = feed
         .renderer
         .lock()
@@ -321,5 +327,5 @@ pub(crate) fn show<T, E>(feed: &Feed, job: impl FnOnce() -> Result<T, E>) -> Res
         false => JobState::Failed,
     });
     feed.with(Renderer::finish);
-    outcome.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    outcome
 }

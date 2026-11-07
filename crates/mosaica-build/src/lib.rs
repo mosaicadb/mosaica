@@ -1042,9 +1042,9 @@ fn shared_access_source<'a>(
 /// The rows the reading stages read, from the footers of the files they read them from.
 pub(crate) struct SourceRows {
     /// Every view's points.
-    pub views: u64,
+    pub(crate) views: u64,
     /// What [`scan_access`] reads: the shared access relation, or the views' points.
-    pub access: u64,
+    pub(crate) access: u64,
 }
 
 impl SourceRows {

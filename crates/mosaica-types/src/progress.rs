@@ -7,8 +7,7 @@
 //!
 //! The only estimate a snapshot carries is `eta_s`, which is the step's remaining count divided by
 //! the rate measured over the last [`RATE_WINDOW`]. A step with no total, such as a sort, has no
-//! `eta_s`, and neither does the job as a whole, because the steps scale differently and an
-//! estimate across them would be a model rather than a measurement.
+//! `eta_s`, and the job as a whole has none.
 //!
 //! `docs/dev/progress.md` describes the record and every surface that serves it.
 

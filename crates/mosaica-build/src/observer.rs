@@ -286,12 +286,13 @@ impl<'a> StageTimer<'a> {
     pub(crate) fn end(&mut self, stage: BuildStage, rows: u64) {
         debug_assert_eq!(self.open.take(), Some(stage), "{stage:?} ended unopened");
         crate::trim_heap();
+        let now = std::time::Instant::now();
         self.observer
-            .stage_end(stage, self.start.elapsed(), rows, peak_rss_kib());
+            .stage_end(stage, now - self.start, rows, peak_rss_kib());
         if self.steps.live.is_some() {
             self.observer.step_ended();
         }
-        self.start = std::time::Instant::now();
+        self.start = now;
     }
 
     /// Report a stage whose duration was measured **inside** the open block, and charge it to
@@ -370,11 +371,6 @@ impl<'a> Steps<'a> {
             live: observer.progress().map(|tracker| (tracker, observer)),
             within: [None; 2],
         }
-    }
-
-    /// Whether there is a tracker, so that a total that costs work to find is found only for one.
-    pub(crate) fn live(self) -> bool {
-        self.live.is_some()
     }
 
     /// These steps, every step opened from them a step of `part`.

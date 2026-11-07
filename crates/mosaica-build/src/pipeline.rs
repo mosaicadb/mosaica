@@ -970,14 +970,14 @@ fn build_bundle(
     timer.end(BuildStage::SourceIds, n);
     timer.begin(BuildStage::Dictionary, &[], None);
     // What the reading stages count, from the files' footers, read only for a reader.
-    let source_rows = match steps.live() {
-        true => Some(crate::SourceRows::of(args, &numbering)?),
-        false => None,
-    };
+    let mut source_rows = None;
+    steps.count(Unit::Rows, || {
+        let rows = crate::SourceRows::of(args, &numbering)?;
+        let access = rows.access;
+        source_rows = Some(rows);
+        Ok(access)
+    })?;
     let rows_of = |rows: fn(&crate::SourceRows) -> u64| source_rows.as_ref().map(rows);
-    if let Some(rows) = rows_of(|rows| rows.access) {
-        steps.count(Unit::Rows, || Ok(rows))?;
-    }
     // The shards the items fill, in allocation order. Everything up to the
     // assignment walk is global; everything after it that writes entity space writes each
     // shard's files at its own ids.
@@ -3266,8 +3266,6 @@ fn write_scoped_column(
     let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
     let written = write_column_values(
         &column_dir,
-        &values_path,
-        &presence_path,
         attribute,
         values,
         // **A group-scoped family is not routed** ([`may_take_extents`]): its columns are this
@@ -3312,9 +3310,9 @@ struct Indexed {
 /// What a group-scoped family's indexed columns cost inside the attribute tail, by the stage each
 /// is charged to.
 #[derive(Default)]
-pub(crate) struct ScopedIndexCost {
-    pub(crate) filter: IndexCost,
-    pub(crate) text: IndexCost,
+struct ScopedIndexCost {
+    filter: IndexCost,
+    text: IndexCost,
 }
 
 /// One view's column of a group-scoped `text` family, its prose as a record blob under
@@ -3604,13 +3602,13 @@ pub(crate) fn write_filter_postings(
 /// a plan bounds the transient one column's pass holds, and both are a function of the machine
 /// rather than of which column is indexed.
 #[derive(Clone, Copy)]
-pub(crate) struct ColumnPlans {
+struct ColumnPlans {
     text: TextIndexPlan,
     keyword: KeywordDictPlan,
 }
 
 impl ColumnPlans {
-    pub(crate) fn for_budget(memory_budget: u64) -> Self {
+    fn for_budget(memory_budget: u64) -> Self {
         ColumnPlans {
             text: TextIndexPlan::for_budget(memory_budget),
             keyword: KeywordDictPlan::for_budget(memory_budget),
@@ -3717,8 +3715,6 @@ fn write_filter_postings_banded(
         );
         let written = write_column_values(
             &column_dir,
-            &values_path,
-            &presence_path,
             attribute,
             values,
             extents,
@@ -4202,17 +4198,19 @@ struct WrittenColumn {
 /// are positions in *this* base's dictionary and mean nothing against any extent's. Nothing
 /// downstream may assume otherwise — which is what keeps a durable manufactured identity, and the
 /// reuse hazard that comes with one, out of the family.
-#[allow(clippy::too_many_arguments)]
+///
+/// The values file is `column_dir`'s [`mosaica_filter::VALUES_FILE`] and the presence bitmap its
+/// [`mosaica_filter::PRESENCE_FILE`].
 fn write_column_values(
     column_dir: &Path,
-    values_path: &Path,
-    presence_path: &Path,
     attribute: &crate::config::Attribute,
     values: &EntityColumn,
     extents: Option<&crate::extents::OpenExtents>,
     keyword_plan: KeywordDictPlan,
     steps: Steps<'_>,
 ) -> Result<WrittenColumn> {
+    let values_path = &column_dir.join(mosaica_filter::VALUES_FILE);
+    let presence_path = &column_dir.join(mosaica_filter::PRESENCE_FILE);
     let mut presence = Presence::default();
     let mut dict = None;
     // The entities the pass over the values has reached, all of them once it ends.
@@ -7448,8 +7446,6 @@ mod tests {
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
             let written = write_column_values(
                 column_dir,
-                &values_path,
-                &presence_path,
                 &attribute,
                 values,
                 extents,
@@ -7508,8 +7504,6 @@ mod tests {
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
             let written = write_column_values(
                 &column_dir,
-                &values_path,
-                &presence_path,
                 &attribute,
                 &values,
                 None,
@@ -7567,8 +7561,6 @@ mod tests {
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
             write_column_values(
                 &column_dir,
-                &values_path,
-                &presence_path,
                 &attribute,
                 &values,
                 None,
