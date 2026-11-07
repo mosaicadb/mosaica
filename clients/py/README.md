@@ -122,8 +122,11 @@ port: 9141, or the next free port above it while 9141 is taken. `mosaica.create(
 another, which the database keeps and `mosaica.open(path, port=...)` changes, and `port=0` lets
 the system choose. A stated port that is taken is refused rather than moved. The notebook's map
 reads from the viewer plane in the browser, so with the kernel on another machine, forward that
-port to the same port on yours, as `ssh -L 9141:127.0.0.1:9141 host` does. A deployment written
-by hand can give the session and control planes addresses of their own.
+port to the same port on yours, as `ssh -L 9141:127.0.0.1:9141 host` does. Where the browser
+reaches the server at another address, through a tunnel to another local port or a proxy, give
+the map that address: `mosaica.Map("http://127.0.0.1:9200", token=db.token())`. The kernel's own
+requests keep the address the server announced. A deployment written by hand can give the
+session and control planes addresses of their own.
 
 `declare_view_group` is the group surface: its views and their metadata come from
 `insert(group, roster=table, key=, **metadata_columns)`, and its rows from one of the two
