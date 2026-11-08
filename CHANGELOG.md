@@ -12,65 +12,85 @@ container image.
 
 ### Changed
 
-- **Bundle format 52.** Bundles built by 0.2.0 must be rebuilt, and writes made to a 0.2.0
-  service, including deletions and suppressions, are not carried over.
-- **The filter cache covers column filters.** Ranges, `eq` and `in` are kept between requests as
-  `match` and `phrase` already were. `serve.text_filter_cache_bytes` is renamed
-  `serve.filter_cache_bytes`, and the status field `text_filter_cache` is renamed `filter_cache`.
-- **Compaction requests are read one at a time** through the new
-  `GET /control/compact/{request}`, which replaces `compaction.requests.last_refusal` in
-  `/control/status`.
-- **The session and control planes share the viewer's port** unless `[serve]` gives them their
-  own address.
-- **The Python client serves on port 9141** by default and prints its address. `create()` and
-  `open()` take `port=`. The package now depends on `tqdm`.
-- **Faster filters, histograms, builds and start-up.**
+- **Breaking:** bundles built by 0.2.0 must be rebuilt, because the bundle format is now 52.
+  Writes made to a 0.2.0 service, including deletions and suppressions, are not carried over.
+  ([#223](https://github.com/mosaicadb/mosaica/pull/223))
+- **Breaking:** `serve.text_filter_cache_bytes` is renamed `serve.filter_cache_bytes`, and a
+  deployment file that uses the old name is refused. The status field `text_filter_cache` is
+  renamed `filter_cache`. ([#217](https://github.com/mosaicadb/mosaica/pull/217))
+- **Breaking:** compaction request numbers start from the server's start time in milliseconds
+  instead of from 1, so a number is not reused after a restart. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+- **Breaking:** when a deployment names no session or control address, those planes are served on
+  the viewer's port. An open server used to put them one and two ports above it. ([#215](https://github.com/mosaicadb/mosaica/pull/215))
+- The filter cache also keeps range, `eq` and `in` conditions on columns, so panning and zooming
+  with a column filter does not evaluate it again. ([#217](https://github.com/mosaicadb/mosaica/pull/217))
+- The Python client serves on port 9141 by default, or the next free port above it, and prints
+  its address. `create()` and `open()` take `port=`. The `mosaica` package now depends on `tqdm`.
+  ([#215](https://github.com/mosaicadb/mosaica/pull/215))
+- Keyword and category filters ([#223](https://github.com/mosaicadb/mosaica/pull/223)), column filters ([#217](https://github.com/mosaicadb/mosaica/pull/217)), histograms ([#221](https://github.com/mosaicadb/mosaica/pull/221)), builds
+  ([#214](https://github.com/mosaicadb/mosaica/pull/214)) and server start-up ([#216](https://github.com/mosaicadb/mosaica/pull/216)) are faster.
 
 ### Added
 
-- **Progress reporting** for builds, inserts and compactions, through `--progress` on the CLI,
-  `jobs` in `/control/status`, and a callback in the Python and TypeScript clients.
-- **`mosaica compact --wait` and `--request`** to wait for a compaction request or read one.
-- **Filter by `mosaica_id`**, with `namedItems(ids)` in the TypeScript client.
-- **Images on the item card**, from the fields listed in `image-fields`.
-- **`[serve] port_retries`**, which tries ports above a taken one.
+- `GET /control/compact/{request}` reports whether a compaction request has been answered, how it
+  ended and how far its compaction has got. `mosaica compact` takes `--wait` and `--request`, and
+  the Python and TypeScript clients can wait for a request or read one. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+- Builds, inserts and compactions report their progress. The CLI shows it with `--progress`,
+  `/control/status` lists running jobs under `jobs`, and the clients pass each record to a
+  callback. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+- A filter can name items by `mosaica_id`, and the TypeScript client builds one with
+  `namedItems(ids)`. ([#220](https://github.com/mosaicadb/mosaica/pull/220))
+- The item card draws the fields listed in `image-fields` as images. ([#220](https://github.com/mosaicadb/mosaica/pull/220))
+- `[serve] port_retries` makes `mosaica serve` try that many ports above a taken one. ([#215](https://github.com/mosaicadb/mosaica/pull/215))
+
+### Removed
+
+- **Breaking:** `compaction.requests.last_refusal` in `/control/status`, which
+  `GET /control/compact/{request}` replaces. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+
+### Documentation
+
+- A guide to reaching a notebook's map when Jupyter or marimo runs on another machine. ([#218](https://github.com/mosaicadb/mosaica/pull/218))
 
 ## [0.2.0] - 2026-11-05
 
 ### Changed
 
-- **Bundle format 50.** Bundles built by 0.1.0 must be rebuilt, and writes made to a 0.1.0
-  service, including deletions and suppressions, are not carried over. The write-ahead log format
-  is now 44, so 0.1.0's log is refused too.
-- **Phrase search reads word positions from the index**, which makes bundles with text fields
-  larger and their builds longer.
-- **Searches are kept between requests** for every viewer with the same access, up to
-  `serve.text_filter_cache_bytes` (256 MiB by default). Concurrent identical searches run once,
-  and a request that waits longer than `serve.single_flight_wait_ms` runs its own.
-- **Faster first frames for a new viewer, and faster filtered maps and aggregates.**
-- **An aggregate always returns its first page**, even when its stream deadline has passed.
-- **Filters stop when the client disconnects**, as does `POST /v1/artifacts/browse`.
+- **Breaking:** bundles built by 0.1.0 must be rebuilt, because the bundle format is now 50.
+  Writes made to a 0.1.0 service, including deletions and suppressions, are not carried over.
+- **Breaking:** the write-ahead log format is now 44, so a 0.1.0 log is refused.
+- Phrase search reads word positions from the index instead of each item's text. Bundles with
+  text fields are larger and take longer to build as a result.
+- The results of `match` and `phrase` filters are kept between requests for every viewer with the
+  same access, up to `serve.text_filter_cache_bytes` (256 MiB by default).
+- A new viewer's first frames are faster, and so are filtered maps and aggregates.
+- An aggregate returns its first page even when its stream deadline has already passed.
+- A request stops evaluating its filter when its client disconnects, and so does
+  `POST /v1/artifacts/browse`.
+
+### Security
+
+- A server could replay a write-ahead log written for another database, such as the log of a
+  bundle that had since been rebuilt. That could expose a deleted or suppressed item and hide an
+  unrelated one. Each log now records its database, and a log for another database is refused.
 
 ### Fixed
 
-- A server replayed a write-ahead log written for another database, such as one from before a
-  rebuild, which could expose a deleted or suppressed item and hide an unrelated one. Each log now
-  records its database, and a mismatched log is refused.
 - Some JSON numbers with seventeen significant digits were read one step away from their true
-  value, which could drop an item lying on the edge of a box.
+  value, which could drop an item lying exactly on the edge of a box filter.
 - A `phrase` filter over a group-scoped text field matched nothing.
-- Two batches adding the same item through two views of one key could each keep a different value
-  for a group-scoped field.
-- Building a text field with very many distinct words held about 0.8 GB per 100 million words
+- Inserting the same item in two batches could leave a group-scoped field with a different value
+  from each, where the second batch should have counted as a repeat or an edit.
+- Building a text field with very many distinct words used about 0.8 GB per 100 million words
   outside the build's memory budget.
 
 ### Documentation
 
-- **A documentation website** at <https://mosaicadb.github.io/mosaica/>, published from each
-  release tag.
-- **A security policy** in SECURITY.md, covering the latest release.
-- **A comparison with ClickHouse, PostgreSQL and OpenSearch**, timing a per-viewer map of GBIF
-  species records at 10 million to a billion records.
+- A documentation website at <https://mosaicadb.github.io/mosaica/>, published from each release
+  tag.
+- A security policy in SECURITY.md, covering the latest release.
+- A comparison with ClickHouse, PostgreSQL and OpenSearch, timing a per-viewer map of GBIF species
+  records at 10 million to a billion records.
 
 ## [0.1.0] - 2026-10-27
 
