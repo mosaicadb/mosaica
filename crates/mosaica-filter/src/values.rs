@@ -79,6 +79,11 @@ use crate::pack;
 use crate::record::RecordValue;
 use mosaica_types::AttrLocalId;
 
+pub(crate) mod ordinals;
+
+pub use ordinals::{BlockOrdinals, CodeBytes};
+use ordinals::OrdinalTest;
+
 /// Matched entities, folded into the result bitmap in bounded chunks.
 ///
 /// **The result is not a safe thing to accumulate whole.** A predicate that matches most of what it
@@ -125,7 +130,9 @@ const RUN_MIN: usize = 32;
 impl Hits {
     fn new() -> Self {
         Hits {
-            buf: Vec::with_capacity(CHUNK + RUN_MIN),
+            // Grown on the first match rather than reserved here, so a scan walked block by block
+            // pays no allocation for a block that matches nothing.
+            buf: Vec::new(),
             start: 0,
             end: 0,
             coalesced: false,
@@ -443,10 +450,28 @@ pub enum Codes {
     I64(ScalarBuffer<i64>),
     F32(ScalarBuffer<f32>),
     F64(ScalarBuffer<f64>),
+    /// A keyword layer's ordinals, or a `u16` or `u32` category's codes, as a file stores them: a
+    /// block of entities at a time in the narrowest encoding the block allows (see [`ordinals`]).
+    Ordinals(Arc<BlockOrdinals>),
 }
 
 impl Codes {
-    pub(crate) fn len(&self) -> usize {
+    /// The codes in slots `start..start + len` appended to `out` as `u32`s, for a column of codes
+    /// (a keyword's ordinals or a category's codes) in any of the forms it is stored in. `false`,
+    /// appending nothing, for any other column.
+    pub fn extend_codes(&self, start: usize, len: usize, out: &mut Vec<u32>) -> bool {
+        match self {
+            Codes::U8(v) => out.extend(v[start..start + len].iter().map(|&c| u32::from(c))),
+            Codes::U16(v) => out.extend(v[start..start + len].iter().map(|&c| u32::from(c))),
+            Codes::U32(v) => out.extend_from_slice(&v[start..start + len]),
+            Codes::Ordinals(o) => o.for_each_in(start, len, |v| out.push(v)),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Values held, one per present entity.
+    pub fn len(&self) -> usize {
         match self {
             Codes::U8(v) => v.len(),
             Codes::U16(v) => v.len(),
@@ -458,7 +483,12 @@ impl Codes {
             Codes::I64(v) => v.len(),
             Codes::F32(v) => v.len(),
             Codes::F64(v) => v.len(),
+            Codes::Ordinals(o) => o.len(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     #[inline]
@@ -467,7 +497,8 @@ impl Codes {
             Codes::U8(v) => v[slot] as u32,
             Codes::U16(v) => v[slot] as u32,
             Codes::U32(v) => v[slot],
-            // Only a *category* has a code, and a category is one of the three widths above. Every
+            Codes::Ordinals(o) => o.at(slot),
+            // Only a *category* has a code, held at one of the three widths or in blocks above. Every
             // other column answers `u32::MAX` so that a code predicate applied to it matches
             // nothing, rather than panicking or — worse — comparing an offset or a signed value to
             // a code. The operator/family check at the parse means this is unreachable through the
@@ -491,6 +522,11 @@ impl Codes {
             Codes::I64(v) => RecordValue::I64(v[slot]),
             Codes::F32(v) => RecordValue::F32(v[slot]),
             Codes::F64(v) => RecordValue::F64(v[slot]),
+            // A code is read back at its declared width, as it was stored flat.
+            Codes::Ordinals(o) => match o.code_bytes() {
+                CodeBytes::Two => RecordValue::U16(o.at(slot) as u16),
+                CodeBytes::Four => RecordValue::U32(o.at(slot)),
+            },
         }
     }
 }
@@ -777,6 +813,16 @@ impl ValueColumn {
         }
     }
 
+    /// The addressing of a column over `presence`, positional where `None`, with no values of its
+    /// own: what a block of [`BlockOrdinals`] is walked under.
+    fn addressing(presence: Option<Bitmap>) -> Self {
+        ValueColumn {
+            codes: Codes::U8(ScalarBuffer::from(Vec::new())),
+            presence,
+            block_ranks: std::sync::OnceLock::new(),
+        }
+    }
+
     /// A column only some entities carry a value in. `presence` must have exactly one set bit per
     /// value, ascending — checked, not trusted: a mismatch would silently pair every entity after
     /// the discrepancy with another entity's value, which is a disclosure with no symptom.
@@ -791,10 +837,17 @@ impl ValueColumn {
                 ),
             ));
         }
+        // Codes in blocks are checked against the blocks the presence cuts the column into, from
+        // the ranks every lookup into a partial column takes anyway.
+        let block_ranks = std::sync::OnceLock::new();
+        if let Codes::Ordinals(o) = &codes {
+            let ranks = block_ranks.get_or_init(|| mosaica_roaring::BlockRanks::of(&presence));
+            o.check_addressing(Some(ranks))?;
+        }
         Ok(ValueColumn {
             codes,
             presence: Some(presence),
-            block_ranks: std::sync::OnceLock::new(),
+            block_ranks,
         })
     }
 
@@ -930,9 +983,25 @@ impl ValueColumn {
     where
         F: Fn(&T) -> bool,
     {
+        self.walk_one_packing(candidate, values, pred, &mut Packing::Undecided)
+    }
+
+    /// [`Self::walk_one`] continuing the packing decision `packing` holds, so a scan walked in
+    /// several parts decides it once, from its first block, as one walk does.
+    #[inline]
+    fn walk_one_packing<T, F>(
+        &self,
+        candidate: &Bitmap,
+        values: &[T],
+        pred: &F,
+        packing: &mut Packing,
+    ) -> Bitmap
+    where
+        F: Fn(&T) -> bool,
+    {
         match &self.presence {
-            Some(presence) => self.walk_partial(presence, candidate, values, pred),
-            None => self.walk_runs(candidate, values, |x| pred(x)),
+            Some(presence) => self.walk_partial(presence, candidate, values, pred, packing),
+            None => self.walk_runs(candidate, values, |x| pred(x), packing),
         }
     }
 
@@ -957,6 +1026,7 @@ impl ValueColumn {
         candidate: &Bitmap,
         values: &[T],
         pred: &F,
+        state: &mut Packing,
     ) -> Bitmap
     where
         F: Fn(&T) -> bool,
@@ -967,26 +1037,16 @@ impl ValueColumn {
             .get_or_init(|| mosaica_roaring::BlockRanks::of(presence));
         let mut packed = pack::Sink::new();
         let mut packed_blocks: Vec<u32> = Vec::new();
-        let mut state = Packing::Undecided;
         let mut present: Vec<u32> = Vec::new();
         let mut members: Vec<u32> = Vec::new();
         let mut held = [0u64; pack::WORDS];
         let mut words = [0u64; pack::WORDS];
-        let mut live_cursor = live.cursor();
         let mut present_cursor = presence.cursor();
-        let mut next = live.minimum();
-        while let Some(at) = next {
-            if state == Packing::Abandoned {
+        for block in mosaica_roaring::Blocks::new(&live) {
+            if *state == Packing::Abandoned {
                 break;
             }
-            let block = at >> 16;
-            let span = block << 16..=(block << 16) | 0xFFFF;
-            next = if block == u32::MAX >> 16 {
-                None
-            } else {
-                live_cursor.reset_at_or_after((block + 1) << 16);
-                live_cursor.current()
-            };
+            let span = mosaica_roaring::span(block);
             let in_live = live.range_cardinality(span.clone());
             let in_presence = presence.range_cardinality(span.clone());
             if in_live < PARTIAL_PACK_MIN || in_live * 2 < in_presence {
@@ -1029,8 +1089,8 @@ impl ValueColumn {
                 &mut |run| record_slot_run(run.len()),
             );
             packed_blocks.push(block);
-            if state == Packing::Undecided {
-                state = if card >= in_live as u32 / 32 {
+            if *state == Packing::Undecided {
+                *state = if card >= in_live as u32 / 32 {
                     Packing::On
                 } else {
                     Packing::Abandoned
@@ -1038,12 +1098,12 @@ impl ValueColumn {
             }
         }
         if packed_blocks.is_empty() {
-            return self.walk_runs(&live, values, |x| pred(x));
+            return self.walk_runs(&live, values, |x| pred(x), &mut Packing::Abandoned);
         }
         for block in &packed_blocks {
-            live.remove_range(block << 16..=(block << 16) | 0xFFFF);
+            live.remove_range(mosaica_roaring::span(*block));
         }
-        let mut out = self.walk_runs(&live, values, |x| pred(x));
+        let mut out = self.walk_runs(&live, values, |x| pred(x), &mut Packing::Abandoned);
         out.or_inplace(&packed.finish());
         out
     }
@@ -1051,7 +1111,13 @@ impl ValueColumn {
     /// The serial scan of one candidate over a typed slice, packing whole blocks of a universal
     /// column and walking everything else per entity.
     #[inline]
-    fn walk_runs<T, F>(&self, candidate: &Bitmap, values: &[T], mut pred: F) -> Bitmap
+    fn walk_runs<T, F>(
+        &self,
+        candidate: &Bitmap,
+        values: &[T],
+        mut pred: F,
+        packing: &mut Packing,
+    ) -> Bitmap
     where
         F: FnMut(&T) -> bool,
     {
@@ -1062,7 +1128,6 @@ impl ValueColumn {
         // packs its blocks in `walk_partial` before reaching here, and what it leaves is walked per
         // entity.
         let positional = self.presence.is_none();
-        let mut packing = Packing::Undecided;
 
         self.for_each_slot_run(candidate, values.len(), |slot0, count, entity0| {
             // **Whole 2¹⁶-aligned blocks are packed into Roaring containers directly**, which is
@@ -1084,7 +1149,7 @@ impl ValueColumn {
                     &mut hits,
                     &mut packed,
                     &mut words,
-                    &mut packing,
+                    packing,
                 )
             {
                 return;
@@ -1179,6 +1244,23 @@ impl ValueColumn {
             Codes::I64(v) => int_range!(v, i64),
             Codes::F32(v) => float_range!(v, f32),
             Codes::F64(v) => float_range!(v, f64),
+            // An ordinal range is a keyword prefix's, and it scans even where nothing can match.
+            Codes::Ordinals(o) => {
+                let (lo, hi) = match (narrow_lo::<u32>(lo), narrow_hi::<u32>(hi)) {
+                    (Narrowed::Unsatisfiable, _) | (_, Narrowed::Unsatisfiable) => (1, 0),
+                    (lo, hi) => (
+                        match lo {
+                            Narrowed::At(x) => x,
+                            _ => 0,
+                        },
+                        match hi {
+                            Narrowed::At(x) => x,
+                            _ => u32::MAX,
+                        },
+                    ),
+                };
+                self.scan_blocks(o, candidate, &OrdinalTest::Range { lo, hi })
+            }
         }
     }
 
@@ -1245,6 +1327,8 @@ impl ValueColumn {
             Codes::I64(v) => int_in!(v, i64),
             Codes::F32(v) => float_in!(v),
             Codes::F64(v) => float_in!(v),
+            // Ordinals are not numbers; the parse refuses a numeric operand on a keyword.
+            Codes::Ordinals(_) => Bitmap::new(),
         }
     }
 
@@ -1275,7 +1359,8 @@ impl ValueColumn {
             Codes::U8(v) => self.walk_typed(candidate, v, |x| u32::from(*x) == w),
             Codes::U16(v) => self.walk_typed(candidate, v, |x| u32::from(*x) == w),
             Codes::U32(v) => self.walk_typed(candidate, v, |x| *x == w),
-            // Only a category has a code, and a category is one of the three widths above.
+            Codes::Ordinals(o) => self.scan_blocks(o, candidate, &OrdinalTest::Eq(w)),
+            // Only a category has a code, stored at one of the three widths above or in blocks.
             _ => Bitmap::new(),
         }
     }
@@ -1297,6 +1382,9 @@ impl ValueColumn {
     pub fn scan_ordinal_set(&self, candidate: &Bitmap, set: &CodeSet) -> Bitmap {
         match &self.codes {
             Codes::U32(v) => self.walk_typed(candidate, v, |x| set.contains(*x)),
+            Codes::Ordinals(o) if o.code_bytes() == CodeBytes::Four => {
+                self.scan_blocks(o, candidate, &OrdinalTest::Set(set))
+            }
             _ => Bitmap::new(),
         }
     }
@@ -1335,6 +1423,17 @@ impl ValueColumn {
                 w.sort_unstable();
                 w.dedup();
                 self.walk_typed(candidate, v, |x| w.binary_search(x).is_ok())
+            }
+            // A two-byte column's domain is a table, as for a flat `u16` column above.
+            Codes::Ordinals(o) if o.code_bytes() == CodeBytes::Two => {
+                let set = CodeSet::new(values, u16::MAX as u32);
+                self.scan_blocks(o, candidate, &OrdinalTest::Set(&set))
+            }
+            Codes::Ordinals(o) => {
+                let mut w: Vec<u32> = values.iter().map(|v| v.raw()).collect();
+                w.sort_unstable();
+                w.dedup();
+                self.scan_blocks(o, candidate, &OrdinalTest::In(&w))
             }
             _ => Bitmap::new(),
         }
@@ -1381,6 +1480,12 @@ impl ValueColumn {
                 });
                 true
             }
+            Codes::Ordinals(o) => {
+                self.for_each_slot_run(candidate, o.len(), |slot0, count, _entity0| {
+                    o.for_each_in(slot0, count, &mut f);
+                });
+                true
+            }
             _ => false,
         }
     }
@@ -1408,6 +1513,15 @@ impl ValueColumn {
             Codes::U8(v) => codes!(v.as_ref(), u32::from),
             Codes::U16(v) => codes!(v.as_ref(), u32::from),
             Codes::U32(v) => codes!(v.as_ref(), std::convert::identity),
+            Codes::Ordinals(o) => {
+                self.walk_slot_runs(candidate, o.len(), |slot0, count, entity0| {
+                    let mut entity = entity0;
+                    o.for_each_in(slot0, count, |value| {
+                        f(entity, value);
+                        entity += 1;
+                    });
+                });
+            }
             other => {
                 let len = other.len();
                 self.walk_slot_runs(candidate, len, |_slot0, count, entity0| {
@@ -1428,6 +1542,26 @@ impl ValueColumn {
         mut f: impl FnMut(u32, RecordValue) -> Result<(), E>,
     ) -> Result<(), E> {
         let mut failed = None;
+        // Codes stored in blocks are decoded a run at a time rather than looked up per slot.
+        if let Codes::Ordinals(o) = &self.codes {
+            let two = o.code_bytes() == CodeBytes::Two;
+            self.walk_slot_runs(candidate, o.len(), |slot0, count, entity0| {
+                let mut entity = entity0;
+                o.for_each_in(slot0, count, |code| {
+                    if failed.is_none() {
+                        let value = match two {
+                            true => RecordValue::U16(code as u16),
+                            false => RecordValue::U32(code),
+                        };
+                        if let Err(e) = f(entity, value) {
+                            failed = Some(e);
+                        }
+                    }
+                    entity += 1;
+                });
+            });
+            return failed.map_or(Ok(()), Err);
+        }
         self.walk_slot_runs(candidate, self.codes.len(), |slot0, count, entity0| {
             if failed.is_some() {
                 return;
@@ -1478,7 +1612,7 @@ impl ValueColumn {
     pub fn present_in(&self, candidate: &Bitmap) -> Bitmap {
         match &self.presence {
             None => {
-                if self.codes.len() == 0 {
+                if self.codes.is_empty() {
                     return Bitmap::new();
                 }
                 candidate.and(&Bitmap::from_range(0u32..self.codes.len() as u32))
@@ -1492,7 +1626,7 @@ impl ValueColumn {
         match &self.presence {
             None => {
                 let mut b = Bitmap::new();
-                if self.codes.len() > 0 {
+                if !self.codes.is_empty() {
                     b.add_range(0u32..self.codes.len() as u32);
                 }
                 b.run_optimize();
@@ -1534,7 +1668,12 @@ impl ValueColumn {
     ) -> io::Result<Self> {
         let codes = read_values(values_path, access)?;
         match presence_path {
-            None => Ok(ValueColumn::universal(codes)),
+            None => {
+                if let Codes::Ordinals(o) = &codes {
+                    o.check_addressing(None)?;
+                }
+                Ok(ValueColumn::universal(codes))
+            }
             Some(path) => ValueColumn::partial(codes, read_presence(path)?),
         }
     }
@@ -1631,6 +1770,9 @@ fn read_values(path: &Path, access: Access) -> io::Result<Codes> {
     // values from the batch's buffers instead of copying them, and concatenating is the copy this
     // exists to avoid. `decode_single_batch` is where that rule is enforced.
     let batch = mosaica_authz::decode_single_batch(&buffer, &format!("{}", path.display()))?;
+    if let Some(parts) = ordinals::parts_of_batch(&batch, path)? {
+        return Ok(Codes::Ordinals(Arc::new(BlockOrdinals::from_parts(parts)?)));
+    }
     if batch.num_columns() != 1 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,

@@ -259,6 +259,9 @@ impl Tally {
         match codes {
             Some(Codes::U8(_)) => Tally::Dense(vec![0; 1 << 8]),
             Some(Codes::U16(_)) => Tally::Dense(vec![0; 1 << 16]),
+            Some(Codes::Ordinals(o)) if o.code_bytes() == mosaica_filter::CodeBytes::Two => {
+                Tally::Dense(vec![0; 1 << 16])
+            }
             _ => Tally::Sparse(FxHashMap::default()),
         }
     }

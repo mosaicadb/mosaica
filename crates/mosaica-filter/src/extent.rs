@@ -19,7 +19,7 @@ use croaring::Bitmap;
 
 use crate::dict::write_sorted_dict;
 use crate::values::{Access, Codes, ValueColumn};
-use crate::values_writer::write_value_column;
+use crate::values_writer::{ColumnKind, ValueColumnWriter};
 
 /// Where a column's per-flush extents live, under the column's own directory.
 pub const EXTENTS_DIR: &str = "extents";
@@ -65,9 +65,14 @@ pub fn extent_paths(column_dir: &Path, flush_id: &str) -> (PathBuf, PathBuf, Pat
 /// `Some` exactly for the keyword family, and its keys must already be **sorted and distinct** —
 /// [`write_sorted_dict`] refuses anything else rather than repairing it, because de-duplicating
 /// here would shift every ordinal `codes` already holds.
+///
+/// `kind` is how the column's values are stored, the one the build writes the column's base at,
+/// so an extent and its base share a form; `codes` must be of that kind or the width a blocked kind
+/// is pushed at.
 pub fn write_extent(
     column_dir: &Path,
     flush_id: &str,
+    kind: ColumnKind,
     codes: &Codes,
     presence: &Bitmap,
     dict_keys: Option<&[&str]>,
@@ -84,7 +89,7 @@ pub fn write_extent(
     }
     // A dictionary beside anything but an ordinal column would be a pair that cannot be read
     // together — refused here rather than discovered by a scan that reads a `u64` as an ordinal.
-    if dict_keys.is_some() && !matches!(codes, Codes::U32(_)) {
+    if dict_keys.is_some() && kind != ColumnKind::Ordinals {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "filter extent: a dictionary was supplied for a column whose values are not u32 \
@@ -100,7 +105,9 @@ pub fn write_extent(
         }
         None => None,
     };
-    write_value_column(&values_path, &presence_path, codes, Some(presence))?;
+    let mut writer = ValueColumnWriter::create(&values_path, &presence_path, kind)?;
+    writer.push(codes)?;
+    writer.finish(Some(presence))?;
     Ok((values_path, presence_path, dict_path))
 }
 

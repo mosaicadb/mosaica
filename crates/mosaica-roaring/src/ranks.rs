@@ -31,10 +31,27 @@ impl BlockRanks {
         let mut total = 0u64;
         for block in lo..=hi {
             below.push(total);
-            total += bitmap.range_cardinality(block << 16..=(block << 16) | 0xFFFF);
+            total += bitmap.range_cardinality(crate::span(block));
         }
         below.push(total);
         BlockRanks { first: lo, below }
+    }
+
+    /// The blocks below the last member's block and that block: `0..` one past it.
+    pub fn blocks(&self) -> std::ops::Range<u32> {
+        let held = (self.below.len() - 1) as u32;
+        0..if held == 0 { 0 } else { self.first + held }
+    }
+
+    /// How many members block `block` holds.
+    pub fn count_in(&self, block: u32) -> u64 {
+        let Some(i) = block.checked_sub(self.first) else {
+            return 0;
+        };
+        match (self.below.get(i as usize), self.below.get(i as usize + 1)) {
+            (Some(lo), Some(hi)) => hi - lo,
+            _ => 0,
+        }
     }
 
     /// How many members of `bitmap`, the bitmap these ranks were taken of, lie below `value`,

@@ -193,7 +193,7 @@ fn a_keyword_column_writes_a_dictionary_and_an_ordinal_column() {
 
         let values = ValueColumn::open_dir(&cdir, Access::Mapped).unwrap();
         assert!(
-            matches!(values.codes(), Codes::U32(_)),
+            matches!(values.codes(), Codes::Ordinals(_)),
             "{column}: the values file holds ordinals, not strings"
         );
     }

@@ -340,6 +340,26 @@ impl Engine {
             .store(enabled, Ordering::SeqCst);
     }
 
+    /// Turn off evaluating a viewport's filter over its tiles' entities alone, so every filter is
+    /// evaluated over the viewer's whole visible set, for a test to compare the two.
+    #[cfg(feature = "fault-injection")]
+    #[doc(hidden)]
+    pub fn set_tile_filters_for_test(&self, enabled: bool) {
+        self.switches
+            .tile_filters_enabled
+            .store(enabled, Ordering::SeqCst);
+    }
+
+    /// Evaluate every viewport's filter over its tiles' entities alone, whatever that costs, so a
+    /// fixture too small for it to pay can still compare the two evaluations.
+    #[cfg(feature = "fault-injection")]
+    #[doc(hidden)]
+    pub fn set_tile_filters_always_for_test(&self, always: bool) {
+        self.switches
+            .tile_filters_always
+            .store(always, Ordering::SeqCst);
+    }
+
     /// Turn the entity-space coalesce off, so a soak can show the axes it bounds keep growing
     /// with the pass stopped.
     #[cfg(feature = "fault-injection")]

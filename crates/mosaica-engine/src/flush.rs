@@ -1254,6 +1254,7 @@ fn write_value_extent(
     let (values_path, presence_path, dict_path) = mosaica_filter::write_extent(
         column_dir,
         &ctx.seg_id,
+        column.kind,
         &column.codes,
         &column.presence,
         column.dict_keys.as_deref(),
@@ -1321,6 +1322,7 @@ fn extent_values<'a>(
 ) -> Result<ExtentColumn<'a>, MaintenanceFailed> {
     use mosaica_filter::Codes;
 
+    let kind = mosaica_store::empty_shard::value_column_kind(spec.ty, spec.category);
     let mut presence = croaring::Bitmap::new();
 
     let wrong = |value: &WalScalar| {
@@ -1349,6 +1351,7 @@ fn extent_values<'a>(
         let (ordinals, keys) = mosaica_filter_write::dictionary_of(&held)
             .map_err(|e| MaintenanceFailed(format!("column '{}': {e}", spec.name)))?;
         return Ok(ExtentColumn {
+            kind,
             codes: Codes::U32(ordinals.into()),
             presence,
             dict_keys: Some(keys),
@@ -1374,7 +1377,7 @@ fn extent_values<'a>(
             }
             _ => Codes::U32(held.into()),
         };
-        return Ok(ExtentColumn::flat(codes, presence));
+        return Ok(ExtentColumn::flat(kind, codes, presence));
     }
 
     // A plain numeric: absent where the item carried no value, present otherwise, so a flushed
@@ -1425,7 +1428,7 @@ fn extent_values<'a>(
         // it as a declared storage type.
         ScalarType::Utf8 => unreachable!("`utf8` is not a declarable type"),
     };
-    Ok(ExtentColumn::flat(codes, presence))
+    Ok(ExtentColumn::flat(kind, codes, presence))
 }
 
 /// Where a column's value sits in a buffered row.
@@ -1497,6 +1500,8 @@ fn scoped_rows<'a>(
 /// One column's extent content: the values, the entities that carry one, and the dictionary those
 /// values are ordinals into where the family has one.
 struct ExtentColumn<'a> {
+    /// How the column is stored: [`mosaica_store::empty_shard::value_column_kind`], the build's.
+    kind: mosaica_filter::ColumnKind,
     codes: mosaica_filter::Codes,
     presence: croaring::Bitmap,
     /// Sorted and distinct, `Some` for keyword columns only.
@@ -1504,9 +1509,14 @@ struct ExtentColumn<'a> {
 }
 
 impl ExtentColumn<'_> {
-    /// A column whose values file carries the values themselves — every family but keyword.
-    fn flat(codes: mosaica_filter::Codes, presence: croaring::Bitmap) -> Self {
+    /// A column with no dictionary beside it: every family but keyword.
+    fn flat(
+        kind: mosaica_filter::ColumnKind,
+        codes: mosaica_filter::Codes,
+        presence: croaring::Bitmap,
+    ) -> Self {
         ExtentColumn {
+            kind,
             codes,
             presence,
             dict_keys: None,
@@ -2499,6 +2509,7 @@ mod tests {
         let (values_path, presence_path, dict_path) = mosaica_filter::write_extent(
             dir.path(),
             "flush-1",
+            column.kind,
             &column.codes,
             &column.presence,
             column.dict_keys.as_deref(),
@@ -2548,6 +2559,7 @@ mod tests {
         let (_, _, dict_path) = mosaica_filter::write_extent(
             dir.path(),
             "flush-1",
+            column.kind,
             &column.codes,
             &column.presence,
             column.dict_keys.as_deref(),
@@ -2610,6 +2622,7 @@ mod tests {
         let error = mosaica_filter::write_extent(
             dir.path(),
             "flush-1",
+            mosaica_filter::ColumnKind::I64,
             &mosaica_filter::Codes::I64(vec![7i64].into()),
             &presence,
             Some(&["alpha"]),
