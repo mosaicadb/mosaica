@@ -407,6 +407,18 @@ def test_a_filter_narrows_the_read_and_count_is_read_from_the_head(db):
     assert (head["visible"], head["matched"]) == (20, 5)
 
 
+def test_a_mosaica_id_filter_reads_the_items_it_names(db):
+    """The identifiers an earlier read handed out name those items again; one naming nothing
+    matches nothing, and a malformed leaf is the server's refusal, not an unknown column."""
+    rows = db.items("map", ["n"]).to_pylist()
+    named = {row["mosaica_id"]: row["n"] for row in rows[::4]}
+    table = db.items("map", ["n"], filters={"mosaica_id": {"in": [*named, 1]}})
+    assert dict(zip(table.column("mosaica_id").to_pylist(), table.column("n").to_pylist())) == named
+    with pytest.raises(Refusal) as refused:
+        db.items("map", ["n"], filters={"mosaica_id": {"range": {"gte": 1}}})
+    assert "not a filterable column" not in str(refused.value)
+
+
 def test_category_dictionaries_that_differ_by_page_join_into_one_column(db):
     """Each page's dictionary holds only its own keys. The whole table holds one column that
     pyarrow groups by and pandas reads as one categorical."""

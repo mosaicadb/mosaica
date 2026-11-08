@@ -501,7 +501,7 @@ def _filter_columns(expression: Any) -> set[str]:
         if key in ("all_of", "any_of", "none_of"):
             for one in value if isinstance(value, list) else []:
                 named |= _filter_columns(one)
-        elif key not in ("region", "member_of"):
+        elif key not in ("region", "member_of", "mosaica_id"):
             named.add(key)
     return named
 

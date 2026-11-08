@@ -1129,6 +1129,9 @@ impl Engine {
         let unique = |column: &str, keys: &[mosaica_store::unique::UniqueKey]| {
             unique_holders(served.generation, side.shard, column, keys)
         };
+        let items = |ids: &[mosaica_types::MosaicaId]| {
+            item_entities(&self.identity_key, served.generation, side.shard, ids)
+        };
         let fragment = fragment.as_ref().map(|fragment| fragment.view());
         let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, evaluate| {
             // A phrase can cost far more over the fragment than over a narrowed candidate, so a
@@ -1165,6 +1168,7 @@ impl Engine {
             members: &members,
             layers: &layers,
             unique: &unique,
+            items: &items,
             leaves,
         };
         body(&|expr: &crate::filter::FilterExpr, prefer_row: bool| {
@@ -1469,6 +1473,30 @@ pub(crate) fn unique_holders(
             column: column.to_string(),
             detail: e.to_string(),
         })
+}
+
+/// The entities of `shard` that `ids` name as items at their current tenancy, deleted entities
+/// dropped: an item card's resolution, once for each identifier. An identifier of another shard, or
+/// naming nothing, contributes none.
+pub(crate) fn item_entities(
+    key: &mosaica_types::IdentityKey,
+    generation: &crate::Generation,
+    shard: &crate::Shard,
+    ids: &[mosaica_types::MosaicaId],
+) -> std::result::Result<Vec<u32>, crate::filter::FilterError> {
+    let numbers: Vec<_> = ids
+        .iter()
+        .filter_map(|id| crate::edited::number_named(key, generation, *id))
+        .filter(|(named, _)| named.id() == shard.id())
+        .map(|(_, number)| number)
+        .collect();
+    let entities = crate::edited::entities_of_numbers(shard, &numbers, |_| true).map_err(|e| {
+        crate::filter::FilterError::UniqueUnreadable {
+            column: crate::filter::MOSAICA_ID_COLUMN.to_string(),
+            detail: e.to_string(),
+        }
+    })?;
+    Ok(entities.into_iter().flatten().map(|entity| entity.raw() as u32).collect())
 }
 
 /// A filter's refusal as the engine's: the caller's fault or the deployment's, as [`FilterError`]

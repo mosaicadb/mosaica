@@ -65,13 +65,17 @@ map.addEventListener('mosaica-itemopen', async (e) => {
 });
 ```
 
-## The item card's Open button
+## The item card's Open button and images
 
 `<mosaica-item-card>` and `<mosaica-explorer>` show an Open button only if you say what it does. Set `open-url` to a link template such as `https://www.geonames.org/{geonameid}`. Each `{name}` is replaced by the item's value for that field, URL-encoded, and `{mosaica_id}` by its id. Open then becomes a link that opens in a new tab. Write the host in full, followed by a `/`, before the first field, since a field in the host part could name any host. An item with no value, or an empty one, for a field the template names, or whose filled address is not `http:` or `https:`, gets no Open button.
 
 To handle Open yourself, set the `open` property to a function; it is called with `{id, fields}` and takes precedence over `open-url`. Either way, `mosaica-open` fires on every press, and on a middle-click of the `open-url` link. In React the props are `openUrl` and `open`.
 
 `card-fields` lists the fields the compact card shows before Show all, in order, separated by spaces or commas.
+
+`image-fields` lists the fields whose value is the address of an image, separated by spaces or commas. The card draws each as the image across its width instead of as text. Store the address in a `keyword` field that is neither rendered nor indexed: the card reads it from the item's record, and the map never sends it. The viewer's browser loads the image from the host that serves it, without a referrer, so that host learns which items the viewer opens. A value that is not an `http:` or `https:` address, or a path on the page's own host, is shown as text, and so is an image that does not load. In React the prop is `imageFields`.
+
+To show the images of points already on the map, read the field for those points in one request: `namedItems(ids)` builds a filter keeping the items `ids` name, for `client.items`.
 
 ## Styling
 

@@ -1,6 +1,7 @@
 import {afterAll, beforeAll, describe, expect, it, type TestContext} from 'vitest';
 import {MosaicaClient, MosaicaError} from '../src/client.js';
 import {tileOfCode} from '../src/coords.js';
+import {namedItems} from '../src/members.js';
 import type {Meta, Session, ViewportRequest} from '../src/types.js';
 import {GROUP, start, type Served} from './served.js';
 
@@ -119,6 +120,15 @@ describe('MosaicaClient against a live server', () => {
     const at = item.views.find((v) => v.id === 's0')!;
     expect(at.x).toBeCloseTo(positions[0]! * 65536, 0);
     expect(at.y).toBeCloseTo(positions[1]! * 65536, 0);
+  });
+
+  it('reads the fields of points the viewport drew by their identifiers, and nothing for an identifier naming nothing', async (ctx) => {
+    live(ctx);
+    const drawn = (await client.viewport(session.token, whole({k: 50}))).result.ids.slice(0, 12);
+    const read = await client.items(session.token, {view: 's0', fields: [], filters: namedItems([...drawn, 1n])});
+    const ids: bigint[] = [];
+    for await (const table of read) for (const id of table.getChild('mosaica_id')!.toArray() as BigUint64Array) ids.push(id);
+    expect(ids.sort()).toEqual([...drawn].sort());
   });
 
   it('counts nothing for a principal holding none of the corpus’s labels', async (ctx) => {

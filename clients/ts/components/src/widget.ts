@@ -37,7 +37,7 @@ import './explorer.js';
  * screen, the map fills the room below its top instead, and takes `height` again on the way out.
  *
  * Only controls and selections cross the kernel boundary. `url`, `explorer_layout`, `height`,
- * `title_field`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_budget_min` and `cluster_budget_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
+ * `title_field`, `image_fields`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_budget_min` and `cluster_budget_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
  * `size_max`, `size_scale` and `filters` go both ways, and so do `budget`, sent up when Most points is let go,
  * `cluster_budget`, sent up when Most clusters is let go, `palette`, sent up when one is chosen, and
  * `value_colours` and `cluster_colours`, sent up as each colour is chosen on a card or in Edit
@@ -711,6 +711,9 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   model.on('change:title_field', () => {
     for (const v of state.views.values()) v.explorer.titleField = titleFieldOf(model);
   });
+  model.on('change:image_fields', () => {
+    for (const v of state.views.values()) v.explorer.imageFields = imageFieldsOf(model);
+  });
   for (const key of ['budget', 'budget_min', 'budget_max', 'cluster_budget', 'cluster_budget_min', 'cluster_budget_max']) {
     model.on(`change:${key}`, () => {
       if (state.syncingUp) return;
@@ -795,6 +798,12 @@ function titleFieldOf(model: WidgetModel): string {
   return typeof f === 'string' ? f : '';
 }
 
+/** The record fields the item card draws as images, as the kernel set them. */
+function imageFieldsOf(model: WidgetModel): string {
+  const f = model.get('image_fields');
+  return Array.isArray(f) ? f.filter((n) => typeof n === 'string').join(' ') : '';
+}
+
 /**
  * The point budget, the cluster budget and the range a control for each offers, as the kernel set
  * them; a value it left unset leaves the explorer's.
@@ -865,6 +874,7 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
   const explorer = document.createElement('mosaica-explorer') as MosaicaExplorer;
   explorer.layout = (model.get('explorer_layout') as 'docked' | 'overlay') || 'docked';
   explorer.titleField = titleFieldOf(model);
+  explorer.imageFields = imageFieldsOf(model);
   applyBudget(explorer, model);
   applyColours(explorer, model);
   applyBasemap(explorer, model, state.images);

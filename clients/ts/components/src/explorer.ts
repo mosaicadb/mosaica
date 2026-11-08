@@ -742,6 +742,8 @@ export class MosaicaExplorer extends MosaicaElement {
   @property({attribute: 'subtitle-field'}) accessor subtitleField = '';
   /** The fields the item card shows before "Show all", in order, as for `<mosaica-item-card>`. Unset, the first three. */
   @property({attribute: 'card-fields'}) accessor cardFields = '';
+  /** The fields the item card draws as images, as for `<mosaica-item-card>`'s `image-fields`. */
+  @property({attribute: 'image-fields'}) accessor imageFields = '';
   /** The link template for the item card's Open button, as for `<mosaica-item-card>`. Without it or `open`, there is no Open button. */
   @property({attribute: 'open-url'}) accessor openUrl = '';
   /** A function the item card calls when Open is pressed, as for `<mosaica-item-card>`. Takes precedence over `open-url`. */
@@ -1148,7 +1150,7 @@ export class MosaicaExplorer extends MosaicaElement {
    */
   private itemCard(item: {id: bigint; detail: ItemDetail} | null, actions: TemplateResult | typeof nothing): TemplateResult {
     return html`<mosaica-item-card exportparts=${FORWARD['item-card']} compact .item=${item} .pick=${item ? null : (this.map?.lastPick ?? null)}
-      title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open}>${actions}</mosaica-item-card>`;
+      title-field=${this.titleField || nothing} subtitle-field=${this.subtitleField || nothing} card-fields=${this.cardFields || nothing} image-fields=${this.imageFields || nothing} open-url=${this.openUrl || nothing} .open=${this.open}>${actions}</mosaica-item-card>`;
   }
 
   /** Whether the card for the selection is the artifact card: the artifact, or its refusal, changed last. */

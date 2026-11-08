@@ -35,7 +35,7 @@ import pathlib
 import re
 import sys
 import warnings
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Union
 
 import anywidget
 import traitlets
@@ -250,6 +250,9 @@ class Map(anywidget.AnyWidget):
       change shows the next time the map is displayed.
     - `title_field`: the field whose value titles a point in the hover and the item card. `None`,
       the default, titles a point by its id.
+    - `image_fields`: the fields whose value is the address of an image, which the item card
+      draws as that image. The viewer's browser loads it from the host serving it. A value that is
+      not an `http:` or `https:` address is shown as text.
     - `artifacts_per_tile`: the most annotations each level of a layer draws in one map tile,
       largest first. `None`, the default, asks for 50, or for the server's
       `max_artifacts_per_tile` when that is smaller, and the server refuses a value above its
@@ -338,6 +341,8 @@ class Map(anywidget.AnyWidget):
     height = traitlets.Int(480).tag(sync=True)
     # The record field that titles a point in the hover and the item card; `None` titles it by id.
     title_field = traitlets.Unicode(None, allow_none=True).tag(sync=True)
+    # The record fields the item card draws as images.
+    image_fields = traitlets.List(traitlets.Unicode()).tag(sync=True)
     # The store's quota of annotations per level per tile; `None` leaves the store's default.
     artifacts_per_tile = traitlets.Int(None, allow_none=True).tag(sync=True)
     budget = traitlets.Int(0).tag(sync=True)
@@ -399,6 +404,7 @@ class Map(anywidget.AnyWidget):
         height: int = 480,
         explorer_layout: str = "docked",
         title_field: Optional[str] = None,
+        image_fields: Union[str, Sequence[str], None] = None,
         artifacts_per_tile: Optional[int] = None,
         budget: int = 0,
         budget_min: int = 1_000,
@@ -442,6 +448,7 @@ class Map(anywidget.AnyWidget):
             height=height,
             explorer_layout=explorer_layout,
             title_field=title_field,
+            image_fields=[] if image_fields is None else listed(image_fields),
             artifacts_per_tile=artifacts_per_tile,
             budget=budget,
             budget_min=budget_min,

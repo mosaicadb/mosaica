@@ -48,8 +48,8 @@ use crate::filter::{FilterExpr, RegionLeaf};
 use crate::figures::MaskIdentity;
 use crate::region::RegionVerdict;
 use crate::viewport::{
-    crossing_domain, filter_refusal, segment_holding, unique_holders, OpenView, ResolvedLeaves,
-    RoutedRows, ServedSide,
+    crossing_domain, filter_refusal, item_entities, segment_holding, unique_holders, OpenView,
+    ResolvedLeaves, RoutedRows, ServedSide,
 };
 use crate::Generation;
 
@@ -247,6 +247,24 @@ impl WalkCx for PageCx<'_> {
                     .map_err(filter_refusal)?
                     .into_iter()
                     .collect();
+                let visible = self.candidate_within(place, &holders)?;
+                Some(
+                    visible
+                        .iter()
+                        .filter_map(|entity| self.row_of(place, entity))
+                        .collect(),
+                )
+            }
+            FilterExpr::Items(ids) => {
+                let holders: Bitmap = item_entities(
+                    &self.engine.identity_key,
+                    self.open.served.generation,
+                    side.shard,
+                    ids,
+                )
+                .map_err(filter_refusal)?
+                .into_iter()
+                .collect();
                 let visible = self.candidate_within(place, &holders)?;
                 Some(
                     visible
@@ -1056,7 +1074,7 @@ fn region_verdict(
             }
             out
         }
-        FilterExpr::Leaf { .. } | FilterExpr::MemberOf(_) => None,
+        FilterExpr::Leaf { .. } | FilterExpr::MemberOf(_) | FilterExpr::Items(_) => None,
     })
 }
 
@@ -1094,7 +1112,9 @@ fn driving_rows(
 /// rows every bounded kid admits, and an `any_of`'s whose every kid is bounded as their union.
 fn bounded_rows(cx: &impl WalkCx, place: usize, expr: &FilterExpr) -> Result<Option<Bitmap>> {
     Ok(match expr {
-        FilterExpr::Leaf { .. } | FilterExpr::MemberOf(_) => cx.index_rows(place, expr)?,
+        FilterExpr::Leaf { .. } | FilterExpr::MemberOf(_) | FilterExpr::Items(_) => {
+            cx.index_rows(place, expr)?
+        }
         FilterExpr::AllOf(kids) => {
             let mut out: Option<Bitmap> = None;
             for kid in kids {

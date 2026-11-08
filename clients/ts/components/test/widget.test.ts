@@ -122,6 +122,14 @@ describe('the token protocol', () => {
     expect(explorer.titleField).toBe('');
   });
 
+  it('hands image_fields to every view’s explorer, and follows a change to it', async () => {
+    const {model, el} = setUp({image_fields: ['thumb', 'photo']});
+    const explorer = el.querySelector('mosaica-explorer') as unknown as {imageFields: string};
+    expect(explorer.imageFields).toBe('thumb photo');
+    model.set('image_fields', []);
+    expect(explorer.imageFields).toBe('');
+  });
+
   it('fills the room below its top while its output is shown full screen, and takes `height` again on the way out', () => {
     const {model, el} = setUp({height: 400});
     const explorer = el.querySelector('mosaica-explorer') as HTMLElement;

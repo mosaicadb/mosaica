@@ -78,10 +78,10 @@ pub use declared::{
 };
 pub use error::{ComposeError, FilterError};
 pub use expr::{
-    evaluate_leaf, FilterExpr, FilterOperand, LeafEvaluation, LeafQuery, LeafResolver,
-    MemberOfArtifact, MemberOfLeaf, MemberResolver, RegionLeaf, RegionResolver, RoutedFilter,
-    RowExpr, RowLeafResolvers, TextQuery, UniqueResolver, MAX_FILTER_DEPTH, MEMBER_OF_COLUMN,
-    REGION_COLUMN, UNRESOLVABLE_VALUE,
+    evaluate_leaf, FilterExpr, FilterOperand, ItemResolver, LeafEvaluation, LeafQuery,
+    LeafResolver, MemberOfArtifact, MemberOfLeaf, MemberResolver, RegionLeaf, RegionResolver,
+    RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, UniqueResolver, MAX_FILTER_DEPTH,
+    MEMBER_OF_COLUMN, MOSAICA_ID_COLUMN, REGION_COLUMN, UNRESOLVABLE_VALUE,
 };
 pub use membership::{
     CategoryCounts, CategoryMembership, CountCodes, EntityCodes, VisitBuffered, VisitCodes,

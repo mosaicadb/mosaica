@@ -18,6 +18,11 @@ import {chrome, tokens} from './tokens.js';
  * empty. To render a field your own way, as a link for example, put an element in its
  * `field-<name>` slot.
  *
+ * A field named in `image-fields` whose value is an `http:` or `https:` address, or a path
+ * resolved against the page, is drawn as the image at that address, across the card's width. The viewer's browser loads it from the host
+ * that serves it, without a referrer. A value that is not such an address, and an image that does
+ * not load, are shown as text.
+ *
  * The Open button appears only when you set `open-url` or `open`. `open-url` is a link template
  * such as `https://www.geonames.org/{geonameid}`, in which each `{name}` is replaced by the item's
  * value for that field. Because the values are URL-encoded, a template cannot open an address that
@@ -50,6 +55,7 @@ import {chrome, tokens} from './tokens.js';
  * @csspart field - One field, with `data-name`, and `data-prose` on a value over 60 characters.
  * @csspart label - A field's name, and the heading above the view chips.
  * @csspart value - A field's value.
+ * @csspart image - A field's value drawn as an image, under `image-fields`.
  * @csspart scoped - The group-scoped values, grouped by key.
  * @csspart key - One key's heading among the group-scoped values, with `data-key`.
  * @csspart open - The Open button.
@@ -133,8 +139,17 @@ export class MosaicaItemCard extends MosaicaElement {
       .head [part='state'] {
         min-height: 24px;
       }
-      [part='field'][data-prose] {
+      [part='field'][data-prose],
+      [part='field'][data-image] {
         grid-column: 1 / -1;
+      }
+      [part='image'] {
+        display: block;
+        max-width: 100%;
+        max-height: 240px;
+        margin-top: 4px;
+        border-radius: 6px;
+        object-fit: contain;
       }
       [part='field'][data-prose] [part='value'] {
         display: -webkit-box;
@@ -211,6 +226,11 @@ export class MosaicaItemCard extends MosaicaElement {
    */
   @property({attribute: 'card-fields'}) accessor cardFields = '';
   /**
+   * The fields whose value is the address of an image, separated by spaces or commas. Each is drawn
+   * as its image rather than as text.
+   */
+  @property({attribute: 'image-fields'}) accessor imageFields = '';
+  /**
    * The link template for Open, with `{name}` for the value of the field `name` and `{mosaica_id}`
    * for the item's id. Without it or `open`, there is no Open button.
    */
@@ -220,6 +240,8 @@ export class MosaicaItemCard extends MosaicaElement {
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;
   private expandedFor: bigint | null = null;
+  /** The image addresses that failed to load, shown as text. @internal */
+  @state() accessor broken: ReadonlySet<string> = new Set();
   /** A category value's title as the store holds it, else from the legend or a suggestion page, else its key. */
   private titleOf(field: string, key: string): string {
     return this.resolvedStore?.heldTitle(field, key) ?? keyTitle(this.resolvedStore, field, key);
@@ -372,8 +394,15 @@ export class MosaicaItemCard extends MosaicaElement {
 
   /** The fields of `fields` that `card-fields` names, in its order. */
   private named(fields: string[]): string[] {
-    const names = this.cardFields.split(/[\s,]+/);
-    return names.filter((n, i) => n && fields.includes(n) && names.indexOf(n) === i);
+    const names = listed(this.cardFields);
+    return names.filter((n, i) => fields.includes(n) && names.indexOf(n) === i);
+  }
+
+  /** The address of the image a field's value names, where `image-fields` lists the field. */
+  private imageOf(name: string, value: unknown): string | null {
+    if (typeof value !== 'string' || !listed(this.imageFields).includes(name)) return null;
+    const address = webAddress(value);
+    return address && !this.broken.has(address) ? address : null;
   }
 
   /** `fields` with those `card-fields` names first, in its order. */
@@ -436,12 +465,21 @@ export class MosaicaItemCard extends MosaicaElement {
     </div>`;
   }
 
-  /** One field, presented by its declared type; prose spans the grid. */
+  /** One field, presented by its declared type; prose and images span the grid. */
   private field(name: string, value: unknown, column: DeclaredScalar | undefined) {
+    const caption = column ? columnCaption(name) : name;
+    const image = this.imageOf(name, value);
+    if (image) {
+      const failed = () => (this.broken = new Set([...this.broken, image]));
+      return html`<div part="field" data-name=${name} data-image>
+        <span part="label" class="k">${caption}</span>
+        <slot name=${`field-${name}`}><img part="image" src=${image} alt=${caption} loading="lazy" referrerpolicy="no-referrer" @error=${failed} /></slot>
+      </div>`;
+    }
     const text = this.text(name, value, column);
     const prose = text.length > 60;
     return html`<div part="field" data-name=${name} ?data-prose=${prose} style=${prose ? nothing : 'display:contents'}>
-      <span part="label" class="k">${column ? columnCaption(name) : name}</span>
+      <span part="label" class="k">${caption}</span>
       <slot name=${`field-${name}`}><span part="value" class="v" title=${prose ? text : nothing}>${text}</span></slot>
     </div>`;
   }
@@ -460,12 +498,25 @@ function openAddress(template: string, values: Record<string, unknown>): string 
       if (value === undefined || value === null || value === '') missing = true;
       return encodeURIComponent(String(value));
     });
-    if (missing) return null;
-    const url = new URL(filled, document.baseURI);
+    return missing ? null : webAddress(filled);
+  } catch {
+    return null;
+  }
+}
+
+/** `text` resolved against the page, where it is an `http:` or `https:` address. */
+function webAddress(text: string): string | null {
+  try {
+    const url = new URL(text, document.baseURI);
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
   } catch {
     return null;
   }
+}
+
+/** The names in a list separated by spaces or commas. */
+function listed(names: string): string[] {
+  return names.split(/[\s,]+/).filter(Boolean);
 }
 
 /** A value as text, by the column's declared type. */

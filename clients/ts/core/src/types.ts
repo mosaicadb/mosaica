@@ -245,7 +245,7 @@ export type FilterOperandSet = {
  * A filter expression, as the viewer routes take it.
  *
  * Each node has exactly one key: a column name mapped to a {@link FilterOperator}, `region`,
- * `member_of`, or one of the combinators `all_of`, `any_of` and `none_of`. `all_of: []` matches
+ * `member_of`, `mosaica_id`, or one of the combinators `all_of`, `any_of` and `none_of`. `all_of: []` matches
  * every item and `any_of: []` matches none. `none_of` matches every visible item that none of its
  * branches matches, including items with no value in the column. The server refuses with `422` a
  * node with two keys, an unknown column, an operator the column does not take, or nesting deeper
@@ -262,7 +262,17 @@ export type FilterExpr =
   | {none_of: FilterExpr[]}
   | {region: RegionOperand}
   | {member_of: MemberOfOperand}
+  | {mosaica_id: MosaicaIdOperand}
   | {[column: string]: FilterOperator};
+
+/**
+ * The `mosaica_id` filter: the items named by the identifiers responses hand out, as decimal
+ * strings, which {@link namedItems} builds. An identifier naming nothing, or an item the viewer
+ * cannot see, matches nothing.
+ *
+ * @category Filters
+ */
+export type MosaicaIdOperand = {eq: string} | {in: string[]};
 
 /**
  * The `region` filter: the items whose position lies inside a shape. Give exactly one of:
