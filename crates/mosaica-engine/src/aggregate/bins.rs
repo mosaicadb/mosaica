@@ -364,12 +364,15 @@ impl Bins {
                 || Histogram::new(&edges[..bins], edges[bins]),
                 timings,
             )?,
-            Edges::Ints(edges) if bins > 0 => self.tally(
-                cx,
-                set,
-                || Histogram::new(&edges[..bins], edges[bins]),
-                timings,
-            )?,
+            Edges::Ints(edges) if bins > 0 => {
+                let words = Words::new(&edges[..bins], edges[bins], self.kind);
+                self.tally(
+                    cx,
+                    set,
+                    || Histogram::new(&edges[..bins], edges[bins]).with_words(&words),
+                    timings,
+                )?
+            }
             Edges::Floats(_) => self.tally(cx, set, || Histogram::<f64>::new(&[], 0.0), timings)?,
             Edges::Ints(_) => self.tally(cx, set, || Histogram::<i128>::new(&[], 0), timings)?,
         };
@@ -392,9 +395,9 @@ impl Bins {
         let cut = sample_cut(self.sample, cx.reads().map(|place| set.size_in(place)));
         let mut sides = Vec::new();
         for place in cx.reads() {
-            let members = set.cells(cx, place);
             let (hist, none, items) = match cut {
                 Some(cut) => {
+                    let members = set.cells(cx, place);
                     let plan = SamplePlan::of(cx, place, &members, cut);
                     let side = self.field.pass_sample(cx, place, &members, &plan, &empty)?;
                     timings.band_entries += plan.entries_read();
@@ -803,6 +806,8 @@ trait Num: Copy + PartialOrd + Send + Sync {
     fn float(x: f64) -> Self;
     fn finite(self) -> bool;
     fn number(self) -> Number;
+    /// This value plus `shift` as a `u64`, where it is an integer and the sum fits.
+    fn word(self, shift: i128) -> Option<u64>;
     fn add_to(sum: &mut Self::Sum, x: Self);
     fn joined(sum: Self::Sum, other: Self::Sum) -> Self::Sum;
     fn exact(sum: Self::Sum) -> Sum;
@@ -855,6 +860,9 @@ impl Num for i128 {
     fn number(self) -> Number {
         Number::Int(self)
     }
+    fn word(self, shift: i128) -> Option<u64> {
+        self.checked_add(shift).and_then(|w| u64::try_from(w).ok())
+    }
     type Sum = i128;
     fn add_to(sum: &mut i128, x: Self) {
         *sum += x;
@@ -879,6 +887,9 @@ impl Num for f64 {
     }
     fn number(self) -> Number {
         Number::Float(self)
+    }
+    fn word(self, _: i128) -> Option<u64> {
+        None
     }
     type Sum = ExactSum;
     fn add_to(sum: &mut ExactSum, x: Self) {
@@ -1035,6 +1046,8 @@ impl Reader<'_> {
 struct Histogram<'e, K> {
     lowers: &'e [K],
     upper: K,
+    /// The same edges as words, where an integer value is placed by them.
+    words: Option<&'e Words>,
     bins: Vec<u64>,
     rest: u64,
 }
@@ -1044,8 +1057,16 @@ impl<'e, K: Num> Histogram<'e, K> {
         Histogram {
             lowers,
             upper,
+            words: None,
             bins: vec![0; lowers.len()],
             rest: 0,
+        }
+    }
+
+    fn with_words(self, words: &'e Words) -> Self {
+        Histogram {
+            words: Some(words),
+            ..self
         }
     }
 }
@@ -1053,11 +1074,18 @@ impl<'e, K: Num> Histogram<'e, K> {
 impl<K: Num> Tally<K> for Histogram<'_, K> {
     #[inline]
     fn add(&mut self, x: K, _: u32) {
-        // A NaN is below no bound and so in no bin.
-        let at = self.lowers.partition_point(|&lower| lower <= x);
-        match at.checked_sub(1) {
-            Some(bin) if x <= self.upper => self.bins[bin] += 1,
-            _ => self.rest += 1,
+        let bin = match self.words.and_then(|w| Some((w, x.word(w.shift)?))) {
+            Some((words, word)) => words.bin(word),
+            // A NaN is below no bound and so in no bin.
+            None => self
+                .lowers
+                .partition_point(|&lower| lower <= x)
+                .checked_sub(1)
+                .filter(|_| x <= self.upper),
+        };
+        match bin {
+            Some(bin) => self.bins[bin] += 1,
+            None => self.rest += 1,
         }
     }
 
@@ -1067,6 +1095,48 @@ impl<K: Num> Tally<K> for Histogram<'_, K> {
         }
         self.rest += other.rest;
         self
+    }
+}
+
+/// A histogram's integer edges moved by `shift` into `u64` words, which order as the edges do and
+/// compare several times faster than `i128`. A value moved by the same shift is placed by its word
+/// exactly as by the edges; one whose word is outside `u64` is placed by the edges.
+struct Words {
+    /// Moves the span of a field's kind onto `0..=u64::MAX`.
+    shift: i128,
+    /// The lower edges' words, one below every word held at 0. The edges above every word hold no
+    /// value and are left off the end, which moves no bin.
+    lowers: Vec<u64>,
+    /// The upper edge's word, held at `u64::MAX` above every word, `None` below every word.
+    upper: Option<u64>,
+}
+
+impl Words {
+    fn new(lowers: &[i128], upper: i128, kind: Kind) -> Words {
+        let shift = match kind {
+            Kind::Unsigned => 0,
+            _ => -i128::from(i64::MIN),
+        };
+        let top = i128::from(u64::MAX);
+        Words {
+            shift,
+            lowers: lowers
+                .iter()
+                .map(|&lower| lower + shift)
+                .take_while(|&lower| lower <= top)
+                .map(|lower| lower.max(0) as u64)
+                .collect(),
+            upper: (upper + shift >= 0).then(|| (upper + shift).min(top) as u64),
+        }
+    }
+
+    /// The bin `word` falls in, or `None` where it is in none.
+    #[inline]
+    fn bin(&self, word: u64) -> Option<usize> {
+        self.lowers
+            .partition_point(|&lower| lower <= word)
+            .checked_sub(1)
+            .filter(|_| self.upper.is_some_and(|upper| word <= upper))
     }
 }
 
@@ -1671,6 +1741,50 @@ mod tests {
             ints.add(x, 0);
         }
         assert_eq!((ints.bins.clone(), ints.rest), (vec![3, 1, 0, 1], 2));
+    }
+
+    /// Placed by words, every value of a kind's span falls in the bin its edges give, with edges
+    /// inside, past and at either end of the span. A value past the span is placed by the edges.
+    #[test]
+    fn an_integer_is_placed_by_its_word_as_by_its_edges() {
+        let (i_min, i_max) = (i128::from(i64::MIN), i128::from(i64::MAX));
+        let u_max = i128::from(u64::MAX);
+        let cases: Vec<(Kind, Vec<i128>)> = vec![
+            (Kind::Signed, vec![-100, -3, 0, 7, 100]),
+            (Kind::Signed, vec![i_min - 5, -3, 0, 7, i_max + 10]),
+            (Kind::Signed, vec![i_min - 9, i_min - 5, i_min, i_max, i_max + 1, i_max + 2]),
+            (Kind::Signed, vec![i_min - 9, i_min - 1]),
+            (Kind::Signed, vec![i_max + 1, i_max + 9]),
+            (Kind::Timestamp, vec![i_min, -1, 0, 1, i_max]),
+            (Kind::Unsigned, vec![0, 10, 1 << 63, u_max]),
+            (Kind::Unsigned, vec![-7, 5, u_max - 1, u_max + 3]),
+            (Kind::Unsigned, vec![u_max + 1, u_max + 2]),
+        ];
+        for (kind, edges) in cases {
+            let (lo, hi) = match kind {
+                Kind::Unsigned => (0, u_max),
+                _ => (i_min, i_max),
+            };
+            let mut values: Vec<i128> = edges
+                .iter()
+                .flat_map(|&e| [e - 1, e, e + 1])
+                .chain([lo, lo + 1, hi - 1, hi, lo - 1, hi + 1, 0])
+                .collect();
+            values.sort_unstable();
+            let n = edges.len() - 1;
+            let words = Words::new(&edges[..n], edges[n], kind);
+            let mut by_edges = Histogram::new(&edges[..n], edges[n]);
+            let mut by_words = Histogram::new(&edges[..n], edges[n]).with_words(&words);
+            for &x in &values {
+                by_edges.add(x, 0);
+                by_words.add(x, 0);
+                assert_eq!(
+                    (&by_words.bins, by_words.rest),
+                    (&by_edges.bins, by_edges.rest),
+                    "{kind:?} {edges:?} at {x}"
+                );
+            }
+        }
     }
 
     /// A sampled histogram over two shards against one shard holding both: each shard's raw
