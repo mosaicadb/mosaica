@@ -10,50 +10,30 @@ container image.
 
 ## [0.3.0] - 2026-11-08
 
-This is an alpha release, like 0.2.0. Bundles built by 0.2.0 have to be built again, and one
-setting in the deployment file has a new name.
-
 ### Changed
 
-- **Bundles from 0.2.0 must be rebuilt.** The bundle format is now 52, and 0.3.0 refuses a 0.2.0
-  bundle with a message that says to rebuild it. A rebuild starts from the declaration and source
-  files alone, so make any writes made to the running 0.2.0 service again afterwards. Until a
-  deletion or suppression is made again, the item it named is served. Move the old write-ahead
-  log (`wal-*.log` and `wal-*.sync`) aside too, because the rebuilt database refuses it.
-- **The filter cache covers column filters and has a new name.** Ranges, `eq` and `in` on columns
-  are now kept between requests as `match` and `phrase` already were, so panning and zooming with
-  a filter does not evaluate it again. Rename `serve.text_filter_cache_bytes` to
-  `serve.filter_cache_bytes` in your deployment file. The status field is now `filter_cache`.
-- **Compaction requests are read one at a time.** `GET /control/compact/{request}` says whether a
-  request has been answered, how it ended and how far its compaction has got. It replaces
-  `compaction.requests.last_refusal` in `/control/status`. Request numbers now start from the
-  server's start time, so a number from before a restart is not reused.
-- **The session and control planes share the viewer's port unless given their own.** `session`
-  and `control` under `[serve]` are optional, and a deployment that names all three addresses is
-  served as before.
-- **The Python client serves on port 9141** (or the next free port above it) and prints the
-  address when its server starts, which makes a notebook on another machine reachable through one
-  forwarded port. `create()` and `open()` take `port=` to choose another. The package now
-  depends on `tqdm`.
-- **Faster filters, histograms, builds and start-up.** Keyword, category and column filters and
-  histograms over a filtered set all read less. A server no longer hashes every file of a bundle
-  when it opens it, although `mosaica verify` still does.
+- **Bundle format 52.** Bundles built by 0.2.0 must be rebuilt, and writes made to a 0.2.0
+  service, including deletions and suppressions, are not carried over.
+- **The filter cache covers column filters.** Ranges, `eq` and `in` are kept between requests as
+  `match` and `phrase` already were. `serve.text_filter_cache_bytes` is renamed
+  `serve.filter_cache_bytes`, and the status field `text_filter_cache` is renamed `filter_cache`.
+- **Compaction requests are read one at a time** through the new
+  `GET /control/compact/{request}`, which replaces `compaction.requests.last_refusal` in
+  `/control/status`.
+- **The session and control planes share the viewer's port** unless `[serve]` gives them their
+  own address.
+- **The Python client serves on port 9141** by default and prints its address. `create()` and
+  `open()` take `port=`. The package now depends on `tqdm`.
+- **Faster filters, histograms, builds and start-up.**
 
 ### Added
 
-- **Progress reporting.** `mosaica build`, `mosaica insert` and `mosaica compact --wait` take
-  `--progress` to show the current phase and step, its rate and the time remaining. The same
-  records appear under `jobs` in `/control/status`, and the Python and TypeScript clients pass
-  them to a callback as they arrive.
-- **`mosaica compact --wait` and `--request`.** `--wait` returns once the server has answered the
-  request and exits 1 if it was refused or failed. `--request N` reads an earlier request.
-- **Filter by `mosaica_id`.** `{"mosaica_id": {"in": [...]}}` keeps the named items the viewer may
-  see, which lets one `/v1/items` call fetch the points a map is showing. The TypeScript client
-  builds it with `namedItems(ids)`.
-- **Images on the item card.** Fields listed in the card's `image-fields` (`imageFields` in React)
-  are drawn as images. The viewer's browser loads each image from its own host, which therefore
-  learns which items the viewer opens.
-- **`[serve] port_retries`** tells `mosaica serve` to try that many ports above a taken one.
+- **Progress reporting** for builds, inserts and compactions, through `--progress` on the CLI,
+  `jobs` in `/control/status`, and a callback in the Python and TypeScript clients.
+- **`mosaica compact --wait` and `--request`** to wait for a compaction request or read one.
+- **Filter by `mosaica_id`**, with `namedItems(ids)` in the TypeScript client.
+- **Images on the item card**, from the fields listed in `image-fields`.
+- **`[serve] port_retries`**, which tries ports above a taken one.
 
 ## [0.2.0] - 2026-11-05
 
