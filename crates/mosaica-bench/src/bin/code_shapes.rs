@@ -27,65 +27,65 @@
 //! target/release/code_shapes --entities 33554432 --dir /path/on/the/disk/under/test
 //! ```
 //!
+//! Before timing, each file is rewritten in one sequential pass and put on disc, and the two
+//! columns are scanned in alternating turns. Without that, a file the writer produced through its
+//! spools measured up to 35% slower than a byte-identical one written in one pass, which made
+//! blocks look slower than flat storage where they are not.
+//!
 //! # Measured 2026-11-08, a 4-core cloud container with 15 GB of memory, release
 //!
 //! 2²⁵ entities, every one carrying a value, median of 9. A cold scan of 138 MB took about
-//! 60–65 ms here, so this disc reads about 2.2 GB/s; the ratios, not the times, are what carry
-//! to another machine. Neither kind of figure is steady on this machine: across runs of one binary
-//! a cold figure moved by up to 20% and a warm one by up to 1.7× (the first row's flat scan
-//! measured 11–20 ms).
+//! 55–60 ms here, so this disc reads about 2.4 GB/s; the ratios, not the times, are what carry
+//! to another machine. A warm figure moved by up to 1.7× across runs of one binary (the first
+//! row's flat scan measured 11–23 ms), and a cold one by up to 20%.
 //!
 //! | codes | distinct | order | flat MB | blocks MB | warm flat ms | warm blocks ms | cold flat ms | cold blocks ms |
 //! |---|---:|---|---:|---:|---:|---:|---:|---:|
-//! | u32 | 16 | uniform | 138 | 35 | 20.4 | 13.5 | 63.4 | 22.5 |
-//! | u32 | 16 | skewed | 138 | 35 | 19.6 | 11.2 | 67.0 | 23.4 |
-//! | u32 | 16 | sorted | 138 | 0 | 10.4 | 0.4 | 67.6 | 0.6 |
-//! | u32 | 10 000 | uniform | 138 | 90 | 12.6 | 9.9 | 63.5 | 52.9 |
-//! | u32 | 10 000 | skewed | 138 | 89 | 17.4 | 12.8 | 68.6 | 49.8 |
-//! | u32 | 10 000 | sorted | 138 | 35 | 12.4 | 6.8 | 64.3 | 17.5 |
-//! | u32 | 10⁷ | uniform | 138 | 138 | 12.2 | 13.7 | 62.4 | 74.9 |
-//! | u32 | 10⁷ | skewed | 138 | 138 | 11.0 | 13.8 | 60.5 | 67.8 |
-//! | u32 | 10⁷ | sorted | 138 | 110 | 12.1 | 10.7 | 64.7 | 53.8 |
-//! | u32 | 2²⁵ | uniform | 138 | 138 | 11.0 | 13.0 | 66.3 | 63.3 |
-//! | u32 | 2²⁵ | skewed | 138 | 138 | 10.4 | 13.9 | 62.0 | 64.5 |
-//! | u32 | 2²⁵ | sorted | 138 | 138 | 10.9 | 13.4 | 65.4 | 68.3 |
-//! | u16 | 16 | uniform | 71 | 35 | 12.9 | 11.1 | 32.0 | 26.1 |
-//! | u16 | 16 | skewed | 71 | 35 | 15.2 | 12.2 | 35.7 | 20.8 |
-//! | u16 | 16 | sorted | 71 | 0 | 7.6 | 0.3 | 32.4 | 0.5 |
-//! | u16 | 1 000 | uniform | 71 | 69 | 9.0 | 9.9 | 29.0 | 33.3 |
-//! | u16 | 1 000 | skewed | 71 | 69 | 12.7 | 14.7 | 34.1 | 38.4 |
-//! | u16 | 1 000 | sorted | 71 | 35 | 9.0 | 6.7 | 29.6 | 18.0 |
-//! | u16 | 60 000 | uniform | 71 | 69 | 9.0 | 9.6 | 30.1 | 37.8 |
-//! | u16 | 60 000 | skewed | 71 | 69 | 10.0 | 9.5 | 33.1 | 37.7 |
-//! | u16 | 60 000 | sorted | 71 | 35 | 7.4 | 6.2 | 31.4 | 19.1 |
+//! | u32 | 16 | uniform | 138 | 35 | 22.9 | 11.6 | 57.5 | 20.5 |
+//! | u32 | 16 | skewed | 138 | 35 | 20.0 | 10.7 | 60.0 | 18.5 |
+//! | u32 | 16 | sorted | 138 | 0 | 13.4 | 0.6 | 58.8 | 0.5 |
+//! | u32 | 10 000 | uniform | 138 | 90 | 12.5 | 9.0 | 54.4 | 37.4 |
+//! | u32 | 10 000 | skewed | 138 | 89 | 14.4 | 9.9 | 57.3 | 40.2 |
+//! | u32 | 10 000 | sorted | 138 | 35 | 13.6 | 6.5 | 59.2 | 15.9 |
+//! | u32 | 10⁷ | uniform | 138 | 138 | 13.4 | 11.6 | 55.9 | 55.3 |
+//! | u32 | 10⁷ | skewed | 138 | 138 | 13.4 | 12.3 | 52.6 | 53.0 |
+//! | u32 | 10⁷ | sorted | 138 | 110 | 12.3 | 8.8 | 54.4 | 45.8 |
+//! | u32 | 2²⁵ | uniform | 138 | 138 | 13.6 | 11.6 | 57.8 | 53.9 |
+//! | u32 | 2²⁵ | skewed | 138 | 138 | 11.8 | 11.3 | 57.7 | 56.3 |
+//! | u32 | 2²⁵ | sorted | 138 | 138 | 13.0 | 10.8 | 53.7 | 54.1 |
+//! | u16 | 16 | uniform | 71 | 35 | 14.0 | 10.8 | 29.8 | 17.8 |
+//! | u16 | 16 | skewed | 71 | 35 | 13.3 | 11.1 | 30.2 | 18.2 |
+//! | u16 | 16 | sorted | 71 | 0 | 9.1 | 0.4 | 28.4 | 0.5 |
+//! | u16 | 1 000 | uniform | 71 | 69 | 9.0 | 8.1 | 28.4 | 29.2 |
+//! | u16 | 1 000 | skewed | 71 | 69 | 13.7 | 13.6 | 30.8 | 30.4 |
+//! | u16 | 1 000 | sorted | 71 | 35 | 9.6 | 6.4 | 28.2 | 14.6 |
+//! | u16 | 60 000 | uniform | 71 | 69 | 9.0 | 8.4 | 27.0 | 27.6 |
+//! | u16 | 60 000 | skewed | 71 | 69 | 10.2 | 9.7 | 28.0 | 27.1 |
+//! | u16 | 60 000 | sorted | 71 | 35 | 8.6 | 5.6 | 28.6 | 15.1 |
 //!
 //! Blocks shrink a column wherever a block holds few distinct codes for its entities, and a cold
-//! scan then reads less: 2.5–3× faster for four-byte codes at 16 values, 1.2–1.4× at 10 000 drawn
-//! independently, 1.2–1.7× for two-byte codes at 16 values or in runs, and far more where whole
-//! blocks hold one value. Where a block holds too many distinct codes to shrink, it is stored
-//! plain, and the file is flat storage's size; a cold scan of such a column measured 0–35% slower
-//! than the flat one across runs, with the same faults, and a warm one up to about 35% slower.
-//! Where blocks shrink a column, a warm scan matched or beat the flat one in every repeated run:
-//! fourteen runs of the two-byte columns in runs gave 5.4–6.9 ms against 6.2–9.0 ms flat, on one
-//! thread as on four.
-
+//! scan then reads less: 2.8–3.2× faster for four-byte codes at 16 values, 1.4–1.5× at 10 000
+//! drawn independently, 1.7–1.9× for two-byte codes at 16 values or in runs, and far more where
+//! whole blocks hold one value. Where a block holds too many distinct codes to shrink it is stored
+//! plain, the file is flat storage's size, and a scan measured the same as flat cold, within 3%,
+//! and the same or faster warm. No shape measured slower stored in blocks.
+//!
 //! A viewport's candidate, at 10 000 four-byte values drawn uniformly, stored per block, against a
-//! scan of the whole set (7.3 ms warm, 47.9 ms cold), from an earlier run of this binary.
-//! `narrows` is the engine's rule:
+//! scan of the whole set (9.0 ms warm, 37.4 ms cold). `narrows` is the engine's rule:
 //!
 //! | share | layout | entities | blocks | warm ms | cold ms | narrows |
 //! |---:|---|---:|---:|---:|---:|---|
-//! | 10⁻⁴ | scattered | 3 355 | 512 | 2.9 | 88.6 | no |
+//! | 10⁻⁴ | scattered | 3 355 | 512 | 4.2 | 86.6 | no |
 //! | 10⁻⁴ | contiguous | 3 355 | 1 | 0.1 | 0.4 | yes |
-//! | 10⁻³ | scattered | 33 535 | 512 | 3.5 | 59.5 | no |
-//! | 10⁻³ | contiguous | 33 554 | 2 | 0.1 | 0.6 | yes |
-//! | 10⁻² | scattered | 333 850 | 512 | 9.4 | 69.1 | no |
-//! | 10⁻² | contiguous | 335 544 | 6 | 0.3 | 1.4 | yes |
+//! | 10⁻³ | scattered | 33 535 | 512 | 3.2 | 52.1 | no |
+//! | 10⁻³ | contiguous | 33 554 | 2 | 0.1 | 0.5 | yes |
+//! | 10⁻² | scattered | 333 850 | 512 | 9.7 | 56.2 | no |
+//! | 10⁻² | contiguous | 335 544 | 6 | 0.2 | 1.1 | yes |
 //!
 //! A scattered viewport touches every block, and reading a few values from every block costs more
 //! cold than reading the whole column in order, because each fault reads ahead about a block. So
 //! the rule counts blocks: it narrows a viewport whose items fall in few blocks, where the gain is
-//! 30–100×, and leaves the scattered ones to the whole scan.
+//! 35–90×, and leaves the scattered ones to the whole scan.
 
 use std::fs::File;
 use std::os::fd::AsRawFd;
@@ -186,36 +186,70 @@ fn ms(d: Duration) -> String {
 
 /// The median of `repeat` scans of `candidate` for `needle`, and the major faults one took. Cold,
 /// each scan opens the column after evicting its file.
-fn scan(
+/// Rewrite the file at `path` in one sequential pass and put it on disc, so its blocks on disc
+/// and in memory are laid out as a single write leaves them, whatever spools the writer went
+/// through: two files of the same bytes then measure alike, which they did not without this.
+fn settle(path: &Path) -> std::io::Result<()> {
+    let bytes = std::fs::read(path)?;
+    let fresh = path.with_extension("settled");
+    std::fs::write(&fresh, &bytes)?;
+    File::open(&fresh)?.sync_all()?;
+    std::fs::rename(&fresh, path)?;
+    evict(path)
+}
+
+/// One scan of `candidate` for `needle` in the column in `dir`: its time, the major faults it
+/// took and how many entities it matched. Cold, the column's file is evicted first.
+fn once(
     dir: &Path,
+    candidate: &Bitmap,
+    needle: u32,
+    cold: bool,
+    pool: &rayon::ThreadPool,
+) -> Result<(Duration, u64, u64), BoxError> {
+    if cold {
+        evict(&dir.join(VALUES_FILE))?;
+    }
+    let column = ValueColumn::open_dir(dir, Access::Mapped)?;
+    let before = major_faults();
+    let started = Instant::now();
+    let found = pool.install(|| column.scan_eq(candidate, AttrLocalId::new(needle)));
+    Ok((started.elapsed(), major_faults() - before, found.cardinality()))
+}
+
+/// Each column's median of `repeat` scans, with the major faults of its last and what it matched.
+/// The columns are scanned in turns, the first of each turn alternating, after their files are on
+/// disc, so no column is measured while another's writes are still going out or always in the
+/// other's wake.
+fn scan(
+    dirs: &[&Path],
     candidate: &Bitmap,
     needle: u32,
     repeat: usize,
     cold: bool,
     pool: &rayon::ThreadPool,
-) -> Result<(Duration, u64, u64), BoxError> {
-    let mut samples = Vec::with_capacity(repeat);
-    let mut faults = 0;
-    let mut matched = 0;
-    if !cold {
-        let warm = ValueColumn::open_dir(dir, Access::Mapped)?;
-        pool.install(|| warm.scan_eq(candidate, AttrLocalId::new(needle)));
+) -> Result<Vec<(Duration, u64, u64)>, BoxError> {
+    for dir in dirs {
+        settle(&dir.join(VALUES_FILE))?;
+        if !cold {
+            once(dir, candidate, needle, false, pool)?;
+        }
     }
-    for _ in 0..repeat {
-        let column = if cold {
-            evict(&dir.join(VALUES_FILE))?;
-            ValueColumn::open_dir(dir, Access::Mapped)?
-        } else {
-            ValueColumn::open_dir(dir, Access::Mapped)?
-        };
-        let before = major_faults();
-        let started = Instant::now();
-        let found = pool.install(|| column.scan_eq(candidate, AttrLocalId::new(needle)));
-        samples.push(started.elapsed());
-        faults = major_faults() - before;
-        matched = found.cardinality();
+    let mut samples = vec![Vec::with_capacity(repeat); dirs.len()];
+    let mut last = vec![(0, 0); dirs.len()];
+    for turn in 0..repeat {
+        for k in 0..dirs.len() {
+            let i = (k + turn) % dirs.len();
+            let (took, faults, matched) = once(dirs[i], candidate, needle, cold, pool)?;
+            samples[i].push(took);
+            last[i] = (faults, matched);
+        }
     }
-    Ok((median(samples), faults, matched))
+    Ok(samples
+        .into_iter()
+        .zip(last)
+        .map(|(s, (faults, matched))| (median(s), faults, matched))
+        .collect())
 }
 
 fn main() -> Result<(), BoxError> {
@@ -280,15 +314,15 @@ fn main() -> Result<(), BoxError> {
                 }
                 _ => "flat".to_string(),
             };
-            let (warm_flat, _, m1) = scan(&flat, &whole, needle, args.repeat, false, &pool)?;
-            let (warm_blocks, _, m2) = scan(&blocks, &whole, needle, args.repeat, false, &pool)?;
+            let both = [flat.as_path(), blocks.as_path()];
+            let warm = scan(&both, &whole, needle, args.repeat, false, &pool)?;
+            let ((warm_flat, _, m1), (warm_blocks, _, m2)) = (warm[0], warm[1]);
             assert_eq!(m1, m2, "both columns match the same entities");
-            let cold = |dir: &Path| match args.warm_only {
-                true => Ok((Duration::ZERO, 0, 0)),
-                false => scan(dir, &whole, needle, args.repeat, true, &pool),
+            let cold = match args.warm_only {
+                true => vec![(Duration::ZERO, 0, 0); 2],
+                false => scan(&both, &whole, needle, args.repeat, true, &pool)?,
             };
-            let (cold_flat, f_flat, _) = cold(&flat)?;
-            let (cold_blocks, f_blocks, _) = cold(&blocks)?;
+            let ((cold_flat, f_flat, _), (cold_blocks, f_blocks, _)) = (cold[0], cold[1]);
             println!(
                 "| u{} | {distinct} | {} | {:.0} | {:.0} | {widths} | {} | {} | {} | {} | {f_flat}/{f_blocks} |",
                 u32::from(bytes) * 8,
@@ -312,9 +346,9 @@ fn main() -> Result<(), BoxError> {
                     for (layout, candidate) in [("scattered", scattered), ("contiguous", contiguous)]
                     {
                         let (warm, _, _) =
-                            scan(&blocks, &candidate, needle, args.repeat, false, &pool)?;
+                            scan(&[&blocks], &candidate, needle, args.repeat, false, &pool)?[0];
                         let (cold, faults, _) =
-                            scan(&blocks, &candidate, needle, args.repeat, true, &pool)?;
+                            scan(&[&blocks], &candidate, needle, args.repeat, true, &pool)?[0];
                         let blocks = u64::from(candidate.statistics().n_containers);
                         let narrows = u64::from(k) * 16 <= u64::from(n)
                             && blocks * 4 <= u64::from(whole.statistics().n_containers);
