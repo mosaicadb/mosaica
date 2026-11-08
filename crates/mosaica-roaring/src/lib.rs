@@ -35,6 +35,43 @@ pub use ranks::BlockRanks;
 pub use runs::{for_each_run_in, split_by_cardinality, RankedRuns, Runs};
 pub use view::OwnedView;
 
+/// The values block `block` spans: one container's.
+pub fn span(block: u32) -> std::ops::RangeInclusive<u32> {
+    let lo = block << 16;
+    lo..=lo | 0xFFFF
+}
+
+/// The blocks `bitmap` holds a member in, ascending: its containers' keys.
+pub struct Blocks<'a> {
+    cursor: croaring::bitmap::BitmapCursor<'a>,
+    done: bool,
+}
+
+impl<'a> Blocks<'a> {
+    pub fn new(bitmap: &'a Bitmap) -> Self {
+        Blocks {
+            cursor: bitmap.cursor(),
+            done: false,
+        }
+    }
+}
+
+impl Iterator for Blocks<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        if self.done {
+            return None;
+        }
+        let block = self.cursor.current()? >> 16;
+        match block.checked_add(1) {
+            Some(next) if next <= u32::MAX >> 16 => self.cursor.reset_at_or_after(next << 16),
+            _ => self.done = true,
+        }
+        Some(block)
+    }
+}
+
 use croaring::{Bitmap, Portable};
 
 /// Values in one Roaring block.
@@ -406,5 +443,31 @@ mod tests {
         }
         assert_eq!(sink.staged_by_value(), want);
         assert_eq!(sink.finish(), want);
+    }
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::*;
+
+    /// Every block holding a member, once and ascending, the last block of the `u32` range
+    /// included; and each block's member count from the ranks.
+    #[test]
+    fn blocks_and_their_counts_are_the_containers() {
+        let mut bitmap = Bitmap::of(&[3, 9, 70_000, u32::MAX - 1, u32::MAX]);
+        bitmap.add_range(5 << 16..(5 << 16) + 300);
+        let blocks: Vec<u32> = Blocks::new(&bitmap).collect();
+        assert_eq!(blocks, vec![0, 1, 5, u32::MAX >> 16]);
+        assert_eq!(Blocks::new(&Bitmap::new()).count(), 0);
+
+        let ranks = BlockRanks::of(&bitmap);
+        assert_eq!(ranks.blocks(), 0..(u32::MAX >> 16) + 1);
+        let counts: Vec<u64> = [0, 1, 2, 5, u32::MAX >> 16]
+            .iter()
+            .map(|&k| ranks.count_in(k))
+            .collect();
+        assert_eq!(counts, vec![2, 1, 0, 300, 2]);
+        assert_eq!(BlockRanks::of(&Bitmap::new()).blocks(), 0..0);
+        assert_eq!(span(5), 5 << 16..=(5 << 16) | 0xFFFF);
     }
 }

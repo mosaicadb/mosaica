@@ -349,24 +349,6 @@ fn sampled_blocks(
     blocks.len() as u64
 }
 
-/// A filter's rows held to `domain`: exact there and silent outside it, as the per-tile crossing's
-/// are. What an answer over the tiles' entities alone is.
-fn held_to(rows: FilterRows, domain: &[Range<u32>]) -> FilterRows {
-    match rows {
-        FilterRows::Viewport { .. } => rows,
-        FilterRows::Complete(rows) => {
-            let mut within = croaring::Bitmap::new();
-            for r in domain {
-                within.add_range(r.clone());
-            }
-            FilterRows::Viewport {
-                rows: rows.and(&within),
-                domain: domain.to_vec(),
-            }
-        }
-    }
-}
-
 /// [`Engine::rows_of_routed`]'s answer.
 pub(crate) struct RoutedRows {
     pub(crate) rows: FilterRows,
@@ -1075,10 +1057,10 @@ impl Engine {
             && (always || narrowing_may_pay(tiling.rows_in_ranges, v_total));
         for (place, side, _) in served.filtered_sides(&mask) {
             let (domain, rows_in_ranges) = tiling.domain_in(place);
-            let within = if may_narrow {
-                self.tiles_candidate(served, side, &domain, rows_in_ranges)?
-            } else {
-                None
+            let tiles = may_narrow.then(|| crate::compose::rows_of(&domain));
+            let within = match &tiles {
+                Some(tiles) => self.tiles_candidate(served, side, &domain, tiles, rows_in_ranges)?,
+                None => None,
             };
             let candidate = match &within {
                 Some(within) => FilterCandidate::Within(within),
@@ -1101,8 +1083,8 @@ impl Engine {
                             rows_in_ranges,
                             per_tile_only,
                         )?;
-                        if within.is_some() {
-                            out.rows = held_to(out.rows, &domain);
+                        if let (Some(tiles), Some(_)) = (&tiles, &within) {
+                            out.rows = out.rows.held_to(tiles, domain.clone());
                         }
                         if let (true, Some(matched)) = (count_matched, out.unmasked) {
                             probe.count(|t| &mut t.filter_matched, matched);
@@ -1144,15 +1126,17 @@ impl Engine {
         ))
     }
 
-    /// The visible entities whose rows lie in `domain`, the rows a request's tiles span in `side`,
-    /// where evaluating the request's filter over them costs less than over the viewer's whole
-    /// visible set there ([`narrowing_pays`]); `None` otherwise, or where the side cannot map its
-    /// rows to entities. The answer is exact over `domain` and says nothing outside it.
+    /// The visible entities whose rows lie in `domain`, the rows a request's tiles span in `side`
+    /// and which `rows` holds, where evaluating the request's filter over them costs less than over
+    /// the viewer's whole visible set there ([`narrowing_pays`]); `None` otherwise, or where the
+    /// side cannot map its rows to entities. The answer is exact over `domain` and says nothing
+    /// outside it.
     fn tiles_candidate(
         &self,
         served: &ServedView<'_>,
         side: &ServedSide<'_>,
         domain: &[Range<u32>],
+        rows: &croaring::Bitmap,
         rows_in_ranges: u64,
     ) -> Result<Option<croaring::Bitmap>> {
         let always = self.switches.tile_filters_always.load(Ordering::Relaxed);
@@ -1168,11 +1152,7 @@ impl Engine {
         if !always && sampled.saturating_mul(NARROW_BLOCK_RATIO) > visible_blocks {
             return Ok(None);
         }
-        let mut rows = croaring::Bitmap::new();
-        for r in domain {
-            rows.add_range(r.clone());
-        }
-        let Some(entities) = self.on_pool(rows_in_ranges, || row_space.entities_of_rows(&rows))
+        let Some(entities) = self.on_pool(rows_in_ranges, || row_space.entities_of_rows(rows))
         else {
             return Ok(None);
         };

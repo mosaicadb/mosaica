@@ -29,6 +29,7 @@ use std::io;
 
 use arrow::buffer::ScalarBuffer;
 use croaring::Bitmap;
+use mosaica_roaring::{span, BlockRanks, Blocks};
 
 use super::{add_scan_work, counted, CodeSet, Packing, ScanWork, ValueColumn, PARALLEL_MIN};
 
@@ -88,30 +89,18 @@ impl Width {
 }
 
 /// How many values each block holds: a whole block's worth up to the last for a column every entity
-/// carries a value in, and the presence bitmap's count in each container's span otherwise.
+/// carries a value in, and, for one only some carry a value in, the count its presence's `ranks`
+/// give each block.
 ///
 /// The writer cuts the column with this and the reader checks the file against it, so a file whose
 /// blocks do not fit the column's addressing is refused at open rather than read off by one block.
-pub(crate) fn block_counts(len: usize, presence: Option<&Bitmap>) -> Vec<u32> {
-    match presence {
+pub(crate) fn block_counts(len: usize, ranks: Option<&BlockRanks>) -> Vec<u32> {
+    match ranks {
         None => (0..len.div_ceil(BLOCK_LEN))
             .map(|k| (len - k * BLOCK_LEN).min(BLOCK_LEN) as u32)
             .collect(),
-        Some(presence) => {
-            let Some(last) = presence.maximum() else {
-                return Vec::new();
-            };
-            (0..=last >> BLOCK_BITS)
-                .map(|k| presence.range_cardinality(span(k)) as u32)
-                .collect()
-        }
+        Some(ranks) => ranks.blocks().map(|k| ranks.count_in(k) as u32).collect(),
     }
-}
-
-/// The entities block `k` spans.
-fn span(k: u32) -> std::ops::RangeInclusive<u32> {
-    let lo = k << BLOCK_BITS;
-    lo..=lo | (BLOCK_LEN as u32 - 1)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -297,9 +286,10 @@ impl BlockOrdinals {
         (widths, (4 * self.data.len() + 9 * self.blocks.len()) as u64)
     }
 
-    /// Refuse a column whose blocks are not the ones the column's addressing cuts it into.
-    pub(crate) fn check_addressing(&self, presence: Option<&Bitmap>) -> io::Result<()> {
-        let want = block_counts(self.len, presence);
+    /// Refuse a column whose blocks are not the ones the column's addressing cuts it into: every
+    /// entity's where `ranks` is `None`, otherwise those of the presence `ranks` were taken of.
+    pub(crate) fn check_addressing(&self, ranks: Option<&BlockRanks>) -> io::Result<()> {
+        let want = block_counts(self.len, ranks);
         let fits = want.len() == self.blocks.len()
             && want.iter().zip(&self.blocks).all(|(w, b)| *w == b.count);
         if !fits {
@@ -477,24 +467,6 @@ impl OrdinalTest<'_> {
 /// The positions of a `Const` block's values: every one is the block dictionary's first entry.
 static CONST_CODES: [u8; BLOCK_LEN] = [0; BLOCK_LEN];
 
-/// The blocks `candidate` reaches among the first `blocks`, ascending.
-fn touched_blocks(candidate: &Bitmap, blocks: usize) -> Vec<u32> {
-    let mut keys = Vec::new();
-    let mut cursor = candidate.cursor();
-    while let Some(at) = cursor.current() {
-        let k = at >> BLOCK_BITS;
-        if k as usize >= blocks {
-            break;
-        }
-        keys.push(k);
-        if k == u32::MAX >> BLOCK_BITS {
-            break;
-        }
-        cursor.reset_at_or_after((k + 1) << BLOCK_BITS);
-    }
-    keys
-}
-
 impl ValueColumn {
     /// Entities of `candidate` whose ordinal passes `test`, block by block. Run on a rayon pool, a
     /// large candidate's blocks are cut into runs of consecutive blocks, a few per thread, and the
@@ -507,7 +479,9 @@ impl ValueColumn {
         test: &OrdinalTest<'_>,
     ) -> Bitmap {
         use rayon::prelude::*;
-        let keys = touched_blocks(candidate, ordinals.blocks.len());
+        let keys: Vec<u32> = Blocks::new(candidate)
+            .take_while(|&k| (k as usize) < ordinals.blocks.len())
+            .collect();
         if keys.is_empty() {
             return Bitmap::new();
         }

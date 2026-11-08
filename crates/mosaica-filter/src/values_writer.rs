@@ -373,6 +373,10 @@ pub struct ValueColumnWriter {
     values_path: PathBuf,
     presence_path: PathBuf,
     values: Option<Spool>,
+    /// Removes the spool when the writer is dropped: a writer that never reached
+    /// [`ValueColumnWriter::finish`] (an error part-way through a fold, a panic) leaves it behind
+    /// otherwise, and the spool is the size of the column.
+    _spool: SpoolFile,
     count: usize,
     scratch: Vec<u8>,
 }
@@ -382,12 +386,14 @@ impl ValueColumnWriter {
     pub fn create(values_path: &Path, presence_path: &Path, kind: ColumnKind) -> io::Result<Self> {
         let mut name = values_path.as_os_str().to_os_string();
         name.push(".spool");
-        let values = Spool::create(PathBuf::from(name))?;
+        let path = PathBuf::from(name);
+        let values = Spool::create(path.clone())?;
         Ok(ValueColumnWriter {
             kind,
             values_path: values_path.to_path_buf(),
             presence_path: presence_path.to_path_buf(),
             values: Some(values),
+            _spool: SpoolFile(path),
             count: 0,
             scratch: Vec::with_capacity(SCRATCH),
         })
@@ -422,6 +428,11 @@ impl ValueColumnWriter {
                 self.kind
             )));
         }
+        let spool = self
+            .values
+            .as_mut()
+            .expect("the values spool is taken only by finish, which consumes the writer");
+        let scratch = &mut self.scratch;
         if self.kind.blocked() {
             let mut at = 0;
             let mut codes = Vec::with_capacity(SCRATCH);
@@ -429,15 +440,13 @@ impl ValueColumnWriter {
                 let take = (chunk.len() - at).min(SCRATCH);
                 codes.clear();
                 chunk.extend_codes(at, take, &mut codes);
-                for &c in &codes {
-                    match self.kind {
-                        ColumnKind::Ordinals16 => {
-                            self.scratch.extend_from_slice(&(c as u16).to_ne_bytes())
-                        }
-                        _ => self.scratch.extend_from_slice(&c.to_ne_bytes()),
+                match self.kind {
+                    ColumnKind::Ordinals16 => {
+                        let narrow = codes.iter().map(|&c| c as u16);
+                        spool_values(spool, narrow, u16::to_ne_bytes, scratch)?
                     }
+                    _ => spool_values(spool, codes.iter().copied(), u32::to_ne_bytes, scratch)?,
                 }
-                Self::flush_scratch(&mut self.values, &mut self.scratch)?;
                 at += take;
             }
             self.count += chunk.len();
@@ -446,13 +455,7 @@ impl ValueColumnWriter {
         macro_rules! scalars {
             ($v:expr) => {{
                 let v = $v;
-                for x in v.iter() {
-                    self.scratch.extend_from_slice(&x.to_ne_bytes());
-                    if self.scratch.len() >= SCRATCH {
-                        Self::flush_scratch(&mut self.values, &mut self.scratch)?;
-                    }
-                }
-                Self::flush_scratch(&mut self.values, &mut self.scratch)?;
+                spool_values(spool, v.iter().copied(), |x| x.to_ne_bytes(), scratch)?;
                 self.count += v.len();
             }};
         }
@@ -472,24 +475,11 @@ impl ValueColumnWriter {
         Ok(())
     }
 
-    fn flush_scratch(values: &mut Option<Spool>, scratch: &mut Vec<u8>) -> io::Result<()> {
-        if scratch.is_empty() {
-            return Ok(());
-        }
-        let spool = values
-            .as_mut()
-            .expect("the values spool is taken only by finish, which consumes the writer");
-        spool.write(scratch)?;
-        scratch.clear();
-        Ok(())
-    }
-
     /// Assemble the column: one record batch over the mapped spool, and the presence bitmap where
     /// presence is partial. `presence` follows [`write_value_column`]'s rule exactly — `None`
     /// means every entity in `0..len()` carries a value.
     pub fn finish(mut self, presence: Option<&Bitmap>) -> io::Result<()> {
         check_presence(self.count, presence)?;
-        Self::flush_scratch(&mut self.values, &mut self.scratch)?;
         let values = self
             .values
             .take()
@@ -545,16 +535,6 @@ impl ValueColumnWriter {
     }
 }
 
-impl Drop for ValueColumnWriter {
-    /// A writer that never reached [`ValueColumnWriter::finish`] — an error part-way through a
-    /// fold, a panic — leaves its spool behind otherwise, and that spool is the size of the column.
-    fn drop(&mut self) {
-        if let Some(spool) = self.values.take() {
-            let _ = std::fs::remove_file(&spool.path);
-        }
-    }
-}
-
 /// A spool removed when dropped, so an abandoned write leaves none behind.
 struct SpoolFile(PathBuf);
 
@@ -592,7 +572,8 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
     presence: Option<&Bitmap>,
     code_bytes: CodeBytes,
 ) -> io::Result<()> {
-    let counts = ordinals::block_counts(values.len(), presence);
+    let ranks = presence.map(mosaica_roaring::BlockRanks::of);
+    let counts = ordinals::block_counts(values.len(), ranks.as_ref());
     let mut name = values_path.as_os_str().to_os_string();
     name.push(".blocks.spool");
     let guard = SpoolFile(PathBuf::from(name));

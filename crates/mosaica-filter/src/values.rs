@@ -837,13 +837,17 @@ impl ValueColumn {
                 ),
             ));
         }
+        // Codes in blocks are checked against the blocks the presence cuts the column into, from
+        // the ranks every lookup into a partial column takes anyway.
+        let block_ranks = std::sync::OnceLock::new();
         if let Codes::Ordinals(o) = &codes {
-            o.check_addressing(Some(&presence))?;
+            let ranks = block_ranks.get_or_init(|| mosaica_roaring::BlockRanks::of(&presence));
+            o.check_addressing(Some(ranks))?;
         }
         Ok(ValueColumn {
             codes,
             presence: Some(presence),
-            block_ranks: std::sync::OnceLock::new(),
+            block_ranks,
         })
     }
 
@@ -1037,21 +1041,12 @@ impl ValueColumn {
         let mut members: Vec<u32> = Vec::new();
         let mut held = [0u64; pack::WORDS];
         let mut words = [0u64; pack::WORDS];
-        let mut live_cursor = live.cursor();
         let mut present_cursor = presence.cursor();
-        let mut next = live.minimum();
-        while let Some(at) = next {
+        for block in mosaica_roaring::Blocks::new(&live) {
             if *state == Packing::Abandoned {
                 break;
             }
-            let block = at >> 16;
-            let span = block << 16..=(block << 16) | 0xFFFF;
-            next = if block == u32::MAX >> 16 {
-                None
-            } else {
-                live_cursor.reset_at_or_after((block + 1) << 16);
-                live_cursor.current()
-            };
+            let span = mosaica_roaring::span(block);
             let in_live = live.range_cardinality(span.clone());
             let in_presence = presence.range_cardinality(span.clone());
             if in_live < PARTIAL_PACK_MIN || in_live * 2 < in_presence {
@@ -1106,7 +1101,7 @@ impl ValueColumn {
             return self.walk_runs(&live, values, |x| pred(x), &mut Packing::Abandoned);
         }
         for block in &packed_blocks {
-            live.remove_range(block << 16..=(block << 16) | 0xFFFF);
+            live.remove_range(mosaica_roaring::span(*block));
         }
         let mut out = self.walk_runs(&live, values, |x| pred(x), &mut Packing::Abandoned);
         out.or_inplace(&packed.finish());

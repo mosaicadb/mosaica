@@ -1010,16 +1010,7 @@ impl Walk {
             let mut domain: Vec<Range<u32>> = Vec::new();
             for_each_run_in(&ahead, 0..cx.total_rows(place), &mut |run| domain.push(run));
             let routed = cx.filter_rows(place, expr, Some(&candidate), &domain, true, cancel)?;
-            filter[place] = Some(match routed.rows {
-                FilterRows::Viewport { rows, domain } => FilterRows::Viewport {
-                    rows: rows.and(&ahead),
-                    domain,
-                },
-                FilterRows::Complete(rows) => FilterRows::Viewport {
-                    rows: rows.and(&ahead),
-                    domain,
-                },
-            });
+            filter[place] = Some(routed.rows.held_to(&ahead, domain));
         }
         if filter.iter().all(Option::is_none) {
             return Ok(None);
