@@ -50,7 +50,7 @@ pub struct EmptyShardWritten {
 pub fn value_column_kind(arrow_type: ScalarType, category: bool) -> mosaica_filter::ColumnKind {
     use mosaica_filter::ColumnKind;
     match arrow_type {
-        ScalarType::Keyword | ScalarType::Text | ScalarType::Utf8 => ColumnKind::U32,
+        ScalarType::Keyword | ScalarType::Text | ScalarType::Utf8 => ColumnKind::Ordinals,
         ScalarType::U8 => ColumnKind::U8,
         ScalarType::U16 => ColumnKind::U16,
         _ if category => ColumnKind::U32,

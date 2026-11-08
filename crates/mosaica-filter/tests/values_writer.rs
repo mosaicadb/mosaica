@@ -110,6 +110,7 @@ fn split(whole: &Codes, at: usize) -> Vec<Codes> {
         Codes::I64(v) => halves!(v, Codes::I64),
         Codes::F32(v) => halves!(v, Codes::F32),
         Codes::F64(v) => halves!(v, Codes::F64),
+        Codes::Ordinals(_) => unreachable!("every column here is written flat"),
     }
 }
 

@@ -253,12 +253,12 @@ fn contains_narrow(
     needle: &str,
     candidate: &Bitmap,
 ) -> Result<Bitmap, DictError> {
-    // A keyword layer's ordinals are `u32` by construction, and no build or flush writes another
-    // width; one that did would match nothing here.
-    let Codes::U32(ordinals) = values.codes() else {
+    // A keyword layer's ordinals are `u32`, flat or in blocks; any other column would match
+    // nothing here.
+    if !matches!(values.codes(), Codes::U32(_) | Codes::Ordinals(_)) {
         return Ok(Bitmap::new());
-    };
-    let held = ordinals.len().min(candidate.cardinality() as usize);
+    }
+    let held = values.codes().len().min(candidate.cardinality() as usize);
     let mut wanted: Vec<u32> = Vec::with_capacity(held);
     values.for_each_code_in(candidate, |_, ordinal| wanted.push(ordinal));
     wanted.sort_unstable();

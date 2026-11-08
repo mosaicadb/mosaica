@@ -201,7 +201,7 @@ fn ordinal_columns<'a>(
     pass: &str,
 ) -> io::Result<Vec<&'a ValueColumn>> {
     for layer in layers {
-        if !matches!(layer.values.codes(), Codes::U32(_)) {
+        if !matches!(layer.values.codes(), Codes::U32(_) | Codes::Ordinals(_)) {
             return Err(invalid(format!(
                 "{pass} was given a {:?} column; a keyword layer stores u32 ordinals into its own \
                  dictionary",
@@ -227,25 +227,25 @@ fn live_ordinals(
     for layer in layers {
         let present = layer.values.present();
         let keep = present.andnot(tombstones);
-        let Codes::U32(src) = layer.values.codes() else {
-            return Err(invalid(format!(
-                "{pass}: a keyword layer stores u32 ordinals"
-            )));
-        };
+        let codes = layer.values.codes();
         let mut ordinals = Bitmap::new();
+        let mut run = Vec::new();
         for (start, last, rank) in RankedRuns::new(&present, &keep) {
-            let slot0 = rank as usize;
-            for k in 0..=(last - start) as usize {
-                let ordinal = *src.get(slot0 + k).ok_or_else(|| {
-                    invalid(format!(
-                        "{pass}: entity {} addresses slot {} in a {}-value layer",
-                        start + k as u32,
-                        slot0 + k,
-                        src.len()
-                    ))
-                })?;
-                ordinals.add(ordinal);
+            let (slot0, count) = (rank as usize, (last - start) as usize + 1);
+            if slot0 + count > codes.len() {
+                return Err(invalid(format!(
+                    "{pass}: entity {last} addresses slot {} in a {}-value layer",
+                    slot0 + count - 1,
+                    codes.len()
+                )));
             }
+            run.clear();
+            if !codes.extend_ordinals(slot0, count, &mut run) {
+                return Err(invalid(format!(
+                    "{pass}: a keyword layer stores u32 ordinals"
+                )));
+            }
+            ordinals.add_many(&run);
         }
         live.push(ordinals);
     }
@@ -487,7 +487,7 @@ impl<'a> KeyCursor<'a> {
 mod tests {
     use super::*;
     use arrow::buffer::ScalarBuffer;
-    use mosaica_filter::{write_sorted_dict, write_value_column, SortedDict};
+    use mosaica_filter::{write_sorted_dict, SortedDict};
 
     fn bitmap(entities: impl IntoIterator<Item = u32>) -> Bitmap {
         let mut b = Bitmap::new();
@@ -784,13 +784,16 @@ mod tests {
         let built = layer(dir, tag, pairs);
         let (values, presence, dict) = paths(dir, tag);
         let present = built.column.present();
-        write_value_column(
+        let mut writer = mosaica_filter::ValueColumnWriter::create(
             &values,
             &presence,
-            built.column.codes(),
-            (!universal).then_some(&present),
+            mosaica_filter::ColumnKind::Ordinals,
         )
-        .expect("the one-shot writer");
+        .expect("the build's writer");
+        writer.push(built.column.codes()).expect("push");
+        writer
+            .finish((!universal).then_some(&present))
+            .expect("the build's writer");
         (
             std::fs::read(&values).expect("values"),
             (!universal).then(|| std::fs::read(&presence).expect("presence")),

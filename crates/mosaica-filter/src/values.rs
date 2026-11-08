@@ -79,6 +79,11 @@ use crate::pack;
 use crate::record::RecordValue;
 use mosaica_types::AttrLocalId;
 
+pub(crate) mod ordinals;
+
+pub use ordinals::BlockOrdinals;
+use ordinals::OrdinalTest;
+
 /// Matched entities, folded into the result bitmap in bounded chunks.
 ///
 /// **The result is not a safe thing to accumulate whole.** A predicate that matches most of what it
@@ -443,10 +448,25 @@ pub enum Codes {
     I64(ScalarBuffer<i64>),
     F32(ScalarBuffer<f32>),
     F64(ScalarBuffer<f64>),
+    /// A keyword layer's `u32` ordinals as a file stores them, a block of entities at a time in
+    /// the narrowest encoding the block allows (see [`ordinals`]).
+    Ordinals(Arc<BlockOrdinals>),
 }
 
 impl Codes {
-    pub(crate) fn len(&self) -> usize {
+    /// The `u32` ordinals in slots `start..start + len` appended to `out`, for a column of keyword
+    /// ordinals in either form. `false`, appending nothing, for any other column.
+    pub fn extend_ordinals(&self, start: usize, len: usize, out: &mut Vec<u32>) -> bool {
+        match self {
+            Codes::U32(v) => out.extend_from_slice(&v[start..start + len]),
+            Codes::Ordinals(o) => o.for_each_in(start, len, |v| out.push(v)),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Values held, one per present entity.
+    pub fn len(&self) -> usize {
         match self {
             Codes::U8(v) => v.len(),
             Codes::U16(v) => v.len(),
@@ -458,7 +478,12 @@ impl Codes {
             Codes::I64(v) => v.len(),
             Codes::F32(v) => v.len(),
             Codes::F64(v) => v.len(),
+            Codes::Ordinals(o) => o.len(),
         }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     #[inline]
@@ -467,6 +492,7 @@ impl Codes {
             Codes::U8(v) => v[slot] as u32,
             Codes::U16(v) => v[slot] as u32,
             Codes::U32(v) => v[slot],
+            Codes::Ordinals(o) => o.at(slot),
             // Only a *category* has a code, and a category is one of the three widths above. Every
             // other column answers `u32::MAX` so that a code predicate applied to it matches
             // nothing, rather than panicking or — worse — comparing an offset or a signed value to
@@ -491,6 +517,7 @@ impl Codes {
             Codes::I64(v) => RecordValue::I64(v[slot]),
             Codes::F32(v) => RecordValue::F32(v[slot]),
             Codes::F64(v) => RecordValue::F64(v[slot]),
+            Codes::Ordinals(o) => RecordValue::U32(o.at(slot)),
         }
     }
 }
@@ -777,6 +804,16 @@ impl ValueColumn {
         }
     }
 
+    /// The addressing of a column over `presence`, positional where `None`, with no values of its
+    /// own: what a block of [`BlockOrdinals`] is walked under.
+    fn addressing(presence: Option<Bitmap>) -> Self {
+        ValueColumn {
+            codes: Codes::U8(ScalarBuffer::from(Vec::new())),
+            presence,
+            block_ranks: std::sync::OnceLock::new(),
+        }
+    }
+
     /// A column only some entities carry a value in. `presence` must have exactly one set bit per
     /// value, ascending — checked, not trusted: a mismatch would silently pair every entity after
     /// the discrepancy with another entity's value, which is a disclosure with no symptom.
@@ -790,6 +827,9 @@ impl ValueColumn {
                     codes.len()
                 ),
             ));
+        }
+        if let Codes::Ordinals(o) = &codes {
+            o.check_addressing(Some(&presence))?;
         }
         Ok(ValueColumn {
             codes,
@@ -1179,6 +1219,20 @@ impl ValueColumn {
             Codes::I64(v) => int_range!(v, i64),
             Codes::F32(v) => float_range!(v, f32),
             Codes::F64(v) => float_range!(v, f64),
+            // An ordinal range is a keyword prefix's, and it scans even where nothing can match.
+            Codes::Ordinals(o) => {
+                let lo = match narrow_lo::<u32>(lo) {
+                    Narrowed::Unsatisfiable => u32::MAX,
+                    Narrowed::Unbounded => 0,
+                    Narrowed::At(x) => x,
+                };
+                let (lo, hi) = match narrow_hi::<u32>(hi) {
+                    Narrowed::Unsatisfiable => (1, 0),
+                    Narrowed::Unbounded => (lo, u32::MAX),
+                    Narrowed::At(x) => (lo, x),
+                };
+                self.scan_blocks(o, candidate, &OrdinalTest::Range { lo, hi })
+            }
         }
     }
 
@@ -1245,6 +1299,8 @@ impl ValueColumn {
             Codes::I64(v) => int_in!(v, i64),
             Codes::F32(v) => float_in!(v),
             Codes::F64(v) => float_in!(v),
+            // Ordinals are not numbers; the parse refuses a numeric operand on a keyword.
+            Codes::Ordinals(_) => Bitmap::new(),
         }
     }
 
@@ -1275,6 +1331,7 @@ impl ValueColumn {
             Codes::U8(v) => self.walk_typed(candidate, v, |x| u32::from(*x) == w),
             Codes::U16(v) => self.walk_typed(candidate, v, |x| u32::from(*x) == w),
             Codes::U32(v) => self.walk_typed(candidate, v, |x| *x == w),
+            Codes::Ordinals(o) => self.scan_blocks(o, candidate, &OrdinalTest::Eq(w)),
             // Only a category has a code, and a category is one of the three widths above.
             _ => Bitmap::new(),
         }
@@ -1297,6 +1354,7 @@ impl ValueColumn {
     pub fn scan_ordinal_set(&self, candidate: &Bitmap, set: &CodeSet) -> Bitmap {
         match &self.codes {
             Codes::U32(v) => self.walk_typed(candidate, v, |x| set.contains(*x)),
+            Codes::Ordinals(o) => self.scan_blocks(o, candidate, &OrdinalTest::Set(set)),
             _ => Bitmap::new(),
         }
     }
@@ -1335,6 +1393,12 @@ impl ValueColumn {
                 w.sort_unstable();
                 w.dedup();
                 self.walk_typed(candidate, v, |x| w.binary_search(x).is_ok())
+            }
+            Codes::Ordinals(o) => {
+                let mut w: Vec<u32> = values.iter().map(|v| v.raw()).collect();
+                w.sort_unstable();
+                w.dedup();
+                self.scan_blocks(o, candidate, &OrdinalTest::In(&w))
             }
             _ => Bitmap::new(),
         }
@@ -1408,6 +1472,15 @@ impl ValueColumn {
             Codes::U8(v) => codes!(v.as_ref(), u32::from),
             Codes::U16(v) => codes!(v.as_ref(), u32::from),
             Codes::U32(v) => codes!(v.as_ref(), std::convert::identity),
+            Codes::Ordinals(o) => {
+                self.walk_slot_runs(candidate, o.len(), |slot0, count, entity0| {
+                    let mut entity = entity0;
+                    o.for_each_in(slot0, count, |value| {
+                        f(entity, value);
+                        entity += 1;
+                    });
+                });
+            }
             other => {
                 let len = other.len();
                 self.walk_slot_runs(candidate, len, |_slot0, count, entity0| {
@@ -1478,7 +1551,7 @@ impl ValueColumn {
     pub fn present_in(&self, candidate: &Bitmap) -> Bitmap {
         match &self.presence {
             None => {
-                if self.codes.len() == 0 {
+                if self.codes.is_empty() {
                     return Bitmap::new();
                 }
                 candidate.and(&Bitmap::from_range(0u32..self.codes.len() as u32))
@@ -1492,7 +1565,7 @@ impl ValueColumn {
         match &self.presence {
             None => {
                 let mut b = Bitmap::new();
-                if self.codes.len() > 0 {
+                if !self.codes.is_empty() {
                     b.add_range(0u32..self.codes.len() as u32);
                 }
                 b.run_optimize();
@@ -1534,7 +1607,12 @@ impl ValueColumn {
     ) -> io::Result<Self> {
         let codes = read_values(values_path, access)?;
         match presence_path {
-            None => Ok(ValueColumn::universal(codes)),
+            None => {
+                if let Codes::Ordinals(o) = &codes {
+                    o.check_addressing(None)?;
+                }
+                Ok(ValueColumn::universal(codes))
+            }
             Some(path) => ValueColumn::partial(codes, read_presence(path)?),
         }
     }
@@ -1631,6 +1709,9 @@ fn read_values(path: &Path, access: Access) -> io::Result<Codes> {
     // values from the batch's buffers instead of copying them, and concatenating is the copy this
     // exists to avoid. `decode_single_batch` is where that rule is enforced.
     let batch = mosaica_authz::decode_single_batch(&buffer, &format!("{}", path.display()))?;
+    if let Some(parts) = ordinals::parts_of_batch(&batch, path)? {
+        return Ok(Codes::Ordinals(Arc::new(BlockOrdinals::from_parts(parts)?)));
+    }
     if batch.num_columns() != 1 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,

@@ -19,7 +19,7 @@ use croaring::Bitmap;
 
 use crate::dict::write_sorted_dict;
 use crate::values::{Access, Codes, ValueColumn};
-use crate::values_writer::write_value_column;
+use crate::values_writer::{write_value_column, ColumnKind, ValueColumnWriter};
 
 /// Where a column's per-flush extents live, under the column's own directory.
 pub const EXTENTS_DIR: &str = "extents";
@@ -84,7 +84,7 @@ pub fn write_extent(
     }
     // A dictionary beside anything but an ordinal column would be a pair that cannot be read
     // together — refused here rather than discovered by a scan that reads a `u64` as an ordinal.
-    if dict_keys.is_some() && !matches!(codes, Codes::U32(_)) {
+    if dict_keys.is_some() && !matches!(codes, Codes::U32(_) | Codes::Ordinals(_)) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "filter extent: a dictionary was supplied for a column whose values are not u32 \
@@ -100,7 +100,14 @@ pub fn write_extent(
         }
         None => None,
     };
-    write_value_column(&values_path, &presence_path, codes, Some(presence))?;
+    if dict_path.is_some() {
+        let mut writer =
+            ValueColumnWriter::create(&values_path, &presence_path, ColumnKind::Ordinals)?;
+        writer.push(codes)?;
+        writer.finish(Some(presence))?;
+    } else {
+        write_value_column(&values_path, &presence_path, codes, Some(presence))?;
+    }
     Ok((values_path, presence_path, dict_path))
 }
 

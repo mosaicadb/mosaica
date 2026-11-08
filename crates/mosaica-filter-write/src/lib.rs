@@ -276,8 +276,12 @@ pub(crate) fn write_merged(
     remap: Option<&[Vec<u32>]>,
 ) -> io::Result<()> {
     // The kind comes from the first layer's file, not the declaration, so a rewrite never
-    // re-types a column; the writer refuses a chunk of another kind.
-    let kind = ColumnKind::of(layers[0].codes());
+    // re-types a column; the writer refuses a chunk of another kind. A remapped merge is a keyword
+    // column's, whichever form its layers were read in.
+    let kind = match remap {
+        Some(_) => ColumnKind::Ordinals,
+        None => ColumnKind::of(layers[0].codes()),
+    };
     let mut writer = ValueColumnWriter::create(values_path, presence_path, kind)?;
     let keeps: Vec<Bitmap> = order.iter().map(|(_, p)| p.andnot(tombstones)).collect();
     let mut runs: Vec<RankedRuns<'_, '_>> = order
@@ -351,14 +355,15 @@ fn recolour(
     remap: &[u32],
     out: &mut Vec<u32>,
 ) -> io::Result<()> {
-    let Codes::U32(src) = codes else {
+    let mut src = Vec::with_capacity(len);
+    if !codes.extend_ordinals(start, len, &mut src) {
         return Err(invalid(format!(
             "a remapped merge was given a {:?} column; only a keyword layer's u32 ordinals are \
              rewritten",
             ColumnKind::of(codes)
         )));
-    };
-    for &ordinal in &src[start..start + len] {
+    }
+    for &ordinal in &src {
         let new = *remap.get(ordinal as usize).ok_or_else(|| {
             invalid(format!(
                 "a remapped merge met ordinal {ordinal} in a layer whose dictionary holds {} keys \
@@ -377,8 +382,9 @@ fn recolour(
     Ok(())
 }
 
-/// `len` values from `start`, borrowed rather than copied: every arm is a window onto the layer's
-/// own buffers, which for a mapped column is a window onto the file.
+/// `len` values from `start`, borrowed rather than copied: every flat arm is a window onto the
+/// layer's own buffers, which for a mapped column is a window onto the file. Ordinals stored in
+/// blocks are decoded.
 fn slice_codes(codes: &Codes, start: usize, len: usize) -> Codes {
     match codes {
         Codes::U8(v) => Codes::U8(v.slice(start, len)),
@@ -391,6 +397,11 @@ fn slice_codes(codes: &Codes, start: usize, len: usize) -> Codes {
         Codes::I64(v) => Codes::I64(v.slice(start, len)),
         Codes::F32(v) => Codes::F32(v.slice(start, len)),
         Codes::F64(v) => Codes::F64(v.slice(start, len)),
+        Codes::Ordinals(_) => {
+            let mut decoded = Vec::with_capacity(len);
+            codes.extend_ordinals(start, len, &mut decoded);
+            Codes::U32(decoded.into())
+        }
     }
 }
 
