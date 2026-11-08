@@ -48,7 +48,7 @@ A client builds everything it shows from a handful of requests: the points of th
     | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | Not built yet |
     | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | Not built yet |
     | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | Not built yet |
-    | [An item's card](#reading-records) | one item's fields | Not built yet. `mosaica items` with an `eq` filter on a unique field reads the fields you name of one item in one view |
+    | [An item's card](#reading-records) | one item's fields | Not built yet. `mosaica items` with a `mosaica_id` filter, or an `eq` filter on a unique field, reads the fields you name of one item in one view |
     | [A table or an export](#reading-records) | every matching item or artifact | `mosaica items`, `mosaica artifacts` |
     | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `mosaica aggregate` |
 

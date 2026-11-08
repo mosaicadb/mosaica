@@ -61,7 +61,7 @@ A field that is neither is still stored. It's shown when someone opens the item 
 
 ### Naming an item
 
-Every response that returns an item includes its `mosaica_id`, which Mosaica gives each item and which stays the same for the item's whole life in the database, through edits and restarts.
+Every response that returns an item includes its `mosaica_id`, which Mosaica gives each item and which stays the same for the item's whole life in the database, through edits and restarts. A filter can name items by it, to read the fields of points already on the map ([filters](queries.md#filters)).
 
 Your data probably has its own identifier too, such as a DOI. If you declare that field `unique`, you can name items by it wherever Mosaica asks which item you mean: to edit one, delete it, add it to a view, or put it in a cluster. It can be a keyword, an integer or a timestamp, and you can always look it up by exact value, whether or not it's indexed.
 
