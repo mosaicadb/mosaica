@@ -854,6 +854,7 @@ describe('draftOf inverts composeFilters', () => {
   it('refuses what a draft cannot hold', () => {
     expect(() => draftOf({none_of: [{title: {match: 'x'}}]}, operands)).toThrow();
     expect(() => draftOf({nope: {eq: 'x'}}, operands)).toThrow();
+    expect(() => draftOf({mosaica_id: {in: ['7']}}, operands)).toThrow();
     expect(() => draftOf({year: {eq: 3}}, operands)).toThrow();
     expect(() => draftOf({all_of: [{year: {range: {gte: 1}}}, {year: {range: {lte: 2}}}]}, operands)).toThrow();
     expect(() => draftOf({year: {range: {gt: 1}}}, operands)).toThrow();

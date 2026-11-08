@@ -9,9 +9,9 @@ use crate::cancel::CancelToken;
 use crate::filter::declared::Placement;
 use crate::filter::error::FilterError;
 use crate::filter::expr::{
-    evaluate_leaf, FilterExpr, FilterOperand, ItemResolver, LeafQuery, LeafResolver,
-    MemberOfArtifact, RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, UniqueResolver,
-    MEMBER_OF_COLUMN, MOSAICA_ID_COLUMN, REGION_COLUMN,
+    evaluate_leaf, FilterExpr, FilterOperand, LeafQuery, LeafResolver, MemberOfArtifact,
+    RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, UniqueResolver, MEMBER_OF_COLUMN,
+    MOSAICA_ID_COLUMN, REGION_COLUMN,
 };
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 use crate::filter::scan::text::{phrase_match, text_match};
@@ -88,23 +88,21 @@ impl FilterColumns {
                 detail: "this evaluation holds no unique index".to_string(),
             })
         };
-        let no_identity = |_: &[mosaica_types::MosaicaId]| {
-            Err(FilterError::UniqueUnreadable {
-                column: MOSAICA_ID_COLUMN.to_string(),
-                detail: "this evaluation holds no identity key".to_string(),
-            })
-        };
-        self.eval(expr, candidate, &no_index, &no_identity, &evaluate_leaf, &None)
+        self.eval(expr, candidate, &no_index, &evaluate_leaf, &None)
     }
 
     /// The keys a leaf names where its column's unique index answers it: `eq` or `in` on a unique
     /// column. A number the column's type cannot hold names no key, so it matches nothing.
+    /// `mosaica_id` is answered as a unique `u64` column, each key the identifier itself.
     pub(crate) fn unique_keys(
         &self,
         column: &str,
         operand: &FilterOperand,
     ) -> Option<Vec<UniqueKey>> {
-        let ty = *self.unique.get(column)?;
+        let ty = match column {
+            MOSAICA_ID_COLUMN => mosaica_spatial::tiler::ScalarType::U64,
+            _ => *self.unique.get(column)?,
+        };
         let number = |value: &crate::filter::Scalar| match *value {
             crate::filter::Scalar::Int(i) => key_of_integer(ty, i),
             crate::filter::Scalar::Float(f) if f.is_finite() && f.fract() == 0.0 => {
@@ -180,7 +178,6 @@ impl FilterColumns {
                 expr,
                 candidate,
                 resolvers.unique,
-                resolvers.items,
                 resolvers.leaves,
                 cancel,
             )?));
@@ -254,10 +251,10 @@ impl FilterColumns {
         if column == REGION_COLUMN || column == MEMBER_OF_COLUMN {
             return Ok(Space::Row);
         }
-        let placement = self.placement_of(column)?;
         if self.unique_keys(column, operand).is_some() {
             return Ok(Space::Entity);
         }
+        let placement = self.placement_of(column)?;
         let entity = placement.entity
             && (!self.unique.contains_key(column) || self.has_value_route(column));
         Ok(match (entity, placement.row) {
@@ -286,7 +283,6 @@ impl FilterColumns {
         match expr {
             FilterExpr::Leaf { column, operand } => self.leaf_space(column, operand, prefer_row),
             FilterExpr::Region(_) | FilterExpr::MemberOf(_) => Ok(Space::Row),
-            FilterExpr::Items(_) => Ok(Space::Entity),
             FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
                 let mut all_entity = true;
                 for kid in kids {
@@ -318,7 +314,6 @@ impl FilterColumns {
                 expr,
                 candidate,
                 resolvers.unique,
-                resolvers.items,
                 resolvers.leaves,
                 cancel,
             )?));
@@ -331,7 +326,6 @@ impl FilterColumns {
             }),
             FilterExpr::Region(leaf) => Ok(RowExpr::Region((resolvers.regions)(leaf)?)),
             FilterExpr::MemberOf(leaf) => Ok(RowExpr::MemberOf((resolvers.members)(leaf)?)),
-            FilterExpr::Items(_) => unreachable!("an `Items` leaf is entity space, answered above"),
             FilterExpr::AllOf(kids) => Ok(RowExpr::AllOf(
                 kids.iter()
                     .map(|kid| self.route(kid, candidate, prefer_row, resolvers, cancel))
@@ -355,7 +349,6 @@ impl FilterColumns {
         expr: &FilterExpr,
         candidate: &Bitmap,
         unique: &UniqueResolver<'_>,
-        items: &ItemResolver<'_>,
         leaves: &LeafResolver<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<Bitmap, FilterError> {
@@ -366,19 +359,10 @@ impl FilterColumns {
             }
             FilterExpr::Region(_) => Err(FilterError::RegionInEntitySpace),
             FilterExpr::MemberOf(_) => Err(FilterError::MemberOfInEntitySpace),
-            FilterExpr::Items(ids) => {
-                check_cancelled(cancel)?;
-                let mut out = Bitmap::new();
-                if !ids.is_empty() {
-                    out.add_many(&items(ids)?);
-                }
-                out.and_inplace(candidate);
-                Ok(out)
-            }
             FilterExpr::AllOf(kids) => {
                 let mut live = candidate.clone();
                 for kid in kids {
-                    live = self.eval(kid, &live, unique, items, leaves, cancel)?;
+                    live = self.eval(kid, &live, unique, leaves, cancel)?;
                     if live.is_empty() {
                         break;
                     }
@@ -388,7 +372,7 @@ impl FilterColumns {
             FilterExpr::AnyOf(kids) => {
                 let mut out = Bitmap::new();
                 for kid in kids {
-                    out |= self.eval(kid, candidate, unique, items, leaves, cancel)?;
+                    out |= self.eval(kid, candidate, unique, leaves, cancel)?;
                 }
                 Ok(out)
             }
@@ -396,7 +380,7 @@ impl FilterColumns {
                 let mut out = candidate.clone();
                 for kid in kids {
                     // Under `out`, not `candidate`, the same narrowing `AllOf` does.
-                    out.andnot_inplace(&self.eval(kid, &out, unique, items, leaves, cancel)?);
+                    out.andnot_inplace(&self.eval(kid, &out, unique, leaves, cancel)?);
                     if out.is_empty() {
                         break;
                     }

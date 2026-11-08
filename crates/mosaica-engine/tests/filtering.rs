@@ -4892,7 +4892,6 @@ fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
         members: &members,
         layers: &|_| None,
         unique: &lookup,
-        items: &|_| unreachable!("the tree holds no mosaica_id"),
         leaves: &mosaica_engine::filter::evaluate_leaf,
     };
     let routed = |cancel: &Option<mosaica_engine::CancelToken>| {

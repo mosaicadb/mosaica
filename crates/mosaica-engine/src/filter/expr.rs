@@ -67,7 +67,7 @@ pub enum RegionLeaf {
 /// The leaf name a `member_of` leaf answers to, reserved exactly as `region` is.
 pub const MEMBER_OF_COLUMN: &str = "member_of";
 
-/// The leaf name a [`FilterExpr::Items`] leaf answers to, a fixed column's name.
+/// The column a leaf naming items by their identifiers answers to, a fixed column of every item.
 pub const MOSAICA_ID_COLUMN: &str = "mosaica_id";
 
 /// The `member_of` leaf: one artifact of one layer, resolved to `membership ∩ M_auth` in row space
@@ -109,9 +109,6 @@ pub enum FilterExpr {
     Region(RegionLeaf),
     /// One artifact's membership, as rows over the whole view. Row space only.
     MemberOf(MemberOfLeaf),
-    /// The items these `mosaica_id`s name, in entity space. An identifier naming nothing, or an
-    /// item outside the candidate, matches nothing.
-    Items(Vec<mosaica_types::MosaicaId>),
     /// Every sub-expression must match. Empty matches the whole candidate.
     AllOf(Vec<FilterExpr>),
     /// At least one sub-expression must match. Empty matches nothing, the identity for union.
@@ -129,10 +126,7 @@ impl FilterExpr {
     /// Nesting depth, with a leaf at 1.
     pub fn depth(&self) -> usize {
         match self {
-            FilterExpr::Leaf { .. }
-            | FilterExpr::Region(_)
-            | FilterExpr::MemberOf(_)
-            | FilterExpr::Items(_) => 1,
+            FilterExpr::Leaf { .. } | FilterExpr::Region(_) | FilterExpr::MemberOf(_) => 1,
             FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
                 1 + kids.iter().map(FilterExpr::depth).max().unwrap_or(0)
             }
@@ -263,11 +257,6 @@ pub type MemberResolver<'a> = dyn Fn(&MemberOfLeaf) -> Result<Bitmap, FilterErro
 pub type UniqueResolver<'a> =
     dyn Fn(&str, &[mosaica_store::unique::UniqueKey]) -> Result<Vec<u32>, FilterError> + 'a;
 
-/// The entities of the evaluating shard that each of these `mosaica_id`s names as an item, deleted
-/// entities dropped. Visibility is the evaluator's: it intersects the answer with its candidate.
-pub type ItemResolver<'a> =
-    dyn Fn(&[mosaica_types::MosaicaId]) -> Result<Vec<u32>, FilterError> + 'a;
-
 /// A `match` or `phrase` operand as its column's analyser reads it. Two operands that read alike
 /// answer alike over the same layers.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,12 +297,11 @@ pub fn evaluate_leaf(
 
 /// The two row-space leaves' resolvers, how many levels a layer a `member_of` names holds where
 /// `/v1/meta` lists it to this principal (`None` where not, refused before either resolver runs),
-/// the unique columns' lookup, the `mosaica_id` lookup and the text and value leaves' answers.
+/// the unique columns' lookup and the text and value leaves' answers.
 pub struct RowLeafResolvers<'a> {
     pub regions: &'a RegionResolver<'a>,
     pub members: &'a MemberResolver<'a>,
     pub layers: &'a dyn Fn(&str) -> Option<u32>,
     pub unique: &'a UniqueResolver<'a>,
-    pub items: &'a ItemResolver<'a>,
     pub leaves: &'a LeafResolver<'a>,
 }

@@ -1127,10 +1127,7 @@ impl Engine {
             |leaf: &crate::filter::MemberOfLeaf| self.member_rows(leaf, served, side, resolved);
         let layers = |layer: &str| self.layer_levels(served.session, layer);
         let unique = |column: &str, keys: &[mosaica_store::unique::UniqueKey]| {
-            unique_holders(served.generation, side.shard, column, keys)
-        };
-        let items = |ids: &[mosaica_types::MosaicaId]| {
-            item_entities(&self.identity_key, served.generation, side.shard, ids)
+            unique_holders(&self.identity_key, served.generation, side.shard, column, keys)
         };
         let fragment = fragment.as_ref().map(|fragment| fragment.view());
         let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, evaluate| {
@@ -1168,7 +1165,6 @@ impl Engine {
             members: &members,
             layers: &layers,
             unique: &unique,
-            items: &items,
             leaves,
         };
         body(&|expr: &crate::filter::FilterExpr, prefer_row: bool| {
@@ -1461,42 +1457,40 @@ fn memo<K, V: Clone, E>(
 
 /// The entities of `shard` holding `keys` in a unique column, by the shard's index and its live
 /// entries in `generation`, deleted entities dropped. Visibility is the caller's.
+///
+/// `mosaica_id`'s keys are identifiers, resolved as the item card resolves one: an identifier at a
+/// tenancy its number no longer holds names nothing.
 pub(crate) fn unique_holders(
+    key: &mosaica_types::IdentityKey,
     generation: &crate::Generation,
     shard: &crate::Shard,
     column: &str,
     keys: &[mosaica_store::unique::UniqueKey],
 ) -> std::result::Result<Vec<u32>, crate::filter::FilterError> {
+    use mosaica_store::unique::UniqueKey;
+    if column == crate::filter::MOSAICA_ID_COLUMN {
+        let ids: Vec<mosaica_types::MosaicaId> = keys
+            .iter()
+            .filter_map(|k| match k {
+                UniqueKey::Int(id) => Some(mosaica_types::MosaicaId::new(*id)),
+                UniqueKey::Keyword(_) => None,
+            })
+            .collect();
+        let named = crate::edited::entities_named(key, generation, shard, &ids)
+            .map_err(|e| crate::filter::FilterError::IdentifiersUnreadable(e.to_string()))?;
+        return Ok(named
+            .into_iter()
+            .flatten()
+            .filter(|(entity, current)| *current && !shard.overlay.is_deleted(*entity))
+            .map(|(entity, _)| entity.raw() as u32)
+            .collect());
+    }
     crate::unique::holders_in(generation, shard, column, keys)
         .map(|found| found.into_iter().map(|(_, entity)| entity.raw() as u32).collect())
         .map_err(|e| crate::filter::FilterError::UniqueUnreadable {
             column: column.to_string(),
             detail: e.to_string(),
         })
-}
-
-/// The entities of `shard` that `ids` name as items at their current tenancy, deleted entities
-/// dropped: an item card's resolution, once for each identifier. An identifier of another shard, or
-/// naming nothing, contributes none.
-pub(crate) fn item_entities(
-    key: &mosaica_types::IdentityKey,
-    generation: &crate::Generation,
-    shard: &crate::Shard,
-    ids: &[mosaica_types::MosaicaId],
-) -> std::result::Result<Vec<u32>, crate::filter::FilterError> {
-    let numbers: Vec<_> = ids
-        .iter()
-        .filter_map(|id| crate::edited::number_named(key, generation, *id))
-        .filter(|(named, _)| named.id() == shard.id())
-        .map(|(_, number)| number)
-        .collect();
-    let entities = crate::edited::entities_of_numbers(shard, &numbers, |_| true).map_err(|e| {
-        crate::filter::FilterError::UniqueUnreadable {
-            column: crate::filter::MOSAICA_ID_COLUMN.to_string(),
-            detail: e.to_string(),
-        }
-    })?;
-    Ok(entities.into_iter().flatten().map(|entity| entity.raw() as u32).collect())
 }
 
 /// A filter's refusal as the engine's: the caller's fault or the deployment's, as [`FilterError`]

@@ -3334,6 +3334,21 @@ fn serials_in(sources: impl IntoIterator<Item = u64>, extra: &[i64]) -> FilterEx
     leaf("serial", FilterOperand::NumIn(values))
 }
 
+/// The items of `sources` named by their `mosaica_id`s, beside an identifier naming nothing.
+fn mosaica_ids_in(engine: &Engine, sources: impl IntoIterator<Item = u64>) -> FilterExpr {
+    let serials: Vec<String> = sources.into_iter().map(|s| serial_of(s).to_string()).collect();
+    let mut ids: Vec<Scalar> = unique_holders(engine, "serial", &serials)
+        .expect("the `serial` index reads")
+        .into_iter()
+        .map(|item| {
+            let entity = item.expect("the serial names an item").entity;
+            Scalar::Int(engine.mosaica_id_of(entity).unwrap().raw().into())
+        })
+        .collect();
+    ids.push(Scalar::Int(1));
+    leaf(mosaica_engine::filter::MOSAICA_ID_COLUMN, FilterOperand::NumIn(ids))
+}
+
 fn serial_eq(s: u64) -> FilterExpr {
     leaf(
         "serial",
@@ -3441,11 +3456,11 @@ fn transcript(
 /// **A read driven by its matches sends what the walk over the view sends**: the same heads,
 /// counts and region verdicts, the same rows in the same pages, and the same page ends and
 /// trailers. Checked in both orders, in two views, for a narrower viewer, for a unique field's
-/// `eq` and `in`, a `member_of`, a region, and each combined with a leaf no index answers; under
-/// a byte ceiling that cuts pages and responses and makes the walk take several stretches; and with
-/// the two routes taking turns across the responses of one read. A bound past what a driven
-/// stretch may hold walks the view. A value held only by an item the viewer cannot see answers
-/// exactly as a value nobody holds.
+/// `eq` and `in`, `mosaica_id`'s `in`, a `member_of`, a region, and each combined with a leaf no
+/// index answers; under a byte ceiling that cuts pages and responses and makes the walk take
+/// several stretches; and with the two routes taking turns across the responses of one read. A
+/// bound past what a driven stretch may hold walks the view. A value held only by an item the
+/// viewer cannot see, named by value or by `mosaica_id`, answers exactly as a value nobody holds.
 #[test]
 fn a_read_driven_by_its_matches_sends_what_the_walk_sends() {
     let fx = Fx::sized(BIG);
@@ -3480,6 +3495,8 @@ fn a_read_driven_by_its_matches_sends_what_the_walk_sends() {
             leaf("serial", FilterOperand::NumEquals(Scalar::Int(7.into()))),
         ),
         ("past a driven stretch", serials_in(0..4500, &[])),
+        ("mosaica_id in", mosaica_ids_in(&fx.engine, (0..BIG).step_by(5))),
+        ("an unseen holder by mosaica_id", mosaica_ids_in(&fx.engine, [unseen])),
     ];
     let mut on_s0 = everywhere.clone();
     on_s0.extend([
@@ -3550,17 +3567,20 @@ fn a_read_driven_by_its_matches_sends_what_the_walk_sends() {
                                 "{what}: past the budget the region is a cover, and the head says so"
                             );
                         }
-                        if name.contains("holder") && shape == "pages of 37" {
+                        let holder = name.contains("holder") && !name.contains("region");
+                        if holder && shape == "pages of 37" {
                             unseen_and_absent.push(driven);
                         }
                     }
                 }
                 if viewer == "third" {
-                    assert_same(
-                        &unseen_and_absent[0],
-                        &unseen_and_absent[1],
-                        &format!("an unseen holder and none in {view}, {order:?}"),
-                    );
+                    for other in &unseen_and_absent[1..] {
+                        assert_same(
+                            &unseen_and_absent[0],
+                            other,
+                            &format!("an unseen holder and none in {view}, {order:?}"),
+                        );
+                    }
                 }
             }
         }

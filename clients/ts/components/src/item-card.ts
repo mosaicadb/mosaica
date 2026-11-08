@@ -242,6 +242,8 @@ export class MosaicaItemCard extends MosaicaElement {
   private expandedFor: bigint | null = null;
   /** The image addresses that failed to load, shown as text. @internal */
   @state() accessor broken: ReadonlySet<string> = new Set();
+  /** `image-fields` as a list, kept in step by `willUpdate`. */
+  private imageNames: string[] = [];
   /** A category value's title as the store holds it, else from the legend or a suggestion page, else its key. */
   private titleOf(field: string, key: string): string {
     return this.resolvedStore?.heldTitle(field, key) ?? keyTitle(this.resolvedStore, field, key);
@@ -258,6 +260,7 @@ export class MosaicaItemCard extends MosaicaElement {
    */
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
+    if (changed.has('imageFields')) this.imageNames = listed(this.imageFields);
     const {item, meta} = this.shown;
     const id = item?.id ?? null;
     if (id !== this.expandedFor) {
@@ -400,7 +403,7 @@ export class MosaicaItemCard extends MosaicaElement {
 
   /** The address of the image a field's value names, where `image-fields` lists the field. */
   private imageOf(name: string, value: unknown): string | null {
-    if (typeof value !== 'string' || !listed(this.imageFields).includes(name)) return null;
+    if (typeof value !== 'string' || !this.imageNames.includes(name)) return null;
     const address = webAddress(value);
     return address && !this.broken.has(address) ? address : null;
   }

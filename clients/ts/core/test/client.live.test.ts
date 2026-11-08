@@ -1,7 +1,7 @@
 import {afterAll, beforeAll, describe, expect, it, type TestContext} from 'vitest';
 import {MosaicaClient, MosaicaError} from '../src/client.js';
 import {tileOfCode} from '../src/coords.js';
-import {namedItems} from '../src/members.js';
+import {namedItems} from '../src/filters.js';
 import type {Meta, Session, ViewportRequest} from '../src/types.js';
 import {GROUP, start, type Served} from './served.js';
 

@@ -2,16 +2,6 @@ import type {ClauseVerb} from './filters.js';
 import type {FilterExpr, MemberOfOperand} from './types.js';
 
 /**
- * A filter keeping the items `ids` name, such as the points a map draws a picture for, to read
- * their fields with one {@link MosaicaClient.items} call.
- *
- * @category Filters
- */
-export function namedItems(ids: Iterable<bigint>): FilterExpr {
-  return {mosaica_id: {in: Array.from(ids, String)}};
-}
-
-/**
  * The `member_of` leaf and the clauses a client holds of it.
  *
  * A `member_of` clause names one artifact of one layer and asks for its members. It composes like
