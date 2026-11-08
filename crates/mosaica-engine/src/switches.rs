@@ -15,6 +15,11 @@ pub(crate) struct TestSwitches {
     /// Whether a bulk read may be driven from its filter's matches; off, every read walks its
     /// view in stretches.
     pub(crate) driven_reads_enabled: AtomicBool,
+    /// Whether a viewport's filter may be evaluated over its tiles' entities alone; off, every
+    /// filter is evaluated over the viewer's whole visible set.
+    pub(crate) tile_filters_enabled: AtomicBool,
+    /// Whether every viewport's filter is evaluated over its tiles' entities, whatever that costs.
+    pub(crate) tile_filters_always: AtomicBool,
     /// Whether a flush holds between finishing on the pool and submitting the result, so it is
     /// still in flight when the next tick lands.
     pub(crate) flush_paused: AtomicBool,
@@ -216,6 +221,8 @@ impl Default for TestSwitches {
             coalesce_enabled: AtomicBool::new(true),
             merge_enabled: AtomicBool::new(true),
             driven_reads_enabled: AtomicBool::new(true),
+            tile_filters_enabled: AtomicBool::new(true),
+            tile_filters_always: AtomicBool::new(false),
             flush_paused: AtomicBool::new(false),
             fold_paused: AtomicBool::new(false),
             fold_panics: AtomicBool::new(false),

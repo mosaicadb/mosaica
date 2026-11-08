@@ -284,6 +284,54 @@ pub(crate) fn row_route_pays(rows: u64, visible: u64) -> bool {
     rows <= visible
 }
 
+/// How many times fewer entities a request's tiles must hold than the viewer's visible set before
+/// its filter is evaluated over the tiles' entities alone: reaching one entity's value from a row
+/// is a random read where scanning the set is a sequential one.
+const NARROW_ENTITY_RATIO: u64 = 16;
+
+/// How many times fewer 2¹⁶-entity blocks of a value column the tiles' entities must fall in than
+/// the viewer's visible set does. Where the column is not resident, reading one entity's value
+/// faults in the kernel's read-ahead around it, which is about a block of ordinals, so a block
+/// costs about the same however few of its entities are read; and a read at random costs more
+/// than one in sequence.
+const NARROW_BLOCK_RATIO: u64 = 4;
+
+/// Whether a request whose tiles span `rows` rows could hold few enough entities, against `visible`
+/// in the view, for [`narrowing_pays`] to hold: a row holds one entity, so this is checked before
+/// the rows are mapped to theirs.
+fn narrowing_may_pay(rows: u64, visible: u64) -> bool {
+    rows.saturating_mul(NARROW_ENTITY_RATIO) <= visible
+}
+
+/// Whether evaluating a filter over `within`, the visible entities of a request's tiles, costs less
+/// than over the viewer's `visible` entities in the side, spread over `visible_blocks` blocks of
+/// 2¹⁶ entities: by entities compared, and by blocks read.
+///
+/// Every count is the viewer's own, and none depends on a filter's values.
+fn narrowing_pays(within: &croaring::Bitmap, visible: u64, visible_blocks: u64) -> bool {
+    let blocks = u64::from(within.statistics().n_containers);
+    within.cardinality().saturating_mul(NARROW_ENTITY_RATIO) <= visible
+        && blocks.saturating_mul(NARROW_BLOCK_RATIO) <= visible_blocks
+}
+
+/// A filter's rows held to `domain`: exact there and silent outside it, as the per-tile crossing's
+/// are. What an answer over the tiles' entities alone is.
+fn held_to(rows: FilterRows, domain: &[Range<u32>]) -> FilterRows {
+    match rows {
+        FilterRows::Viewport { .. } => rows,
+        FilterRows::Complete(rows) => {
+            let mut within = croaring::Bitmap::new();
+            for r in domain {
+                within.add_range(r.clone());
+            }
+            FilterRows::Viewport {
+                rows: rows.and(&within),
+                domain: domain.to_vec(),
+            }
+        }
+    }
+}
+
 /// [`Engine::rows_of_routed`]'s answer.
 pub(crate) struct RoutedRows {
     pub(crate) rows: FilterRows,
@@ -987,9 +1035,20 @@ impl Engine {
         let mut filters = Vec::new();
         let mut highlights = Vec::new();
         let resolved = ResolvedLeaves::new(&mask);
-        let candidate = FilterCandidate::Compose;
+        let always = self.switches.tile_filters_always.load(Ordering::Relaxed);
+        let may_narrow = self.switches.tile_filters_enabled.load(Ordering::Relaxed)
+            && (always || narrowing_may_pay(tiling.rows_in_ranges, v_total));
         for (place, side, _) in served.filtered_sides(&mask) {
             let (domain, rows_in_ranges) = tiling.domain_in(place);
+            let within = if may_narrow {
+                self.tiles_candidate(served, side, &domain, rows_in_ranges)?
+            } else {
+                None
+            };
+            let candidate = match &within {
+                Some(within) => FilterCandidate::Within(within),
+                None => FilterCandidate::Compose,
+            };
             let (filter_rows, highlight_rows) =
                 self.route_filters_under(served, side, candidate, &resolved, &req.cancel, |route| {
                     // `count_matched` excludes the highlight from the `filter_matched` probe: its
@@ -1000,13 +1059,16 @@ impl Engine {
                      -> Result<(FilterRows, Option<crate::region::RegionVerdict>)> {
                         let routed = route(expr, prefer_row)?;
                         probe.lap(|t| &mut t.filter_eval_ns);
-                        let out = self.rows_of_routed(
+                        let mut out = self.rows_of_routed(
                             side,
                             routed,
                             &domain,
                             rows_in_ranges,
                             per_tile_only,
                         )?;
+                        if within.is_some() {
+                            out.rows = held_to(out.rows, &domain);
+                        }
                         if let (true, Some(matched)) = (count_matched, out.unmasked) {
                             probe.count(|t| &mut t.filter_matched, matched);
                         }
@@ -1045,6 +1107,45 @@ impl Engine {
             mask.with_filters(filters).with_highlights(highlights),
             region_verdict,
         ))
+    }
+
+    /// The visible entities whose rows lie in `domain`, the rows a request's tiles span in `side`,
+    /// where evaluating the request's filter over them costs less than over the viewer's whole
+    /// visible set there ([`narrowing_pays`]); `None` otherwise, or where the side cannot map its
+    /// rows to entities. The answer is exact over `domain` and says nothing outside it.
+    fn tiles_candidate(
+        &self,
+        served: &ServedView<'_>,
+        side: &ServedSide<'_>,
+        domain: &[Range<u32>],
+        rows_in_ranges: u64,
+    ) -> Result<Option<croaring::Bitmap>> {
+        let mut rows = croaring::Bitmap::new();
+        for r in domain {
+            rows.add_range(r.clone());
+        }
+        let row_space = &side.data.row_space;
+        let Some(entities) = self.on_pool(rows_in_ranges, || row_space.entities_of_rows(&rows))
+        else {
+            return Ok(None);
+        };
+        let fragment = self.fragment_for(served.session, side.shard, Some(&side.geometry.fragment))?;
+        let view = fragment.view();
+        let visible = view.andnot_cardinality(&side.shard.overlay.denied());
+        let visible_blocks = u64::from(view.statistics().n_containers);
+        let within = crate::filter::candidate_within(
+            &fragment,
+            served.session.satisfied(),
+            &side.shard.overlay,
+            &side.shard.buffer,
+            &entities,
+        );
+        let always = self.switches.tile_filters_always.load(Ordering::Relaxed);
+        if !always && !narrowing_pays(&within, visible, visible_blocks) {
+            return Ok(None);
+        }
+        self.counters.tile_filters.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(within))
     }
 
     /// The entity-space set a request's filter is evaluated under in `shard`: the session's
@@ -1623,6 +1724,21 @@ mod tests {
         .with_row_entity(Arc::new(
             RowToEntity::load(&table_path).expect("table loads"),
         ))
+    }
+
+    /// A viewport's few entities in few blocks narrow; as many in every block, or too many
+    /// entities, do not.
+    #[test]
+    fn narrowing_pays_for_few_entities_in_few_blocks() {
+        let visible = 64u64 << 16;
+        let contiguous = croaring::Bitmap::from_range(5 << 16..(5 << 16) + 2_000);
+        let scattered: croaring::Bitmap = (0..2_000u32).map(|i| (i % 64) << 16 | i).collect();
+        let crowded = croaring::Bitmap::from_range(0..(visible / 8) as u32);
+        assert!(narrowing_pays(&contiguous, visible, 64));
+        assert!(!narrowing_pays(&scattered, visible, 64));
+        assert!(!narrowing_pays(&crowded, visible, 64));
+        assert!(narrowing_may_pay(visible / 16, visible));
+        assert!(!narrowing_may_pay(visible / 16 + 1, visible));
     }
 
     /// Testing the viewport's rows one at a time and projecting the whole result give the same

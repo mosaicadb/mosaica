@@ -22,6 +22,8 @@ pub(crate) struct ServeCounters {
     pub(crate) member_of_column_walks: AtomicU64,
     /// Bulk-read stretches driven from their filter's matches rather than walked over the view.
     pub(crate) driven_stretches: AtomicU64,
+    /// Shards of a filtered viewport whose filter was evaluated over the tiles' entities alone.
+    pub(crate) tile_filters: AtomicU64,
     /// Requests served from a one-generation-stale entry.
     pub(crate) stale_serves: AtomicU64,
     /// Entries the background refresh has produced.
@@ -275,6 +277,12 @@ impl Engine {
     /// Bulk-read stretches driven from their filter's matches rather than walked over the view.
     pub fn driven_stretches(&self) -> u64 {
         self.counters.driven_stretches.load(Ordering::Relaxed)
+    }
+
+    /// Shards of filtered viewports whose filter was evaluated over the tiles' entities alone
+    /// rather than the viewer's whole visible set.
+    pub fn tile_filters(&self) -> u64 {
+        self.counters.tile_filters.load(Ordering::Relaxed)
     }
 
     /// The point shards' high waters, summed.
