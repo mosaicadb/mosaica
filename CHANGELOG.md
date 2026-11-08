@@ -10,92 +10,50 @@ container image.
 
 ## [0.3.0] - 2026-11-08
 
-An alpha, like 0.2.0. The bundle format has changed again, so 0.3.0 refuses a bundle that 0.2.0
-built, and each one has to be built again. A setting and a status field are renamed, the
-control plane's compaction requests are numbered and read differently, and a deployment that
-named no session or control address now serves them on the viewer's port.
+This is an alpha release, like 0.2.0. Bundles built by 0.2.0 have to be built again, and one
+setting in the deployment file has a new name.
 
 ### Changed
 
-- **Bundles from 0.2.0 must be rebuilt, and their logs set aside.** The bundle format is now 52,
-  and 0.3.0 refuses to open a bundle of format 50, which 0.2.0 writes, with a message that says to
-  rebuild it. Build it again from its declaration and source files with `mosaica build`, or from
-  data frames in Python. A rebuild starts from those files alone, so every write made to the
-  running 0.2.0 service is left behind: make inserts, edits, deletions, suppressions and
-  declarations again on the rebuilt database; until a deletion or suppression is made again, the
-  item it named is served. The rebuilt database refuses the old write-ahead log, so move its files
-  (`wal-*.log` and `wal-*.sync`, where `[bundle] wal` points) aside, or set `[bundle] wal` to a new
-  path.
-- **Keyword and category values are stored per block.** A keyword field's ordinals and a
-  category's codes are kept per block of 2¹⁶ items in the narrowest width that holds them, so a
-  field with few values in a region reads less, and an `eq` or `in` on one is answered from the
-  block's codes.
-- **The filter cache keeps every condition, and is renamed.** `serve.text_filter_cache_bytes` is
-  now `serve.filter_cache_bytes`, and `/control/status`'s `text_filter_cache` is now
-  `filter_cache`. Besides `match` and `phrase`, it keeps what a range, an `eq` or an `in` on a
-  column matches, each condition apart, so a combined filter reuses its parts. Rename the setting
-  in a deployment file; the old name is refused.
-- **A compaction request is read by its number.** `POST /control/compact` numbers its requests
-  from the time in milliseconds at which the server started, so a number from before a restart is
-  never given again, and the new `GET /control/compact/{request}` says whether a request is
-  answered, how (`compacted`, `nothing_to_do`, `refused` or `failed`) and how far its compaction
-  has gone. The server keeps the latest 1,024 answers; an older one answers `410`, and a number
-  from before a restart `404`. `/control/status`'s `compaction.requests` no longer carries
-  `last_refusal`; read the request instead.
-- **A viewport's filter is evaluated over its tiles' items** where that reads less than a scan of
-  the column, and a column filter's scan runs in parallel. Sparse columns are stored packed.
-- **Faster histograms.** `/v1/aggregate` bins over a filtered set read only that set's rows, and
-  bins over an integer field compare one key.
-- **Faster builds and starts.** A build hashes or sorts keyword chunks and merges keys alone, in
-  parallel. A server opening a bundle checks every file's size and each segment's permutation, and
-  hashes only the few files it reads without checking their structure, so a start no longer reads
-  the whole bundle. `mosaica verify` still hashes every file.
-- **The three planes share one port unless given their own.** `session` and `control` under
-  `[serve]` are now optional, and a plane with no address of its own is served on the viewer's
-  address and port, each route keeping its own credential and CORS rules. A deployment that names
-  all three addresses is served as before. An open server no longer puts the session and control
-  planes one and two ports above the viewer; they share its port unless named.
-- **The Python client serves on port 9141 and prints the address.** A database made with
-  `mosaica.create()` is served on 9141, or the next free port above it, on this machine only, and
-  starting its server prints the address, so a notebook kernel on another machine can be reached
-  by forwarding one port. `create()` and `open()` take `port=` to state another; a stated port
-  that is taken is refused. The Python package now depends on `tqdm`.
+- **Bundles from 0.2.0 must be rebuilt.** The bundle format is now 52, and 0.3.0 refuses a 0.2.0
+  bundle with a message that says to rebuild it. A rebuild starts from the declaration and source
+  files alone, so make any writes made to the running 0.2.0 service again afterwards. Until a
+  deletion or suppression is made again, the item it named is served. Move the old write-ahead
+  log (`wal-*.log` and `wal-*.sync`) aside too, because the rebuilt database refuses it.
+- **The filter cache covers column filters and has a new name.** Ranges, `eq` and `in` on columns
+  are now kept between requests as `match` and `phrase` already were, so panning and zooming with
+  a filter does not evaluate it again. Rename `serve.text_filter_cache_bytes` to
+  `serve.filter_cache_bytes` in your deployment file. The status field is now `filter_cache`.
+- **Compaction requests are read one at a time.** `GET /control/compact/{request}` says whether a
+  request has been answered, how it ended and how far its compaction has got. It replaces
+  `compaction.requests.last_refusal` in `/control/status`. Request numbers now start from the
+  server's start time, so a number from before a restart is not reused.
+- **The session and control planes share the viewer's port unless given their own.** `session`
+  and `control` under `[serve]` are optional, and a deployment that names all three addresses is
+  served as before.
+- **The Python client serves on port 9141** (or the next free port above it) and prints the
+  address when its server starts, which makes a notebook on another machine reachable through one
+  forwarded port. `create()` and `open()` take `port=` to choose another. The package now
+  depends on `tqdm`.
+- **Faster filters, histograms, builds and start-up.** Keyword, category and column filters and
+  histograms over a filtered set all read less. A server no longer hashes every file of a bundle
+  when it opens it, although `mosaica verify` still does.
 
 ### Added
 
-- **Progress for builds, inserts, flushes and compactions.** `mosaica build`, `mosaica insert`
-  and `mosaica compact --wait` take `--progress` (`auto`, `bar`, `plain`, `json` or `none`) and
-  show the phase, the step, its count, rate and time remaining, the time elapsed and resident
-  memory on stderr. `/control/status` reports the jobs running as `jobs`, and
-  `compaction.last_job`. In Python, `commit()` and `compact()` take `progress=`, `True` to draw a
-  bar or a function to receive each record, and `Control` gains `compaction_request` and
-  `await_compaction`; the TypeScript client gains the same, with the `Progress` types.
-- **`mosaica compact --wait` and `--request`.** `--wait` stays until the server has answered the
-  request, prints the answer, and exits 1 when it was refused or failed, or the server restarted
-  and lost it. `--request N` reads a request made earlier.
-- **Filter by `mosaica_id`.** A filter's `mosaica_id` leaf, `{"eq": id}` or `{"in": [...]}`,
-  keeps the named items the viewer may see, so one `/v1/items` call reads the fields of the points
-  a map shows. The TypeScript client has `namedItems(ids)` to build it.
-- **Images on the item card.** The card's `image-fields` (`imageFields` in React) lists fields
-  whose value is an image's address, drawn as the image across the card. The browser loads it from
-  its host without a referrer, and a value that is not an `http:`, `https:` or same-host address
-  is shown as text.
-- **`[serve] port_retries` share one port unless given their own.** `session` and `control` under
-  `[serve]` are now optional, and a plane with no address of its own is served on the viewer's
-  address and port, each route keeping its own credential and CORS rules. A deployment that names
-  all three addresses is served as before. An open server no longer puts the session and control
-  planes one and two ports above the viewer; they share its port unless named.
-- **The Python client serves on port 9141 and prints the address.** A database made with
-  `mosaica.create()` is served on 9141, or the next free port above it, on this machine only, and
-  starting its server prints the address, so a notebook kernel on another machine can be reached
-  by forwarding one port. `create()` and `open()` take `port=` to state another; a stated port
-  that is taken is refused.
-
-### Added
-
-- **`[serve] port_retries`** tries that many ports above a taken one in turn, and the announce
-  line names the port bound. `mosaica serve` binds its addresses before it opens the bundle, so a
-  taken port refuses at once.
+- **Progress reporting.** `mosaica build`, `mosaica insert` and `mosaica compact --wait` take
+  `--progress` to show the current phase and step, its rate and the time remaining. The same
+  records appear under `jobs` in `/control/status`, and the Python and TypeScript clients pass
+  them to a callback as they arrive.
+- **`mosaica compact --wait` and `--request`.** `--wait` returns once the server has answered the
+  request and exits 1 if it was refused or failed. `--request N` reads an earlier request.
+- **Filter by `mosaica_id`.** `{"mosaica_id": {"in": [...]}}` keeps the named items the viewer may
+  see, which lets one `/v1/items` call fetch the points a map is showing. The TypeScript client
+  builds it with `namedItems(ids)`.
+- **Images on the item card.** Fields listed in the card's `image-fields` (`imageFields` in React)
+  are drawn as images. The viewer's browser loads each image from its own host, which therefore
+  learns which items the viewer opens.
+- **`[serve] port_retries`** tells `mosaica serve` to try that many ports above a taken one.
 
 ## [0.2.0] - 2026-11-05
 
