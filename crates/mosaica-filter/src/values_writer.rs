@@ -129,16 +129,12 @@ impl ColumnKind {
     /// Bytes per value as spooled. **Every value column is fixed-width**: a keyword's values are
     /// `u32` ordinals into its layer's dictionary, and the dictionary is a separate artefact this
     /// writer knows nothing about, so there is no variable-width case to spool an offset array for.
-    /// Codes written a block at a time are spooled as `u32`s whatever their width.
+    /// Codes written a block at a time are spooled at their own width.
     fn width(self) -> usize {
         match self {
             ColumnKind::U8 | ColumnKind::I8 => 1,
-            ColumnKind::U16 | ColumnKind::I16 => 2,
-            ColumnKind::U32
-            | ColumnKind::I32
-            | ColumnKind::F32
-            | ColumnKind::Ordinals
-            | ColumnKind::Ordinals16 => 4,
+            ColumnKind::U16 | ColumnKind::I16 | ColumnKind::Ordinals16 => 2,
+            ColumnKind::U32 | ColumnKind::I32 | ColumnKind::F32 | ColumnKind::Ordinals => 4,
             ColumnKind::U64 | ColumnKind::I64 | ColumnKind::F64 => 8,
         }
     }
@@ -433,8 +429,13 @@ impl ValueColumnWriter {
                 let take = (chunk.len() - at).min(SCRATCH);
                 codes.clear();
                 chunk.extend_codes(at, take, &mut codes);
-                for c in &codes {
-                    self.scratch.extend_from_slice(&c.to_ne_bytes());
+                for &c in &codes {
+                    match self.kind {
+                        ColumnKind::Ordinals16 => {
+                            self.scratch.extend_from_slice(&(c as u16).to_ne_bytes())
+                        }
+                        _ => self.scratch.extend_from_slice(&c.to_ne_bytes()),
+                    }
                 }
                 Self::flush_scratch(&mut self.values, &mut self.scratch)?;
                 at += take;
@@ -497,9 +498,16 @@ impl ValueColumnWriter {
 
         let buffer = values.map(self.count * self.kind.width())?;
         if let Some(code_bytes) = self.kind.code_bytes() {
-            let pushed = ScalarBuffer::<u32>::new(buffer, 0, self.count);
-            write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
-            drop(pushed);
+            match code_bytes {
+                CodeBytes::Two => {
+                    let pushed = ScalarBuffer::<u16>::new(buffer, 0, self.count);
+                    write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
+                }
+                CodeBytes::Four => {
+                    let pushed = ScalarBuffer::<u32>::new(buffer, 0, self.count);
+                    write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
+                }
+            }
             std::fs::remove_file(&values_spool)?;
             if let Some(p) = presence {
                 write_presence(&self.presence_path, p)?;
@@ -578,9 +586,9 @@ fn spool_values<T: Copy, const N: usize>(
 /// Write `values`, a column's codes in slot order, as [`crate::BlockOrdinals`]: each
 /// block of the column `presence` addresses encoded at its smallest width. The encoded data is
 /// spooled as it is produced, so only one block is held in memory.
-fn write_ordinal_blocks(
+fn write_ordinal_blocks<T: Copy + Into<u32>>(
     values_path: &Path,
-    values: &[u32],
+    values: &[T],
     presence: Option<&Bitmap>,
     code_bytes: CodeBytes,
 ) -> io::Result<()> {
@@ -592,10 +600,13 @@ fn write_ordinal_blocks(
     let mut widths = Vec::with_capacity(counts.len());
     let mut dict_lens = Vec::with_capacity(counts.len());
     let mut encoder = BlockEncoder::default();
+    let mut wide: Vec<u32> = Vec::with_capacity(ordinals::BLOCK_LEN);
     let mut scratch = Vec::with_capacity(SCRATCH);
     let (mut slot, mut bytes) = (0usize, 0u64);
     for &count in &counts {
-        let block = &values[slot..slot + count as usize];
+        wide.clear();
+        wide.extend(values[slot..slot + count as usize].iter().map(|&c| c.into()));
+        let block = wide.as_slice();
         slot += count as usize;
         let width = encoder.encode(block, code_bytes);
         let dict: &[u32] = match width {

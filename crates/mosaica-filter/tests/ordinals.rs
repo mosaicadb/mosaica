@@ -93,6 +93,8 @@ fn agree(blocks: &ValueColumn, flat: &ValueColumn, candidate: &Bitmap, values: &
         (int(50_000, true), None),
         (None, int(7, true)),
         (int(10, true), int(9, true)),
+        (int(u32::MAX, false), None),
+        (None, int(0, false)),
         (None, None),
     ];
     for (lo, hi) in ranges {

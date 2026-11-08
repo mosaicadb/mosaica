@@ -342,7 +342,10 @@ fn recolour(
     out: &mut Vec<u32>,
 ) -> io::Result<()> {
     let mut src = Vec::with_capacity(len);
-    if !codes.extend_codes(start, len, &mut src) {
+    // Only a keyword layer's four-byte ordinals are remapped; a narrower column paired with a
+    // dictionary is a contradiction, refused rather than re-typed.
+    let ordinals = matches!(ColumnKind::of(codes), ColumnKind::U32 | ColumnKind::Ordinals);
+    if !ordinals || !codes.extend_codes(start, len, &mut src) {
         return Err(invalid(format!(
             "a remapped merge was given a {:?} column; only a keyword layer's u32 ordinals are \
              rewritten",
@@ -414,26 +417,39 @@ pub trait CategorySource {
 impl CategorySource for ValueColumn {
     fn for_each(&self, f: &mut dyn FnMut(u32, u32) -> io::Result<()>) -> io::Result<()> {
         let codes = self.codes();
+        // Only a category has a code, stored flat at its width or a block at a time. Any other
+        // column would key a posting on a value nothing carries, so it is refused, empty or not.
+        if !matches!(
+            ColumnKind::of(codes),
+            ColumnKind::U8
+                | ColumnKind::U16
+                | ColumnKind::U32
+                | ColumnKind::Ordinals
+                | ColumnKind::Ordinals16
+        ) {
+            return Err(invalid(
+                "postings were asked for over a column that is not a category; only a \
+                 category's values carry an identity a posting can be keyed by",
+            ));
+        }
         let present = self.present();
-        let mut slot0 = 0usize;
-        let mut run = Vec::new();
+        let mut slot = 0usize;
+        // Decoded a bounded piece at a time: a column every entity carries is one run.
+        let mut piece = Vec::with_capacity(MERGE_CHUNK);
         for (start, last) in mosaica_roaring::Runs::new(&present) {
-            let count = (last - start) as usize + 1;
-            run.clear();
-            // Only a category has a code, stored flat at its width or a block at a time. Any other
-            // column would key a posting on a value nothing carries, so it is refused.
-            if !codes.extend_codes(slot0, count, &mut run) {
-                return Err(invalid(
-                    "postings were asked for over a column that is not a category; only a \
-                     category's values carry an identity a posting can be keyed by",
-                ));
-            }
-            for (entity, &code) in (start..=last).zip(&run) {
-                if code != ABSENT_CODE {
-                    f(entity, code)?;
+            let mut entity = start;
+            let mut left = (last - start) as usize + 1;
+            while left > 0 {
+                let take = left.min(MERGE_CHUNK);
+                piece.clear();
+                codes.extend_codes(slot, take, &mut piece);
+                for (e, &code) in (entity..).zip(&piece) {
+                    if code != ABSENT_CODE {
+                        f(e, code)?;
+                    }
                 }
+                (slot, entity, left) = (slot + take, entity + take as u32, left - take);
             }
-            slot0 += count;
         }
         Ok(())
     }
@@ -801,6 +817,35 @@ mod tests {
         for spool in ["postings.spool", "positions.spool"] {
             assert!(!dir.join(format!("fold-beta-out-{spool}")).exists());
         }
+    }
+
+    /// A category's postings source visits every present entity with its code, in order, over a
+    /// column stored in blocks whose one run is longer than a decoded piece; and refuses a column
+    /// that is not a category even when it holds nothing.
+    #[test]
+    fn a_category_source_visits_a_long_run_and_refuses_a_number() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let n = MERGE_CHUNK as u32 * 2 + 7;
+        let codes: Vec<u32> = (0..n).map(|e| 1 + e % 300).collect();
+        let values = dir.path().join("v.arrow");
+        let mut writer =
+            ValueColumnWriter::create(&values, &dir.path().join("p.roaring"), ColumnKind::Ordinals)
+                .expect("create");
+        writer.push(&codes_u32(codes.clone())).expect("push");
+        writer.finish(None).expect("finish");
+        let column = ValueColumn::open(&values, None, mosaica_filter::Access::Read).expect("open");
+        let mut seen = Vec::with_capacity(n as usize);
+        column
+            .for_each(&mut |entity, code| {
+                seen.push((entity, code));
+                Ok(())
+            })
+            .expect("a category");
+        let want: Vec<(u32, u32)> = (0..n).zip(codes).collect();
+        assert_eq!(seen, want);
+
+        let numbers = ValueColumn::universal(Codes::I64(Vec::<i64>::new().into()));
+        assert!(numbers.for_each(&mut |_, _| Ok(())).is_err());
     }
 
     /// Coalesce `inputs` into one extent and open it back.

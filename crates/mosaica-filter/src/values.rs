@@ -1251,15 +1251,18 @@ impl ValueColumn {
             Codes::F64(v) => float_range!(v, f64),
             // An ordinal range is a keyword prefix's, and it scans even where nothing can match.
             Codes::Ordinals(o) => {
-                let lo = match narrow_lo::<u32>(lo) {
-                    Narrowed::Unsatisfiable => u32::MAX,
-                    Narrowed::Unbounded => 0,
-                    Narrowed::At(x) => x,
-                };
-                let (lo, hi) = match narrow_hi::<u32>(hi) {
-                    Narrowed::Unsatisfiable => (1, 0),
-                    Narrowed::Unbounded => (lo, u32::MAX),
-                    Narrowed::At(x) => (lo, x),
+                let (lo, hi) = match (narrow_lo::<u32>(lo), narrow_hi::<u32>(hi)) {
+                    (Narrowed::Unsatisfiable, _) | (_, Narrowed::Unsatisfiable) => (1, 0),
+                    (lo, hi) => (
+                        match lo {
+                            Narrowed::At(x) => x,
+                            _ => 0,
+                        },
+                        match hi {
+                            Narrowed::At(x) => x,
+                            _ => u32::MAX,
+                        },
+                    ),
                 };
                 self.scan_blocks(o, candidate, &OrdinalTest::Range { lo, hi })
             }
@@ -1426,6 +1429,11 @@ impl ValueColumn {
                 w.dedup();
                 self.walk_typed(candidate, v, |x| w.binary_search(x).is_ok())
             }
+            // A two-byte column's domain is a table, as for a flat `u16` column above.
+            Codes::Ordinals(o) if o.code_bytes() == CodeBytes::Two => {
+                let set = CodeSet::new(values, u16::MAX as u32);
+                self.scan_blocks(o, candidate, &OrdinalTest::Set(&set))
+            }
             Codes::Ordinals(o) => {
                 let mut w: Vec<u32> = values.iter().map(|v| v.raw()).collect();
                 w.sort_unstable();
@@ -1539,6 +1547,26 @@ impl ValueColumn {
         mut f: impl FnMut(u32, RecordValue) -> Result<(), E>,
     ) -> Result<(), E> {
         let mut failed = None;
+        // Codes stored in blocks are decoded a run at a time rather than looked up per slot.
+        if let Codes::Ordinals(o) = &self.codes {
+            let two = o.code_bytes() == CodeBytes::Two;
+            self.walk_slot_runs(candidate, o.len(), |slot0, count, entity0| {
+                let mut entity = entity0;
+                o.for_each_in(slot0, count, |code| {
+                    if failed.is_none() {
+                        let value = match two {
+                            true => RecordValue::U16(code as u16),
+                            false => RecordValue::U32(code),
+                        };
+                        if let Err(e) = f(entity, value) {
+                            failed = Some(e);
+                        }
+                    }
+                    entity += 1;
+                });
+            });
+            return failed.map_or(Ok(()), Err);
+        }
         self.walk_slot_runs(candidate, self.codes.len(), |slot0, count, entity0| {
             if failed.is_some() {
                 return;

@@ -314,6 +314,41 @@ fn narrowing_pays(within: &croaring::Bitmap, visible: u64, visible_blocks: u64) 
         && blocks.saturating_mul(NARROW_BLOCK_RATIO) <= visible_blocks
 }
 
+/// Rows of a viewport's tiles [`sampled_blocks`] maps to their entities.
+const BLOCK_SAMPLE_ROWS: u64 = 4096;
+
+/// How many distinct 2¹⁶-entity blocks hold the visible entities of up to [`BLOCK_SAMPLE_ROWS`]
+/// rows spread evenly over `domain`, `rows` rows in all: no more than the blocks all its visible
+/// entities fall in. Zero where the row space cannot map a row to its entity.
+fn sampled_blocks(
+    row_space: &mosaica_store::permutation::RowSpace,
+    domain: &[Range<u32>],
+    rows: u64,
+    visible: &croaring::Bitmap,
+) -> u64 {
+    let step = rows.div_ceil(BLOCK_SAMPLE_ROWS).max(1);
+    let mut blocks = Vec::new();
+    let mut next = 0u64;
+    let mut before = 0u64;
+    for r in domain {
+        let len = u64::from(r.end - r.start);
+        while next < before + len {
+            let row = r.start + (next - before) as u32;
+            if let Some(entity) = row_space.entity_of(RowId::new(row)) {
+                let entity = entity.raw() as u32;
+                if visible.contains(entity) {
+                    blocks.push(entity >> 16);
+                }
+            }
+            next += step;
+        }
+        before += len;
+    }
+    blocks.sort_unstable();
+    blocks.dedup();
+    blocks.len() as u64
+}
+
 /// A filter's rows held to `domain`: exact there and silent outside it, as the per-tile crossing's
 /// are. What an answer over the tiles' entities alone is.
 fn held_to(rows: FilterRows, domain: &[Range<u32>]) -> FilterRows {
@@ -1120,19 +1155,27 @@ impl Engine {
         domain: &[Range<u32>],
         rows_in_ranges: u64,
     ) -> Result<Option<croaring::Bitmap>> {
-        let mut rows = croaring::Bitmap::new();
-        for r in domain {
-            rows.add_range(r.clone());
-        }
-        let row_space = &side.data.row_space;
-        let Some(entities) = self.on_pool(rows_in_ranges, || row_space.entities_of_rows(&rows))
-        else {
-            return Ok(None);
-        };
+        let always = self.switches.tile_filters_always.load(Ordering::Relaxed);
         let fragment = self.fragment_for(served.session, side.shard, Some(&side.geometry.fragment))?;
         let view = fragment.view();
         let visible = view.andnot_cardinality(&side.shard.overlay.denied());
         let visible_blocks = u64::from(view.statistics().n_containers);
+        let row_space = &side.data.row_space;
+        // A sample of the tiles' rows finds a lower bound on the blocks their visible entities
+        // fall in, so a viewport whose entities are scattered is turned away before every row is
+        // mapped to its entity.
+        let sampled = sampled_blocks(row_space, domain, rows_in_ranges, &view);
+        if !always && sampled.saturating_mul(NARROW_BLOCK_RATIO) > visible_blocks {
+            return Ok(None);
+        }
+        let mut rows = croaring::Bitmap::new();
+        for r in domain {
+            rows.add_range(r.clone());
+        }
+        let Some(entities) = self.on_pool(rows_in_ranges, || row_space.entities_of_rows(&rows))
+        else {
+            return Ok(None);
+        };
         let within = crate::filter::candidate_within(
             &fragment,
             served.session.satisfied(),
@@ -1140,7 +1183,6 @@ impl Engine {
             &side.shard.buffer,
             &entities,
         );
-        let always = self.switches.tile_filters_always.load(Ordering::Relaxed);
         if !always && !narrowing_pays(&within, visible, visible_blocks) {
             return Ok(None);
         }
@@ -1724,6 +1766,36 @@ mod tests {
         .with_row_entity(Arc::new(
             RowToEntity::load(&table_path).expect("table loads"),
         ))
+    }
+
+    /// The sampled blocks never exceed the blocks the domain's visible entities fall in.
+    #[test]
+    fn sampled_blocks_is_a_lower_bound_on_the_blocks_visible_entities_fall_in() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let n = 1u32 << 18;
+        // Rows in an order that scatters a stretch of rows over every block of entities.
+        let order: Vec<u32> = (0..n).map(|r| (r % 4) << 16 | (r / 4)).collect();
+        let rows = row_space_over(dir.path(), &order);
+        let mut visible = croaring::Bitmap::from_range(0..n);
+        visible.remove_range(2 << 16..3 << 16);
+        let one = |r: Range<u32>| vec![r];
+        let domains = [one(0..4), one(0..n), vec![100..200, 9_000..9_001], one(8..12)];
+        for domain in &domains {
+            let total: u64 = domain.iter().map(|r| u64::from(r.end - r.start)).sum();
+            let mut held = croaring::Bitmap::new();
+            for r in domain {
+                for row in r.clone() {
+                    let e = order[row as usize];
+                    if visible.contains(e) {
+                        held.add(e);
+                    }
+                }
+            }
+            let blocks = u64::from(held.statistics().n_containers);
+            let sampled = sampled_blocks(&rows, domain, total, &visible);
+            assert!(sampled <= blocks, "{domain:?}: {sampled} sampled, {blocks} reached");
+            assert!(sampled > 0);
+        }
     }
 
     /// A viewport's few entities in few blocks narrow; as many in every block, or too many

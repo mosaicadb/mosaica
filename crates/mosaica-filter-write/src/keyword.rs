@@ -242,13 +242,19 @@ fn live_ordinals(
                     codes.len()
                 )));
             }
-            run.clear();
-            if !codes.extend_codes(slot0, count, &mut run) {
-                return Err(invalid(format!(
-                    "{pass}: a keyword layer stores u32 ordinals"
-                )));
+            // Decoded a bounded piece at a time: a layer every entity carries is one run.
+            let mut at = 0;
+            while at < count {
+                let take = (count - at).min(crate::MERGE_CHUNK);
+                run.clear();
+                if !codes.extend_codes(slot0 + at, take, &mut run) {
+                    return Err(invalid(format!(
+                        "{pass}: a keyword layer stores u32 ordinals"
+                    )));
+                }
+                ordinals.add_many(&run);
+                at += take;
             }
-            ordinals.add_many(&run);
         }
         live.push(ordinals);
     }
