@@ -6321,6 +6321,12 @@ components:
         whole view, composed and negated as `region` is. A layer this principal's `/v1/meta` does
         not list is `422`. An artifact that names nothing, belongs to another layer, is suppressed
         or is below this principal's criterion is an empty operand, one answer for every reason.
+
+        `mosaica_id` is a leaf over the identifiers responses hand out: `{"eq": id}` or
+        `{"in": [id, ...]}`. It matches the items named that this principal may see; an identifier
+        naming nothing, an artifact, or an item the principal may not see matches nothing, one
+        answer for every reason. It composes and negates as a column leaf does, and a read of a
+        few named items answers from the identifiers without walking the view.
       type: object
       minProperties: 1
       maxProperties: 1
@@ -6338,8 +6344,32 @@ components:
           $ref: "#/components/schemas/RegionLeaf"
         member_of:
           $ref: "#/components/schemas/MemberOfLeaf"
+        mosaica_id:
+          $ref: "#/components/schemas/MosaicaIdLeaf"
       additionalProperties:
         $ref: "#/components/schemas/FilterLeafOperator"
+
+    MosaicaIdLeaf:
+      type: object
+      description: The items named by `mosaica_id` that this principal may see.
+      minProperties: 1
+      maxProperties: 1
+      properties:
+        eq:
+          $ref: "#/components/schemas/MosaicaIdValue"
+        in:
+          type: array
+          items:
+            $ref: "#/components/schemas/MosaicaIdValue"
+      additionalProperties: false
+
+    MosaicaIdValue:
+      description: A `mosaica_id`, as a JSON number or its decimal digits in a string.
+      oneOf:
+        - type: integer
+          minimum: 0
+        - type: string
+          pattern: "^[0-9]+$"
 
     MemberOfLeaf:
       type: object

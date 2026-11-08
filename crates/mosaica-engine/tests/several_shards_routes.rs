@@ -1510,6 +1510,24 @@ fn ids_in() -> FilterExpr {
     }
 }
 
+/// [`ids_in`]'s items named by their `mosaica_id`s in `built`, beside an artifact's identifier and
+/// one naming nothing, which match nothing.
+fn mosaica_ids_in(built: &Built) -> FilterExpr {
+    let s = shards();
+    let sources = [s.z0[0], s.z1s[0], s.z2s[0], s.z2n[0]];
+    let mut ids: Vec<u64> = (built.names.items.iter())
+        .filter(|(_, source)| sources.contains(source))
+        .map(|(&id, _)| id)
+        .collect();
+    assert_eq!(ids.len(), sources.len(), "every named item is read");
+    ids.sort_unstable();
+    ids.extend([built.names.id("clusters/split").raw(), 1]);
+    FilterExpr::Leaf {
+        column: mosaica_engine::filter::MOSAICA_ID_COLUMN.to_string(),
+        operand: FilterOperand::NumIn(ids.into_iter().map(|id| Scalar::Int(id.into())).collect()),
+    }
+}
+
 /// An items read in either order, resumed page by page across every shard boundary, serves the
 /// rows, pages and counts one shard serves, unfiltered and under every kind of filter.
 #[test]
@@ -1522,6 +1540,7 @@ fn an_items_read_resumed_across_every_shard_equals_one_shards() {
                 ("unfiltered", every.clone()),
                 ("scored", every.clone().filter(scored())),
                 ("ids", every.clone().filter(ids_in())),
+                ("mosaica ids", every.clone().filter(mosaica_ids_in(built))),
                 (
                     "split",
                     every.clone().filter(member_of(built, "clusters/split")),
@@ -1574,6 +1593,20 @@ fn an_items_read_resumed_across_every_shard_equals_one_shards() {
     assert!(
         pair.several.engine.driven_stretches() > before,
         "the unique `in` drove the read"
+    );
+
+    let before = pair.several.engine.driven_stretches();
+    let read = read_items(
+        &pair.several.engine,
+        &session,
+        &Items::new(RecordsOrder::Stored).filter(mosaica_ids_in(&pair.several)),
+    );
+    let mut ids: Vec<u64> = read.rows_with_ids.iter().map(|&(_, id)| id).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, want, "the items named, and nothing for the others");
+    assert!(
+        pair.several.engine.driven_stretches() > before,
+        "the identifiers drove the read"
     );
 }
 
@@ -1633,6 +1666,19 @@ fn a_filtered_and_highlighted_viewport_and_its_underlay_equal_one_shards() {
                 },
             );
         }
+    }
+}
+
+/// The viewport under a `mosaica_id` filter counts and draws over every shard what one shard does.
+#[test]
+fn a_viewport_filtered_by_mosaica_id_equals_one_shards() {
+    let pair = Pair::new();
+    for zoom in [0, 3] {
+        pair.same(&format!("the viewport at depth {zoom}"), |built, session| {
+            let request = ViewportRequest::new("s0", zoom, WHOLE_MAP, N as usize)
+                .filter(mosaica_ids_in(built));
+            viewport(built, session, request)
+        });
     }
 }
 
@@ -1821,6 +1867,7 @@ fn aggregate_groupings_sum_over_every_shard() {
             Some(Reference::Visible),
         ),
         ("in split", |b| Some(member_of(b, "clusters/split")), None),
+        ("named by mosaica_id", |b| Some(mosaica_ids_in(b)), None),
     ];
     for (what, filter, reference) in cases {
         pair.same(&format!("the {what} aggregate"), |built, session| {

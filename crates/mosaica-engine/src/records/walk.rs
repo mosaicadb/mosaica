@@ -104,9 +104,9 @@ pub(super) trait WalkCx {
         cancel: &Option<CancelToken>,
     ) -> Result<RoutedRows>;
     /// The rows of the side at `place` an index bounds one leaf's matches to: a unique field's
-    /// `eq` or `in`, as the rows of the items holding the values named that are in the viewer's
-    /// candidate set, tested only at the holders; a `member_of`, as the artifact's members the
-    /// page's mask admits. `None` for any other expression.
+    /// `eq` or `in`, `mosaica_id`'s among them, as the rows of the items holding the values named
+    /// that are in the viewer's candidate set, tested only at the holders; a `member_of`, as the
+    /// artifact's members the page's mask admits. `None` for any other expression.
     fn index_rows(&self, place: usize, expr: &FilterExpr) -> Result<Option<Bitmap>>;
     /// The verdict a region leaf reaches in the side at `place`.
     fn region_verdict(
@@ -242,11 +242,16 @@ impl WalkCx for PageCx<'_> {
                 let Some(keys) = side.shard.filter_columns.unique_keys(column, operand) else {
                     return Ok(None);
                 };
-                let holders: Bitmap =
-                    unique_holders(self.open.served.generation, side.shard, column, &keys)
-                    .map_err(filter_refusal)?
-                    .into_iter()
-                    .collect();
+                let holders: Bitmap = unique_holders(
+                    &self.engine.identity_key,
+                    self.open.served.generation,
+                    side.shard,
+                    column,
+                    &keys,
+                )
+                .map_err(filter_refusal)?
+                .into_iter()
+                .collect();
                 let visible = self.candidate_within(place, &holders)?;
                 Some(
                     visible

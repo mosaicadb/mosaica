@@ -67,6 +67,9 @@ pub enum RegionLeaf {
 /// The leaf name a `member_of` leaf answers to, reserved exactly as `region` is.
 pub const MEMBER_OF_COLUMN: &str = "member_of";
 
+/// The column a leaf naming items by their identifiers answers to, a fixed column of every item.
+pub const MOSAICA_ID_COLUMN: &str = "mosaica_id";
+
 /// The `member_of` leaf: one artifact of one layer, resolved to `membership ∩ M_auth` in row space
 /// over the whole view.
 ///

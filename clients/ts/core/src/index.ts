@@ -72,6 +72,7 @@ export {
   composeFilters,
   emptyDraft,
   isPopulated,
+  namedItems,
   textQueryOf,
   textTerms,
   withoutClause,

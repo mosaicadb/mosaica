@@ -11,7 +11,7 @@ use crate::filter::error::FilterError;
 use crate::filter::expr::{
     evaluate_leaf, FilterExpr, FilterOperand, LeafQuery, LeafResolver, MemberOfArtifact,
     RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, UniqueResolver, MEMBER_OF_COLUMN,
-    REGION_COLUMN,
+    MOSAICA_ID_COLUMN, REGION_COLUMN,
 };
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 use crate::filter::scan::text::{phrase_match, text_match};
@@ -93,12 +93,16 @@ impl FilterColumns {
 
     /// The keys a leaf names where its column's unique index answers it: `eq` or `in` on a unique
     /// column. A number the column's type cannot hold names no key, so it matches nothing.
+    /// `mosaica_id` is answered as a unique `u64` column, each key the identifier itself.
     pub(crate) fn unique_keys(
         &self,
         column: &str,
         operand: &FilterOperand,
     ) -> Option<Vec<UniqueKey>> {
-        let ty = *self.unique.get(column)?;
+        let ty = match column {
+            MOSAICA_ID_COLUMN => mosaica_spatial::tiler::ScalarType::U64,
+            _ => *self.unique.get(column)?,
+        };
         let number = |value: &crate::filter::Scalar| match *value {
             crate::filter::Scalar::Int(i) => key_of_integer(ty, i),
             crate::filter::Scalar::Float(f) if f.is_finite() && f.fract() == 0.0 => {
@@ -247,10 +251,10 @@ impl FilterColumns {
         if column == REGION_COLUMN || column == MEMBER_OF_COLUMN {
             return Ok(Space::Row);
         }
-        let placement = self.placement_of(column)?;
         if self.unique_keys(column, operand).is_some() {
             return Ok(Space::Entity);
         }
+        let placement = self.placement_of(column)?;
         let entity = placement.entity
             && (!self.unique.contains_key(column) || self.has_value_route(column));
         Ok(match (entity, placement.row) {

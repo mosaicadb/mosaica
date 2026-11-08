@@ -1,6 +1,14 @@
 import {describe, expect, it} from 'vitest';
-import {activeCount, composeFilters, emptyDraft, textQueryOf, withoutClause, type FilterDraft} from '../src/filters.js';
+import {activeCount, composeFilters, emptyDraft, namedItems, textQueryOf, withoutClause, type FilterDraft} from '../src/filters.js';
 import {memberOf, withMember, withMembers, withoutMember, type MemberClause} from '../src/members.js';
+
+describe('namedItems', () => {
+  it('names each id as its decimal string, exact past 2^53, in the order given', () => {
+    expect(namedItems([18446744073709551615n, 7n])).toEqual({mosaica_id: {in: ['18446744073709551615', '7']}});
+    expect(namedItems(new BigUint64Array([3n]))).toEqual({mosaica_id: {in: ['3']}});
+    expect(namedItems([])).toEqual({mosaica_id: {in: []}});
+  });
+});
 
 describe('an empty draft', () => {
   it('seeds a keyword control with the first operator the column publishes, in the order published', () => {

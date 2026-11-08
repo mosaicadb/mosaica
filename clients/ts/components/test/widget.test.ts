@@ -122,6 +122,14 @@ describe('the token protocol', () => {
     expect(explorer.titleField).toBe('');
   });
 
+  it('hands image_fields to every view’s explorer, and follows a change to it', async () => {
+    const {model, el} = setUp({image_fields: ['thumb', 'photo']});
+    const explorer = el.querySelector('mosaica-explorer') as unknown as {imageFields: string};
+    expect(explorer.imageFields).toBe('thumb photo');
+    model.set('image_fields', []);
+    expect(explorer.imageFields).toBe('');
+  });
+
   it('fills the room below its top while its output is shown full screen, and takes `height` again on the way out', () => {
     const {model, el} = setUp({height: 400});
     const explorer = el.querySelector('mosaica-explorer') as HTMLElement;
@@ -846,6 +854,7 @@ describe('draftOf inverts composeFilters', () => {
   it('refuses what a draft cannot hold', () => {
     expect(() => draftOf({none_of: [{title: {match: 'x'}}]}, operands)).toThrow();
     expect(() => draftOf({nope: {eq: 'x'}}, operands)).toThrow();
+    expect(() => draftOf({mosaica_id: {in: ['7']}}, operands)).toThrow();
     expect(() => draftOf({year: {eq: 3}}, operands)).toThrow();
     expect(() => draftOf({all_of: [{year: {range: {gte: 1}}}, {year: {range: {lte: 2}}}]}, operands)).toThrow();
     expect(() => draftOf({year: {range: {gt: 1}}}, operands)).toThrow();
