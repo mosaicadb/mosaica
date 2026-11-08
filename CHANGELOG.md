@@ -8,96 +8,89 @@ container image.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-08
+
 ### Changed
 
-- **The three planes share one port unless given their own.** `session` and `control` under
-  `[serve]` are now optional, and a plane with no address of its own is served on the viewer's
-  address and port, each route keeping its own credential and CORS rules. A deployment that names
-  all three addresses is served as before. An open server no longer puts the session and control
-  planes one and two ports above the viewer; they share its port unless named.
-- **The Python client serves on port 9141 and prints the address.** A database made with
-  `mosaica.create()` is served on 9141, or the next free port above it, on this machine only, and
-  starting its server prints the address, so a notebook kernel on another machine can be reached
-  by forwarding one port. `create()` and `open()` take `port=` to state another; a stated port
-  that is taken is refused.
+- **Breaking:** bundles built by 0.2.0 must be rebuilt, because the bundle format is now 52.
+  Writes made to a 0.2.0 service, including deletions and suppressions, are not carried over.
+  ([#223](https://github.com/mosaicadb/mosaica/pull/223))
+- **Breaking:** `serve.text_filter_cache_bytes` is renamed `serve.filter_cache_bytes`, and a
+  deployment file that uses the old name is refused. The status field `text_filter_cache` is
+  renamed `filter_cache`. ([#217](https://github.com/mosaicadb/mosaica/pull/217))
+- **Breaking:** compaction request numbers start from the server's start time in milliseconds
+  instead of from 1, so a number is not reused after a restart. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+- **Breaking:** when a deployment names no session or control address, those planes are served on
+  the viewer's port. An open server used to put them one and two ports above it. ([#215](https://github.com/mosaicadb/mosaica/pull/215))
+- The filter cache also keeps range, `eq` and `in` conditions on columns, so panning and zooming
+  with a column filter does not evaluate it again. ([#217](https://github.com/mosaicadb/mosaica/pull/217))
+- The Python client serves on port 9141 by default, or the next free port above it, and prints
+  its address. `create()` and `open()` take `port=`. The `mosaica` package now depends on `tqdm`.
+  ([#215](https://github.com/mosaicadb/mosaica/pull/215))
+- Keyword and category filters ([#223](https://github.com/mosaicadb/mosaica/pull/223)), column filters ([#217](https://github.com/mosaicadb/mosaica/pull/217)), histograms ([#221](https://github.com/mosaicadb/mosaica/pull/221)), builds
+  ([#214](https://github.com/mosaicadb/mosaica/pull/214)) and server start-up ([#216](https://github.com/mosaicadb/mosaica/pull/216)) are faster.
 
 ### Added
 
-- **`[serve] port_retries`** tries that many ports above a taken one in turn, and the announce
-  line names the port bound. `mosaica serve` binds its addresses before it opens the bundle, so a
-  taken port refuses at once.
+- `GET /control/compact/{request}` reports whether a compaction request has been answered, how it
+  ended and how far its compaction has got. `mosaica compact` takes `--wait` and `--request`, and
+  the Python and TypeScript clients can wait for a request or read one. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+- Builds, inserts and compactions report their progress. The CLI shows it with `--progress`,
+  `/control/status` lists running jobs under `jobs`, and the clients pass each record to a
+  callback. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
+- A filter can name items by `mosaica_id`, and the TypeScript client builds one with
+  `namedItems(ids)`. ([#220](https://github.com/mosaicadb/mosaica/pull/220))
+- The item card draws the fields listed in `image-fields` as images. ([#220](https://github.com/mosaicadb/mosaica/pull/220))
+- `[serve] port_retries` makes `mosaica serve` try that many ports above a taken one. ([#215](https://github.com/mosaicadb/mosaica/pull/215))
 
-## [0.2.0] - 2026-11-05
+### Removed
 
-An alpha, like 0.1.0. The bundle format has changed, so 0.2.0 refuses a bundle that 0.1.0 built,
-and each one has to be built again. The HTTP API keeps its version, and the Python and TypeScript
-clients behave as they did in 0.1.0.
-
-### Changed
-
-- **Bundles from 0.1.0 must be rebuilt, and their logs set aside.** The bundle format is now 50,
-  and 0.2.0 refuses to open a bundle of format 48, which 0.1.0 writes, with a message that says to
-  rebuild it. Build it again from its declaration and source files with `mosaica build`, or from
-  data frames in Python. A rebuild starts from those files alone, so every write made to the
-  running 0.1.0 service is left behind: inserts, edits, deletions, suppressions and declarations.
-  Make them again on the rebuilt database; until a deletion or suppression is made again, the item
-  it named is served. 0.2.0 also refuses 0.1.0's write-ahead log, so move its files (`wal-*.log`
-  and `wal-*.sync`, where `[bundle] wal` points) aside, or set `[bundle] wal` to a new path.
-- **Phrase search reads word positions from the index.** A text field's index now records where
-  each word falls in each item, and a `phrase` filter or highlight is answered from those positions
-  instead of by reading the text of every item that holds all its words. The positions add to a
-  bundle's size on disc and to a build's work.
-- **A search is kept between requests.** The items each `match` and `phrase` filter matches are
-  kept for every viewer with the same access, so panning and zooming with a search does not run it
-  again. Deletions and suppressions still apply to the next request, and the kept answer is dropped
-  when the indexed text changes at a flush, coalesce or compaction. `serve.text_filter_cache_bytes`
-  bounds it (256 MiB by default, `0` keeps none), and `GET /control/status` reports it as
-  `text_filter_cache`. The status's `region_cache` gains `waiters_now` and `oversized_admissions`.
-  When several requests start the same search at once, one runs it and the others wait for its
-  answer. A request that has waited `serve.single_flight_wait_ms` runs the search itself, where a
-  wait that long for any other shared cache is refused with 429.
-- **Faster first frames for a new viewer.** The count of occupied tiles that sets how many points a
-  tile draws is now shared by every viewer with the same access and kept on disc, so a second
-  session and a restart reuse it. At deep zooms over large visible sets it is estimated from a
-  sample of the viewer's own tiles, which can move a tile's number of drawn points slightly.
-- **Faster filtered maps and aggregates.** A dense tile under a filter is drawn from the stored
-  sample bands where that reads less than a scan, and `/v1/aggregate` evaluates a filter bounded by
-  a drawn region only within the region's tiles.
-- **An aggregate always returns its first page.** A `/v1/aggregate` response whose stream deadline
-  passed before its first page used to end with a trailer alone, and now delivers that page first,
-  as a records read does.
-- **Filters stop when the client goes away.** A request whose client disconnects stops evaluating
-  its filter, and `POST /v1/artifacts/browse` is now cancelled the same way.
-
-### Fixed
-
-- **A server refuses a write-ahead log written for another database.** Each log now records the
-  database it belongs to, and a server refuses to replay one written for any other, such as the log
-  of a bundle that has since been rebuilt, with a message that says to move it aside. Before, the
-  server replayed the old log's writes onto the new bundle by internal id, so a deleted or
-  suppressed item could reappear and an unrelated one be hidden. The log format is now 44.
-- **JSON numbers are read as the correctly rounded double.** 0.1.0 could read some numbers with
-  seventeen significant digits one step away from their true value, which could move a box's edge
-  past an item lying on it and drop that item from the answer.
-- A `phrase` filter over a group-scoped text field matched nothing, and now matches as it does over
-  any other text field.
-- Two batches that added the same item through two views of one key could each keep their own
-  value for a group-scoped field. The second batch is now checked again, so an equal value counts
-  as a repeat and a different one as an edit.
-- Building a text field with very many distinct words held one 8-byte offset per word in memory
-  outside the build's memory budget, about 0.8 GB at 100 million words. The offsets are now written
-  to a scratch file, and so are those of the word positions this release adds, which would have
-  doubled the figure.
+- **Breaking:** `compaction.requests.last_refusal` in `/control/status`, which
+  `GET /control/compact/{request}` replaces. ([#219](https://github.com/mosaicadb/mosaica/pull/219))
 
 ### Documentation
 
-- **A documentation website** at <https://mosaicadb.github.io/mosaica/>, with search, published
-  from each release tag so that it describes the release.
-- **Security policy.** SECURITY.md now supports the latest release, and a security fix ships in
-  the next release.
-- **Compared with other databases**, a page and a README section that time one per-viewer map of
-  GBIF species records served by Mosaica, ClickHouse, PostgreSQL and OpenSearch, each enforcing the
-  viewer's access with its own access control, from 10 million to a billion records.
+- A guide to reaching a notebook's map when Jupyter or marimo runs on another machine. ([#218](https://github.com/mosaicadb/mosaica/pull/218))
+
+## [0.2.0] - 2026-11-05
+
+### Changed
+
+- **Breaking:** bundles built by 0.1.0 must be rebuilt, because the bundle format is now 50.
+  Writes made to a 0.1.0 service, including deletions and suppressions, are not carried over.
+- **Breaking:** the write-ahead log format is now 44, so a 0.1.0 log is refused.
+- Phrase search reads word positions from the index instead of each item's text. Bundles with
+  text fields are larger and take longer to build as a result.
+- The results of `match` and `phrase` filters are kept between requests for every viewer with the
+  same access, up to `serve.text_filter_cache_bytes` (256 MiB by default).
+- A new viewer's first frames are faster, and so are filtered maps and aggregates.
+- An aggregate returns its first page even when its stream deadline has already passed.
+- A request stops evaluating its filter when its client disconnects, and so does
+  `POST /v1/artifacts/browse`.
+
+### Security
+
+- A server could replay a write-ahead log written for another database, such as the log of a
+  bundle that had since been rebuilt. That could expose a deleted or suppressed item and hide an
+  unrelated one. Each log now records its database, and a log for another database is refused.
+
+### Fixed
+
+- Some JSON numbers with seventeen significant digits were read one step away from their true
+  value, which could drop an item lying exactly on the edge of a box filter.
+- A `phrase` filter over a group-scoped text field matched nothing.
+- Inserting the same item in two batches could leave a group-scoped field with a different value
+  from each, where the second batch should have counted as a repeat or an edit.
+- Building a text field with very many distinct words used about 0.8 GB per 100 million words
+  outside the build's memory budget.
+
+### Documentation
+
+- A documentation website at <https://mosaicadb.github.io/mosaica/>, published from each release
+  tag.
+- A security policy in SECURITY.md, covering the latest release.
+- A comparison with ClickHouse, PostgreSQL and OpenSearch, timing a per-viewer map of GBIF species
+  records at 10 million to a billion records.
 
 ## [0.1.0] - 2026-10-27
 
@@ -154,5 +147,6 @@ any later release, and a bundle built by one version may be refused by the next.
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
+[0.3.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
