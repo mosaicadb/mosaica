@@ -45,6 +45,7 @@ use mosaica_store::vocabulary::{code_value, Resolved, Unresolved, VocabularyMint
 use crate::config::{Fields, ViewSelector};
 use crate::error::{BuildError, Result};
 use crate::ids::{Numbers, ReadRows, NO_SOURCE};
+use crate::observer::Steps;
 use crate::row_groups::FileGroups;
 
 /// One input point: its number ([`crate::ids`]) and geometry.
@@ -193,6 +194,8 @@ pub struct Source<'a> {
     path: Option<&'a Path>,
     fields: &'a Fields,
     rows: &'a ReadRows,
+    /// The step a reader adds each batch's rows to.
+    steps: Steps<'a>,
 }
 
 /// Every row of a file, row `r` numbered `r`.
@@ -205,7 +208,26 @@ static EVERY_ROW: ReadRows = ReadRows {
 
 impl<'a> Source<'a> {
     pub(crate) fn new(path: Option<&'a Path>, fields: &'a Fields, rows: &'a ReadRows) -> Source<'a> {
-        Source { path, fields, rows }
+        Source {
+            path,
+            fields,
+            rows,
+            steps: Steps::default(),
+        }
+    }
+
+    /// This source, its reader adding the rows of each batch it decodes to `steps`.
+    pub(crate) fn counted(self, steps: Steps<'a>) -> Source<'a> {
+        Source { steps, ..self }
+    }
+
+    /// The rows of the row groups a reader decodes, read from the file's footer.
+    pub(crate) fn kept_rows(&self) -> Result<u64> {
+        let Some(path) = self.path else {
+            return Ok(0);
+        };
+        let groups = FileGroups::open(path)?;
+        Ok(groups.rows_of(&self.groups(&groups)))
     }
 
     /// Every row of the file, numbered by its position: for a caller reading a file on its own.
@@ -214,6 +236,7 @@ impl<'a> Source<'a> {
             path: Some(path),
             fields,
             rows: &EVERY_ROW,
+            steps: Steps::default(),
         }
     }
 
@@ -316,6 +339,16 @@ pub fn scan_points<F: FnMut(PointRow) -> ControlFlow<()>>(
         MortonResidual(Vec<u64>, Vec<u64>, Vec<u64>),
     }
 
+    impl PointGeom {
+        fn rows(&self) -> u64 {
+            match self {
+                PointGeom::Xy(ids, ..)
+                | PointGeom::Morton(ids, _)
+                | PointGeom::MortonResidual(ids, ..) => ids.len() as u64,
+            }
+        }
+    }
+
     let column = |batch: &RecordBatch, name: &str| -> Result<usize> {
         column_index(path, &batch.schema(), name)
     };
@@ -344,6 +377,7 @@ pub fn scan_points<F: FnMut(PointRow) -> ControlFlow<()>>(
     };
     let mut stopped = false;
     groups.decode_parallel(path, &src.groups(&groups), &mask, decode, |(first, geometry)| {
+        src.steps.advance(geometry.rows());
         match geometry {
             PointGeom::Xy(ids, xs, ys) => {
                 for i in 0..ids.len() {
@@ -463,6 +497,7 @@ pub fn scan_pairs<F: FnMut(u64, u64) -> ControlFlow<()>>(
         Ok((ids, terms))
     };
     groups.decode_parallel(path, &src.groups(&groups), &projection, decode, |(ids, terms)| {
+        src.steps.advance(ids.len() as u64);
         for i in 0..ids.len() {
             if ids[i] == NO_SOURCE {
                 continue;
@@ -714,6 +749,7 @@ fn scan_identity<F: FnMut(u64) -> ControlFlow<()>>(src: Source<'_>, mut visit: F
     for group in src.groups(&groups) {
         let first = groups.start(group);
         let len = groups.group_rows(group) as usize;
+        src.steps.advance(len as u64);
         for id in src.source_ids(first, len) {
             if id == NO_SOURCE {
                 continue;
@@ -779,6 +815,7 @@ fn scan_access_column<F: FnMut(&[u64], &[u32], &AccessBatch<'_>) -> ControlFlow<
     let mut rows: Vec<u32> = Vec::with_capacity(ATTRIBUTE_BATCH_ROWS);
     groups.each_batch(path, &kept, &projection, |first, batch| {
         let source_ids = src.source_ids(first, batch.num_rows());
+        src.steps.advance(source_ids.len() as u64);
         let terms = read_access_column(path, batch.column(0), field)?;
         rows.clear();
         rows.extend(

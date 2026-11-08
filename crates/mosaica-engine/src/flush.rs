@@ -21,6 +21,7 @@ use mosaica_store::manifest::{DictExtent, FileDigest, Quantisation, RecordExtent
 use mosaica_store::permutation::SegmentExtent;
 use mosaica_store::read::SegmentData;
 use mosaica_store::{write_flush_segment, FlushInput, FlushRow, ShardLayout};
+use mosaica_types::progress::{Batched, Phase, Stage, Stages, Tracker, Unit};
 use mosaica_types::{EntityId, IdentityKey, ShardId, TermId};
 use rustc_hash::FxHashMap;
 
@@ -262,30 +263,76 @@ impl FlushStage {
     }
 }
 
-/// One `execute_flush`'s laps, added to the executor's health when the call returns. Local to
-/// the call so a flush still running is in no total.
-#[derive(Debug)]
+/// The one phase of a flush's record.
+const FLUSHING: Phase = Phase::new(1, 1, "Flushing");
+
+impl Stage for FlushStage {
+    fn name(self) -> &'static str {
+        FlushStage::name(self)
+    }
+
+    fn phase(self) -> Phase {
+        FLUSHING
+    }
+}
+
+/// One `execute_flush`'s stages. Each stage begun opens its step in the flush's record, which
+/// `/control/status` serves while the flush is in flight, and under `bench-timing` each stage's
+/// time is kept here and added to the executor's health when the call returns, so a flush still
+/// running is in no total.
 pub(crate) struct FlushLaps {
     /// Compiles to nothing without `bench-timing`.
     #[cfg_attr(not(feature = "bench-timing"), allow(dead_code))]
     pub(crate) nanos: [u64; FlushStage::COUNT],
-}
-
-// Written out because `Default` is derived for arrays of 32 elements and fewer only.
-impl Default for FlushLaps {
-    fn default() -> Self {
-        FlushLaps {
-            nanos: [0; FlushStage::COUNT],
-        }
-    }
+    record: Arc<Tracker>,
+    stages: Stages<FlushStage>,
 }
 
 impl FlushLaps {
+    /// The laps of a flush whose `record` was made with `stages` when it was dispatched.
+    pub(crate) fn new(record: Arc<Tracker>, stages: Stages<FlushStage>) -> Self {
+        FlushLaps {
+            nanos: [0; FlushStage::COUNT],
+            record,
+            stages,
+        }
+    }
+
+    /// Begin the stage the flush was dispatched at.
+    fn start(&mut self) {
+        let ended = self.stages.start(&self.record, None, None);
+        self.charge(ended, false);
+    }
+
+    /// End the open stage and begin `stage`. `counted` is its step's total and what it counts, or
+    /// `None` for a stage that counts nothing.
+    fn begin(&mut self, stage: FlushStage, counted: Option<(u64, Unit)>) {
+        let ended = self.stages.enter(&self.record, stage, None, counted);
+        self.charge(ended, false);
+    }
+
+    /// End the open stage, its time charged to it, or to `Failed` where it failed.
+    fn end(&mut self, failed: bool) {
+        let ended = self.stages.close();
+        self.charge(ended, failed);
+    }
+
+    /// Charge a stage that ended, or `Failed` for its time where it failed. A no-op without
+    /// `bench-timing`.
+    #[allow(unused_variables)]
+    fn charge(&mut self, ended: Option<(FlushStage, std::time::Duration)>, failed: bool) {
+        #[cfg(feature = "bench-timing")]
+        if let Some((stage, ran)) = ended {
+            let stage = if failed { FlushStage::Failed } else { stage };
+            self.nanos[stage as usize] += ran.as_nanos() as u64;
+        }
+    }
+
     /// Charge the time since `mark` to `stage`, and return a fresh mark. A no-op without
     /// `bench-timing`.
     #[inline(always)]
     #[allow(unused_variables)]
-    pub(crate) fn lap(&mut self, stage: FlushStage, mark: StageMark) -> StageMark {
+    fn lap(&mut self, stage: FlushStage, mark: StageMark) -> StageMark {
         #[cfg(feature = "bench-timing")]
         {
             let now = std::time::Instant::now();
@@ -566,31 +613,28 @@ pub(crate) struct SegmentFlush {
 /// Turn a plan into durable files. Runs on the background pool, over immutable inputs. The side-manifest is written
 /// last because it is the commit point: a crash before it leaves orphan files nothing references.
 ///
-/// `laps` receives the pool's [`FlushStage`]s: each stage's wall clock, and `PoolWall` for the whole call.
+/// `laps` begins the pool's [`FlushStage`]s: each stage's step and wall clock, and `PoolWall` for
+/// the whole call.
 pub(crate) fn execute_flush(
     plan: FlushPlan,
     ctx: FlushContext,
     laps: &mut FlushLaps,
 ) -> Result<CompletedFlush, MaintenanceFailed> {
     let wall = StageMark::now();
-    let mut mark = wall;
-    let result = execute_flush_stages(plan, ctx, laps, &mut mark);
-    if result.is_err() {
-        // A failed flush's time since its last lap, so `PoolWall` stays partitioned.
-        laps.lap(FlushStage::Failed, mark);
-    }
+    let result = execute_flush_stages(plan, ctx, laps);
+    // A failed stage's time goes to `Failed`, so `PoolWall` stays partitioned.
+    laps.end(result.is_err());
     laps.lap(FlushStage::PoolWall, wall);
     result
 }
 
-/// The pool's stages, each lapped as it ends. `mark` is left at the last lap so the caller can
-/// charge a failure's tail.
+/// The pool's stages, each begun in `laps`. The last is left open for the caller to end.
 fn execute_flush_stages(
     plan: FlushPlan,
     ctx: FlushContext,
     laps: &mut FlushLaps,
-    mark: &mut StageMark,
 ) -> Result<CompletedFlush, MaintenanceFailed> {
+    laps.start();
     let consumed: Vec<EntityId> = plan.items.iter().map(|(entity, _)| *entity).collect();
     let numbers = numbers_of(&plan, &ctx)?;
     let tenancies = ctx.tenancy.of_each(numbers.iter().copied());
@@ -598,9 +642,13 @@ fn execute_flush_stages(
     // ---- promotion: term ids allocated downward from `u32::MAX` stay unsatisfiable until promoted here.
     let promotion = promote(&plan, &ctx)?;
     let promoted_from = promotion.extent.as_ref().map(|_| ctx.dict.len());
-    *mark = laps.lap(FlushStage::Promote, *mark);
 
     // ---- the segment: scalars narrowed to the render subset.
+    laps.begin(
+        FlushStage::Rows,
+        Some((plan.items.len() as u64, Unit::Rows)),
+    );
+    let mut written = Batched::new(Some(&laps.record));
     let mut rows: Vec<FlushRow> = Vec::with_capacity(plan.items.len());
     for (((entity, item), number), tenancy) in plan.items.iter().zip(&numbers).zip(tenancies) {
         let mut scalars = Vec::with_capacity(ctx.render_indices.len() + ctx.scoped_render.len());
@@ -630,8 +678,10 @@ fn execute_flush_stages(
             y: item.y,
             scalars,
         });
+        written.add(1);
     }
-    *mark = laps.lap(FlushStage::Rows, *mark);
+    drop(written);
+    laps.begin(FlushStage::Segment, None);
     let out = if rows.is_empty() {
         None
     } else {
@@ -655,7 +705,7 @@ fn execute_flush_stages(
             .map_err(|e| MaintenanceFailed(format!("segment: {e}")))?,
         )
     };
-    *mark = laps.lap(FlushStage::Segment, *mark);
+    laps.begin(FlushStage::DeltaTier, None);
 
     // ---- the delta postings tier: carries the postings of the entities the segment gave rows.
     let segment_rel = ctx.layout().segment_rel(&ctx.view, &ctx.seg_id);
@@ -675,7 +725,7 @@ fn execute_flush_stages(
     } else {
         None
     };
-    *mark = laps.lap(FlushStage::DeltaTier, *mark);
+    laps.begin(FlushStage::FilterExtents, None);
 
     // ---- the manifest's ingredients: the executor assembles and writes the manifest at publication, since `n`
     // cannot be allocated here. Every file below the segment's own four is digested in one pass.
@@ -718,14 +768,14 @@ fn execute_flush_stages(
             .chain(&edited_runs.by_entity)
             .map(|run| run.path.clone()),
     );
-    *mark = laps.lap(FlushStage::FilterExtents, *mark);
+    laps.begin(FlushStage::EntityTerms, None);
 
     // ---- the entity-to-term transpose extent: written from the promotion, so its ordinals match the tier's.
     let entity_terms_extent = write_entity_terms_extent(&promotion.per_entity, &ctx)?;
     for rel in entity_terms_extent.files() {
         to_digest.push(rel.to_string());
     }
-    *mark = laps.lap(FlushStage::EntityTerms, *mark);
+    laps.begin(FlushStage::ScopedExtents, None);
 
     // ---- the group-scoped column families' extents: composed like the entity-scoped extents above.
     let ScopedWrite {
@@ -749,7 +799,7 @@ fn execute_flush_stages(
         all.extend(scoped_extents);
         all
     };
-    *mark = laps.lap(FlushStage::ScopedExtents, *mark);
+    laps.begin(FlushStage::RecordExtent, None);
 
     // ---- the record-blob extent --------------------------------------------------------------------
     let record_extent = write_record_extent(&plan, &ctx)?;
@@ -758,8 +808,8 @@ fn execute_flush_stages(
             to_digest.push(rel.to_string());
         }
     }
-    *mark = laps.lap(FlushStage::RecordExtent, *mark);
-    let mut text_extents = write_text_extents(&plan, &ctx, laps, *mark)?;
+    laps.begin(FlushStage::TextExtents, None);
+    let mut text_extents = write_text_extents(&plan, &ctx, laps)?;
     text_extents.extend(scoped_texts);
     // Every file of every text extent is digested: `publish_fold` discards the fold if one digest
     // is missing.
@@ -768,13 +818,13 @@ fn execute_flush_stages(
             to_digest.push(rel.to_string());
         }
     }
-    *mark = laps.lap(FlushStage::TextExtents, *mark);
+    laps.begin(FlushStage::Digests, None);
 
     // ---- the digests, one pass over everything written above ---------------------------------
     for rel in to_digest {
         files.insert(rel.clone(), digest_of(&ctx.prefix_dir.join(&rel))?);
     }
-    *mark = laps.lap(FlushStage::Digests, *mark);
+    laps.begin(FlushStage::Reopen, None);
 
     let segment = match &out {
         None => None,
@@ -793,7 +843,7 @@ fn execute_flush_stages(
             )
         }
     };
-    *mark = laps.lap(FlushStage::Reopen, *mark);
+    laps.begin(FlushStage::Shapes, None);
 
     // ---- the shape memberships: resolved on the pool before the generation is published. A panic here fails the
     // flush whole: nothing is published and the buffer stands.
@@ -818,7 +868,7 @@ fn execute_flush_stages(
             cost,
         });
     }
-    *mark = laps.lap(FlushStage::Shapes, *mark);
+    laps.begin(FlushStage::DropPlan, None);
 
     // Exists exactly where the plan gave rows geometry.
     let segment = match (segment, out, tier_bits) {
@@ -864,7 +914,6 @@ fn execute_flush_stages(
     drop(plan);
     drop(promotion.postings);
     drop(promotion.per_entity);
-    laps.lap(FlushStage::DropPlan, *mark);
     Ok(completed)
 }
 
@@ -1513,17 +1562,16 @@ pub(crate) struct ScopedColumnSpec {
 /// This flush's text layers: per indexed `text` column, its own dictionary over the terms this
 /// batch produced, postings against that dictionary, and the entities it holds a value for. An
 /// entity whose text analyses to no terms still carries a value, in the presence bitmap. `laps`
-/// takes the `Text*` sub-laps ([`FlushStage::TEXT`]), run from a copy of `mark`.
+/// takes the `Text*` sub-laps ([`FlushStage::TEXT`]), run from a mark taken here.
 fn write_text_extents(
     plan: &FlushPlan,
     ctx: &FlushContext,
     laps: &mut FlushLaps,
-    mark: StageMark,
 ) -> Result<Vec<mosaica_store::manifest::TextExtent>, MaintenanceFailed> {
     if ctx.text_schema.is_empty() {
         return Ok(Vec::new());
     }
-    let mut mark = mark;
+    let mut mark = StageMark::now();
     let mut out = Vec::with_capacity(ctx.text_schema.len());
     for spec in &ctx.text_schema {
         let mut rows = Vec::with_capacity(plan.items.len());

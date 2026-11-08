@@ -194,10 +194,10 @@ export class MosaicaError extends Error {
     /** The HTTP status, such as `404` or `422`. */
     readonly status: number,
     /**
-     * The error code from the body: `bad-credential`, `expired-token`, `unknown`, `conflict`,
-     * `contract`, `backpressure`, `fail-closed` or `not-ready`. It is `http-error` if the body is
-     * not JSON or has no code, as with an error page from a proxy, and then only `status` says what
-     * went wrong.
+     * The error code from the body: `bad-credential`, `expired-token`, `forbidden`, `unknown`,
+     * `conflict`, `contract`, `backpressure`, `fail-closed`, `not-ready` or `gone`. It is
+     * `http-error` if the body is not JSON or has no code, as with an error page from a proxy, and
+     * then only `status` says what went wrong.
      */
     readonly code: string,
     /** What was wrong, from the body's `detail`, or the HTTP status text if the body has none. */

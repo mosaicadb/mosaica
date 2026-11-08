@@ -100,9 +100,11 @@ db.check()                                         # what the declaration reads,
 db.commit()                                        # mosaica check, mosaica build, mosaica serve
 ```
 
-Only starting the server prints, one line naming the address it serves at. Every other call
-returns a report that shows as a short summary of what happened, in numbers,
-with every refusal and finding in full; a notebook cell that ends in one shows it. The detail is
+Starting the server prints one line naming the address it serves at, and while they run,
+`commit()` and `compact(wait=True)` draw a `tqdm` bar of how far they have gone, which their
+`progress` argument turns off or hands to a function, as their docstrings say. Every call returns
+a report that shows as a short summary of what happened, in numbers, with every refusal and
+finding in full; a notebook cell that ends in one shows it. The detail is
 on the report's attributes: an insert's `read` and `ignored` columns, a check's or a first
 commit's `findings` and `log` (the declaration check's and the build's text), a later commit's
 `plan`, `rows_accepted` and `refusals`. `db.path` is where the database is and `db.binary` the
@@ -615,6 +617,7 @@ for a set of terms, since it is made for no principal of the catalogue.
 ```python
 db.status()                                    # the watermarks, queues and pagination units
 db.compact()                                   # ask for the fold that removes a deletion's rows
+db.compact(wait=True)                          # and wait for the server's answer
 db.drop_layer("clusters/kmeans")               # the inverse of declare_layer
 db.drop_view("slices", "a")                    # remove one view of a view group
 ```
@@ -635,8 +638,10 @@ minutes.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call
-returns. After `drop_layer()` the name may be declared again, as a new layer that none of the
-dropped layer's `mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
+returns. `compact(wait=True)` waits until the server has answered the request, and raises
+`Refusal` where the served answer's `ok` is false; its docstring says what it returns. After
+`drop_layer()` the name may be declared again, as a new layer that none of the dropped layer's
+`mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
 items it leaves in no view, as `remove()` deletes one, and the answer's `deleted` says how many.
 
 ## A deployment somebody else runs

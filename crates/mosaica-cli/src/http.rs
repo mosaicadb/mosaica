@@ -77,6 +77,18 @@ impl Answer {
     pub(crate) fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).trim_end().to_owned()
     }
+
+    /// The answer where the server accepted the request, or what it answered instead.
+    pub(crate) fn accepted(self) -> Result<Answer, String> {
+        match self.ok() {
+            true => Ok(self),
+            false => Err(format!(
+                "the server answered {}: {}",
+                self.status,
+                self.text()
+            )),
+        }
+    }
 }
 
 /// A request body and its content type.
@@ -305,20 +317,12 @@ pub(crate) fn segment(raw: &str) -> String {
 
 /// Prints the answer, or the refusal, and exits accordingly.
 pub(crate) fn finish(verb: &str, answer: Result<Answer, String>) -> ExitCode {
-    match answer {
-        Ok(answer) if answer.ok() => {
+    match answer.and_then(Answer::accepted) {
+        Ok(answer) => {
             if !answer.body.is_empty() {
                 println!("{}", answer.text());
             }
             ExitCode::SUCCESS
-        }
-        Ok(answer) => {
-            eprintln!(
-                "mosaica {verb}: the server answered {}: {}",
-                answer.status,
-                answer.text()
-            );
-            ExitCode::FAILURE
         }
         Err(e) => {
             eprintln!("mosaica {verb}: {e}");

@@ -242,3 +242,15 @@ pub fn read_request(reader: &mut impl BufRead) -> Option<Request> {
         body,
     })
 }
+
+/// The progress records a command printed on stderr with `--progress json`: every line of stderr
+/// that is a JSON object, each read as a record.
+pub fn progress_records(output: &std::process::Output) -> Vec<mosaica_types::progress::Progress> {
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter(|line| line.starts_with('{'))
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: not a record: {line}"))
+        })
+        .collect()
+}

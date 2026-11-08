@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 mod http;
 mod identity;
+mod progress;
 mod records;
 mod writes;
 
@@ -142,6 +143,18 @@ enum Command {
         /// `started_at` and `ended_at`. It does not need `--stage-timings`.
         #[arg(long, value_name = "PATH")]
         stage_timings_json: Option<PathBuf>,
+
+        /// Show the build's progress on stderr: its phase, the step running, the step's count,
+        /// rate and time remaining, the time elapsed and resident memory.
+        ///
+        /// `bar` redraws two lines in place. `plain` prints a line when a step begins, a line
+        /// with its final count when it ends, and a line every 30 seconds while it runs, with no
+        /// terminal control codes. `json` prints one progress record per line when a step begins,
+        /// when it ends and at most once a second while it runs. Each mode ends with a record
+        /// whose state is `finished` or `failed`. `none` prints nothing.
+        /// `auto` is `bar` when stderr is a terminal and `plain` otherwise.
+        #[arg(long, value_name = "MODE", value_enum, default_value = "auto")]
+        progress: progress::Mode,
     },
     /// Check the declaration against the column schemas of the files it names, without reading
     /// a row.
@@ -459,10 +472,11 @@ enum Command {
     /// request's number in `request`.
     ///
     /// A compaction removes deleted items' rows from disc, one shard after another, and runs for
-    /// minutes to hours on a large corpus. `mosaica status` reports it under
-    /// `compaction.requests`, where `answered` reaches the request's number once it is answered.
-    /// Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
-    Compact(http::Control),
+    /// minutes to hours on a large corpus. `GET /control/compact/{request}` says whether the
+    /// request is answered, how, and with the progress record of its compaction, which `--wait`
+    /// reads, and `--request` reads a request already made. Needs `write`, and with `--wait` or
+    /// `--request` also `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
+    Compact(writes::CompactArgs),
     /// Print the server's status report, from `GET /control/status`: how far writes have got,
     /// queue depths, compaction, shards, and the limits on each write request. Needs `admin`, and
     /// the credential is read from `MOSAICA_CREDENTIAL`.
@@ -893,21 +907,19 @@ fn collect_bindings(
     Ok(bindings)
 }
 
-/// `--file NAME=PATH`. Split at the **first** `=` so a path may contain one.
-/// Prints one line per pipeline stage as it completes, for `--stage-timings`.
+/// The build's observer: a line per pipeline stage as it completes, for `--stage-timings`, the
+/// records of `--stage-timings-json` and the progress of `--progress`.
 ///
 /// **Peak RSS is the process's high-water at the moment the stage ended**, not the stage's own —
 /// it only ever rises, so a stage that adds nothing repeats the last figure. What it locates is
 /// the stage the peak arrived in, which is the question `--memory-budget` is answered against.
-///
-/// **One observer, two sinks**, rather than a second observer for `--stage-timings-json`: the
-/// pipeline takes one, and a wrapper that fanned out to two would have to re-sample nothing but
-/// still be a second place a stage could be dropped from.
 struct StageTimings {
     /// Print a line per stage — `--stage-timings`. Off when only the JSON path was asked for.
     print: bool,
     /// Collect the records — `--stage-timings-json`. `None` when only the lines were asked for.
     json: Option<mosaica_build::observer::JsonStageTimings>,
+    /// The build's progress, for `--progress`, and `None` for `--progress none`.
+    progress: Option<progress::Feed>,
 }
 
 impl mosaica_build::observer::BuildObserver for StageTimings {
@@ -936,8 +948,25 @@ impl mosaica_build::observer::BuildObserver for StageTimings {
             );
         }
     }
+
+    fn progress(&self) -> Option<&mosaica_types::progress::Tracker> {
+        self.progress.as_ref().map(progress::Feed::tracker)
+    }
+
+    fn step_ended(&self) {
+        if let Some(feed) = &self.progress {
+            feed.step_ended();
+        }
+    }
+
+    fn step_begun(&self) {
+        if let Some(feed) = &self.progress {
+            feed.step_begun();
+        }
+    }
 }
 
+/// `--file NAME=PATH`. Split at the **first** `=` so a path may contain one.
 fn parse_file_binding(raw: &str) -> Result<(String, PathBuf), String> {
     let (key, path) = raw.split_once('=').ok_or_else(|| {
         format!(
@@ -1343,6 +1372,7 @@ fn main() -> ExitCode {
             memory_budget,
             stage_timings,
             stage_timings_json,
+            progress,
         } => {
             // **The deployment file first, because everything else is read through it**: where the
             // declaration is and where the bundle goes. A missing one is a refusal naming what to
@@ -1404,21 +1434,23 @@ fn main() -> ExitCode {
                 json: stage_timings_json
                     .is_some()
                     .then(mosaica_build::observer::JsonStageTimings::new),
+                progress: (progress != progress::Mode::None)
+                    .then(|| progress::Feed::new(mosaica_build::observer::tracker(), progress)),
             };
-            let built = if stage_timings || stage_timings_json.is_some() {
-                mosaica_build::build_framed(&args, &framings, &observer)
-            } else {
-                mosaica_build::build_framed(&args, &framings, &mosaica_build::NoopObserver)
-            };
-            // Written whether the build succeeded or failed: a build that died in `layers` is
-            // exactly the one whose per-stage record is worth having, and the records collected
-            // before the failure are as true as any other.
+            let built = progress::run(
+                observer.progress.as_ref(),
+                || mosaica_build::build_framed(&args, &framings, &observer),
+                Result::is_ok,
+            );
+            // Written whether the build succeeded, failed or panicked: a build that died in
+            // `layers` is exactly the one whose per-stage record is worth having, and the records
+            // collected before the failure are as true as any other.
             if let (Some(path), Some(json)) = (&stage_timings_json, &observer.json) {
                 if let Err(e) = json.write(path) {
                     eprintln!("stage timings: writing {}: {e}", path.display());
                 }
             }
-            match built {
+            match built.unwrap_or_else(|panic| std::panic::resume_unwind(panic)) {
                 Ok(report) => {
                     // **The other half of the frame report**, and the half the clamp count
                     // cannot see: data far too small for its frame clamps nothing, and every

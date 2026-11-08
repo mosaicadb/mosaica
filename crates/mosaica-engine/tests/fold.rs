@@ -25,6 +25,7 @@ use mosaica_engine::{Engine, EngineConfig};
 use mosaica_lifecycle::command::UnallocatedRow;
 use mosaica_lifecycle::wal::ChangeOp;
 use mosaica_store::read::open_bundle;
+use mosaica_types::progress::{JobKind, JobState};
 use mosaica_types::{EntityId, MosaicaId, TermId};
 use parquet::arrow::ArrowWriter;
 
@@ -703,6 +704,54 @@ fn a_request_made_while_a_compaction_runs_is_answered_by_a_later_one() {
         0,
         "the deletion accepted during the first compaction is retired by the second"
     );
+}
+
+/// A compaction's progress record is among the engine's jobs while it runs, naming its part, and
+/// its phase never goes back. Once the compaction publishes no job is left, and its last record
+/// is finished in the last phase.
+#[test]
+fn a_compaction_is_a_job_until_it_publishes() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let engine = engine_over_fixture(tmp.path(), &root, config_uncapped());
+    engine
+        .accept_change(entity_of_source(&root, "v00000", 4), ChangeOp::Delete)
+        .unwrap();
+    assert_eq!(engine.jobs(), Vec::new(), "nothing runs before the request");
+
+    engine.set_fold_paused_for_test(true);
+    let before = engine.write_executor_stats();
+    engine.request_fold().unwrap();
+    let mut seen = Vec::new();
+    wait_for("the compaction's passes to finish", || {
+        seen.extend(engine.jobs());
+        engine.fold_is_holding_for_test()
+    });
+    seen.extend(engine.jobs());
+    engine.set_fold_paused_for_test(false);
+    wait_for_fold_publication(&engine, &before);
+
+    assert!(!seen.is_empty(), "a held compaction is a job");
+    for record in &seen {
+        assert_eq!(
+            (record.job, record.state),
+            (JobKind::Compaction, JobState::Running)
+        );
+        assert!(record.context.is_some(), "{record:?}");
+    }
+    let phases: Vec<u32> = seen.iter().map(|record| record.phase.index).collect();
+    assert!(phases.is_sorted(), "{phases:?}");
+
+    assert_eq!(
+        engine.jobs(),
+        Vec::new(),
+        "the published compaction left the jobs"
+    );
+    let last = engine
+        .last_job(JobKind::Compaction)
+        .expect("the compaction's last record is kept");
+    assert_eq!(last.state, JobState::Finished);
+    assert_eq!(last.phase.index, last.phase.of);
 }
 
 /// The `v#####` prefixes under `root`, in order.

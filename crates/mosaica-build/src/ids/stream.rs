@@ -33,6 +33,7 @@ use rayon::prelude::*;
 use mosaica_lifecycle::resolve::{self, Batch, Named, Refusal};
 use mosaica_store::key_index::{Key, KeySpill};
 use mosaica_store::unique::{KeyKind, UniqueKey};
+use mosaica_types::progress::{Part, Unit};
 use mosaica_types::{EntityId, ItemAt, ShardId};
 
 use super::report::{Tally, OUTSIDE_LIMIT};
@@ -41,6 +42,7 @@ use super::{
     check_cap, CarriedField, Limit, Limited, Numbering, Numbers, Read, ReadInput, ReadRows,
 };
 use crate::error::{BuildError, Result};
+use crate::observer::{BuildStage, Steps};
 use crate::row_groups::FileGroups;
 use crate::spill::{self, boundaries_uniform, mix64, MappedArray, Partition};
 
@@ -65,9 +67,10 @@ const SORT_SHARE: u64 = 4;
 const SORT_MIN: u64 = 4 << 20;
 const SORT_MAX: u64 = 4 << 30;
 
-/// Number every file of the build.
-pub(crate) fn number(args: &crate::BuildArgs, tmp: &Path) -> Result<Numbering> {
-    number_with(args, tmp, ZIP_TRIAL)
+/// Number every file of the build, each file a step of [`BuildStage::SourceIds`] that counts the
+/// rows it reads.
+pub(crate) fn number(args: &crate::BuildArgs, tmp: &Path, steps: Steps<'_>) -> Result<Numbering> {
+    number_with(args, tmp, ZIP_TRIAL, steps)
 }
 
 /// [`number`], a names file compared row by row with its creating file for `zip_trial` rows before
@@ -76,11 +79,13 @@ pub(super) fn number_with(
     args: &crate::BuildArgs,
     tmp: &Path,
     zip_trial: u64,
+    steps: Steps<'_>,
 ) -> Result<Numbering> {
     let budget = args
         .memory_budget
         .unwrap_or_else(crate::pipeline::detect_memory_budget);
     let mut pass = Pass {
+        steps,
         tmp: tmp.to_path_buf(),
         sort_bytes: (budget / SORT_SHARE).clamp(SORT_MIN, SORT_MAX) as usize,
         held: BTreeMap::new(),
@@ -94,8 +99,10 @@ pub(super) fn number_with(
         items: 0,
         refused: Vec::new(),
     };
-    for read in super::reads(args)? {
-        let (rows, refused) = pass.read(args, &read)?;
+    let reads = super::reads(args)?;
+    for (index, read) in reads.iter().enumerate() {
+        let file = Part::new("file", &read.source, index, reads.len());
+        let (rows, refused) = pass.read(args, read, file)?;
         if args.strict && refused.iter().any(super::RefusedRows::is_refusal) {
             return Err(strict_refusal(&refused));
         }
@@ -254,7 +261,9 @@ impl Drop for KeyStream {
 }
 
 /// What the files read so far hold, per unique field. The held runs' files go with it.
-struct Pass {
+struct Pass<'a> {
+    /// Each file is a step of its own.
+    steps: Steps<'a>,
     tmp: PathBuf,
     sort_bytes: usize,
     held: BTreeMap<u16, Vec<HeldRun>>,
@@ -265,7 +274,7 @@ struct Pass {
     sequence: u64,
 }
 
-impl Drop for Pass {
+impl Drop for Pass<'_> {
     fn drop(&mut self) {
         for run in self.held.values().flatten() {
             let _ = std::fs::remove_file(&run.receipt.path);
@@ -335,7 +344,7 @@ fn candidate_key(row: u32, field: usize) -> u64 {
 /// one more than the row before it naming the same item.
 const LINK: u64 = 0xffff;
 
-impl Pass {
+impl Pass<'_> {
     /// A file's numbers, every row no item until the pass decides it: mapped for a file, held for
     /// the few members a declaration or an artifacts file lists.
     fn rows(&mut self, input: &Input<'_>, total: u64) -> Result<Rows> {
@@ -359,11 +368,14 @@ impl Pass {
         self.tmp.join(name)
     }
 
+    /// Number one file's rows, as the step `file` names.
     fn read(
         &mut self,
         args: &crate::BuildArgs,
         read: &Read,
+        file: Part<'_>,
     ) -> Result<(ReadRows, Vec<super::RefusedRows>)> {
+        self.steps.begin(BuildStage::SourceIds, &[file], None);
         match &read.input {
             ReadInput::File {
                 path,
@@ -396,6 +408,12 @@ impl Pass {
                         u32::MAX - 1
                     )));
                 }
+                let kept = file.kept_groups();
+                self.steps.count(Unit::Rows, || {
+                    Ok(kept
+                        .as_ref()
+                        .map_or(groups.rows(), |kept| groups.rows_of(kept)))
+                })?;
                 let (rows, tally) = self.number_rows(read, Input::File(&file))?;
                 let values = file.values_at(&tally.sampled())?;
                 let refused = tally.finish(&read.source, &read.object, |row| {
@@ -406,7 +424,7 @@ impl Pass {
                 });
                 Ok((
                     ReadRows {
-                        groups: file.kept_groups(),
+                        groups: kept,
                         ..rows
                     },
                     refused,
@@ -414,6 +432,7 @@ impl Pass {
             }
             ReadInput::Lists(lists) => {
                 let scanned = Limited::lists(self.limited.as_ref(), lists);
+                self.steps.count(Unit::Rows, || Ok(lists.len() as u64))?;
                 let (rows, tally) = self.number_rows(read, Input::Lists(lists, &scanned))?;
                 let refused = tally.finish(&read.source, &read.object, |row| {
                     lists.texts[row as usize].clone()
@@ -424,6 +443,7 @@ impl Pass {
     }
 
     fn number_rows(&mut self, read: &Read, input: Input<'_>) -> Result<(ReadRows, Tally)> {
+        let steps = self.steps;
         let (carried, total, takes_every_row, mosaica) = match &input {
             Input::File(file) => (
                 file.carried,
@@ -446,6 +466,7 @@ impl Pass {
 
         // A file of new items with nothing to name them by: each row is the next item.
         if creates && carried.is_empty() && !mosaica && takes_every_row {
+            steps.advance(total);
             return self.offset(base, total).map(|rows| (rows, tally));
         }
 
@@ -507,6 +528,7 @@ impl Pass {
         // Rows compared and rows that matched: a file in another order stops being compared.
         let (mut compared, mut matched) = (0u64, 0u64);
         let mut on_batch = |scanned: &Scanned| -> Result<()> {
+            steps.advance(scanned.len as u64);
             let numbers = rows.as_mut().map(Rows::slice);
             let mut numbers = numbers;
             for offset in 0..scanned.len {

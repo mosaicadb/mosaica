@@ -18,10 +18,11 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import weakref
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -30,7 +31,7 @@ import pyarrow.parquet as pq
 from . import _columns
 from . import _commit as C
 from . import _declaration as D
-from . import _inserts, _instance
+from . import _inserts, _instance, _progress
 from ._auth import Token, authorise, revoke
 from ._control import Control
 from ._inserts import Insert
@@ -1335,7 +1336,9 @@ class Database:
             return False, f"check FAILED: {refused}"
         return report.ok, report.page
 
-    def commit(self, strict: bool = False) -> CommitReport | PagedReport:
+    def commit(
+        self, strict: bool = False, progress: bool | Callable[[dict], Any] = True
+    ) -> CommitReport | PagedReport:
         """Make what was inserted part of the database, and return a report of what happened.
 
         The first commit checks the declaration, builds the database from the inserted tables and
@@ -1348,6 +1351,15 @@ class Database:
         and the report counts the rows left out by reason.
 
         - `strict`: `True` refuses the whole build, or the whole request, that carries such a row.
+        - `progress`: how the commit shows how far it has gone. `True`, the default, draws it with
+          `tqdm.auto`, which is a widget in a notebook and a bar on stderr in a terminal. `False`
+          draws nothing. A function is called with each record as a `dict`, in the shape
+          `/control/status` serves under `jobs`, and nothing is drawn. The first commit's records
+          are the build's, and a later commit's are an `ingest` record that counts the rows of
+          its pages sent and then waits for publication. The last record has `state` `finished`
+          or `failed`, except where the build was killed by a signal or the commit was
+          interrupted, which leave the last record `running`. A later commit with nothing to send
+          makes no record.
 
         A commit that did nothing raises `Refusal`, with the report as its `report`, which happens
         when a problem is found before anything is sent, when the build fails or when the server
@@ -1357,8 +1369,9 @@ class Database:
 
             db.commit()
         """
+        show = _progress.shown(progress)
         if self.built:
-            return self._paged(sent=True, strict=strict)
+            return self._paged(sent=True, strict=strict, show=show)
         document = self.write()
         findings = self._preflight(document)
         if findings:
@@ -1370,10 +1383,13 @@ class Database:
         ok, page = self._checked()
         if not ok:
             raise Refusal(_reason_first("commit: the declaration did not check", page, page))
-        build = self._run(
-            ["build", "--deployment", str(self.path / "mosaica.toml")]
-            + (["--strict"] if strict else [])
-        )
+        with show:
+            build = self._run(
+                ["build", "--deployment", str(self.path / "mosaica.toml"),
+                 "--progress", "none" if progress is False else "json"]
+                + (["--strict"] if strict else []),
+                show,
+            )
         report = CommitReport(
             what="commit",
             ok=build.returncode == 0,
@@ -1431,8 +1447,11 @@ class Database:
 
     # ------------------------------------------------------------------ the paged commit
 
-    def _paged(self, sent: bool, strict: bool = False) -> PagedReport:
-        """The plan over what was inserted since the last commit, run where `sent`."""
+    def _paged(
+        self, sent: bool, strict: bool = False, show: _progress.Sink = _progress.Sink()
+    ) -> PagedReport:
+        """The plan over what was inserted since the last commit, run where `sent`, giving `show`
+        the commit's ingest record."""
         self.serve()
         control = self.control
         planner = C.Planner(self, control, self.meta())
@@ -1449,7 +1468,8 @@ class Database:
             return report
         if report.findings:
             raise Refusal(str(report), report)
-        accepted = C.run(control, pages, report, strict)
+        with show:
+            accepted = C.run(control, pages, report, strict, show)
         self._record_committed_layers(page.body for page in accepted if page.kind == "layer")
         self.pending.clear()
         self._save_state()
@@ -1910,19 +1930,47 @@ class Database:
         self._refuse_before_the_first_commit("status")
         return _accepted(self.control.status_answer(), "status")
 
-    def compact(self) -> dict:
+    def compact(
+        self, wait: bool = False, progress: bool | Callable[[dict], Any] = True
+    ) -> dict:
         """Ask the server to remove the rows of deleted items from disc now.
 
-        The call returns `{"request": n}` once the server has accepted the request, before the work
-        is done. The server then compacts each shard that has something to reclaim, and a request
-        made while a compaction runs waits until that compaction has finished. When no compaction
-        can start until the server is restarted, the call raises `Refusal` with the reason and
-        requests nothing.
+        The server compacts each shard that has something to reclaim, and a request made while a
+        compaction runs waits until that compaction has finished. When no compaction can start
+        until the server is restarted, the call raises `Refusal` with the reason and requests
+        nothing.
 
-        Follow the request in `status()`, as `Control.compact` describes.
+        - `wait`: `False`, the default, returns `{"request": n}` once the server has accepted the
+          request, before the work is done, and `control.compaction_request(n)` says where the
+          request is. `True` waits as `Control.await_compaction` does and returns `{"request": n}`
+          with what it returned merged in. Where its `ok` is false, it raises `Refusal` with the
+          server's `detail`, from the answer or from the reading that ended the wait, that same
+          dictionary as the refusal's `report`, and the HTTP status of that reading as its
+          `status`.
+        - `progress`: how the wait shows the compaction's record, as `commit` takes it. The
+          default is `True`.
+
+            db.compact(wait=True)
         """
         self._refuse_before_the_first_commit("compact")
-        return _accepted(self.control.compact(), "compact")
+        answer = self.control.compact(wait=wait, progress=progress)
+        body = _accepted(answer, "compact")
+        waited = answer.waited
+        if waited is None:
+            return body
+        request = body["request"]
+        result = {**body, **waited}
+        if waited["ok"]:
+            return result
+        read = waited.get("read")
+        if read is None:
+            why = waited["answer"]["detail"]
+        else:
+            why = read.body.get("detail") or read.detail[:1000]
+        raise Refusal(
+            f"compact: request {request}: {why}", result,
+            status=None if read is None else read.status,
+        )
 
     def drop_layer(self, name: str, wait: bool = False) -> dict:
         """Remove an annotation layer or a label set, and return the server's answer.
@@ -2040,13 +2088,58 @@ class Database:
         running."""
         return None if self.listening is None else f"http://{self.listening.session}"
 
-    def _run(self, arguments: Sequence[str]) -> subprocess.CompletedProcess:
+    def _run(
+        self, arguments: Sequence[str], show: _progress.Sink | None = None
+    ) -> subprocess.CompletedProcess:
+        """Run `mosaica` with `arguments` in the database's directory, and return what it wrote.
+
+        Where there is a `show`, each line of stderr that is a progress record goes to it as it
+        arrives and is left out of the stderr returned. stdout is read on a thread of its own
+        while this thread reads stderr, so neither pipe fills while the other is read, and the
+        records reach `show` on the caller's thread. A byte that is not UTF-8 is read as U+FFFD.
+        """
         binary, _ = _instance.find_binary()
-        return subprocess.run(
+        child = subprocess.Popen(
             [binary, *arguments],
-            capture_output=True,
-            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
             cwd=self.path,
+        )
+        stdout: list[str] = []
+        stderr: list[str] = []
+        drained: list[BaseException] = []
+
+        def drain() -> None:
+            try:
+                stdout.extend(child.stdout)
+            except BaseException as why:
+                # A pipe no one reads would hold the child up, so it is stopped and the reason is
+                # raised on the caller's thread.
+                drained.append(why)
+                child.kill()
+
+        reader = threading.Thread(target=drain, daemon=True)
+        with child:
+            reader.start()
+            try:
+                for line in child.stderr:
+                    one = None if show is None else _progress.record(line)
+                    if one is None:
+                        stderr.append(line)
+                    else:
+                        show(one)
+            except BaseException:
+                # An interrupt, or a sink that raised, ends the child as `subprocess.run` would.
+                child.kill()
+                raise
+            finally:
+                reader.join()
+        if drained:
+            raise drained[0]
+        return subprocess.CompletedProcess(
+            child.args, child.returncode, "".join(stdout), "".join(stderr)
         )
 
     def _frames(self, document: dict) -> list[tuple[str, str]]:

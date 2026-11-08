@@ -72,6 +72,14 @@ class Control:
     def compact(self):
         return requests.post(f"{self.base}/control/compact", headers=self.headers, timeout=60)
 
+    def compaction_request(self, request: int) -> dict:
+        """`GET /control/compact/{request}`: where one compaction request is."""
+        r = requests.get(
+            f"{self.base}/control/compact/{request}", headers=self.headers, timeout=60
+        )
+        r.raise_for_status()
+        return r.json()
+
     def declare_shards(self, size: int):
         """`PUT /control/shards`: the point shards' size."""
         return requests.put(

@@ -20,6 +20,7 @@
 mod command;
 mod executor;
 mod health;
+mod jobs;
 pub(crate) mod joined;
 mod live;
 mod opening;
@@ -30,6 +31,7 @@ pub use command::{ViewDropped, VocabularyDeclared, VocabularyValues};
 pub(crate) use command::*;
 pub use executor::*;
 pub use health::*;
+pub(crate) use jobs::{Job, Jobs};
 pub(crate) use live::*;
 pub(crate) use opening::*;
 pub(crate) use reconstruct::*;

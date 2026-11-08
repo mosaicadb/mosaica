@@ -13,10 +13,13 @@ use std::time::{Duration, Instant};
 use arrow::array::{Array, ArrayRef, Float64Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use mosaica_types::progress::{JobKind, JobState, Progress};
 use serde_json::Value;
 use tempfile::TempDir;
 
-use common::{deployment_with_control, mosaica, Bound, Ports, Server, OPERATOR_CREDENTIAL};
+use common::{
+    deployment_with_control, mosaica, progress_records, Bound, Ports, Server, OPERATOR_CREDENTIAL,
+};
 
 const OPERATOR: (&str, &str) = ("MOSAICA_CREDENTIAL", OPERATOR_CREDENTIAL);
 
@@ -190,6 +193,65 @@ fn a_group_with_category_metadata_declared_again_answers_its_views_as_held() {
     for (request, status) in requests(&after) {
         assert_eq!(status, 200, "after a restart, {request}: {after}");
     }
+}
+
+/// `insert --progress json` ends with its pages step at its total, and `compact --wait --progress
+/// json` waits for its compaction and ends with the compaction's record, finished.
+#[test]
+fn insert_and_compact_show_their_progress() {
+    let served = serve(false, "");
+    let dir = served.dir.path().to_owned();
+    let control = served.bound.control.clone();
+    let write = |args: &[&str]| {
+        let mut all = args.to_vec();
+        all.extend(["--control", control.as_str()]);
+        run(&dir, &all, &[OPERATOR], b"")
+    };
+    write_parquet(
+        &dir.join("new.parquet"),
+        vec![
+            (
+                "id",
+                Arc::new(UInt64Array::from_iter_values(7000..7005)) as ArrayRef,
+            ),
+            ("x", Arc::new(Float64Array::from(vec![1.0; 5]))),
+            ("y", Arc::new(Float64Array::from(vec![2.0; 5]))),
+        ],
+    );
+    let inserted = write(&[
+        "insert",
+        "new.parquet",
+        "--view",
+        "s0",
+        "--page-rows",
+        "2",
+        "--progress",
+        "json",
+    ]);
+    let records = progress_records(&inserted);
+    assert_eq!(answer(inserted)["created"], 5);
+    let last = records.last().expect("the insert printed its progress");
+    assert_eq!(
+        (last.job, last.state),
+        (JobKind::Ingest, JobState::Finished)
+    );
+    assert_eq!((last.done, last.total), (Some(5), Some(5)), "{last:?}");
+
+    assert_eq!(
+        answer(write(&["delete", "--match", r#"{"id": "7000"}"#]))["accepted"],
+        1
+    );
+    let compacted = write(&["compact", "--wait", "--progress", "json"]);
+    let records = progress_records(&compacted);
+    answer(compacted);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.job == JobKind::Compaction),
+        "{records:?}"
+    );
+    let last = records.last().expect("the compaction's record is shown");
+    assert_eq!(last.state, JobState::Finished);
 }
 
 fn answer(output: Output) -> Value {
@@ -810,18 +872,7 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     assert_eq!(served_ids(&served, &token, "s0", &first), vec![4, 5, 6]);
 
     // A compaction removes the deleted rows; the items stay as they were.
-    let request = answer(write(&["compact"], b""))["request"]
-        .as_u64()
-        .unwrap();
-    let started = Instant::now();
-    loop {
-        let status = answer(write(&["status"], b""));
-        if status["compaction"]["requests"]["answered"].as_u64() >= Some(request) {
-            break;
-        }
-        assert!(started.elapsed() < Duration::from_secs(120), "{status}");
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    answer(write(&["compact", "--wait", "--progress", "none"], b""));
     assert_eq!(served_ids(&served, &token, "s0", &first), vec![4, 5, 6]);
 
     let served = restart(served);
@@ -853,8 +904,7 @@ fn deletions_and_suppressions_hold_after_a_restart() {
     assert_eq!(nowhere["refused_pages"][0]["status"], 404, "{nowhere}");
 }
 
-/// A control plane that answers each request as `plan` says, in order: `None` closes the
-/// connection without an answer, and `Some(body)` answers `200` with it. It records each
+/// A control plane that answers each request as its plan says, in order, and records each
 /// request's batch id and body.
 struct Planned {
     url: String,
@@ -864,7 +914,10 @@ struct Planned {
 /// Each request a [`Planned`] plane received: its batch id and its body.
 type Seen = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
-fn planned(plan: Vec<Option<&'static str>>) -> Planned {
+/// A plane that answers each request in turn with the status and JSON body `plan` holds, closes
+/// the connection unanswered where it holds `None`, and answers `500` once the plan is spent, so a
+/// command that reads once more than planned fails rather than waits.
+fn planned(plan: Vec<Option<(u16, String)>>) -> Planned {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let seen: Seen = Default::default();
@@ -878,11 +931,15 @@ fn planned(plan: Vec<Option<&'static str>>) -> Planned {
                 recorded.lock().unwrap().push((batch, request.body));
             }
             let mut stream = reader.into_inner();
-            match plan.next().flatten() {
-                Some(answer) => {
+            let spent = r#"{"error": "fail-closed", "detail": "the plan is spent"}"#;
+            match plan
+                .next()
+                .unwrap_or_else(|| Some((500, spent.to_string())))
+            {
+                Some((status, answer)) => {
                     let _ = write!(
                         stream,
-                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: \
+                        "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: \
                          {}\r\nconnection: close\r\n\r\n{answer}",
                         answer.len()
                     );
@@ -894,6 +951,124 @@ fn planned(plan: Vec<Option<&'static str>>) -> Planned {
         }
     });
     Planned { url, seen }
+}
+
+/// `compact --wait` against a control plane that numbers the request 3 and then answers
+/// `GET /control/compact/3` with `state`: its exit status and the progress records it printed.
+fn compact_answered(status: u16, state: &str) -> (bool, Vec<Progress>) {
+    let dir = TempDir::new().unwrap();
+    let numbered = (202, r#"{"request": 3}"#.to_string());
+    let plane = planned(vec![Some(numbered), Some((status, state.to_string()))]);
+    let args = [
+        "compact",
+        "--wait",
+        "--progress",
+        "json",
+        "--control",
+        &plane.url,
+    ];
+    let output = run(dir.path(), &args, &[OPERATOR], b"");
+    (output.status.success(), progress_records(&output))
+}
+
+#[test]
+fn compact_wait_ends_with_the_outcome_the_server_states() {
+    let refused = r#"{"request": 3, "answered": true, "job": null, "answer": {"first": 2,
+        "last": 3, "outcome": "refused", "ok": false, "gate": "insufficient_memory",
+        "detail": "more", "shard": 0, "need_bytes": 2, "had_bytes": 1}}"#;
+    let (ok, records) = compact_answered(200, refused);
+    assert!(!ok, "a refused request fails the command");
+    assert_eq!(records, Vec::new(), "no compaction ran for it");
+
+    let record = r#"{"job": "compaction", "state": "failed",
+        "phase": {"index": 4, "of": 4, "name": "Publishing"}, "step": "flip", "step_id": 9,
+        "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0, "rss_bytes": 1024}"#;
+    let failed = format!(
+        r#"{{"request": 3, "answered": true, "job": {record}, "answer": {{"first": 3,
+        "last": 3, "outcome": "failed", "ok": false, "gate": null, "detail": "failed in flip",
+        "shard": null,
+        "need_bytes": null, "had_bytes": null}}}}"#
+    );
+    let (ok, records) = compact_answered(200, &failed);
+    assert!(!ok, "a failed compaction fails the command");
+    let served: Progress = serde_json::from_str(record).unwrap();
+    assert_eq!(
+        records.last(),
+        Some(&served),
+        "the record is printed as served"
+    );
+
+    let nothing = r#"{"request": 3, "answered": true, "job": null, "answer": {"first": 3,
+        "last": 3, "outcome": "nothing_to_do", "ok": true, "gate": null, "detail": null,
+        "shard": null, "need_bytes": null, "had_bytes": null}}"#;
+    assert!(
+        compact_answered(200, nothing).0,
+        "nothing to do is no failure"
+    );
+
+    // The server restarted and has given no request 3.
+    let lost = r#"{"error": "unknown", "detail": "lost"}"#;
+    assert!(
+        !compact_answered(404, lost).0,
+        "a lost request fails the command"
+    );
+
+    // The answer is older than the ones the server keeps.
+    let gone = r#"{"error": "gone", "detail": "no longer kept"}"#;
+    assert!(
+        !compact_answered(410, gone).0,
+        "an answer no longer kept fails the command"
+    );
+}
+
+/// `compact --wait` shows the compaction serving the request while it is pending, reads the
+/// request again through a connection the server dropped, and ends with the answered record.
+#[test]
+fn compact_wait_shows_the_running_record_then_the_answered_one() {
+    let dir = TempDir::new().unwrap();
+    let record = |state: &str, step: &str, step_id: u64| {
+        format!(
+            r#"{{"job": "compaction", "state": "{state}",
+            "phase": {{"index": 4, "of": 4, "name": "Publishing"}}, "step": "{step}",
+            "step_id": {step_id}, "context": "shard 0", "elapsed_s": 2.5, "step_elapsed_s": 1.0,
+            "rss_bytes": 1024}}"#
+        )
+    };
+    let (running, answered) = (
+        record("running", "warm", 7),
+        record("finished", "reclaim", 8),
+    );
+    let pending =
+        format!(r#"{{"request": 3, "answered": false, "answer": null, "job": {running}}}"#);
+    let done = format!(
+        r#"{{"request": 3, "answered": true, "job": {answered}, "answer": {{"first": 3,
+        "last": 3, "outcome": "compacted", "ok": true, "gate": null, "detail": null,
+        "shard": null, "need_bytes": null, "had_bytes": null}}}}"#
+    );
+    let plane = planned(vec![
+        Some((202, r#"{"request": 3}"#.to_string())),
+        Some((200, pending)),
+        None,
+        Some((200, done.clone())),
+    ]);
+    let args = [
+        "compact",
+        "--wait",
+        "--progress",
+        "json",
+        "--control",
+        &plane.url,
+    ];
+    let output = run(dir.path(), &args, &[OPERATOR], b"");
+    assert!(output.status.success(), "{output:?}");
+    let shown = progress_records(&output);
+    let expected: Vec<Progress> = [running, answered]
+        .iter()
+        .map(|record| serde_json::from_str(record).unwrap())
+        .collect();
+    assert_eq!(shown, expected);
+    let printed: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(printed["answer"]["outcome"], "compacted", "{printed}");
 }
 
 #[test]
@@ -912,6 +1087,8 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
                 "10",
                 "--page-bytes",
                 "1m",
+                "--progress",
+                "json",
                 "--control",
                 url,
             ],
@@ -923,7 +1100,11 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
     // Answered on the resend: the same bytes under the same batch id, and the row lands once.
     let answered = planned(vec![
         None,
-        Some(r#"{"rows": 1, "created": 1, "mosaica_ids": ["7"], "refused": [], "publication": 3}"#),
+        Some((
+            200,
+            r#"{"rows": 1, "created": 1, "mosaica_ids": ["7"], "refused": [], "publication": 3}"#
+                .to_string(),
+        )),
     ]);
     let report = answer(insert(&answered.url));
     assert_eq!(report["pages"], 1, "{report}");
@@ -934,9 +1115,15 @@ fn a_page_no_server_answered_is_sent_once_more_and_then_the_insert_stops() {
     assert_eq!(seen[0], seen[1]);
     assert_eq!(seen[0].1, rows);
 
-    // Unanswered twice: the insert stops there, having sent the page twice and no more.
-    let silent = planned(Vec::new());
-    let report = refused(insert(&silent.url));
+    // Unanswered twice: the insert stops there, having sent the page twice and no more, and its
+    // last record is failed.
+    let silent = planned(vec![None, None]);
+    let output = insert(&silent.url);
+    let last = progress_records(&output)
+        .pop()
+        .expect("the insert printed its progress");
+    assert_eq!(last.state, JobState::Failed);
+    let report = refused(output);
     assert!(report["stopped"].is_string(), "{report}");
     assert_eq!(
         report["refused_pages"][0]["status"],
@@ -1095,14 +1282,7 @@ fn a_database_keeps_its_log_through_flushes_compactions_restarts_and_a_copy() {
     assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 2, 3, 9000]);
 
     assert_eq!(write(&served, &["delete", "--match", r#"{"id": "2"}"#])["accepted"], 1);
-    let request = write(&served, &["compact"])["request"].as_u64().unwrap();
-    let started = Instant::now();
-    while write(&served, &["status"])["compaction"]["requests"]["answered"].as_u64()
-        < Some(request)
-    {
-        assert!(started.elapsed() < Duration::from_secs(120));
-        std::thread::sleep(Duration::from_millis(200));
-    }
+    write(&served, &["compact", "--wait", "--progress", "none"]);
     let served = restart(served);
     let token = self::token(&served);
     assert_eq!(served_ids(&served, &token, "s0", &ids), vec![0, 3, 9000]);

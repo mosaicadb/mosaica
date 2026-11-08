@@ -22,6 +22,12 @@ pub mod process;
 pub mod scalar;
 pub mod written;
 
+/// How far a long-running job has gone, as every surface serves it. Behind `serde` because the
+/// record exists to be served, and here because the build, the engine and the clients' CLI all
+/// report it.
+#[cfg(feature = "serde")]
+pub mod progress;
+
 /// The annotation layer declaration, shared by the WAL record that makes a registration durable,
 /// the manifest section that carries it, and the gate-filtered `/v1/meta` view.
 ///

@@ -62,14 +62,19 @@ fn build_count_pool(
         .build()
 }
 
-/// The record a pooled task's panic leaves: subsystem, worker thread, payload, abort-site
-/// backtrace. Separate from the handler so it can be asserted without aborting the process.
-fn describe_pool_panic(payload: &(dyn std::any::Any + Send)) -> String {
-    let message = payload
+/// What a panic said, where its payload is the text `panic!` gives it.
+pub(crate) fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
         .downcast_ref::<&'static str>()
         .map(|s| (*s).to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "a payload that is neither &str nor String".to_string());
+        .unwrap_or_else(|| "a payload that is neither &str nor String".to_string())
+}
+
+/// The record a pooled task's panic leaves: subsystem, worker thread, payload, abort-site
+/// backtrace. Separate from the handler so it can be asserted without aborting the process.
+fn describe_pool_panic(payload: &(dyn std::any::Any + Send)) -> String {
+    let message = panic_message(payload);
     let thread = std::thread::current()
         .name()
         .unwrap_or("<unnamed>")

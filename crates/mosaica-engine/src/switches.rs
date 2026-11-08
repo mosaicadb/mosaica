@@ -20,6 +20,8 @@ pub(crate) struct TestSwitches {
     pub(crate) flush_paused: AtomicBool,
     /// Whether a fold holds between finishing its passes and submitting the result.
     pub(crate) fold_paused: AtomicBool,
+    /// Whether the next fold panics as its thread begins its passes.
+    pub(crate) fold_panics: AtomicBool,
     /// See [`crate::Engine::set_fold_publication_paused_for_test`].
     pub(crate) fold_publication_paused: AtomicBool,
     /// The memory a compaction's pre-flight takes the host to have, in bytes; zero measures it.
@@ -216,6 +218,7 @@ impl Default for TestSwitches {
             driven_reads_enabled: AtomicBool::new(true),
             flush_paused: AtomicBool::new(false),
             fold_paused: AtomicBool::new(false),
+            fold_panics: AtomicBool::new(false),
             fold_publication_paused: AtomicBool::new(false),
             fold_memory: AtomicU64::new(0),
             merge_publication_paused: AtomicBool::new(false),

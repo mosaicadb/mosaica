@@ -38,15 +38,18 @@ durable, and what it wrote can be read after the next publication.
 from __future__ import annotations
 
 import datetime
+import itertools
 import json
 import numbers
+import time
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import pyarrow as pa
 
 from ._control import UNANSWERED, Answer, Control, arrow_body, batch_id
 from . import _declaration as _D
+from . import _progress
 from ._declaration import rows_of
 from ._inserts import SHAPE_COLUMNS, SHAPE_FIELDS, SHAPE_RECORD_FIELD, axes
 from ._refusal import Refusal
@@ -1289,8 +1292,27 @@ def _records(table: pa.Table, insert) -> list[dict]:
 
 # ---------------------------------------------------------------------------- the run
 
+#: The phases of a later commit's ingest record, and the step each runs: the pages it sends, then
+#: the publication its closing flush waits for.
+INGEST_PHASES = ["Sending", "Waiting for publication"]
+PAGES = "pages"
+PUBLICATION = "publication"
 
-def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -> list[Page]:
+#: The `step_id` of each ingest step this process begins, one more for each.
+_STEP_IDS = itertools.count(1)
+
+#: A step younger than this has no `rate`, because its first pages measure start-up rather than
+#: throughput.
+RATE_SETTLE_S = 2.0
+
+
+def run(
+    control: Control,
+    pages: Sequence[Page],
+    report,
+    strict: bool = False,
+    show: Callable[[dict], Any] = _progress.Sink(),
+) -> list[Page]:
     """Send the plan, in order, then flush once and wait for the publication that flush arms. A
     page no server answers stops the plan there.
 
@@ -1299,20 +1321,109 @@ def run(control: Control, pages: Sequence[Page], report, strict: bool = False) -
     the executor's own period. Where nothing was accepted there is nothing to publish and no flush
     is sent. Returns the pages other than the plan's own flushes that were accepted. `strict` is
     passed to every route that takes rows.
+
+    `show` is given the commit's ingest record before each page is sent, when the pages end, when
+    the wait begins and when the commit ends. The step `pages` counts the rows of each page
+    answered out of the rows of every page in the plan, and its context names the page among the
+    plan's pages that carry rows, as `mosaica insert` names its pages. The last record is
+    `finished` where the report is ok and `failed` where it is not, which includes a refused
+    page, a page no server answered, a finding on the closing flush and a refused flush. An empty
+    plan sends nothing and makes no record.
     """
+    if not pages:
+        return []
+    began = time.monotonic()
+    rows = sum(page.rows for page in pages)
+    carrying = sum(1 for page in pages if page.rows)
+    sent = 0
+    # The open step: its phase, its name, when it began, its id, its context and whether it
+    # counts rows.
+    step: tuple = (0, PAGES, began, next(_STEP_IDS), None, True)
+
+    def record(state: str = "running") -> dict:
+        at, name, step_began, step_id, context, counted = step
+        return _ingest_record(began, at, name, step_began, step_id, context,
+                              (sent, rows) if counted else None, state)
+
     accepted = []
+    numbered = 0
     for page in pages:
+        if page.rows:
+            step = step[:4] + (_page_context(numbered, carrying), True)
+            numbered += 1
+        show(record())
         answer = _send(control, page, strict)
         _fold(report, page, answer)
         if answer.status == UNANSWERED:
             # No server answered, a page of rows not even when sent once more: the pages after
             # this one would go the same way.
             break
+        sent += page.rows
         if answer.ok and page.kind != "flush":
             accepted.append(page)
+    show(record())
     if accepted:
+        step = (1, PUBLICATION, time.monotonic(), next(_STEP_IDS), None, False)
+        show(record())
         _waited(report, control.flush(wait=True))
+    show(record("finished" if report.ok else "failed"))
     return accepted
+
+
+def _ingest_record(
+    began: float,
+    phase: int,
+    step: str,
+    step_began: float,
+    step_id: int,
+    context: str | None,
+    counted: tuple[int, int] | None,
+    state: str,
+) -> dict:
+    """The ingest record of a commit that began at `began`, in the shape of `/control/status`'s
+    records, with `counted` the rows sent and the rows planned where the step counts rows.
+
+    `rate` is the step's average since it began, from two seconds in, and `eta_s` the time
+    `rate` takes to send the rest.
+    """
+    now = time.monotonic()
+    one: dict = {
+        "job": "ingest",
+        "state": state,
+        "phase": {"index": phase + 1, "of": len(INGEST_PHASES), "name": INGEST_PHASES[phase]},
+        "step": step,
+        "step_id": step_id,
+    }
+    if context is not None:
+        one["context"] = context
+    if counted is not None:
+        done, total = counted
+        one.update(done=done, total=total, unit="rows")
+        if now - step_began >= RATE_SETTLE_S:
+            one["rate"] = done / (now - step_began)
+            if one["rate"] > 0:
+                one["eta_s"] = max(total - done, 0) / one["rate"]
+    one.update(elapsed_s=now - began, step_elapsed_s=now - step_began,
+               rss_bytes=_resident_bytes())
+    return one
+
+
+def _page_context(index: int, of: int) -> str | None:
+    """The context of the page at `index`, counted from 0, of `of`, as `page (37 of 120)`, and
+    none where there is one page, as the build's records name their parts."""
+    return f"page ({index + 1} of {of})" if of > 1 else None
+
+
+def _resident_bytes() -> int:
+    """This process's resident memory from `/proc/self/status`, or 0 where there is none."""
+    try:
+        with open("/proc/self/status", encoding="ascii", errors="replace") as status:
+            for line in status:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return 0
 
 
 def _send(control: Control, page: Page, strict: bool = False) -> Answer:

@@ -403,6 +403,8 @@ pub(crate) struct Assembly<'a> {
     pub(crate) render: Vec<RenderColumn<'a>>,
     /// The columns the identity bands copy beside the render ones, by entity.
     pub(crate) indexed: Vec<RenderColumn<'a>>,
+    /// The step the first pass's rows are counted in.
+    pub(crate) steps: crate::observer::Steps<'a>,
 }
 
 /// What it produced.
@@ -565,6 +567,9 @@ fn priority_of(key: &IdentityKey, shard: ShardId, entity: u32) -> u16 {
 
 /// Steps 3 to 6: the buckets in Morton order, the permutation, the render tail and the framing
 /// around them.
+///
+/// The rows of its first pass, which writes the Morton column and the row-to-entity table, are
+/// counted in [`Assembly::steps`] a chunk at a time.
 pub(crate) fn write_segment(
     job: &Assembly<'_>,
     mut rows: PartitionedRows,
@@ -700,6 +705,7 @@ pub(crate) fn write_segment(
                 pairs.push(&pair)?;
             }
             row += chunk.len() as u64;
+            job.steps.advance(chunk.len() as u64);
         }
     }
     morton_out

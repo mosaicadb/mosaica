@@ -17,8 +17,7 @@ first arrived; unanswered twice, it is the answer. Every other status is an answ
 differing part is reported and not retried, since an edit is a delete and a re-ingest, and the SDK
 does not do that on the user's behalf.
 
-The transport is `urllib`, so the SDK's only dependency outside the standard library stays
-pyarrow.
+The transport is `urllib`, so the package depends on no HTTP library.
 """
 
 from __future__ import annotations
@@ -30,11 +29,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from . import _progress
 from ._auth import request_headers
 from ._refusal import listed, retry_after
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 ARROW = "application/vnd.apache.arrow.stream"
 JSON = "application/json"
@@ -47,6 +47,9 @@ MAX_BACKOFF = 30.0
 #: out and the request sent again while the waits stay within this; the `429` whose wait would take
 #: them past it is the answer.
 RETRY_BUDGET_S = 300.0
+
+#: How often `await_compaction` reads `/control/compact/{request}`, in seconds.
+COMPACT_POLL_S = 1.0
 
 #: The status an answer carries when the request reached no server at all. Not an HTTP status: the
 #: request was never answered, so there is none to report.
@@ -79,6 +82,8 @@ class Answer:
     - `attempts`: how many times the request was sent, which is more than 1 when the server asked
       the client to wait with a `429`, or when an ingest that got no answer was sent again.
     - `seconds`: how long the request took, from its first attempt to its answer.
+    - `waited`: for `Control.compact(wait=True)` where the server accepted the request, how the
+      wait for its outcome ended, as `compact` describes, and `None` for every other answer.
     """
 
     status: int
@@ -86,6 +91,7 @@ class Answer:
     detail: str = ""
     attempts: int = 1
     seconds: float = 0.0
+    waited: dict | None = None
 
     @property
     def ok(self) -> bool:
@@ -99,9 +105,13 @@ class Control:
 
     `Database.control` returns one for a database you made, and `Control(base, credential)` makes
     one for a database someone else runs. Each route method sends one HTTP request and returns its
-    `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. When a
-    busy server answers `429`, the method waits as long as the server asks, up to 30 seconds, and
-    sends the request again. It returns the `429` once the waits would pass five minutes in all.
+    `Answer` without raising, so a refusal is read from the answer's `status` and `detail`. The
+    exceptions are `await_compaction`, which reads `compaction_request` until the request is
+    answered and returns how that ended, and `compact(wait=True)`, which calls it. Both raise
+    `Refusal` for a `progress` they do not take, and pass on what a `progress` function raises.
+    When a busy server answers `429`, the method waits as long as the server asks, up to 30
+    seconds, and sends the request again. It returns the `429` once the waits would pass five
+    minutes in all.
 
     - `base`: the control plane's address, such as `http://127.0.0.1:41234`.
     - `credential`: the operator credential, an API key or an OIDC access token, or `None` for a
@@ -418,22 +428,77 @@ class Control:
             "DELETE", f"/control/views/{_segment(group)}/{_segment(key)}" + _wait(wait)
         )
 
-    def compact(self) -> Answer:
+    def compact(self, wait: bool = False, progress: bool | Callable[[dict], Any] = True) -> Answer:
         """Ask the server for a compaction, which removes the rows of deleted items from disc
-        (`POST /control/compact`).
+        (`POST /control/compact`), and wait for its outcome where `wait` is `True`.
 
-        The server answers `202` at once with the request's number in `body["request"]`, and then
-        compacts every shard with something to reclaim. The outcome is read from `status()`. The
-        request has been answered once `compaction.requests.answered` reaches its number. A
-        `compaction.requests.last_refusal` whose `request` is that number means a shard was refused
-        while answering it, with `detail` saying why and what to do. A higher number means a later
-        refusal has replaced the record, and that refusal may or may not concern yours. A request
-        answered without a refusal can still have failed, so to confirm that the rows are gone,
-        check that `compaction.folds` rose and `overlay.retirable` fell; `compaction.fold_failures`
-        counts the compactions that failed or were discarded. When no compaction can start until the
-        server restarts, the answer is `503` and nothing is requested.
+        The server answers `202` with the request's number in `body["request"]`, or `503` where no
+        compaction can start until it restarts, and then compacts every shard with something to
+        reclaim. `compaction_request` reads where the request is.
+
+        - `wait`: `True` passes the number to `await_compaction` and returns the `202` as the
+          server sent it, with `waited` set to what `await_compaction` returned.
+        - `progress`: what `await_compaction` takes. It is checked before the request is sent.
         """
-        return self._send("POST", "/control/compact", b"")
+        _progress.shown(progress)
+        answer = self._send("POST", "/control/compact", b"")
+        if not wait or not answer.ok:
+            return answer
+        return replace(answer, waited=self.await_compaction(answer.body["request"], progress))
+
+    def compaction_request(self, request: int) -> Answer:
+        """Return where one compaction request is, pending or answered
+        (`GET /control/compact/{request}`).
+
+        `request` is the number `compact` answered. The route's description in
+        `docs/openapi/mosaica.yaml` says what the body holds and when it is `404` or `410`.
+        """
+        return self._send("GET", f"/control/compact/{int(request)}")
+
+    def await_compaction(
+        self, request: int, progress: bool | Callable[[dict], Any] = True
+    ) -> dict:
+        """Wait until the server has answered compaction request number `request`, reading
+        `compaction_request(request)` about once a second, and return how the wait ended.
+
+        - `progress`: how the wait shows the compaction serving the request, the route's `job`, as
+          `Database.commit`'s `progress` takes it. The default is `True`. Once the request is
+          answered, the last record shown is that of the compaction that answered it, where one
+          ran. A compaction shorter than the interval between two readings is shown only by that
+          record.
+
+        A reading that no server answered is read again a second later, so a server that
+        restarts while the call waits ends the wait as `lost` once it is back. The wait has no
+        bound of its own: to stop it, interrupt it, or call `compaction_request` in a loop of
+        your own instead.
+
+        The dictionary returned has `ok`, which is `True` only where the request succeeded, and
+        `ended`, which says how the wait ended:
+
+        - `answered`: `answer` and `job` are the route's, as served, and `ok` is the answer's.
+        - `lost`: the route answered `404`, because the server restarted after the request was
+          made. `read` is that `Answer`. Ask again.
+        - `gone`: the route answered `410`, because the answer is older than those the server
+          keeps. `read` is that `Answer`.
+        - `unread`: the route answered another status outside the 200s, such as `503` once the
+          server's write executor has stopped, and `read` is that `Answer`.
+        """
+        ended = {404: "lost", 410: "gone"}
+        with _progress.shown(progress) as show:
+            while True:
+                read = self.compaction_request(request)
+                if read.status == UNANSWERED:
+                    sleep(COMPACT_POLL_S)
+                    continue
+                if not read.ok:
+                    return {"ok": False, "ended": ended.get(read.status, "unread"), "read": read}
+                job = read.body.get("job")
+                if job:
+                    show(job)
+                if read.body.get("answered"):
+                    answer = read.body["answer"]
+                    return {"ok": answer["ok"], "ended": "answered", "answer": answer, "job": job}
+                sleep(COMPACT_POLL_S)
 
     def flush(self, wait: bool = False) -> Answer:
         """Make the writes sent so far visible to readers sooner, by bringing the next publication

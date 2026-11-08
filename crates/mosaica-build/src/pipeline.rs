@@ -160,12 +160,13 @@ use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 use crate::column::EntityColumn;
 use crate::error::{BuildError, Result};
 use crate::input;
-use crate::observer::{BuildObserver, BuildStage, StageTimer};
+use crate::observer::{BuildObserver, BuildStage, StageTimer, Steps};
 use crate::spill;
 use crate::{
     fsync_file, validate_args, write_manifests, BuildArgs, BuildReport, BundleFiles,
     PairsParquetWriter, PREFIX, SEG_ID,
 };
+use mosaica_types::progress::{Batched, Part, Unit};
 
 /// One item's position in the signature sort. 16 bytes, four-byte aligned — every field is a
 /// component of the sort key, and holding the key in the record is what keeps the comparator a
@@ -926,6 +927,8 @@ fn build_bundle(
     route: crate::ExtentRoute,
 ) -> Result<BuildReport> {
     let mut timer = StageTimer::new(observer);
+    let steps = timer.steps();
+    timer.begin(BuildStage::SourceIds, &[], None);
 
     // ---- 1. pass zero: which item each row of each file names (`crate::ids`) -----------
     // An item's *ordinal* is the number the identity rule gave it, in creation order: the order
@@ -944,7 +947,7 @@ fn build_bundle(
     // every structure in it is swept by the `close` at the end or by the next build's `create`.
     let tmp = spill::TmpDir::create(&args.out)?;
     crate::residency::report_identity_disk(args, available_disk(&args.out))?;
-    let mut numbering = crate::ids::number_streaming(args, tmp.path())?;
+    let mut numbering = crate::ids::number_streaming(args, tmp.path(), steps)?;
     let n = numbering.items;
     crate::config::require_sources(&args.schema, &args.attribute_sources, n > 0)?;
     let refused = std::mem::take(&mut numbering.refused);
@@ -953,6 +956,8 @@ fn build_bundle(
     let args = match frames {
         [] => args,
         frames => {
+            // The files' steps are over, and fitting the frames is the stage's own.
+            steps.begin(BuildStage::SourceIds, &[], None);
             fitted = crate::fit_frames(args, frames, &numbering)?;
             &fitted
         }
@@ -963,6 +968,16 @@ fn build_bundle(
     // another item's position, with nothing to notice.
 
     timer.end(BuildStage::SourceIds, n);
+    timer.begin(BuildStage::Dictionary, &[], None);
+    // What the reading stages count, from the files' footers, read only for a reader.
+    let mut source_rows = None;
+    steps.count(Unit::Rows, || {
+        let rows = crate::SourceRows::of(args, &numbering)?;
+        let access = rows.access;
+        source_rows = Some(rows);
+        Ok(access)
+    })?;
+    let rows_of = |rows: fn(&crate::SourceRows) -> u64| source_rows.as_ref().map(rows);
     // The shards the items fill, in allocation order. Everything up to the
     // assignment walk is global; everything after it that writes entity space writes each
     // shard's files at its own ids.
@@ -993,7 +1008,7 @@ fn build_bundle(
         histogram,
         histogram_shift,
         dict_paths,
-    } = build_dictionary(args, &access, n, &dict_dir, &numbering)?;
+    } = build_dictionary(args, &access, n, &dict_dir, &numbering, steps)?;
     if term_count >= u32::MAX as u64 {
         return Err(BuildError::Invalid(format!(
             "{term_count} distinct terms exceeds the 2^32 term-ID space"
@@ -1001,6 +1016,11 @@ fn build_bundle(
     }
 
     timer.end(BuildStage::Dictionary, term_count);
+    timer.begin(
+        BuildStage::PairsPack,
+        &[],
+        rows_of(|rows| rows.access).map(|rows| (rows, Unit::Rows)),
+    );
 
     // ---- 2b. the plan: batch size, bucket backing, band boundaries, pre-flight --------
     // Everything the budget arithmetic decides, decided in one place and printed — the batch
@@ -1088,22 +1108,28 @@ fn build_bundle(
         )
     };
     let mut current: Option<(usize, u64)> = None;
-    crate::scan_access(args, &access, &numbering, |view, source_id, source_term| {
-        // A chunk **never spans two views**, and never splits a row: rows of one view arrive
-        // contiguously (a view holds one row per entity), so the boundary is taken at the change
-        // of view — always — or at the next change of entity once the chunk is full.
-        let changed_view = current.is_some_and(|(previous, _)| previous != view);
-        let changed_row = current != Some((view, source_id));
-        if changed_view || (changed_row && chunk.len() >= JOIN_CHUNK_ROWS) {
-            if let Err(e) = resolve(&mut chunk, &mut resolved, distinct_of_ordinal, &mut sink) {
-                failure = Some(e);
-                return ControlFlow::Break(());
+    crate::scan_access(
+        args,
+        &access,
+        &numbering,
+        steps,
+        |view, source_id, source_term| {
+            // A chunk **never spans two views**, and never splits a row: rows of one view arrive
+            // contiguously (a view holds one row per entity), so the boundary is taken at the change
+            // of view — always — or at the next change of entity once the chunk is full.
+            let changed_view = current.is_some_and(|(previous, _)| previous != view);
+            let changed_row = current != Some((view, source_id));
+            if changed_view || (changed_row && chunk.len() >= JOIN_CHUNK_ROWS) {
+                if let Err(e) = resolve(&mut chunk, &mut resolved, distinct_of_ordinal, &mut sink) {
+                    failure = Some(e);
+                    return ControlFlow::Break(());
+                }
             }
-        }
-        current = Some((view, source_id));
-        chunk.push((source_id, source_term));
-        ControlFlow::Continue(())
-    })?;
+            current = Some((view, source_id));
+            chunk.push((source_id, source_term));
+            ControlFlow::Continue(())
+        },
+    )?;
     if let Some(error) = failure {
         return Err(error);
     }
@@ -1115,6 +1141,16 @@ fn build_bundle(
             "the pairs file yielded {pair_rows} rows, then {pushed}"
         )));
     }
+    drop(term_keys);
+    drop(term_ids);
+    drop(row_counts);
+    let mut store = sink.finish()?;
+    timer.end(BuildStage::PairsPack, pushed);
+    timer.begin(
+        BuildStage::GeometryRead,
+        &[],
+        rows_of(|rows| rows.views).map(|rows| (rows, Unit::Rows)),
+    );
     // ---- 3b. geometry, by ordinal, once per (item, view) (`views.md` §7) --------------
     // **Every view's geometry is read exactly once, and it is read here** — before entity ids
     // exist, so it lands in *ordinal* space. Pass two permutes it into entity space rather than
@@ -1186,7 +1222,7 @@ fn build_bundle(
                 })
             };
             input::scan_points(
-                crate::view_source(args, index, &numbering),
+                crate::view_source(args, index, &numbering).counted(steps),
                 view.projection,
                 &view.extent,
                 |point| {
@@ -1286,13 +1322,13 @@ fn build_bundle(
         (None, None) => (&[], &[]),
     };
     timer.end(BuildStage::GeometryRead, n);
-
-    drop(term_keys);
-    drop(term_ids);
-    drop(row_counts);
-    let mut store = sink.finish()?;
-
-    timer.end(BuildStage::PairsPack, pushed);
+    // What precedes the batch loop is the first batch's sort, or the assignment's where a build of
+    // no items has no batch.
+    let batch = |k: u64| Part::new("batch", "", k as usize, plan.batches as usize);
+    match plan.batches {
+        0 => timer.begin(BuildStage::Assignment, &[], None),
+        _ => timer.begin(BuildStage::SignatureSort, &[batch(0)], None),
+    }
 
     // ---- 4–5. per batch: sort, signature-refine, assign, emit bands (§11.1) -----------
     // Entity id = batch base + position in the batch's signature order. Batches partition
@@ -1340,6 +1376,9 @@ fn build_bundle(
     let mut entity_terms = filled.first().map(entity_terms_writer).transpose()?;
     let mut sig_terms: Vec<u32> = Vec::new();
     for k in 0..plan.batches {
+        if k > 0 {
+            timer.begin(BuildStage::SignatureSort, &[batch(k)], None);
+        }
         let ordinal_lo = k * plan.batch_items;
         let ordinal_hi = ((k + 1) * plan.batch_items).min(n);
         let batch_len = (ordinal_hi - ordinal_lo) as usize;
@@ -1458,6 +1497,11 @@ fn build_bundle(
         refine_signature_ties(&mut recs, &packed, &starts, ordinal_lo, &long_sig);
         drop(long_sig);
         timer.end(BuildStage::SignatureSort, recs.len() as u64);
+        timer.begin(
+            BuildStage::Assignment,
+            &[batch(k)],
+            Some((recs.len() as u64, Unit::Items)),
+        );
 
         // **The batch's slice of the entity map, filled here and written once.** A batch's
         // ordinals are the contiguous range `[ordinal_lo, ordinal_hi)`, and the walk visits them
@@ -1475,7 +1519,9 @@ fn build_bundle(
         // every term's entity list arrives ascending — within this batch here, and across
         // batches because bases ascend and the loop is sequential. `encode_posting`'s
         // unconditional sortedness check later re-verifies exactly this property from disk.
+        let mut assigned_count = steps.batched();
         for (position, rec) in recs.iter().enumerate() {
+            assigned_count.add(1);
             let entity = (entity_base + position as u64) as u32;
             let local = (rec.ordinal as u64 - ordinal_lo) as usize;
             assigned[local] = entity;
@@ -1510,10 +1556,15 @@ fn build_bundle(
                 .push(entity - spans[entity_terms_shard].lo as u32, &sig_terms)
                 .map_err(transpose)?;
         }
+        drop(assigned_count);
         entities[ordinal_lo as usize..ordinal_lo as usize + batch_len].copy_from_slice(&assigned);
         entity_base += recs.len() as u64;
         store.delete(k)?;
         timer.end(BuildStage::Assignment, recs.len() as u64);
+    }
+    // The bands' and the transposes' last writes, which close the assignment.
+    if plan.batches > 0 {
+        timer.begin(BuildStage::Assignment, &[], None);
     }
     if entity_base != n {
         return Err(input_changed(&format!(
@@ -1566,6 +1617,11 @@ fn build_bundle(
     }
 
     timer.end(BuildStage::Assignment, n);
+    timer.begin(
+        BuildStage::PostingsWrite,
+        &[],
+        Some((pair_count, Unit::Pairs)),
+    );
 
     // ---- 6. postings and pairs.parquet, one term band at a time -----------------------
     // Bands arrive from the batch loop with every term's entities strictly ascending (bases
@@ -1679,6 +1735,7 @@ fn build_bundle(
                     }
                 }
             }
+            steps.advance(offsets[hi] - offsets[t]);
             t = hi;
         }
         drop(flat);
@@ -1700,6 +1757,7 @@ fn build_bundle(
     }
 
     timer.end(BuildStage::PostingsWrite, pair_count);
+    timer.begin(BuildStage::AttributeTail, &[], None);
 
     // ---- 8. the declared attribute tail ----------------------------------------------
     // **Geometry is already in entity order**: the assignment walk placed it as it assigned, so
@@ -1740,7 +1798,7 @@ fn build_bundle(
     // Here, beside the attribute tail, because it wants exactly what the tail wants: the numbers
     // and `entity_of_ordinal`, both alive, and entity ids final under I9. One column per view of
     // the group, in entity space; nothing per row space.
-    let (scoped_paths, mut scoped_render) = write_scoped_columns(
+    let (scoped_paths, mut scoped_render, scoped_cost) = write_scoped_columns(
         args,
         &prefix_dir,
         filled,
@@ -1749,13 +1807,23 @@ fn build_bundle(
         entity_of_ordinal,
         &mut minters,
         &scratch,
+        steps,
     )?;
+    for (stage, cost) in [
+        (BuildStage::FilterPostings, scoped_cost.filter),
+        (BuildStage::TextIndex, scoped_cost.text),
+    ] {
+        if !cost.elapsed.is_zero() {
+            timer.charge(stage, cost.elapsed, cost.rows);
+        }
+    }
     // Which of those columns each view's row space carries (`views.md` §5) — resolved once, here,
     // rather than per view inside the loop below, so the rule that decides it is stated in one
     // place and the loop is an index.
     let scoped_render_targets = scoped_render_targets(args, &scoped_render);
 
     timer.end(BuildStage::AttributeTail, n);
+    timer.begin(BuildStage::Layers, &[], None);
 
     // ---- 8c. layers and their artifacts ------------------------------------------------
     // Resolved here for the reason the attribute tail is: this is where what turns a member's
@@ -1819,6 +1887,7 @@ fn build_bundle(
     crate::write_containment_report(&args.out, &published_layers)?;
 
     timer.end(BuildStage::Layers, published_layers.layers.len() as u64);
+    timer.begin(BuildStage::UniqueIndexes, &[], None);
 
     // ---- 8d. attribute filter postings (filter-index §4) -------------------------------
     // Its own stage, after entity assignment and before the tiler sort: entity ids are final
@@ -1860,8 +1929,9 @@ fn build_bundle(
         )?);
     }
     timer.end(BuildStage::UniqueIndexes, n);
+    timer.begin(BuildStage::FilterPostings, &[], None);
     let mut filter_paths = Vec::new();
-    for span in filled {
+    for (k, span) in filled.iter().enumerate() {
         window_shard(&mut attributes_by_entity, &mut open_extents, span);
         let (paths, text_index) = write_filter_postings(
             &prefix_dir,
@@ -1870,11 +1940,17 @@ fn build_bundle(
             &attributes_by_entity,
             &open_extents,
             plan.budget,
+            steps.within(Part::new("shard", "", k, filled.len())),
         )?;
         filter_paths.extend(paths);
         // The text columns' share, charged out of the block rather than measured beside it — the
         // two interleave over one column loop, so a boundary in time cannot separate them.
-        timer.charge(BuildStage::TextIndex, text_index.elapsed, text_index.terms);
+        timer.charge(BuildStage::TextIndex, text_index.elapsed, text_index.rows);
+    }
+    // The columns' steps are over, and what is left of the stage is its own.
+    let owed = |attribute| postings_are_owed(&args.schema, attribute);
+    if !filled.is_empty() && args.schema.attributes.iter().any(owed) {
+        steps.begin(BuildStage::FilterPostings, &[], None);
     }
     // **A column with no blob row is dead here, not two stages further on.** The blob reads the
     // columns whose values have no other home ([`blob_resident`]); the segment write reads the
@@ -1904,6 +1980,7 @@ fn build_bundle(
         }
     }
     timer.end(BuildStage::FilterPostings, n);
+    timer.begin(BuildStage::RecordBlob, &[], None);
 
     // The record blob wants the same two things the postings did — entity ids final under I9, and
     // the attribute values in hand — so it runs here. Its files join the manifest digest at step 11
@@ -1929,6 +2006,7 @@ fn build_bundle(
         column.remove();
     }
     timer.end(BuildStage::RecordBlob, n);
+    timer.begin(BuildStage::ColumnRelease, &[], None);
     // **Everything past here wants only the render columns**, and the pass that wanted the rest has
     // just run. The assembly reads a non-render column not at all (its home is entity space, and
     // giving it a slot in every row is the per-row cost §10.3's routing exists to avoid), so a
@@ -1951,7 +2029,6 @@ fn build_bundle(
             column.release();
         }
     }
-    timer.end(BuildStage::ColumnRelease, n);
 
     let mut empty_files: Vec<PathBuf> = Vec::new();
     if filled.is_empty() {
@@ -2041,7 +2118,10 @@ fn build_bundle(
         })
         .collect::<Result<_>>()?;
     let several = spans.len() > 1;
+    timer.end(BuildStage::ColumnRelease, n);
     for (index, view) in args.views.iter().enumerate() {
+        let view_part = Part::new("view", &view.view_id, index, args.views.len());
+        timer.begin(BuildStage::TilerSort, &[view_part], None);
         // ---- the assembly: the view's rows, Morton-partitioned, straight from ordinal order ----
         //
         // **No entity-order geometry.** What stood here permuted `x` and `y` into two
@@ -2105,6 +2185,11 @@ fn build_bundle(
 
         let mut parts: Vec<(crate::ShardSpan, u32)> = Vec::with_capacity(spans.len());
         for (k, part) in partitioned.into_iter().enumerate() {
+            timer.begin(
+                BuildStage::SegmentWrite,
+                &[view_part, Part::new("shard", "", k, filled.len())],
+                Some((part.rows.rows(), Unit::Rows)),
+            );
             let ShardRows {
                 span,
                 view_dir,
@@ -2162,6 +2247,7 @@ fn build_bundle(
                     shard: span.id,
                     render,
                     indexed,
+                    steps,
                 };
                 crate::assembly::write_segment(&job, rows, &boundaries, page_plan)?
             };
@@ -2187,13 +2273,14 @@ fn build_bundle(
             for path in &segment_paths {
                 fsync_file(path)?;
             }
-            timer.end(BuildStage::SegmentWrite, rows_in_view as u64);
             view_files.push(assembled.permutation_path);
             view_files.push(assembled.row_entity_path);
             view_files.extend(segment_paths);
             view_files.extend(assembled.presence_paths);
             parts.push((*span, rows_in_view));
+            timer.end(BuildStage::SegmentWrite, rows_in_view as u64);
         }
+        timer.begin(BuildStage::ArtifactPass, &[view_part], None);
         if filled.is_empty() {
             for (k, span) in spans.iter().enumerate() {
                 shards[k].occupancies.push(crate::Occupancy {
@@ -2236,6 +2323,11 @@ fn build_bundle(
 
         for (k, &(span, rows_in_view)) in parts.iter().enumerate() {
             let layout = span.layout();
+            timer.begin(
+                BuildStage::TermImages,
+                &[view_part, Part::new("shard", "", k, parts.len())],
+                (rows_in_view > 0).then(|| (u64::from(postings[k].term_count()), Unit::Terms)),
+            );
             // ---- 10c. this view's term images (`crate::term_images_pass`) ------------------
             //
             // Beside the artifact pass and after it, for the reason it sits here: the images are
@@ -2249,11 +2341,11 @@ fn build_bundle(
                 rows_in_view,
                 &mut derived_index,
                 plan.sizing.term_image_workers as usize,
+                steps,
             )?;
             artifact_paths.extend(images.iter().map(|images| images.path.clone()));
             let kept = images.as_ref().map_or(0, |images| images.report.kept);
             shards[k].term_images.push(images);
-            timer.end(BuildStage::TermImages, u64::from(kept));
 
             // ---- 10d. this view's field tallies (`mosaica_store::field_tallies`) -----------
             //
@@ -2282,16 +2374,17 @@ fn build_bundle(
                     entity_lo: 0,
                     entity_hi: span.len(),
                 });
+            timer.end(BuildStage::TermImages, u64::from(kept));
         }
     }
-    // Every view has been through the term images, so the postings mappings are unbusy.
-    drop(postings);
-
     // ---- 10e. the containment partitions, once a shard ------------------------------------
     //
     // **Outside the view loop**, because a partition is a function of the level's records and the
     // shard's postings and carries no view. Composing it inside the pass would write one identical
     // file and one manifest entry per view.
+    timer.begin(BuildStage::ArtifactPass, &[], None);
+    // Every view has been through the term images, so the postings mappings are unbusy.
+    drop(postings);
     {
         let artifact_store = std::mem::take(&mut published_layers.store);
         let containment = crate::artifact_pass::containment(
@@ -2310,6 +2403,9 @@ fn build_bundle(
         published_layers.derived_extents.extend(containment);
         timer.end(BuildStage::ArtifactPass, composed);
     }
+
+    // ---- 11. manifests ---------------------------------------------------------------
+    timer.begin(BuildStage::Manifests, &[], None);
     for (shard, extents) in shards
         .iter_mut()
         .zip(std::mem::take(&mut published_layers.membership_extents))
@@ -2323,7 +2419,6 @@ fn build_bundle(
     // entity-space scatter are dropped by this point, so the tree is unbusy.
     tmp.close()?;
 
-    // ---- 11. manifests ---------------------------------------------------------------
     let mut other_paths = empty_files;
     if !filled.is_empty() {
         other_paths.extend(postings_paths);
@@ -2350,6 +2445,7 @@ fn build_bundle(
         &minters,
         &published_layers,
         &shards,
+        steps,
     )?;
     // Reported in bytes, not rows: this stage re-reads and SHA-256s every byte the build wrote,
     // so it scales with bundle size rather than with item count.
@@ -2990,16 +3086,12 @@ fn write_scoped_columns(
     entity_of_ordinal: &[u32],
     minters: &mut std::collections::HashMap<String, mosaica_store::vocabulary::VocabularyMinter>,
     scratch: &crate::column::ColumnScratch,
-) -> Result<(Vec<PathBuf>, Vec<ScopedRenderColumn>)> {
+    steps: Steps<'_>,
+) -> Result<(Vec<PathBuf>, Vec<ScopedRenderColumn>, ScopedIndexCost)> {
     let mut paths = Vec::new();
     let mut render_columns: Vec<ScopedRenderColumn> = Vec::new();
-    // The text and keyword passes' budgets, derived once for the build rather than per column,
-    // exactly as the entity-scoped pass derives them: a plan bounds the transient one column's
-    // pass holds, and both are a function of the machine rather than of which column is indexed.
-    let text_plan =
-        TextIndexPlan::for_budget(args.memory_budget.unwrap_or_else(detect_memory_budget));
-    let keyword_plan =
-        KeywordDictPlan::for_budget(args.memory_budget.unwrap_or_else(detect_memory_budget));
+    let plans = ColumnPlans::for_budget(args.memory_budget.unwrap_or_else(detect_memory_budget));
+    let mut cost = ScopedIndexCost::default();
     for (family_index, family) in args.scoped_attributes.iter().enumerate() {
         let attribute = &family.attribute;
         // **What `render` buys, and the one place it still does not reach.** The build's own
@@ -3023,7 +3115,7 @@ fn write_scoped_columns(
                 attribute.name, family.group, family.group
             );
         }
-        for &index in &family.views {
+        for (at, &index) in family.views.iter().enumerate() {
             let view = &args.views[index];
             let rows = match &family.source {
                 Some(_) => numbering
@@ -3044,17 +3136,33 @@ fn write_scoped_columns(
                 minters,
                 scratch,
             )?;
-            for span in spans {
+            let view_part = Part::new("view", &view.view_id, at, family.views.len());
+            for (k, span) in spans.iter().enumerate() {
                 column.values.window(span.lo as usize, span.hi as usize);
-                paths.extend(write_scoped_column(
+                let started = std::time::Instant::now();
+                let (written, indexed) = write_scoped_column(
                     prefix_dir,
                     span.layout(),
                     attribute,
                     view,
                     &column.values,
-                    text_plan,
-                    keyword_plan,
-                )?);
+                    plans,
+                    steps
+                        .within(view_part)
+                        .within(Part::new("shard", "", k, spans.len())),
+                )?;
+                paths.extend(written);
+                // An indexed column is a step of its stage and its time that stage's, and the
+                // attribute tail resumes after it.
+                if let Some(indexed) = indexed {
+                    let charge = match indexed.stage {
+                        BuildStage::TextIndex => &mut cost.text,
+                        _ => &mut cost.filter,
+                    };
+                    charge.elapsed += started.elapsed();
+                    charge.rows += indexed.rows;
+                    steps.begin(BuildStage::AttributeTail, &[], None);
+                }
             }
             column.values.window(0, n as usize);
             report_scoped_coverage(attribute, view, column.present, n);
@@ -3073,20 +3181,23 @@ fn write_scoped_columns(
             }
         }
     }
-    Ok((paths, render_columns))
+    Ok((paths, render_columns, cost))
 }
 
 /// One shard's files of one view's column of a group-scoped family, under that shard.
+///
+/// An indexed column is a step of `steps`, and what it wrote is returned beside its paths.
 fn write_scoped_column(
     prefix_dir: &Path,
     layout: ShardLayout<'_>,
     attribute: &crate::config::Attribute,
     view: &crate::ViewArgs,
     values: &EntityColumn,
-    text_plan: TextIndexPlan,
-    keyword_plan: KeywordDictPlan,
-) -> Result<Vec<PathBuf>> {
+    plans: ColumnPlans,
+    steps: Steps<'_>,
+) -> Result<(Vec<PathBuf>, Option<Indexed>)> {
     let mut paths = Vec::new();
+    let column_part = Part::new("column", &attribute.name, 0, 1);
     let column_dir = prefix_dir.join(layout.scoped_column_rel(
         &attribute.name,
         &view.view_id,
@@ -3117,27 +3228,52 @@ fn write_scoped_column(
         // `index = false` is refused at the declaration for exactly this reason — with no blob row
         // and no index the prose would have no home at all — so the guard here is against a
         // `Schema` built programmatically rather than parsed.
+        let mut indexed = None;
         if attribute.index {
-            let written =
-                write_text_index(&column_dir, attribute, TextValues::Arena(values), text_plan)?;
+            steps.begin(BuildStage::TextIndex, &[column_part], None);
+            let written = write_text_index(
+                &column_dir,
+                attribute,
+                TextValues::Arena(values),
+                plans.text,
+                steps,
+            )?;
             paths.extend(written.paths);
+            indexed = Some(Indexed {
+                stage: BuildStage::TextIndex,
+                rows: written.terms,
+            });
         }
         paths.extend(write_scoped_prose(&column_dir, values)?);
-        return Ok(paths);
+        return Ok((paths, indexed));
     }
+    let indexed = (attribute.index || scoped_postings_are_owed(attribute)).then_some(Indexed {
+        stage: BuildStage::FilterPostings,
+        rows: values.len() as u64,
+    });
+    let column_steps = match indexed {
+        Some(_) => {
+            steps.begin(
+                BuildStage::FilterPostings,
+                &[column_part],
+                Some((values.len() as u64, Unit::Items)),
+            );
+            steps
+        }
+        None => Steps::default(),
+    };
     let values_path = column_dir.join(mosaica_filter::VALUES_FILE);
     let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
     let written = write_column_values(
         &column_dir,
-        &values_path,
-        &presence_path,
         attribute,
         values,
         // **A group-scoped family is not routed** ([`may_take_extents`]): its columns are this
         // pass's own and there is no blob row for an extent to land in, so the characters are
         // always the column's.
         None,
-        keyword_plan,
+        plans.keyword,
+        column_steps,
     )?;
     fsync_file(&values_path)?;
     paths.push(values_path);
@@ -3161,7 +3297,22 @@ fn write_scoped_column(
         fsync_file(&path)?;
         paths.push(path);
     }
-    Ok(paths)
+    Ok((paths, indexed))
+}
+
+/// An indexed column of a group-scoped family: the stage its step was of, and what that stage
+/// counts of it.
+struct Indexed {
+    stage: BuildStage,
+    rows: u64,
+}
+
+/// What a group-scoped family's indexed columns cost inside the attribute tail, by the stage each
+/// is charged to.
+#[derive(Default)]
+struct ScopedIndexCost {
+    filter: IndexCost,
+    text: IndexCost,
 }
 
 /// One view's column of a group-scoped `text` family, its prose as a record blob under
@@ -3434,50 +3585,81 @@ pub(crate) fn write_filter_postings(
     by_entity: &[EntityColumn],
     spilled: &[crate::extents::OpenExtents],
     memory_budget: u64,
-) -> Result<(Vec<PathBuf>, TextIndexCost)> {
+    steps: Steps<'_>,
+) -> Result<(Vec<PathBuf>, IndexCost)> {
     write_filter_postings_banded(
         prefix_dir,
         layout,
         schema,
         by_entity,
         spilled,
-        TextIndexPlan::for_budget(memory_budget),
-        KeywordDictPlan::for_budget(memory_budget),
+        ColumnPlans::for_budget(memory_budget),
+        steps,
     )
 }
 
-/// What the text columns cost inside [`write_filter_postings`]'s loop: the wall time and the terms
-/// written, for [`BuildStage::TextIndex`].
+/// How the text and keyword passes are sized, derived once for the build from its memory budget:
+/// a plan bounds the transient one column's pass holds, and both are a function of the machine
+/// rather than of which column is indexed.
+#[derive(Clone, Copy)]
+struct ColumnPlans {
+    text: TextIndexPlan,
+    keyword: KeywordDictPlan,
+}
+
+impl ColumnPlans {
+    fn for_budget(memory_budget: u64) -> Self {
+        ColumnPlans {
+            text: TextIndexPlan::for_budget(memory_budget),
+            keyword: KeywordDictPlan::for_budget(memory_budget),
+        }
+    }
+}
+
+/// What indexed columns cost inside another stage's block, for [`StageTimer::charge`]: the wall
+/// time and what the stage counts. The text columns are charged out of
+/// [`write_filter_postings`]'s loop, and a group-scoped family's indexed columns out of the
+/// attribute tail ([`write_scoped_columns`]).
 ///
 /// **Measured here rather than at a stage boundary** because the loop visits a text column and a
 /// category column in whatever order the schema declares them, and the two are different code paths
 /// at different costs — a tokenise and a dictionary against a fixed-width scan. One number over
 /// both is what a reader cannot act on.
 #[derive(Default)]
-pub(crate) struct TextIndexCost {
+pub(crate) struct IndexCost {
     pub(crate) elapsed: std::time::Duration,
-    pub(crate) terms: u64,
+    pub(crate) rows: u64,
 }
 
 /// Entity ids the postings emit holds in flight — the shared emit's own constant, so the build and
 /// the fold band identically (filter-index §6.2).
 use mosaica_filter_write::POSTINGS_BAND_ROWS;
 
+/// Each column is a step of its own, a step of [`BuildStage::TextIndex`] for a text column and of
+/// [`BuildStage::FilterPostings`] for any other.
 fn write_filter_postings_banded(
     prefix_dir: &Path,
     layout: ShardLayout<'_>,
     schema: &crate::config::Schema,
     by_entity: &[EntityColumn],
     spilled: &[crate::extents::OpenExtents],
-    text_plan: TextIndexPlan,
-    keyword_plan: KeywordDictPlan,
-) -> Result<(Vec<PathBuf>, TextIndexCost)> {
+    plans: ColumnPlans,
+    steps: Steps<'_>,
+) -> Result<(Vec<PathBuf>, IndexCost)> {
     let mut paths = Vec::new();
-    let mut text = TextIndexCost::default();
+    let mut text = IndexCost::default();
+    let owed = schema
+        .attributes
+        .iter()
+        .filter(|attribute| postings_are_owed(schema, attribute))
+        .count();
+    let mut part = 0;
     for (column, (attribute, values)) in schema.attributes.iter().zip(by_entity).enumerate() {
         if !postings_are_owed(schema, attribute) {
             continue;
         }
+        let column_part = Part::new("column", &attribute.name, part, owed);
+        part += 1;
         let column_dir = prefix_dir.join(layout.column_rel(&attribute.name));
         std::fs::create_dir_all(&column_dir).map_err(|e| BuildError::io(&column_dir, e))?;
 
@@ -3500,14 +3682,16 @@ fn write_filter_postings_banded(
                     ))
                 })?;
             let started = std::time::Instant::now();
+            steps.begin(BuildStage::TextIndex, &[column_part], None);
             let written = write_text_index(
                 &column_dir,
                 attribute,
                 TextValues::Extents(extents),
-                text_plan,
+                plans.text,
+                steps,
             )?;
             text.elapsed += started.elapsed();
-            text.terms += written.terms;
+            text.rows += written.terms;
             paths.extend(written.paths);
             continue;
         }
@@ -3524,14 +3708,18 @@ fn write_filter_postings_banded(
             .find(|column_extents| column_extents.column == column);
         let values_path = column_dir.join(mosaica_filter::VALUES_FILE);
         let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
+        steps.begin(
+            BuildStage::FilterPostings,
+            &[column_part],
+            Some((values.len() as u64, Unit::Items)),
+        );
         let written = write_column_values(
             &column_dir,
-            &values_path,
-            &presence_path,
             attribute,
             values,
             extents,
-            keyword_plan,
+            plans.keyword,
+            steps,
         )?;
         fsync_file(&values_path)?;
         paths.push(values_path);
@@ -4010,17 +4198,23 @@ struct WrittenColumn {
 /// are positions in *this* base's dictionary and mean nothing against any extent's. Nothing
 /// downstream may assume otherwise — which is what keeps a durable manufactured identity, and the
 /// reuse hazard that comes with one, out of the family.
+///
+/// The values file is `column_dir`'s [`mosaica_filter::VALUES_FILE`] and the presence bitmap its
+/// [`mosaica_filter::PRESENCE_FILE`].
 fn write_column_values(
     column_dir: &Path,
-    values_path: &Path,
-    presence_path: &Path,
     attribute: &crate::config::Attribute,
     values: &EntityColumn,
     extents: Option<&crate::extents::OpenExtents>,
     keyword_plan: KeywordDictPlan,
+    steps: Steps<'_>,
 ) -> Result<WrittenColumn> {
+    let values_path = &column_dir.join(mosaica_filter::VALUES_FILE);
+    let presence_path = &column_dir.join(mosaica_filter::PRESENCE_FILE);
     let mut presence = Presence::default();
     let mut dict = None;
+    // The entities the pass over the values has reached, all of them once it ends.
+    let mut reached = steps.batched();
 
     let kind =
         mosaica_store::empty_shard::value_column_kind(attribute.ty, attribute.vocabulary.is_some());
@@ -4053,12 +4247,14 @@ fn write_column_values(
             attribute,
             source,
             &mut presence,
+            &mut reached,
             &mut writer,
             keyword_plan,
         )?);
     } else if attribute.vocabulary.is_some() {
         let mut held: Vec<u32> = Vec::new();
         for (entity, value) in values.iter().enumerate() {
+            reached.add(1);
             let code = category_code(&value, &attribute.name)?;
             if code == mosaica_store::vocabulary::ABSENT_CODE {
                 continue;
@@ -4091,8 +4287,9 @@ fn write_column_values(
         for entity in values.present_entities() {
             presence.present(entity as u32);
         }
-        push_numeric_chunks(&mut writer, values_path, attribute, values)?;
+        push_numeric_chunks(&mut writer, values_path, attribute, values, &mut reached)?;
     }
+    reached.reach(values.len() as u64);
     let presence = presence.written(values.len());
     writer
         .finish(presence)
@@ -4179,10 +4376,12 @@ fn for_each_keyword(
     attribute: &crate::config::Attribute,
     values: KeywordValues<'_>,
     presence: &mut Presence,
+    reached: &mut Batched<'_>,
     visit: &mut dyn FnMut(u32, &str) -> Result<()>,
 ) -> Result<u64> {
     let mut rows = 0u64;
     let mut step = |entity: u32, text: &str| -> Result<()> {
+        reached.reach(u64::from(entity) + 1);
         if text.is_empty() {
             return Err(BuildError::Invalid(format!(
                 "attribute '{}' is declared `keyword` and entity {entity} carries the empty \
@@ -4805,12 +5004,14 @@ impl<'a> KeywordChunks<'a> {
 /// walk visited must be translated, and every spill file verifies its count and anchor as it is
 /// read. A wrong ordinal recolours a map with no other symptom (`mosaica_filter::dict`), so each of
 /// these refuses the build rather than writing one.
+#[allow(clippy::too_many_arguments)]
 fn write_keyword_column(
     column_dir: &Path,
     values_path: &Path,
     attribute: &crate::config::Attribute,
     values: KeywordValues<'_>,
     presence: &mut Presence,
+    reached: &mut Batched<'_>,
     writer: &mut ValueColumnWriter,
     plan: KeywordDictPlan,
 ) -> Result<PathBuf> {
@@ -4819,7 +5020,7 @@ fn write_keyword_column(
 
     // ---- 1. the chunk pass ---------------------------------------------------------------------
     let mut chunker = KeywordChunks::create(column_dir, plan, values.rows_hint())?;
-    let rows = for_each_keyword(attribute, values, presence, &mut |_row, text| {
+    let rows = for_each_keyword(attribute, values, presence, reached, &mut |_row, text| {
         chunker.push(text)
     })?;
     let (ids, perms, runs, chunks) = chunker.finish()?;
@@ -5107,11 +5308,13 @@ fn push_numeric_chunks(
     values_path: &Path,
     attribute: &crate::config::Attribute,
     values: &EntityColumn,
+    reached: &mut Batched<'_>,
 ) -> Result<()> {
     macro_rules! stream {
         ($variant:ident, $ctor:expr, $map:expr) => {{
             let mut out = Vec::with_capacity(VALUE_CHUNK);
             for v in values.iter() {
+                reached.add(1);
                 match v {
                     ScalarValue::$variant(x) => out.push($map(x)),
                     // No slot at all — see this function's doc.
@@ -5426,12 +5629,16 @@ impl TextValues<'_> {
     }
 }
 
+/// Write one text column's index, counting in the open step each document it tokenises out of the
+/// documents the column holds.
 fn write_text_index(
     column_dir: &Path,
     attribute: &crate::config::Attribute,
     values: TextValues<'_>,
     plan: TextIndexPlan,
+    steps: Steps<'_>,
 ) -> Result<WrittenTextIndex> {
+    steps.count(Unit::Items, || Ok(values.present()?.cardinality()))?;
     // The identity was resolved at the schema parse; the name is its first component. Resolving it
     // again here rather than threading an `Analyser` down keeps the build's contract with the
     // manifest one-directional: what is recorded is what indexed.
@@ -5485,6 +5692,7 @@ fn write_text_index(
                 attribute,
                 &analyser,
                 plan.worker_bytes,
+                steps,
             )
         })
         .collect::<Result<Vec<_>>>()?;
@@ -5533,7 +5741,9 @@ fn index_text_chunk(
     _attribute: &crate::config::Attribute,
     analyser: &mosaica_analyse::Analyser,
     worker_bytes: usize,
+    steps: Steps<'_>,
 ) -> Result<Vec<spill::SpillReceipt>> {
+    let mut documents = steps.batched();
     let mut receipts = Vec::new();
     let mut terms: std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences> =
         std::collections::HashMap::new();
@@ -5542,6 +5752,7 @@ fn index_text_chunk(
     // The analyser's normalisation buffer, held across the whole chunk rather than per document.
     let mut scratch = mosaica_analyse::TokenScratch::default();
     values.for_each_record_in(window, &mut |entity, prose| {
+        documents.add(1);
         let entity = entity as u32;
         let mut position = 0u32;
         analyser.for_each_token(prose, &mut scratch, &mut |token| {
@@ -6070,6 +6281,7 @@ fn build_dictionary(
     n: u64,
     dict_dir: &std::path::Path,
     numbering: &crate::ids::Numbering,
+    steps: Steps<'_>,
 ) -> Result<Dictionary> {
     // Chunk-order insensitivity ([`join_chunk`]): per-term min-ordinal and row counts, and the
     // per-range histogram, are commutative aggregations — no arrival order is observable.
@@ -6104,17 +6316,23 @@ fn build_dictionary(
         })
     };
     let mut failure: Option<BuildError> = None;
-    let fill = crate::scan_access(args, access, numbering, |_view, source_id, source_term| {
-        pair_rows += 1;
-        chunk.push((source_id, source_term));
-        if chunk.len() == JOIN_CHUNK_ROWS {
-            if let Err(e) = resolve(&mut chunk) {
-                failure = Some(e);
-                return ControlFlow::Break(());
+    let fill = crate::scan_access(
+        args,
+        access,
+        numbering,
+        steps,
+        |_view, source_id, source_term| {
+            pair_rows += 1;
+            chunk.push((source_id, source_term));
+            if chunk.len() == JOIN_CHUNK_ROWS {
+                if let Err(e) = resolve(&mut chunk) {
+                    failure = Some(e);
+                    return ControlFlow::Break(());
+                }
             }
-        }
-        ControlFlow::Continue(())
-    })?;
+            ControlFlow::Continue(())
+        },
+    )?;
     crate::report_access_fill(args, fill);
     if let Some(error) = failure {
         return Err(error);
@@ -6961,7 +7179,8 @@ mod tests {
                     TextValues::Extents(prose) => TextValues::Extents(prose),
                 };
                 let written =
-                    write_text_index(&column_dir, &attribute, values, plan).expect("text index");
+                    write_text_index(&column_dir, &attribute, values, plan, Steps::default())
+                        .expect("text index");
                 assert_eq!(
                     written.terms,
                     expected_text_postings().len() as u64,
@@ -6977,9 +7196,14 @@ mod tests {
             }
             let column_dir = dir.path().join(format!("plan-{k}"));
             std::fs::create_dir_all(&column_dir).expect("column dir");
-            let written =
-                write_text_index(&column_dir, &attribute, TextValues::Arena(&values), plan)
-                    .expect("text index");
+            let written = write_text_index(
+                &column_dir,
+                &attribute,
+                TextValues::Arena(&values),
+                plan,
+                Steps::default(),
+            )
+            .expect("text index");
             assert_eq!(
                 written.terms,
                 expected_text_postings().len() as u64,
@@ -7037,6 +7261,7 @@ mod tests {
             &text_fixture_attribute(),
             TextValues::Arena(&values),
             TextIndexPlan::explicit(97, 2_048, 1 << 22),
+            Steps::default(),
         )
         .expect("text index");
 
@@ -7221,12 +7446,11 @@ mod tests {
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
             let written = write_column_values(
                 column_dir,
-                &values_path,
-                &presence_path,
                 &attribute,
                 values,
                 extents,
                 KeywordDictPlan::explicit(7, 5, None),
+                Steps::default(),
             )
             .expect("keyword column");
             assert!(written.presence, "the fixture has absent entities");
@@ -7280,12 +7504,11 @@ mod tests {
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
             let written = write_column_values(
                 &column_dir,
-                &values_path,
-                &presence_path,
                 &attribute,
                 &values,
                 None,
                 plan,
+                Steps::default(),
             )
             .expect("keyword column");
             assert!(written.presence, "the fixture has absent entities");
@@ -7338,12 +7561,11 @@ mod tests {
             let presence_path = column_dir.join(mosaica_filter::PRESENCE_FILE);
             write_column_values(
                 &column_dir,
-                &values_path,
-                &presence_path,
                 &attribute,
                 &values,
                 None,
                 plan,
+                Steps::default(),
             )
             .expect("keyword column");
 

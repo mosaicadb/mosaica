@@ -10,14 +10,19 @@
 //! deployment file and its refusal when there is none, the environment key and its `.env`, the
 //! `--file` override, and the flags that no longer exist.
 
+mod common;
+
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
 
-use arrow::array::{Float64Array, UInt32Array, UInt64Array};
+use arrow::array::{Float64Array, StringArray, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
+use common::progress_records;
+use mosaica_types::progress::{JobKind, JobState, Progress};
 use parquet::arrow::ArrowWriter;
 const N: u64 = 64;
 
@@ -737,4 +742,170 @@ fn the_schema_path_comes_from_the_deployment_config() {
     )
     .unwrap();
     assert!(build_in(tmp.path(), &[]).status.success());
+}
+
+// -------------------------------------------------------------------------------------------
+// --progress
+// -------------------------------------------------------------------------------------------
+
+/// A project whose declaration also indexes a keyword column, `tag`, and a text column, `note`,
+/// with `tag` taken from `tag_of`.
+fn indexed_project(dir: &Path, tag_of: fn(u64) -> Option<&'static str>) {
+    project(dir);
+    let schema = std::fs::read_to_string(dir.join("schema.toml")).unwrap();
+    std::fs::write(
+        dir.join("schema.toml"),
+        format!(
+            "{schema}[[attribute]]\nname = \"tag\"\ntype = \"keyword\"\nindex = true\n\
+             source = \"points\"\n\
+             [[attribute]]\nname = \"note\"\ntype = \"text\"\nindex = true\n\
+             source = \"points\"\n"
+        ),
+    )
+    .unwrap();
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("entity_id", DataType::UInt64, false),
+        Field::new("x", DataType::Float64, false),
+        Field::new("y", DataType::Float64, false),
+        Field::new("tag", DataType::Utf8, true),
+        Field::new("note", DataType::Utf8, true),
+    ]));
+    let ids: Vec<u64> = (0..N).collect();
+    let xs: Vec<f64> = ids.iter().map(|e| (e % 101) as f64).collect();
+    let ys: Vec<f64> = ids.iter().map(|e| ((e % 11) as f64) + 1000.0).collect();
+    let tags: Vec<Option<&str>> = ids.iter().map(|&e| tag_of(e)).collect();
+    let notes: Vec<Option<String>> = ids
+        .iter()
+        .map(|e| (e % 3 != 0).then(|| format!("river {} stone", e % 5)))
+        .collect();
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(UInt64Array::from(ids)),
+            Arc::new(Float64Array::from(xs)),
+            Arc::new(Float64Array::from(ys)),
+            Arc::new(StringArray::from(tags)),
+            Arc::new(StringArray::from(notes)),
+        ],
+    )
+    .unwrap();
+    let path = dir.join("points.parquet");
+    let mut w = ArrowWriter::try_new(File::create(path).unwrap(), schema, None).unwrap();
+    w.write(&batch).unwrap();
+    w.close().unwrap();
+}
+
+/// `--progress json` reports the build's steps in order, through every phase, one step per
+/// indexed column, each count within its total, and ends with a record of the finished build.
+#[test]
+fn json_progress_runs_through_every_phase_in_order_and_ends_finished() {
+    let tmp = tempfile::tempdir().unwrap();
+    indexed_project(tmp.path(), |e| (e % 4 != 0).then_some("t"));
+    let output = build_in(tmp.path(), &["--progress", "json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let records = progress_records(&output);
+    let phases: Vec<u32> = records.iter().map(|r| r.phase.index).collect();
+    assert!(
+        phases.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{phases:?}"
+    );
+    let mut distinct = phases.clone();
+    distinct.dedup();
+    let of = records[0].phase.of;
+    assert_eq!(distinct, (1..=of).collect::<Vec<u32>>());
+    assert!(records.iter().all(|r| r.job == JobKind::Build));
+    assert!(
+        records.iter().all(|r| r.done <= r.total),
+        "a count past its total"
+    );
+    let columns: BTreeSet<&String> = records
+        .iter()
+        .filter(|r| r.step == "filter_postings" || r.step == "text_index")
+        .filter_map(|r| r.context.as_ref())
+        .collect();
+    assert_eq!(columns.len(), 2, "{columns:?}");
+    let (last, earlier) = records.split_last().expect("at least one record");
+    assert_eq!(last.state, JobState::Finished);
+    assert_eq!(last.done, last.total);
+    assert!(earlier.iter().all(|r| r.state == JobState::Running));
+}
+
+/// A build that fails after it has started ends with a record of the failed build, in the step
+/// it failed in.
+#[test]
+fn a_build_that_fails_partway_ends_with_a_failed_record() {
+    let tmp = tempfile::tempdir().unwrap();
+    // An indexed keyword column with an empty string in it, which the column's index refuses.
+    indexed_project(tmp.path(), |e| Some(if e == 7 { "" } else { "t" }));
+    let output = build_in(tmp.path(), &["--progress", "json"]);
+    assert!(!output.status.success(), "{}", stderr(&output));
+    let records = progress_records(&output);
+    let [.., before, last] = &records[..] else {
+        panic!("fewer than two records: {}", stderr(&output));
+    };
+    assert_eq!(last.state, JobState::Failed, "{}", stderr(&output));
+    let step = |r: &Progress| (r.phase.index, r.step.clone(), r.context.clone());
+    assert_eq!(step(last), step(before));
+}
+
+/// `--progress none` adds nothing to what the build does or prints: its stdout, its stage
+/// timings and its stderr are the `json` build's, with the records taken out, and every step a
+/// record names is one of those stages. A build piped with no `--progress` prints progress as
+/// text, with no terminal control codes and no records.
+#[test]
+fn no_progress_prints_no_progress() {
+    let tmp = tempfile::tempdir().unwrap();
+    project(tmp.path());
+    // A budget stated, because the derived one follows the memory free at the moment.
+    let run = |name: &str, progress: &[&str]| {
+        let out = format!("bundles/{name}");
+        let timings = format!("{name}.json");
+        let flags = [
+            "--memory-budget",
+            "4g",
+            "--out",
+            &out,
+            "--stage-timings-json",
+            &timings,
+        ];
+        let output = build_in(tmp.path(), &[&flags[..], progress].concat());
+        assert!(output.status.success(), "{}", stderr(&output));
+        let path = tmp.path().join(timings);
+        let records: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let stages: Vec<String> = records
+            .iter()
+            .map(|r| r["stage"].as_str().unwrap().to_string())
+            .collect();
+        (output, stages)
+    };
+    let (json, json_stages) = run("a", &["--progress", "json"]);
+    let (none, none_stages) = run("b", &["--progress", "none"]);
+    let (auto, _) = run("c", &[]);
+
+    // The bundle's size follows the identity key, which each build generates afresh.
+    let report = |output: &Output, out: &str| -> Vec<String> {
+        stdout(output)
+            .replace(out, "OUT")
+            .split(", ")
+            .filter(|part| !part.ends_with("bytes on disk"))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(report(&json, "bundles/a"), report(&none, "bundles/b"));
+    assert_eq!(json_stages, none_stages);
+    assert!(progress_records(&json)
+        .iter()
+        .all(|r| json_stages.contains(&r.step.to_string())));
+    let without_records: Vec<String> = stderr(&json)
+        .lines()
+        .filter(|line| !line.starts_with('{'))
+        .map(|line| line.replace("bundles/a", "bundles/b"))
+        .collect();
+    let none_lines: Vec<String> = stderr(&none).lines().map(str::to_string).collect();
+    assert_eq!(none_lines, without_records);
+
+    assert!(!auto.stderr.contains(&0x1b), "{}", stderr(&auto));
+    assert!(progress_records(&auto).is_empty());
+    assert!(stderr(&auto).lines().count() > none_lines.len());
 }

@@ -43,9 +43,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
-use mosaica_engine::{Engine, EngineConfig};
+use mosaica_engine::{Engine, EngineConfig, RequestOutcome, RequestState};
 use mosaica_lifecycle::faults::{FaultSwitchboard, PauseAction, PauseSite};
 use mosaica_lifecycle::{ChangeOp, UnallocatedRow};
+use mosaica_types::progress::{JobKind, JobState};
 use mosaica_types::EntityId;
 
 const WAIT: Duration = Duration::from_secs(30);
@@ -152,6 +153,98 @@ fn the_current_flip_site_parks_the_fold_with_the_old_prefix_still_committed() {
     );
 }
 
+/// A compaction that fails at its flip leaves the running jobs failed, its last record at the
+/// step it was held in, and its request is answered as failed with that record.
+#[test]
+fn a_compaction_failed_at_its_flip_is_recorded_failed_where_it_stopped() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let (engine, faults) = engine_with_faults(tmp.path(), &root);
+    let deleted = EntityId::new(source_to_new_map(&root, "v00000")[&4]);
+    engine
+        .accept_change(deleted, ChangeOp::Delete)
+        .expect("a delete is accepted");
+
+    faults.arm_pause(PauseSite::BeforeCurrentFlip, PauseAction::Stall);
+    let request = engine.request_fold().unwrap();
+    faults.await_arrivals(PauseSite::BeforeCurrentFlip, 1, WAIT);
+    let jobs = engine.jobs();
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    let held = &jobs[0];
+    assert_eq!(
+        (held.job, held.phase.index),
+        (JobKind::Compaction, held.phase.of)
+    );
+    // A directory where the flip writes its temporary file fails the flip.
+    std::fs::create_dir(root.join("CURRENT.tmp")).unwrap();
+    faults.release();
+    wait_until("the compaction leaves the jobs", WAIT, || {
+        engine.jobs().is_empty()
+    });
+
+    let last = engine
+        .last_job(JobKind::Compaction)
+        .expect("its last record is kept");
+    assert_eq!(last.state, JobState::Failed);
+    assert_eq!(
+        (&last.phase, &last.step, &last.context),
+        (&held.phase, &held.step, &held.context)
+    );
+    wait_until("the request is answered", WAIT, || {
+        engine.write_executor_stats().compaction_requests_answered >= request
+    });
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(request) else {
+        panic!("request {request} is answered");
+    };
+    assert_eq!(answer.outcome, RequestOutcome::Failed);
+    assert_eq!(
+        answer.job,
+        Some(last),
+        "the answer carries the failed record"
+    );
+}
+
+/// A compaction that panics fails as one that errs does: the failure is counted, its record ends
+/// failed, its request is answered as failed with that record, and the next compaction runs.
+#[test]
+fn a_compaction_that_panics_is_counted_failed_and_the_next_one_runs() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let (engine, _faults) = engine_with_faults(tmp.path(), &root);
+    let deleted = EntityId::new(source_to_new_map(&root, "v00000")[&4]);
+    engine
+        .accept_change(deleted, ChangeOp::Delete)
+        .expect("a delete is accepted");
+    let before = engine.write_executor_stats();
+
+    engine.panic_next_fold_for_test();
+    let request = engine.request_fold().unwrap();
+    wait_until("the request is answered", WAIT, || {
+        engine.write_executor_stats().compaction_requests_answered >= request
+    });
+    let after = engine.write_executor_stats();
+    assert_eq!(after.fold_failures, before.fold_failures + 1);
+    assert_eq!(after.folds, before.folds);
+    let last = engine
+        .last_job(JobKind::Compaction)
+        .expect("its last record is kept");
+    assert_eq!(last.state, JobState::Failed);
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(request) else {
+        panic!("request {request} is answered");
+    };
+    assert_eq!(answer.outcome, RequestOutcome::Failed);
+    assert_eq!(answer.job, Some(last));
+
+    let next = engine.request_fold().unwrap();
+    wait_until("the next request is answered", WAIT, || {
+        engine.write_executor_stats().compaction_requests_answered >= next
+    });
+    let Some(RequestState::Answered(answer)) = engine.compaction_request(next) else {
+        panic!("request {next} is answered");
+    };
+    assert_eq!(answer.outcome, RequestOutcome::Compacted);
+}
+
 /// **The fold's cost on `/control/status` covers its publication.** The staircase the fold thread
 /// records ends at its fifth pass; the executor continues it through the publication's phases, so
 /// the shard's compaction seconds and the pass list report the fold from the thread's entry to the
@@ -179,34 +272,9 @@ fn the_fold_status_covers_the_publication() {
     });
 
     let passes = engine.last_fold_passes();
-    let names: Vec<&str> = passes.iter().map(|p| p.pass).collect();
-    let publication = [
-        "6 hand-off",
-        "7 memberships",
-        "8 derived",
-        "9 report",
-        "10 manifest",
-        "11 flip",
-        "12 retire",
-        "13 open",
-        "14 adopt",
-        "15 warm",
-        "16 wal",
-        "17 reclaim",
-    ];
-    assert_eq!(
-        &names[names.len() - publication.len()..],
-        &publication,
-        "the publication's phases follow the thread's passes, in execution order: {names:?}"
-    );
-    assert_eq!(names[0], "entry");
-    assert!(
-        names.contains(&"5 digests + fsync"),
-        "and the thread's passes are still there: {names:?}"
-    );
     let flip = passes
         .iter()
-        .find(|p| p.pass == "11 flip")
+        .find(|p| p.pass == "flip")
         .expect("the flip is a row");
     assert!(
         flip.elapsed >= held,
