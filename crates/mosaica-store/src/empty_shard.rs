@@ -45,15 +45,18 @@ pub struct EmptyShardWritten {
     pub segments: Vec<SegmentDescriptor>,
 }
 
-/// The kind a value column of `arrow_type` is written as: a keyword's ordinals and a text
-/// column's terms as `u32`, a category's codes at its width, and a number at its own.
+/// The kind a value column of `arrow_type` is written as, at the build, a flush and an empty
+/// shard alike: a keyword's ordinals and a category's `u16` and `u32` codes a block at a time, a
+/// `u8` category's codes flat, since a block can store them no narrower, and a number at its own
+/// width.
 pub fn value_column_kind(arrow_type: ScalarType, category: bool) -> mosaica_filter::ColumnKind {
     use mosaica_filter::ColumnKind;
     match arrow_type {
         ScalarType::Keyword | ScalarType::Text | ScalarType::Utf8 => ColumnKind::Ordinals,
         ScalarType::U8 => ColumnKind::U8,
+        ScalarType::U16 if category => ColumnKind::Ordinals16,
         ScalarType::U16 => ColumnKind::U16,
-        _ if category => ColumnKind::U32,
+        _ if category => ColumnKind::Ordinals,
         ScalarType::Bool => ColumnKind::U8,
         ScalarType::U32 => ColumnKind::U32,
         ScalarType::U64 => ColumnKind::U64,

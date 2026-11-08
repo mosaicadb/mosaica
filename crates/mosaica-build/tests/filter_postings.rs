@@ -385,6 +385,11 @@ fn the_derived_postings_agree_with_the_value_column() {
     let out = dir.path().join("bundle");
     let cdir = column_dir(&out, "department");
     let column = ValueColumn::open_dir(&cdir, mosaica_filter::Access::Mapped).unwrap();
+    assert_eq!(
+        mosaica_filter::ColumnKind::of(column.codes()),
+        mosaica_filter::ColumnKind::Ordinals16,
+        "a u16 category's codes are stored a block at a time"
+    );
     let postings = ColumnPostings::open_keyed(&postings_path(&out, "department")).unwrap();
 
     // Every entity, so the scan's candidate excludes nothing.

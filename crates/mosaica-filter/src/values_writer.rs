@@ -45,7 +45,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use croaring::{Bitmap, Portable};
 
-use crate::values::ordinals::{self, BlockEncoder, Parts, Width};
+use crate::values::ordinals::{self, BlockEncoder, CodeBytes, Parts, Width};
 use crate::values::Codes;
 
 /// Which family and width a column stores, decided before its first value arrives.
@@ -65,10 +65,13 @@ pub enum ColumnKind {
     I64,
     F32,
     F64,
-    /// A keyword layer's `u32` ordinals, written a block at a time ([`crate::BlockOrdinals`]).
+    /// `u32` codes, a keyword layer's ordinals or a `u32` category's codes, written a block at a
+    /// time ([`crate::BlockOrdinals`]).
     /// Pushed as `u32` chunks like any other column; the encoding is chosen at
     /// [`ValueColumnWriter::finish`], once the presence that divides the column into blocks is known.
     Ordinals,
+    /// A `u16` category's codes, written a block at a time. Pushed as `u16` chunks.
+    Ordinals16,
 }
 
 impl ColumnKind {
@@ -85,8 +88,25 @@ impl ColumnKind {
             Codes::I64(_) => ColumnKind::I64,
             Codes::F32(_) => ColumnKind::F32,
             Codes::F64(_) => ColumnKind::F64,
-            Codes::Ordinals(_) => ColumnKind::Ordinals,
+            Codes::Ordinals(o) => match o.code_bytes() {
+                CodeBytes::Two => ColumnKind::Ordinals16,
+                CodeBytes::Four => ColumnKind::Ordinals,
+            },
         }
+    }
+
+    /// The width of the codes a blocked kind writes, `None` for a column written flat.
+    fn code_bytes(self) -> Option<CodeBytes> {
+        match self {
+            ColumnKind::Ordinals => Some(CodeBytes::Four),
+            ColumnKind::Ordinals16 => Some(CodeBytes::Two),
+            _ => None,
+        }
+    }
+
+    /// Whether the column is written a block at a time.
+    fn blocked(self) -> bool {
+        self.code_bytes().is_some()
     }
 
     /// The Arrow type the file declares.
@@ -95,6 +115,7 @@ impl ColumnKind {
             ColumnKind::U8 => DataType::UInt8,
             ColumnKind::U16 => DataType::UInt16,
             ColumnKind::U32 | ColumnKind::Ordinals => DataType::UInt32,
+            ColumnKind::Ordinals16 => DataType::UInt16,
             ColumnKind::U64 => DataType::UInt64,
             ColumnKind::I8 => DataType::Int8,
             ColumnKind::I16 => DataType::Int16,
@@ -105,14 +126,19 @@ impl ColumnKind {
         }
     }
 
-    /// Bytes per value as pushed. **Every value column is fixed-width**: a keyword's values are
+    /// Bytes per value as spooled. **Every value column is fixed-width**: a keyword's values are
     /// `u32` ordinals into its layer's dictionary, and the dictionary is a separate artefact this
     /// writer knows nothing about, so there is no variable-width case to spool an offset array for.
+    /// Codes written a block at a time are spooled as `u32`s whatever their width.
     fn width(self) -> usize {
         match self {
             ColumnKind::U8 | ColumnKind::I8 => 1,
             ColumnKind::U16 | ColumnKind::I16 => 2,
-            ColumnKind::U32 | ColumnKind::I32 | ColumnKind::F32 | ColumnKind::Ordinals => 4,
+            ColumnKind::U32
+            | ColumnKind::I32
+            | ColumnKind::F32
+            | ColumnKind::Ordinals
+            | ColumnKind::Ordinals16 => 4,
             ColumnKind::U64 | ColumnKind::I64 | ColumnKind::F64 => 8,
         }
     }
@@ -388,14 +414,33 @@ impl ValueColumnWriter {
     /// wrongly, with no error anywhere — so it is refused rather than reinterpreted.
     pub fn push(&mut self, chunk: &Codes) -> io::Result<()> {
         let kind = ColumnKind::of(chunk);
-        let ordinals = self.kind == ColumnKind::Ordinals
-            && matches!(kind, ColumnKind::U32 | ColumnKind::Ordinals);
-        if kind != self.kind && !ordinals {
+        let accepted = kind == self.kind
+            || matches!(
+                (self.kind, kind),
+                (ColumnKind::Ordinals, ColumnKind::U32) | (ColumnKind::Ordinals16, ColumnKind::U16)
+            );
+        if !accepted {
             return Err(invalid(format!(
                 "value column at {}: declared {:?} but a chunk carried {kind:?}",
                 self.values_path.display(),
                 self.kind
             )));
+        }
+        if self.kind.blocked() {
+            let mut at = 0;
+            let mut codes = Vec::with_capacity(SCRATCH);
+            while at < chunk.len() {
+                let take = (chunk.len() - at).min(SCRATCH);
+                codes.clear();
+                chunk.extend_codes(at, take, &mut codes);
+                for c in &codes {
+                    self.scratch.extend_from_slice(&c.to_ne_bytes());
+                }
+                Self::flush_scratch(&mut self.values, &mut self.scratch)?;
+                at += take;
+            }
+            self.count += chunk.len();
+            return Ok(());
         }
         macro_rules! scalars {
             ($v:expr) => {{
@@ -421,17 +466,7 @@ impl ValueColumnWriter {
             Codes::I64(v) => scalars!(v),
             Codes::F32(v) => scalars!(v),
             Codes::F64(v) => scalars!(v),
-            Codes::Ordinals(o) => {
-                let mut decoded = Vec::with_capacity(SCRATCH);
-                let mut at = 0;
-                while at < o.len() {
-                    let take = (o.len() - at).min(SCRATCH);
-                    decoded.clear();
-                    o.for_each_in(at, take, |v| decoded.push(v));
-                    scalars!(&decoded);
-                    at += take;
-                }
-            }
+            Codes::Ordinals(_) => unreachable!("a blocked chunk is accepted only by a blocked kind"),
         }
         Ok(())
     }
@@ -461,9 +496,9 @@ impl ValueColumnWriter {
         let values_spool = values.path.clone();
 
         let buffer = values.map(self.count * self.kind.width())?;
-        if self.kind == ColumnKind::Ordinals {
+        if let Some(code_bytes) = self.kind.code_bytes() {
             let pushed = ScalarBuffer::<u32>::new(buffer, 0, self.count);
-            write_ordinal_blocks(&self.values_path, &pushed, presence)?;
+            write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
             drop(pushed);
             std::fs::remove_file(&values_spool)?;
             if let Some(p) = presence {
@@ -487,7 +522,9 @@ impl ValueColumnWriter {
             ColumnKind::I64 => borrowed!(arrow::array::Int64Array),
             ColumnKind::F32 => borrowed!(arrow::array::Float32Array),
             ColumnKind::F64 => borrowed!(arrow::array::Float64Array),
-            ColumnKind::Ordinals => unreachable!("ordinals are written above"),
+            ColumnKind::Ordinals | ColumnKind::Ordinals16 => {
+                unreachable!("blocked codes are written above")
+            }
         };
         // The array — and with it the mapping — is dropped inside, so the spool is only removed
         // once `values.arrow` is fully written.
@@ -538,13 +575,14 @@ fn spool_values<T: Copy, const N: usize>(
     Ok(())
 }
 
-/// Write `values`, a keyword layer's ordinals in slot order, as [`crate::BlockOrdinals`]: each
+/// Write `values`, a column's codes in slot order, as [`crate::BlockOrdinals`]: each
 /// block of the column `presence` addresses encoded at its smallest width. The encoded data is
 /// spooled as it is produced, so only one block is held in memory.
 fn write_ordinal_blocks(
     values_path: &Path,
     values: &[u32],
     presence: Option<&Bitmap>,
+    code_bytes: CodeBytes,
 ) -> io::Result<()> {
     let counts = ordinals::block_counts(values.len(), presence);
     let mut name = values_path.as_os_str().to_os_string();
@@ -559,7 +597,7 @@ fn write_ordinal_blocks(
     for &count in &counts {
         let block = &values[slot..slot + count as usize];
         slot += count as usize;
-        let width = encoder.encode(block);
+        let width = encoder.encode(block, code_bytes);
         let dict: &[u32] = match width {
             Width::Empty | Width::Plain => &[],
             Width::Const | Width::U8 | Width::U16 => &encoder.dict,
@@ -573,16 +611,22 @@ fn write_ordinal_blocks(
                 spool_values(&mut data, positions.map(|p| p as u8), u8::to_ne_bytes, &mut scratch)?
             }
             Width::U16 => spool_values(&mut data, positions, u16::to_ne_bytes, &mut scratch)?,
-            Width::Plain => {
-                spool_values(&mut data, block.iter().copied(), u32::to_ne_bytes, &mut scratch)?
-            }
+            Width::Plain => match code_bytes {
+                CodeBytes::Two => {
+                    let at = block.iter().map(|&c| c as u16);
+                    spool_values(&mut data, at, u16::to_ne_bytes, &mut scratch)?
+                }
+                CodeBytes::Four => {
+                    spool_values(&mut data, block.iter().copied(), u32::to_ne_bytes, &mut scratch)?
+                }
+            },
             Width::Empty | Width::Const => {}
         }
-        let size = ordinals::block_bytes(width, count, dict.len() as u32);
+        let size = ordinals::block_bytes(width, count, dict.len() as u32, code_bytes);
         let written = 4 * dict.len() as u64 + match width {
             Width::U8 => u64::from(count),
             Width::U16 => 2 * u64::from(count),
-            Width::Plain => 4 * u64::from(count),
+            Width::Plain => code_bytes.bytes() * u64::from(count),
             Width::Empty | Width::Const => 0,
         };
         data.write(&[0u8; 3][..(size - written) as usize])?;
@@ -597,6 +641,7 @@ fn write_ordinal_blocks(
         )));
     }
     let parts = Parts {
+        code_bytes,
         widths: ScalarBuffer::from(widths),
         counts: ScalarBuffer::from(counts),
         dict_lens: ScalarBuffer::from(dict_lens),

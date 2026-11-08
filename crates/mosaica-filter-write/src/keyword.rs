@@ -88,7 +88,7 @@ use std::io::{self, BufWriter};
 use std::path::Path;
 
 use croaring::Bitmap;
-use mosaica_filter::{Access, Codes, ColumnKind, SortedDict, SortedDictWriter, ValueColumn};
+use mosaica_filter::{Access, ColumnKind, SortedDict, SortedDictWriter, ValueColumn};
 
 use crate::{invalid, merge_order, write_merged};
 use mosaica_roaring::RankedRuns;
@@ -201,7 +201,10 @@ fn ordinal_columns<'a>(
     pass: &str,
 ) -> io::Result<Vec<&'a ValueColumn>> {
     for layer in layers {
-        if !matches!(layer.values.codes(), Codes::U32(_) | Codes::Ordinals(_)) {
+        if !matches!(
+            ColumnKind::of(layer.values.codes()),
+            ColumnKind::U32 | ColumnKind::Ordinals
+        ) {
             return Err(invalid(format!(
                 "{pass} was given a {:?} column; a keyword layer stores u32 ordinals into its own \
                  dictionary",
@@ -240,7 +243,7 @@ fn live_ordinals(
                 )));
             }
             run.clear();
-            if !codes.extend_ordinals(slot0, count, &mut run) {
+            if !codes.extend_codes(slot0, count, &mut run) {
                 return Err(invalid(format!(
                     "{pass}: a keyword layer stores u32 ordinals"
                 )));
@@ -487,7 +490,7 @@ impl<'a> KeyCursor<'a> {
 mod tests {
     use super::*;
     use arrow::buffer::ScalarBuffer;
-    use mosaica_filter::{write_sorted_dict, SortedDict};
+    use mosaica_filter::{write_sorted_dict, Codes, SortedDict};
 
     fn bitmap(entities: impl IntoIterator<Item = u32>) -> Bitmap {
         let mut b = Bitmap::new();

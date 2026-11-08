@@ -69,7 +69,7 @@ pub use record::{
 };
 pub use record_stack::{RecordExtentPaths, RecordStack};
 pub use values::{
-    BlockOrdinals,
+    BlockOrdinals, CodeBytes,
     base_numbers,
     as_f64, narrow_hi, narrow_lo, take_scan_work, Access, CodeSet, Codes, Endpoint, Narrowed,
     NativeBound, Scalar, ScanWork, ValueColumn, PRESENCE_FILE, VALUES_FILE, read_presence,

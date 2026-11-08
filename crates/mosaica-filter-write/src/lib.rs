@@ -122,20 +122,6 @@ const MERGE_CHUNK: usize = 1 << 20;
 /// §2.2), so seconds per column even at sixteen bands.
 pub const POSTINGS_BAND_ROWS: usize = 1 << 26;
 
-/// The vocabulary code at `slot`, for the three widths a category is stored at.
-///
-/// `None` for every other family — and that is a refusal rather than a default, because the value
-/// a wider or signed column holds is not a code and a posting keyed on it would name a value
-/// nothing carries.
-fn code_at(codes: &Codes, slot: usize) -> Option<u32> {
-    match codes {
-        Codes::U8(v) => Some(u32::from(v[slot])),
-        Codes::U16(v) => Some(u32::from(v[slot])),
-        Codes::U32(v) => Some(v[slot]),
-        _ => None,
-    }
-}
-
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
@@ -356,7 +342,7 @@ fn recolour(
     out: &mut Vec<u32>,
 ) -> io::Result<()> {
     let mut src = Vec::with_capacity(len);
-    if !codes.extend_ordinals(start, len, &mut src) {
+    if !codes.extend_codes(start, len, &mut src) {
         return Err(invalid(format!(
             "a remapped merge was given a {:?} column; only a keyword layer's u32 ordinals are \
              rewritten",
@@ -397,10 +383,15 @@ fn slice_codes(codes: &Codes, start: usize, len: usize) -> Codes {
         Codes::I64(v) => Codes::I64(v.slice(start, len)),
         Codes::F32(v) => Codes::F32(v.slice(start, len)),
         Codes::F64(v) => Codes::F64(v.slice(start, len)),
-        Codes::Ordinals(_) => {
+        Codes::Ordinals(o) => {
             let mut decoded = Vec::with_capacity(len);
-            codes.extend_ordinals(start, len, &mut decoded);
-            Codes::U32(decoded.into())
+            codes.extend_codes(start, len, &mut decoded);
+            match o.code_bytes() {
+                mosaica_filter::CodeBytes::Two => {
+                    Codes::U16(decoded.iter().map(|&c| c as u16).collect::<Vec<_>>().into())
+                }
+                mosaica_filter::CodeBytes::Four => Codes::U32(decoded.into()),
+            }
         }
     }
 }
@@ -422,30 +413,27 @@ pub trait CategorySource {
 /// the accelerator a *derivative* of the value column rather than a second producer that agrees.
 impl CategorySource for ValueColumn {
     fn for_each(&self, f: &mut dyn FnMut(u32, u32) -> io::Result<()>) -> io::Result<()> {
-        match self.codes() {
-            Codes::U8(_) | Codes::U16(_) | Codes::U32(_) => {}
-            // Only a category has a code, and a category is one of the three widths above.
-            // `Codes::at` answers `u32::MAX` for everything else, which would key a posting on a
-            // value nothing carries — refused rather than emitted.
-            _ => {
+        let codes = self.codes();
+        let present = self.present();
+        let mut slot0 = 0usize;
+        let mut run = Vec::new();
+        for (start, last) in mosaica_roaring::Runs::new(&present) {
+            let count = (last - start) as usize + 1;
+            run.clear();
+            // Only a category has a code, stored flat at its width or a block at a time. Any other
+            // column would key a posting on a value nothing carries, so it is refused.
+            if !codes.extend_codes(slot0, count, &mut run) {
                 return Err(invalid(
                     "postings were asked for over a column that is not a category; only a \
                      category's values carry an identity a posting can be keyed by",
-                ))
+                ));
             }
-        }
-        let present = self.present();
-        let mut slot0 = 0usize;
-        for (start, last) in mosaica_roaring::Runs::new(&present) {
-            for (k, entity) in (start..=last).enumerate() {
-                let code = code_at(self.codes(), slot0 + k)
-                    .expect("the family was checked before the walk began");
-                if code == ABSENT_CODE {
-                    continue;
+            for (entity, &code) in (start..=last).zip(&run) {
+                if code != ABSENT_CODE {
+                    f(entity, code)?;
                 }
-                f(entity, code)?;
             }
-            slot0 += (last - start) as usize + 1;
+            slot0 += count;
         }
         Ok(())
     }

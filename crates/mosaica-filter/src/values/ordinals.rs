@@ -1,17 +1,19 @@
-//! A keyword layer's ordinals, stored per block of 2¹⁶ entities in the narrowest encoding the
-//! block allows.
+//! A column of codes, stored per block of 2¹⁶ entities in the narrowest encoding the block allows:
+//! a keyword layer's ordinals, and a category's codes where its vocabulary is declared `u16` or
+//! `u32` wide.
 //!
-//! An ordinal is a `u32` position in the layer's sorted dictionary. Stored flat that is four bytes
-//! per entity whatever the block holds, and a scan that misses the page cache reads every one of
-//! them. A block here is the span of one Roaring container, so its present entities hold
-//! consecutive slots, and it is stored one of four ways:
+//! A keyword ordinal is a `u32` position in the layer's sorted dictionary, and a category code a
+//! number of the vocabulary's declared width, `w` bytes. Stored flat that is `w` bytes per entity
+//! whatever the block holds, and a scan that misses the page cache reads every one of them. A block
+//! here is the span of one Roaring container, so its present entities hold consecutive slots, and
+//! it is stored one of four ways:
 //!
 //! | Width | Stored | Bytes for `n` values, `d` distinct |
 //! |---|---|---|
-//! | `Const` | the one ordinal the block holds | 4 |
-//! | `U8` | the block's distinct ordinals, sorted, and a byte per value indexing them | `4d + n` |
+//! | `Const` | the one code the block holds | 4 |
+//! | `U8` | the block's distinct codes, sorted, and a byte per value indexing them | `4d + n` |
 //! | `U16` | the same, with two bytes per value | `4d + 2n` |
-//! | `Plain` | each value's ordinal | `4n` |
+//! | `Plain` | each value's code, at the column's width | `wn` |
 //!
 //! The writer takes the smallest, so no block is larger than flat storage. A block no entity
 //! carries a value in is `Empty` and holds nothing.
@@ -28,7 +30,7 @@ use std::io;
 use arrow::buffer::ScalarBuffer;
 use croaring::Bitmap;
 
-use super::{add_scan_work, counted, CodeSet, ScanWork, ValueColumn, PARALLEL_MIN};
+use super::{add_scan_work, counted, CodeSet, Packing, ScanWork, ValueColumn, PARALLEL_MIN};
 
 /// Bits of an entity id below its block: a block is one Roaring container's span.
 pub(crate) const BLOCK_BITS: u32 = 16;
@@ -68,10 +70,10 @@ impl Width {
         })
     }
 
-    /// The smallest width for `n` values holding `d` distinct ordinals, `0 < d <= n <= BLOCK_LEN`.
-    /// A tie goes to the narrower.
-    pub(crate) fn smallest(n: usize, d: usize) -> Width {
-        let plain = 4 * n;
+    /// The smallest width for `n` values holding `d` distinct codes, `0 < d <= n <= BLOCK_LEN`, in
+    /// a column whose codes are `code_bytes` wide. A tie goes to the narrower.
+    pub(crate) fn smallest(n: usize, d: usize, code_bytes: CodeBytes) -> Width {
+        let plain = code_bytes.bytes() as usize * n;
         if d == 1 && 4 < plain {
             return Width::Const;
         }
@@ -123,26 +125,54 @@ struct Block {
     at: u64,
 }
 
-impl Width {
-    /// Bytes one value takes.
-    fn value_bytes(self) -> u64 {
+/// How wide a column's codes are, and so a `Plain` block's values: a keyword's ordinals and a `u32`
+/// category's codes are four bytes, a `u16` category's two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodeBytes {
+    Two,
+    Four,
+}
+
+impl CodeBytes {
+    pub(crate) fn bytes(self) -> u64 {
         match self {
-            Width::Empty | Width::Const => 0,
-            Width::U8 => 1,
-            Width::U16 => 2,
-            Width::Plain => 4,
+            CodeBytes::Two => 2,
+            CodeBytes::Four => 4,
+        }
+    }
+
+    fn of(bytes: &str) -> Option<CodeBytes> {
+        match bytes {
+            "2" => Some(CodeBytes::Two),
+            "4" => Some(CodeBytes::Four),
+            _ => None,
         }
     }
 }
 
-/// Bytes a block takes in [`Parts::data`]: its dictionary's ordinals, its values, and the padding
-/// that starts the next block on a four-byte boundary.
-pub(crate) fn block_bytes(width: Width, count: u32, dict_len: u32) -> u64 {
-    (4 * u64::from(dict_len) + width.value_bytes() * u64::from(count)).next_multiple_of(4)
+impl Width {
+    /// Bytes one value takes in a column of `code_bytes` codes.
+    fn value_bytes(self, code_bytes: CodeBytes) -> u64 {
+        match self {
+            Width::Empty | Width::Const => 0,
+            Width::U8 => 1,
+            Width::U16 => 2,
+            Width::Plain => code_bytes.bytes(),
+        }
+    }
 }
 
-/// The arrays a [`BlockOrdinals`] is stored as, each one column of the file.
+/// Bytes a block takes in [`Parts::data`]: its dictionary's codes, its values, and the padding
+/// that starts the next block on a four-byte boundary.
+pub(crate) fn block_bytes(width: Width, count: u32, dict_len: u32, code_bytes: CodeBytes) -> u64 {
+    (4 * u64::from(dict_len) + width.value_bytes(code_bytes) * u64::from(count))
+        .next_multiple_of(4)
+}
+
+/// The arrays a [`BlockOrdinals`] is stored as, each one column of the file, and the width of its
+/// codes, which the file records beside them.
 pub(crate) struct Parts {
+    pub code_bytes: CodeBytes,
     /// One [`Width::tag`] per block.
     pub widths: ScalarBuffer<u8>,
     /// Values per block.
@@ -151,15 +181,16 @@ pub(crate) struct Parts {
     /// none for `Empty` and `Plain`.
     pub dict_lens: ScalarBuffer<u32>,
     /// The blocks in order, each its distinct ordinals ascending, then its values at its width
-    /// (positions in that dictionary, or ordinals for `Plain`) in native byte order, padded to a
+    /// (positions in that dictionary, or codes for `Plain`) in native byte order, padded to a
     /// whole `u32`. A block is one stretch of the file, so a scan reads the file in order.
     pub data: ScalarBuffer<u32>,
 }
 
-/// A keyword layer's ordinals in slot order, stored per block (see the module header).
+/// A column's codes in slot order, stored per block (see the module header).
 #[derive(Debug)]
 pub struct BlockOrdinals {
     len: usize,
+    code_bytes: CodeBytes,
     blocks: Vec<Block>,
     widths: ScalarBuffer<u8>,
     counts: ScalarBuffer<u32>,
@@ -212,7 +243,7 @@ impl BlockOrdinals {
                 at,
             });
             slot += u64::from(count);
-            at += block_bytes(width, count, dict_len);
+            at += block_bytes(width, count, dict_len, parts.code_bytes);
         }
         if at != 4 * parts.data.len() as u64 {
             return Err(invalid(format!(
@@ -222,6 +253,7 @@ impl BlockOrdinals {
         }
         Ok(BlockOrdinals {
             len: slot as usize,
+            code_bytes: parts.code_bytes,
             blocks,
             widths: parts.widths,
             counts: parts.counts,
@@ -233,6 +265,7 @@ impl BlockOrdinals {
     /// The arrays this column is stored as, sharing its buffers.
     pub(crate) fn parts(&self) -> Parts {
         Parts {
+            code_bytes: self.code_bytes,
             widths: self.widths.clone(),
             counts: self.counts.clone(),
             dict_lens: self.dict_lens.clone(),
@@ -247,6 +280,11 @@ impl BlockOrdinals {
 
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    /// How wide the column's codes are.
+    pub fn code_bytes(&self) -> CodeBytes {
+        self.code_bytes
     }
 
     /// How many blocks are stored at each width, in the order `Empty`, `Const`, `U8`, `U16`,
@@ -300,6 +338,29 @@ impl BlockOrdinals {
         &self.data[at..at + b.count as usize]
     }
 
+    /// `n` two-byte values from block `b`'s first, which may run on into the blocks after it.
+    fn run16(&self, b: &Block, n: usize) -> &[u16] {
+        let at = Self::values_at(b) / 2;
+        &self.data.inner().typed_data::<u16>()[at..at + n]
+    }
+
+    /// `n` four-byte values from block `b`'s first, likewise.
+    fn run32(&self, b: &Block, n: usize) -> &[u32] {
+        let at = Self::values_at(b) / 4;
+        &self.data[at..at + n]
+    }
+
+    /// Whether block `k` and the one after it are both `Plain`, with the second's values starting
+    /// where the first's end, so the two read as one slice.
+    fn plain_follows(&self, k: usize) -> bool {
+        let (Some(a), Some(b)) = (self.blocks.get(k), self.blocks.get(k + 1)) else {
+            return false;
+        };
+        a.width == Width::Plain
+            && b.width == Width::Plain
+            && b.at == a.at + self.code_bytes.bytes() * u64::from(a.count)
+    }
+
     /// The block holding `slot`, which must be below [`Self::len`].
     fn block_of_slot(&self, slot: usize) -> usize {
         self.blocks
@@ -324,7 +385,12 @@ impl BlockOrdinals {
             Width::Const => (0..len).for_each(|_| f(at(0))),
             Width::U8 => self.values8(b)[i..i + len].iter().for_each(|&p| f(at(usize::from(p)))),
             Width::U16 => self.values16(b)[i..i + len].iter().for_each(|&p| f(at(usize::from(p)))),
-            Width::Plain => self.values32(b)[i..i + len].iter().for_each(|&v| f(v)),
+            Width::Plain => match self.code_bytes {
+                CodeBytes::Two => self.values16(b)[i..i + len]
+                    .iter()
+                    .for_each(|&v| f(u32::from(v))),
+                CodeBytes::Four => self.values32(b)[i..i + len].iter().for_each(|&v| f(v)),
+            },
         }
     }
 
@@ -447,10 +513,26 @@ impl ValueColumn {
         }
         let run = |keys: &[u32]| {
             counted(|| {
-                let found: Vec<Bitmap> = keys
-                    .iter()
-                    .map(|&k| self.scan_block(ordinals, k, candidate, test))
-                    .collect();
+                let mut found = Vec::new();
+                let mut packing = Packing::Undecided;
+                let mut i = 0;
+                while i < keys.len() {
+                    let mut j = i;
+                    while j + 1 < keys.len()
+                        && keys[j + 1] == keys[j] + 1
+                        && ordinals.plain_follows(keys[j] as usize)
+                    {
+                        j += 1;
+                    }
+                    found.push(self.scan_span(
+                        ordinals,
+                        (keys[i], keys[j]),
+                        candidate,
+                        test,
+                        &mut packing,
+                    ));
+                    i = j + 1;
+                }
                 Bitmap::fast_or(&found.iter().collect::<Vec<_>>())
             })
         };
@@ -471,43 +553,67 @@ impl ValueColumn {
         Bitmap::fast_or(&found)
     }
 
-    /// One block of [`Self::scan_blocks`]: the block's values walked under a column addressing
-    /// them alone, so packing, the per-entity walk and the work count are the ones every scan
-    /// uses.
-    fn scan_block(
+    /// Blocks `k0..=k1` of [`Self::scan_blocks`], one block or a run of `Plain` blocks whose
+    /// values lie end to end: their values walked as one slice under a column addressing them
+    /// alone, so packing, the per-entity walk and the work count are the ones every scan uses, and
+    /// a run of blocks stored as plain codes costs one walk as a flat column's would. `packing`
+    /// carries the decision whether to pack from the first block a scan packs to the rest, as
+    /// one walk of a flat column does.
+    fn scan_span(
         &self,
         ordinals: &BlockOrdinals,
-        k: u32,
+        (k0, k1): (u32, u32),
         candidate: &Bitmap,
         test: &OrdinalTest<'_>,
+        packing: &mut Packing,
     ) -> Bitmap {
-        let b = &ordinals.blocks[k as usize];
-        if b.count == 0 {
+        let b = &ordinals.blocks[k0 as usize];
+        let n: usize = (k0..=k1)
+            .map(|k| ordinals.blocks[k as usize].count as usize)
+            .sum();
+        if n == 0 {
             return Bitmap::new();
         }
-        // The block is walked with its first entity at 0, so a block of a column every entity
-        // carries a value in keeps that column's positional walk, whole-block packing included.
-        let within = Bitmap::from_range(span(k));
-        let first = i64::from(k << BLOCK_BITS);
+        // The span is walked with its first entity at 0, so a column every entity carries a value
+        // in keeps its positional walk, whole-block packing included.
+        let within = Bitmap::from_range(*span(k0).start()..=*span(k1).end());
+        let first = i64::from(k0 << BLOCK_BITS);
         let candidate = candidate.and(&within).add_offset(-first);
         let column = ValueColumn::addressing(
             self.presence
                 .as_ref()
                 .map(|presence| presence.and(&within).add_offset(-first)),
         );
-        let n = b.count as usize;
+        // Each arm hands the walk its own predicate, so each is compiled for its own test.
+        macro_rules! walk {
+            ($values:expr, $pred:expr) => {
+                column.walk_one_packing(&candidate, $values, &$pred, packing)
+            };
+        }
         macro_rules! walk_positions {
             ($codes:expr) => {{
                 let codes = $codes;
                 match test.local(ordinals.block_dict(b)) {
-                    LocalTest::Eq(c) => column.walk_one(&candidate, codes, &|v| u32::from(*v) == c),
-                    LocalTest::Range(lo, hi) => column.walk_one(&candidate, codes, &|v| {
+                    LocalTest::Eq(c) => walk!(codes, |v| u32::from(*v) == c),
+                    LocalTest::Range(lo, hi) => walk!(codes, |v| {
                         let v = u32::from(*v);
                         lo <= v && v < hi
                     }),
-                    LocalTest::Set(set) => {
-                        column.walk_one(&candidate, codes, &|v| set.contains(u32::from(*v)))
-                    }
+                    LocalTest::Set(set) => walk!(codes, |v| set.contains(u32::from(*v))),
+                }
+            }};
+        }
+        macro_rules! walk_codes {
+            ($values:expr) => {{
+                let values = $values;
+                match test {
+                    OrdinalTest::Eq(x) => walk!(values, |v| u32::from(*v) == *x),
+                    OrdinalTest::In(w) => walk!(values, |v| w.binary_search(&u32::from(*v)).is_ok()),
+                    OrdinalTest::Range { lo, hi } => walk!(values, |v| {
+                        let v = u32::from(*v);
+                        *lo <= v && v <= *hi
+                    }),
+                    OrdinalTest::Set(s) => walk!(values, |v| s.contains(u32::from(*v))),
                 }
             }};
         }
@@ -515,29 +621,21 @@ impl ValueColumn {
             Width::Empty => Bitmap::new(),
             Width::Const => {
                 let held = test.global(ordinals.block_dict(b)[0]);
-                column.walk_one(&candidate, &CONST_CODES[..n], &|_| held)
+                walk!(&CONST_CODES[..n], |_: &u8| held)
             }
             Width::U8 => walk_positions!(ordinals.values8(b)),
             Width::U16 => walk_positions!(ordinals.values16(b)),
-            Width::Plain => {
-                let values = ordinals.values32(b);
-                match test {
-                    OrdinalTest::Eq(x) => column.walk_one(&candidate, values, &|v| v == x),
-                    OrdinalTest::In(w) => {
-                        column.walk_one(&candidate, values, &|v| w.binary_search(v).is_ok())
-                    }
-                    OrdinalTest::Range { lo, hi } => {
-                        column.walk_one(&candidate, values, &|v| lo <= v && v <= hi)
-                    }
-                    OrdinalTest::Set(s) => {
-                        column.walk_one(&candidate, values, &|v| s.contains(*v))
-                    }
-                }
-            }
+            Width::Plain => match ordinals.code_bytes {
+                CodeBytes::Two => walk_codes!(ordinals.run16(b, n)),
+                CodeBytes::Four => walk_codes!(ordinals.run32(b, n)),
+            },
         };
         found.add_offset(first)
     }
 }
+
+/// The schema metadata key the width of the column's codes is recorded under.
+const CODE_BYTES_KEY: &str = "code_bytes";
 
 /// The file's columns, in order: each is one row holding one of [`Parts`]' arrays.
 const FIELDS: [&str; 4] = ["width", "count", "dict_len", "data"];
@@ -579,7 +677,9 @@ pub(crate) fn batch_of_parts(parts: Parts) -> io::Result<arrow::record_batch::Re
         list_of::<UInt32Type>(parts.dict_lens),
         list_of::<UInt32Type>(parts.data),
     ];
-    arrow::record_batch::RecordBatch::try_new(std::sync::Arc::new(Schema::new(fields)), columns)
+    let schema = Schema::new(fields)
+        .with_metadata([(CODE_BYTES_KEY, parts.code_bytes.bytes().to_string())]);
+    arrow::record_batch::RecordBatch::try_new(std::sync::Arc::new(schema), columns)
         .map_err(|e| invalid(e.to_string()))
 }
 
@@ -633,7 +733,18 @@ pub(crate) fn parts_of_batch(
         }
         Ok(values.values().clone())
     }
+    let code_bytes = schema
+        .metadata()
+        .get(CODE_BYTES_KEY)
+        .and_then(|b| CodeBytes::of(b))
+        .ok_or_else(|| {
+            invalid(format!(
+                "ordinal blocks at {}: the schema records no code width of 2 or 4 bytes",
+                path.display()
+            ))
+        })?;
     Ok(Some(Parts {
+        code_bytes,
         widths: array::<UInt8Type>(batch, 0, path)?,
         counts: array::<UInt32Type>(batch, 1, path)?,
         dict_lens: array::<UInt32Type>(batch, 2, path)?,
@@ -653,9 +764,10 @@ pub(crate) struct BlockEncoder {
 }
 
 impl BlockEncoder {
-    /// Encode `values`, at most a block's worth, and return the width to store them at. The
-    /// dictionary and positions are left in `self` for every width but `Empty` and `Plain`.
-    pub(crate) fn encode(&mut self, values: &[u32]) -> Width {
+    /// Encode `values`, at most a block's worth of a column of `code_bytes` codes, and return the
+    /// width to store them at. The dictionary and positions are left in `self` for every width but
+    /// `Empty` and `Plain`.
+    pub(crate) fn encode(&mut self, values: &[u32], code_bytes: CodeBytes) -> Width {
         debug_assert!(values.len() <= BLOCK_LEN, "one block's values");
         self.dict.clear();
         self.positions.clear();
@@ -680,6 +792,6 @@ impl BlockEncoder {
             }
             self.positions[(key & (BLOCK_LEN as u64 - 1)) as usize] = (self.dict.len() - 1) as u16;
         }
-        Width::smallest(values.len(), self.dict.len())
+        Width::smallest(values.len(), self.dict.len(), code_bytes)
     }
 }

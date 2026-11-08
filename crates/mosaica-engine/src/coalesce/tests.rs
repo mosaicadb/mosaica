@@ -283,6 +283,10 @@ impl Fixture {
         let (values, presence, dict) = mosaica_filter::write_extent(
             &self.path(&Self::column_rel(column, view)),
             flush,
+            match dict_keys {
+                Some(_) => mosaica_filter::ColumnKind::Ordinals,
+                None => mosaica_filter::ColumnKind::U32,
+            },
             &mosaica_filter::Codes::U32(codes.into()),
             &presence,
             dict_keys.as_deref(),

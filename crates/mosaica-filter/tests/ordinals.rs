@@ -157,7 +157,7 @@ fn a_column_every_entity_carries_answers_as_its_flat_ordinals_do() {
         assert_eq!(blocks.value_of(entity), flat.value_of(entity), "entity {entity}");
     }
     let mut decoded = Vec::new();
-    assert!(blocks.codes().extend_ordinals(5, n - 10, &mut decoded));
+    assert!(blocks.codes().extend_codes(5, n - 10, &mut decoded));
     assert_eq!(decoded, values[5..n - 5]);
 }
 
@@ -257,4 +257,118 @@ fn blocks_that_do_not_fit_the_presence_are_refused_at_open() {
     )
     .expect("presence");
     assert!(ValueColumn::open_dir(dir.path(), Access::Read).is_err());
+}
+
+/// A `u16` category's codes, one of three shapes per block: one code, a few dozen, and nearly as
+/// many as the block holds.
+fn shaped16(n: usize, draw: &mut Draw) -> Vec<u16> {
+    (0..n)
+        .map(|slot| match (slot as u32 / BLOCK) % 3 {
+            0 => 9,
+            1 => 100 + draw.below(40) as u16,
+            _ => 1 + draw.below(65_535) as u16,
+        })
+        .collect()
+}
+
+#[test]
+fn a_u16_category_answers_and_reads_back_as_its_flat_codes() {
+    use mosaica_filter::{CodeBytes, RecordValue};
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut draw = Draw(0x51_7CC1_B727_220A);
+    let mut presence = Bitmap::new();
+    for k in [0u32, 1, 2, 5] {
+        for _ in 0..50_000 {
+            presence.add(k * BLOCK + draw.below(BLOCK));
+        }
+    }
+    let n = presence.cardinality() as usize;
+    let codes = shaped16(n, &mut draw);
+
+    let values_path = dir.path().join(VALUES_FILE);
+    let presence_path = dir.path().join(PRESENCE_FILE);
+    let mut writer =
+        ValueColumnWriter::create(&values_path, &presence_path, ColumnKind::Ordinals16)
+            .expect("create");
+    for chunk in codes.chunks(7_001) {
+        writer.push(&Codes::U16(chunk.to_vec().into())).expect("push");
+    }
+    writer.finish(Some(&presence)).expect("finish");
+    let blocks = ValueColumn::open_dir(dir.path(), Access::Mapped).expect("open");
+    let flat = ValueColumn::partial(Codes::U16(codes.clone().into()), presence.clone()).unwrap();
+
+    let Codes::Ordinals(stored) = blocks.codes() else {
+        panic!("a u16 category reads back as blocks");
+    };
+    assert_eq!(stored.code_bytes(), CodeBytes::Two);
+    assert_eq!(ColumnKind::of(blocks.codes()), ColumnKind::Ordinals16);
+    let (widths, bytes) = stored.census();
+    assert_eq!(widths[0], 2, "the two blocks no entity is present in");
+    assert!(widths[1] > 0 && widths[2] > 0 && widths[4] > 0, "{widths:?}");
+    assert_eq!(widths[3], 0, "two-byte positions are never smaller than two-byte codes");
+    assert!(bytes < 2 * n as u64, "{bytes} bytes for {n} two-byte codes");
+
+    let wide: Vec<u32> = codes.iter().map(|&c| u32::from(c)).collect();
+    let mut cases = candidates(BLOCK * 6, &mut draw);
+    cases.push(presence.clone());
+    for candidate in &cases {
+        agree(&blocks, &flat, candidate, &wide);
+        let mut seen = 0;
+        blocks.visit_codes(candidate, |_| seen += 1);
+        assert_eq!(seen, candidate.and_cardinality(&presence), "one code per candidate entity");
+    }
+    let records = |column: &ValueColumn| {
+        let mut out = Vec::new();
+        column
+            .for_each_record_value_in(&presence, |e, v| {
+                out.push((e, v));
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+        out
+    };
+    let (a, b) = (records(&blocks), records(&flat));
+    assert_eq!(a, b, "records read back at the declared width");
+    assert!(matches!(a[0].1, RecordValue::U16(_)));
+}
+
+#[test]
+fn a_u16_column_refuses_wider_codes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut writer = ValueColumnWriter::create(
+        &dir.path().join(VALUES_FILE),
+        &dir.path().join(PRESENCE_FILE),
+        ColumnKind::Ordinals16,
+    )
+    .expect("create");
+    assert!(writer.push(&Codes::U32(vec![70_000].into())).is_err());
+}
+
+#[test]
+fn a_run_of_plain_blocks_answers_as_its_flat_codes() {
+    let mut draw = Draw(0xA076_1D64_78BD_642F);
+    let n = (BLOCK * 5 + 77) as usize;
+    let values: Vec<u32> = (0..n).map(|_| draw.below(1 << 30)).collect();
+    let dense = tempfile::tempdir().expect("tempdir");
+    let blocks = written(dense.path(), &values, None);
+    let Codes::Ordinals(stored) = blocks.codes() else {
+        panic!("blocks");
+    };
+    assert_eq!(stored.census().0, [0, 0, 0, 0, 6], "every block plain");
+    for candidate in candidates(n as u32 + 3, &mut draw) {
+        agree(&blocks, &flat(&values, None), &candidate, &values);
+    }
+
+    let mut presence = Bitmap::new();
+    for k in [0u32, 1, 2, 4] {
+        for _ in 0..30_001 {
+            presence.add(k * BLOCK + draw.below(BLOCK));
+        }
+    }
+    let n = presence.cardinality() as usize;
+    let partial = tempfile::tempdir().expect("tempdir");
+    let blocks = written(partial.path(), &values[..n], Some(&presence));
+    for candidate in candidates(BLOCK * 5, &mut draw) {
+        agree(&blocks, &flat(&values[..n], Some(&presence)), &candidate, &values[..n]);
+    }
 }
