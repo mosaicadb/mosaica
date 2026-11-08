@@ -30,44 +30,48 @@
 //! # Measured 2026-11-08, a 4-core cloud container with 15 GB of memory, release
 //!
 //! 2²⁵ entities, every one carrying a value, median of 9. A cold scan of 138 MB took about
-//! 55–65 ms here, so this disc reads about 2.3 GB/s; the ratios, not the times, are what carry
-//! to another machine. Cold figures moved by up to 20% between otherwise identical runs.
+//! 60–65 ms here, so this disc reads about 2.2 GB/s; the ratios, not the times, are what carry
+//! to another machine. Neither kind of figure is steady on this machine: across runs of one binary
+//! a cold figure moved by up to 20% and a warm one by up to 1.7× (the first row's flat scan
+//! measured 11–20 ms).
 //!
 //! | codes | distinct | order | flat MB | blocks MB | warm flat ms | warm blocks ms | cold flat ms | cold blocks ms |
 //! |---|---:|---|---:|---:|---:|---:|---:|---:|
-//! | u32 | 16 | uniform | 138 | 35 | 11.8 | 13.2 | 61.4 | 23.0 |
-//! | u32 | 16 | skewed | 138 | 35 | 11.1 | 11.1 | 61.3 | 21.9 |
-//! | u32 | 16 | sorted | 138 | 0 | 10.6 | 0.3 | 56.6 | 0.4 |
-//! | u32 | 10 000 | uniform | 138 | 90 | 11.2 | 7.3 | 61.9 | 47.9 |
-//! | u32 | 10 000 | skewed | 138 | 89 | 17.9 | 14.9 | 66.2 | 47.7 |
-//! | u32 | 10 000 | sorted | 138 | 35 | 8.8 | 7.3 | 67.6 | 21.1 |
-//! | u32 | 10⁷ | uniform | 138 | 138 | 10.3 | 12.5 | 62.7 | 85.5 |
-//! | u32 | 10⁷ | skewed | 138 | 138 | 11.1 | 12.2 | 61.7 | 74.1 |
-//! | u32 | 10⁷ | sorted | 138 | 110 | 11.1 | 9.2 | 63.9 | 60.0 |
-//! | u32 | 2²⁵ | uniform | 138 | 138 | 11.1 | 12.4 | 62.9 | 73.9 |
-//! | u32 | 2²⁵ | skewed | 138 | 138 | 12.5 | 11.3 | 60.3 | 70.0 |
-//! | u32 | 2²⁵ | sorted | 138 | 138 | 9.9 | 11.6 | 60.5 | 71.0 |
-//! | u16 | 16 | uniform | 71 | 35 | 12.5 | 13.4 | 33.9 | 24.9 |
-//! | u16 | 16 | skewed | 71 | 35 | 11.1 | 11.5 | 31.7 | 21.4 |
-//! | u16 | 16 | sorted | 71 | 0 | 6.5 | 0.4 | 30.3 | 0.5 |
-//! | u16 | 1 000 | uniform | 71 | 69 | 7.7 | 8.1 | 32.5 | 34.1 |
-//! | u16 | 1 000 | skewed | 71 | 69 | 10.2 | 12.3 | 35.3 | 40.1 |
-//! | u16 | 1 000 | sorted | 71 | 35 | 6.6 | 9.0 | 33.8 | 20.0 |
-//! | u16 | 60 000 | uniform | 71 | 69 | 6.7 | 7.9 | 31.8 | 36.7 |
-//! | u16 | 60 000 | skewed | 71 | 69 | 7.5 | 6.7 | 32.8 | 35.2 |
-//! | u16 | 60 000 | sorted | 71 | 35 | 5.1 | 9.5 | 32.2 | 18.7 |
+//! | u32 | 16 | uniform | 138 | 35 | 20.4 | 13.5 | 63.4 | 22.5 |
+//! | u32 | 16 | skewed | 138 | 35 | 19.6 | 11.2 | 67.0 | 23.4 |
+//! | u32 | 16 | sorted | 138 | 0 | 10.4 | 0.4 | 67.6 | 0.6 |
+//! | u32 | 10 000 | uniform | 138 | 90 | 12.6 | 9.9 | 63.5 | 52.9 |
+//! | u32 | 10 000 | skewed | 138 | 89 | 17.4 | 12.8 | 68.6 | 49.8 |
+//! | u32 | 10 000 | sorted | 138 | 35 | 12.4 | 6.8 | 64.3 | 17.5 |
+//! | u32 | 10⁷ | uniform | 138 | 138 | 12.2 | 13.7 | 62.4 | 74.9 |
+//! | u32 | 10⁷ | skewed | 138 | 138 | 11.0 | 13.8 | 60.5 | 67.8 |
+//! | u32 | 10⁷ | sorted | 138 | 110 | 12.1 | 10.7 | 64.7 | 53.8 |
+//! | u32 | 2²⁵ | uniform | 138 | 138 | 11.0 | 13.0 | 66.3 | 63.3 |
+//! | u32 | 2²⁵ | skewed | 138 | 138 | 10.4 | 13.9 | 62.0 | 64.5 |
+//! | u32 | 2²⁵ | sorted | 138 | 138 | 10.9 | 13.4 | 65.4 | 68.3 |
+//! | u16 | 16 | uniform | 71 | 35 | 12.9 | 11.1 | 32.0 | 26.1 |
+//! | u16 | 16 | skewed | 71 | 35 | 15.2 | 12.2 | 35.7 | 20.8 |
+//! | u16 | 16 | sorted | 71 | 0 | 7.6 | 0.3 | 32.4 | 0.5 |
+//! | u16 | 1 000 | uniform | 71 | 69 | 9.0 | 9.9 | 29.0 | 33.3 |
+//! | u16 | 1 000 | skewed | 71 | 69 | 12.7 | 14.7 | 34.1 | 38.4 |
+//! | u16 | 1 000 | sorted | 71 | 35 | 9.0 | 6.7 | 29.6 | 18.0 |
+//! | u16 | 60 000 | uniform | 71 | 69 | 9.0 | 9.6 | 30.1 | 37.8 |
+//! | u16 | 60 000 | skewed | 71 | 69 | 10.0 | 9.5 | 33.1 | 37.7 |
+//! | u16 | 60 000 | sorted | 71 | 35 | 7.4 | 6.2 | 31.4 | 19.1 |
 //!
 //! Blocks shrink a column wherever a block holds few distinct codes for its entities, and a cold
-//! scan then reads less: 2.5–3× faster for four-byte codes at 16 values, 1.3–1.4× at 10 000 drawn
-//! independently, 1.4–1.7× for two-byte codes at 16 values or in runs, and far more where whole
+//! scan then reads less: 2.5–3× faster for four-byte codes at 16 values, 1.2–1.4× at 10 000 drawn
+//! independently, 1.2–1.7× for two-byte codes at 16 values or in runs, and far more where whole
 //! blocks hold one value. Where a block holds too many distinct codes to shrink, it is stored
 //! plain, and the file is flat storage's size; a cold scan of such a column measured 0–35% slower
-//! than the flat one across runs, with the same faults, and a warm one within about 15%. A
-//! two-byte column whose values come in runs scans 1.4–1.9× slower warm, though it reads half the
-//! bytes cold.
-//!
+//! than the flat one across runs, with the same faults, and a warm one up to about 35% slower.
+//! Where blocks shrink a column, a warm scan matched or beat the flat one in every repeated run:
+//! fourteen runs of the two-byte columns in runs gave 5.4–6.9 ms against 6.2–9.0 ms flat, on one
+//! thread as on four.
+
 //! A viewport's candidate, at 10 000 four-byte values drawn uniformly, stored per block, against a
-//! scan of the whole set (7.3 ms warm, 47.9 ms cold). `narrows` is the engine's rule:
+//! scan of the whole set (7.3 ms warm, 47.9 ms cold), from an earlier run of this binary.
+//! `narrows` is the engine's rule:
 //!
 //! | share | layout | entities | blocks | warm ms | cold ms | narrows |
 //! |---:|---|---:|---:|---:|---:|---|
