@@ -52,7 +52,6 @@ use rayon::prelude::*;
 use mosaica_filter::RecordValue;
 use mosaica_lifecycle::WalScalar;
 use mosaica_spatial::tiler::ScalarType;
-use mosaica_store::key_index;
 use mosaica_store::read::ScalarSlice;
 
 use super::set::{Cx, Set};
@@ -123,24 +122,31 @@ impl Kind {
         })
     }
 
+    /// The values the served column of an integer or timestamp kind holds; `None` for a float.
+    fn span(self) -> Option<(i128, i128)> {
+        match self {
+            Kind::Unsigned => ScalarType::U64,
+            Kind::Signed => ScalarType::I64,
+            Kind::Timestamp => ScalarType::TimestampUs,
+            Kind::Float => return None,
+        }
+        .integer_range()
+    }
+
     /// Edges moved inside the span the served column holds. No stored value lies outside that
     /// span, so the move takes no value into another bin.
     fn clamp(self, edges: Vec<i128>) -> Vec<i128> {
-        let (lo, hi) = match self {
-            Kind::Unsigned => (0, i128::from(u64::MAX)),
-            _ => (i128::from(i64::MIN), i128::from(i64::MAX)),
+        let Some((lo, hi)) = self.span() else {
+            return edges;
         };
         edges.into_iter().map(|e| e.clamp(lo, hi)).collect()
     }
 
-    /// `x` as a `u64` key that orders as the values do, where a column of this integer or
-    /// timestamp kind can hold it.
+    /// `x` as a `u64` key that orders as the values do: its distance above the bottom of the span,
+    /// where the span holds it.
     fn key(self, x: i128) -> Option<u64> {
-        match self {
-            Kind::Unsigned => u64::try_from(x).ok().map(key_index::unsigned_key),
-            Kind::Signed | Kind::Timestamp => i64::try_from(x).ok().map(key_index::signed_key),
-            Kind::Float => None,
-        }
+        let (lo, hi) = self.span()?;
+        (lo..=hi).contains(&x).then(|| (x - lo) as u64)
     }
 }
 
@@ -1693,8 +1699,6 @@ mod tests {
     /// themselves: at and either side of every edge, at each end of the column's span and past it.
     #[test]
     fn an_integer_falls_in_the_bin_whose_edges_hold_it_in_every_kind() {
-        let (i_min, i_max) = (i128::from(i64::MIN), i128::from(i64::MAX));
-        let u_max = i128::from(u64::MAX);
         let big = 1i128 << 63;
         let year = |y: i64| date(y, 1, 1) as i64;
         let cases = [
@@ -1708,10 +1712,7 @@ mod tests {
             (Kind::Timestamp, readable_times(i64::MIN, i64::MAX, 3)),
         ];
         for (kind, edges) in cases {
-            let (lo, hi) = match kind {
-                Kind::Unsigned => (0, u_max),
-                _ => (i_min, i_max),
-            };
+            let (lo, hi) = kind.span().expect("an integer kind has a span");
             let n = edges.len() - 1;
             let oracle = |x: i128| {
                 (0..n)
