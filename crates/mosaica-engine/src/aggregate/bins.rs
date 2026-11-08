@@ -52,6 +52,7 @@ use rayon::prelude::*;
 use mosaica_filter::RecordValue;
 use mosaica_lifecycle::WalScalar;
 use mosaica_spatial::tiler::ScalarType;
+use mosaica_store::key_index;
 use mosaica_store::read::ScalarSlice;
 
 use super::set::{Cx, Set};
@@ -130,6 +131,16 @@ impl Kind {
             _ => (i128::from(i64::MIN), i128::from(i64::MAX)),
         };
         edges.into_iter().map(|e| e.clamp(lo, hi)).collect()
+    }
+
+    /// `x` as a `u64` key that orders as the values do, where a column of this integer or
+    /// timestamp kind can hold it.
+    fn key(self, x: i128) -> Option<u64> {
+        match self {
+            Kind::Unsigned => u64::try_from(x).ok().map(key_index::unsigned_key),
+            Kind::Signed | Kind::Timestamp => i64::try_from(x).ok().map(key_index::signed_key),
+            Kind::Float => None,
+        }
     }
 }
 
@@ -356,25 +367,19 @@ impl Bins {
         timings: &mut AggregateTimings,
     ) -> Result<(Counts, Counted)> {
         let bins = edges.bins();
-        // With no bin, every value is in `rest`.
         let (sides, sampled) = match edges {
-            Edges::Floats(edges) if bins > 0 => self.tally(
-                cx,
-                set,
-                || Histogram::new(&edges[..bins], edges[bins]),
-                timings,
-            )?,
-            Edges::Ints(edges) if bins > 0 => {
-                let words = Words::new(&edges[..bins], edges[bins], self.kind);
-                self.tally(
-                    cx,
-                    set,
-                    || Histogram::new(&edges[..bins], edges[bins]).with_words(&words),
-                    timings,
-                )?
+            Edges::Floats(edges) => {
+                self.tally(cx, set, || Histogram::<f64>::new(edges, self.kind), timings)?
             }
-            Edges::Floats(_) => self.tally(cx, set, || Histogram::<f64>::new(&[], 0.0), timings)?,
-            Edges::Ints(_) => self.tally(cx, set, || Histogram::<i128>::new(&[], 0), timings)?,
+            Edges::Ints(edges) => {
+                let keys = keys(edges, self.kind).ok_or_else(|| {
+                    EngineError::Malformed(format!(
+                        "field '{}' has a bin edge outside its column's span",
+                        self.field.column
+                    ))
+                })?;
+                self.tally(cx, set, || Histogram::<i128>::new(&keys, self.kind), timings)?
+            }
         };
         let items = sides.iter().map(|side| side.items).sum();
         Ok((
@@ -806,8 +811,10 @@ trait Num: Copy + PartialOrd + Send + Sync {
     fn float(x: f64) -> Self;
     fn finite(self) -> bool;
     fn number(self) -> Number;
-    /// This value plus `shift` as a `u64`, where it is an integer and the sum fits.
-    fn word(self, shift: i128) -> Option<u64>;
+    /// What a histogram compares this value with its edges as, in a field of kind `kind`: a float
+    /// as itself, an integer as its key ([`Kind::key`]), where it has one.
+    type Edge: Copy + PartialOrd + Send + Sync;
+    fn edge(self, kind: Kind) -> Option<Self::Edge>;
     fn add_to(sum: &mut Self::Sum, x: Self);
     fn joined(sum: Self::Sum, other: Self::Sum) -> Self::Sum;
     fn exact(sum: Self::Sum) -> Sum;
@@ -860,8 +867,9 @@ impl Num for i128 {
     fn number(self) -> Number {
         Number::Int(self)
     }
-    fn word(self, shift: i128) -> Option<u64> {
-        self.checked_add(shift).and_then(|w| u64::try_from(w).ok())
+    type Edge = u64;
+    fn edge(self, kind: Kind) -> Option<u64> {
+        kind.key(self)
     }
     type Sum = i128;
     fn add_to(sum: &mut i128, x: Self) {
@@ -888,8 +896,9 @@ impl Num for f64 {
     fn number(self) -> Number {
         Number::Float(self)
     }
-    fn word(self, _: i128) -> Option<u64> {
-        None
+    type Edge = f64;
+    fn edge(self, _: Kind) -> Option<f64> {
+        Some(self)
     }
     type Sum = ExactSum;
     fn add_to(sum: &mut ExactSum, x: Self) {
@@ -1041,32 +1050,22 @@ impl Reader<'_> {
     }
 }
 
-/// A count per bin: bin `b` holds `lowers[b] <= x` up to the next lower bound, and the last bin
-/// holds up to `upper` inclusive.
-struct Histogram<'e, K> {
-    lowers: &'e [K],
-    upper: K,
-    /// The same edges as words, where an integer value is placed by them.
-    words: Option<&'e Words>,
+/// A count per bin of `edges`, ascending: bin `b` holds `edges[b] <= x` up to the next edge, and
+/// the last bin holds its upper edge too. Values are compared as [`Num::edge`] gives them.
+struct Histogram<'e, K: Num> {
+    edges: &'e [K::Edge],
+    kind: Kind,
     bins: Vec<u64>,
     rest: u64,
 }
 
 impl<'e, K: Num> Histogram<'e, K> {
-    fn new(lowers: &'e [K], upper: K) -> Self {
+    fn new(edges: &'e [K::Edge], kind: Kind) -> Self {
         Histogram {
-            lowers,
-            upper,
-            words: None,
-            bins: vec![0; lowers.len()],
+            edges,
+            kind,
+            bins: vec![0; edges.len().saturating_sub(1)],
             rest: 0,
-        }
-    }
-
-    fn with_words(self, words: &'e Words) -> Self {
-        Histogram {
-            words: Some(words),
-            ..self
         }
     }
 }
@@ -1074,15 +1073,14 @@ impl<'e, K: Num> Histogram<'e, K> {
 impl<K: Num> Tally<K> for Histogram<'_, K> {
     #[inline]
     fn add(&mut self, x: K, _: u32) {
-        let bin = match self.words.and_then(|w| Some((w, x.word(w.shift)?))) {
-            Some((words, word)) => words.bin(word),
-            // A NaN is below no bound and so in no bin.
-            None => self
-                .lowers
+        let bins = self.bins.len();
+        // A NaN is below no edge. An integer no column of its kind can hold is outside every edge.
+        let bin = x.edge(self.kind).and_then(|x| {
+            self.edges[..bins]
                 .partition_point(|&lower| lower <= x)
                 .checked_sub(1)
-                .filter(|_| x <= self.upper),
-        };
+                .filter(|_| x <= self.edges[bins])
+        });
         match bin {
             Some(bin) => self.bins[bin] += 1,
             None => self.rest += 1,
@@ -1098,46 +1096,10 @@ impl<K: Num> Tally<K> for Histogram<'_, K> {
     }
 }
 
-/// A histogram's integer edges moved by `shift` into `u64` words, which order as the edges do and
-/// compare several times faster than `i128`. A value moved by the same shift is placed by its word
-/// exactly as by the edges; one whose word is outside `u64` is placed by the edges.
-struct Words {
-    /// Moves the span of a field's kind onto `0..=u64::MAX`.
-    shift: i128,
-    /// The lower edges' words, one below every word held at 0. The edges above every word hold no
-    /// value and are left off the end, which moves no bin.
-    lowers: Vec<u64>,
-    /// The upper edge's word, held at `u64::MAX` above every word, `None` below every word.
-    upper: Option<u64>,
-}
-
-impl Words {
-    fn new(lowers: &[i128], upper: i128, kind: Kind) -> Words {
-        let shift = match kind {
-            Kind::Unsigned => 0,
-            _ => -i128::from(i64::MIN),
-        };
-        let top = i128::from(u64::MAX);
-        Words {
-            shift,
-            lowers: lowers
-                .iter()
-                .map(|&lower| lower + shift)
-                .take_while(|&lower| lower <= top)
-                .map(|lower| lower.max(0) as u64)
-                .collect(),
-            upper: (upper + shift >= 0).then(|| (upper + shift).min(top) as u64),
-        }
-    }
-
-    /// The bin `word` falls in, or `None` where it is in none.
-    #[inline]
-    fn bin(&self, word: u64) -> Option<usize> {
-        self.lowers
-            .partition_point(|&lower| lower <= word)
-            .checked_sub(1)
-            .filter(|_| self.upper.is_some_and(|upper| word <= upper))
-    }
+/// Integer edges as the keys their values are compared by ([`Kind::key`]), or `None` where an
+/// edge is outside the span a column of `kind` holds.
+fn keys(edges: &[i128], kind: Kind) -> Option<Vec<u64>> {
+    edges.iter().map(|&edge| kind.key(edge)).collect()
 }
 
 /// Whether `lower` is below `upper`, comparing two integers exactly.
@@ -1710,7 +1672,7 @@ mod tests {
     #[test]
     fn a_value_falls_in_the_bin_whose_edges_hold_it_and_the_last_bin_is_closed() {
         let edges = [0.0, 0.5, 1.0, 1.5];
-        let mut floats = Histogram::new(&edges[..3], edges[3]);
+        let mut floats = Histogram::<f64>::new(&edges, Kind::Float);
         for x in [
             -0.1,
             0.0,
@@ -1725,64 +1687,49 @@ mod tests {
             floats.add(x, 0);
         }
         assert_eq!((floats.bins.clone(), floats.rest), (vec![2, 1, 2], 4));
-        // Integers past 2^63 against exact edges.
-        let big = 1i128 << 63;
-        let edges = equal_ints(big, big + 100, 4);
-        let mut ints = Histogram::new(&edges[..4], edges[4]);
-        for x in [
-            big - 1,
-            big,
-            big + 5,
-            big + 24,
-            big + 25,
-            big + 100,
-            big + 101,
-        ] {
-            ints.add(x, 0);
-        }
-        assert_eq!((ints.bins.clone(), ints.rest), (vec![3, 1, 0, 1], 2));
     }
 
-    /// Placed by words, every value of a kind's span falls in the bin its edges give, with edges
-    /// inside, past and at either end of the span. A value past the span is placed by the edges.
+    /// Integer edges as a field of each kind is served them, its values placed against the edges
+    /// themselves: at and either side of every edge, at each end of the column's span and past it.
     #[test]
-    fn an_integer_is_placed_by_its_word_as_by_its_edges() {
+    fn an_integer_falls_in_the_bin_whose_edges_hold_it_in_every_kind() {
         let (i_min, i_max) = (i128::from(i64::MIN), i128::from(i64::MAX));
         let u_max = i128::from(u64::MAX);
-        let cases: Vec<(Kind, Vec<i128>)> = vec![
-            (Kind::Signed, vec![-100, -3, 0, 7, 100]),
-            (Kind::Signed, vec![i_min - 5, -3, 0, 7, i_max + 10]),
-            (Kind::Signed, vec![i_min - 9, i_min - 5, i_min, i_max, i_max + 1, i_max + 2]),
-            (Kind::Signed, vec![i_min - 9, i_min - 1]),
-            (Kind::Signed, vec![i_max + 1, i_max + 9]),
-            (Kind::Timestamp, vec![i_min, -1, 0, 1, i_max]),
-            (Kind::Unsigned, vec![0, 10, 1 << 63, u_max]),
-            (Kind::Unsigned, vec![-7, 5, u_max - 1, u_max + 3]),
-            (Kind::Unsigned, vec![u_max + 1, u_max + 2]),
+        let big = 1i128 << 63;
+        let year = |y: i64| date(y, 1, 1) as i64;
+        let cases = [
+            (Kind::Unsigned, equal_ints(big - 50, big + 50, 4)),
+            // Repeated edges, as clamping a range leaves them.
+            (Kind::Unsigned, Kind::Unsigned.clamp(equal_ints(-100, 100, 4))),
+            (Kind::Unsigned, Kind::Unsigned.clamp(equal_ints(-10, i128::MAX, 3))),
+            (Kind::Signed, Kind::Signed.clamp(equal_ints(i128::MIN, i128::MAX, 2))),
+            (Kind::Signed, Kind::Signed.clamp(readable_ints(-1_000_003, 7, 13))),
+            (Kind::Timestamp, readable_times(year(1900), year(1960), 10)),
+            (Kind::Timestamp, readable_times(i64::MIN, i64::MAX, 3)),
         ];
         for (kind, edges) in cases {
             let (lo, hi) = match kind {
                 Kind::Unsigned => (0, u_max),
                 _ => (i_min, i_max),
             };
-            let mut values: Vec<i128> = edges
+            let n = edges.len() - 1;
+            let oracle = |x: i128| {
+                (0..n)
+                    .rev()
+                    .find(|&b| edges[b] <= x)
+                    .filter(|_| x <= edges[n])
+            };
+            let keys = keys(&edges, kind).expect("served edges lie within the span");
+            let values = edges
                 .iter()
                 .flat_map(|&e| [e - 1, e, e + 1])
-                .chain([lo, lo + 1, hi - 1, hi, lo - 1, hi + 1, 0])
-                .collect();
-            values.sort_unstable();
-            let n = edges.len() - 1;
-            let words = Words::new(&edges[..n], edges[n], kind);
-            let mut by_edges = Histogram::new(&edges[..n], edges[n]);
-            let mut by_words = Histogram::new(&edges[..n], edges[n]).with_words(&words);
-            for &x in &values {
-                by_edges.add(x, 0);
-                by_words.add(x, 0);
-                assert_eq!(
-                    (&by_words.bins, by_words.rest),
-                    (&by_edges.bins, by_edges.rest),
-                    "{kind:?} {edges:?} at {x}"
-                );
+                .chain([lo - 1, lo, lo + 1, 0, hi - 1, hi, hi + 1]);
+            for x in values {
+                let mut histogram = Histogram::<i128>::new(&keys, kind);
+                histogram.add(x, 0);
+                let placed = histogram.bins.iter().position(|&count| count == 1);
+                assert_eq!(placed, oracle(x), "{kind:?} {edges:?} at {x}");
+                assert_eq!(histogram.rest, u64::from(placed.is_none()));
             }
         }
     }
