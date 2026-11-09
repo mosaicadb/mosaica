@@ -20,7 +20,7 @@ mosaica$ mosaica status --control unix:/run/mosaica/control.sock | jq '.heap | {
 }
 ```
 
-A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build's own structures within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine.
+A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build's own structures within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine. A text index takes whatever its stage leaves of the budget, so a larger budget writes fewer, larger intermediate files and merges them in fewer passes; the build prints both figures before it starts. A server indexes the text of each flush within the memory available at the time.
 
 ### The caches
 

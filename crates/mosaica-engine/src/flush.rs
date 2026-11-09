@@ -1595,7 +1595,7 @@ fn write_text_extents(
             &spec.analyser,
             rows,
             TextTarget::of(ctx),
-            TEXT_LAYER_BUDGET,
+            text_layer_allowance(),
             sub,
         )? {
             out.push(extent);
@@ -1604,9 +1604,14 @@ fn write_text_extents(
     Ok(out)
 }
 
-/// The bytes one text layer's accumulator may allocate before it spills a run, the same for every
-/// flush.
-const TEXT_LAYER_BUDGET: usize = 256 << 20;
+/// What one text layer's pass may hold: the memory the server has available now, by the rule a
+/// build's term index is sized by, on the one thread a flush runs on. Read at each layer, since
+/// what is available moves while the server runs; where it cannot be read, the least the pass runs
+/// in.
+fn text_layer_allowance() -> mosaica_filter_write::Allowance {
+    let available = mosaica_types::process::available_memory().unwrap_or(0);
+    mosaica_filter_write::Allowance::new(available, 0, 1)
+}
 
 /// Where a text layer's files go. What [`write_text_layer`] needs of a [`FlushContext`], so a
 /// test can write a layer without building one.
@@ -1634,8 +1639,8 @@ impl<'a> TextTarget<'a> {
 /// `Text*` sub-laps where the caller's stage is `TextExtents`, and is `None` from the scoped pass.
 ///
 /// The terms are gathered in the accumulator the build's text pass uses, which spills sorted runs
-/// beside the layer's files when it has allocated `budget` bytes; the runs are merged into the
-/// layer and removed.
+/// beside the layer's files when it has allocated `allowance`; the runs are merged into the layer
+/// under the same allowance and removed.
 #[allow(clippy::too_many_arguments)]
 fn write_text_layer(
     rel_dir: &str,
@@ -1644,7 +1649,7 @@ fn write_text_layer(
     analyser: &mosaica_analyse::Analyser,
     rows: Vec<(u32, &WalScalar)>,
     target: TextTarget<'_>,
-    budget: usize,
+    allowance: mosaica_filter_write::Allowance,
     mut sub: Option<TextLaps<'_>>,
 ) -> Result<Option<mosaica_store::manifest::TextExtent>, MaintenanceFailed> {
     let dir = target.prefix_dir.join(rel_dir);
@@ -1655,7 +1660,7 @@ fn write_text_layer(
     let mut terms = mosaica_filter_write::TermAccumulator::new(
         &dir,
         format!("{}-text-run", target.seg_id),
-        budget,
+        allowance.per_worker(),
     );
     let mut presence = croaring::Bitmap::new();
     let mut prose_rows: Vec<(u32, &str)> = Vec::new();
@@ -1698,7 +1703,11 @@ fn write_text_layer(
     let failed = |e: std::io::Error| MaintenanceFailed(format!("{dict_rel}: {e}"));
     let mut writer = mosaica_filter_write::TextIndexWriter::create(files).map_err(failed)?;
     terms
-        .write_index(&mut writer, mosaica_filter_write::TEXT_MERGE_SLICE_CAP)
+        .write_index(
+            &mut writer,
+            mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
+            allowance,
+        )
         .map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextDict);
     writer.finish().map_err(failed)?;
@@ -1799,7 +1808,7 @@ fn write_scoped_extents(
                 analyser,
                 scoped_rows(spec, plan)?,
                 TextTarget::of(ctx),
-                TEXT_LAYER_BUDGET,
+                text_layer_allowance(),
                 None,
             )? {
                 texts.push(extent);
@@ -2329,10 +2338,10 @@ mod tests {
             "the fixture repeats a term within a row"
         );
 
-        // Unbounded, the layer is written from memory; with no budget, the accumulator spills a
+        // Unbounded, the layer is written from memory; with none, the accumulator spills a
         // run after every row and the layer is merged from the runs. Both write the same bytes.
         let mut written: Option<Vec<Vec<u8>>> = None;
-        for budget in [usize::MAX, 0] {
+        for bytes in [u64::MAX, 0] {
             let dir = tempfile::TempDir::new().expect("a temp dir");
             let rows: Vec<(u32, &WalScalar)> = prose.iter().map(|(e, v)| (*e, v)).collect();
             let extent = write_text_layer(
@@ -2346,7 +2355,7 @@ mod tests {
                     seg_id: "flush-1-0",
                     scoped_incarnation: mosaica_types::view::DECLARED_INCARNATION,
                 },
-                budget,
+                mosaica_filter_write::Allowance { bytes, threads: 1 },
                 None,
             )
             .expect("the layer writes")
@@ -2414,7 +2423,11 @@ mod tests {
             match &written {
                 None => written = Some(files.to_vec()),
                 Some(first) => {
-                    assert_eq!(first, &files.to_vec(), "the same layer at budget {budget}")
+                    assert_eq!(
+                        first,
+                        &files.to_vec(),
+                        "the same layer at an allowance of {bytes} bytes"
+                    )
                 }
             }
             let runs = std::fs::read_dir(dir.path().join("attrs/title/extents"))

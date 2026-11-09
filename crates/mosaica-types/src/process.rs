@@ -1,11 +1,14 @@
-//! The process's own memory: what the C allocator holds, and what the kernel says is resident.
+//! The process's own resources: what the C allocator holds, what the kernel says is resident,
+//! what the machine has available, and how many files the process may hold open.
 //!
-//! Three calls, shared by the build and the serve path, which are one database
+//! Shared by the build and the serve path, which are one database
 //! ([decision 0091](../../../docs/decisions/0091-build-is-ingest-into-an-empty-database.md)) and
 //! therefore one implementation of anything they both do. The build trims at every
 //! stage boundary; the server caps the arena count at startup and trims on a growth cadence. Both
 //! want the same three primitives, and a second copy of [`resident_bytes`]' parser would be a
-//! second answer to "how much of this process is anonymous memory".
+//! second answer to "how much of this process is anonymous memory". Both size a term index's
+//! merge from [`available_memory`] and [`descriptor_limit`], and the binary raises the descriptor
+//! limit for both at startup ([`raise_descriptor_limit`]).
 //!
 //! # Why an allocator call is a Mosaica concern at all
 //!
@@ -24,8 +27,9 @@
 //!
 //! `malloc_trim` and `mallopt` are glibc extensions. Both are compiled only for a glibc target and
 //! are no-ops elsewhere, so a musl or macOS build keeps the same call sites and gets an allocator
-//! that already returns pages on its own terms. [`resident_bytes`] reads `/proc/self/status` and
-//! answers zeros where it cannot, which is also what a non-Linux target gets.
+//! that already returns pages on its own terms. The descriptor limit is POSIX and is read and
+//! raised on every Unix. [`resident_bytes`] and [`available_memory`] read `/proc` and answer zeros
+//! or `None` where they cannot, which is also what a non-Linux target gets.
 
 /// Return the allocator's free pages to the kernel.
 ///
@@ -118,6 +122,81 @@ pub fn resident_bytes() -> Resident {
         anon: field("RssAnon:"),
         file: field("RssFile:"),
     }
+}
+
+/// Memory this process could take without reclaiming anything it needs, in bytes: the smaller of
+/// `MemAvailable` and this process's cgroup v2 `memory.max`. `None` where `/proc/meminfo` cannot
+/// be read.
+///
+/// **Both sources, because either can be the real bound.** `MemAvailable` is the kernel's estimate
+/// of what an allocation could get on the host; `memory.max` is the ceiling this process is killed
+/// at, and it charges page cache against itself. A process inside a 4 GiB container on a 48 GiB
+/// machine that read only the first would size itself for the machine. A `memory.max` of `max`
+/// does not parse, which leaves `MemAvailable` as the answer.
+pub fn available_memory() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let available = meminfo
+        .lines()
+        .find(|line| line.starts_with("MemAvailable:"))
+        .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|kib| kib * 1024)?;
+    let limit = std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|cgroup| {
+            let path = cgroup
+                .lines()
+                .next()?
+                .split(':')
+                .nth(2)?
+                .trim_start_matches('/');
+            std::fs::read_to_string(format!("/sys/fs/cgroup/{path}/memory.max")).ok()
+        })
+        .and_then(|max| max.trim().parse::<u64>().ok());
+    Some(limit.map_or(available, |limit| limit.min(available)))
+}
+
+/// The files this process may hold open at once: its soft `RLIMIT_NOFILE`. 1,024, the soft limit
+/// a Linux process ordinarily starts with, where the limit cannot be read or is not a Unix one.
+pub fn descriptor_limit() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` writes one `rlimit` through a pointer to a live local.
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } == 0 {
+            // `rlim_t` is not `u64` on every Unix.
+            #[allow(clippy::unnecessary_cast)]
+            return limit.rlim_cur as u64;
+        }
+    }
+    1024
+}
+
+/// Raise this process's soft `RLIMIT_NOFILE` to its hard limit, and return the soft limit it then
+/// has. The binary calls it once at startup, for `build` and `serve` alike, since a merge's fan-in
+/// is bounded by [`descriptor_limit`] as well as by memory. A limit that cannot be raised is left
+/// as it is.
+pub fn raise_descriptor_limit() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` and `setrlimit` read and write one `rlimit` through a pointer to a
+        // live local.
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0
+                && limit.rlim_cur < limit.rlim_max
+            {
+                limit.rlim_cur = limit.rlim_max;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
+            }
+        }
+    }
+    descriptor_limit()
 }
 
 /// A byte count to three significant figures in binary units, such as `18.2 GiB` or `512 B`, as

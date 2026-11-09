@@ -78,11 +78,13 @@
 //! and the sorted run a term index or a keyword dictionary spills: its writer
 //! ([`TextRunWriter`]), the k-way merge over runs ([`TextRunMerge`]) and the cascade that reduces
 //! more runs than one merge may hold open ([`cascade_sorted_runs`]). The build's spill files and
-//! `mosaica-store`'s partition use the receipt from here.
+//! `mosaica-store`'s partition use the receipt from here. It also holds the one rule a term index's
+//! pass is sized by, [`Allowance`]: what its stage leaves of the memory to be had, which pays for
+//! the accumulators and then for the merge's fan-in.
 //!
 //! A text index's terms are gathered in a [`TermAccumulator`], which spills those runs when its
-//! budget fills, and the runs are merged into the index by [`merge_text_runs`]. The build and the
-//! flush share both.
+//! share of the allowance fills, and the runs are merged into the index by [`merge_text_runs`].
+//! The build and the flush share both.
 
 mod accumulator;
 mod chunk_dict;
@@ -115,8 +117,9 @@ pub use record::{
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
 pub use spill::{
-    at_end, cascade_sorted_runs, read_varint, RunPayload, SpillFileError, SpillReceipt,
-    TextRunMerge, TextRunWriter, SPILL_BUF_BYTES,
+    at_end, cascade_sorted_runs, merge_descriptors, read_varint, Allowance, RunPayload,
+    SpillFileError, SpillReceipt, TextRunMerge, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
+    WORKER_BYTES_MIN,
 };
 pub use text::{
     coalesce_text_extents, merge_text_layers, Posting, TextIndexWriter, TextLayerRef,

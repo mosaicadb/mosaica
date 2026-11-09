@@ -240,12 +240,11 @@ const MEMBER_ENTRY_BYTES: usize = 16;
 const MEMBER_ARTIFACT_BYTES: usize = 80;
 
 /// The share of the build's memory budget the member accumulator may hold, and its floor and
-/// ceiling. Sixteenth, floor and ceiling all follow the text index's, which is the other pass in
-/// this build that spills sorted runs — one rule rather than two constants to keep in step.
+/// ceiling.
 ///
-/// ⊘ Deliberately **not** added to `residency.rs`'s model, for that pass's reason: it is a
-/// sixteenth of the same budget the model is checked against, inside the factor of two that module
-/// states as its own error bar, and adding it would turn builds that fit today into refusals. The
+/// ⊘ Deliberately **not** added to `residency.rs`'s model: it is a sixteenth of the same budget the
+/// model is checked against, inside the factor of two that module states as its own error bar, and
+/// adding it would turn builds that fit today into refusals. The
 /// merge's open runs ([`member_merge_fan_in`]) are left out on the same argument and a second one:
 /// they are sized *from* this share and stand only while the accumulator is empty, so the two are
 /// one term and not two.
@@ -262,22 +261,6 @@ fn member_budget(memory_budget: u64) -> u64 {
 /// [`mosaica_filter_write::SPILL_BUF_BYTES`]. The file descriptor, the reader's own fields and its
 /// place in the heap come to under a kibibyte beside it.
 const MEMBER_MERGE_BYTES_PER_RUN: u64 = mosaica_filter_write::SPILL_BUF_BYTES as u64;
-
-/// The most runs one merge may hold **open**, whatever the budget pays for.
-///
-/// **A merge holds a file descriptor per run, and memory is not what bounds that.** The budget
-/// share buys 256 runs at the accumulator's present ceiling, so the cap does not bind today; it
-/// binds the moment [`MEMBER_BUDGET_MAX`] is raised, where a 8 GiB share would otherwise ask for
-/// 2,048 descriptors and fail with `EMFILE` at hour two on exactly the corpus this shape exists to
-/// make buildable. The text index's merge has the same cap for the same reason
-/// ([`mosaica_filter_write::cascade_sorted_runs`]), at a lower number because it runs one merge per
-/// thread and this one runs a merge at a time.
-///
-/// Five hundred and twelve: half the 1,024 soft limit a Linux process ordinarily starts with. The
-/// other half is what the build holds open beside this merge — the source Parquet readers, the
-/// mapped arenas, the member table it is writing and the membership packs that follow it — none of
-/// which scales with the run count, so half is headroom rather than an estimate.
-const MEMBER_MERGE_DESCRIPTOR_CAP: usize = 512;
 
 /// The most runs one merge opens at once: **what the accumulator's own budget share pays for**,
 /// rather than a fixed number.
@@ -296,8 +279,8 @@ const MEMBER_MERGE_DESCRIPTOR_CAP: usize = 512;
 /// flag asks for, and the floor is also what makes a pass always reduce: sixteen runs into one is
 /// a reduction where one run into one would be a copy.
 ///
-/// [`MEMBER_MERGE_DESCRIPTOR_CAP`] bounds it above, memory not being what limits how many files a
-/// process may hold open.
+/// The descriptors a merge may hold bound it above ([`mosaica_filter_write::merge_descriptors`]),
+/// memory not being what limits how many files a process may hold open.
 fn member_merge_fan_in(memory_budget: u64) -> usize {
     open_runs_for(member_budget(memory_budget))
 }
@@ -305,7 +288,7 @@ fn member_merge_fan_in(memory_budget: u64) -> usize {
 /// How many runs a budget share of `bytes` pays for, held under the descriptor cap. Split out so
 /// the cap can be read at a share the accumulator's present ceiling does not reach.
 fn open_runs_for(bytes: u64) -> usize {
-    ((bytes / MEMBER_MERGE_BYTES_PER_RUN) as usize).min(MEMBER_MERGE_DESCRIPTOR_CAP)
+    ((bytes / MEMBER_MERGE_BYTES_PER_RUN) as usize).min(mosaica_filter_write::merge_descriptors())
 }
 
 /// Every layer's member rows, accumulated as `(artifact, source)` pairs and spilled as **sorted
@@ -5081,14 +5064,14 @@ mod tests {
         assert!(runs_of(1 << 20, 100_000_000) > member_merge_fan_in(1 << 20) as u64);
         // The floor is what makes a pass reduce rather than copy, at every budget.
         assert_eq!(member_merge_fan_in(0), 16);
-        // **The descriptors bound it above**, and do not bind at the present ceiling. A share
-        // eight times that ceiling pays for 2,048 open files, which is twice the soft limit a
-        // Linux process starts with: it gets the cap instead.
+        // **The descriptors bound it above.** A share eight times that ceiling pays for 2,048
+        // open files, which is twice the soft limit a Linux process starts with: it gets the
+        // merge's share of the descriptors where that is fewer.
         assert_eq!(open_runs_for(MEMBER_BUDGET_MAX), 256);
         assert_eq!(MEMBER_BUDGET_MAX * 8 / MEMBER_MERGE_BYTES_PER_RUN, 2_048);
         assert_eq!(
             open_runs_for(MEMBER_BUDGET_MAX * 8),
-            MEMBER_MERGE_DESCRIPTOR_CAP
+            mosaica_filter_write::merge_descriptors().min(2_048)
         );
     }
 }

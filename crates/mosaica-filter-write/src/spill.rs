@@ -11,6 +11,12 @@
 //! A **sorted run** is written by [`TextRunWriter`] and read back by a run reader inside
 //! [`TextRunMerge`], which merges runs k-way on the term. [`cascade_sorted_runs`] reduces more runs
 //! than one merge may hold open. A malformed run is refused as [`io::ErrorKind::InvalidData`].
+//!
+//! **What a merge may hold is an [`Allowance`]**, the one rule the build and the service both size
+//! a term index's pass by. Its fan-in, and the read buffer each run's cursor gets, are what the
+//! allowance pays for, under the share of the process's file descriptors a merge may take
+//! ([`merge_descriptors`]). Every cursor on a run reads it at its own offset through one shared
+//! descriptor.
 //! Every error a run's reader or writer returns names its file, an I/O failure as a
 //! [`SpillFileError`], and every refusal the merge makes of its own names its term.
 
@@ -18,13 +24,14 @@ use std::fmt::Display;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use mosaica_filter::{common_prefix_len, put_varint, take_varint, VarintError};
 use mosaica_types::splitmix64;
 
-/// Buffer size for spill I/O, both directions. Four mebibytes: large enough that the syscall
-/// cost is noise against the encode/decode work, small enough to be irrelevant against the
-/// build's peak memory.
+/// Buffer size for spill I/O, both directions, and the largest read buffer a merge gives a run's
+/// cursor. Four mebibytes: large enough that the syscall cost is noise against the encode/decode
+/// work.
 pub const SPILL_BUF_BYTES: usize = 4 << 20;
 
 /// What `finish` hands back and every read path verifies against: the file, how many records
@@ -89,7 +96,7 @@ fn malformed(path: &Path, detail: impl Display) -> io::Error {
 
 /// What `reader` holds buffered, refilling it when it holds nothing: empty only at end of file.
 /// Retries `Interrupted`, which a refill may see.
-fn buffered(reader: &mut BufReader<File>) -> io::Result<&[u8]> {
+fn buffered<R: Read>(reader: &mut BufReader<R>) -> io::Result<&[u8]> {
     while let Err(e) = reader.fill_buf() {
         if e.kind() != io::ErrorKind::Interrupted {
             return Err(e);
@@ -100,7 +107,7 @@ fn buffered(reader: &mut BufReader<File>) -> io::Result<&[u8]> {
 
 /// Whether `reader` is at end of file — a record boundary, which is the only place a spill reader
 /// may legitimately be.
-pub fn at_end(reader: &mut BufReader<File>) -> io::Result<bool> {
+pub fn at_end<R: Read>(reader: &mut BufReader<R>) -> io::Result<bool> {
     Ok(buffered(reader)?.is_empty())
 }
 
@@ -111,8 +118,8 @@ pub fn at_end(reader: &mut BufReader<File>) -> io::Result<bool> {
 ///
 /// The varint is decoded from the bytes the reader holds where it is whole among them, and
 /// gathered a byte at a time where it crosses the buffer's end.
-pub fn read_varint<T>(
-    reader: &mut BufReader<File>,
+pub fn read_varint<R: Read, T>(
+    reader: &mut BufReader<R>,
     take: impl Fn(&[u8], &mut usize) -> Result<T, VarintError>,
 ) -> io::Result<T> {
     let mut cursor = 0;
@@ -247,11 +254,17 @@ pub enum RunPayload {
 
 impl TextRunWriter {
     pub fn create(path: &Path, payload: RunPayload) -> io::Result<TextRunWriter> {
+        TextRunWriter::buffered(path, payload, SPILL_BUF_BYTES)
+    }
+
+    /// A writer whose buffer is `buffer` bytes, for a cascade pass that charges it to its
+    /// allowance.
+    fn buffered(path: &Path, payload: RunPayload, buffer: usize) -> io::Result<TextRunWriter> {
         let file = File::create(path).map_err(|e| at(path, e))?;
         Ok(TextRunWriter {
             path: path.to_path_buf(),
             payload,
-            writer: BufWriter::with_capacity(SPILL_BUF_BYTES, file),
+            writer: BufWriter::with_capacity(buffer, file),
             record: Vec::new(),
             prev: Vec::new(),
             terms: 0,
@@ -465,7 +478,7 @@ impl TextRunWriter {
 struct TextRunReader {
     path: PathBuf,
     payload: RunPayload,
-    reader: BufReader<File>,
+    reader: BufReader<RunCursor>,
     /// The term's positions in the entity [`Self::next_entity`] last returned.
     positions: Vec<u32>,
     /// The head term, front-decoded against its predecessor.
@@ -487,14 +500,38 @@ struct TextRunReader {
     done: bool,
 }
 
+/// A cursor's place in a run's file. It reads at its own offset (`pread`), so every cursor on one
+/// run shares the run's one descriptor.
+struct RunCursor {
+    file: Arc<File>,
+    at: u64,
+}
+
+impl Read for RunCursor {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        #[cfg(unix)]
+        let read = std::os::unix::fs::FileExt::read_at(&*self.file, buf, self.at)?;
+        #[cfg(windows)]
+        let read = std::os::windows::fs::FileExt::seek_read(&*self.file, buf, self.at)?;
+        self.at += read as u64;
+        Ok(read)
+    }
+}
+
 impl TextRunReader {
-    fn open(receipt: &SpillReceipt, payload: RunPayload) -> io::Result<TextRunReader> {
-        let file = File::open(&receipt.path).map_err(|e| at(&receipt.path, e))?;
-        Ok(TextRunReader {
+    /// A reader of the run `receipt` names, from its start, through `file`, which is that run's
+    /// open file, with a read buffer of `buffer` bytes.
+    fn open(
+        file: Arc<File>,
+        receipt: &SpillReceipt,
+        payload: RunPayload,
+        buffer: usize,
+    ) -> TextRunReader {
+        TextRunReader {
             path: receipt.path.clone(),
             payload,
             positions: Vec::new(),
-            reader: BufReader::with_capacity(SPILL_BUF_BYTES, file),
+            reader: BufReader::with_capacity(buffer, RunCursor { file, at: 0 }),
             term: Vec::new(),
             mark: 0,
             pending: 0,
@@ -505,7 +542,7 @@ impl TextRunReader {
             count: 0,
             anchor: 0,
             done: false,
-        })
+        }
     }
 
     /// Move to the next term, returning `false` at a *verified* end of stream.
@@ -698,11 +735,17 @@ pub struct TextRunMerge {
 }
 
 impl TextRunMerge {
-    pub fn open(receipts: &[SpillReceipt], payload: RunPayload) -> io::Result<TextRunMerge> {
+    /// A merge over `receipts`, each run read through a buffer of `buffer` bytes.
+    pub fn open(
+        receipts: &[SpillReceipt],
+        payload: RunPayload,
+        buffer: usize,
+    ) -> io::Result<TextRunMerge> {
         let mut cursors: Vec<TextRunReader> = Vec::with_capacity(receipts.len());
         let mut heap: Vec<usize> = Vec::with_capacity(receipts.len());
         for receipt in receipts {
-            let mut reader = TextRunReader::open(receipt, payload)?;
+            let file = File::open(&receipt.path).map_err(|e| at(&receipt.path, e))?;
+            let mut reader = TextRunReader::open(Arc::new(file), receipt, payload, buffer);
             // A run with no terms at all — an empty chunk — verifies its receipt here and takes no
             // place in the heap.
             if reader.advance()? {
@@ -863,30 +906,116 @@ fn text_heap_pop(heap: &mut Vec<usize>, cursors: &[TextRunReader]) -> usize {
     top
 }
 
-/// Runs opened at once by one merge — the text index's and the keyword column's alike, both
-/// spilling the same run format.
-///
-/// **A merge holds a file descriptor per run, and the run count is a function of the corpus.** A
-/// worker spills whenever its budget fills, so a corpus far larger than memory produces far more
-/// runs than a process may hold open — which would be `EMFILE` at hour two on exactly the corpus
-/// this whole shape exists to make buildable. Above the cap the runs are merged in passes: groups
-/// of [`RUN_MERGE_FAN_IN`] into one intermediate run each, until what is left fits in one merge.
-/// An intermediate run is written by the same writer as a worker's, so the cascade adds a pass and
-/// not a format.
-///
-/// A hundred and twenty-eight, which is comfortably under the 1,024 soft limit a Linux process
-/// ordinarily starts with and above the run count an ordinary corpus produces — 7.4×10⁷ Overture
-/// names at eight chunks a thread on twelve cores is 96 runs, one merge and no cascade. The passes
-/// are sequential: the cascade is I/O and the final merge is sequential anyway, so running the
-/// groups in parallel would buy a fraction of a rare path at the cost of multiplying the very
-/// descriptor count the cap exists to hold down — `threads × fan-in` is not a number this can
-/// bound on a machine whose core count it does not know.
-const RUN_MERGE_FAN_IN: usize = 128;
+// --------------------------------------------------------------------------------------------
+// The allowance, and the fan-in it pays for
+// --------------------------------------------------------------------------------------------
 
-/// Reduce `receipts` to at most `RUN_MERGE_FAN_IN` runs, deleting each pass's inputs as it goes.
-/// `family` names the intermediate files, so two column families cascading in one directory cannot
-/// collide. On an error the cascade removes every file it wrote, and leaves the caller's runs to
-/// the caller.
+/// The smallest read buffer a merge gives a run's cursor. A quarter of a mebibyte, at which a
+/// refill's system call is still small against decoding what it read.
+pub const RUN_BUFFER_MIN: usize = 256 << 10;
+
+/// The least a term index's pass is given for each of its threads: what one accumulator runs in
+/// without spilling every few documents.
+pub const WORKER_BYTES_MIN: usize = 8 << 20;
+
+/// What one term index's pass may hold, and on how many threads it runs.
+///
+/// **One rule, for the build and the service.** [`Allowance::new`] takes what is to be had (a
+/// build's `--memory-budget`, or the memory a server has available) less what the rest of the
+/// pass's stage holds beside it. Everything the pass holds is charged against the one figure: its
+/// accumulators while it tokenises, a share each ([`Self::per_worker`]), and after them the read
+/// buffers of the merge and of any cascade pass before it, and those passes' writers. So a stated
+/// budget is not exceeded by a pass that grows to fill it.
+///
+/// It is never less than [`WORKER_BYTES_MIN`] a thread, which is what the pass runs in. A build
+/// charges that floor in its model, so a budget that cannot pay for it is refused before the build
+/// starts rather than exceeded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Allowance {
+    pub bytes: u64,
+    pub threads: usize,
+}
+
+impl Allowance {
+    /// The allowance a pass on `threads` threads gets where `budget` bytes are to be had and the
+    /// rest of its stage holds `resident` of them.
+    pub fn new(budget: u64, resident: u64, threads: usize) -> Allowance {
+        let threads = threads.max(1);
+        let least = threads as u64 * WORKER_BYTES_MIN as u64;
+        Allowance {
+            bytes: budget.saturating_sub(resident).max(least),
+            threads,
+        }
+    }
+
+    /// What each of the pass's accumulators may allocate before it spills.
+    pub fn per_worker(&self) -> usize {
+        usize::try_from(self.bytes / self.threads.max(1) as u64).unwrap_or(usize::MAX)
+    }
+
+    /// **The fan-in: the most runs one merge level opens**, with `ranges` merges in flight at once,
+    /// F = M / (W × B) with each cursor at [`RUN_BUFFER_MIN`]. Held under [`merge_descriptors`],
+    /// since every cursor on one run shares its descriptor and the runs are what is counted, and
+    /// three at least, so that a cascade pass reduces two runs into one with its writer beside
+    /// them.
+    ///
+    /// One level over R runs fits while R is at most F. R is the run bytes over a run's size, and a
+    /// run's size follows the allowance over the threads, so one level holds a corpus whose run
+    /// bytes grow as the square of the allowance. Above that the cascade takes a pass.
+    pub fn fan_in(&self, ranges: usize) -> usize {
+        let by_memory = self.bytes / (ranges.max(1) as u64 * RUN_BUFFER_MIN as u64);
+        usize::try_from(by_memory)
+            .unwrap_or(usize::MAX)
+            .min(merge_descriptors())
+            .max(3)
+    }
+
+    /// The read buffer each of `cursors` open at once is given: an equal share of the allowance,
+    /// from [`RUN_BUFFER_MIN`] to [`SPILL_BUF_BYTES`].
+    pub fn buffer(&self, cursors: usize) -> usize {
+        usize::try_from(self.bytes / cursors.max(1) as u64)
+            .unwrap_or(usize::MAX)
+            .clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES)
+    }
+
+    /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance.
+    pub fn cascade_passes(&self, mut runs: usize) -> usize {
+        let fan_in = self.fan_in(1);
+        let mut passes = 0;
+        while runs > fan_in {
+            runs = runs.div_ceil(cascade_group(runs, fan_in));
+            passes += 1;
+        }
+        passes
+    }
+}
+
+/// The share of this process's file descriptors one merge's runs may take: half the soft limit.
+/// The other half is what the process holds open beside the merge (the source files, the files
+/// being written, a server's sockets), none of which scales with the run count, so half is headroom
+/// rather than an estimate.
+pub fn merge_descriptors() -> usize {
+    usize::try_from(mosaica_types::process::descriptor_limit() / 2).unwrap_or(usize::MAX)
+}
+
+/// The runs one cascade group merges where `runs` are left over a fan-in of `fan_in`: the fewest
+/// that bring the pass's output to the fan-in, so the next level is the final merge, and at most
+/// one less than the fan-in, for the group's writer.
+fn cascade_group(runs: usize, fan_in: usize) -> usize {
+    runs.div_ceil(fan_in).clamp(2, fan_in - 1)
+}
+
+/// Reduce `receipts` to at most the allowance's fan-in, deleting each pass's inputs as it goes, and
+/// return what is left and the passes taken. `family` names the intermediate files, so two column
+/// families cascading in one directory cannot collide. On an error the cascade removes every file
+/// it wrote, and leaves the caller's runs to the caller.
+///
+/// **A pass merges groups of runs into one intermediate run each, several groups at once.** Each
+/// group is as small as brings the pass's output under the fan-in ([`cascade_group`]), and as many
+/// groups run at once as their cursors' and writers' buffers fit in the allowance, up to its
+/// threads. So the groups in flight hold no more than one merge level would, and a corpus whose
+/// runs are under the square of the fan-in takes one pass. An intermediate run is written by the
+/// same writer as an accumulator's, so the cascade adds a pass and not a format.
 ///
 /// Groups are taken in order and each group merges in order, so the entity ordering the final
 /// merge relies on survives every pass.
@@ -895,43 +1024,62 @@ pub fn cascade_sorted_runs(
     family: &str,
     payload: RunPayload,
     mut receipts: Vec<SpillReceipt>,
-) -> io::Result<Vec<SpillReceipt>> {
+    allowance: Allowance,
+) -> io::Result<(Vec<SpillReceipt>, usize)> {
+    let fan_in = allowance.fan_in(1);
     let mut pass = 0usize;
-    while receipts.len() > RUN_MERGE_FAN_IN {
-        let mut merged = Vec::with_capacity(receipts.len().div_ceil(RUN_MERGE_FAN_IN));
-        for (group, runs) in receipts.chunks(RUN_MERGE_FAN_IN).enumerate() {
-            let path = column_dir.join(format!("{family}-merge-{pass:02}-{group:05}.spill"));
-            // Deleted per group rather than per pass: a corpus that reaches the cascade at all is
-            // one whose runs are large, and holding a whole pass's inputs beside a whole pass's
-            // outputs would double the spill's peak on disk for no reason.
-            let written =
-                merge_group(runs, &path, payload).and_then(|run| remove_runs(runs).map(|()| run));
-            match written {
-                Ok(run) => merged.push(run),
-                Err(e) => {
-                    let _ = std::fs::remove_file(&path);
-                    let _ = remove_runs(&merged);
-                    if pass > 0 {
-                        let _ = remove_runs(&receipts);
-                    }
-                    return Err(e);
+    while receipts.len() > fan_in {
+        let group = cascade_group(receipts.len(), fan_in);
+        let in_flight = (fan_in / (group + 1)).clamp(1, allowance.threads.max(1));
+        let buffer = allowance.buffer(in_flight * (group + 1));
+        let path =
+            |index: usize| column_dir.join(format!("{family}-merge-{pass:02}-{index:05}.spill"));
+        // Deleted per group rather than per pass: a corpus that reaches the cascade at all is one
+        // whose runs are large, and holding a whole pass's inputs beside a whole pass's outputs
+        // would double the spill's peak on disk.
+        let merge = |(index, runs): (usize, &[SpillReceipt])| {
+            merge_group(runs, &path(index), payload, buffer)
+                .and_then(|run| remove_runs(runs).map(|()| run))
+        };
+        let groups: Vec<&[SpillReceipt]> = receipts.chunks(group).collect();
+        let merged: io::Result<Vec<SpillReceipt>> = match in_flight {
+            1 => groups.iter().copied().enumerate().map(merge).collect(),
+            _ => rayon::ThreadPoolBuilder::new()
+                .num_threads(in_flight)
+                .build()
+                .map_err(io::Error::other)
+                .and_then(|pool| {
+                    use rayon::prelude::*;
+                    pool.install(|| groups.par_iter().copied().enumerate().map(merge).collect())
+                }),
+        };
+        match merged {
+            Ok(merged) => receipts = merged,
+            Err(e) => {
+                for index in 0..groups.len() {
+                    let _ = std::fs::remove_file(path(index));
                 }
+                if pass > 0 {
+                    let _ = remove_runs(&receipts);
+                }
+                return Err(e);
             }
         }
-        receipts = merged;
         pass += 1;
     }
-    Ok(receipts)
+    Ok((receipts, pass))
 }
 
-/// Merge `runs` into one run at `path`.
+/// Merge `runs` into one run at `path`, each run and the writer through a buffer of `buffer`
+/// bytes.
 fn merge_group(
     runs: &[SpillReceipt],
     path: &Path,
     payload: RunPayload,
+    buffer: usize,
 ) -> io::Result<SpillReceipt> {
-    let mut merge = TextRunMerge::open(runs, payload)?;
-    let mut writer = TextRunWriter::create(path, payload)?;
+    let mut merge = TextRunMerge::open(runs, payload, buffer)?;
+    let mut writer = TextRunWriter::buffered(path, payload, buffer)?;
     while merge.next_term()? {
         let count = u32::try_from(merge.postings()).map_err(|_| {
             io::Error::new(
@@ -995,6 +1143,12 @@ mod tests {
         );
     }
 
+    /// A reader of the run `receipt` names.
+    fn open_reader(receipt: &SpillReceipt, payload: RunPayload) -> TextRunReader {
+        let file = File::open(&receipt.path).unwrap();
+        TextRunReader::open(Arc::new(file), receipt, payload, RUN_BUFFER_MIN)
+    }
+
     /// One whole record of a run of rows.
     fn push(writer: &mut TextRunWriter, term: &[u8], entities: &[u32]) -> io::Result<()> {
         writer.begin(term, entities.len() as u32)?;
@@ -1026,7 +1180,7 @@ mod tests {
             }
         }
         let receipt = writer.finish().unwrap();
-        let mut reader = TextRunReader::open(&receipt, RunPayload::Positions).unwrap();
+        let mut reader = open_reader(&receipt, RunPayload::Positions);
         for (term, items) in &records {
             assert!(reader.advance().unwrap());
             assert_eq!(reader.term(), *term);
@@ -1041,7 +1195,7 @@ mod tests {
         let mut bytes = fs::read(&path).unwrap();
         *bytes.last_mut().unwrap() ^= 1;
         fs::write(&path, &bytes).unwrap();
-        let mut reader = TextRunReader::open(&receipt, RunPayload::Positions).unwrap();
+        let mut reader = open_reader(&receipt, RunPayload::Positions);
         assert!((|| -> io::Result<()> {
             while reader.advance()? {}
             Ok(())
@@ -1075,7 +1229,7 @@ mod tests {
     }
 
     fn read_text_run(receipt: &SpillReceipt) -> io::Result<Vec<(String, Vec<u32>)>> {
-        let mut reader = TextRunReader::open(receipt, RunPayload::Rows)?;
+        let mut reader = open_reader(receipt, RunPayload::Rows);
         let mut out = Vec::new();
         while reader.advance()? {
             let term = String::from_utf8(reader.term().to_vec()).unwrap();
@@ -1181,6 +1335,90 @@ mod tests {
         }
     }
 
+    /// **The allowance is what the budget leaves**, and never less than the pass runs in. Its
+    /// fan-in is what it pays for at the smallest buffer, divided among the ranges in flight, and
+    /// each cursor's buffer is its share, between the smallest and the largest.
+    #[test]
+    fn the_allowance_is_what_the_budget_leaves_and_pays_for_the_fan_in() {
+        assert_eq!(Allowance::new(8 << 30, 1 << 30, 4).bytes, 7 << 30);
+        assert_eq!(
+            Allowance::new(8 << 30, 1 << 30, 4).per_worker(),
+            (7 << 30) / 4
+        );
+        let floor = Allowance::new(1 << 30, 2 << 30, 4);
+        assert_eq!(floor.bytes, 4 * WORKER_BYTES_MIN as u64);
+
+        let allowance = Allowance::new(64 * RUN_BUFFER_MIN as u64, 0, 1);
+        assert_eq!(allowance.fan_in(1), 64.min(merge_descriptors()));
+        assert_eq!(allowance.fan_in(4), 16);
+        assert_eq!(allowance.buffer(64), RUN_BUFFER_MIN);
+        assert_eq!(allowance.buffer(1_000), RUN_BUFFER_MIN);
+        assert_eq!(allowance.buffer(1), SPILL_BUF_BYTES);
+    }
+
+    /// **More runs than the fan-in are cascaded, several groups at once, in the passes the
+    /// allowance forecasts**, and what is left merges to what the runs held, with every
+    /// intermediate file gone.
+    #[test]
+    fn a_cascade_reduces_the_runs_to_the_fan_in_and_keeps_every_entity() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let terms = ["alpha", "beta", "delta", "gamma"];
+        let runs = 40u32;
+        let receipts: Vec<SpillReceipt> = (0..runs)
+            .map(|run| {
+                let records: Vec<(&str, Vec<u32>)> = terms
+                    .iter()
+                    .enumerate()
+                    .filter(|(t, _)| !(run as usize + t).is_multiple_of(3))
+                    .map(|(_, term)| (*term, (0..50).map(|k| k * runs + run).collect()))
+                    .collect();
+                write_text_run(&temp.path().join(format!("run-{run}.spill")), &records)
+            })
+            .collect();
+        let merged = |receipts: &[SpillReceipt]| {
+            let mut merge =
+                TextRunMerge::open(receipts, RunPayload::Rows, RUN_BUFFER_MIN).unwrap();
+            let mut out = Vec::new();
+            while merge.next_term().unwrap() {
+                let mut entities = Vec::new();
+                merge
+                    .drain(std::convert::identity, &mut |entity, _| {
+                        entities.push(entity);
+                        Ok(())
+                    })
+                    .unwrap();
+                out.push((merge.term().to_vec(), entities));
+            }
+            out
+        };
+        let expected = merged(&receipts);
+
+        // A fan-in of twelve: groups of four, two at once, and one pass.
+        let allowance = Allowance {
+            bytes: 12 * RUN_BUFFER_MIN as u64,
+            threads: 4,
+        };
+        let (left, passes) = cascade_sorted_runs(
+            temp.path(),
+            "test",
+            RunPayload::Rows,
+            receipts.clone(),
+            allowance,
+        )
+        .unwrap();
+        assert!(
+            left.len() <= allowance.fan_in(1),
+            "{} runs left",
+            left.len()
+        );
+        assert_eq!(passes, allowance.cascade_passes(runs as usize));
+        assert_eq!(passes, 1);
+        assert_eq!(merged(&left), expected);
+        assert!(receipts.iter().all(|run| !run.path.exists()));
+        remove_runs(&left).unwrap();
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
+
     proptest! {
         /// Any sorted, distinct term stream with ascending entity lists round-trips exactly.
         #[test]
@@ -1209,7 +1447,7 @@ mod tests {
             }
             let receipt = writer.finish().unwrap();
 
-            let mut reader = TextRunReader::open(&receipt, RunPayload::Rows).unwrap();
+            let mut reader = open_reader(&receipt, RunPayload::Rows);
             let mut read: Vec<(Vec<u8>, Vec<u32>)> = Vec::new();
             while reader.advance().unwrap() {
                 let term = reader.term().to_vec();

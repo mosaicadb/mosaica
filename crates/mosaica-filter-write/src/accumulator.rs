@@ -1,6 +1,8 @@
 //! Where a text index's terms are gathered before they are written, and the merge of what was
 //! spilled. The build's text pass and the flush both accumulate in a [`TermAccumulator`], spill
-//! from it, and write through it or through [`merge_text_runs`].
+//! from it, and write through it or through [`merge_text_runs`], each under an [`Allowance`]: an
+//! accumulator's budget is its share of it, and the merge's read buffers are what it pays for once
+//! the accumulators are gone.
 //!
 //! # What the accumulator holds
 //!
@@ -57,8 +59,8 @@ use mosaica_filter::{put_varint, take_varint};
 
 use crate::chunk_dict::{rank_table, KeyRef, KeyTable, Lookup, SortOn};
 use crate::spill::{
-    cascade_sorted_runs, encode_entity, fingerprint, remove_runs, RunPayload, SpillReceipt,
-    TextRunMerge, TextRunWriter,
+    cascade_sorted_runs, encode_entity, fingerprint, remove_runs, Allowance, RunPayload,
+    SpillReceipt, TextRunMerge, TextRunWriter,
 };
 use crate::text::{Posting, TextIndexWriter};
 
@@ -347,11 +349,13 @@ impl TermAccumulator {
     }
 
     /// Write the index into `writer`: straight from memory where nothing was spilled, and
-    /// otherwise by spilling the rest and merging the runs with [`merge_text_runs`].
+    /// otherwise by spilling the rest and merging the runs with [`merge_text_runs`] under
+    /// `allowance`.
     pub fn write_index(
         mut self,
         writer: &mut TextIndexWriter,
         merge_slice_cap: usize,
+        allowance: Allowance,
     ) -> io::Result<()> {
         if self.runs.is_empty() {
             let (mut entities, mut bytes) = (Vec::new(), Vec::new());
@@ -372,7 +376,15 @@ impl TermAccumulator {
         }
         let family = format!("{}-merge", self.stem);
         let dir = self.dir.clone();
-        merge_text_runs(&dir, &family, self.into_runs()?, writer, merge_slice_cap)
+        merge_text_runs(
+            &dir,
+            &family,
+            self.into_runs()?,
+            writer,
+            merge_slice_cap,
+            allowance,
+        )
+        .map(|_| ())
     }
 
     /// Visit every term in ascending order with its entity count, its share of the anchor and its
@@ -554,31 +566,38 @@ fn sort_segments(term: &[u8], chain: &[u8], entries: &mut Vec<(u32, u32)>) -> io
     Ok(())
 }
 
-/// Merge text runs into `writer`: cascaded first where there are more than one merge may hold
-/// open, then merged k-way on the term. Every run is removed, whether or not the merge succeeds.
-/// `family` names the cascade's files in `dir`.
+/// Merge text runs into `writer` under `allowance`: cascaded first where there are more than its
+/// fan-in, then merged k-way on the term, each run read through its share of the allowance. Every
+/// run is removed, whether or not the merge succeeds. `family` names the cascade's files in `dir`.
+/// Returns the cascade passes taken.
 pub fn merge_text_runs(
     dir: &Path,
     family: &str,
     runs: Vec<SpillReceipt>,
     writer: &mut TextIndexWriter,
     merge_slice_cap: usize,
-) -> io::Result<()> {
-    let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone());
+    allowance: Allowance,
+) -> io::Result<usize> {
+    let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone(), allowance);
     let merged = match &cascaded {
-        Ok(left) => merge_runs(left, writer, merge_slice_cap),
+        Ok((left, _)) => merge_runs(left, writer, merge_slice_cap, allowance.buffer(left.len())),
         Err(_) => Ok(()),
     };
-    let removed = remove_runs(runs.iter().chain(cascaded.iter().flatten()));
-    cascaded.and(merged).and(removed)
+    let removed = remove_runs(
+        runs.iter()
+            .chain(cascaded.iter().flat_map(|(left, _)| left)),
+    );
+    let passes = cascaded.map(|(_, passes)| passes);
+    merged.and(removed).and(passes)
 }
 
 fn merge_runs(
     runs: &[SpillReceipt],
     writer: &mut TextIndexWriter,
     merge_slice_cap: usize,
+    buffer: usize,
 ) -> io::Result<()> {
-    let mut merge = TextRunMerge::open(runs, RunPayload::Positions)?;
+    let mut merge = TextRunMerge::open(runs, RunPayload::Positions, buffer)?;
     let mut entities: Vec<u32> = Vec::new();
     let mut staged: Vec<u32> = Vec::new();
     while merge.next_term()? {
@@ -786,7 +805,8 @@ mod tests {
             }
             let runs = accumulator.into_runs().unwrap();
 
-            let mut merge = TextRunMerge::open(&runs, RunPayload::Positions).unwrap();
+            let mut merge =
+                TextRunMerge::open(&runs, RunPayload::Positions, crate::RUN_BUFFER_MIN).unwrap();
             let mut read: BTreeMap<Vec<u8>, BTreeMap<u32, Vec<u32>>> = BTreeMap::new();
             while merge.next_term().unwrap() {
                 let term = read.entry(merge.term().to_vec()).or_default();
