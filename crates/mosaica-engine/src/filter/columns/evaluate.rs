@@ -172,10 +172,9 @@ impl FilterColumns {
         self.columns.get(column).is_some_and(|held| held.filterable)
     }
 
-    /// How many entities the base postings hold for the values an `eq` or `in` names, where the
-    /// column answers it from them; `None` for any other leaf, or a posting that will not read.
-    /// The postings route is taken only under `visibility = "public"`, where a value's posting is
-    /// published.
+    /// How many entities the base postings hold for the values an `eq` or `in` names, over the whole
+    /// shard, where the column answers it from them; `None` for any other leaf, or a posting that
+    /// will not read. Only a `visibility = "public"` column answers from its postings.
     pub(crate) fn posting_entities(&self, column: &str, operand: &FilterOperand) -> Option<u64> {
         let ColumnLayers::Values {
             postings: Some(postings),
