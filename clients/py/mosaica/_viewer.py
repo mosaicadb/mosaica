@@ -706,18 +706,13 @@ class Selection:
 
         When the box's outline crosses more grid cells than the server's `max_region_cells`
         setting allows, the server counts the cells that cover the box, so the count can include
-        items outside it. `sample(k=0)` gives the same count as `matched` in its `mosaica.counts`,
-        with the verdict on the box in `mosaica.region`.
+        items outside it. `aggregate([{"count": True}])` gives the same count, with the verdict on
+        the box in its table's `mosaica.region`.
 
             db.view("papers").count()
         """
-        request = {"view": self._view, "zoom": 0, "tiles": [0], "k": 0}
-        expression = self._expression()
-        if expression is not None:
-            request["filters"] = expression
-        body = self._reader()._request("POST", "/v1/viewport", request)
-        tiles = _tables([p for kind, p in split_frames(body) if kind == FRAME_TILES])
-        return _tile_counts(tiles).get("matched", 0)
+        [size] = self.aggregate([{"count": True}])
+        return int(size.column("count")[0].as_py()) if size.num_rows else 0
 
     def sample(
         self,
