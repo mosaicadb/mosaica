@@ -7,19 +7,21 @@
 //! |---|---|
 //! | `V` | the records, back to back |
 //! | 0 to 7 | zeros, to the next multiple of 8 |
-//! | `8 (n + 1)` | the offsets, `i64`: record *i* is bytes `o[i]..o[i + 1]` of the values, with `o[0] = 0` and `o[n] = V` |
+//! | `8 (n + 1)` | the offsets `o`, `i64`, with `o[0] = 0` and `o[n] = V` |
 //! | `4 n`, keyed files only | the keys, `u32`, strictly ascending |
 //! | 48 | the trailer |
+//!
+//! Record *i* is bytes `o[i]..o[i + 1]` of the records.
 //!
 //! The trailer is the magic `MOSAREC\0`, the container version as a `u32`, one byte that is 1 when
 //! keys are present and 0 when not, three zero bytes, the column name zero-padded to 16 bytes, the
 //! record count `n` as a `u64` and `V` as a `u64`.
 //!
-//! [`RecordWriter`] writes each record into the file as it arrives, so the records, which are nearly
-//! all of the file's bytes, are written once. The offsets and keys follow the records because the
-//! records' total length is not known until the last one arrives, so the writer spools them to
-//! unnamed files beside the file and `finish` appends them. A record written in pieces reserves its
-//! head, which its end writes back in place.
+//! [`RecordWriter`] writes each record into the file as it arrives, so the records, which are
+//! nearly all of the file's bytes, are written once. The offsets and keys follow the records
+//! because the records' total length is not known until the last one arrives, so the writer spools
+//! them to unnamed files beside the file and `finish` appends them. A record written in pieces
+//! reserves its head, which its end writes back in place.
 //!
 //! The reader maps the file, or reads it into a buffer aligned for `i64`, and borrows the values,
 //! offsets and keys from it without copying. It refuses a file whose length is not what its trailer
@@ -33,6 +35,11 @@ use arrow::array::LargeBinaryArray;
 use arrow::buffer::{Buffer, MutableBuffer, OffsetBuffer, ScalarBuffer};
 
 use crate::postings::{invalid_data, mapped_buffer};
+
+// The reader borrows the offsets and keys as native integers, which are the file's little-endian
+// ones only on a little-endian target.
+#[cfg(target_endian = "big")]
+compile_error!("the record container is read only on little-endian targets");
 
 const MAGIC: [u8; 8] = *b"MOSAREC\0";
 const VERSION: u32 = 1;

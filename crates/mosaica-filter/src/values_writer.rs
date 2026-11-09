@@ -184,8 +184,9 @@ fn check_presence(values: usize, presence: Option<&Bitmap>) -> io::Result<()> {
 /// The single schema/batch/IPC-writer invocation behind both writers.
 ///
 /// Byte-identity between the whole-column path and the streaming one requires this to be literally
-/// the same code rather than two copies that could drift. The column carries no validity buffer on either path: a value column's absences live in the
-/// presence bitmap, and a spurious all-valid buffer would change the file's bytes.
+/// the same code rather than two copies that could drift. The column carries no validity buffer on
+/// either path: a value column's absences live in the presence bitmap, and a spurious all-valid
+/// buffer would change the file's bytes.
 fn write_value_array(path: &Path, array: ArrayRef, ty: DataType) -> io::Result<()> {
     let schema = Arc::new(Schema::new(vec![Field::new("value", ty, false)]));
     let batch =
@@ -341,11 +342,11 @@ impl Spool {
             )));
         }
         let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-        // SAFETY: `arc` owns the mapping for as
-        // long as any `Buffer` built from it is alive (it is captured as the buffer's
-        // `Allocation`), the mapping is valid for `expect` bytes for its whole lifetime, and
-        // `memmap2::Mmap` never returns a null base pointer. The mapping's base is page-aligned,
-        // which satisfies the alignment every `ScalarBuffer` built over it requires.
+        // SAFETY: `arc` owns the mapping for as long as any `Buffer` built from it is alive (it is
+        // captured as the buffer's `Allocation`), the mapping is valid for `expect` bytes for its
+        // whole lifetime, and `memmap2::Mmap` never returns a null base pointer. The mapping's
+        // base is page-aligned, which satisfies the alignment every `ScalarBuffer` built over it
+        // requires.
         let ptr = NonNull::new(arc.as_ptr() as *mut u8)
             .expect("memmap2::Mmap never returns a null base pointer");
         Ok(unsafe { Buffer::from_custom_allocation(ptr, expect, arc) })

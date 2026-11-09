@@ -558,7 +558,8 @@ pub fn write_category_postings(
         for local in 0..width {
             let entities = &flat[offsets[local] as usize..offsets[local + 1] as usize];
             let key = keys[local];
-            out.append_keyed(key, &encode_posting(key as usize, entities, SMALL_TERM_THRESHOLD_DEFAULT)?)?;
+            let record = encode_posting(key as usize, entities, SMALL_TERM_THRESHOLD_DEFAULT)?;
+            out.append_keyed(key, &record)?;
         }
     }
     out.finish()

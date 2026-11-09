@@ -131,7 +131,7 @@ fn build_fixture_n(artifacts: u32) -> Fixture {
     let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &per_term, SMALL_TERM_THRESHOLD).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
-    let tier_path = temp.path().join("tier.arrow");
+    let tier_path = temp.path().join("tier");
     let entries: Vec<(u32, Vec<u32>)> = per_term_flushed
         .into_iter()
         .enumerate()

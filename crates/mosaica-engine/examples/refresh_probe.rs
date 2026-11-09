@@ -226,7 +226,7 @@ fn p2(dir: &std::path::Path, entities: u64, grant: f64) {
     for count in [0usize, 1, 8, 64, 512] {
         while tiers.len() < count {
             let i = tiers.len();
-            let path = tier_dir.join(format!("delta-{i}.arrow"));
+            let path = tier_dir.join(format!("delta-{i}"));
             if !path.exists() {
                 let entries: Vec<(TermId, Vec<u32>)> = (0..TERMS as u32)
                     .map(|t| {

@@ -1514,11 +1514,11 @@ impl RssSampler {
 /// **P1 — what a fold costs in memory and wall clock, at two corpus sizes.**
 ///
 /// `compaction.md` §14 lists the fold's peak RSS as **modelled** and marks it *"the design's
-/// central claim and nothing measures it"*. §3 is the claim: a budget of three named terms —
-/// the postings file's offsets spool (dictionary), `permutation.bin` (entity space, written through a
-/// mapping), plus the widest term's encode — summing to **~9–10 GB at
-/// 10⁹**, and explicitly *not* the merge's measured 4.4–4.9× of its inputs' bytes, which applied to
-/// a corpus would be 200+ GB on a 47 GB bundle. This probe measures the budget.
+/// central claim and nothing measures it"*. §3 is the claim: a budget of named terms —
+/// `permutation.bin` (entity space, written through a mapping) and the widest term's encode —
+/// summing to **about 9 GB at 10⁹** with the safety factor, and explicitly *not* the merge's
+/// measured 4.4–4.9× of its inputs' bytes, which applied to a corpus would be 200+ GB on a 47 GB
+/// bundle. This probe measures the budget.
 ///
 /// # Two sizes, in two processes, and both halves of that are load-bearing
 ///

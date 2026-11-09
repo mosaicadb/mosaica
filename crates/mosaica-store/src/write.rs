@@ -589,10 +589,10 @@ impl ColumnSpool {
             });
         }
 
-        // SAFETY: identical to `ColumnsRef::load`'s mmap arm — `arc`
-        // owns the mapping for as long as any `Buffer` built from it is alive (captured as the
-        // buffer's `Allocation`), the mapping is valid for `len` bytes for its whole lifetime, and
-        // memmap2 never returns a null base pointer.
+        // SAFETY: identical to `ColumnsRef::load`'s mmap arm — `arc` owns the mapping for as long
+        // as any `Buffer` built from it is alive (captured as the buffer's `Allocation`), the
+        // mapping is valid for `len` bytes for its whole lifetime, and memmap2 never returns a
+        // null base pointer.
         let mapping = unsafe { memmap2::Mmap::map(&file) }?;
         let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
         let ptr = NonNull::new(arc.as_ptr() as *mut u8)

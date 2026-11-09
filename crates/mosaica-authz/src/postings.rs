@@ -3,22 +3,24 @@
 //! A postings file is a record container ([`crate::records`]) whose column is named
 //! [`POSTINGS_COLUMN`]. Record *i* is term *i*'s posting, `u8 tag ‖ payload`: tag 0 is a sorted
 //! `u32` little-endian entity array, used when `count <= small_term_threshold` including the empty
-//! case; tag 1 is portable-serialised Roaring bitmap bytes. A delta tier is a keyed container of the
-//! same records ([`crate::DeltaTier`]).
+//! case; tag 1 is portable-serialised Roaring bitmap bytes. A delta tier is a keyed container of
+//! the same records ([`crate::DeltaTier`]).
 //!
 //! Postings are entity-space only; `RowId` never appears here.
+//!
+//! It also holds two general Arrow helpers: [`decode_single_batch`], which other crates' readers
+//! use for their own IPC files, and `mapped_buffer`, which maps a file as an Arrow buffer.
 
 use std::fs::File;
-use std::io::{self, BufWriter};
+use std::io;
 use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, LargeBinaryArray};
+use arrow::array::{Array, LargeBinaryArray};
 use arrow::buffer::Buffer;
 use arrow::datatypes::SchemaRef;
 use arrow::ipc::reader::{read_footer_length, FileDecoder};
-use arrow::ipc::writer::FileWriter;
 use arrow::ipc::{root_as_footer, MetadataVersion};
 use arrow::record_batch::RecordBatch;
 use croaring::{Bitmap, BitmapView, Portable};
@@ -105,26 +107,6 @@ pub fn encode_posting_bitmap(bitmap: &Bitmap, small_term_threshold: u32) -> io::
         record.extend_from_slice(&optimised.serialize::<Portable>());
     }
     Ok(record)
-}
-
-/// Write `columns` as the single record batch of an Arrow IPC file.
-#[allow(dead_code)]
-pub(crate) fn write_single_batch(
-    path: &Path,
-    schema: SchemaRef,
-    columns: Vec<ArrayRef>,
-) -> io::Result<()> {
-    let batch = RecordBatch::try_new(schema.clone(), columns)
-        .map_err(|e| invalid_data(e.to_string()))?;
-
-    let file = File::create(path)?;
-    let mut writer = FileWriter::try_new(BufWriter::new(file), &schema)
-        .map_err(|e| invalid_data(e.to_string()))?;
-    writer
-        .write(&batch)
-        .map_err(|e| invalid_data(e.to_string()))?;
-    writer.finish().map_err(|e| invalid_data(e.to_string()))?;
-    Ok(())
 }
 
 /// Memory-map `file` whole as an Arrow buffer, without copying.

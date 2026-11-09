@@ -1,11 +1,11 @@
 //! A text layer's word positions: for each term, where in each item's token sequence it occurs.
 //!
 //! A positions file is a record container (`mosaica_authz::records`) whose column is named
-//! [`POSITIONS_COLUMN`], record *i* term ordinal *i*'s, beside the postings it is read with. A term's record holds one entry per item of
-//! its posting, in the posting's ascending item order, so the item at rank *k* of the posting has
-//! entry *k*. An entry is the number of times the term occurs in the item and then each position:
-//! the token's index in the sequence `Analyser::for_each_token` yields, the first absolute and each
-//! later one less the one before.
+//! [`POSITIONS_COLUMN`], record *i* term ordinal *i*'s, beside the postings it is read with. A
+//! term's record holds one entry per item of its posting, in the posting's ascending item order,
+//! so the item at rank *k* of the posting has entry *k*. An entry is the number of times the term
+//! occurs in the item and then each position: the token's index in the sequence
+//! `Analyser::for_each_token` yields, the first absolute and each later one less the one before.
 //!
 //! The entries are grouped in blocks of [`POSITIONS_BLOCK`] items. With `n` items in the posting
 //! there are `B = ⌈n / 128⌉` blocks, and the record is:

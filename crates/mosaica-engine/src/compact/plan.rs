@@ -184,7 +184,6 @@ pub(super) const TERM_IMAGE_MANIFEST_N: u64 = 0;
 /// | term | basis |
 /// |---|---|
 /// | 4 B × permutation bound | `permutation.bin`, written through a mapping |
-/// | 8 B × dictionary length | the postings file's offsets spool |
 /// | 90 B × membership containers | the artifact pass's row forms |
 /// | threads × (posting + image + frozen + scratch) | pass 2b's window and its projection |
 ///
@@ -197,7 +196,6 @@ pub(crate) fn memory_estimate(
 ) -> u64 {
     let terms = 4u64
         .saturating_mul(permutation_bound)
-        .saturating_add(8u64.saturating_mul(dict_len))
         .saturating_add(ARTIFACT_BYTES_PER_CONTAINER.saturating_mul(membership_containers))
         .saturating_add(term_image_estimate(dict_len, permutation_bound, base_rows));
     terms.saturating_mul(FOLD_MEMORY_SAFETY_FACTOR)
@@ -396,12 +394,13 @@ pub(crate) fn plan_fold(
 mod tests {
     use super::*;
 
-    /// A billion entities over 117 million terms: about 5.4 GB, doubled by the safety factor.
+    /// A billion entities over 117 million terms: about 4.5 GB, doubled by the safety factor. The
+    /// dictionary's size does not enter it.
     #[test]
-    fn the_memory_estimate_at_a_billion_entities_is_about_11_gb() {
+    fn the_memory_estimate_at_a_billion_entities_is_about_9_gb() {
         let need = memory_estimate(1_000_000_000, 117_000_000, 0, 1_000_000_000);
         let gb = need as f64 / 1e9;
-        assert!((10.0..=11.5).contains(&gb), "estimate is {gb:.1} GB");
+        assert!((8.5..=9.5).contains(&gb), "estimate is {gb:.2} GB");
     }
 
     /// Four bytes per entity for the permutation, doubled.
@@ -412,8 +411,6 @@ mod tests {
             4 * 1_000 * 2,
             "no terms, so no images"
         );
-        // 8 B per dictionary ordinal, whatever the entity space.
-        assert_eq!(memory_estimate(0, 1_000, 0, 0), 8 * 1_000 * 2);
     }
 
     /// Pass 2b is charged one posting, one image, its buffer and one scratch, and only where it
@@ -425,31 +422,26 @@ mod tests {
             0,
             "no terms, so no images"
         );
-        assert_eq!(
-            memory_estimate(0, 1, 0, 0),
-            8 * 2,
-            "no rows, so no images"
-        );
+        assert_eq!(memory_estimate(0, 1, 0, 0), 0, "no rows, so no images");
         let scratch = |bound: u64, rows: u64| {
             mosaica_store::permutation::project_scratch_bound(bound, rows).total()
         };
         // One container of rows: an 8 KiB image and a buffer of the same width.
         assert_eq!(
             memory_estimate(0, 1, 0, VALUES_PER_CONTAINER),
-            (8 + 2 * BYTES_PER_BITSET_CONTAINER + scratch(0, VALUES_PER_CONTAINER))
+            (2 * BYTES_PER_BITSET_CONTAINER + scratch(0, VALUES_PER_CONTAINER))
                 * FOLD_MEMORY_SAFETY_FACTOR
         );
         // One more row adds a container to the image and to the buffer.
         assert_eq!(
             memory_estimate(0, 1, 0, VALUES_PER_CONTAINER + 1),
-            (8 + 4 * BYTES_PER_BITSET_CONTAINER + scratch(0, VALUES_PER_CONTAINER + 1))
+            (4 * BYTES_PER_BITSET_CONTAINER + scratch(0, VALUES_PER_CONTAINER + 1))
                 * FOLD_MEMORY_SAFETY_FACTOR
         );
         // A container of entity space adds its 4 B per entity and one posting container.
         assert_eq!(
             memory_estimate(VALUES_PER_CONTAINER, 1, 0, VALUES_PER_CONTAINER),
             (4 * VALUES_PER_CONTAINER
-                + 8
                 + 3 * BYTES_PER_BITSET_CONTAINER
                 + scratch(VALUES_PER_CONTAINER, VALUES_PER_CONTAINER))
                 * FOLD_MEMORY_SAFETY_FACTOR
