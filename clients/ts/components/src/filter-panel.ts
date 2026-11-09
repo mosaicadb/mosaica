@@ -4,7 +4,7 @@ import {repeat} from 'lit/directives/repeat.js';
 import {CLUSTER_PREFIX, activeCount, artifactName, emptyDraft, isPopulated, withoutClause, withoutMember, type ClauseVerb, type ColumnDraft, type FilterDraft, type Layer, type MemberClause, type Meta, type Store} from '@mosaicajs/client';
 import {OPERATOR_WORDS} from './filter.js';
 import {HeldAggregate} from './aggregate.js';
-import {MosaicaElement, UNNAMED, columnCaption, dateRangeText, countText, emit, keyTitle, shortCount} from './base.js';
+import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, isBoolColumn, keyTitle, shortCount} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import type {MosaicaFieldCard} from './field-card.js';
 import {icon} from './icons.js';
@@ -397,6 +397,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
       case 'numeric': {
         const meta = this.resolvedStore?.get('meta');
         if (meta?.declaredScalars.find((c) => c.name === column)?.arrowType === 'timestamp_us') return `${caption} ${dateRangeText(draft.gte, draft.lte)}`;
+        const kept = isBoolColumn(this.resolvedStore, column) ? boolKeys(draft) : [];
+        if (kept.length > 0) return `${caption}: ${kept.map((k) => BOOL_WORDS[k]).join(', ')}`;
         const f = (v: number) => v.toLocaleString('en-GB');
         if (draft.lte === null) return `${caption} ≥ ${f(draft.gte!)}`;
         if (draft.gte === null) return `${caption} ≤ ${f(draft.lte)}`;

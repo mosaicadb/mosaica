@@ -1392,8 +1392,8 @@ class Viewer:
 
         A grouping names at least one figure. `"count": True` counts the items in each row, so
         `{"count": True}` alone is the size of the set. `"values"`, `"missing"`, `"min"`, `"max"`
-        and `"mean"` each take a list of number or timestamp fields and give a column per field,
-        such as `min_year`, and `"summary"` gives all five. They are exact and are taken over
+        and `"mean"` each take a list of number, timestamp or bool fields and give a column per
+        field, such as `min_year`, and `"summary"` gives all five. They are exact and are taken over
         every item this reader may see in the view, so they are refused beside `"by"` or
         `"cells"` and in a request with `filters` or `reference`. `min_` and `max_` have the
         field's type, and `mean_` is a float, or a UTC timestamp on a timestamp field.
@@ -1412,12 +1412,13 @@ class Viewer:
           `top` needs `"cut": {"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}`, so that it
           ranks the annotations a map draws at that zoom, box and cluster budget, and without
           `budget` it ranks the finest cut.
-        - By bins of a number or timestamp field, as `{"field": name, "bins": n}`, a histogram of
-          at most `n` bins in one page. With `"range": [lower, upper]` the bins divide that range
-          into equal widths and `rest` counts the values outside it. Without a range the edges
-          are round values around the smallest and largest value this reader may see in the view,
-          so they stay put as the filters change. The edges have the field's type, except that an
-          integer field gets float edges when a bound of `range` is fractional. `"sample": s`
+        - By bins of a number, timestamp or bool field, as `{"field": name, "bins": n}`, a
+          histogram of at most `n` bins in one page. With `"range": [lower, upper]` the bins
+          divide that range into equal widths and `rest` counts the values outside it. Without a
+          range the edges are round values around the smallest and largest value this reader may
+          see in the view, so they stay put as the filters change; a bool's are a bin for false
+          (0) and one for true (1). The edges have the field's type, except that an integer field
+          gets float edges when a bound of `range` is fractional. `"sample": s`
           counts a large set faster, over about `s` of its items, and scales each count to the
           set's size.
 

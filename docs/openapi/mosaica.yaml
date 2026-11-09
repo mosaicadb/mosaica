@@ -2171,7 +2171,7 @@ paths:
     post:
       tags: [viewer]
       operationId: aggregate
-      summary: How the items this principal may see in one view are distributed, as one table per grouping of the figures it names, counts exact unless a histogram asks for a sample, and the figures of number or timestamp fields over the visible set.
+      summary: How the items this principal may see in one view are distributed, as one table per grouping of the figures it names, counts exact unless a histogram asks for a sample, and the figures of number, timestamp or bool fields over the visible set.
       description: |
         **The body is not JSON.** It is framed as `POST /v1/items` frames its body, with these
         kinds:
@@ -2197,8 +2197,8 @@ paths:
         (**Figures**), and has an optional outer level, `by`, and an optional inner level,
         `cells`. With neither level, its table is one row, so `{"count": true}` is the size of the
         set. `by` names a category `field` or the artifacts of a `layer`, and lists `top` groups by
-        count or the groups named in `values` or `artifacts`; or it names a number or timestamp
-        `field` and counts its values in `bins`, a histogram, which takes no `cells`. `cells`
+        count or the groups named in `values` or `artifacts`; or it names a number, timestamp or
+        bool `field` and counts its values in `bins`, a histogram, which takes no `cells`. `cells`
         divides the set, or each group, into the cells of `view` at `depth`: depths 0 to 16 are the cells of the
         map's tiles at that zoom, and 17 to 32 divide them down to the stored position.
         `cells.area` is a bbox in the form and units the viewport's `bbox` takes, absent for the
@@ -2244,7 +2244,8 @@ paths:
         `gte` the lower edge and `lt` the upper matches exactly a bin's items, and `lte` for the
         last. On a timestamp field, and on an integer field unless a bound of `range` is
         fractional, the edges are whole numbers, worked out exactly, and every value is compared
-        with them exactly.
+        with them exactly. A bool is binned as 0 for false and 1 for true, its edges served as
+        `uint64`.
 
         With `range` on a float field, where `lower` and `upper` are multiples of one readable
         width (below) `n` widths apart, the edges are those multiples; otherwise edge `i` of `n`
@@ -2277,7 +2278,8 @@ paths:
         week's on Mondays, a month's on the first of a month whose number from January of year 0
         is a multiple of the width, and a year's on 1 January of a year that is a multiple of the
         width, in UTC. The last edge is above the largest value. Where every visible value is the
-        same instant, its bin is its day.
+        same instant, its bin is its day. On a bool field the edges are 0, 1 and 2, a bin for false
+        and one for true, whatever the visible items hold; with `bins` of 1, they are 0 and 1.
 
         The smallest and largest value are the field's `min` and `max` (**Figures**), exact over
         every item this principal may see in `view`, so no visible value lies outside the bins. A build and a
@@ -2307,10 +2309,11 @@ paths:
 
         **Figures.** A grouping names what its rows hold, as keys beside `by` and `cells`, and
         names at least one. `count: true` counts the items of the set in each row. `values`,
-        `missing`, `min`, `max` and `mean` each list number or timestamp fields declared with
+        `missing`, `min`, `max` and `mean` each list number, timestamp or bool fields declared with
         `index` or `render`, resolved as `by`'s `field` is, and give one column per field: the
         items holding a finite value, the items holding no value, the smallest and largest finite
-        value, and the mean of the finite values. `summary` lists fields and names all five of
+        value, and the mean of the finite values. A bool's values are 0 and 1, so its mean is the
+        share of its values that are true. `summary` lists fields and names all five of
         those figures over each. A figure named twice for one field gives one column; **Columns**
         gives their order.
 
@@ -2479,8 +2482,8 @@ paths:
             - `top` of 0 or above `selection.max_aggregate_top`; `values` or `artifacts` empty or longer than `selection.max_aggregate_named`; an `artifacts` entry that is not a `mosaica_id`;
             - `bins` beside `top` or `values`, or on a layer; `range` without `bins`; `bins` of 0 or above `selection.max_aggregate_bins`; a `range` whose lower bound is not below its upper, or that is not two numbers or strings; a fractional bound on a timestamp field, or a text bound that is not a date or date-time with an offset and at most six fractional-second digits; `bins` with `cells`; `sample` without `bins`, on a layer, or of 0;
             - a grouping that names no figure, `{}` and a `by` alone among them, with a detail saying to write `"count": true`; `count` other than `true`, `null` among them; a `values`, `missing`, `min`, `max`, `mean` or `summary` that is `null` or an empty list;
-            - `values`, `missing`, `min`, `max`, `mean` or `summary` in a grouping with `by` or `cells`, or in a request carrying `filters` or `reference`, with a detail saying they are computed over the whole visible set only; a field in one of them that is not a number or timestamp, and a number or timestamp field declared with neither `index` nor `render`, with a detail saying to name a number or timestamp field declared with `index` or `render`;
-            - `bins` on a field that is not a number or timestamp, each kind with its own detail; on a `bool`, with a detail saying it has no bins; and on a number or timestamp field declared with neither `index` nor `render`, with a detail saying to name a number or timestamp field declared with `index` or `render`;
+            - `values`, `missing`, `min`, `max`, `mean` or `summary` in a grouping with `by` or `cells`, or in a request carrying `filters` or `reference`, with a detail saying they are computed over the whole visible set only; a field in one of them that is not a number, timestamp or bool, and one of those declared with neither `index` nor `render`, with a detail saying to name a number, timestamp or bool field declared with `index` or `render`;
+            - `bins` on a field that is not a number, timestamp or bool, each kind with its own detail; and on one of those declared with neither `index` nor `render`, with a detail saying to name a number, timestamp or bool field declared with `index` or `render`;
             - an unknown field, and a field that is not a category, each with its own detail; a category declared with none of `index`, `render` or a `derived` vocabulary, with a detail saying to declare it with `index` or `render`;
             - a layer outside the list `/v1/meta` publishes to this principal; no `level` on a layer with several, a `level` the layer does not hold, or one given on a layer with a single level;
             - `top` on a `nested` or `dag` layer without `cut`; `cut` on any other layer or on a field; a `cut` whose `zoom` is above 16, whose `bbox` is not `[x0, y0, x1, y1]` with `x0 ≤ x1`, `y0 ≤ y1`, all finite, or which spans more tiles than `max_tiles_per_request`;
@@ -6803,13 +6806,13 @@ components:
       type: array
       minItems: 1
       items: { type: string }
-      description: "Number or timestamp fields declared with `index` or `render`, resolved as `AggregateBy`'s `field` is, each giving its own column of the figure, named `<figure>_<field>`. Only in a grouping with neither `by` nor `cells`, in a request with neither `filters` nor `reference`; see **Figures**. `summary` names all five figures of each field."
+      description: "Number, timestamp or bool fields declared with `index` or `render`, resolved as `AggregateBy`'s `field` is, each giving its own column of the figure, named `<figure>_<field>`. Only in a grouping with neither `by` nor `cells`, in a request with neither `filters` nor `reference`; see **Figures**. `summary` names all five figures of each field."
 
     AggregateBy:
       description: |
         A grouping's outer level. With `top` or `values`, `field` is a category field declared
         with `index` or `render`, or one with a `derived` vocabulary; with `bins`, it
-        is a number or timestamp field declared with `index` or `render`. A group-scoped field resolves under
+        is a number, timestamp or bool field declared with `index` or `render`. A group-scoped field resolves under
         `view` as a filter leaf on it does, or is pinned as `<field>@<key>`. `layer` is one `/v1/meta` publishes to
         this principal, and `level` follows `BrowseRequest.level`: required on a layer with
         several levels and refused on one with a single level. On a `nested` or `dag` layer `top`
@@ -6849,7 +6852,7 @@ components:
               maxItems: 2
               items:
                 $ref: "#/components/schemas/NumericComparand"
-              description: "`[lower, upper]`, with `lower` below `upper`, in the field's own units: on a timestamp field, whole microseconds since the Unix epoch, or an RFC 3339 date or date-time with an offset written as a string, as in a filter. On an integer field, a fractional bound has the bins cut, and served, in `float64`. Absent is readable edges around the values every item this principal may see in `view` holds."
+              description: "`[lower, upper]`, with `lower` below `upper`, in the field's own units: on a timestamp field, whole microseconds since the Unix epoch, or an RFC 3339 date or date-time with an offset written as a string, as in a filter. On an integer field, a fractional bound has the bins cut, and served, in `float64`. Absent is readable edges around the values every item this principal may see in `view` holds, or on a bool a bin for false and one for true."
             sample:
               type: integer
               minimum: 1

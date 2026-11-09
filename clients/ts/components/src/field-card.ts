@@ -24,7 +24,7 @@ import {
 import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
 import {HeldAggregate, artifactGroupings, countsByKey, levelOf, listedGroups, rankedGrouping} from './aggregate.js';
-import {MosaicaElement, UNNAMED, columnCaption, countText, dateRangeText, emit, idString, keyTitle, shortDateText} from './base.js';
+import {BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, idString, isBoolColumn, keyTitle, shortDateText, type BoolKey} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
 import {attachContextRoot, defineOnce} from './define.js';
@@ -63,8 +63,8 @@ function formatNumber(n: number, whole: boolean): string {
   return v.toLocaleString('en-GB', size >= 1 ? {maximumFractionDigits: 2} : {maximumSignificantDigits: 3});
 }
 
-/** What a card draws: a category's or a layer's top values, a histogram, or a search box. */
-type Kind = 'category' | 'cluster' | 'histogram' | 'search';
+/** What a card draws: a category's or a layer's top values, a histogram, a bool's two values, or a search box. */
+type Kind = 'category' | 'cluster' | 'histogram' | 'bool' | 'search';
 
 /** One bin of a histogram, its edges in the column's units (microseconds on a timestamp). */
 type Bin = {lower: number; upper: number; count: number};
@@ -116,6 +116,8 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * - A number or date card draws a histogram, and the viewer drags across it to pick a range to
  *   filter or highlight by. From the keyboard, they press Shift and the arrow keys on the focused
  *   plot, then Enter. Counts over about 100,000 items come from a sample, so they are marked "≈".
+ * - A bool card lists yes and no as a category card lists values. Its counts are taken as a
+ *   histogram's, so those over about 100,000 items are marked "≈".
  * - A text or keyword field's card is a search box, `<mosaica-filter>`.
  *
  * While the paint button colours the map by the field, clicking a value's colour opens a picker
@@ -667,7 +669,8 @@ export class MosaicaFieldCard extends MosaicaElement {
     if (this.layerName !== null) return this.declaredLayer(meta) ? 'cluster' : null;
     const o = meta.filterOperands.find((x) => x.column === this.field);
     if (!o) return null;
-    return o.family === 'category' ? 'category' : o.family === 'numeric' ? 'histogram' : 'search';
+    if (o.family === 'numeric') return meta.declaredScalars.find((c) => c.name === this.field)?.arrowType === 'bool' ? 'bool' : 'histogram';
+    return o.family === 'category' ? 'category' : 'search';
   }
 
   private isTimestamp(meta: Meta | null): boolean {
@@ -686,11 +689,12 @@ export class MosaicaFieldCard extends MosaicaElement {
     return levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []);
   }
 
-  /** The keys of the field's clause in `verb`: a category's values, or a layer's clusters by id. */
+  /** The keys of the field's clause in `verb`: a category's values, a bool's, or a layer's clusters by id. */
   private clauseKeys(store: Store, verb: ClauseVerb): Set<string> {
     const name = this.layerName;
     if (name !== null) return new Set(store.get('filters').members.filter((m) => m.layer === name && m.verb === verb && !m.outside).map((m) => idString(m.artifact)));
     const held = store.get('filters').draft[verb][this.field];
+    if (isBoolColumn(store, this.field)) return new Set(boolKeys(held));
     return new Set(held?.family === 'category' ? held.keys : []);
   }
 
@@ -742,6 +746,10 @@ export class MosaicaFieldCard extends MosaicaElement {
   private specs(store: Store, meta: Meta, kind: Kind): {subject: AggregateSpec | null; match: AggregateSpec | null; figures: AggregateSpec | null} {
     const leaveOut = this.layerName !== null ? {withoutMembersOf: this.layerName} : {without: this.field};
     if (kind === 'search') return {subject: null, match: null, figures: null};
+    if (kind === 'bool') {
+      const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: 2, sample: SAMPLE}}];
+      return {subject: {groupings: bins, subject: 'view', highlighted: true, ...leaveOut}, match: this.folded ? null : {groupings: bins, ...leaveOut}, figures: null};
+    }
     if (kind === 'histogram') {
       const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: BINS, sample: SAMPLE}}];
       return {
@@ -810,6 +818,14 @@ export class MosaicaFieldCard extends MosaicaElement {
     const was = held?.family === 'category' ? held.keys : [];
     const keys = was.includes(key) ? was.filter((k) => k !== key) : [...was, key];
     this.setClause(verb, {family: 'category', keys});
+  }
+
+  /** Put a bool's value in or out of the field's clause in `verb`. */
+  private toggleBool(key: BoolKey, verb: ClauseVerb): void {
+    const s = this.resolvedStore;
+    if (!s) return;
+    const was = boolKeys(s.get('filters').draft[verb][this.field]);
+    this.setClause(verb, boolClause(was.includes(key) ? was.filter((k) => k !== key) : [...was, key]));
   }
 
   /** Replace the field's clause in `verb`, and report what that position composes. */
@@ -891,9 +907,8 @@ export class MosaicaFieldCard extends MosaicaElement {
       bars = [];
       for (let i = 0; i < bins.length; i += per) bars.push({n: bins.slice(i, i + per).reduce((t, b) => t + b.count, 0), colour: null});
     } else {
-      const counts = countsByKey(entry);
       const rows = this.rows(s, kind, entry, undefined, colouring).slice(0, SPARK_BARS);
-      bars = rows.map((r) => ({n: counts?.get(r.key) ?? 0, colour: r.swatch}));
+      bars = rows.map((r) => ({n: r.sub ?? 0, colour: r.swatch}));
     }
     const top = Math.max(1, ...bars.map((b) => b.n));
     return html`<span part="spark" aria-hidden="true">${bars.map((b) => html`<span style=${`height:${Math.max(1, Math.round((b.n / top) * 14))}px${b.colour ? `;background:${b.colour}` : ''}`}></span>`)}</span>`;
@@ -904,8 +919,11 @@ export class MosaicaFieldCard extends MosaicaElement {
    * count in the subject, then in the whole match.
    */
   private rows(s: Store, kind: Kind, subject: AggregateEntry | undefined, match: AggregateEntry | undefined, colouring: boolean): Row[] {
-    const sub = countsByKey(subject);
-    const all = countsByKey(match);
+    const sub = this.counts(kind, subject);
+    const all = this.counts(kind, match);
+    if (kind === 'bool') {
+      return (['true', 'false'] as const).map((key) => ({key, name: BOOL_WORDS[key], path: '', sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
+    }
     if (all && kind === 'category') for (const [k, n] of countsByKey(this.outsideCounts.entryFor(s)) ?? []) if (!all.has(k)) all.set(k, n);
     const named = [...this.clauseKeys(s, 'filter'), ...this.clauseKeys(s, 'highlight')];
     if (kind === 'category') {
@@ -949,6 +967,14 @@ export class MosaicaFieldCard extends MosaicaElement {
     });
   }
 
+  /** Each row's count in `entry`: a bool's from its bins for false and true, else by each group's key. */
+  private counts(kind: Kind, entry: AggregateEntry | undefined): Map<string, number> | null {
+    if (kind !== 'bool') return countsByKey(entry);
+    const table = entry?.result?.tables[0];
+    if (!table) return null;
+    return new Map(binsOf(table, false).map((b): [BoolKey, number] => [b.lower === 0 ? 'false' : 'true', b.count]));
+  }
+
   /** The name a cluster's clause carries, for a cluster no table lists. */
   private clauseName(s: Store, id: bigint): string | null {
     return s.get('filters').members.find((m) => m.artifact === id && m.layer === this.layerName)?.label ?? null;
@@ -973,9 +999,11 @@ export class MosaicaFieldCard extends MosaicaElement {
     // The shares are of each set's total, or of what the field's own filter keeps where it has one.
     const keptTotal = (counts: Map<string, number> | null, table: AggregateTable | undefined) =>
       filtered.size > 0 && counts ? [...filtered].reduce((t, k) => t + (counts.get(k) ?? 0), 0) : (table?.total ?? 0);
-    const subTotal = keptTotal(countsByKey(subject), subject?.result?.tables[0]);
-    const allTotal = keptTotal(countsByKey(match), match?.result?.tables[0]);
+    const subTotal = keptTotal(this.counts(kind, subject), subject?.result?.tables[0]);
+    const allTotal = keptTotal(this.counts(kind, match), match?.result?.tables[0]);
     const same = subTotal === allTotal;
+    // A bool's counts are a histogram's, so they may come from a sample.
+    const approx = [subject, match].some((e) => e?.result?.tables[0]?.sample?.sampled) ? '≈' : '';
     const pct = (n: number | null, total: number) => (n === null || total <= 0 ? 0 : Math.min(100, (100 * n) / total));
     // A layer's clusters are often a few per cent each; a bar that is not empty stays visible.
     const width = (share: number) => (share > 0 && kind === 'cluster' ? `max(${MIN_BAR_PX}px, ${share.toFixed(1)}%)` : `${share.toFixed(1)}%`);
@@ -992,10 +1020,11 @@ export class MosaicaFieldCard extends MosaicaElement {
         : inFilter
           ? icon('check', 12, 2.6)
           : nothing;
-      const verb = (v: ClauseVerb) => () => (kind === 'category' ? this.toggleValue(r.key, v) : this.toggleCluster(r.key, r.name === UNNAMED ? null : r.name, v));
+      const verb = (v: ClauseVerb) => () =>
+        kind === 'category' ? this.toggleValue(r.key, v) : kind === 'bool' ? this.toggleBool(r.key as BoolKey, v) : this.toggleCluster(r.key, r.name === UNNAMED ? null : r.name, v);
       const counts = out
-        ? html`<span part="count">${r.all === null ? '' : countText(r.all)}</span>`
-        : html`<span part="count"><span class="sub">${r.sub === null ? '' : countText(r.sub)}</span>${same || r.all === null ? '' : ` / ${countText(r.all)}`}</span>`;
+        ? html`<span part="count">${r.all === null ? '' : approx + countText(r.all)}</span>`
+        : html`<span part="count"><span class="sub">${r.sub === null ? '' : approx + countText(r.sub)}</span>${same || r.all === null ? '' : ` / ${approx}${countText(r.all)}`}</span>`;
       // A press on a row filters to its value or cluster, as its Filter button does, and shows its
       // buttons; the keyboard reaches the buttons.
       return html`<div part="row" data-key=${r.key} data-state=${stateOf} ?data-shown=${this.shownRow === r.key}
@@ -1018,7 +1047,9 @@ export class MosaicaFieldCard extends MosaicaElement {
     };
     const values = (kind === 'category' ? match?.result?.tables[0] : match?.result?.tables.at(-1))?.groups ?? null;
     const search =
-      kind === 'category'
+      kind === 'bool'
+        ? nothing
+        : kind === 'category'
         ? html`<mosaica-filter class="search" exportparts=${exportparts('filter')} column=${this.field} placeholder=${values === null ? 'Search values' : `Search ${values.toLocaleString('en-GB')} values`} .store=${s}></mosaica-filter>`
         : html`<mosaica-cluster-filter class="search" exportparts=${exportparts('cluster-filter')} layer=${layer!.name} placeholder=${values === null ? 'Search clusters' : `Search ${values.toLocaleString('en-GB')} clusters`} .store=${s}></mosaica-cluster-filter>`;
     const moreButton =
@@ -1027,7 +1058,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         : nothing;
     // An answer with nothing in it says so, where a list would otherwise stand empty.
     const empty = shown.length === 0 && subject?.result ? html`<span class="none">${subTotal === 0 ? 'None in view' : 'None counted'}</span>` : nothing;
-    return html`${head(sub)}<div class="body">${search}<div part="rows" role="list" aria-label=${`Commonest ${layer ? 'clusters' : 'values'}`}>${shown.map(
+    return html`${head(sub)}<div class="body">${search}<div part="rows" role="list" aria-label=${kind === 'bool' ? 'Values' : `Commonest ${layer ? 'clusters' : 'values'}`}>${shown.map(
         (r) => html`<div role="listitem">${row(r)}</div>`
       )}</div>${empty}${moreButton}</div>${this.picker.render()}`;
   }

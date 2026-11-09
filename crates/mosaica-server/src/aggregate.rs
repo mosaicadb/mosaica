@@ -438,12 +438,12 @@ fn by_of(
                     })
                 }
                 (None, _, Family::Category) => Err(ApiError::Contract(format!(
-                    "field '{field}' is a category; bins go with a number or timestamp field, \
-                     and a category takes top or values"
+                    "field '{field}' is a category; bins go with a number, timestamp or bool \
+                     field, and a category takes top or values"
                 ))),
                 (None, _, _) => Err(ApiError::Contract(format!(
-                    "field '{field}' is not a number or timestamp; name a number or timestamp \
-                     field for bins"
+                    "field '{field}' is not a number, timestamp or bool; name one of those for \
+                     bins"
                 ))),
             }
         }
@@ -510,9 +510,6 @@ fn in_callers_words(e: EngineError, asked: &[GroupingReq], sent: &[Grouping]) ->
         }
         EngineError::AggregateRefused(AggregateRefused::NotBinnable(column)) => {
             (column, AggregateRefused::NotBinnable)
-        }
-        EngineError::AggregateRefused(AggregateRefused::BinsOnBool(column)) => {
-            (column, AggregateRefused::BinsOnBool)
         }
         EngineError::AggregateRefused(AggregateRefused::FractionalTime(column)) => {
             (column, AggregateRefused::FractionalTime)

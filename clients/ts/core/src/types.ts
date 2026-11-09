@@ -1584,8 +1584,8 @@ export type AggregateRequest = {
  * cells. Name at least one figure; `{count: true}` alone counts the whole set.
  *
  * The field figures (`values`, `missing`, `min`, `max`, `mean` and `summary`) each take a list of
- * number or timestamp columns declared with `index` or `render`, and add one column per field
- * named `<figure>_<field>`. They are computed over every visible item in the view, so they cannot
+ * number, timestamp or bool columns declared with `index` or `render`, and add one column per
+ * field named `<figure>_<field>`. They are computed over every visible item in the view, so they cannot
  * be combined with `by`, `cells`, `filters` or `reference`, and their table has one row. All
  * figures are exact; `min`, `max` and `mean` are null if the field has no values. `values_` and
  * `missing_` columns are `bigint`; `min_` and `max_` are typed as a histogram's edges, and `mean_`
@@ -1624,7 +1624,9 @@ export type Grouping = {
  *   32) gives each artifact its {@link Artifact.slot}. On a `nested` or `dag` layer, `top` requires
  *   a `cut`, and lists the artifacts {@link MosaicaClient.viewportArtifacts} would draw for it. A
  *   `cut` on any other layer is a `422`.
- * - A number or timestamp column in `bins`, as a histogram. The column needs `index` or `render`.
+ * - A number, timestamp or bool column in `bins`, as a histogram. The column needs `index` or
+ *   `render`. A bool is binned as 0 and 1, and without a `range` has a bin for false and one for
+ *   true.
  *
  * Pin a group-scoped column outside its group as `<field>@<key>`. A named value or artifact the
  * viewer cannot see gets no row.

@@ -1,7 +1,7 @@
 import {ContextConsumer} from '@lit/context';
 import {LitElement, type PropertyValues} from 'lit';
 import {property} from 'lit/decorators.js';
-import {createStore, type SelectionShape, type Store, type TokenSupplier} from '@mosaicajs/client';
+import {createStore, isPopulated, type ColumnDraft, type SelectionShape, type Store, type TokenSupplier} from '@mosaicajs/client';
 import type {SelectionShapeDetail, MosaicaEventDetails} from './events.js';
 import {storeContext} from './context.js';
 
@@ -281,6 +281,32 @@ export function keyTitle(store: Store | null, column: string, key: string): stri
   if (!store) return key;
   const named = store.get('legend').categories[column]?.find((v) => v.key === key) ?? store.get('filters').suggestions[column]?.values.find((v) => v.key === key);
   return named?.title ?? key;
+}
+
+/** A bool's two values, as the keys a bool card's rows carry. */
+export type BoolKey = 'true' | 'false';
+/** A bool's values as a card, a chip and an item card name them. */
+export const BOOL_WORDS: Record<BoolKey, string> = {true: 'yes', false: 'no'};
+
+/** Whether `column` is declared `bool`. */
+export function isBoolColumn(store: Store | null, column: string): boolean {
+  return store?.get('meta')?.declaredScalars.find((c) => c.name === column)?.arrowType === 'bool';
+}
+
+/** The values of a bool, true then false, that a clause on it keeps: those whose 1 or 0 lies within its range. */
+export function boolKeys(draft: ColumnDraft | undefined): BoolKey[] {
+  if (draft?.family !== 'numeric' || !isPopulated(draft)) return [];
+  const {gte, lte} = draft;
+  return (['true', 'false'] as const).filter((k) => {
+    const v = k === 'true' ? 1 : 0;
+    return (gte === null || v >= gte) && (lte === null || v <= lte);
+  });
+}
+
+/** The clause on a bool that keeps `keys`: a range over their 1 and 0, or no clause for none. */
+export function boolClause(keys: readonly BoolKey[]): ColumnDraft {
+  const values = keys.map((k) => (k === 'true' ? 1 : 0));
+  return values.length === 0 ? {family: 'numeric', gte: null, lte: null} : {family: 'numeric', gte: Math.min(...values), lte: Math.max(...values)};
 }
 
 const DATE = new Intl.DateTimeFormat('en-GB', {day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'});
