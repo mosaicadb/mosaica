@@ -461,7 +461,7 @@ impl Engine {
         if let Some(expr) = &req.filter {
             generation
                 .declared_columns()
-                .admit(expr, true, &|layer| self.layer_levels(session, layer))
+                .admit(expr, &|layer| self.layer_levels(session, layer))
                 .map_err(filter_refusal)?;
         }
         let page_rows = page_rows_of(req.page_rows, &req.limits);

@@ -8,6 +8,18 @@ container image.
 
 ## [Unreleased]
 
+### Changed
+
+- `serve.filter_cache_bytes` defaults to 1 GiB, up from 256 MiB.
+- The filter cache keeps the rows a condition on a rendered column has read from the map and
+  those it matched, so a pan or a repeated viewport reads only the rows it brings into view.
+- The filter cache keeps the map rows of the items a filter answered over the whole map matches,
+  for a filter answered from the items' values and naming no unique field, so a later viewport
+  with the same filter reads them instead of finding them again.
+- An `eq` or `in` on a `public` category is answered from its postings where they hold few
+  enough items, rather than by reading every row in view. A filter on a rare value over the
+  whole map no longer reads every row.
+
 ## [0.3.0] - 2026-11-08
 
 ### Changed

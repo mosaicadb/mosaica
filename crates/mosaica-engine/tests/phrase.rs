@@ -463,9 +463,10 @@ fn a_repeated_text_filter_is_answered_from_the_cache_with_the_same_items() {
         let before = cache(&engine);
         let session = engine.authorise(&full_coverage_credential()).unwrap();
         assert_eq!(matched(&engine, &session, filter.clone()), want.len() as u64);
+        // The leaf, and its rows in the view, since the filter is answered over the whole map.
         let first = cache(&engine);
-        assert_eq!(first.misses, before.misses + 1, "{filter:?} is evaluated once");
-        assert_eq!(first.entries, before.entries + 1, "{filter:?} is kept apart");
+        assert_eq!(first.misses, before.misses + 2, "{filter:?} is evaluated once");
+        assert_eq!(first.entries, before.entries + 2, "{filter:?} is kept apart");
 
         let again = engine.authorise(&full_coverage_credential()).unwrap();
         assert_eq!(matched(&engine, &again, filter.clone()), want.len() as u64);
@@ -483,7 +484,7 @@ fn a_repeated_text_filter_is_answered_from_the_cache_with_the_same_items() {
     let restarted = cache(&engine);
     assert_eq!(
         (restarted.hits, restarted.misses),
-        (0, 3),
+        (0, 6),
         "a restart keeps nothing"
     );
 }
@@ -516,8 +517,8 @@ fn a_text_filter_answers_each_grant_its_own_items() {
         assert_eq!(matched(&engine, &none, phrase("the quick")), 0);
     }
     let stats = cache(&engine);
-    assert_eq!(stats.misses, 3, "each grant is evaluated once");
-    assert_eq!(stats.hits, 3, "and read from its own entry after");
+    assert_eq!(stats.misses, 6, "each grant is evaluated once and keeps its rows");
+    assert_eq!(stats.hits, 3, "and read from its own rows after");
 }
 
 /// **A suppression, a lift, a deletion and a commit window each reach the next request from the
@@ -585,7 +586,11 @@ fn a_change_reaches_the_next_text_filter_after_a_kept_answer() {
         want(&items),
         "a flushed item is matched once it is visible"
     );
-    assert_eq!(cache(&engine).misses, before.misses + 1, "a flush evaluates again");
+    assert_eq!(
+        cache(&engine).misses,
+        before.misses + 2,
+        "a flush evaluates the leaf and keeps its rows again"
+    );
     assert_eq!(matched(&engine, &fresh, phrase("the quick")), want(&items));
 }
 
