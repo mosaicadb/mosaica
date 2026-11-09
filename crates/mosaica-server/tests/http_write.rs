@@ -2183,6 +2183,84 @@ async fn a_compaction_request_is_pending_then_answered_with_its_record() {
     }
 }
 
+/// A compaction writes its prefix's derived files on its own thread, before it hands the prefix to
+/// the publication: held after them, its record is at that step and an ingest is answered. Once
+/// it publishes, its passes list the derived files before the hand-off, and the new prefix names
+/// the layer's files.
+#[tokio::test]
+async fn an_ingest_is_answered_while_a_compaction_holds_after_its_derived_files() {
+    const LAYER: &str = "clusters/derived";
+    let tmp = TempDir::new().unwrap();
+    let server = serve(&tmp).await;
+    let engine = &server.state.engine;
+    register(&server, flat_layer(LAYER)).await;
+    let resp = server
+        .client
+        .put(server.control_url(&format!(
+            "/control/layers/{}/artifacts",
+            LAYER.replace('/', "%2F")
+        )))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .json(&serde_json::json!({
+            "artifacts": [
+                { "key": "a", "members": members(0..100) },
+                { "key": "b", "members": members(100..200) },
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 201, "{}", resp.text().await.unwrap());
+    let (code, body) = post_ingest(&server, "folded", &rows_from(70_000, 1), true).await;
+    assert_eq!(code, 200, "{body}");
+    tick(&server).await;
+
+    engine.set_fold_paused_for_test(true);
+    let request = ask_for_compaction(&server).await;
+    wait_until(
+        "the compaction holds",
+        std::time::Duration::from_secs(60),
+        async || engine.fold_is_holding_for_test(),
+    )
+    .await;
+    let held = control_status(&server).await;
+    let jobs: Vec<Progress> = serde_json::from_value(held["jobs"].clone()).unwrap();
+    assert_eq!(jobs.len(), 1, "{held}");
+    assert_eq!(jobs[0].step, "derived", "{held}");
+    let (code, body) = post_ingest(&server, "while-held", &rows_from(70_100, 1), true).await;
+    assert_eq!(code, 200, "{body}");
+    assert!(engine.fold_is_holding_for_test(), "answered with the compaction still held");
+
+    engine.set_fold_paused_for_test(false);
+    wait_for_executor(&server, "the request answered", |now| {
+        now.compaction_requests_answered >= request
+    })
+    .await;
+    let (_, answered) = compaction_request(&server, request).await;
+    assert_eq!(answered["answer"]["outcome"], "compacted", "{answered}");
+    let status = control_status(&server).await;
+    let passes: Vec<&str> = status["compaction"]["passes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|pass| pass["pass"].as_str().unwrap())
+        .collect();
+    let at = |name: &str| passes.iter().position(|pass| *pass == name);
+    assert!(
+        at("derived").is_some() && at("derived") < at("hand_off"),
+        "{passes:?}"
+    );
+
+    let (_, prefix_dir) = live_prefix(&tmp.path().join("bundle"));
+    let derived = newest_shard_record(&tmp.path().join("bundle"))["derived_extents"].take();
+    let derived = derived.as_array().unwrap();
+    assert!(!derived.is_empty(), "the compacted prefix names the level's files");
+    for extent in derived {
+        let path = prefix_dir.join(extent["path"].as_str().unwrap());
+        assert!(path.is_file(), "{} is on disc", path.display());
+    }
+}
+
 /// A compaction that fails is served failed: its request's answer is `failed`, not `ok`, with a
 /// detail and the failed record, and `/control/status` lists no job and keeps the same record.
 #[tokio::test]

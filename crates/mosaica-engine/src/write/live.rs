@@ -585,6 +585,25 @@ impl LiveState {
         space: LayerSpace,
         deleted: &croaring::Bitmap,
     ) -> BTreeMap<ShardId, croaring::Bitmap> {
+        self.owing_noted(space, deleted, true)
+    }
+
+    /// [`Self::owing`], noting nothing it reads from the slices: the answer of a thread other than
+    /// the executor's, whose note could land after a write of the store has emptied the notes.
+    pub(in crate::write) fn owing_unnoted(
+        &self,
+        space: LayerSpace,
+        deleted: &croaring::Bitmap,
+    ) -> BTreeMap<ShardId, croaring::Bitmap> {
+        self.owing_noted(space, deleted, false)
+    }
+
+    fn owing_noted(
+        &self,
+        space: LayerSpace,
+        deleted: &croaring::Bitmap,
+        note: bool,
+    ) -> BTreeMap<ShardId, croaring::Bitmap> {
         let (mut owing, unsettled) = match lock_recover(&self.settled_owing).get(&space) {
             Some(settled) => (settled.share(deleted), deleted.andnot(&settled.deletions)),
             None => (BTreeMap::new(), deleted.clone()),
@@ -602,6 +621,10 @@ impl LiveState {
         let Some(probed) = self.probe_owing(space, &unprobed) else {
             return owing;
         };
+        if !note {
+            add_shares(&mut owing, probed);
+            return owing;
+        }
         let mut memo = lock_recover(&self.probed_owing);
         let held = memo.entry(space).or_default();
         held.deletions.or_inplace(&unprobed);
