@@ -25,6 +25,8 @@ use super::plan::{FoldPlan, PlannedEntities, TERM_IMAGE_MANIFEST_N, TERM_IMAGE_T
 /// Everything [`execute`] needs beyond its plan, taken from the generation and then immutable.
 /// The two `Arc`s are the live readers, so the fold reads the mappings requests are served from.
 pub(crate) struct FoldContext {
+    /// What each of its term merges may hold, and on how many threads.
+    pub(crate) allowance: mosaica_filter_write::Allowance,
     pub(crate) from_prefix_dir: PathBuf,
     pub(crate) to_prefix: String,
     pub(crate) to_prefix_dir: PathBuf,

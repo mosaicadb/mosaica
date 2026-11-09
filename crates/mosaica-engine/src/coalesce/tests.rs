@@ -119,6 +119,7 @@ impl Fixture {
     fn execute(&self, plan: CoalescePlan) -> Result<CompletedCoalesce, MaintenanceFailed> {
         let id = "coalesce-1-1";
         let ctx = CoalesceContext {
+            allowance: crate::write::writer_allowance(1),
             prefix_dir: self.prefix_dir.clone(),
             prefix: "v00000".to_string(),
             id: id.to_string(),

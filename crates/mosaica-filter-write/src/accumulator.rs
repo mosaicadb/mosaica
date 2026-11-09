@@ -12,8 +12,9 @@
 //!   of the next. The bytes are what [`encode_entity`] writes, so a spill copies a term's chain
 //!   into its run as it stands, and the term's share of the run's receipt is summed as it is
 //!   inserted.
-//! - **About forty bytes of state a term**: where its chain starts and ends, its last entity, how
-//!   many entities it holds, and its share of the receipt. The states are held in pages, so they
+//! - **About forty bytes of state a term**: where its chain starts and ends and the bytes it holds,
+//!   its last entity, how many entities it holds, and its share of the receipt. The states are
+//!   held in pages, so they
 //!   grow without moving.
 //!
 //! A document's tokens are grouped by term before they are inserted, because the run format writes
@@ -70,10 +71,11 @@ use std::path::{Path, PathBuf};
 use mosaica_filter::{put_varint, take_varint, VarintError};
 
 use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
-use crate::merge::{merge_ranges, split, Ranges, TermMerge, TermSource};
+use crate::merge::{Ranges, TermMerge, TermSource};
 use crate::spill::{
-    cascade_sorted_runs, encode_entity, fingerprint, remove_runs, Allowance, RunPayload, RunSet,
-    Sample, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
+    cascade_sorted_runs, encode_entity, fingerprint, merge_runs, remove_runs, Allowance, Beside,
+    RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN,
+    SPILL_BUF_BYTES,
 };
 use crate::text::{write_range, TextIndexWriter};
 
@@ -133,6 +135,8 @@ struct TermState {
     level: u8,
     /// Whether the chain holds more than one segment.
     segmented: bool,
+    /// The bytes the chain holds, its links aside.
+    bytes: u32,
 }
 
 impl TermAccumulator {
@@ -271,6 +275,7 @@ impl TermAccumulator {
             room: (SLICE_BYTES[0] - LINK_BYTES) as u16,
             level: 0,
             segmented: false,
+            bytes: 0,
         });
         Ok(id)
     }
@@ -305,6 +310,7 @@ impl TermAccumulator {
         })?;
         state.anchor = state.anchor.wrapping_add(anchor);
         state.last = entity;
+        state.bytes = state.bytes.saturating_add(self.encoded.len() as u32);
         self.pool.append(state, &self.encoded);
         Ok(())
     }
@@ -427,12 +433,14 @@ impl Drop for Gathered {
 }
 
 /// How a text index was written: the runs its merge read, the sources it held in memory beside
-/// them, and the cascade passes the runs took first.
+/// them, the cascade passes the runs took first, and the threads the merge ran on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextMerge {
     pub runs: usize,
     pub held: usize,
     pub passes: usize,
+    /// The threads the merge after the cascade ran on.
+    pub threads: usize,
 }
 
 /// Write a text index into `writer` from what the accumulators gathered, under `allowance`, with
@@ -481,6 +489,7 @@ pub fn write_text_index(
         runs: runs.len(),
         held: held.len(),
         passes: 0,
+        threads: 0,
     };
 
     let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone(), left);
@@ -491,20 +500,23 @@ pub fn write_text_index(
         Ok((left_runs, _)) => {
             merge_gathered(left_runs, &held, writer, merge_slice_cap, left, ranges)
         }
-        Err(_) => Ok(()),
+        Err(_) => Ok(0),
     };
     let removed = remove_runs(
         runs.iter()
             .chain(cascaded.iter().flat_map(|(left, _)| left)),
     );
-    let passes = cascaded.map(|(_, passes)| passes);
-    merged
-        .and(removed)
-        .and(passes)
-        .map(|passes| TextMerge { passes, ..figures })
+    let passes = cascaded.map(|(_, passes)| passes)?;
+    let threads = merged?;
+    removed.map(|()| TextMerge {
+        passes,
+        threads,
+        ..figures
+    })
 }
 
-/// Merge `runs` and `held` into `writer` in term ranges, under `allowance` and as `ranges` says.
+/// Merge `runs` and `held` into `writer` in term ranges, under `allowance` and as `ranges` says,
+/// returning the threads the merge ran on.
 fn merge_gathered(
     runs: &[SpillReceipt],
     held: &[Held],
@@ -512,51 +524,50 @@ fn merge_gathered(
     slice_cap: usize,
     allowance: Allowance,
     ranges: Ranges,
-) -> io::Result<()> {
-    let mut runs = RunSet::open(runs)?;
-    let bytes = runs.records() + held.iter().map(|h| h.allocated() as u64).sum::<u64>();
-    let plan = ranges.plan(allowance, bytes, runs.len());
-    let mut samples: Vec<Sample> = Vec::new();
-    if plan.ranges > 1 {
-        let each = plan.samples(runs.len() + held.len());
-        samples = runs.samples(each)?;
-        for held in held {
-            samples.extend(held.samples(each));
-        }
-    }
-    let ranges = split(samples, plan.ranges);
-    runs.place(&ranges)?;
-    merge_ranges(
-        writer,
-        &ranges,
-        plan,
-        |range, turn| {
-            let sources = runs
-                .readers(RunPayload::Positions, plan.read)
-                .map(Source::Run)
-                .chain(held.iter().map(|h| Source::Held(h.cursor())))
-                .collect();
-            let mut merge = TermMerge::range(sources, range)?;
-            write_range(&mut merge, turn, slice_cap)?;
-            let sources = merge.into_sources();
-            runs.tally(sources.iter().filter_map(|source| match source {
+) -> io::Result<usize> {
+    // Each thread holds a term's entities up to the slice cap, and a copy of the largest held term
+    // that arrived in several segments. A term above the cap is held as a bitmap, bounded by its
+    // posting rather than by the allowance, until such a term is merged in entity ranges.
+    let each = (slice_cap * std::mem::size_of::<u32>()) as u64
+        + held.iter().map(Held::copy_bytes).max().unwrap_or(0);
+    let how = RunMerge {
+        payload: RunPayload::Positions,
+        allowance,
+        ranges,
+        each,
+        beside: Beside {
+            bytes: held.iter().map(|h| h.allocated() as u64).sum(),
+            sources: held.len(),
+            samples: &|each| held.iter().flat_map(|h| h.samples(each)).collect(),
+        },
+    };
+    merge_runs(runs, writer, how, |range, readers, turn| {
+        let sources = readers
+            .into_iter()
+            .map(Source::Run)
+            .chain(held.iter().map(|h| Source::Held(h.cursor())))
+            .collect();
+        let mut merge = TermMerge::range(sources, range)?;
+        write_range(&mut merge, turn, slice_cap)?;
+        Ok(merge
+            .into_sources()
+            .into_iter()
+            .filter_map(|source| match source {
                 Source::Run(reader) => Some(reader),
                 Source::Held(_) => None,
-            }));
-            Ok(())
-        },
-        |range| runs.written(range),
-    )?;
-    runs.check()
+            })
+            .collect())
+    })
+    .map(|(_, plan)| plan.threads)
 }
 
 /// One source of a text index's merge: a run, or an accumulator's held terms.
-enum Source<'a> {
-    Run(TextRunReader<'a>),
-    Held(HeldCursor<'a>),
+enum Source<'r, 'h> {
+    Run(TextRunReader<'r>),
+    Held(HeldCursor<'h>),
 }
 
-impl TermSource for Source<'_> {
+impl TermSource for Source<'_, '_> {
     fn next_term(&mut self) -> io::Result<bool> {
         match self {
             Source::Run(run) => run.next_term(),
@@ -614,6 +625,17 @@ impl Held {
             + self.keys.capacity()
             + self.sorted.capacity() * std::mem::size_of::<KeyRef>()
             + self.order.capacity() * std::mem::size_of::<u32>()
+    }
+
+    /// What a cursor holds to read its largest term of several segments: a copy of the chain, and
+    /// eight bytes an entity.
+    fn copy_bytes(&self) -> u64 {
+        (0..self.terms.len as u32)
+            .map(|id| self.terms.get(id))
+            .filter(|state| state.segmented)
+            .map(|state| u64::from(state.bytes) + 8 * u64::from(state.pairs))
+            .max()
+            .unwrap_or(0)
     }
 
     /// About `samples` of its terms, evenly spaced by rank, each with the bytes from it to the
@@ -1131,7 +1153,7 @@ mod tests {
                 .iter()
                 .map(|run| RunFile::open(run).unwrap())
                 .collect();
-            let mut sources: Vec<Source<'_>> = runs
+            let mut sources: Vec<Source<'_, '_>> = runs
                 .iter()
                 .map(|run| {
                     Source::Run(TextRunReader::open(
@@ -1156,5 +1178,48 @@ mod tests {
             }
             assert_eq!(read, reference, "budget {budget}, spilled {spill}");
         }
+    }
+
+    /// **A damaged run fails a merge on several threads with an error**, and the merge returns
+    /// rather than leaving the threads waiting on the range that failed.
+    #[test]
+    fn a_damaged_run_fails_a_parallel_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut accumulator = TermAccumulator::new(dir.path(), "text-run", 0);
+        for entity in 0..64u32 {
+            let words = [
+                format!("w{}", entity % 7),
+                format!("v{entity}"),
+                "common".into(),
+            ];
+            accumulator
+                .add_document(entity, |push| words.iter().for_each(|w| push(w)))
+                .unwrap();
+        }
+        let mut gathered = accumulator.finish().unwrap();
+        gathered.spill().unwrap();
+        let damaged = &gathered.runs[gathered.runs.len() / 2].path;
+        let mut bytes = std::fs::read(damaged).unwrap();
+        bytes[0] ^= 0x40;
+        std::fs::write(damaged, bytes).unwrap();
+
+        let files = mosaica_filter::TextIndexFiles::in_dir(dir.path());
+        let mut writer = TextIndexWriter::create(files).unwrap();
+        let ranges = Ranges::Fixed {
+            ranges: 6,
+            threads: 3,
+            window: 3,
+            buffer: 1,
+        };
+        let merged = write_text_index(
+            dir.path(),
+            "text",
+            vec![gathered],
+            &mut writer,
+            1 << 22,
+            Allowance::new(0, 0, 3),
+            ranges,
+        );
+        assert!(merged.is_err(), "{merged:?}");
     }
 }

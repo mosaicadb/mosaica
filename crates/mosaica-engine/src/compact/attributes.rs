@@ -157,7 +157,7 @@ pub(super) fn fold_text_columns(
             &inputs,
             &plan.tombstones,
             to.clone(),
-            crate::write::writer_allowance(),
+            ctx.allowance,
         )
         .map_err(failed(
             Pass::Attributes.at(format!("text: column '{}'", job.name)),
@@ -398,7 +398,7 @@ fn fold_value_column(
             &values_path,
             &presence_path,
             &dict_path,
-            crate::write::writer_allowance(),
+            ctx.allowance,
         )
         .map_err(failed(Pass::Attributes.at("the keyword merge")))?;
         out.wrote(dict_rel, dict_path.clone());

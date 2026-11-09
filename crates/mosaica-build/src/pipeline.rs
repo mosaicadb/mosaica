@@ -167,7 +167,8 @@ use crate::{
     PairsParquetWriter, PREFIX, SEG_ID,
 };
 use mosaica_filter_write::{
-    cascade_sorted_runs, RunPayload, SpillReceipt, TermAccumulator, TermMerge, TextRunWriter,
+    cascade_sorted_runs, HeldRecords, RunPayload, SpillReceipt, TermAccumulator, TermMerge,
+    TextRunWriter,
 };
 use mosaica_types::progress::{Batched, Part, Unit};
 use mosaica_types::splitmix64;
@@ -4579,6 +4580,8 @@ pub(crate) struct KeywordDictPlan {
     merge_batch: usize,
     /// What the cascade and the merge read the runs under.
     allowance: mosaica_filter_write::Allowance,
+    /// How the merge is divided into key ranges.
+    ranges: mosaica_filter_write::Ranges,
 }
 
 /// The floor on a chunk, so a tiny `--memory-budget` cannot derive a plan that spills a run every
@@ -4601,6 +4604,7 @@ impl KeywordDictPlan {
             forced: None,
             merge_batch: KEYWORD_MERGE_BATCH,
             allowance,
+            ranges: mosaica_filter_write::Ranges::Planned,
         }
     }
 
@@ -4617,7 +4621,14 @@ impl KeywordDictPlan {
             forced,
             merge_batch: 3,
             allowance: tests::TEST_MERGE,
+            ranges: mosaica_filter_write::Ranges::Planned,
         }
+    }
+
+    /// This plan with its merge divided as `ranges` says.
+    #[cfg(test)]
+    fn in_ranges(self, ranges: mosaica_filter_write::Ranges) -> KeywordDictPlan {
+        KeywordDictPlan { ranges, ..self }
     }
 }
 
@@ -4664,80 +4675,48 @@ fn joined<T>(handle: std::thread::ScopedJoinHandle<'_, T>) -> T {
         .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
-/// Keys on their way to a writer thread: the characters end to end, and where each key ends.
-#[derive(Default)]
-struct KeyBatch {
-    text: Vec<u8>,
-    ends: Vec<usize>,
-}
-
-impl KeyBatch {
-    fn push(&mut self, key: &[u8]) {
-        self.text.extend_from_slice(key);
-        self.ends.push(self.text.len());
-    }
-
-    fn keys(&self) -> impl Iterator<Item = &[u8]> {
-        let mut start = 0;
-        self.ends.iter().map(move |&end| {
-            let key = &self.text[start..end];
-            start = end;
-            key
-        })
-    }
-}
-
-/// Merge a keyword column's runs into `merged` in key ranges, on the allowance's threads, each
-/// key's chunks drained into its remap records, and check each run's receipt against what the
-/// ranges decoded of it.
+/// Merge a keyword column's runs into `merged` in key ranges, as `ranges` says, on the allowance's
+/// threads, each key's chunks drained into its remap records.
 fn merge_keyword_runs(
     runs: &[SpillReceipt],
     merged: KeywordMerged,
     allowance: mosaica_filter_write::Allowance,
+    ranges: mosaica_filter_write::Ranges,
 ) -> std::io::Result<KeywordMerged> {
-    let mut runs = mosaica_filter_write::RunSet::open(runs)?;
-    let plan = mosaica_filter_write::MergePlan::new(allowance, runs.records(), runs.len());
-    let samples = match plan.ranges {
-        1 => Vec::new(),
-        _ => runs.samples(plan.samples(runs.len()))?,
+    let how = mosaica_filter_write::RunMerge {
+        payload: RunPayload::Rows,
+        allowance,
+        ranges,
+        each: 0,
+        beside: mosaica_filter_write::Beside::none(),
     };
-    let ranges = mosaica_filter_write::split(samples, plan.ranges);
-    runs.place(&ranges)?;
-    let merged = mosaica_filter_write::merge_ranges(
-        merged,
-        &ranges,
-        plan,
-        |range, turn| {
-            let readers = runs.readers(RunPayload::Rows, plan.read).collect();
-            let mut merge = TermMerge::range(readers, range)?;
-            let mut carriers: Vec<u32> = Vec::new();
-            while merge.next_term()? {
-                carriers.clear();
-                merge.drain(std::convert::identity, &mut |chunk, _| {
-                    carriers.push(chunk);
-                    Ok(())
-                })?;
-                match turn.out()? {
-                    mosaica_filter_write::Out::Writer(merged) => {
-                        merged.push(merge.term(), &carriers)?
-                    }
-                    mosaica_filter_write::Out::Held(held) => {
-                        held.keys.push(merge.term());
-                        held.chunks.extend_from_slice(&carriers);
-                        held.ends.push(held.chunks.len());
-                    }
+    mosaica_filter_write::merge_runs(runs, merged, how, |range, readers, turn| {
+        let mut merge = TermMerge::range(readers, range)?;
+        let (mut carriers, mut bytes) = (Vec::<u32>::new(), Vec::<u8>::new());
+        while merge.next_term()? {
+            carriers.clear();
+            merge.drain(std::convert::identity, &mut |chunk, _| {
+                carriers.push(chunk);
+                Ok(())
+            })?;
+            match turn.out()? {
+                mosaica_filter_write::Out::Writer(merged) => {
+                    merged.push(merge.term(), &carriers)?
                 }
-                if turn.full() {
-                    turn.wait()?;
+                mosaica_filter_write::Out::Held(held) => {
+                    held.keys.push(merge.term());
+                    bytes.clear();
+                    bytes.extend(carriers.iter().flat_map(|chunk| chunk.to_le_bytes()));
+                    held.chunks.push(&bytes);
                 }
             }
-            runs.tally(merge.into_sources().iter());
-            Ok(())
-        },
-        |range| runs.written(range),
-    )?;
-    runs.check()?;
-    Ok(merged)
+            if turn.full() {
+                turn.wait()?;
+            }
+        }
+        Ok(merge.into_sources())
+    })
+    .map(|(merged, _)| merged)
 }
 
 /// The keyword merge's output as it is written: each key to the dictionary's writer, and a remap
@@ -4785,45 +4764,52 @@ impl KeywordMerged {
     }
 }
 
-/// The keys a range of the keyword merge holds until its turn, each with the chunks holding it.
+/// The keys a range of the keyword merge holds until its turn, and for each the chunks holding it
+/// as little-endian `u32`s.
 #[derive(Default)]
 struct HeldKeywords {
-    keys: KeyBatch,
-    chunks: Vec<u32>,
-    /// Where each key's chunks end.
-    ends: Vec<usize>,
+    keys: HeldRecords,
+    chunks: HeldRecords,
 }
 
 impl mosaica_filter_write::RangeWriter for KeywordMerged {
     type Held = HeldKeywords;
 
     fn held_bytes(held: &HeldKeywords) -> usize {
-        held.keys.text.len() + held.chunks.len() * 4
+        held.keys.bytes() + held.chunks.bytes()
     }
 
     fn write_held(&mut self, held: &mut HeldKeywords) -> std::io::Result<()> {
-        let mut start = 0;
-        for (key, &end) in held.keys.keys().zip(&held.ends) {
-            self.push(key, &held.chunks[start..end])?;
-            start = end;
+        let mut carriers: Vec<u32> = Vec::new();
+        for (key, chunks) in held.keys.records().zip(held.chunks.records()) {
+            carriers.clear();
+            carriers.extend(
+                chunks
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|chunk| u32::from_le_bytes(*chunk)),
+            );
+            self.push(key, &carriers)?;
         }
-        *held = HeldKeywords::default();
+        held.keys.clear();
+        held.chunks.clear();
         Ok(())
     }
 }
 
-/// The sending half of a writer thread's queue of [`KeyBatch`]es, `size` keys a batch. Dropping it
-/// closes the queue, which is what ends the writer's loop.
+/// The sending half of a writer thread's queue of keys, `size` keys a batch. Dropping it closes the
+/// queue, which is what ends the writer's loop.
 struct KeySender {
-    batch: KeyBatch,
-    queue: std::sync::mpsc::SyncSender<KeyBatch>,
+    batch: HeldRecords,
+    queue: std::sync::mpsc::SyncSender<HeldRecords>,
     size: usize,
 }
 
 impl KeySender {
-    fn new(queue: std::sync::mpsc::SyncSender<KeyBatch>, size: usize) -> KeySender {
+    fn new(queue: std::sync::mpsc::SyncSender<HeldRecords>, size: usize) -> KeySender {
         KeySender {
-            batch: KeyBatch::default(),
+            batch: HeldRecords::default(),
             queue,
             size,
         }
@@ -4833,7 +4819,7 @@ impl KeySender {
     /// characters.
     fn push(&mut self, key: &[u8]) -> Result<()> {
         self.batch.push(key);
-        if self.batch.ends.len() >= self.size || self.batch.text.len() >= KEYWORD_BATCH_BYTES {
+        if self.batch.len() >= self.size || self.batch.bytes() >= KEYWORD_BATCH_BYTES {
             self.flush()?;
         }
         Ok(())
@@ -4841,15 +4827,11 @@ impl KeySender {
 
     /// Send the keys held.
     fn flush(&mut self) -> Result<()> {
-        if self.batch.ends.is_empty() {
+        if self.batch.is_empty() {
             return Ok(());
         }
-        let batch = KeyBatch {
-            text: Vec::with_capacity(KEYWORD_BATCH_BYTES),
-            ends: Vec::with_capacity(self.size),
-        };
         self.queue
-            .send(std::mem::replace(&mut self.batch, batch))
+            .send(std::mem::take(&mut self.batch))
             .map_err(|_| writer_stopped())
     }
 }
@@ -4860,7 +4842,7 @@ fn writer_stopped() -> BuildError {
     BuildError::Invalid("a keyword writer thread stopped".to_string())
 }
 
-/// The characters a [`KeyBatch`] holds before it is sent, whatever its key count.
+/// The characters a batch of keys holds before it is sent, whatever its key count.
 const KEYWORD_BATCH_BYTES: usize = 1 << 20;
 
 /// Ids per record of the id and perm streams. A record is a block rather than one id so the
@@ -5118,11 +5100,11 @@ impl<'a> KeywordChunks<'a> {
             // The run is written on its own thread while the chunk is ranked.
             let (keys, run) = std::thread::scope(|scope| -> Result<(u32, SpillReceipt)> {
                 let (queue, batches) =
-                    std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
+                    std::sync::mpsc::sync_channel::<HeldRecords>(KEYWORD_MERGE_DEPTH);
                 let writer = scope.spawn(move || -> std::io::Result<SpillReceipt> {
                     let mut run = TextRunWriter::create(&path, RunPayload::Rows)?;
                     for batch in batches {
-                        for key in batch.keys() {
+                        for key in batch.records() {
                             run.begin(key, 1)?;
                             run.push_entity(chunk, &[])?;
                         }
@@ -5308,7 +5290,7 @@ fn write_keyword_column(
     // the remap's.
     let (keys, emitted, partition) = std::thread::scope(|scope| {
         let (key_queue, key_batches) =
-            std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
+            std::sync::mpsc::sync_channel::<HeldRecords>(KEYWORD_MERGE_DEPTH);
         let (record_queue, record_batches) =
             std::sync::mpsc::sync_channel::<Vec<u8>>(KEYWORD_MERGE_DEPTH);
         let dict_writer = scope.spawn(|| -> Result<u64> {
@@ -5319,7 +5301,7 @@ fn write_keyword_column(
                     .map_err(|e| BuildError::io(&dict_path, std::io::Error::from(e)))?;
             let mut keys = 0u64;
             for batch in key_batches {
-                for key in batch.keys() {
+                for key in batch.records() {
                     let key = std::str::from_utf8(key).map_err(|e| {
                         refuse(format!(
                             "a merged key is not UTF-8 ({e}) — the column holds `&str`, so this \
@@ -5364,6 +5346,7 @@ fn write_keyword_column(
                 chunks: chunks.len(),
             },
             plan.allowance,
+            plan.ranges,
         )
         .map_err(|e| spill::run_error(column_dir, e))
         .and_then(|mut merged| {
@@ -5769,7 +5752,7 @@ impl TextValues<'_> {
 ///    in groups into intermediate runs, several groups at once. The build prints the passes it
 ///    forecasts before it starts, and the runs, held accumulators and passes taken as it ends.
 ///    The merge runs in term ranges on the plan's threads, each range's sources started at its
-///    first term, and writes them in term order ([`mosaica_filter_write::merge_ranges`]); a run's
+///    first term, and writes them in term order ([`mosaica_filter_write::merge_runs`]); a run's
 ///    records are given back to the file system as the ranges that read them are written.
 ///
 /// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
@@ -5792,7 +5775,7 @@ impl TextValues<'_> {
 ///   run: a read buffer, its share of what the allowance leaves beside them, and the head *term*,
 ///   never the head's entities, which is why a run's reader decodes a record's postings only when
 ///   they are asked for. The ranges not yet written each hold up to a buffer of their output, and
-///   those buffers are charged to the allowance too ([`mosaica_filter_write::MergePlan`]). The
+///   those buffers are charged to the allowance too ([`mosaica_filter_write::RangePlan`]). The
 ///   cascade holds the run count to the allowance's fan-in.
 /// * One merged term's entity list is capped at the plan's slice cap, above which it accumulates
 ///   into a Roaring bitmap and encodes through the byte-identical bitmap encoder.
@@ -5910,12 +5893,13 @@ fn write_text_index(
     .map_err(|e| spill::run_error(column_dir, e))?;
     eprintln!(
         "text index '{}': {} run(s) and {} accumulator(s) held in memory, {} cascade pass(es) \
-         under a fan-in of {}",
+         under a fan-in of {}, merged on {} thread(s)",
         attribute.name,
         merged.runs,
         merged.held,
         merged.passes,
-        plan.allowance.fan_in()
+        plan.allowance.fan_in(),
+        merged.threads
     );
     let terms = writer.finish().map_err(failed)?;
     mosaica_filter::write_presence(&files.presence, &values.present()?)
@@ -7357,7 +7341,7 @@ mod tests {
     /// column emitted in chunks of three have to be the same three files. That is what makes
     /// [`KeywordDictPlan`] a memory knob rather than a format decision, and it is what an
     /// off-by-one at a boundary fails: a key whose rows split across two runs and lost half of
-    /// them changes only the bytes.
+    /// them changes only the bytes. Nor must the merge's key ranges be.
     #[test]
     fn chunking_the_keyword_column_does_not_change_its_bytes() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -7367,7 +7351,13 @@ mod tests {
         let values = keyword_fixture_column(&scratch);
 
         let mut emitted: Vec<[Vec<u8>; 3]> = Vec::new();
-        for (k, plan) in keyword_plans().into_iter().enumerate() {
+        // And the merge in key ranges, with every range but the head held until its turn.
+        let ranged = [
+            KeywordDictPlan::explicit(3, 5, None).in_ranges(ranges(4, 3, 3, 1)),
+            KeywordDictPlan::explicit(7, 1 << 20, Some(ChunkMode::Hash))
+                .in_ranges(ranges(3, 2, 6, 64)),
+        ];
+        for (k, plan) in keyword_plans().into_iter().chain(ranged).enumerate() {
             let column_dir = dir.path().join(format!("plan-{k}"));
             std::fs::create_dir_all(&column_dir).expect("column dir");
             let values_path = column_dir.join("values.arrow");

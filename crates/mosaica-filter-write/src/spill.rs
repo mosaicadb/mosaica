@@ -10,8 +10,8 @@
 //!
 //! A **sorted run** is written by [`TextRunWriter`] and read back by [`TextRunReader`], one of the
 //! sources [`TermMerge`] merges. A run ends in a sparse index of its terms, so that a reader can
-//! start at a term: a merge in term ranges ([`crate::merge`]) starts each range's readers there,
-//! and checks each run's receipt against what all its ranges decoded of it ([`RunSet`]).
+//! start at a term: a merge in term ranges ([`merge_runs`]) starts each range's readers there,
+//! and checks each run's receipt against what all its ranges decoded of it.
 //! [`cascade_sorted_runs`] reduces more runs than one merge may hold open. A malformed run is
 //! refused as [`io::ErrorKind::InvalidData`].
 //!
@@ -34,7 +34,9 @@ use mosaica_filter::{
 };
 use mosaica_types::splitmix64;
 
-use crate::merge::{TermMerge, TermRange, TermSource};
+use crate::merge::{
+    merge_ranges, split, RangePlan, RangeWriter, Ranges, TermMerge, TermRange, TermSource, Turn,
+};
 
 /// Buffer size for spill I/O, both directions, and the largest read buffer a merge gives a run's
 /// cursor. Four mebibytes: large enough that the syscall cost is noise against the encode/decode
@@ -354,6 +356,12 @@ impl TextRunWriter {
         if term.is_empty() {
             return Err(malformed(&self.path, "the empty string is not a term"));
         }
+        let key = std::str::from_utf8(term).map_err(|e| {
+            malformed(
+                &self.path,
+                format_args!("term {term:?} is not UTF-8 ({e}); a run's terms are text"),
+            )
+        })?;
         if entities == 0 {
             return Err(malformed(
                 &self.path,
@@ -367,12 +375,6 @@ impl TextRunWriter {
         let point = self.written >= self.next_point;
         let shared = match point {
             true => {
-                let key = std::str::from_utf8(term).map_err(|e| {
-                    malformed(
-                        &self.path,
-                        format_args!("term {term:?} is not UTF-8 ({e}); a run's terms are text"),
-                    )
-                })?;
                 self.index.push(key).map_err(io::Error::from)?;
                 self.offsets.push(self.written);
                 self.next_point = self.written + RUN_INDEX_STRIDE;
@@ -539,7 +541,7 @@ impl TextRunWriter {
 /// A run opened for its readers: its file, which every reader on it reads at its own offset
 /// (`pread`) so that all of them share one descriptor, its receipt, and its sparse index, mapped
 /// rather than read.
-pub struct RunFile {
+pub(crate) struct RunFile {
     path: PathBuf,
     file: File,
     count: u64,
@@ -561,7 +563,7 @@ pub struct Sample {
 
 impl RunFile {
     /// Open the run `receipt` names, checking that its trailer, index and length agree.
-    pub fn open(receipt: &SpillReceipt) -> io::Result<RunFile> {
+    pub(crate) fn open(receipt: &SpillReceipt) -> io::Result<RunFile> {
         let path = &receipt.path;
         // Writable as well, so that its spans can be given back as they are read.
         let file = std::fs::OpenOptions::new()
@@ -621,10 +623,6 @@ impl RunFile {
         self.records
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     /// The offset of the record index entry `ordinal` names.
     fn offset(&self, ordinal: u32) -> io::Result<u64> {
         let mut bytes = [0u8; 8];
@@ -671,32 +669,15 @@ impl RunFile {
 
     /// About `samples` of its index's terms, evenly spaced, each with the bytes of records from it
     /// to the next.
-    pub fn samples(&self, samples: usize) -> io::Result<Vec<Sample>> {
-        let n = self.index.len() as usize;
-        let mut scratch = Vec::new();
-        let mut taken: Vec<(Vec<u8>, u64)> = Vec::new();
-        for i in 0..samples.min(n) {
-            let ordinal = (i * n / samples.min(n)) as u32;
-            let key = self
-                .index
-                .key_of(ordinal, &mut scratch)
-                .map_err(|e| malformed(&self.path, e))?;
-            taken.push((key.as_bytes().to_vec(), self.offset(ordinal)?));
-        }
-        let ends: Vec<u64> = taken
-            .iter()
-            .skip(1)
-            .map(|(_, offset)| *offset)
-            .chain([self.records])
-            .collect();
-        Ok(taken
-            .into_iter()
-            .zip(ends)
-            .map(|((key, offset), end)| Sample {
-                key,
-                bytes: end.saturating_sub(offset),
-            })
-            .collect())
+    pub(crate) fn samples(&self, samples: usize) -> io::Result<Vec<Sample>> {
+        crate::merge::samples(&self.index, samples, |ordinal| match ordinal {
+            o if o == self.index.len() => Ok(self.records),
+            o => self.offset(o),
+        })
+        .map_err(|e| match e.kind() {
+            io::ErrorKind::InvalidData => malformed(&self.path, e),
+            _ => e,
+        })
     }
 
     /// Check what the readers that covered every record between them decoded, summed, against
@@ -714,106 +695,114 @@ impl RunFile {
     }
 }
 
-/// The runs a merge in term ranges reads: each opened once, where each range starts in each, and
-/// what the ranges have decoded of each so far.
-pub struct RunSet {
-    files: Vec<RunFile>,
-    /// Per range, the offset in each run its readers start from.
-    starts: Vec<Vec<u64>>,
-    decoded: Mutex<Vec<(u64, u64)>>,
+/// How [`merge_runs`] merges: what its runs carry, the allowance and how it is divided, the bytes
+/// each thread holds beside its readers, and the sources it merges beside the runs.
+pub struct RunMerge<'a> {
+    pub payload: RunPayload,
+    pub allowance: Allowance,
+    pub ranges: Ranges,
+    pub each: u64,
+    pub beside: Beside<'a>,
 }
 
-impl RunSet {
-    pub fn open(receipts: &[SpillReceipt]) -> io::Result<RunSet> {
-        Ok(RunSet {
-            files: receipts
-                .iter()
-                .map(RunFile::open)
-                .collect::<io::Result<_>>()?,
-            starts: Vec::new(),
-            decoded: Mutex::new(vec![(0, 0); receipts.len()]),
-        })
-    }
+/// The sources a merge reads beside its runs: their bytes, how many there are, and `samples(n)`,
+/// about `n` keys sampled from each.
+pub struct Beside<'a> {
+    pub bytes: u64,
+    pub sources: usize,
+    pub samples: &'a dyn Fn(usize) -> Vec<Sample>,
+}
 
-    pub fn len(&self) -> usize {
-        self.files.len()
+impl Beside<'_> {
+    /// No source beside the runs.
+    pub fn none() -> Beside<'static> {
+        Beside {
+            bytes: 0,
+            sources: 0,
+            samples: &|_| Vec::new(),
+        }
     }
+}
 
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
-    }
-
-    /// The bytes their records take.
-    pub fn records(&self) -> u64 {
-        self.files.iter().map(RunFile::records).sum()
-    }
-
-    /// `each` keys sampled from each run's index.
-    pub fn samples(&self, each: usize) -> io::Result<Vec<Sample>> {
-        let mut samples = Vec::new();
-        for file in &self.files {
+/// Merge the runs `receipts` name, and the sources `how` says are beside them, into `writer` in
+/// term ranges. `work` merges one range from a reader on each run, in order, started at the range's
+/// first term, and hands the readers back.
+///
+/// Each run is opened once and every reader on it shares its descriptor. Each run's receipt is
+/// checked against what all the ranges' readers decoded of it before this returns, so a range that
+/// read short, or a reader not handed back, fails the merge. Once every range that reads a span of
+/// a run is written, the span is given back to the file system. Returns the writer, and the plan
+/// the merge ran to.
+pub fn merge_runs<W: RangeWriter>(
+    receipts: &[SpillReceipt],
+    writer: W,
+    how: RunMerge<'_>,
+    work: impl for<'r> Fn(
+            &TermRange,
+            Vec<TextRunReader<'r>>,
+            &mut Turn<'_, W>,
+        ) -> io::Result<Vec<TextRunReader<'r>>>
+        + Sync,
+) -> io::Result<(W, RangePlan)> {
+    let files = receipts
+        .iter()
+        .map(RunFile::open)
+        .collect::<io::Result<Vec<_>>>()?;
+    let bytes = files.iter().map(RunFile::records).sum::<u64>() + how.beside.bytes;
+    let plan = how.ranges.plan(how.allowance, bytes, files.len(), how.each);
+    let mut samples = Vec::new();
+    if plan.ranges > 1 {
+        let each = plan.samples(files.len() + how.beside.sources);
+        for file in &files {
             samples.extend(file.samples(each)?);
         }
-        Ok(samples)
+        samples.extend((how.beside.samples)(each));
     }
-
-    /// Find where each of `ranges` starts in each run, from the runs' indexes.
-    pub fn place(&mut self, ranges: &[TermRange]) -> io::Result<()> {
-        self.starts = ranges
-            .iter()
-            .map(|range| {
-                self.files
-                    .iter()
-                    .map(|file| match &range.lo {
-                        Some(lo) => file.start_of(lo).map(|(offset, _)| offset),
-                        None => Ok(0),
-                    })
-                    .collect()
-            })
-            .collect::<io::Result<_>>()?;
-        Ok(())
-    }
-
-    /// A reader of each run, in order, from its start.
-    pub fn readers(
-        &self,
-        payload: RunPayload,
-        buffer: usize,
-    ) -> impl Iterator<Item = TextRunReader<'_>> {
-        self.files
-            .iter()
-            .map(move |file| TextRunReader::open(file, payload, buffer))
-    }
-
-    /// Count what `readers`, one a run in order, decoded of one range.
-    pub fn tally<'a>(&self, readers: impl Iterator<Item = &'a TextRunReader<'a>>) {
-        let mut decoded = self.decoded.lock().unwrap_or_else(PoisonError::into_inner);
-        for (sum, reader) in decoded.iter_mut().zip(readers) {
-            let (pairs, anchor) = reader.share();
-            *sum = (sum.0 + pairs, sum.1.wrapping_add(anchor));
-        }
-    }
-
-    /// Range `range` and every range before it are written: give back what no later range reads.
-    pub fn written(&self, range: usize) {
-        if let Some(next) = self.starts.get(range + 1) {
-            for (file, &offset) in self.files.iter().zip(next) {
-                file.release_before(offset);
+    let ranges = split(samples, plan.ranges);
+    // Per range, the offset in each run its readers start from, found in the runs' indexes.
+    let starts = ranges
+        .iter()
+        .map(|range| {
+            files
+                .iter()
+                .map(|file| match &range.lo {
+                    Some(lo) => file.start_of(lo).map(|(offset, _)| offset),
+                    None => Ok(0),
+                })
+                .collect::<io::Result<Vec<u64>>>()
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let decoded = Mutex::new(vec![(0u64, 0u64); files.len()]);
+    let writer = merge_ranges(
+        writer,
+        &ranges,
+        plan,
+        |range, turn| {
+            let readers = files
+                .iter()
+                .map(|file| TextRunReader::open(file, how.payload, plan.read))
+                .collect();
+            let readers = work(range, readers, turn)?;
+            let mut decoded = decoded.lock().unwrap_or_else(PoisonError::into_inner);
+            for (sum, reader) in decoded.iter_mut().zip(&readers) {
+                let (pairs, anchor) = reader.share();
+                *sum = (sum.0 + pairs, sum.1.wrapping_add(anchor));
             }
-        }
+            Ok(())
+        },
+        |range| {
+            if let Some(next) = starts.get(range + 1) {
+                for (file, &offset) in files.iter().zip(next) {
+                    file.release_before(offset);
+                }
+            }
+        },
+    )?;
+    let decoded = decoded.into_inner().unwrap_or_else(PoisonError::into_inner);
+    for (file, (pairs, anchor)) in files.iter().zip(decoded) {
+        file.check(pairs, anchor)?;
     }
-
-    /// Check what the ranges decoded of each run against its receipt.
-    pub fn check(self) -> io::Result<()> {
-        let decoded = self
-            .decoded
-            .into_inner()
-            .unwrap_or_else(PoisonError::into_inner);
-        for (file, (pairs, anchor)) in self.files.iter().zip(decoded) {
-            file.check(pairs, anchor)?;
-        }
-        Ok(())
-    }
+    Ok((writer, plan))
 }
 
 /// What a span of a run is given back in multiples of: a file system's block, or a multiple of it.
@@ -1017,7 +1006,7 @@ impl TermSource for TextRunReader<'_> {
 impl<'r> TextRunReader<'r> {
     /// A reader of `run`, from its start, with a read buffer of `buffer` bytes. Several readers
     /// may read one run at once.
-    pub fn open(run: &'r RunFile, payload: RunPayload, buffer: usize) -> TextRunReader<'r> {
+    pub(crate) fn open(run: &'r RunFile, payload: RunPayload, buffer: usize) -> TextRunReader<'r> {
         TextRunReader {
             run,
             payload,
@@ -1227,15 +1216,22 @@ impl Allowance {
         self.chunk(self.threads)
     }
 
-    /// **The fan-in: the most runs one merge opens**, F = M / B with each cursor at
-    /// [`RUN_BUFFER_MIN`]. Held under [`merge_descriptors`], since every cursor on one run shares
-    /// its descriptor and the runs are what is counted, and three at least, so that a cascade pass
-    /// reduces two runs into one with its writer beside them.
+    /// **The fan-in: the most runs one merge opens**, F / T: as many runs as each of its threads
+    /// can hold a reader on, each reader at [`RUN_BUFFER_MIN`], so that the merge after the
+    /// cascade runs on every thread. Held under [`merge_descriptors`], since every reader on one
+    /// run shares its descriptor and the runs are what is counted, and three at least, so that a
+    /// cascade pass reduces two runs into one with its writer beside them.
     ///
-    /// One level over R runs fits while R is at most F. R is the run bytes over a run's size, and a
-    /// run's size follows the allowance over the threads, so one level holds a corpus whose run
-    /// bytes grow as the square of the allowance. Above that the cascade takes a pass.
+    /// One level over R runs fits while R is at most the fan-in. R is the run bytes over a run's
+    /// size, and a run's size follows the allowance over the threads, so one level holds a corpus
+    /// whose run bytes grow as the square of the allowance. Above that the cascade takes a pass.
     pub fn fan_in(&self) -> usize {
+        (self.readers() / self.threads.max(1)).max(3)
+    }
+
+    /// The readers it pays for at [`RUN_BUFFER_MIN`] each, under [`merge_descriptors`]: what the
+    /// groups of one cascade pass hold between them.
+    fn readers(&self) -> usize {
         usize::try_from(self.bytes / RUN_BUFFER_MIN as u64)
             .unwrap_or(usize::MAX)
             .min(merge_descriptors())
@@ -1348,7 +1344,7 @@ pub fn cascade_sorted_runs(
     while receipts.len() > fan_in {
         let plan = CascadePass::of(receipts.len(), fan_in, allowance.threads);
         let widest = plan.taken.div_ceil(plan.groups);
-        let in_flight = (fan_in / (widest + 1)).clamp(1, allowance.threads.max(1));
+        let in_flight = (allowance.readers() / (widest + 1)).clamp(1, allowance.threads.max(1));
         let buffer = allowance.buffer(in_flight * (widest + 1));
         let path =
             |index: usize| column_dir.join(format!("{family}-merge-{pass:02}-{index:05}.spill"));
@@ -1749,8 +1745,8 @@ mod tests {
     }
 
     /// **The allowance is what the budget leaves**, and never less than the pass runs in. Its
-    /// fan-in is what it pays for at the smallest buffer, and each cursor's buffer is its share,
-    /// between the smallest and the largest.
+    /// fan-in is what it pays for at the smallest buffer on each of its threads, and each cursor's
+    /// buffer is its share, between the smallest and the largest.
     #[test]
     fn the_allowance_is_what_the_budget_leaves_and_pays_for_the_fan_in() {
         assert_eq!(Allowance::new(8 << 30, 1 << 30, 4).bytes, 7 << 30);
@@ -1763,6 +1759,11 @@ mod tests {
 
         let allowance = Allowance::new(64 * RUN_BUFFER_MIN as u64, 0, 1);
         assert_eq!(allowance.fan_in(), 64.min(merge_descriptors()));
+        let four = Allowance {
+            bytes: 64 * RUN_BUFFER_MIN as u64,
+            threads: 4,
+        };
+        assert_eq!(four.fan_in(), (64.min(merge_descriptors()) / 4).max(3));
         assert_eq!(allowance.buffer(64), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1_000), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1), SPILL_BUF_BYTES);
@@ -1857,10 +1858,11 @@ mod tests {
         };
         let expected = merged(&receipts);
 
-        // A fan-in of twelve over forty runs: the excess of 28 takes four groups of eight, one at
-        // a time, and the eight runs past them are left as they are.
+        // Forty-eight readers on four threads is a fan-in of twelve over forty runs: the excess of
+        // 28 takes four groups of eight, all four at once, and the eight runs past them are left
+        // as they are.
         let allowance = Allowance {
-            bytes: 12 * RUN_BUFFER_MIN as u64,
+            bytes: 48 * RUN_BUFFER_MIN as u64,
             threads: 4,
         };
         let (left, passes) = cascade_sorted_runs(

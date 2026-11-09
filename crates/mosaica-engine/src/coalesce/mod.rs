@@ -183,6 +183,8 @@ impl CoalescePlan {
 }
 
 pub(crate) struct CoalesceContext {
+    /// What each of its term merges may hold, and on how many threads.
+    pub(crate) allowance: mosaica_filter_write::Allowance,
     pub(crate) prefix_dir: PathBuf,
     pub(crate) prefix: String,
     /// The pass's id, which names its dictionary extent's directory. Never reused: two passes

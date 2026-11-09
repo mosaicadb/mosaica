@@ -15,7 +15,7 @@
 //! # In parallel, by term range
 //!
 //! A merge divides its term space into [`TermRange`]s of about equal bytes, [`split`] from keys
-//! sampled from its sources ([`Sample`]), several to a thread ([`MergePlan`]). Each range is a
+//! sampled from its sources ([`Sample`]), several to a thread ([`RangePlan`]). Each range is a
 //! [`TermMerge`] of its own over sources started at its first key, and the ranges run on the plan's
 //! threads, at most its window of them issued and not yet written ([`Ordered`]). The output is
 //! written in term order by [`merge_ranges`]: the earliest range not yet written writes straight
@@ -317,30 +317,30 @@ impl<'a> DictCursor<'a> {
     pub fn at(&self) -> u32 {
         self.at
     }
+}
 
-    /// About `samples` of its keys, evenly spaced by ordinal, each with `bytes` of what lies from
-    /// it to the next: the bytes before an ordinal, the whole at the dictionary's length.
-    pub(crate) fn samples(
-        dict: &SortedDict,
-        samples: usize,
-        bytes: impl Fn(u32) -> u64,
-    ) -> io::Result<Vec<Sample>> {
-        let n = dict.len() as usize;
-        let taken = samples.min(n);
-        let ordinals: Vec<u32> = (0..taken).map(|i| (i * n / taken) as u32).collect();
-        let mut scratch = Vec::new();
-        ordinals
-            .iter()
-            .enumerate()
-            .map(|(i, &ordinal)| {
-                let end = ordinals.get(i + 1).copied().unwrap_or(dict.len());
-                Ok(Sample {
-                    key: dict.key_of(ordinal, &mut scratch)?.as_bytes().to_vec(),
-                    bytes: bytes(end).saturating_sub(bytes(ordinal)),
-                })
+/// About `samples` of `dict`'s keys, evenly spaced by ordinal, each with the bytes from it to the
+/// next sample, `bytes` giving the bytes before an ordinal and the whole at the dictionary's length.
+pub(crate) fn samples(
+    dict: &SortedDict,
+    samples: usize,
+    bytes: impl Fn(u32) -> io::Result<u64>,
+) -> io::Result<Vec<Sample>> {
+    let n = dict.len() as usize;
+    let taken = samples.min(n);
+    let ordinals: Vec<u32> = (0..taken).map(|i| (i * n / taken) as u32).collect();
+    let mut scratch = Vec::new();
+    ordinals
+        .iter()
+        .enumerate()
+        .map(|(i, &ordinal)| {
+            let end = ordinals.get(i + 1).copied().unwrap_or(dict.len());
+            Ok(Sample {
+                key: dict.key_of(ordinal, &mut scratch)?.as_bytes().to_vec(),
+                bytes: bytes(end)?.saturating_sub(bytes(ordinal)?),
             })
-            .collect()
-    }
+        })
+        .collect()
 }
 
 /// The least input a merge gives each range it divides its terms into, so that a small merge is
@@ -369,7 +369,7 @@ pub struct TermRange {
 /// ranges may be issued and not yet written, what one of them holds of its output before it
 /// waits, and the read buffer each run's reader is given.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MergePlan {
+pub struct RangePlan {
     pub ranges: usize,
     pub threads: usize,
     pub window: usize,
@@ -377,23 +377,25 @@ pub struct MergePlan {
     pub read: usize,
 }
 
-impl MergePlan {
-    /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`.
+impl RangePlan {
+    /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`,
+    /// where each thread holds `each` bytes beside its readers.
     ///
     /// The ranges are sized by bytes, [`RANGES_PER_THREAD`] a thread at most, and the window is two
-    /// ranges a thread. What it holds is charged to the allowance: each thread's readers, one a run, and
-    /// the buffers of the ranges in the window but the one being written, each an equal share of
-    /// half the allowance up to [`RANGE_BUFFER_MAX`]. Where that is more than the allowance, the
-    /// merge takes fewer threads, down to one, whose one range in flight holds no buffer.
-    pub fn new(allowance: Allowance, bytes: u64, runs: usize) -> MergePlan {
+    /// ranges a thread. What it holds is charged to the allowance: each thread's `each` bytes and
+    /// its readers, one a run, and the buffers of the ranges in the window but the one being
+    /// written, each an equal share of half what is left up to [`RANGE_BUFFER_MAX`]. Where that is
+    /// more than the allowance, the merge takes fewer threads, down to one, whose one range in
+    /// flight holds no buffer.
+    pub fn new(allowance: Allowance, bytes: u64, runs: usize, each: u64) -> RangePlan {
         let most = usize::try_from(bytes / RANGE_BYTES_MIN)
             .unwrap_or(usize::MAX)
             .max(1);
         let mut threads = allowance.threads.clamp(1, most);
         loop {
             let ranges = most.min(RANGES_PER_THREAD * threads);
-            let plan = MergePlan::with(allowance, ranges, threads, 2 * threads, runs);
-            let held = (threads * runs) as u64 * RUN_BUFFER_MIN as u64
+            let plan = RangePlan::with(allowance, ranges, threads, 2 * threads, runs, each);
+            let held = threads as u64 * (each + runs as u64 * RUN_BUFFER_MIN as u64)
                 + (plan.window - 1) as u64 * plan.buffer as u64;
             if threads == 1 || held <= allowance.bytes {
                 return plan;
@@ -402,26 +404,32 @@ impl MergePlan {
         }
     }
 
-    /// A plan of `ranges` ranges on `threads` threads, `window` of them in flight, each held up to
-    /// its share of half the allowance, and the readers of `runs` runs a thread given the rest.
+    /// A plan of `ranges` ranges on `threads` threads, `window` of them in flight (one on one
+    /// thread), each held up to its share of half what the threads' `each` bytes leave, and the
+    /// readers of `runs` runs a thread given the rest.
     pub fn with(
         allowance: Allowance,
         ranges: usize,
         threads: usize,
         window: usize,
         runs: usize,
-    ) -> MergePlan {
+        each: u64,
+    ) -> RangePlan {
         let ranges = ranges.max(1);
         let threads = threads.clamp(1, ranges);
-        let window = window.clamp(threads, ranges.max(threads));
-        let buffer = usize::try_from(allowance.bytes / 2 / window as u64)
+        let window = match threads {
+            1 => 1,
+            _ => window.clamp(threads, ranges.max(threads)),
+        };
+        let left = allowance.less(threads as u64 * each);
+        let buffer = usize::try_from(left.bytes / 2 / window as u64)
             .unwrap_or(usize::MAX)
             .clamp(RUN_BUFFER_MIN, RANGE_BUFFER_MAX);
-        let read = allowance
+        let read = left
             .less((window - 1) as u64 * buffer as u64)
             .buffer(threads * runs.max(1))
             .clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES);
-        MergePlan {
+        RangePlan {
             ranges,
             threads,
             window,
@@ -451,18 +459,19 @@ pub enum Ranges {
 }
 
 impl Ranges {
-    /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`.
-    pub fn plan(self, allowance: Allowance, bytes: u64, runs: usize) -> MergePlan {
+    /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`,
+    /// where each thread holds `each` bytes beside its readers.
+    pub fn plan(self, allowance: Allowance, bytes: u64, runs: usize, each: u64) -> RangePlan {
         match self {
-            Ranges::Planned => MergePlan::new(allowance, bytes, runs),
+            Ranges::Planned => RangePlan::new(allowance, bytes, runs, each),
             Ranges::Fixed {
                 ranges,
                 threads,
                 window,
                 buffer,
-            } => MergePlan {
+            } => RangePlan {
                 buffer: buffer.max(1),
-                ..MergePlan::with(allowance, ranges, threads, window, runs)
+                ..RangePlan::with(allowance, ranges, threads, window, runs, each)
             },
         }
     }
@@ -528,7 +537,7 @@ impl<W: RangeWriter> RangeWriter for &mut W {
 pub fn merge_ranges<W: RangeWriter>(
     writer: W,
     ranges: &[TermRange],
-    plan: MergePlan,
+    plan: RangePlan,
     work: impl Fn(&TermRange, &mut Turn<'_, W>) -> io::Result<()> + Sync,
     written: impl Fn(usize) + Sync,
 ) -> io::Result<W> {

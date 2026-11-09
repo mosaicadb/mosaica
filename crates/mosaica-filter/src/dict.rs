@@ -539,7 +539,7 @@ impl SortedDict {
     }
 
     /// Open the dictionary `file` holds in the `len` bytes from `offset`, mapped, for a file that
-    /// carries one after bytes of its own.
+    /// carries one after bytes of its own, such as a sorted run's index after its records.
     pub fn map_within(file: &std::fs::File, offset: u64, len: u64) -> Result<Self, DictError> {
         let len = usize::try_from(len)
             .map_err(|_| malformed(format!("a {len}-byte dictionary does not fit in memory")))?;
@@ -548,7 +548,8 @@ impl SortedDict {
                 "a dictionary of {len} bytes is shorter than the {MIN_FILE_LEN}-byte minimum"
             )));
         }
-        // SAFETY: as `open`'s mapping. The caller's file is not written while it is read.
+        // SAFETY: as `open`'s mapping. The caller does not write or punch the mapped bytes while
+        // they are read; a run's index, which starts where its records end, is never punched.
         let mapping = unsafe {
             memmap2::MmapOptions::new()
                 .offset(offset)

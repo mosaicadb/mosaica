@@ -23,17 +23,15 @@ fn writer_memory() -> Option<u64> {
     mosaica_types::process::memory_to_take().map(|bytes| bytes / MEMORY_WRITERS)
 }
 
-/// What each of a background writer's term indexes may hold, read once an operation: its share
-/// ([`writer_memory`]) by the rule a build's term index is sized by, and the machine's threads for
-/// its merges, which divide their terms into ranges as a build's do. Its layers are written one at
-/// a time, so each takes the whole of it; where the memory cannot be read, the least a pass runs
-/// in.
-pub(crate) fn writer_allowance() -> mosaica_filter_write::Allowance {
-    mosaica_filter_write::Allowance::new(
-        writer_memory().unwrap_or(0),
-        0,
-        crate::config::default_compute_threads(),
-    )
+/// What each of a background writer's term indexes may hold, read once at the start of its
+/// operation: its share of the memory ([`writer_memory`]) by the rule a build's term index is sized
+/// by, and its share of the engine's `compute_threads`, divided as the memory is, one share for
+/// each kind in [`MEMORY_WRITERS`], rounded up and one at least. Its merges divide their terms into
+/// ranges over those threads as a build's do. Its layers are written one at a time, so each takes
+/// the whole of it; where the memory cannot be read, the least a pass runs in.
+pub(crate) fn writer_allowance(compute_threads: usize) -> mosaica_filter_write::Allowance {
+    let threads = compute_threads.div_ceil(MEMORY_WRITERS as usize).max(1);
+    mosaica_filter_write::Allowance::new(writer_memory().unwrap_or(0), 0, threads)
 }
 
 /// Whether a unit of one kind is running, or finished and not yet published, read from its two

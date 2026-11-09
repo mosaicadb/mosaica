@@ -475,6 +475,8 @@ pub(crate) fn plan_flush(
 /// the generation on the executor thread and then immutable: the pool holds no reference to live
 /// state.
 pub(crate) struct FlushContext {
+    /// What each of its text layers may hold, and on how many threads.
+    pub(crate) allowance: mosaica_filter_write::Allowance,
     pub(crate) prefix_dir: PathBuf,
     pub(crate) partition: String,
     pub(crate) view: String,
@@ -635,7 +637,7 @@ fn execute_flush_stages(
     laps: &mut FlushLaps,
 ) -> Result<CompletedFlush, MaintenanceFailed> {
     laps.start();
-    let text_allowance = crate::write::writer_allowance();
+    let text_allowance = ctx.allowance;
     let consumed: Vec<EntityId> = plan.items.iter().map(|(entity, _)| *entity).collect();
     let numbers = numbers_of(&plan, &ctx)?;
     let tenancies = ctx.tenancy.of_each(numbers.iter().copied());

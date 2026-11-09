@@ -34,9 +34,10 @@ impl RecordSink for RecordWriter {
     }
 }
 
-/// Records held in memory end to end, and one being written in pieces after them.
+/// Records held in memory end to end, and one being written in pieces after them: what a range of
+/// a parallel merge holds until its turn, and a batch of keys on its way to a writer.
 #[derive(Default)]
-pub(crate) struct HeldRecords {
+pub struct HeldRecords {
     bytes: Vec<u8>,
     /// Where each whole record ends.
     ends: Vec<usize>,
@@ -45,23 +46,38 @@ pub(crate) struct HeldRecords {
 }
 
 impl HeldRecords {
+    /// Hold `record`, after the others.
+    pub fn push(&mut self, record: &[u8]) {
+        self.bytes.extend_from_slice(record);
+        self.ends.push(self.bytes.len());
+    }
+
     /// The whole records held.
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.ends.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.ends.is_empty()
+    }
+
     /// Whole record `i`.
-    pub(crate) fn record(&self, i: usize) -> &[u8] {
+    pub fn record(&self, i: usize) -> &[u8] {
         let start = i.checked_sub(1).map_or(0, |before| self.ends[before]);
         &self.bytes[start..self.ends[i]]
     }
 
+    /// Each whole record, in order.
+    pub fn records(&self) -> impl Iterator<Item = &[u8]> {
+        (0..self.len()).map(|i| self.record(i))
+    }
+
     /// The bytes held.
-    pub(crate) fn bytes(&self) -> usize {
+    pub fn bytes(&self) -> usize {
         self.bytes.len()
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.bytes.clear();
         self.ends.clear();
         self.open = None;
@@ -70,8 +86,7 @@ impl HeldRecords {
 
 impl RecordSink for HeldRecords {
     fn append(&mut self, record: &[u8]) -> io::Result<()> {
-        self.bytes.extend_from_slice(record);
-        self.ends.push(self.bytes.len());
+        self.push(record);
         Ok(())
     }
     fn begin_record(&mut self, head: usize) -> io::Result<()> {

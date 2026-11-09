@@ -70,9 +70,10 @@ use mosaica_filter::{
 use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
 
 use crate::merge::{
-    merge_ranges, split, DictCursor, Out, RangeWriter, Ranges, Records, TermMerge, TermSource, Turn,
+    merge_ranges, samples as sample, split, DictCursor, Out, RangeWriter, Ranges, Records,
+    TermMerge, TermSource, Turn,
 };
-use crate::positions::{HeldRecords, PositionsWriter, RecordSink};
+use crate::positions::{HeldRecords, PositionsWriter};
 use crate::spill::{Allowance, Sample};
 
 /// Entities held as a `u32` slice for one merged term before the merge switches to a Roaring
@@ -239,8 +240,7 @@ impl TermOut for TextIndexWriter {
 /// and the term it is part way through, whose positions are encoded as far as they have come.
 #[derive(Default)]
 pub struct HeldTerms {
-    keys: Vec<u8>,
-    key_ends: Vec<usize>,
+    keys: HeldRecords,
     postings: HeldRecords,
     positions: Option<PositionsWriter<HeldRecords>>,
     /// The open term's items, where one is open.
@@ -252,21 +252,15 @@ impl HeldTerms {
         self.positions.get_or_insert_with(PositionsWriter::held)
     }
 
-    fn push_key(&mut self, term: &str) {
-        self.keys.extend_from_slice(term.as_bytes());
-        self.key_ends.push(self.keys.len());
-    }
-
     fn key(&self, i: usize) -> &str {
-        let start = i.checked_sub(1).map_or(0, |before| self.key_ends[before]);
-        std::str::from_utf8(&self.keys[start..self.key_ends[i]]).expect("a held key was a str")
+        std::str::from_utf8(self.keys.record(i)).expect("a held key was a str")
     }
 }
 
 impl TermOut for HeldTerms {
     fn begin_term(&mut self, term: &str, items: u64) -> io::Result<()> {
         self.positions().begin(items)?;
-        self.push_key(term);
+        self.keys.push(term.as_bytes());
         self.items = Some(items);
         Ok(())
     }
@@ -277,12 +271,13 @@ impl TermOut for HeldTerms {
         let items = self.items.take().unwrap_or_default();
         let record = encode(posting, self.postings.len() as u64, items)?;
         self.positions().end()?;
-        self.postings.append(&record)
+        self.postings.push(&record);
+        Ok(())
     }
     fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()> {
         self.positions().copy(records.positions)?;
-        self.postings.append(records.posting)?;
-        self.push_key(term);
+        self.postings.push(records.posting);
+        self.keys.push(term.as_bytes());
         Ok(())
     }
 }
@@ -291,7 +286,7 @@ impl RangeWriter for TextIndexWriter {
     type Held = HeldTerms;
 
     fn held_bytes(held: &HeldTerms) -> usize {
-        held.keys.len()
+        held.keys.bytes()
             + held.postings.bytes()
             + held.positions.as_ref().map_or(0, |p| p.records().bytes())
     }
@@ -312,7 +307,6 @@ impl RangeWriter for TextIndexWriter {
             self.items = items;
         }
         held.keys.clear();
-        held.key_ends.clear();
         held.postings.clear();
         if let Some(positions) = &mut held.positions {
             positions.clear();
@@ -481,15 +475,18 @@ fn merge(
         .iter()
         .map(|input| input.positions.bytes_before(input.positions.record_count()))
         .sum();
-    let plan = ranges.plan(allowance, bytes, 0);
+    let plan = ranges.plan(
+        allowance,
+        bytes,
+        0,
+        (TEXT_MERGE_SLICE_CAP * std::mem::size_of::<u32>()) as u64,
+    );
     let mut samples: Vec<Sample> = Vec::new();
     if plan.ranges > 1 {
         for input in inputs {
-            samples.extend(DictCursor::samples(
-                input.dict,
-                plan.samples(inputs.len()),
-                |ordinal| input.positions.bytes_before(ordinal),
-            )?);
+            samples.extend(sample(input.dict, plan.samples(inputs.len()), |ordinal| {
+                Ok(input.positions.bytes_before(ordinal))
+            })?);
         }
     }
     merge_ranges(

@@ -60,11 +60,11 @@
 //!
 //! # Bounded by memory, not by time
 //!
-//! The merge holds one remap entry per input key — 4 B, unavoidable, since the remap is the pass's
-//! output — and one decode buffer per layer for each key range in flight. It holds **no**
+//! The merge holds one remap entry per input key, 4 B and unavoidable, since the remap is the
+//! pass's output, and one decode buffer per layer for each key range in flight. It holds **no**
 //! materialised key set: an arena of the window's decoded keys would be several times the remap
-//! and would breach the input cap that bounds the pass transient (§5.2), since decoding un-elides
-//! exactly the shared prefixes the format exists to elide. A range not yet written holds its keys
+//! and would breach the input cap that bounds the pass transient, since decoding un-elides exactly
+//! the shared prefixes the format exists to elide. A range not yet written holds its keys
 //! up to its plan's buffer and then waits ([`crate::merge`]).
 //!
 //! The price is paid in decodes: the merge's [`DictCursor`] steps with `key_of`, whose cost its
@@ -82,7 +82,8 @@ use std::path::Path;
 use croaring::Bitmap;
 use mosaica_filter::{Access, ColumnKind, SortedDict, SortedDictWriter, ValueColumn};
 
-use crate::merge::{merge_ranges, split, DictCursor, MergePlan, Out, RangeWriter, TermMerge};
+use crate::merge::{merge_ranges, samples, split, DictCursor, Out, RangeWriter, Ranges, TermMerge};
+use crate::positions::HeldRecords;
 use crate::spill::{Allowance, Sample};
 use crate::{invalid, merge_order, write_merged};
 use mosaica_roaring::RankedRuns;
@@ -132,7 +133,7 @@ pub fn coalesce_keyword_extents(
     let (order, presence) = merge_order(&columns, &Bitmap::new(), PASS)?;
     // No liveness filter: every key in every input dictionary survives a coalesce, because every
     // entity does.
-    let remap = merge_dictionaries(inputs, None, dict_path, PASS, allowance)?;
+    let remap = merge_dictionaries(inputs, None, dict_path, PASS, allowance, Ranges::Planned)?;
     verify_remap(inputs, &remap, dict_path, PASS)?;
     write_merged(
         &columns,
@@ -172,7 +173,14 @@ pub fn fold_keyword_column(
     let universal = out_presence.cardinality() == u64::from(bound)
         && (bound == 0 || out_presence.maximum() == Some(bound - 1));
     let live = live_ordinals(layers, tombstones, PASS)?;
-    let remap = merge_dictionaries(layers, Some(&live), dict_path, PASS, allowance)?;
+    let remap = merge_dictionaries(
+        layers,
+        Some(&live),
+        dict_path,
+        PASS,
+        allowance,
+        Ranges::Planned,
+    )?;
     verify_remap(layers, &remap, dict_path, PASS)?;
     write_merged(
         &columns,
@@ -262,7 +270,7 @@ fn live_ordinals(
 /// `live` restricts each layer to the ordinals a surviving entity reaches; `None` — the coalesce's
 /// case — takes every key. Keys equal across layers collapse to one merged ordinal, which is the
 /// interning a merge is for. The layers are merged by the one term merge, each through a
-/// [`DictCursor`], in key ranges on the threads `allowance` gives.
+/// [`DictCursor`], in key ranges as `ranges` says, on the threads `allowance` gives.
 ///
 /// **The output is written at the default restart interval whatever the inputs used**, for the
 /// reason the presence bitmap is normalised at the value writer (index §6.2): a rebuilt artefact
@@ -274,17 +282,18 @@ pub(crate) fn merge_dictionaries(
     dict_path: &Path,
     pass: &str,
     allowance: Allowance,
+    ranges: Ranges,
 ) -> io::Result<Vec<Vec<u32>>> {
     let bytes: u64 = layers.iter().map(|layer| layer.dict.bytes()).sum();
-    let plan = MergePlan::new(allowance, bytes, 0);
-    let mut samples: Vec<Sample> = Vec::new();
+    let plan = ranges.plan(allowance, bytes, 0, 0);
+    let mut sampled: Vec<Sample> = Vec::new();
     if plan.ranges > 1 {
         for layer in layers {
             let (len, bytes) = (u64::from(layer.dict.len().max(1)), layer.dict.bytes());
-            samples.extend(DictCursor::samples(
+            sampled.extend(samples(
                 layer.dict,
                 plan.samples(layers.len()),
-                |ordinal| u64::from(ordinal) * bytes / len,
+                |ordinal| Ok(u64::from(ordinal) * bytes / len),
             )?);
         }
     }
@@ -297,7 +306,7 @@ pub(crate) fn merge_dictionaries(
     };
     let merged = merge_ranges(
         merged,
-        &split(samples, plan.ranges),
+        &split(sampled, plan.ranges),
         plan,
         |range, turn| {
             let cursors = layers
@@ -306,20 +315,24 @@ pub(crate) fn merge_dictionaries(
                 .map(|(i, layer)| DictCursor::new(layer.dict, live.map(|sets| &sets[i])))
                 .collect();
             let mut merge = TermMerge::range(cursors, range)?;
+            let mut claimed: Vec<u8> = Vec::new();
             while merge.next_term()? {
                 // Valid UTF-8 by the reader's own decode check; re-derived here because `push`
                 // takes a `&str` and a lossy conversion would put a replacement character in a key.
                 let key = std::str::from_utf8(merge.term()).map_err(|e| {
                     invalid(format!("{pass}: a decoded key is not valid UTF-8: {e}"))
                 })?;
-                let claims = merge.selected().map(|(i, cursor)| (i, cursor.at()));
+                let claims = merge.selected().map(|(i, cursor)| (i as u32, cursor.at()));
                 match turn.out()? {
                     Out::Writer(merged) => merged.push(key, claims)?,
                     Out::Held(held) => {
-                        held.keys.extend_from_slice(key.as_bytes());
-                        held.key_ends.push(held.keys.len());
-                        held.claims.extend(claims);
-                        held.claim_ends.push(held.claims.len());
+                        held.keys.push(key.as_bytes());
+                        claimed.clear();
+                        for (i, at) in claims {
+                            claimed.extend_from_slice(&i.to_le_bytes());
+                            claimed.extend_from_slice(&at.to_le_bytes());
+                        }
+                        held.claims.push(&claimed);
                     }
                 }
                 if turn.full() {
@@ -342,43 +355,47 @@ struct Merged {
 
 impl Merged {
     /// Write `key`, and remap each `(layer, ordinal)` that claims it to the ordinal it takes.
-    fn push(&mut self, key: &str, claims: impl Iterator<Item = (usize, u32)>) -> io::Result<()> {
+    fn push(&mut self, key: &str, claims: impl Iterator<Item = (u32, u32)>) -> io::Result<()> {
         // The writer refuses a key that does not ascend strictly, so a merge that lost its order
         // stops here rather than producing a dictionary whose ordinals mean nothing.
         let ordinal = self.writer.push(key)?;
         for (i, old) in claims {
-            self.remap[i][old as usize] = ordinal;
+            self.remap[i as usize][old as usize] = ordinal;
         }
         Ok(())
     }
 }
 
-/// The keys a range of the merge holds until its turn, each with the layers' ordinals that claim
-/// it.
+/// The keys a range of the merge holds until its turn, and for each the layers' ordinals that
+/// claim it, as `(layer, ordinal)` pairs of little-endian `u32`s.
 #[derive(Default)]
 struct HeldKeys {
-    keys: Vec<u8>,
-    key_ends: Vec<usize>,
-    claims: Vec<(usize, u32)>,
-    claim_ends: Vec<usize>,
+    keys: HeldRecords,
+    claims: HeldRecords,
 }
 
 impl RangeWriter for Merged {
     type Held = HeldKeys;
 
     fn held_bytes(held: &HeldKeys) -> usize {
-        held.keys.len() + held.claims.len() * std::mem::size_of::<(usize, u32)>()
+        held.keys.bytes() + held.claims.bytes()
     }
 
     fn write_held(&mut self, held: &mut HeldKeys) -> io::Result<()> {
-        let (mut key_at, mut claim_at) = (0, 0);
-        for (&key_end, &claim_end) in held.key_ends.iter().zip(&held.claim_ends) {
-            let key = std::str::from_utf8(&held.keys[key_at..key_end])
+        for (key, claims) in held.keys.records().zip(held.claims.records()) {
+            let key = std::str::from_utf8(key)
                 .map_err(|e| invalid(format!("a held key is not valid UTF-8: {e}")))?;
-            self.push(key, held.claims[claim_at..claim_end].iter().copied())?;
-            (key_at, claim_at) = (key_end, claim_end);
+            let claims = claims.as_chunks::<8>().0.iter().map(|pair| {
+                let (i, at) = pair.split_at(4);
+                (
+                    u32::from_le_bytes(i.try_into().expect("four bytes")),
+                    u32::from_le_bytes(at.try_into().expect("four bytes")),
+                )
+            });
+            self.push(key, claims)?;
         }
-        *held = HeldKeys::default();
+        held.keys.clear();
+        held.claims.clear();
         Ok(())
     }
 }
@@ -701,12 +718,36 @@ mod tests {
             &dict_path,
             "the test",
             Allowance::new(0, 0, 1),
+            Ranges::Planned,
         )
         .expect("the merge");
         assert_eq!(
             remap,
             vec![vec![0, 2], vec![1, 3]],
             "alpha bravo charlie delta"
+        );
+        // In key ranges, every range but the first held until its turn: the same dictionary and
+        // the same remap.
+        let ranged_path = dir.path().join("ranged-dict.bin");
+        let ranges = Ranges::Fixed {
+            ranges: 3,
+            threads: 2,
+            window: 3,
+            buffer: 1,
+        };
+        let ranged = merge_dictionaries(
+            &inputs,
+            None,
+            &ranged_path,
+            "the test",
+            Allowance::new(0, 0, 2),
+            ranges,
+        )
+        .expect("the ranged merge");
+        assert_eq!(ranged, remap);
+        assert_eq!(
+            std::fs::read(&ranged_path).unwrap(),
+            std::fs::read(&dict_path).unwrap()
         );
         verify_remap(&inputs, &remap, &dict_path, "the test").expect("a correct remap passes");
 
