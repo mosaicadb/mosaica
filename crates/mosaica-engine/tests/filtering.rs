@@ -4579,6 +4579,96 @@ fn a_public_category_takes_the_entity_route_where_its_postings_are_small() {
     }
 }
 
+/// **A render leaf's rows are kept across requests and read over each request's own rows.** A
+/// window is scanned once, a pan keeps the same entry and scans only what it adds, a window inside
+/// what has been scanned is read without a scan, and a suppression still removes its item. Every
+/// answer is the one an engine keeping nothing gives. A flush renumbers the rows, so the next
+/// request scans again and finds the flushed item.
+#[test]
+fn a_render_leaf_is_answered_from_the_rows_it_has_scanned() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-row-kept");
+    let wal = fx._dir.path().join("wal-row-kept");
+    let mut engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    engine.start_write_executor(8).expect("the executor starts");
+    let bound = engine.filter_cache_stats().bound_bytes;
+    let eng = || {
+        leaf(
+            "department",
+            FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
+        )
+    };
+    let ids = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
+        out.points.mosaica_ids.iter().copied().collect()
+    };
+    // The answer with the cache on, checked against the same request with it off, and the
+    // change in `(misses, hits)` the request made.
+    let ask = |session: &mosaica_engine::Session, zoom: u8, window: [f64; 4]| {
+        let request = || ViewportRequest::new("s0", zoom, window, 10_000).filter(eng());
+        engine.set_filter_cache_bytes(0);
+        let unkept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        engine.set_filter_cache_bytes(bound);
+        let (before, routes) = (engine.filter_cache_stats(), engine.filter_row_routes());
+        let kept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        let after = engine.filter_cache_stats();
+        assert_eq!(engine.filter_row_routes() - routes, 1, "{window:?} takes the row route");
+        assert_eq!(kept, unkept, "{window:?}");
+        (kept, after.misses - before.misses, after.hits - before.hits)
+    };
+
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let narrow = [0.0, 0.0, 400.0, 400.0];
+    let (first, scans, _) = ask(&session, 8, narrow);
+    assert_eq!(scans, 1, "the first window is scanned and kept");
+    let (_, scans, _) = ask(&session, 8, [200.0, 200.0, 600.0, 600.0]);
+    assert_eq!(scans, 1, "a pan scans the rows it adds");
+    assert_eq!(engine.filter_cache_stats().entries, 1, "into the same entry");
+    let (again, scans, reads) = ask(&session, 8, narrow);
+    assert_eq!((again, scans), (first.clone(), 0), "a scanned window is read");
+    assert!(reads > 0);
+    let (whole, _, _) = ask(&session, 0, FULL_VIEWPORT);
+    let want: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| department_of(e) == Some("eng"))
+        .map(|e| {
+            engine
+                .mosaica_id_of(mosaica_types::EntityId::new(fx.entity_of[&e]))
+                .expect("identity is computable")
+                .raw()
+        })
+        .collect();
+    assert_eq!(whole, want);
+
+    let hidden = *first.iter().next().expect("the window holds a match");
+    let entity = (0..N)
+        .map(|e| mosaica_types::EntityId::new(fx.entity_of[&e]))
+        .find(|&e| engine.mosaica_id_of(e).unwrap().raw() == hidden)
+        .expect("a drawn item is one of the corpus");
+    engine
+        .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+        .expect("a suppression is accepted");
+    let (suppressed, scans, _) = ask(&session, 8, narrow);
+    assert_eq!(scans, 0, "a suppression leaves the rows as scanned");
+    assert!(!suppressed.contains(&hidden) && suppressed.len() == first.len() - 1);
+
+    let flushed = ingest_and_flush_with(
+        &engine,
+        "row-kept",
+        WalScalar::Utf8("eng".to_string()),
+        WalScalar::Utf8("xx".to_string()),
+        "paper-88",
+        3,
+        WalScalar::Null,
+    );
+    let fresh = engine.authorise(&full_coverage_credential()).unwrap();
+    let (after, scans, _) = ask(&fresh, 8, narrow);
+    assert_eq!(scans, 1, "a flush renumbers the rows, so they are scanned again");
+    let id = engine
+        .mosaica_id_of(mosaica_types::EntityId::new(flushed))
+        .expect("identity is computable")
+        .raw();
+    assert!(after.contains(&id), "the flushed item is matched");
+}
+
 /// **A negation is the visible set minus the matches on either route**, over two columns, one of
 /// which the row route reads from the hot column. The row route's complement holds every row of
 /// the window, a suppressed one and one outside the principal's grant among them, and only the

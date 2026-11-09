@@ -59,6 +59,7 @@ impl Engine {
     /// domain rather than letting a whole-view projection be chosen where it is cheaper.
     pub(crate) fn rows_of_routed(
         &self,
+        served: &ServedView<'_>,
         side: &ServedSide<'_>,
         routed: crate::filter::RoutedFilter,
         domain: &[Range<u32>],
@@ -78,8 +79,14 @@ impl Engine {
                 region: None,
             },
             crate::filter::RoutedFilter::Row(tree) => {
-                let rows =
-                    self.evaluate_row_route(&tree, side, domain, rows_in_ranges, per_tile_only)?;
+                let rows = self.evaluate_row_route(
+                    &tree,
+                    served,
+                    side,
+                    domain,
+                    rows_in_ranges,
+                    per_tile_only,
+                )?;
                 self.counters.filter_row_routed.fetch_add(1, Ordering::Relaxed);
                 RoutedRows {
                     // A region's interior rows have not met the mask, so their count is a
@@ -100,10 +107,12 @@ impl Engine {
     /// walk, or projected where cheaper, and the tree combines entirely in row space. A tree
     /// bounded by nothing but region leaves and projected verdicts comes back
     /// [`FilterRows::Complete`]; a render leaf or a per-tile crossing bounds the answer and comes
-    /// back [`FilterRows::Viewport`].
+    /// back [`FilterRows::Viewport`]. A render leaf's rows are read from the filter cache over the
+    /// rows it has scanned for the leaf, and scanned over the rest ([`crate::filter_cache`]).
     pub(crate) fn evaluate_row_route(
         &self,
         tree: &crate::filter::RowExpr,
+        served: &ServedView<'_>,
         side: &ServedSide<'_>,
         domain: &[Range<u32>],
         rows_in_ranges: u64,
@@ -169,10 +178,24 @@ impl Engine {
             }
             RowScope::Domain(domain_rows)
         };
+        let grant = served.session.terms_digest();
+        let scan = |column: &str, family: crate::filter::Family, operand: &FilterOperand| {
+            let key = crate::filter_cache::row_key_of(
+                side.shard,
+                grant,
+                served.name,
+                side.data.incarnation,
+                column,
+                operand,
+            );
+            crate::filter_cache::rows_answer(&self.filter_cache, side.shard, key, domain, |ranges| {
+                scan_rows(segments, ranges, column, LeafValues::of(family, operand).predicate())
+            })
+        };
         let mut next_image = 0usize;
         let rows = self
             .pool
-            .install(|| eval_row_expr(tree, &images, &mut next_image, segments, domain, &scope))?;
+            .install(|| eval_row_expr(tree, &images, &mut next_image, &scan, &scope))?;
         Ok(if whole_view {
             FilterRows::Complete(rows)
         } else {
@@ -220,7 +243,7 @@ impl Engine {
                 let region = tree.region_verdict();
                 // Exact over the whole view: every match lies inside the bounding region, whose
                 // rows the domain holds.
-                let rows = match self.evaluate_row_route(&tree, side, domain, rows, false)? {
+                let rows = match self.evaluate_row_route(&tree, served, side, domain, rows, false)? {
                     FilterRows::Complete(rows) | FilterRows::Viewport { rows, .. } => rows,
                 };
                 OverView::Rows { rows, region }
@@ -361,6 +384,10 @@ pub(crate) struct RoutedRows {
     pub(crate) unmasked: Option<u64>,
 }
 
+/// A render leaf's rows over a row-space evaluation's domain, by its column, family and operand.
+type RowLeafScan<'a> =
+    dyn Fn(&str, crate::filter::Family, &FilterOperand) -> Result<croaring::Bitmap> + Sync + 'a;
+
 /// The rows a row-space evaluation answers over — see [`Engine::evaluate_row_route`].
 enum RowScope {
     /// Every row of the view: the tree holds nothing the request's domain bounds.
@@ -389,13 +416,13 @@ impl RowScope {
 
 /// Evaluate one routed node over `domain`, in row space. `images` are the pre-crossed row images
 /// of the tree's entity-space verdicts, consumed in the order
-/// [`crate::filter::RowExpr::entity_verdicts`] collects them; `next_image` is that cursor.
+/// [`crate::filter::RowExpr::entity_verdicts`] collects them; `next_image` is that cursor. `scan`
+/// answers a render leaf over the domain.
 fn eval_row_expr(
     expr: &crate::filter::RowExpr,
     images: &[croaring::Bitmap],
     next_image: &mut usize,
-    segments: &[(&SegmentData, u32)],
-    domain: &[Range<u32>],
+    scan: &RowLeafScan<'_>,
     scope: &RowScope,
 ) -> Result<croaring::Bitmap> {
     use crate::filter::RowExpr;
@@ -409,10 +436,7 @@ fn eval_row_expr(
             column,
             family,
             operand,
-        } => {
-            let values = LeafValues::of(*family, operand);
-            scan_rows(segments, domain, column, values.predicate())
-        }
+        } => scan(column, *family, operand),
         RowExpr::Region(region) => Ok(scope.clamp(&region.rows)),
         // Already `membership ∩ M_auth` over the whole view, clamped where a sibling leaf bounds
         // the tree to the request's rows.
@@ -423,7 +447,7 @@ fn eval_row_expr(
             let mut out = scope.all_rows();
             for kid in kids {
                 out.andnot_inplace(&eval_row_expr(
-                    kid, images, next_image, segments, domain, scope,
+                    kid, images, next_image, scan, scope,
                 )?);
             }
             Ok(out)
@@ -431,7 +455,7 @@ fn eval_row_expr(
         RowExpr::AllOf(kids) => {
             let mut out: Option<croaring::Bitmap> = None;
             for kid in kids {
-                let kid_rows = eval_row_expr(kid, images, next_image, segments, domain, scope)?;
+                let kid_rows = eval_row_expr(kid, images, next_image, scan, scope)?;
                 out = Some(match out {
                     None => kid_rows,
                     Some(mut acc) => {
@@ -446,7 +470,7 @@ fn eval_row_expr(
         RowExpr::AnyOf(kids) => {
             let mut out = croaring::Bitmap::new();
             for kid in kids {
-                out |= eval_row_expr(kid, images, next_image, segments, domain, scope)?;
+                out |= eval_row_expr(kid, images, next_image, scan, scope)?;
             }
             Ok(out)
         }
@@ -1084,6 +1108,7 @@ impl Engine {
                         let routed = route(expr, both)?;
                         probe.lap(|t| &mut t.filter_eval_ns);
                         let mut out = self.rows_of_routed(
+                            served,
                             side,
                             routed,
                             &domain,
