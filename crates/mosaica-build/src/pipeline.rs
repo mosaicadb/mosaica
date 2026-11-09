@@ -839,12 +839,14 @@ fn report_term_indexes(
         let cascade = match characters {
             Some(characters) => {
                 let runs = crate::residency::expected_text_runs(characters, allowance);
+                // What each thread of the merge holds beside its readers, the held terms aside.
+                let slice = (mosaica_filter_write::TEXT_MERGE_SLICE_CAP * 4) as u64;
                 format!(
                     "; a text index over {} MiB of characters spills about {runs} run(s), {} \
                      cascade pass(es) under a fan-in of {}",
                     characters >> 20,
-                    allowance.cascade_passes(runs),
-                    allowance.fan_in()
+                    allowance.cascade_passes(runs, slice),
+                    allowance.fan_in(slice)
                 )
             }
             None => String::new(),
@@ -5259,6 +5261,7 @@ fn write_keyword_column(
         RunPayload::Rows,
         runs,
         plan.allowance,
+        0,
     )
     .map_err(|e| spill::run_error(column_dir, e))?;
     let spilled: u64 = runs.iter().map(|run| run.count).sum();
@@ -5898,7 +5901,7 @@ fn write_text_index(
         merged.runs,
         merged.held,
         merged.passes,
-        plan.allowance.fan_in(),
+        merged.fan_in,
         merged.threads
     );
     let terms = writer.finish().map_err(failed)?;

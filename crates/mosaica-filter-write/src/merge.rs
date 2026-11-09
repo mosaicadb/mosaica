@@ -381,32 +381,24 @@ impl RangePlan {
     /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`,
     /// where each thread holds `each` bytes beside its readers.
     ///
-    /// The ranges are sized by bytes, [`RANGES_PER_THREAD`] a thread at most, and the window is two
-    /// ranges a thread. What it holds is charged to the allowance: each thread's `each` bytes and
-    /// its readers, one a run, and the buffers of the ranges in the window but the one being
-    /// written, each an equal share of half what is left up to [`RANGE_BUFFER_MAX`]. Where that is
-    /// more than the allowance, the merge takes fewer threads, down to one, whose one range in
-    /// flight holds no buffer.
+    /// It runs on [`Allowance::merge_threads`], the threads the cascade sized the runs for, or
+    /// fewer where its input is too small for that many ranges. The ranges are sized by bytes,
+    /// [`RANGES_PER_THREAD`] a thread at most, and the window is two ranges a thread, one on one
+    /// thread.
     pub fn new(allowance: Allowance, bytes: u64, runs: usize, each: u64) -> RangePlan {
         let most = usize::try_from(bytes / RANGE_BYTES_MIN)
             .unwrap_or(usize::MAX)
             .max(1);
-        let mut threads = allowance.threads.clamp(1, most);
-        loop {
-            let ranges = most.min(RANGES_PER_THREAD * threads);
-            let plan = RangePlan::with(allowance, ranges, threads, 2 * threads, runs, each);
-            let held = threads as u64 * (each + runs as u64 * RUN_BUFFER_MIN as u64)
-                + (plan.window - 1) as u64 * plan.buffer as u64;
-            if threads == 1 || held <= allowance.bytes {
-                return plan;
-            }
-            threads -= 1;
-        }
+        let threads = allowance.merge_threads(each).min(most);
+        let ranges = most.min(RANGES_PER_THREAD * threads);
+        RangePlan::with(allowance, ranges, threads, 2 * threads, runs, each)
     }
 
     /// A plan of `ranges` ranges on `threads` threads, `window` of them in flight (one on one
-    /// thread), each held up to its share of half what the threads' `each` bytes leave, and the
-    /// readers of `runs` runs a thread given the rest.
+    /// thread). Each thread holds its `each` bytes and a reader on each of `runs` runs, and each
+    /// range in the window but the one being written holds up to an equal share of half what they
+    /// leave, from [`RUN_BUFFER_MIN`] to [`RANGE_BUFFER_MAX`]; the readers' buffers are what is
+    /// left after that.
     pub fn with(
         allowance: Allowance,
         ranges: usize,
@@ -422,7 +414,8 @@ impl RangePlan {
             _ => window.clamp(threads, ranges.max(threads)),
         };
         let left = allowance.less(threads as u64 * each);
-        let buffer = usize::try_from(left.bytes / 2 / window as u64)
+        let readers = (threads * runs) as u64 * RUN_BUFFER_MIN as u64;
+        let buffer = usize::try_from(left.less(readers).bytes / 2 / (window as u64 - 1).max(1))
             .unwrap_or(usize::MAX)
             .clamp(RUN_BUFFER_MIN, RANGE_BUFFER_MAX);
         let read = left

@@ -439,7 +439,8 @@ pub struct TextMerge {
     pub runs: usize,
     pub held: usize,
     pub passes: usize,
-    /// The threads the merge after the cascade ran on.
+    /// The fan-in the cascade reduced the runs to, and the threads the merge after it ran on.
+    pub fan_in: usize,
     pub threads: usize,
 }
 
@@ -485,20 +486,33 @@ pub fn write_text_index(
         .collect();
     drop(gathered);
     let left = allowance.less(held.iter().map(|h| h.allocated() as u64).sum());
+    // Each merge thread holds a term's entities up to the slice cap, and a copy of the largest held
+    // term that arrived in several segments. A term above the cap is held as a bitmap, bounded by
+    // its posting rather than by the allowance, until such a term is merged in entity ranges.
+    let each = (merge_slice_cap * std::mem::size_of::<u32>()) as u64
+        + held.iter().map(Held::copy_bytes).max().unwrap_or(0);
     let figures = TextMerge {
         runs: runs.len(),
         held: held.len(),
         passes: 0,
+        fan_in: left.fan_in(each),
         threads: 0,
     };
 
-    let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone(), left);
+    let cascaded = cascade_sorted_runs(
+        dir,
+        family,
+        RunPayload::Positions,
+        runs.clone(),
+        left,
+        each,
+    );
     // What the accumulators or the cascade's threads freed in their own arenas goes back before
     // the merge's buffers are taken.
     mosaica_types::process::trim_heap();
     let merged = match &cascaded {
         Ok((left_runs, _)) => {
-            merge_gathered(left_runs, &held, writer, merge_slice_cap, left, ranges)
+            merge_gathered(left_runs, &held, writer, merge_slice_cap, each, left, ranges)
         }
         Err(_) => Ok(0),
     };
@@ -516,20 +530,17 @@ pub fn write_text_index(
 }
 
 /// Merge `runs` and `held` into `writer` in term ranges, under `allowance` and as `ranges` says,
-/// returning the threads the merge ran on.
+/// each term held as a slice of at most `slice_cap` and each thread holding `each` bytes beside its
+/// readers, returning the threads the merge ran on.
 fn merge_gathered(
     runs: &[SpillReceipt],
     held: &[Held],
     writer: &mut TextIndexWriter,
     slice_cap: usize,
+    each: u64,
     allowance: Allowance,
     ranges: Ranges,
 ) -> io::Result<usize> {
-    // Each thread holds a term's entities up to the slice cap, and a copy of the largest held term
-    // that arrived in several segments. A term above the cap is held as a bitmap, bounded by its
-    // posting rather than by the allowance, until such a term is merged in entity ranges.
-    let each = (slice_cap * std::mem::size_of::<u32>()) as u64
-        + held.iter().map(Held::copy_bytes).max().unwrap_or(0);
     let how = RunMerge {
         payload: RunPayload::Positions,
         allowance,

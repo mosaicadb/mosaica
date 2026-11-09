@@ -1216,17 +1216,52 @@ impl Allowance {
         self.chunk(self.threads)
     }
 
-    /// **The fan-in: the most runs one merge opens**, F / T: as many runs as each of its threads
-    /// can hold a reader on, each reader at [`RUN_BUFFER_MIN`], so that the merge after the
-    /// cascade runs on every thread. Held under [`merge_descriptors`], since every reader on one
-    /// run shares its descriptor and the runs are what is counted, and three at least, so that a
-    /// cascade pass reduces two runs into one with its writer beside them.
+    /// **The threads the merge after the cascade runs on**, where each holds `each` bytes beside
+    /// its readers: the most of the allowance's threads that can each pay for those bytes, their
+    /// share of the merge's window of range buffers at its least, and a reader on [`FAN_IN_MIN`]
+    /// runs; one at least. [`Self::fan_in`] sizes the cascade for these threads, and
+    /// [`crate::RangePlan`] runs the merge on them.
+    pub fn merge_threads(&self, each: u64) -> usize {
+        let pays = |t: usize| {
+            t as u64 * (Self::per_thread(t, each) + (FAN_IN_MIN * RUN_BUFFER_MIN) as u64)
+                <= self.bytes
+        };
+        (1..=self.threads.max(1)).rev().find(|&t| pays(t)).unwrap_or(1)
+    }
+
+    /// What each of `threads` merge threads holds beside its readers: `each`, and, where there are
+    /// several, two range buffers at [`RUN_BUFFER_MIN`], its share of a window of two ranges a
+    /// thread.
+    fn per_thread(threads: usize, each: u64) -> u64 {
+        match threads {
+            1 => each,
+            _ => each + 2 * RUN_BUFFER_MIN as u64,
+        }
+    }
+
+    /// **The fan-in: the most runs one merge opens**, where each merge thread holds `each` bytes
+    /// beside its readers: F = (M − T × what each holds) / (T × B), with T the
+    /// [`merge threads`](Self::merge_threads) and B [`RUN_BUFFER_MIN`], so that the merge after the
+    /// cascade holds a reader on every run on every thread. On one thread it is M / B, as the
+    /// merge's one thread was always sized. Held under [`merge_descriptors`], since every reader
+    /// on one run shares its descriptor and the runs are what is counted, and at least
+    /// [`FAN_IN_MIN`].
     ///
     /// One level over R runs fits while R is at most the fan-in. R is the run bytes over a run's
     /// size, and a run's size follows the allowance over the threads, so one level holds a corpus
     /// whose run bytes grow as the square of the allowance. Above that the cascade takes a pass.
-    pub fn fan_in(&self) -> usize {
-        (self.readers() / self.threads.max(1)).max(3)
+    pub fn fan_in(&self, each: u64) -> usize {
+        let threads = self.merge_threads(each);
+        let bytes = match threads {
+            1 => self.bytes,
+            _ => self
+                .bytes
+                .saturating_sub(threads as u64 * Self::per_thread(threads, each)),
+        };
+        usize::try_from(bytes / (threads as u64 * RUN_BUFFER_MIN as u64))
+            .unwrap_or(usize::MAX)
+            .min(merge_descriptors())
+            .max(FAN_IN_MIN)
     }
 
     /// The readers it pays for at [`RUN_BUFFER_MIN`] each, under [`merge_descriptors`]: what the
@@ -1235,7 +1270,7 @@ impl Allowance {
         usize::try_from(self.bytes / RUN_BUFFER_MIN as u64)
             .unwrap_or(usize::MAX)
             .min(merge_descriptors())
-            .max(3)
+            .max(FAN_IN_MIN)
     }
 
     /// The read buffer each of `cursors` open at once is given: an equal share of the allowance,
@@ -1246,17 +1281,22 @@ impl Allowance {
             .clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES)
     }
 
-    /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance.
-    pub fn cascade_passes(&self, mut runs: usize) -> usize {
+    /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance,
+    /// each merge thread holding `each` bytes beside its readers.
+    pub fn cascade_passes(&self, mut runs: usize, each: u64) -> usize {
+        let fan_in = self.fan_in(each);
         let mut passes = 0;
-        while runs > self.fan_in() {
-            let pass = CascadePass::of(runs, self.fan_in(), self.threads);
+        while runs > fan_in {
+            let pass = CascadePass::of(runs, fan_in, self.threads);
             runs -= pass.taken - pass.groups;
             passes += 1;
         }
         passes
     }
 }
+
+/// The least fan-in: a cascade pass that reduces two runs into one, with its writer beside them.
+pub const FAN_IN_MIN: usize = 3;
 
 /// The share of this process's file descriptors one merge's runs may take: half the soft limit.
 /// The other half is what the process holds open beside the merge (the source files, the files
@@ -1316,8 +1356,9 @@ impl CascadePass {
     }
 }
 
-/// Reduce `receipts` to at most the allowance's fan-in, deleting each pass's inputs as it goes, and
-/// return what is left and the passes taken. `family` names the intermediate files, so two column
+/// Reduce `receipts` to at most the allowance's fan-in for a merge whose threads each hold `each`
+/// bytes beside their readers, deleting each pass's inputs as it goes, and return what is left and
+/// the passes taken. `family` names the intermediate files, so two column
 /// families cascading in one directory cannot collide. On an error the cascade removes every file
 /// it wrote, and leaves the caller's runs to the caller.
 ///
@@ -1337,8 +1378,9 @@ pub fn cascade_sorted_runs(
     payload: RunPayload,
     mut receipts: Vec<SpillReceipt>,
     allowance: Allowance,
+    each: u64,
 ) -> io::Result<(Vec<SpillReceipt>, usize)> {
-    let fan_in = allowance.fan_in();
+    let fan_in = allowance.fan_in(each);
     let mut written: Vec<PathBuf> = Vec::new();
     let mut pass = 0usize;
     while receipts.len() > fan_in {
@@ -1758,12 +1800,25 @@ mod tests {
         assert_eq!(floor.bytes, 4 * WORKER_BYTES_MIN as u64);
 
         let allowance = Allowance::new(64 * RUN_BUFFER_MIN as u64, 0, 1);
-        assert_eq!(allowance.fan_in(), 64.min(merge_descriptors()));
+        assert_eq!(allowance.fan_in(0), 64.min(merge_descriptors()));
+        // On several threads, the threads the cascade sizes for can each pay for what they hold
+        // and a reader on every run it leaves; where only one can, the fan-in is one thread's.
         let four = Allowance {
             bytes: 64 * RUN_BUFFER_MIN as u64,
             threads: 4,
         };
-        assert_eq!(four.fan_in(), (64.min(merge_descriptors()) / 4).max(3));
+        let charges = [0, 4, 20, 40].map(|readers| readers * RUN_BUFFER_MIN as u64);
+        for each in charges {
+            let threads = four.merge_threads(each);
+            let held = threads as u64 * (each + 2 * RUN_BUFFER_MIN as u64)
+                + (threads * four.fan_in(each) * RUN_BUFFER_MIN) as u64;
+            match threads {
+                1 => assert_eq!(four.fan_in(each), 64.min(merge_descriptors())),
+                _ => assert!(held <= four.bytes, "{threads} threads hold {held}"),
+            }
+            assert_eq!(RangePlan::new(four, u64::MAX, 0, each).threads, threads);
+        }
+        assert_eq!(charges.map(|each| four.merge_threads(each)), [4, 4, 2, 1]);
         assert_eq!(allowance.buffer(64), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1_000), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1), SPILL_BUF_BYTES);
@@ -1858,11 +1913,11 @@ mod tests {
         };
         let expected = merged(&receipts);
 
-        // Forty-eight readers on four threads is a fan-in of twelve over forty runs: the excess of
-        // 28 takes four groups of eight, all four at once, and the eight runs past them are left
-        // as they are.
+        // Fifty-six readers on four threads, two buffers a thread aside, is a fan-in of twelve over
+        // forty runs: the excess of 28 takes four groups of eight, all four at once, and the eight
+        // runs past them are left as they are.
         let allowance = Allowance {
-            bytes: 48 * RUN_BUFFER_MIN as u64,
+            bytes: 56 * RUN_BUFFER_MIN as u64,
             threads: 4,
         };
         let (left, passes) = cascade_sorted_runs(
@@ -1871,10 +1926,11 @@ mod tests {
             RunPayload::Rows,
             receipts.clone(),
             allowance,
+            0,
         )
         .unwrap();
-        assert!(left.len() <= allowance.fan_in(), "{} runs left", left.len());
-        assert_eq!(passes, allowance.cascade_passes(runs as usize));
+        assert!(left.len() <= allowance.fan_in(0), "{} runs left", left.len());
+        assert_eq!(passes, allowance.cascade_passes(runs as usize, 0));
         assert_eq!(passes, 1);
         assert_eq!(merged(&left), expected);
         let left_paths: Vec<&PathBuf> = left.iter().map(|run| &run.path).collect();
