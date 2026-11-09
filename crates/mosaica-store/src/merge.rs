@@ -243,8 +243,9 @@ pub fn execute_merge(
         path: out_dir.join("columns.arrow"),
         source,
     };
+    let rows = cursors.iter().map(|cursor| cursor.rows).sum();
     let mut writer =
-        SegmentWriter::create(&out_dir, spec.scalar_schema, spec.indexed).map_err(io)?;
+        SegmentWriter::create(&out_dir, spec.scalar_schema, spec.indexed, rows).map_err(io)?;
     // Each merged row's entity, in emission order: the merged row *is* the emission ordinal, so
     // the extent needs no companion permutation of the entity axis.
     let mut entities: Vec<u64> = Vec::new();

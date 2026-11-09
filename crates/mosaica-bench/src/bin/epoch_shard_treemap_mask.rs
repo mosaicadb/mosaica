@@ -428,7 +428,8 @@ fn view_space_mask(map: &Treemap, scratch: &Path) -> EffectiveMask {
 /// visible row — which is the cost this bench is measuring.
 fn synthetic_segment(rows: usize, seed: u64, scratch: &Path) -> SegmentData {
     let mut rng = SplitMix(seed);
-    let mut writer = SegmentWriter::create(scratch, &[], &[]).expect("a synthetic segment writer");
+    let mut writer =
+        SegmentWriter::create(scratch, &[], &[], rows).expect("a synthetic segment writer");
     for row in 0..rows as u32 {
         writer
             .append(SegmentRow {

@@ -54,7 +54,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
-use arrow::array::{ArrayRef, RecordBatch, UInt32Array, UInt64Array};
+use arrow::array::{ArrayRef, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use croaring::{Bitmap, Portable};
 
@@ -431,7 +431,6 @@ impl RecordBlobWriter {
             .map_err(io::IntoInnerError::into_error)?;
         file.sync_all()?;
 
-        let n = self.directory.len();
         let schema = Arc::new(Schema::new(vec![
             Field::new("compressed_offset", DataType::UInt64, false),
             Field::new("compressed_len", DataType::UInt64, false),
@@ -456,17 +455,7 @@ impl RecordBlobWriter {
                 self.directory.iter().map(|d| d.4),
             )),
         ];
-        let batch = RecordBatch::try_new(schema.clone(), columns)
-            .map_err(|e| invalid(format!("assembling the block directory ({n} blocks): {e}")))?;
-        let file = File::create(&self.directory_path)?;
-        let mut writer = arrow::ipc::writer::FileWriter::try_new(file, &schema)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        writer
-            .write(&batch)
-            .map_err(|e| io::Error::other(e.to_string()))?;
-        writer
-            .finish()
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        mosaica_authz::arrow_file::write_single_batch(&self.directory_path, schema, columns)?;
 
         // Run-optimised so the file's bytes are a function of the entity set alone — the same
         // canonicalisation the presence bitmap gets in `values_writer::presence_bytes`, and for

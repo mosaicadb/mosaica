@@ -1929,19 +1929,29 @@ pub(crate) fn disk(
             width * n + n.div_ceil(8),
             Phases::INDEX.onwards(),
         );
-        // `values.arrow` is assembled from a spool of the same values beside it
-        // (`mosaica_filter::values_writer`), so the column's slots stand twice while it is
-        // written. Measured on the GBIF prefix: `specieskey` 473,983,152 bytes of spool and `year`
-        // 243,206,776, both alive at the index phase's peak.
-        push(
-            format!(
-                "attribute '{}': the value column's own spool, {width} B/item, beside \
-                 values.arrow while it is assembled",
-                attribute.name
+        // A column written a block at a time is spooled beside `values.arrow` until its presence
+        // divides it into blocks: the codes it was pushed and then their encoded blocks, both
+        // alive while `values.arrow` is written, the blocks at most the codes' width a value. A
+        // flat column is written in place and spools nothing. Measured on the GBIF prefix:
+        // `specieskey` 473,983,152 bytes of spooled codes at the index phase's peak.
+        let blocked = matches!(
+            mosaica_store::empty_shard::value_column_kind(
+                attribute.ty,
+                attribute.vocabulary.is_some()
             ),
-            width * n,
-            Phases::INDEX,
+            mosaica_filter::ColumnKind::Ordinals | mosaica_filter::ColumnKind::Ordinals16
         );
+        if blocked {
+            push(
+                format!(
+                    "attribute '{}': the value column's own spools, its codes and their blocks at \
+                     {width} B/item each, beside values.arrow while it is assembled",
+                    attribute.name
+                ),
+                2 * width * n,
+                Phases::INDEX,
+            );
+        }
         if matches!(attribute.ty, ScalarType::Utf8 | ScalarType::Keyword) {
             // The dictionary pass's own scratch, under the column's directory rather than
             // `.build-tmp/`: an id per row, 4 B; per key of each chunk, an 8 B remap record and,
@@ -3390,7 +3400,7 @@ mod tests {
             disk.terms
                 .iter()
                 .any(|t| t.what.contains("the value column's own spool")),
-            "values.arrow is assembled from a spool of the same values beside it"
+            "a keyword's values.arrow is assembled from spools beside it"
         );
         // **And the entry overhead beside the characters.** The file is front-coded, two varints
         // and a share of a restart offset an entry, so a column of short distinct values that

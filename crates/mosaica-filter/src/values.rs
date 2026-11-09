@@ -1716,12 +1716,13 @@ pub enum Access {
 }
 
 impl Access {
-    /// `None` to read, `Some(sequential)` to map.
-    fn mapped(self) -> Option<bool> {
+    /// The file at `path` as one Arrow buffer, read or mapped as this says.
+    pub(crate) fn buffer(self, path: &Path) -> io::Result<Buffer> {
+        use mosaica_authz::arrow_file::{mapped_buffer, mapped_buffer_streamed, read_buffer};
         match self {
-            Access::Read => None,
-            Access::Mapped => Some(false),
-            Access::MappedSequential => Some(true),
+            Access::Read => read_buffer(path),
+            Access::Mapped => mapped_buffer(&std::fs::File::open(path)?),
+            Access::MappedSequential => mapped_buffer_streamed(&std::fs::File::open(path)?),
         }
     }
 }
@@ -1743,28 +1744,9 @@ fn read_values(path: &Path, access: Access) -> io::Result<Codes> {
     use arrow::array::Array;
     use arrow::datatypes::DataType;
 
-    let buffer = if let Some(sequential) = access.mapped() {
-        let file = std::fs::File::open(path)?;
-        // SAFETY: the same argument as `PostingsReader::open`'s mmap arm. `arc` owns the mapping
-        // for as long as any `Buffer` built from it is alive — it is captured as the buffer's
-        // `Allocation` — the mapping is valid for `len` bytes for its whole lifetime, and
-        // `memmap2::Mmap` never returns a null base pointer.
-        let mapping = unsafe { memmap2::Mmap::map(&file) }?;
-        if sequential {
-            // **A hint, and a failure to give it is not a failure to open**
-            // (decision 0052): the advice is an optimisation for a caller that streams the column
-            // once, and a kernel that declines it leaves a correct mapping behind. Erroring here
-            // would let an advisory call fail a fold.
-            let _ = mapping.advise(memmap2::Advice::Sequential);
-        }
-        let len = mapping.len();
-        let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-        let ptr = std::ptr::NonNull::new(arc.as_ptr() as *mut u8)
-            .expect("memmap2::Mmap never returns a null base pointer");
-        unsafe { Buffer::from_custom_allocation(ptr, len, arc) }
-    } else {
-        Buffer::from_vec(std::fs::read(path)?)
-    };
+    // A streamed mapping is a hint, and a kernel that declines it is no failure to open
+    // (decision 0052): the fold streams a column once, and an error here would fail the fold.
+    let buffer = access.buffer(path)?;
 
     // One record batch, refused rather than concatenated if there are more: the reader borrows its
     // values from the batch's buffers instead of copying them, and concatenating is the copy this

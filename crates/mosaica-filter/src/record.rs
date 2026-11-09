@@ -136,7 +136,6 @@
 use std::fmt;
 use std::io;
 use std::path::Path;
-use std::sync::Arc;
 
 use arrow::array::{Array, UInt32Array, UInt64Array};
 use arrow::buffer::{Buffer, ScalarBuffer};
@@ -1015,8 +1014,8 @@ impl RecordBlob {
         access: Access,
         hasrow: Option<Bitmap>,
     ) -> Result<Self, RecordError> {
-        let blocks = read_buffer(blocks_path, access)?;
-        let directory = read_buffer(directory_path, access)?;
+        let blocks = access.buffer(blocks_path)?;
+        let directory = access.buffer(directory_path)?;
         let batch = mosaica_authz::decode_single_batch(
             &directory,
             &format!("{}", directory_path.display()),
@@ -1615,38 +1614,6 @@ impl<'a> RecordRowCursor<'a> {
         let value = decode_value_ref(payload, &mut cursor, kind)?;
         Ok(RecordFieldRef { tag, value })
     }
-}
-
-/// A file's bytes as an Arrow buffer — read whole or mapped per `access`, the same construction
-/// and safety argument as `values::read_values` and `PostingsReader::open`. Duplicated rather
-/// than shared from `values.rs`, which is the scan's hot file and has paid for added code five
-/// times over (see `values_writer.rs`'s module doc).
-fn read_buffer(path: &Path, access: Access) -> Result<Buffer, RecordError> {
-    if access == Access::Read {
-        return Ok(Buffer::from_vec(std::fs::read(path)?));
-    }
-    let file = std::fs::File::open(path)?;
-    let len = file.metadata()?.len() as usize;
-    if len == 0 {
-        // memmap2 rejects zero-length maps, and an empty buffer is what the read path produces
-        // for an empty file anyway.
-        return Ok(arrow::buffer::MutableBuffer::new(0).into());
-    }
-    // SAFETY: `arc` owns the mapping for as long as any `Buffer` built from it is alive — it is
-    // captured as the buffer's `Allocation` — the mapping is valid for `len` bytes for its whole
-    // lifetime, and `memmap2::Mmap` never returns a null base pointer.
-    let mapping = unsafe { memmap2::Mmap::map(&file) }?;
-    if access == Access::MappedSequential {
-        // A hint, and a failure to give it is not a failure to open (decision 0052) — the same
-        // posture as `values.rs`'s mapping: the fold streams a layer exactly once and wants the
-        // drop-behind, and a kernel that declines leaves a correct mapping behind.
-        let _ = mapping.advise(memmap2::Advice::Sequential);
-    }
-    let len = mapping.len();
-    let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-    let ptr = std::ptr::NonNull::new(arc.as_ptr() as *mut u8)
-        .expect("memmap2::Mmap never returns a null base pointer");
-    Ok(unsafe { Buffer::from_custom_allocation(ptr, len, arc) })
 }
 
 #[cfg(test)]

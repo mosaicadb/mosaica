@@ -48,7 +48,7 @@ use std::path::{Path, PathBuf};
 
 use mosaica_spatial::split32;
 use mosaica_spatial::tiler::ScalarType;
-use mosaica_store::columns::{ColumnsFile, ColumnsPlan};
+use mosaica_authz::arrow_file::InPlaceFile;
 use mosaica_store::write::{CutWriter, PagePlan, PermutationWriter};
 use mosaica_types::{EntityId, IdentityKey, ItemHigh, MosaicaId, ShardId, Tenancy};
 use rayon::slice::ParallelSliceMut;
@@ -593,9 +593,9 @@ pub(crate) fn write_segment(
         .iter()
         .map(|column| (column.name.clone(), column.ty))
         .collect();
-    let columns = ColumnsFile::create(
+    let columns = InPlaceFile::create(
         &columns_path,
-        ColumnsPlan::new(&declared, rows_in_view as usize)
+        mosaica_store::write::columns_layout(&declared, rows_in_view as usize)
             .map_err(|e| BuildError::io(&columns_path, e))?,
     )
     .map_err(|e| BuildError::io(&columns_path, e))?;
@@ -867,7 +867,7 @@ struct RenderLane<'a> {
 /// bitmap beside it.
 fn write_render_columns(
     job: &Assembly<'_>,
-    columns: &ColumnsFile,
+    columns: &InPlaceFile,
     lanes: Vec<RenderLane<'_>>,
     boundaries: &[u32],
     rows_in_view: u32,

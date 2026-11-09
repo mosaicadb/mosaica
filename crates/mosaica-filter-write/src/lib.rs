@@ -268,8 +268,9 @@ pub(crate) fn write_merged(
         Some(_) => ColumnKind::Ordinals,
         None => ColumnKind::of(layers[0].codes()),
     };
-    let mut writer = ValueColumnWriter::create(values_path, presence_path, kind)?;
     let keeps: Vec<Bitmap> = order.iter().map(|(_, p)| p.andnot(tombstones)).collect();
+    let rows = keeps.iter().map(|keep| keep.cardinality() as usize).sum();
+    let mut writer = ValueColumnWriter::create(values_path, presence_path, kind, Some(rows))?;
     let mut runs: Vec<RankedRuns<'_, '_>> = order
         .iter()
         .zip(&keeps)
@@ -828,9 +829,13 @@ mod tests {
         let n = MERGE_CHUNK as u32 * 2 + 7;
         let codes: Vec<u32> = (0..n).map(|e| 1 + e % 300).collect();
         let values = dir.path().join("v.arrow");
-        let mut writer =
-            ValueColumnWriter::create(&values, &dir.path().join("p.roaring"), ColumnKind::Ordinals)
-                .expect("create");
+        let mut writer = ValueColumnWriter::create(
+            &values,
+            &dir.path().join("p.roaring"),
+            ColumnKind::Ordinals,
+            Some(codes.len()),
+        )
+        .expect("create");
         writer.push(&codes_u32(codes.clone())).expect("push");
         writer.finish(None).expect("finish");
         let column = ValueColumn::open(&values, None, mosaica_filter::Access::Read).expect("open");

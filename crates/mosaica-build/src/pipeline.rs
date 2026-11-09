@@ -3907,8 +3907,8 @@ pub(crate) fn value_column_is_owed(
 /// nowhere, which is what the `render` term above refuses.
 ///
 /// **`render` is refused on every string type at the declaration**
-/// (`config::compile_attributes`), and `ColumnsPlan::new` refuses one that reaches it anyway, so
-/// that term fires only for a `Schema` assembled programmatically.
+/// (`config::compile_attributes`), and `mosaica_store::write::columns_layout` refuses one that
+/// reaches it anyway, so that term fires only for a `Schema` assembled programmatically.
 ///
 /// **A group-scoped family is not asked.** Its columns are the scoped pass's own, one per view,
 /// and the join that fills them is `write_scoped_columns`'s rather than this one's (`views.md`
@@ -4218,7 +4218,21 @@ fn write_column_values(
 
     let kind =
         mosaica_store::empty_shard::value_column_kind(attribute.ty, attribute.vocabulary.is_some());
-    let mut writer = ValueColumnWriter::create(values_path, presence_path, kind)
+    // A flat column is laid out before its values arrive, so it is told how many there will be:
+    // every present entity of a number, and every present code of a `u8` category, whose absent
+    // code is no value. A column written a block at a time is told nothing.
+    let rows = match kind {
+        mosaica_filter::ColumnKind::Ordinals | mosaica_filter::ColumnKind::Ordinals16 => None,
+        _ if attribute.vocabulary.is_some() => Some(
+            values
+                .present_entities()
+                .map(|entity| category_code(&values.value_at(entity), &attribute.name))
+                .filter(|code| !matches!(code, Ok(mosaica_store::vocabulary::ABSENT_CODE)))
+                .count(),
+        ),
+        _ => Some(values.present_count()),
+    };
+    let mut writer = ValueColumnWriter::create(values_path, presence_path, kind, rows)
         .map_err(|e| BuildError::io(values_path, e))?;
     macro_rules! push {
         ($chunk:expr) => {
@@ -5279,7 +5293,7 @@ fn write_keyword_column(
     Ok(dict_path)
 }
 
-/// Values pushed to the column writer at a time. The writer spools each chunk as it arrives, so
+/// Values pushed to the column writer at a time. The writer writes each chunk as it arrives, so
 /// this is the whole of what the emit holds beside the attribute tail it reads from.
 const VALUE_CHUNK: usize = 1 << 16;
 
@@ -6626,8 +6640,9 @@ mod tests {
             (ScalarType::Keyword, true, false, true),
             (ScalarType::Utf8, true, false, true),
             // Rendered: the row tail reads the column at an entity. ⊘ `render` on a string type
-            // is refused at the declaration and `ColumnsPlan::new` refuses one that arrives anyway,
-            // so this arm is reachable only from a `Schema` built programmatically.
+            // is refused at the declaration and `mosaica_store::write::columns_layout` refuses one
+            // that arrives anyway, so this arm is reachable only from a `Schema` built
+            // programmatically.
             (ScalarType::Keyword, false, true, false),
             // A fixed-width column is a slot and is never spilled, whatever its flags say.
             (ScalarType::U32, false, false, false),

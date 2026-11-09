@@ -317,13 +317,13 @@ fn write_segment_scalars_round_trip() {
             mosaica_id: MosaicaId::new(1),
             qx: q(0.1),
             qy: q(0.2),
-            scalars: vec![ScalarValue::U64(42), ScalarValue::Utf8("alpha".to_string())],
+            scalars: vec![ScalarValue::U64(42), ScalarValue::I16(-3)],
         },
         TilerItem {
             mosaica_id: MosaicaId::new(2),
             qx: q(0.8),
             qy: q(0.9),
-            scalars: vec![ScalarValue::U64(7), ScalarValue::Utf8("beta".to_string())],
+            scalars: vec![ScalarValue::U64(7), ScalarValue::I16(12)],
         },
     ];
     let mut entity_ids = vec![EntityId::new(1), EntityId::new(2)];
@@ -332,7 +332,7 @@ fn write_segment_scalars_round_trip() {
     let dir = tempfile::tempdir().expect("tempdir");
     let scalar_schema = vec![
         ("count".to_string(), ScalarType::U64),
-        ("label".to_string(), ScalarType::Utf8),
+        ("label".to_string(), ScalarType::I16),
     ];
     write_segment(dir.path(), &items, &codes, &scalar_schema, &[]).expect("write_segment");
 
@@ -350,7 +350,7 @@ fn write_segment_scalars_round_trip() {
     let label_col = batch
         .column(3)
         .as_any()
-        .downcast_ref::<arrow::array::StringArray>()
+        .downcast_ref::<arrow::array::Int16Array>()
         .unwrap();
     for (i, item) in items.iter().enumerate() {
         let ScalarValue::U64(v) = &item.scalars[0] else {
@@ -362,15 +362,62 @@ fn write_segment_scalars_round_trip() {
         };
         assert_eq!(count_col.value(i), *v);
 
-        let ScalarValue::Utf8(v) = &item.scalars[1] else {
+        let ScalarValue::I16(v) = &item.scalars[1] else {
             panic!(
-                "expected ScalarValue::Utf8 at scalars[1] for mosaica_id {}, got {:?}",
+                "expected ScalarValue::I16 at scalars[1] for mosaica_id {}, got {:?}",
                 item.mosaica_id.raw(),
                 item.scalars[1]
             );
         };
-        assert_eq!(label_col.value(i), v.as_str());
+        assert_eq!(label_col.value(i), *v);
     }
+}
+
+/// A string column has no width, so `columns.arrow` cannot be laid out for it: the write is
+/// refused, as `render` on a string type is at the declaration.
+#[test]
+fn a_string_column_is_refused() {
+    use mosaica_spatial::tiler::ScalarValue;
+
+    let mut items = vec![TilerItem {
+        mosaica_id: MosaicaId::new(1),
+        qx: q(0.1),
+        qy: q(0.2),
+        scalars: vec![ScalarValue::Utf8("alpha".to_string())],
+    }];
+    let mut entity_ids = vec![EntityId::new(1)];
+    let codes = sort_batch(&mut items, &mut entity_ids);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schema = vec![("label".to_string(), ScalarType::Utf8)];
+    write_segment(dir.path(), &items, &codes, &schema, &[]).expect_err("a utf8 column is refused");
+}
+
+/// A segment is laid out for the rows it was created for: one more is refused when it arrives,
+/// one fewer when the segment finishes, and neither leaves a `columns.arrow` behind.
+#[test]
+fn a_segment_holds_exactly_the_rows_it_was_created_for() {
+    use mosaica_store::write::{no_indexed, SegmentRow, SegmentWriter};
+
+    let row = |id: u64| SegmentRow {
+        mosaica_id: MosaicaId::new(id),
+        morton: 0,
+        residual: 0,
+        scalars: &[],
+        indexed: &no_indexed,
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let columns = dir.path().join("columns.arrow");
+
+    let mut writer = SegmentWriter::create(dir.path(), &[], &[], 1).expect("create");
+    writer.append(row(1)).expect("the one row");
+    writer.append(row(2)).expect_err("a second row is refused");
+    drop(writer);
+    assert!(!columns.exists());
+
+    let mut writer = SegmentWriter::create(dir.path(), &[], &[], 2).expect("create");
+    writer.append(row(1)).expect("the first row");
+    writer.finish().expect_err("one row of two is refused");
+    assert!(!columns.exists());
 }
 
 #[test]
@@ -602,12 +649,12 @@ fn a_scattered_duplicate_entity_is_refused() {
     );
 }
 
-/// **Every declarable width survives a write and a read, including the two that are not flat.**
+/// **Every declarable width survives a write and a read, including the one that is not flat.**
 ///
 /// The tail is stored and read back positionally, so a type handled in the writer and missed in
 /// the reader — or handled in both at different widths — puts every later column's values under
-/// the wrong name with the row count still agreeing. Thirteen types is past the number anyone
-/// checks by eye, which is why this asserts each one's value rather than only the schema.
+/// the wrong name with the row count still agreeing. Twelve types is past the number anyone checks
+/// by eye, which is why this asserts each one's value rather than only the schema.
 ///
 /// **`bool` is the case worth having.** It is the one member Arrow packs — a bit per row, so the
 /// segment writer accumulates a partial byte and flushes it at eight — and the row count here is
@@ -630,7 +677,6 @@ fn every_declared_width_round_trips_including_a_packed_bool() {
         ("f32c".into(), ScalarType::F32),
         ("f64c".into(), ScalarType::F64),
         ("when".into(), ScalarType::TimestampUs),
-        ("name".into(), ScalarType::Utf8),
     ];
 
     // 13 rows: not a multiple of 8, so the bool column ends mid-byte.
@@ -651,7 +697,6 @@ fn every_declared_width_round_trips_including_a_packed_bool() {
             // A value no `f32` holds, so a column that silently narrowed would fail here.
             ScalarValue::F64(1.0 / 3.0 + i as f64),
             ScalarValue::TimestampUs(1_700_000_000_000_000 + i as i64),
-            ScalarValue::Utf8(format!("row-{i}")),
         ]
     };
 
@@ -695,9 +740,6 @@ fn every_declared_width_round_trips_including_a_packed_bool() {
                 (ScalarSlice::TimestampUs(v), ScalarType::TimestampUs) => {
                     ScalarValue::TimestampUs(v[row])
                 }
-                (ScalarSlice::Utf8(v), ScalarType::Utf8) => {
-                    ScalarValue::Utf8(v.value(row).to_string())
-                }
                 (other, ty) => {
                     panic!(
                         "column '{name}' declared {ty:?} read back as {}",
@@ -720,18 +762,22 @@ fn every_declared_width_round_trips_including_a_packed_bool() {
     );
 }
 
-/// **The in-place route writes the bytes the segment writer writes.** This is the assertion
-/// `mosaica_store::columns` exists under: the build lays `columns.arrow` out before its first row
-/// and fills it from Morton buckets, and a file that differed from the one [`SegmentWriter`]
-/// produces for the same rows would be a format two writers disagree about.
+/// **Both in-place routes write the bytes Arrow's own writer writes for the whole batch.** The
+/// build lays `columns.arrow` out before its first row and fills it from Morton buckets, and
+/// [`SegmentWriter`] fills the same layout a row at a time; a file that differed from either other
+/// for the same rows would be a format two writers disagree about.
 ///
 /// Over every declarable render width, including the bit-packed `bool` whose buffer is not a flat
 /// array of itself; over the two-column case a schema-less build writes; and over no rows at all.
 #[test]
 fn a_column_file_filled_in_place_is_byte_identical_to_one_written_whole() {
+    use arrow::array::{
+        ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int64Array,
+        TimestampMicrosecondArray, UInt32Array, UInt64Array, UInt8Array,
+    };
+    use mosaica_authz::arrow_file::{write_single_batch, InPlaceFile};
     use mosaica_spatial::tiler::{ScalarType, ScalarValue};
-    use mosaica_store::columns::{ColumnsFile, ColumnsPlan};
-    use mosaica_store::write::{SegmentRow, SegmentWriter};
+    use mosaica_store::write::{columns_layout, columns_schema, SegmentRow, SegmentWriter};
 
     let widths = [
         ("flag", ScalarType::Bool),
@@ -790,8 +836,8 @@ fn a_column_file_filled_in_place_is_byte_identical_to_one_written_whole() {
     let dir = tempfile::tempdir().expect("tempdir");
     for scalars in [&widths[..], &[][..]] {
         // 600,000 rows puts the all-ones validity bitmap arrow writes for each non-nullable
-        // column past the size the plan keeps a write's bytes at, which is the case the
-        // 25,846,007-row `gbif-64p` fixture found and the smaller row counts here do not.
+        // column past the largest write the layout keeps as bytes, and each column past the
+        // segment writer's staging buffer.
         for rows in [0usize, 1, 7, 1000, 600_000] {
             // Ascending, so the rows arrive in the `(morton, mosaica_id)` order the writer takes
             // with every row in one cell.
@@ -814,7 +860,8 @@ fn a_column_file_filled_in_place_is_byte_identical_to_one_written_whole() {
 
             let whole = dir.path().join(format!("whole-{}-{rows}", scalars.len()));
             fs::create_dir(&whole).expect("segment dir");
-            let mut writer = SegmentWriter::create(&whole, &declared, &[]).expect("create");
+            let mut writer =
+                SegmentWriter::create(&whole, &declared, &[], rows).expect("create");
             for row in 0..rows {
                 let values: Vec<ScalarValue> =
                     columns.iter().map(|column| column[row].clone()).collect();
@@ -833,8 +880,8 @@ fn a_column_file_filled_in_place_is_byte_identical_to_one_written_whole() {
             let in_place = dir
                 .path()
                 .join(format!("in-place-{}-{rows}.arrow", scalars.len()));
-            let plan = ColumnsPlan::new(&declared, rows).expect("plan");
-            let file = ColumnsFile::create(&in_place, plan).expect("create");
+            let layout = columns_layout(&declared, rows).expect("layout");
+            let file = InPlaceFile::create(&in_place, layout).expect("create");
             // Filled in pieces and out of column order, which is what the build does: the two
             // fixed columns arrive a Morton bucket at a time and each render column arrives
             // later, a row bucket at a time.
@@ -850,10 +897,59 @@ fn a_column_file_filled_in_place_is_byte_identical_to_one_written_whole() {
             }
             file.finish().expect("finish");
 
+            let arrow_written = dir
+                .path()
+                .join(format!("arrow-{}-{rows}.arrow", scalars.len()));
+            let mut arrays: Vec<ArrayRef> = vec![
+                Arc::new(UInt64Array::from(mosaica.clone())),
+                Arc::new(UInt32Array::from(residual.clone())),
+            ];
+            for column in &columns {
+                macro_rules! array {
+                    ($variant:ident, $array:ty) => {
+                        Arc::new(<$array>::from(
+                            column
+                                .iter()
+                                .map(|v| match v {
+                                    ScalarValue::$variant(x) => *x,
+                                    other => unreachable!("{other:?}"),
+                                })
+                                .collect::<Vec<_>>(),
+                        )) as ArrayRef
+                    };
+                }
+                arrays.push(match column.first() {
+                    Some(ScalarValue::Bool(_)) => array!(Bool, BooleanArray),
+                    Some(ScalarValue::U8(_)) => array!(U8, UInt8Array),
+                    Some(ScalarValue::I16(_)) => array!(I16, Int16Array),
+                    Some(ScalarValue::U32(_)) => array!(U32, UInt32Array),
+                    Some(ScalarValue::I64(_)) => array!(I64, Int64Array),
+                    Some(ScalarValue::F32(_)) => array!(F32, Float32Array),
+                    Some(ScalarValue::F64(_)) => array!(F64, Float64Array),
+                    Some(ScalarValue::TimestampUs(_)) => {
+                        array!(TimestampUs, TimestampMicrosecondArray)
+                    }
+                    // No rows: an empty array of the column's declared type.
+                    _ => arrow::array::new_empty_array(
+                        columns_schema(&declared).field(arrays.len()).data_type(),
+                    ),
+                });
+            }
+            write_single_batch(&arrow_written, columns_schema(&declared), arrays)
+                .expect("written whole");
+
+            let expected = fs::read(&arrow_written).expect("read whole");
             assert_eq!(
                 fs::read(&in_place).expect("read in-place"),
-                fs::read(whole.join("columns.arrow")).expect("read whole"),
-                "{rows} rows, {} declared columns: the in-place file must be byte-identical",
+                expected,
+                "{rows} rows, {} declared columns: the bucketed file must be byte-identical",
+                scalars.len()
+            );
+            assert_eq!(
+                fs::read(whole.join("columns.arrow")).expect("read segment"),
+                expected,
+                "{rows} rows, {} declared columns: the segment writer's file must be \
+                 byte-identical",
                 scalars.len()
             );
         }
