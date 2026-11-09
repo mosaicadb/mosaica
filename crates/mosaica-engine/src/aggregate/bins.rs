@@ -707,45 +707,36 @@ impl Numbers {
                     let base = row_base as usize;
                     let present = segment.columns.presence(column).bitmap();
                     macro_rules! walk {
-                        ($values:expr, $num:expr) => {{
-                            let values = $values;
+                        ($read:expr) => {{
+                            let read = $read;
                             set.for_each_run(rows.clone(), &mut |run| {
                                 for row in run {
                                     let local = row as usize - base;
                                     if present.is_some_and(|p| !p.contains(local as u32)) {
                                         none += 1;
                                     } else {
-                                        tally.add($num(values[local]), row);
+                                        tally.add(read(local), row);
                                     }
                                 }
                             })
                         }};
                     }
+                    let int = |x: i128| K::int(x);
                     match segment.columns.scalar(column) {
-                        Some(ScalarSlice::U8(v)) => walk!(v, |x: u8| K::int(i128::from(x))),
-                        Some(ScalarSlice::U16(v)) => walk!(v, |x: u16| K::int(i128::from(x))),
-                        Some(ScalarSlice::U32(v)) => walk!(v, |x: u32| K::int(i128::from(x))),
-                        Some(ScalarSlice::U64(v)) => walk!(v, |x: u64| K::int(i128::from(x))),
-                        Some(ScalarSlice::I8(v)) => walk!(v, |x: i8| K::int(i128::from(x))),
-                        Some(ScalarSlice::I16(v)) => walk!(v, |x: i16| K::int(i128::from(x))),
-                        Some(ScalarSlice::I32(v)) => walk!(v, |x: i32| K::int(i128::from(x))),
-                        Some(ScalarSlice::I64(v)) => walk!(v, |x: i64| K::int(i128::from(x))),
-                        Some(ScalarSlice::TimestampUs(v)) => {
-                            walk!(v, |x: i64| K::int(i128::from(x)))
+                        Some(ScalarSlice::U8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U64(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I64(v)) | Some(ScalarSlice::TimestampUs(v)) => {
+                            walk!(|l: usize| int(i128::from(v[l])))
                         }
-                        Some(ScalarSlice::F32(v)) => walk!(v, |x: f32| K::float(f64::from(x))),
-                        Some(ScalarSlice::F64(v)) => walk!(v, |x: f64| K::float(x)),
+                        Some(ScalarSlice::F32(v)) => walk!(|l: usize| K::float(f64::from(v[l]))),
+                        Some(ScalarSlice::F64(v)) => walk!(|l: usize| K::float(v[l])),
                         Some(ScalarSlice::Bool(v)) => {
-                            set.for_each_run(rows.clone(), &mut |run| {
-                                for row in run {
-                                    let local = row as usize - base;
-                                    if present.is_some_and(|p| !p.contains(local as u32)) {
-                                        none += 1;
-                                    } else {
-                                        tally.add(K::int(i128::from(v.value(local))), row);
-                                    }
-                                }
-                            })
+                            walk!(|l: usize| int(i128::from(v.value(l))))
                         }
                         _ => none += set.count(rows.clone()),
                     }
@@ -844,19 +835,9 @@ trait Num: Copy + PartialOrd + Send + Sync {
     fn exact(sum: Self::Sum) -> Sum;
 
     fn of_record(value: &RecordValue) -> Option<Self> {
-        Some(match *value {
-            RecordValue::Bool(x) => Self::int(i128::from(x)),
-            RecordValue::U8(x) => Self::int(i128::from(x)),
-            RecordValue::U16(x) => Self::int(i128::from(x)),
-            RecordValue::U32(x) => Self::int(i128::from(x)),
-            RecordValue::U64(x) => Self::int(i128::from(x)),
-            RecordValue::I8(x) => Self::int(i128::from(x)),
-            RecordValue::I16(x) => Self::int(i128::from(x)),
-            RecordValue::I32(x) => Self::int(i128::from(x)),
-            RecordValue::I64(x) | RecordValue::TimestampUs(x) => Self::int(i128::from(x)),
-            RecordValue::F32(x) => Self::float(f64::from(x)),
-            RecordValue::F64(x) => Self::float(x),
-            _ => return None,
+        Some(match value.number()? {
+            Number::Int(x) => Self::int(x),
+            Number::Float(x) => Self::float(x),
         })
     }
 

@@ -159,8 +159,9 @@ pub enum By {
     Field { column: String, pick: Pick<String> },
     /// The values of a number, timestamp or bool field, as a resolved column name, counted in at
     /// most `bins` bins of `range`, or with no range in readable bins around the values of the
-    /// items the viewer may see in the view, or a bool's bins for false and true. With `sample`, counted over about that many of the set's
-    /// items and scaled to the set, where the set holds more ([`bins`]'s module doc).
+    /// items the viewer may see in the view, or a bool's bins for false and true. With `sample`,
+    /// counted over about that many of the set's items and scaled to the set, where the set holds
+    /// more ([`bins`]'s module doc).
     Bins {
         column: String,
         bins: u32,

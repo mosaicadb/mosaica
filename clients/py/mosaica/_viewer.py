@@ -1393,8 +1393,8 @@ class Viewer:
         A grouping names at least one figure. `"count": True` counts the items in each row, so
         `{"count": True}` alone is the size of the set. `"values"`, `"missing"`, `"min"`, `"max"`
         and `"mean"` each take a list of number, timestamp or bool fields and give a column per
-        field, such as `min_year`, and `"summary"` gives all five. They are exact and are taken over
-        every item this reader may see in the view, so they are refused beside `"by"` or
+        field, such as `min_year`, and `"summary"` gives all five. They are exact and are taken
+        over every item this reader may see in the view, so they are refused beside `"by"` or
         `"cells"` and in a request with `filters` or `reference`. `min_` and `max_` have the
         field's type, and `mean_` is a float, or a UTC timestamp on a timestamp field.
 
@@ -1418,9 +1418,8 @@ class Viewer:
           range the edges are round values around the smallest and largest value this reader may
           see in the view, so they stay put as the filters change; a bool's are a bin for false
           (0) and one for true (1). The edges have the field's type, except that an integer field
-          gets float edges when a bound of `range` is fractional. `"sample": s`
-          counts a large set faster, over about `s` of its items, and scales each count to the
-          set's size.
+          gets float edges when a bound of `range` is fractional. `"sample": s` counts a large
+          set faster, over about `s` of its items, and scales each count to the set's size.
 
         `"cells": {"depth": d}` divides the set, or each group, into the view's cells at a depth
         from 0 to 32, where up to 16 they are the map's tiles at that zoom. Adding `"area": [x0,

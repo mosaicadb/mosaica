@@ -1652,9 +1652,9 @@ fn near(a: Summary, b: Summary) -> bool {
     (a.0, a.1, a.2, a.3, a.4) == (b.0, b.1, b.2, b.3, b.4) && close(a.5, b.5)
 }
 
-/// **A bool is counted in a bin for false and one for true**, edged 0, 1 and 2 as `uint64` however
-/// many bins are asked for, for each viewer under a filter, and **its summary's mean is the share
-/// of its values that are true**.
+/// **A bool is counted in a bin for false and one for true**, edged 0, 1 and 2 as `uint64`
+/// whenever two or more bins are asked for, **and in one bin edged 0 and 1 where one is**, for
+/// each viewer under a filter, and **its summary's mean is the share of its values that are true**.
 #[tokio::test]
 async fn a_bool_is_counted_in_a_bin_for_false_and_one_for_true() {
     use arrow::array::AsArray;
@@ -1662,31 +1662,31 @@ async fn a_bool_is_counted_in_a_bin_for_false_and_one_for_true() {
     let f = fixture().await;
     for terms in [&["0"][..], &["1"][..]] {
         let token = token_for(&f.server, terms).await;
-        let body = json!({ "view": "s0", "filters": { "archive": { "eq": "hep" } },
-                           "groupings": [{ "count": true, "by": { "field": "flag", "bins": 20 } }] });
-        let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;
-        let batch = &decoded.tables[0].1[0].0;
-        let edges = |name: &str| batch.column_by_name(name).unwrap().as_primitive::<UInt64Type>().clone();
-        let (lower, upper) = (edges("lower"), edges("upper"));
-        let rows: Vec<_> = aggregate_rows(batch)
-            .into_iter()
-            .enumerate()
-            .map(|(i, row)| {
-                let listed = row.group.as_deref() == Some("listed");
-                (row.group.unwrap(), listed.then(|| (lower.value(i), upper.value(i))), row.count)
-            })
-            .collect();
         let hep = items(terms, |e| archive_of(e) == Some("hep"));
         let holding = |v: Option<bool>| hep.iter().filter(|&&e| flag_of(e) == v).count() as u64;
-        assert_eq!(
-            rows,
-            [
-                ("listed".to_string(), Some((0, 1)), holding(Some(false))),
-                ("listed".to_string(), Some((1, 2)), holding(Some(true))),
-                ("none".to_string(), None, holding(None)),
-            ],
-            "{terms:?}"
-        );
+        let listed = |edges: (u64, u64), n: u64| ("listed".to_string(), Some(edges), n);
+        let none = ("none".to_string(), None, holding(None));
+        for (bins, want) in [
+            (20, vec![listed((0, 1), holding(Some(false))), listed((1, 2), holding(Some(true))), none.clone()]),
+            (2, vec![listed((0, 1), holding(Some(false))), listed((1, 2), holding(Some(true))), none.clone()]),
+            (1, vec![listed((0, 1), holding(Some(false)) + holding(Some(true))), none.clone()]),
+        ] {
+            let body = json!({ "view": "s0", "filters": { "archive": { "eq": "hep" } },
+                               "groupings": [{ "count": true, "by": { "field": "flag", "bins": bins } }] });
+            let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;
+            let batch = &decoded.tables[0].1[0].0;
+            let edges = |name: &str| batch.column_by_name(name).unwrap().as_primitive::<UInt64Type>().clone();
+            let (lower, upper) = (edges("lower"), edges("upper"));
+            let rows: Vec<_> = aggregate_rows(batch)
+                .into_iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    let listed = row.group.as_deref() == Some("listed");
+                    (row.group.unwrap(), listed.then(|| (lower.value(i), upper.value(i))), row.count)
+                })
+                .collect();
+            assert_eq!(rows, want, "{terms:?}, {bins} bins");
+        }
 
         let body = json!({ "view": "s0", "groupings": [{ "count": true, "summary": ["flag"] }] });
         let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;

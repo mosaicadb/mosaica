@@ -24,7 +24,7 @@ import {
 import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
 import {HeldAggregate, artifactGroupings, countsByKey, levelOf, listedGroups, rankedGrouping} from './aggregate.js';
-import {BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, idString, isBoolColumn, keyTitle, shortDateText, type BoolKey} from './base.js';
+import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, idString, isBoolColumn, keyTitle, shortDateText, type BoolKey} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
 import {attachContextRoot, defineOnce} from './define.js';
@@ -70,13 +70,18 @@ type Kind = 'category' | 'cluster' | 'histogram' | 'bool' | 'search';
 type Bin = {lower: number; upper: number; count: number};
 
 /**
- * One row of a category or cluster card; `own` is a cluster's palette colour, `#rrggbb`, where it
+ * One row of a category, bool or cluster card; `own` is a cluster's palette colour, `#rrggbb`, where it
  * is coloured, and `unmet` marks a category value the map has given no colour yet.
  */
 type Row = {key: string; name: string; path: string; sub: number | null; all: number | null; swatch: string | null; own: string | null; unmet: boolean};
 
 /** A range dragged across the histogram, by bin, `from` where the drag began. */
 type Brush = {from: number; to: number; open: boolean};
+
+/** "≈" where either table's counts were taken from a sample, else nothing. */
+function approxMark(...tables: (AggregateTable | undefined)[]): string {
+  return tables.some((t) => t?.sample?.sampled) ? '≈' : '';
+}
 
 /** The listed bins of a histogram table, in order, with the edges in the column's units. */
 function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
@@ -669,7 +674,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     if (this.layerName !== null) return this.declaredLayer(meta) ? 'cluster' : null;
     const o = meta.filterOperands.find((x) => x.column === this.field);
     if (!o) return null;
-    if (o.family === 'numeric') return meta.declaredScalars.find((c) => c.name === this.field)?.arrowType === 'bool' ? 'bool' : 'histogram';
+    if (o.family === 'numeric') return isBoolColumn(meta, this.field) ? 'bool' : 'histogram';
     return o.family === 'category' ? 'category' : 'search';
   }
 
@@ -694,7 +699,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const name = this.layerName;
     if (name !== null) return new Set(store.get('filters').members.filter((m) => m.layer === name && m.verb === verb && !m.outside).map((m) => idString(m.artifact)));
     const held = store.get('filters').draft[verb][this.field];
-    if (isBoolColumn(store, this.field)) return new Set(boolKeys(held));
+    if (isBoolColumn(store.get('meta'), this.field)) return new Set(boolKeys(held));
     return new Set(held?.family === 'category' ? held.keys : []);
   }
 
@@ -746,16 +751,12 @@ export class MosaicaFieldCard extends MosaicaElement {
   private specs(store: Store, meta: Meta, kind: Kind): {subject: AggregateSpec | null; match: AggregateSpec | null; figures: AggregateSpec | null} {
     const leaveOut = this.layerName !== null ? {withoutMembersOf: this.layerName} : {without: this.field};
     if (kind === 'search') return {subject: null, match: null, figures: null};
-    if (kind === 'bool') {
-      const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: 2, sample: SAMPLE}}];
-      return {subject: {groupings: bins, subject: 'view', highlighted: true, ...leaveOut}, match: this.folded ? null : {groupings: bins, ...leaveOut}, figures: null};
-    }
-    if (kind === 'histogram') {
-      const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: BINS, sample: SAMPLE}}];
+    if (kind === 'histogram' || kind === 'bool') {
+      const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: kind === 'bool' ? BOOL_KEYS.length : BINS, sample: SAMPLE}}];
       return {
         subject: {groupings: bins, subject: 'view', highlighted: true, ...leaveOut},
         match: this.folded ? null : {groupings: bins, ...leaveOut},
-        figures: {groupings: [{summary: [this.field]}], subject: 'visible'}
+        figures: kind === 'bool' ? null : {groupings: [{summary: [this.field]}], subject: 'visible'}
       };
     }
     const subject = this.rowGroupings(store, meta, kind, this.expanded ? MORE_ROWS : ROWS);
@@ -915,14 +916,14 @@ export class MosaicaFieldCard extends MosaicaElement {
   }
 
   /**
-   * The rows of a category or cluster card: the values its clauses name, then the rest by their
-   * count in the subject, then in the whole match.
+   * The rows of a bool card, yes then no; or of a category or cluster card: the values its
+   * clauses name, then the rest by their count in the subject, then in the whole match.
    */
   private rows(s: Store, kind: Kind, subject: AggregateEntry | undefined, match: AggregateEntry | undefined, colouring: boolean): Row[] {
     const sub = this.counts(kind, subject);
     const all = this.counts(kind, match);
     if (kind === 'bool') {
-      return (['true', 'false'] as const).map((key) => ({key, name: BOOL_WORDS[key], path: '', sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
+      return BOOL_KEYS.map((key) => ({key, name: BOOL_WORDS[key], path: '', sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
     }
     if (all && kind === 'category') for (const [k, n] of countsByKey(this.outsideCounts.entryFor(s)) ?? []) if (!all.has(k)) all.set(k, n);
     const named = [...this.clauseKeys(s, 'filter'), ...this.clauseKeys(s, 'highlight')];
@@ -972,7 +973,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     if (kind !== 'bool') return countsByKey(entry);
     const table = entry?.result?.tables[0];
     if (!table) return null;
-    return new Map(binsOf(table, false).map((b): [BoolKey, number] => [b.lower === 0 ? 'false' : 'true', b.count]));
+    return new Map(BOOL_KEYS.map((k) => [k, binsOf(table, false).find((b) => b.lower === BOOL_NUMBERS[k])?.count ?? 0]));
   }
 
   /** The name a cluster's clause carries, for a cluster no table lists. */
@@ -1003,7 +1004,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const allTotal = keptTotal(this.counts(kind, match), match?.result?.tables[0]);
     const same = subTotal === allTotal;
     // A bool's counts are a histogram's, so they may come from a sample.
-    const approx = [subject, match].some((e) => e?.result?.tables[0]?.sample?.sampled) ? '≈' : '';
+    const approx = approxMark(subject?.result?.tables[0], match?.result?.tables[0]);
     const pct = (n: number | null, total: number) => (n === null || total <= 0 ? 0 : Math.min(100, (100 * n) / total));
     // A layer's clusters are often a few per cent each; a bar that is not empty stays visible.
     const width = (share: number) => (share > 0 && kind === 'cluster' ? `max(${MIN_BAR_PX}px, ${share.toFixed(1)}%)` : `${share.toFixed(1)}%`);
@@ -1047,11 +1048,11 @@ export class MosaicaFieldCard extends MosaicaElement {
     };
     const values = (kind === 'category' ? match?.result?.tables[0] : match?.result?.tables.at(-1))?.groups ?? null;
     const search =
-      kind === 'bool'
-        ? nothing
-        : kind === 'category'
+      kind === 'category'
         ? html`<mosaica-filter class="search" exportparts=${exportparts('filter')} column=${this.field} placeholder=${values === null ? 'Search values' : `Search ${values.toLocaleString('en-GB')} values`} .store=${s}></mosaica-filter>`
-        : html`<mosaica-cluster-filter class="search" exportparts=${exportparts('cluster-filter')} layer=${layer!.name} placeholder=${values === null ? 'Search clusters' : `Search ${values.toLocaleString('en-GB')} clusters`} .store=${s}></mosaica-cluster-filter>`;
+        : kind === 'bool'
+          ? nothing
+          : html`<mosaica-cluster-filter class="search" exportparts=${exportparts('cluster-filter')} layer=${layer!.name} placeholder=${values === null ? 'Search clusters' : `Search ${values.toLocaleString('en-GB')} clusters`} .store=${s}></mosaica-cluster-filter>`;
     const moreButton =
       more > 0 || this.expanded
         ? html`<button part="more" class="more-link" type="button" @click=${() => (this.expanded = !this.expanded)}>${this.expanded ? 'Show fewer' : `${more.toLocaleString('en-GB')} more${this.highlighting(s) ? '' : ' in view'}`}</button>`
@@ -1085,8 +1086,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const share = (n: number, total: number) => (total > 0 ? n / total : 0);
     const tallest = Math.max(1e-9, ...bins.map((b) => Math.max(share(allOf(b), allTotal), share(subOf(b), subTotal))));
     const height = (n: number, total: number) => `${((share(n, total) / tallest) * PLOT_HEIGHT).toFixed(1)}px`;
-    const estimate = Boolean(subjectTable?.sample?.sampled || matchTable?.sample?.sampled);
-    const approx = estimate ? '≈' : '';
+    const approx = approxMark(subjectTable, matchTable);
     const lo = bins[0]?.lower;
     const hi = bins.at(-1)?.upper;
     const at = (v: number) => (lo === undefined || hi === undefined || hi <= lo ? 0 : Math.min(1, Math.max(0, (v - lo) / (hi - lo))));

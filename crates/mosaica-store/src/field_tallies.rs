@@ -1,5 +1,5 @@
-//! `field-tallies.bin` — per view, the figures of every number and timestamp field over the base
-//! rows, one tally for each distinct list of index keys the rows' items carry.
+//! `field-tallies.bin` — per view, the figures of every number, timestamp and bool field over the
+//! base rows, one tally for each distinct list of index keys the rows' items carry.
 //!
 //! A viewer's visible base rows are the rows whose item carries a key the viewer's grant satisfies,
 //! and items carrying the same key list are seen or not seen together. So a grant's figures over
