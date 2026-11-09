@@ -846,7 +846,7 @@ fn report_term_indexes(
                      cascade pass(es) under a fan-in of {}",
                     characters >> 20,
                     allowance.cascade_passes(runs, slice),
-                    allowance.fan_in(slice)
+                    allowance.fan_in(slice, runs)
                 )
             }
             None => String::new(),

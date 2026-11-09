@@ -381,15 +381,15 @@ impl RangePlan {
     /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`,
     /// where each thread holds `each` bytes beside its readers.
     ///
-    /// It runs on [`Allowance::merge_threads`], the threads the cascade sized the runs for, or
-    /// fewer where its input is too small for that many ranges. The ranges are sized by bytes,
+    /// It runs on [`Allowance::merge_threads`] over the runs the cascade left, or fewer where its
+    /// input is too small for that many ranges. The ranges are sized by bytes,
     /// [`RANGES_PER_THREAD`] a thread at most, and the window is two ranges a thread, one on one
     /// thread.
     pub fn new(allowance: Allowance, bytes: u64, runs: usize, each: u64) -> RangePlan {
         let most = usize::try_from(bytes / RANGE_BYTES_MIN)
             .unwrap_or(usize::MAX)
             .max(1);
-        let threads = allowance.merge_threads(each).min(most);
+        let threads = allowance.merge_threads(each, runs).min(most);
         let ranges = most.min(RANGES_PER_THREAD * threads);
         RangePlan::with(allowance, ranges, threads, 2 * threads, runs, each)
     }

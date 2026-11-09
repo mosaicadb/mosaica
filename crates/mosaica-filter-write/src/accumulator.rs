@@ -73,7 +73,8 @@ use mosaica_filter::{put_varint, take_varint, VarintError};
 use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
 use crate::merge::{Ranges, TermMerge, TermSource};
 use crate::spill::{
-    cascade_sorted_runs, encode_entity, fingerprint, merge_runs, remove_runs, Allowance, Beside,
+    cascade_sorted_runs, encode_entity, fingerprint, merge_runs, remove_runs, run_largest,
+    Allowance, Beside,
     RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN,
     SPILL_BUF_BYTES,
 };
@@ -486,16 +487,28 @@ pub fn write_text_index(
         .collect();
     drop(gathered);
     let left = allowance.less(held.iter().map(|h| h.allocated() as u64).sum());
-    // Each merge thread holds a term's entities up to the slice cap, and a copy of the largest held
-    // term that arrived in several segments. A term above the cap is held as a bitmap, bounded by
-    // its posting rather than by the allowance, until such a term is merged in entity ranges.
-    let each = (merge_slice_cap * std::mem::size_of::<u32>()) as u64
+    // Each merge thread holds a term's entities as a slice, up to the cap or the most a term can
+    // gather from its sources, and a copy of the largest held term that arrived in several
+    // segments. A term above the cap is held as a bitmap, bounded by its posting rather than by
+    // the allowance, until such a term is merged in entity ranges.
+    let largest = runs.iter().try_fold(
+        held.iter().map(Held::largest).sum::<u64>(),
+        |sum, run| run_largest(run).map(|largest| sum + u64::from(largest)),
+    );
+    let largest = match largest {
+        Ok(largest) => largest,
+        Err(e) => {
+            let _ = remove_runs(&runs);
+            return Err(e);
+        }
+    };
+    let each = (merge_slice_cap as u64).min(largest) * std::mem::size_of::<u32>() as u64
         + held.iter().map(Held::copy_bytes).max().unwrap_or(0);
     let figures = TextMerge {
         runs: runs.len(),
         held: held.len(),
         passes: 0,
-        fan_in: left.fan_in(each),
+        fan_in: left.fan_in(each, runs.len()),
         threads: 0,
     };
 
@@ -636,6 +649,14 @@ impl Held {
             + self.keys.capacity()
             + self.sorted.capacity() * std::mem::size_of::<KeyRef>()
             + self.order.capacity() * std::mem::size_of::<u32>()
+    }
+
+    /// The most entities one of its terms holds.
+    fn largest(&self) -> u64 {
+        (0..self.terms.len as u32)
+            .map(|id| u64::from(self.terms.get(id).pairs))
+            .max()
+            .unwrap_or(0)
     }
 
     /// What a cursor holds to read its largest term of several segments: a copy of the chain, and

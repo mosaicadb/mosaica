@@ -475,6 +475,8 @@ fn merge(
         .iter()
         .map(|input| input.positions.bytes_before(input.positions.record_count()))
         .sum();
+    // A layer gives its largest posting only by reading every one, so the slice is charged at its
+    // cap.
     let plan = ranges.plan(
         allowance,
         bytes,

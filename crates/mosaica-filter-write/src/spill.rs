@@ -231,7 +231,8 @@ pub(crate) fn encode_entity(
 /// file's start: the first record at or after every [`RUN_INDEX_STRIDE`] bytes is written with
 /// nothing shared, and its term is a key of a [`SortedDict`] written after the records, whose
 /// ordinal names that record's offset in a `u64` array after it. A trailer ends the file:
-/// `records_len u64 ‖ index_len u64 ‖ "MSRI"`. [`RunFile`] reads it.
+/// `records_len u64 ‖ index_len u64 ‖ largest u32 ‖ "MSR2"`, `largest` being the most entities one
+/// term holds. [`RunFile`] reads it.
 ///
 /// **The entity delta is per TERM, not per file**, which is where this differs from a band file. A
 /// band file's records ascend in entity across the whole file because its emitter walks items in
@@ -249,6 +250,8 @@ pub struct TextRunWriter {
     /// a term is only complete when every one it promised has arrived — and `finish` refuses a
     /// file whose last record never was.
     owed: u32,
+    /// The most entities a term of the file holds.
+    largest: u32,
     /// The last entity written for the open term, for the delta.
     last_entity: u32,
     started: bool,
@@ -270,10 +273,11 @@ pub struct TextRunWriter {
 pub const RUN_INDEX_STRIDE: u64 = 8 << 10;
 
 /// The last four bytes of a run.
-const RUN_MAGIC: [u8; 4] = *b"MSRI";
+const RUN_MAGIC: [u8; 4] = *b"MSR2";
 
-/// The bytes of a run's trailer: the records' and the index's lengths, and [`RUN_MAGIC`].
-const RUN_TRAILER: u64 = 20;
+/// The bytes of a run's trailer: the records' and the index's lengths, the most entities a term
+/// holds, and [`RUN_MAGIC`].
+const RUN_TRAILER: u64 = 24;
 
 /// What a run carries for each entity of a term: nothing more, as the keyword column's runs, or the
 /// term's positions in it, as the text index's.
@@ -303,6 +307,7 @@ impl TextRunWriter {
             prev: Vec::new(),
             terms: 0,
             owed: 0,
+            largest: 0,
             last_entity: 0,
             started: false,
             count: 0,
@@ -397,6 +402,7 @@ impl TextRunWriter {
         self.prev.extend_from_slice(term);
         self.terms += 1;
         self.owed = entities;
+        self.largest = self.largest.max(entities);
         self.started = false;
         self.last_entity = 0;
         Ok(())
@@ -519,6 +525,7 @@ impl TextRunWriter {
         }
         tail.extend_from_slice(&records.to_le_bytes());
         tail.extend_from_slice(&index_len.to_le_bytes());
+        tail.extend_from_slice(&self.largest.to_le_bytes());
         tail.extend_from_slice(&RUN_MAGIC);
         self.put(&tail)?;
         let TextRunWriter {
@@ -548,9 +555,47 @@ pub(crate) struct RunFile {
     anchor: u64,
     /// Bytes of records, which the index follows.
     records: u64,
+    /// The most entities a term of the run holds, which every record is checked against.
+    largest: u32,
     index: SortedDict,
     /// Where the index's offsets start in the file.
     offsets_at: u64,
+}
+
+/// The most entities one term of the run `receipt` names holds, read from its trailer alone. Every
+/// reader of the run refuses a record that holds more.
+pub(crate) fn run_largest(receipt: &SpillReceipt) -> io::Result<u32> {
+    let file = File::open(&receipt.path).map_err(|e| at(&receipt.path, e))?;
+    Ok(Trailer::read(&file, &receipt.path)?.largest)
+}
+
+/// A run's trailer, and the file's length.
+struct Trailer {
+    len: u64,
+    records: u64,
+    index_len: u64,
+    largest: u32,
+}
+
+impl Trailer {
+    fn read(file: &File, path: &Path) -> io::Result<Trailer> {
+        let len = file.metadata().map_err(|e| at(path, e))?.len();
+        let mut trailer = [0u8; RUN_TRAILER as usize];
+        if len < RUN_TRAILER {
+            return Err(malformed(path, format_args!("{len} bytes hold no trailer")));
+        }
+        read_at(file, &mut trailer, len - RUN_TRAILER).map_err(|e| at(path, e))?;
+        if trailer[20..] != RUN_MAGIC {
+            return Err(malformed(path, "the trailer does not end the file"));
+        }
+        let u64_at = |at: usize| u64::from_le_bytes(trailer[at..at + 8].try_into().expect("8"));
+        Ok(Trailer {
+            len,
+            records: u64_at(0),
+            index_len: u64_at(8),
+            largest: u32::from_le_bytes(trailer[16..20].try_into().expect("four bytes")),
+        })
+    }
 }
 
 /// One key of a source, and the bytes from it to the source's next sample: what a merge divides
@@ -571,17 +616,12 @@ impl RunFile {
             .write(true)
             .open(path)
             .map_err(|e| at(path, e))?;
-        let len = file.metadata().map_err(|e| at(path, e))?.len();
-        let mut trailer = [0u8; RUN_TRAILER as usize];
-        if len < RUN_TRAILER {
-            return Err(malformed(path, format_args!("{len} bytes hold no trailer")));
-        }
-        read_at(&file, &mut trailer, len - RUN_TRAILER).map_err(|e| at(path, e))?;
-        if trailer[16..] != RUN_MAGIC {
-            return Err(malformed(path, "the trailer does not end the file"));
-        }
-        let records = u64::from_le_bytes(trailer[..8].try_into().expect("eight bytes"));
-        let index_len = u64::from_le_bytes(trailer[8..16].try_into().expect("eight bytes"));
+        let Trailer {
+            len,
+            records,
+            index_len,
+            largest,
+        } = Trailer::read(&file, path)?;
         let index_end = records
             .checked_add(index_len)
             .filter(|end| *end <= len - RUN_TRAILER)
@@ -613,6 +653,7 @@ impl RunFile {
             count: receipt.count,
             anchor: receipt.anchor,
             records,
+            largest,
             index,
             offsets_at: index_end,
         })
@@ -1072,6 +1113,12 @@ impl<'r> TextRunReader<'r> {
         if count == 0 {
             return Err(self.malformed("a term with no entities"));
         }
+        if count > self.run.largest {
+            return Err(self.malformed(&format!(
+                "a term with {count} entities, where the trailer says no term holds more than {}",
+                self.run.largest
+            )));
+        }
         if self.pairs + count as u64 > self.run.count {
             return Err(self.malformed(&format!(
                 "trailing data: more pairs than the receipt's count {}",
@@ -1216,17 +1263,28 @@ impl Allowance {
         self.chunk(self.threads)
     }
 
-    /// **The threads the merge after the cascade runs on**, where each holds `each` bytes beside
-    /// its readers: the most of the allowance's threads that can each pay for those bytes, their
-    /// share of the merge's window of range buffers at its least, and a reader on [`FAN_IN_MIN`]
-    /// runs; one at least. [`Self::fan_in`] sizes the cascade for these threads, and
-    /// [`crate::RangePlan`] runs the merge on them.
-    pub fn merge_threads(&self, each: u64) -> usize {
+    /// **The threads a merge over `runs` runs runs on, and the fan-in its cascade reduces them
+    /// to**, where each merge thread holds `each` bytes beside its readers. One rule settles both,
+    /// and more threads never cost a cascade pass:
+    ///
+    /// - T threads pay where each can hold `each`, its share of the merge's window of range
+    ///   buffers at their least, and a reader on [`FAN_IN_MIN`] runs. Their fan-in is
+    ///   F_T = (M − T × what each holds) / (T × B), with B [`RUN_BUFFER_MIN`].
+    /// - The merge takes the most threads, above one, that pay and whose F_T is at least `runs`,
+    ///   so that it needs no cascade at all. Where there are none it takes one thread, whose
+    ///   fan-in is M / B, and the cascade reduces the runs to that as it always has.
+    ///
+    /// [`cascade_sorted_runs`] reduces to [`Self::fan_in`], and [`crate::RangePlan`] runs on these
+    /// threads over the runs the cascade leaves.
+    pub fn merge_threads(&self, each: u64, runs: usize) -> usize {
         let pays = |t: usize| {
             t as u64 * (Self::per_thread(t, each) + (FAN_IN_MIN * RUN_BUFFER_MIN) as u64)
                 <= self.bytes
         };
-        (1..=self.threads.max(1)).rev().find(|&t| pays(t)).unwrap_or(1)
+        (2..=self.threads.max(1))
+            .rev()
+            .find(|&t| pays(t) && runs <= self.fan_in_on(t, each))
+            .unwrap_or(1)
     }
 
     /// What each of `threads` merge threads holds beside its readers: `each`, and, where there are
@@ -1239,19 +1297,20 @@ impl Allowance {
         }
     }
 
-    /// **The fan-in: the most runs one merge opens**, where each merge thread holds `each` bytes
-    /// beside its readers: F = (M − T × what each holds) / (T × B), with T the
-    /// [`merge threads`](Self::merge_threads) and B [`RUN_BUFFER_MIN`], so that the merge after the
-    /// cascade holds a reader on every run on every thread. On one thread it is M / B, as the
-    /// merge's one thread was always sized. Held under [`merge_descriptors`], since every reader
-    /// on one run shares its descriptor and the runs are what is counted, and at least
-    /// [`FAN_IN_MIN`].
+    /// **The fan-in: the most runs one merge over `runs` runs opens**, on the
+    /// [`merge threads`](Self::merge_threads) that rule settles. Held under [`merge_descriptors`],
+    /// since every reader on one run shares its descriptor and the runs are what is counted, and
+    /// at least [`FAN_IN_MIN`].
     ///
     /// One level over R runs fits while R is at most the fan-in. R is the run bytes over a run's
     /// size, and a run's size follows the allowance over the threads, so one level holds a corpus
     /// whose run bytes grow as the square of the allowance. Above that the cascade takes a pass.
-    pub fn fan_in(&self, each: u64) -> usize {
-        let threads = self.merge_threads(each);
+    pub fn fan_in(&self, each: u64, runs: usize) -> usize {
+        self.fan_in_on(self.merge_threads(each, runs), each)
+    }
+
+    /// F_T, the fan-in on `threads` threads: on one, what the whole allowance's readers pay for.
+    fn fan_in_on(&self, threads: usize, each: u64) -> usize {
         let bytes = match threads {
             1 => self.bytes,
             _ => self
@@ -1284,7 +1343,7 @@ impl Allowance {
     /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance,
     /// each merge thread holding `each` bytes beside its readers.
     pub fn cascade_passes(&self, mut runs: usize, each: u64) -> usize {
-        let fan_in = self.fan_in(each);
+        let fan_in = self.fan_in(each, runs);
         let mut passes = 0;
         while runs > fan_in {
             let pass = CascadePass::of(runs, fan_in, self.threads);
@@ -1380,7 +1439,7 @@ pub fn cascade_sorted_runs(
     allowance: Allowance,
     each: u64,
 ) -> io::Result<(Vec<SpillReceipt>, usize)> {
-    let fan_in = allowance.fan_in(each);
+    let fan_in = allowance.fan_in(each, receipts.len());
     let mut written: Vec<PathBuf> = Vec::new();
     let mut pass = 0usize;
     while receipts.len() > fan_in {
@@ -1506,7 +1565,7 @@ mod tests {
 
     /// The records' length a run's trailer gives.
     fn open_run_len(bytes: &[u8]) -> usize {
-        let at = bytes.len() - 20;
+        let at = bytes.len() - 24;
         u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize
     }
 
@@ -1703,9 +1762,9 @@ mod tests {
         let records_len = open_run_len(&whole);
         let mut grown = whole[..records_len].to_vec();
         grown.extend_from_slice(&[0, 2, b'z', b'z', 1, 3]);
-        grown.extend_from_slice(&whole[records_len..whole.len() - 20]);
+        grown.extend_from_slice(&whole[records_len..whole.len() - 24]);
         grown.extend_from_slice(&(records_len as u64 + 6).to_le_bytes());
-        grown.extend_from_slice(&whole[whole.len() - 12..]);
+        grown.extend_from_slice(&whole[whole.len() - 16..]);
         fs::write(&path, grown).unwrap();
         assert_refused(read_text_run(&receipt));
     }
@@ -1776,7 +1835,7 @@ mod tests {
         // Index entry 1 named at entry 2's offset.
         let bytes = fs::read(&path).unwrap();
         let tail = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
-        let offsets = tail(bytes.len() - 20) + tail(bytes.len() - 12);
+        let offsets = tail(bytes.len() - 24) + tail(bytes.len() - 16);
         let mut damaged = bytes.clone();
         damaged.copy_within(offsets + 16..offsets + 24, offsets + 8);
         drop(run);
@@ -1800,25 +1859,29 @@ mod tests {
         assert_eq!(floor.bytes, 4 * WORKER_BYTES_MIN as u64);
 
         let allowance = Allowance::new(64 * RUN_BUFFER_MIN as u64, 0, 1);
-        assert_eq!(allowance.fan_in(0), 64.min(merge_descriptors()));
-        // On several threads, the threads the cascade sizes for can each pay for what they hold
-        // and a reader on every run it leaves; where only one can, the fan-in is one thread's.
+        assert_eq!(allowance.fan_in(0, 100), 64.min(merge_descriptors()));
+        // Several threads only where they pay for what they hold and a reader on every run with no
+        // cascade; otherwise one, whose fan-in is the whole allowance's.
         let four = Allowance {
             bytes: 64 * RUN_BUFFER_MIN as u64,
             threads: 4,
         };
-        let charges = [0, 4, 20, 40].map(|readers| readers * RUN_BUFFER_MIN as u64);
-        for each in charges {
-            let threads = four.merge_threads(each);
+        let cases = [(0, 10), (0, 20), (0, 40), (40 * RUN_BUFFER_MIN as u64, 0)];
+        for (each, runs) in cases {
+            let threads = four.merge_threads(each, runs);
+            let fan_in = four.fan_in(each, runs);
             let held = threads as u64 * (each + 2 * RUN_BUFFER_MIN as u64)
-                + (threads * four.fan_in(each) * RUN_BUFFER_MIN) as u64;
+                + (threads * fan_in * RUN_BUFFER_MIN) as u64;
             match threads {
-                1 => assert_eq!(four.fan_in(each), 64.min(merge_descriptors())),
-                _ => assert!(held <= four.bytes, "{threads} threads hold {held}"),
+                1 => assert_eq!(fan_in, 64.min(merge_descriptors())),
+                _ => assert!(runs <= fan_in && held <= four.bytes, "{threads} hold {held}"),
             }
-            assert_eq!(RangePlan::new(four, u64::MAX, 0, each).threads, threads);
+            assert_eq!(RangePlan::new(four, u64::MAX, runs, each).threads, threads);
         }
-        assert_eq!(charges.map(|each| four.merge_threads(each)), [4, 4, 2, 1]);
+        assert_eq!(
+            cases.map(|(each, runs)| four.merge_threads(each, runs)),
+            [4, 2, 1, 1]
+        );
         assert_eq!(allowance.buffer(64), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1_000), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1), SPILL_BUF_BYTES);
@@ -1913,11 +1976,11 @@ mod tests {
         };
         let expected = merged(&receipts);
 
-        // Fifty-six readers on four threads, two buffers a thread aside, is a fan-in of twelve over
-        // forty runs: the excess of 28 takes four groups of eight, all four at once, and the eight
-        // runs past them are left as they are.
+        // Twelve readers cannot read forty runs on more than one thread, so the merge takes one
+        // and its fan-in is twelve: the excess of 28 takes four groups of eight, one at a time,
+        // and the eight runs past them are left as they are.
         let allowance = Allowance {
-            bytes: 56 * RUN_BUFFER_MIN as u64,
+            bytes: 12 * RUN_BUFFER_MIN as u64,
             threads: 4,
         };
         let (left, passes) = cascade_sorted_runs(
@@ -1929,7 +1992,7 @@ mod tests {
             0,
         )
         .unwrap();
-        assert!(left.len() <= allowance.fan_in(0), "{} runs left", left.len());
+        assert!(left.len() <= allowance.fan_in(0, 40), "{} runs left", left.len());
         assert_eq!(passes, allowance.cascade_passes(runs as usize, 0));
         assert_eq!(passes, 1);
         assert_eq!(merged(&left), expected);
