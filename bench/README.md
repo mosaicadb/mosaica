@@ -350,7 +350,16 @@ Two binaries that do not differ still separate completely on one row in 252, by 
 night has hundreds of rows, so the 15% and 2 ms conditions are what keep a red run meaningful.
 They were set from one repetition of a binary run against itself on a 4-core machine: filtered
 viewports differed by up to 20%, build and compaction by under 5%, and ingest by up to 50% on the
-`fields` profile. How often a hosted runner raises a false alarm under these conditions has not
-been measured, so rerun a red row with the same baseline before acting on it. Hosted runners
-differ from one another by more than any of these figures, so only the ratio, taken on one
-machine, means anything, and the absolutes belong to that runner.
+`fields` profile. Hosted runners differ from one another by more than any of these figures, so
+only the ratio, taken on one machine, means anything, and the absolutes belong to that runner.
+
+The five figures a runner takes of one binary are not independent, so one runner can separate two
+binaries that do the same work. On one hosted runner, `serve ready s` on the `layers` profile was
+2.40–2.53 s for the baseline and 2.82–2.85 s for the candidate, a ratio of 1.18 with the two
+sides' figures apart, and the row was marked slower. A second runner of the same model (an AMD
+EPYC 7763) gave 2.43–2.52 s and 2.42–2.51 s for the same two commits, and the first runner's own
+two binaries were within 1% of each other on a 4-core Intel machine, where the engine's logged
+open took the same time in every phase. The threshold and the overlap test cannot catch a false
+alarm of this kind, because both are met within one runner, so only a second runner tells it from
+a regression. Rerun a red row with the same baseline before acting on it, and treat it as a
+regression only when the rerun marks it too.
