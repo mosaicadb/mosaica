@@ -276,9 +276,11 @@ pub struct GenerationStamp {
 // block allows. A 50 bundle is refused.
 // 52: a category's codes, where its vocabulary is u16 or u32 wide, are stored per 2^16-entity block
 // as a keyword's ordinals are, and every such file records its codes' width. A 51 bundle is refused.
+// 53: every postings, positions and delta-tier file is a record container, its records followed by
+// their offsets, any keys and a trailer, and is named without `.arrow`. A 52 bundle is refused.
 // Each bump makes a stale local bundle a loud refusal rather than a silent misread — a fail-closed
 // guard, not compatibility.
-pub const BUNDLE_FORMAT: u32 = 52;
+pub const BUNDLE_FORMAT: u32 = 53;
 pub const API_VERSION: u32 = 1;
 pub const ABI_VERSION: u32 = 1;
 pub const ROW_ABSENT: u32 = 0xFFFF_FFFF;

@@ -227,7 +227,7 @@ fn fixture(v_per_tile: usize) -> (TempDir, SegmentData, EffectiveMask) {
 
     let bound = items.len() as u64;
     let all: Vec<u32> = (0..items.len() as u32).collect();
-    let postings_path = temp.path().join("postings.arrow");
+    let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &[all], 32).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
     let cache = FragmentCache::new(&temp.path().join("cache"), [2u8; 32]);

@@ -168,7 +168,7 @@ fn an_indexed_text_column_writes_a_token_index_and_a_blob_row() {
 
     // --- entity space: a term's posting names exactly the entities whose prose carries it.
     let postings =
-        mosaica_authz::postings::PostingsReader::open(&column_dir.join("postings.arrow"), false)
+        mosaica_authz::postings::PostingsReader::open(&column_dir.join("postings"), false)
             .expect("the postings open");
     assert_eq!(postings.term_count(), terms.len() as u32);
     let source_of = common::entities_of(&out, "id", 0..N);
@@ -232,7 +232,7 @@ fn an_unindexed_text_column_has_the_blob_row_and_no_index() {
         "an unindexed text column wrote a dictionary"
     );
     assert!(
-        !column_dir.join("postings.arrow").exists(),
+        !column_dir.join("postings").exists(),
         "an unindexed text column wrote postings"
     );
 

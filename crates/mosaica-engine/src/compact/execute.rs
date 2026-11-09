@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use mosaica_authz::{sweep_term_postings, DeltaTier, PostingsReader, PostingsSpool};
+use mosaica_authz::{sweep_term_postings, DeltaTier, PostingsReader, RecordWriter, POSTINGS_COLUMN};
 use mosaica_spatial::tiler::ScalarType;
 use mosaica_store::edited::{EditedRows, RowEntities};
 use mosaica_store::manifest::{
@@ -14,7 +14,7 @@ use mosaica_store::{fold_row_space, FoldRowSpaceSpec, FoldSegmentInput, PairsPar
 use mosaica_types::progress::{Batched, Stage, Tracker, Unit};
 use mosaica_types::IdentityKey;
 
-use crate::flush::{failed, remove_spool_on_error, MaintenanceFailed};
+use crate::flush::{failed, MaintenanceFailed};
 
 use super::attributes::{
     fold_entity_terms, fold_record_blob, fold_text_columns, fold_value_columns,
@@ -155,7 +155,7 @@ pub(crate) fn execute(
     ctx.going_on()?;
 
     stairs.enter(Pass::Postings, Some((plan.dict_len.into(), Unit::Terms)));
-    let postings_path = fold_postings(&plan, &ctx, stairs.record(), &terms_dir, &mut out)?;
+    let postings_path = fold_postings(&plan, &ctx, stairs.record(), &mut out)?;
     ctx.going_on()?;
 
     stairs.enter(Pass::TermImages, None);
@@ -341,7 +341,6 @@ fn fold_postings(
     plan: &FoldPlan,
     ctx: &FoldContext,
     progress: &Tracker,
-    terms_dir: &Path,
     out: &mut FoldOutput,
 ) -> Result<PathBuf, MaintenanceFailed> {
     let layout = plan.layout();
@@ -349,10 +348,9 @@ fn fold_postings(
     let pairs_rel = layout.pairs_rel();
     let postings_path = ctx.to_prefix_dir.join(&postings_rel);
     let pairs_path = ctx.to_prefix_dir.join(&pairs_rel);
-    let spool_path = terms_dir.join("postings.spool");
     {
-        let mut spool =
-            PostingsSpool::create(&spool_path).map_err(failed(Pass::Postings.at("spool")))?;
+        let mut postings = RecordWriter::create(&postings_path, POSTINGS_COLUMN)
+            .map_err(failed(Pass::Postings.name()))?;
         let mut pairs =
             PairsParquetWriter::create(&pairs_path).map_err(failed(Pass::Postings.at("pairs")))?;
         let mut swept = Batched::new(Some(progress));
@@ -362,7 +360,7 @@ fn fold_postings(
             &ctx.tiers,
             &plan.tombstones,
             plan.small_term_threshold,
-            &mut spool,
+            &mut postings,
             |term, entities| {
                 swept.add(1);
                 pairs
@@ -370,11 +368,9 @@ fn fold_postings(
                     .map_err(|e| std::io::Error::other(e.to_string()))
             },
         );
-        remove_spool_on_error(
-            sweep.and_then(|()| spool.finish(&postings_path)),
-            &spool_path,
-        )
-        .map_err(failed(Pass::Postings.name()))?;
+        sweep
+            .and_then(|()| postings.finish())
+            .map_err(failed(Pass::Postings.name()))?;
         pairs.finish().map_err(failed(Pass::Postings.at("pairs")))?;
     }
     out.push(postings_rel, postings_path.clone());

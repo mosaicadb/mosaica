@@ -270,7 +270,7 @@ fn mask_over(visible_rows: &[u32], row_count: u32) -> (TempDir, EffectiveMask) {
     let temp = TempDir::new().unwrap();
     let bound = u64::from(row_count);
 
-    let postings_path = temp.path().join("postings.arrow");
+    let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &[visible_rows.to_vec()], 32).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
 

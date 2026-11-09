@@ -186,7 +186,7 @@ fn a_keyword_column_writes_a_dictionary_and_an_ordinal_column() {
             "{column}: every seventh item carries nothing, so presence is partial"
         );
         assert!(
-            !cdir.join("postings.arrow").exists(),
+            !cdir.join("postings").exists(),
             "{column}: a keyword derives no postings at the build (decision 0067's are a \
              separate, ruled addition)"
         );

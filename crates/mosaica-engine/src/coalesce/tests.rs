@@ -192,7 +192,7 @@ impl Fixture {
         let seg = format!("flush-{flush}-1");
         let seg_rel = self.write_geometry(flush, &entities);
 
-        let tier = format!("{seg_rel}/delta.arrow");
+        let tier = format!("{seg_rel}/delta");
         let pairs = [
             (TermId::new(1), entities.clone()),
             (TermId::new(100 + flush), vec![entities[0]]),
@@ -355,8 +355,8 @@ impl Fixture {
             view: view.map(|(v, _)| v.to_string()),
             incarnation: view.map(|(_, i)| i),
             dict: format!("{dir}/{seg}-dict.bin"),
-            postings: format!("{dir}/{seg}-postings.arrow"),
-            positions: format!("{dir}/{seg}-positions.arrow"),
+            postings: format!("{dir}/{seg}-postings"),
+            positions: format!("{dir}/{seg}-positions"),
             presence: format!("{dir}/{seg}-presence.roaring"),
             prose: view.map(|_| RecordExtent {
                 blocks: format!("{dir}/{seg}-prose.blocks.bin"),
@@ -942,7 +942,7 @@ fn listed(flushes: u64) -> (SegmentsManifest, BTreeMap<String, FileDigest>) {
     }];
     for i in 0..flushes {
         let seg = format!("segments/flush-{i}");
-        for name in ["delta.arrow", "doi.keys", "terms-0.dict"] {
+        for name in ["delta", "doi.keys", "terms-0.dict"] {
             manifest
                 .partition
                 .files
@@ -951,7 +951,7 @@ fn listed(flushes: u64) -> (SegmentsManifest, BTreeMap<String, FileDigest>) {
         manifest
             .only_shard_mut()
             .deltas
-            .push(format!("{seg}/delta.arrow"));
+            .push(format!("{seg}/delta"));
         manifest.only_shard_mut().unique_indexes[0]
             .live
             .push(format!("{seg}/doi.keys"));
@@ -1055,7 +1055,7 @@ fn the_builds_dictionary_is_never_taken() {
 #[test]
 fn an_entry_with_an_undigested_file_is_not_taken() {
     let (mut manifest, build_files) = listed(3);
-    for name in ["delta.arrow", "doi.keys", "terms-0.dict"] {
+    for name in ["delta", "doi.keys", "terms-0.dict"] {
         manifest
             .partition
             .files

@@ -14,19 +14,19 @@ fn tier(dir: &std::path::Path, name: &str, entries: &[(u32, &[u32])]) -> DeltaTi
 }
 
 /// Sparse: the file holds one record per term the flushed set carried, and nothing for the gaps.
-/// The ordinal-indexed `postings.arrow` layout cannot express this, since record *i* is term *i*.
+/// The ordinal-indexed postings layout cannot express this, since record *i* is term *i*.
 #[test]
 fn a_tier_holds_one_record_per_carried_term_however_high_the_ordinals() {
     let dir = tempfile::TempDir::new().unwrap();
     let t = tier(
         dir.path(),
-        "sparse.arrow",
+        "sparse",
         &[(7, &[1, 2]), (1_000_000, &[3])],
     );
 
     assert_eq!(t.term_count(), 2, "two records, not a million");
     assert!(
-        std::fs::metadata(dir.path().join("sparse.arrow"))
+        std::fs::metadata(dir.path().join("sparse"))
             .unwrap()
             .len()
             < 4096,
@@ -41,7 +41,7 @@ fn a_tier_holds_one_record_per_carried_term_however_high_the_ordinals() {
     );
 }
 
-/// Round trip through both encodings: the tag rule is `postings.arrow`'s, unchanged, so a term
+/// Round trip through both encodings: the tag rule is a postings file's, unchanged, so a term
 /// above the small threshold is a Roaring bitmap and one below is a raw `u32` array.
 #[test]
 fn both_posting_encodings_round_trip() {
@@ -49,7 +49,7 @@ fn both_posting_encodings_round_trip() {
     let large: Vec<u32> = (0..100).collect();
     let t = tier(
         dir.path(),
-        "both.arrow",
+        "both",
         &[(3, &[5, 9]), (4, large.as_slice())],
     );
 
@@ -72,10 +72,10 @@ fn both_posting_encodings_round_trip() {
 fn a_tier_refuses_unordered_or_duplicated_term_ids() {
     let dir = tempfile::TempDir::new().unwrap();
     let descending = vec![(TermId::new(9), vec![1u32]), (TermId::new(3), vec![2u32])];
-    assert!(write_delta_tier(&dir.path().join("a.arrow"), &descending, 32).is_err());
+    assert!(write_delta_tier(&dir.path().join("a"), &descending, 32).is_err());
 
     let duplicated = vec![(TermId::new(3), vec![1u32]), (TermId::new(3), vec![2u32])];
-    assert!(write_delta_tier(&dir.path().join("b.arrow"), &duplicated, 32).is_err());
+    assert!(write_delta_tier(&dir.path().join("b"), &duplicated, 32).is_err());
 }
 
 /// An empty tier is representable and opens: a flush whose items carried no term at all still
@@ -83,7 +83,7 @@ fn a_tier_refuses_unordered_or_duplicated_term_ids() {
 #[test]
 fn an_empty_tier_opens_and_carries_nothing() {
     let dir = tempfile::TempDir::new().unwrap();
-    let t = tier(dir.path(), "empty.arrow", &[]);
+    let t = tier(dir.path(), "empty", &[]);
     assert_eq!(t.term_count(), 0);
     assert!(t.posting(TermId::new(0)).unwrap().is_none());
 }

@@ -1211,7 +1211,7 @@ mod tests {
 
     /// `postings` written as a postings file beside `out`, term *t* the *t*-th, and opened.
     fn postings_file(out: &Path, postings: &[Bitmap]) -> PostingsReader {
-        let path = out.with_extension("postings.arrow");
+        let path = out.with_extension("postings");
         let per_term: Vec<Vec<u32>> = postings.iter().map(Bitmap::to_vec).collect();
         write_postings(&path, &per_term, SMALL_TERM_THRESHOLD_DEFAULT).expect("write_postings");
         PostingsReader::open(&path, false).expect("the postings open")

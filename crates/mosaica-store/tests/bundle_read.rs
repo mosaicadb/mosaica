@@ -392,7 +392,7 @@ fn a_deny_alongside_deltas_is_not_stepped_past_either() {
 
     add_segments_manifest(dir.path(), 1, |value| {
         shard0(value)["deny"] = serde_json::to_value(deny_set(&[17])).unwrap();
-        shard0(value)["deltas"] = serde_json::json!([seg_file("flush-1-1", "delta.arrow")]);
+        shard0(value)["deltas"] = serde_json::json!([seg_file("flush-1-1", "delta")]);
         name_a_missing_file(value);
     });
 
@@ -458,7 +458,7 @@ fn a_candidate_with_no_deny_state_steps_down_and_serves() {
     let dir = tempfile::tempdir().expect("tempdir");
     build_bundle(dir.path(), 50);
     add_segments_manifest(dir.path(), 1, |value| {
-        shard0(value)["deltas"] = serde_json::json!([seg_file("flush-1-1", "delta.arrow")]);
+        shard0(value)["deltas"] = serde_json::json!([seg_file("flush-1-1", "delta")]);
         name_a_missing_file(value);
     });
 

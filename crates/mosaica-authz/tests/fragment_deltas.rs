@@ -35,7 +35,7 @@ fn tier_with(dir: &std::path::Path, name: &str, entries: &[(u32, &[u32])]) -> Ar
 #[test]
 fn a_build_over_zero_delta_tiers_is_byte_identical() {
     let temp = TempDir::new().unwrap();
-    let base = postings_with(temp.path(), "base.arrow", &[&[1, 2, 3], &[2, 4]]);
+    let base = postings_with(temp.path(), "base", &[&[1, 2, 3], &[2, 4]]);
     let terms = [TermId::new(0), TermId::new(1)];
 
     let before = build_fragment(&terms, &base).unwrap();
@@ -51,8 +51,8 @@ fn a_build_over_zero_delta_tiers_is_byte_identical() {
 #[test]
 fn a_delta_tier_contributes_only_satisfied_terms() {
     let temp = TempDir::new().unwrap();
-    let base = postings_with(temp.path(), "base.arrow", &[&[1], &[2]]);
-    let delta = tier_with(temp.path(), "delta.arrow", &[(0, &[10]), (1, &[11])]);
+    let base = postings_with(temp.path(), "base", &[&[1], &[2]]);
+    let delta = tier_with(temp.path(), "delta", &[(0, &[10]), (1, &[11])]);
 
     let fragment = build_fragment_over_tiers(&[TermId::new(0)], &base, &[delta]).unwrap();
 
@@ -64,8 +64,8 @@ fn a_delta_tier_contributes_only_satisfied_terms() {
 #[test]
 fn a_term_no_tier_carries_contributes_nothing_rather_than_failing() {
     let temp = TempDir::new().unwrap();
-    let base = postings_with(temp.path(), "base.arrow", &[&[1, 2]]);
-    let delta = tier_with(temp.path(), "delta.arrow", &[(1, &[7])]);
+    let base = postings_with(temp.path(), "base", &[&[1, 2]]);
+    let delta = tier_with(temp.path(), "delta", &[(1, &[7])]);
 
     // Term 1 is absent from the base and present in the tier; term 9 is in neither.
     let fragment = build_fragment_over_tiers(
@@ -83,9 +83,9 @@ fn a_term_no_tier_carries_contributes_nothing_rather_than_failing() {
 #[test]
 fn every_tier_contributes_and_none_shadows_another() {
     let temp = TempDir::new().unwrap();
-    let base = postings_with(temp.path(), "base.arrow", &[&[1]]);
-    let t1 = tier_with(temp.path(), "t1.arrow", &[(0, &[5])]);
-    let t2 = tier_with(temp.path(), "t2.arrow", &[(0, &[9])]);
+    let base = postings_with(temp.path(), "base", &[&[1]]);
+    let t1 = tier_with(temp.path(), "t1", &[(0, &[5])]);
+    let t2 = tier_with(temp.path(), "t2", &[(0, &[9])]);
 
     let fragment = build_fragment_over_tiers(&[TermId::new(0)], &base, &[t1, t2]).unwrap();
 

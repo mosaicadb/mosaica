@@ -53,7 +53,7 @@ impl BaseTier {
 
 /// A column's postings file within its directory: a category's per-value postings, or a text
 /// column's per-term ones.
-pub const POSTINGS_FILE: &str = "postings.arrow";
+pub const POSTINGS_FILE: &str = "postings";
 
 /// One column's postings.
 ///
@@ -247,7 +247,7 @@ mod tests {
     const SMALL: u32 = 32;
 
     fn column_with(per_value: &[Vec<u32>], dir: &Path) -> ColumnPostings {
-        let base = dir.join("postings.arrow");
+        let base = dir.join("postings");
         write_postings(&base, per_value, SMALL).unwrap();
         ColumnPostings::open(&base, false).unwrap()
     }
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     fn intersects_agrees_over_a_keyed_base() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(
             &base,
             &[(7, vec![1, 2]), (40_000, vec![3]), (65_535, vec![4, 5])],
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn a_keyed_base_addresses_scattered_codes() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(
             &base,
             &[(7, vec![1, 2]), (40_000, vec![3]), (65_535, vec![4, 5])],
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn an_unheld_code_is_empty_rather_than_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(&base, &[(7, vec![1])], SMALL).unwrap();
         let column = ColumnPostings::open_keyed(&base).unwrap();
 
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn set_membership_spans_scattered_codes() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(&base, &[(3, vec![1]), (50_000, vec![2, 3])], SMALL).unwrap();
         let column = ColumnPostings::open_keyed(&base).unwrap();
 

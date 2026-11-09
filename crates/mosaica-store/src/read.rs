@@ -2,9 +2,7 @@
 //! loader, and the tile lookup — `tile_ranges` for one tile, `tile_ranges_all` for the whole
 //! tile set of a viewport in one sweep.
 //!
-//! This module has its own Arrow IPC reader: `columns.arrow`'s schema (fixed-width primitive
-//! columns) differs from `postings.arrow`'s single `LargeBinary` column, so the zero-copy
-//! technique is reused and the code is not.
+//! This module has its own Arrow IPC reader for `columns.arrow`'s fixed-width primitive columns.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;

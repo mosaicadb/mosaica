@@ -84,7 +84,7 @@ use std::path::Path;
 
 use arrow::buffer::ScalarBuffer;
 use croaring::Bitmap;
-use mosaica_authz::KeyedPostingsSpool;
+use mosaica_authz::{encode_posting, RecordWriter, POSTINGS_COLUMN};
 use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 
 use mosaica_filter::{Codes, ColumnKind, ValueColumn, ValueColumnWriter};
@@ -465,8 +465,8 @@ impl CategorySource for ValueColumn {
 /// **A code is never split across a band**, which is what lets a band be encoded and appended the
 /// moment its scatter finishes; a code larger than the budget forms a band of its own, exactly as
 /// the authorisation build's `band_rows_budget` takes its floor from the largest single term. Bands
-/// partition ascending code space, so [`KeyedPostingsSpool`]'s ascending-key check holds across
-/// them unchanged.
+/// partition ascending code space, so the keyed file's ascending-key check ([`RecordWriter`]) holds
+/// across them unchanged.
 ///
 /// The two fail-closed scatter checks are the authorisation emit's, for its reasons: an overflow
 /// check, because one code's entities silently becoming another's is a disclosure; and a short-fill
@@ -512,8 +512,7 @@ pub fn write_category_postings(
     }
     bands.push((lo, codes.len()));
 
-    let spool_path = path.with_extension("spool");
-    let mut spool = KeyedPostingsSpool::create(&spool_path, SMALL_TERM_THRESHOLD_DEFAULT)?;
+    let mut out = RecordWriter::create_keyed(path, POSTINGS_COLUMN)?;
     for (lo, hi) in bands {
         let keys = &codes[lo..hi];
         let width = hi - lo;
@@ -558,10 +557,11 @@ pub fn write_category_postings(
         }
         for local in 0..width {
             let entities = &flat[offsets[local] as usize..offsets[local + 1] as usize];
-            spool.append(keys[local], entities)?;
+            let key = keys[local];
+            out.append_keyed(key, &encode_posting(key as usize, entities, SMALL_TERM_THRESHOLD_DEFAULT)?)?;
         }
     }
-    spool.finish(path)
+    out.finish()
 }
 
 #[cfg(test)]
@@ -728,8 +728,8 @@ mod tests {
     fn text_files(dir: &Path, tag: &str) -> TextIndexFiles {
         TextIndexFiles {
             dict: dir.join(format!("{tag}-dict.bin")),
-            postings: dir.join(format!("{tag}-postings.arrow")),
-            positions: dir.join(format!("{tag}-positions.arrow")),
+            postings: dir.join(format!("{tag}-postings")),
+            positions: dir.join(format!("{tag}-positions")),
             presence: dir.join(format!("{tag}-presence.roaring")),
         }
     }
@@ -814,9 +814,6 @@ mod tests {
             vec![("alpha".to_string(), vec![held(1), held(2)])]
         );
         assert_eq!(folded.positions.record_count(), 1);
-        for spool in ["postings.spool", "positions.spool"] {
-            assert!(!dir.join(format!("fold-beta-out-{spool}")).exists());
-        }
     }
 
     /// A category's postings source visits every present entity with its code, in order, over a
@@ -1003,7 +1000,7 @@ mod tests {
             .collect();
         let column = ValueColumn::partial(codes_u32(kept), present).expect("a column");
 
-        let path = dir.path().join("postings.arrow");
+        let path = dir.path().join("postings");
         write_category_postings(&path, "colour", &column, POSTINGS_BAND_ROWS).expect("the emit");
         let postings = mosaica_filter::ColumnPostings::open_keyed(&path).expect("open");
         let mut codes: Vec<u32> = values
@@ -1031,7 +1028,7 @@ mod tests {
         );
 
         // Banding is a memory knob, not a format one: the same bytes at every band size.
-        let narrow = dir.path().join("postings-narrow.arrow");
+        let narrow = dir.path().join("postings-narrow");
         write_category_postings(&narrow, "colour", &column, 1).expect("the emit");
         assert_eq!(
             std::fs::read(&path).expect("read"),

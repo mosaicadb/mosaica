@@ -220,7 +220,7 @@ fn base_index(root: &Path) -> BTreeMap<String, croaring::Bitmap> {
     let dir = shard_dir(root).join("attrs/prose");
     let dict = mosaica_filter::SortedDict::open_dir(&dir, mosaica_filter::Access::Read)
         .expect("the merged token dictionary opens");
-    let postings = mosaica_filter::ColumnPostings::open(&dir.join("postings.arrow"), false)
+    let postings = mosaica_filter::ColumnPostings::open(&dir.join("postings"), false)
         .expect("the merged token postings open");
     assert_eq!(
         dict.len(),

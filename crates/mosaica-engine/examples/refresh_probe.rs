@@ -203,7 +203,7 @@ fn p2(dir: &std::path::Path, entities: u64, grant: f64) {
     // compartment terms whose postings union to the wide grant.
     const TERMS: usize = 8;
     let stride = (1.0 / grant).round().max(1.0) as u64;
-    let postings_path = dir.join("postings.arrow");
+    let postings_path = dir.join("postings");
     if !postings_path.exists() {
         let mut per_term: Vec<Vec<u32>> = vec![Vec::new(); TERMS];
         for e in (0..entities).step_by(stride as usize) {
@@ -212,7 +212,7 @@ fn p2(dir: &std::path::Path, entities: u64, grant: f64) {
         let t = Instant::now();
         mosaica_authz::write_postings(&postings_path, &per_term, 32).expect("postings write");
         println!(
-            "fixture: postings.arrow in {:.1}s",
+            "fixture: postings in {:.1}s",
             t.elapsed().as_secs_f64()
         );
     }

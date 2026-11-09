@@ -184,7 +184,7 @@ pub(super) const TERM_IMAGE_MANIFEST_N: u64 = 0;
 /// | term | basis |
 /// |---|---|
 /// | 4 B × permutation bound | `permutation.bin`, written through a mapping |
-/// | 8 B × dictionary length | `PostingsSpool`'s offsets buffer |
+/// | 8 B × dictionary length | the postings file's offsets spool |
 /// | 90 B × membership containers | the artifact pass's row forms |
 /// | threads × (posting + image + frozen + scratch) | pass 2b's window and its projection |
 ///

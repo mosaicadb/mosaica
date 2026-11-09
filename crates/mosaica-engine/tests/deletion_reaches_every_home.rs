@@ -356,7 +356,7 @@ impl Files for Home {
                 attrs.join("tag").join(mosaica_filter::VALUES_FILE),
                 attrs.join("tag").join(mosaica_filter::PRESENCE_FILE),
             ],
-            Home::CategoryPostings => vec![attrs.join("band/postings.arrow")],
+            Home::CategoryPostings => vec![attrs.join("band/postings")],
             Home::KeywordDictionary => vec![attrs.join("tag").join(mosaica_filter::DICT_FILE)],
             // All three, because they are one record: a posting and a positions record are
             // positions in *this* dictionary, so a fold that rewrote one and carried another
@@ -367,7 +367,7 @@ impl Files for Home {
                 attrs.join("prose").join(mosaica_filter::POSITIONS_FILE),
             ],
             Home::RecordBlob => files_under(&attrs.join("record")),
-            Home::TermPostings => vec![shard.join("terms/postings.arrow")],
+            Home::TermPostings => vec![shard.join("terms/postings")],
             // Homes this fixture does not have: the second test, over the fixture that has every
             // home, reaches them. A suppression is not a file; it is asserted below, on the
             // suppressed survivor.
@@ -478,7 +478,7 @@ fn scored_entities(root: &Path) -> croaring::Bitmap {
 
 /// `Home::CategoryPostings`: the entities `band` says carry `code`.
 fn band_carriers(root: &Path, code: u8) -> croaring::Bitmap {
-    let path = shard_dir(root).join("attrs/band/postings.arrow");
+    let path = shard_dir(root).join("attrs/band/postings");
     mosaica_filter::ColumnPostings::open_keyed(&path)
         .expect("the category postings open")
         .entities(AttrLocalId::new(u32::from(code)))
@@ -505,7 +505,7 @@ fn text_index(root: &Path) -> BTreeMap<String, croaring::Bitmap> {
     let dir = shard_dir(root).join("attrs/prose");
     let dict = mosaica_filter::SortedDict::open_dir(&dir, mosaica_filter::Access::Read)
         .expect("the token dictionary opens");
-    let postings = mosaica_filter::ColumnPostings::open(&dir.join("postings.arrow"), false)
+    let postings = mosaica_filter::ColumnPostings::open(&dir.join("postings"), false)
         .expect("the token postings open");
     assert_eq!(
         dict.len(),
@@ -557,7 +557,7 @@ fn all_term(root: &Path) -> TermId {
 }
 
 fn term_names(root: &Path, term: TermId, entity: EntityId) -> bool {
-    let path = shard_dir(root).join("terms/postings.arrow");
+    let path = shard_dir(root).join("terms/postings");
     let postings = PostingsReader::open(&path, false).expect("the term postings open");
     let entity = entity.raw() as u32;
     // Bound rather than returned as the tail expression, which would drop `postings` before the

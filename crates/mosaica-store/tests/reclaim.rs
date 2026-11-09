@@ -180,7 +180,7 @@ fn linking_onto_an_existing_target_is_an_error_not_a_silent_overwrite() {
     fs::create_dir_all(&old_prefix).expect("mkdir old prefix");
     fs::create_dir_all(&new_prefix).expect("mkdir new prefix");
 
-    let rel = "terms/postings.arrow".to_string();
+    let rel = "terms/postings".to_string();
     fs::create_dir_all(old_prefix.join("terms")).expect("mkdir old terms");
     fs::write(old_prefix.join(&rel), b"source").expect("write source");
 

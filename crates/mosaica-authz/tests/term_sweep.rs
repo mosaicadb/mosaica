@@ -5,14 +5,14 @@ use std::sync::Arc;
 use croaring::Bitmap;
 use mosaica_authz::{
     sweep_term_postings, write_delta_tier, write_postings, DeltaTier, PostingRef, PostingsReader,
-    PostingsSpool,
+    RecordWriter, POSTINGS_COLUMN,
 };
 use mosaica_types::TermId;
 
 const THRESHOLD: u32 = 4;
 
 fn base_postings(dir: &std::path::Path, per_term: &[Vec<u32>], threshold: u32) -> PostingsReader {
-    let path = dir.join("base-postings.arrow");
+    let path = dir.join("base-postings");
     write_postings(&path, per_term, threshold).unwrap();
     PostingsReader::open(&path, false).unwrap()
 }
@@ -45,9 +45,8 @@ fn run_sweep(
     tiers: &[Arc<DeltaTier>],
     tombstones: &Bitmap,
 ) -> (PostingsReader, Vec<(u32, Vec<u32>)>) {
-    let spool_path = dir.join("sweep.spool");
-    let out_path = dir.join("swept-postings.arrow");
-    let mut spool = PostingsSpool::create(&spool_path).unwrap();
+    let out_path = dir.join("swept-postings");
+    let mut out = RecordWriter::create(&out_path, POSTINGS_COLUMN).unwrap();
 
     let mut callback_pairs: Vec<(u32, Vec<u32>)> = Vec::new();
     sweep_term_postings(
@@ -56,14 +55,14 @@ fn run_sweep(
         tiers,
         tombstones,
         THRESHOLD,
-        &mut spool,
+        &mut out,
         |term, bitmap| {
             callback_pairs.push((term.raw(), bitmap.iter().collect()));
             Ok(())
         },
     )
     .unwrap();
-    spool.finish(&out_path).unwrap();
+    out.finish().unwrap();
 
     (
         PostingsReader::open(&out_path, false).unwrap(),
@@ -84,7 +83,7 @@ fn a_folded_entity_vanishes_from_base_only_tier_only_and_both_terms() {
     let base = base_postings(dir.path(), &[vec![1, 2, 3], vec![10, 11]], THRESHOLD);
     let t = tier(
         dir.path(),
-        "t.arrow",
+        "t",
         &[(1, &[12]), (2, &[20, 21])],
         THRESHOLD,
     );
@@ -175,12 +174,12 @@ fn output_is_byte_identical_to_write_postings_over_the_same_final_sets() {
         &[vec![1, 2, 3, 4, 5], vec![10, 11, 12]],
         THRESHOLD,
     );
-    let t = tier(dir.path(), "t.arrow", &[(1, &[13, 14])], THRESHOLD);
+    let t = tier(dir.path(), "t", &[(1, &[13, 14])], THRESHOLD);
     let tombstones = Bitmap::of(&[5]);
 
     let (reader, _) = run_sweep(dir.path(), 2, &base, &[t], &tombstones);
 
-    let expected_path = dir.path().join("expected.arrow");
+    let expected_path = dir.path().join("expected");
     write_postings(
         &expected_path,
         &[vec![1, 2, 3, 4], vec![10, 11, 12, 13, 14]],
@@ -188,7 +187,7 @@ fn output_is_byte_identical_to_write_postings_over_the_same_final_sets() {
     )
     .unwrap();
 
-    let actual_bytes = std::fs::read(dir.path().join("swept-postings.arrow")).unwrap();
+    let actual_bytes = std::fs::read(dir.path().join("swept-postings")).unwrap();
     let expected_bytes = std::fs::read(&expected_path).unwrap();
     assert_eq!(actual_bytes, expected_bytes);
 

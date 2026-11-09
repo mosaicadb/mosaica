@@ -18,7 +18,7 @@
 //! each arm run twice:
 //!
 //! - **cold**, after `posix_fadvise(POSIX_FADV_DONTNEED)` over `permutation.bin`, the view's
-//!   `.timg` file and `postings.arrow`. The eviction is best effort and does not reach a page this
+//!   `.timg` file and `postings`. The eviction is best effort and does not reach a page this
 //!   process holds mapped, so every arm records `read_bytes` and the major-fault delta beside its
 //!   wall and the reader judges whether it took.
 //! - **warm**, the same arm run again with the page cache the cold run left.

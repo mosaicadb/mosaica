@@ -22,7 +22,7 @@
 //!
 //! `terms/pairs.parquet` is written by the build and rewritten by the fold, and by nothing else —
 //! a flush's delta tiers hold pairs it has never seen. The check is therefore exact equality with
-//! the union of the **base** `terms/postings.arrow`, deltas excluded; an unscoped check against
+//! the union of the **base** `terms/postings`, deltas excluded; an unscoped check against
 //! base ∪ deltas would refuse every bundle that has absorbed a write.
 //!
 //! ## Cost model, and what this pass must not be pointed at

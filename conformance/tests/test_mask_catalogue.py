@@ -74,7 +74,7 @@ def test_each_case_reaches_exactly_the_entity_set_it_names(catalogue_bundle: Bun
     """A case's grant set must produce its declared entity set — by a route independent of the one
     `verify()` uses.
 
-    `verify()` reads `postings.arrow`, the per-term arrays the engine actually serves queries from.
+    `verify()` reads `terms/postings`, the per-term arrays the engine actually serves queries from.
     This reads `pairs.parquet`, the flat `(entity_id, term_id)` relation, and scans it. Agreement
     between a union of posting lists and a semi-join over the flat relation is the same
     union-vs-semi-join differential `reference/tests` runs at 250k, applied here to the shapes that

@@ -37,7 +37,7 @@ pub enum BuildStage {
     SignatureSort,
     /// 5. Entity id = position in the signature order.
     Assignment,
-    /// 6. One pass over the pairs file, writing `postings.arrow` and `pairs.parquet`.
+    /// 6. One pass over the pairs file, writing `postings` and `pairs.parquet`.
     PostingsWrite,
     /// 8. Geometry permuted from ordinal into entity order, plus the declared attribute tail. No
     ///    points-file I/O: [`BuildStage::GeometryRead`] did the reading.

@@ -161,7 +161,7 @@ fn an_empty_shard_holds_every_declared_structure_and_no_item() {
     let dict = SortedDict::open_dir(&column(layout.column_rel("kw")), Access::Read).unwrap();
     assert_eq!(dict.len(), 0);
     for name in ["kind", "source"] {
-        ColumnPostings::open_keyed(&column(layout.column_rel(name)).join("postings.arrow"))
+        ColumnPostings::open_keyed(&column(layout.column_rel(name)).join("postings"))
             .unwrap();
     }
     for name in ["plain", "num"] {
@@ -172,7 +172,7 @@ fn an_empty_shard_holds_every_declared_structure_and_no_item() {
     }
     let note = column(layout.column_rel("note"));
     assert_eq!(SortedDict::open_dir(&note, Access::Read).unwrap().len(), 0);
-    ColumnPostings::open(&note.join("postings.arrow"), false).unwrap();
+    ColumnPostings::open(&note.join("postings"), false).unwrap();
     let blob = RecordBlob::open_dir(&column(layout.record_rel()), Access::Read).unwrap();
     assert_eq!(blob.rows(), 0);
     assert!(column(layout.unique_index_rel("id")).is_dir());

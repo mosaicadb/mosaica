@@ -3,7 +3,7 @@
 //!
 //! # Why a second copy of a relation the bundle already holds
 //!
-//! Labels are stored term-major, as postings: `terms/postings.arrow` answers *which entities
+//! Labels are stored term-major, as postings: `terms/postings` answers *which entities
 //! carry term `t`*, which is the question the mask is built from and the only question the
 //! request path used to ask. Two questions run the other way, and neither is answerable from the
 //! postings without walking every term in the dictionary:

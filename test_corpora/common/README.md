@@ -128,7 +128,7 @@ and the run's parameters under `churn`, and a table of the rows is printed.
 | `free_ids`, `held_ids` | count | the newest side-manifest's shard records' `free_entities`, the freed ids the allocator issues before its high water, and `held_entities`, those held back until the log rotates |
 | `prefix` | — | the bundle version `CURRENT` names |
 | `shards[]` | — | each shard's `partition`, `id`, `state`, `identity`, `high_water`, `segments`, `live_rows`, `postings_bytes`, `term_images_bytes`, `free_ids` and `held_ids`, from its record in the newest side-manifest |
-| `postings_bytes`, `fresh_postings_bytes`, `postings_vs_fresh` | bytes | the term index on disc, `partitions/<p>/shards/<s>/terms/postings.arrow` and every delta tier the newest side-manifest lists, on the served copy and on the all-in bundle, and their ratio |
+| `postings_bytes`, `fresh_postings_bytes`, `postings_vs_fresh` | bytes | the term index on disc, `partitions/<p>/shards/<s>/terms/postings` and every delta tier the newest side-manifest lists, on the served copy and on the all-in bundle, and their ratio |
 | `term_images_bytes`, `fresh_term_images_bytes` | bytes | the side-manifest's `term_image_extents`, on each |
 | `bundle_bytes` | bytes | every file under the served copy, a version not yet removed included |
 | `principals[]` | — | the narrowest and the broadest principal of `--targets`' ladder |

@@ -212,7 +212,7 @@ fn column_dir(out: &Path, column: &str) -> PathBuf {
 }
 
 fn postings_path(out: &Path, column: &str) -> PathBuf {
-    column_dir(out, column).join("postings.arrow")
+    column_dir(out, column).join("postings")
 }
 
 const FILTER_SCHEMA: &str = r#"
@@ -342,7 +342,7 @@ fn the_postings_file_is_under_the_manifest_digest() {
     let dir = build_with(FILTER_SCHEMA);
     let out = dir.path().join("bundle");
     let bundle = open_bundle(&out).unwrap();
-    let key = format!("{}/postings.arrow", common::SHARD.column_rel("department"));
+    let key = format!("{}/postings", common::SHARD.column_rel("department"));
     assert!(
         bundle.manifest.files.contains_key(&key),
         "MANIFEST.files covers {key}; it holds {:?}",
@@ -506,7 +506,7 @@ fn a_string_filter_column_emits_its_pair_and_no_postings() {
     let cdir = column_dir(&out, "title");
     assert!(cdir.join("values.arrow").exists());
     assert!(
-        !cdir.join("postings.arrow").exists(),
+        !cdir.join("postings").exists(),
         "a string column earns no accelerator: its values neither repeat densely nor carry an \
          identity a posting could be keyed by"
     );

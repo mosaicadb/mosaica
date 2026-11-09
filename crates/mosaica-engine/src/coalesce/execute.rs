@@ -32,7 +32,7 @@ pub(super) fn coalesce_tiers(
     ctx: &CoalesceContext,
     files: &mut BTreeMap<String, FileDigest>,
 ) -> Result<OpenedTier, MaintenanceFailed> {
-    let rel = format!("{}/delta.arrow", ctx.out_rel);
+    let rel = format!("{}/delta", ctx.out_rel);
     let path = ctx.prefix_dir.join(&rel);
     let inputs: Vec<PathBuf> = tiers.iter().map(|p| ctx.prefix_dir.join(p)).collect();
     coalesce_delta_tiers(&inputs, &path, SMALL_TERM_THRESHOLD).map_err(failed("delta tiers"))?;

@@ -104,7 +104,7 @@ pub enum FlushStage {
     TextTokeniseTerms,
     /// Writing each term's dictionary key, posting and positions, in step.
     TextDict,
-    /// Assembling `postings.arrow` and `positions.arrow` from their spools.
+    /// Completing the postings and positions files: appending their offsets and trailers.
     TextPostings,
     /// Serialising and writing the presence bitmap.
     TextPresence,
@@ -714,7 +714,7 @@ fn execute_flush_stages(
             &promotion.postings,
             plan.items.len() as u64,
         );
-        let tier_rel = format!("{segment_rel}/delta.arrow");
+        let tier_rel = format!("{segment_rel}/delta");
         let tier_path = ctx.prefix_dir.join(&tier_rel);
         write_delta_tier(&tier_path, &promotion.postings, SMALL_TERM_THRESHOLD)
             .map_err(|e| MaintenanceFailed(format!("delta tier: {e}")))?;
@@ -934,14 +934,6 @@ pub(crate) fn failed<E: std::fmt::Display>(
     what: impl std::fmt::Display,
 ) -> impl FnOnce(E) -> MaintenanceFailed {
     move |e| MaintenanceFailed(format!("{what}: {e}"))
-}
-
-/// Removes the spool if `outcome` failed. On success the spool writer's `finish` has removed it.
-pub(crate) fn remove_spool_on_error<T, E>(outcome: Result<T, E>, spool: &Path) -> Result<T, E> {
-    if outcome.is_err() {
-        let _ = std::fs::remove_file(spool);
-    }
-    outcome
 }
 
 /// What promotion produced: the dictionary to republish, the extent naming the new ordinals, and
@@ -1689,8 +1681,8 @@ fn write_text_layer(
     }
 
     let dict_rel = format!("{rel_dir}/{}-dict.bin", target.seg_id);
-    let postings_rel = format!("{rel_dir}/{}-postings.arrow", target.seg_id);
-    let positions_rel = format!("{rel_dir}/{}-positions.arrow", target.seg_id);
+    let postings_rel = format!("{rel_dir}/{}-postings", target.seg_id);
+    let positions_rel = format!("{rel_dir}/{}-positions", target.seg_id);
     let presence_rel = format!("{rel_dir}/{}-presence.roaring", target.seg_id);
     let files = mosaica_filter::TextIndexFiles {
         dict: target.prefix_dir.join(&dict_rel),

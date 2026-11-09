@@ -21,8 +21,8 @@
 //! | pairs ×1 | dictionary (streamed), term-lookup arrays, pre-dedup `row_counts`, histogram | 12T + 8T |
 //! | pairs ×1 | resolved `ordinal << 32 \| term` per **batch bucket** (RAM when it fits, spilled otherwise) | plan |
 //! | per batch | sort+dedup the bucket; per-ordinal `starts`; signature sort + refinement; entity ids; **band emit** | plan |
-//! | per band | cursor-scatter (already sorted), Roaring-encode in sub-chunks, spool + `pairs.parquet` | plan |
-//! | — | postings assembly: the spool becomes `postings.arrow`'s one record batch, zero-copy | 8(T+1) mapped |
+//! | per band | cursor-scatter (already sorted), Roaring-encode in sub-chunks, append to `postings` + `pairs.parquet` | plan |
+//! | — | postings completion: the offsets, spooled at 8 B a term, appended after the records | 8(T+1) on disk |
 //! | points ×1 | geometry, the tiler sort, and the segment | 28N |
 //!
 //! ## A column no pass reads at an entity is never permuted
@@ -49,7 +49,7 @@
 //!
 //! ## The spill discipline
 //!
-//! Bucket, band and spool files live under `<out>/.build-tmp/`, are deleted as consumed and
+//! Bucket and band files live under `<out>/.build-tmp/`, are deleted as consumed and
 //! on every exit path, and each carries a write-side `(count, mix64-sum)` receipt verified on
 //! read — the cross-pass anchor discipline extends across every spill boundary. Bands arrive
 //! with each term's entities strictly ascending by construction (bases ascend across batches,
@@ -1648,14 +1648,11 @@ fn build_bundle(
         .iter()
         .map(|path| PairsParquetWriter::create(path))
         .collect::<std::result::Result<_, _>>()?;
-    let mut spools: Vec<mosaica_authz::PostingsSpool> = filled
+    let mut postings: Vec<mosaica_authz::RecordWriter> = postings_paths[..filled.len()]
         .iter()
-        .zip(&postings_paths)
-        .map(|(span, path)| {
-            mosaica_authz::PostingsSpool::create(
-                &tmp.path().join(format!("postings-{}.spool", span.id)),
-            )
-            .map_err(|e| BuildError::io(path, e))
+        .map(|path| {
+            mosaica_authz::RecordWriter::create(path, mosaica_authz::POSTINGS_COLUMN)
+                .map_err(|e| BuildError::io(path, e))
         })
         .collect::<Result<_>>()?;
     let mut written = 0u64;
@@ -1704,7 +1701,7 @@ fn build_bundle(
             }
         }
         // Encode in bounded sub-chunks — parallel, collected in term order — and append to
-        // the spool; never one live record per term (T = 117M of those is gigabytes of Vec
+        // the postings file; never one live record per term (T = 117M of those is gigabytes of Vec
         // headers before a byte is written).
         const ENCODE_CHUNK_TERMS: usize = 1 << 16;
         let mut t = 0usize;
@@ -1726,7 +1723,7 @@ fn build_bundle(
                     })
                     .collect::<Result<_>>()?;
                 for (local, (record, slice)) in (t..hi).zip(encoded) {
-                    spools[k]
+                    postings[k]
                         .append(&record)
                         .map_err(|e| BuildError::io(&postings_paths[k], e))?;
                     written += slice.len() as u64;
@@ -1751,8 +1748,8 @@ fn build_bundle(
     for writer in pairs_writers {
         writer.finish()?;
     }
-    for (spool, path) in spools.into_iter().zip(&postings_paths) {
-        spool.finish(path).map_err(|e| BuildError::io(path, e))?;
+    for (file, path) in postings.into_iter().zip(&postings_paths) {
+        file.finish().map_err(|e| BuildError::io(path, e))?;
         fsync_file(path)?;
     }
 
@@ -3542,7 +3539,7 @@ fn read_scoped_column(
 /// Write the entity-space filter postings for every column declared `index = true`, and
 /// return the paths so the manifest digests them.
 ///
-/// **One file per column** — `attrs/<column>/postings.arrow` — never one file for the whole
+/// **One file per column** — `attrs/<column>/postings` — never one file for the whole
 /// schema. A shared file would have to address a value as `base + local` over per-column extents,
 /// and under ingest a value minted after the build takes an ordinal belonging to the *next*
 /// column; the base-union-tiers read then merges one value's members into another's. Because
@@ -3571,8 +3568,8 @@ fn read_scoped_column(
 /// at 10⁹, on every build, in the same pipeline whose *authorisation* emit bands term space
 /// precisely to avoid this shape. A counting pass sizes each band from `band_rows`, a code is never
 /// split across a band, and each band is one column scan cursor-scattering into a flat buffer laid
-/// out by prefix sums. Bands partition ascending code space, so [`KeyedPostingsSpool`]'s
-/// ascending-key check holds across them unchanged.
+/// out by prefix sums. Bands partition ascending code space, so the keyed file's ascending-key
+/// check ([`mosaica_authz::RecordWriter::append_keyed`]) holds across them unchanged.
 ///
 /// What the banding does *not* bound is the attribute tail this reads from — but that tail is no
 /// longer memory: `by_entity` is mapped (`column.rs`), so what this pass reads is page cache the
@@ -5496,7 +5493,7 @@ impl TextIndexPlan {
 /// belongs to the *i*-th key the dictionary holds. Both files are produced by one pass over one
 /// sorted term stream, so an ordinal cannot drift between them: the ordinal a term gets is the one
 /// [`mosaica_filter::SortedDictWriter::push`] returns, and the record encoded against it is
-/// appended to the postings spool before the next term is read.
+/// appended to the postings file before the next term is read.
 ///
 /// # The shape: chunk, spill, merge
 ///
@@ -5547,7 +5544,7 @@ impl TextIndexPlan {
 /// tokens ([`mosaica_analyse::Analyser::for_each_token`]) and the lookup is by `&[u8]`, so a term
 /// already in the map costs no allocation.
 ///
-/// **The postings stream through [`mosaica_authz::postings::PostingsSpool`]** rather than being
+/// **The postings stream through [`mosaica_authz::RecordWriter`]** rather than being
 /// collected, and the dictionary through [`mosaica_filter::SortedDictWriter`]: neither file is
 /// ever held whole in memory.
 ///
@@ -7728,7 +7725,7 @@ mod tests {
 
         let mut files: Vec<Vec<u8>> = Vec::new();
         for band_rows in [1usize, 2, 100, 1_000, usize::MAX] {
-            let path = dir.path().join(format!("postings-{band_rows}.arrow"));
+            let path = dir.path().join(format!("postings-{band_rows}"));
             write_category_postings(&path, "colour", &values, band_rows).expect("emit");
             files.push(std::fs::read(&path).expect("read"));
         }
@@ -7739,7 +7736,7 @@ mod tests {
         // And the postings say what the column says: each code's posting is exactly the entities
         // carrying it, which is what makes one a derivative of the other.
         let tier =
-            mosaica_authz::DeltaTier::open(&dir.path().join("postings-1.arrow")).expect("open");
+            mosaica_authz::DeltaTier::open(&dir.path().join("postings-1")).expect("open");
         let mut codes: Vec<u32> = values
             .iter()
             .map(|v| category_code(&v, "colour").expect("code"))

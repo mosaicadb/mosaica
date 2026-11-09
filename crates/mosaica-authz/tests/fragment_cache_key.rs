@@ -14,7 +14,7 @@ const THRESHOLD: u32 = 32;
 const IDENTITY: [u8; 32] = [1u8; 32];
 
 fn base(dir: &std::path::Path) -> PostingsReader {
-    let path = dir.join("postings.arrow");
+    let path = dir.join("postings");
     write_postings(&path, &[vec![1, 2, 3]], THRESHOLD).unwrap();
     PostingsReader::open(&path, false).unwrap()
 }
@@ -53,7 +53,7 @@ fn the_watermark_is_part_of_the_disk_key() {
             IDENTITY,
             &terms,
             &base,
-            &[tier(dir.path(), "t.arrow", &[9])],
+            &[tier(dir.path(), "t", &[9])],
             20,
         )
         .unwrap();
@@ -86,9 +86,9 @@ fn coalescing_tiers_leaves_the_fragment_unchanged() {
     let base = base(dir.path());
     let terms = [TermId::new(0)];
 
-    let t1 = tier_path(dir.path(), "t1.arrow", &[7]);
-    let t2 = tier_path(dir.path(), "t2.arrow", &[9]);
-    let merged = dir.path().join("merged.arrow");
+    let t1 = tier_path(dir.path(), "t1", &[7]);
+    let t2 = tier_path(dir.path(), "t2", &[9]);
+    let merged = dir.path().join("merged");
     coalesce_delta_tiers(&[t1.clone(), t2.clone()], &merged, THRESHOLD).unwrap();
 
     let separate_cache = cache_at(&dir, "separate");

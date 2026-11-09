@@ -1,7 +1,7 @@
 """Mask construction and change composition — from `pairs.parquet`, independent of postings.
 
 `mask_of` is the union-vs-semi-join differential's other side: the Rust engine derives a viewer's
-authorised set from `postings.arrow` (per-term entity lists, possibly Roaring-compressed); this
+authorised set from `terms/postings` (per-term entity lists, possibly Roaring-compressed); this
 module derives the same set from each shard's `terms/pairs.parquet` (the flat `(entity_id,
 term_id)` relation) by direct scan. Agreement between the two is what the differential test proves.
 

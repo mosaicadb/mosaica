@@ -613,8 +613,8 @@ mod tests {
         let write = |tag: &str, terms: &[&str], positions_records: usize| {
             let files = mosaica_filter::TextIndexFiles {
                 dict: dir.path().join(format!("{tag}-dict.bin")),
-                postings: dir.path().join(format!("{tag}-postings.arrow")),
-                positions: dir.path().join(format!("{tag}-positions.arrow")),
+                postings: dir.path().join(format!("{tag}-postings")),
+                positions: dir.path().join(format!("{tag}-positions")),
                 presence: dir.path().join(format!("{tag}-presence.roaring")),
             };
             let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).unwrap();
@@ -629,15 +629,15 @@ mod tests {
             mosaica_filter::write_presence(&files.presence, &Bitmap::from_range(0..3)).unwrap();
             // A positions file of another length, as a writer that lost step would leave.
             if positions_records != terms.len() {
-                let mut spool = mosaica_authz::PostingsSpool::for_column(
-                    &files.positions.with_extension("spool"),
+                let mut positions = mosaica_authz::RecordWriter::create(
+                    &files.positions,
                     mosaica_filter::POSITIONS_COLUMN,
                 )
                 .unwrap();
                 for _ in 0..positions_records {
-                    spool.append(&[0, 0]).unwrap();
+                    positions.append(&[0, 0]).unwrap();
                 }
-                spool.finish(&files.positions).unwrap();
+                positions.finish().unwrap();
             }
             crate::filter::TextExtentPaths {
                 column: "prose".to_string(),

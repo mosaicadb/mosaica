@@ -1,7 +1,7 @@
 //! A text layer's word positions: for each term, where in each item's token sequence it occurs.
 //!
-//! `positions.arrow` is one Arrow IPC file with one non-null `LargeBinary` column, record *i* term
-//! ordinal *i*'s, beside the postings it is read with. A term's record holds one entry per item of
+//! A positions file is a record container (`mosaica_authz::records`) whose column is named
+//! [`POSITIONS_COLUMN`], record *i* term ordinal *i*'s, beside the postings it is read with. A term's record holds one entry per item of
 //! its posting, in the posting's ascending item order, so the item at rank *k* of the posting has
 //! entry *k*. An entry is the number of times the term occurs in the item and then each position:
 //! the token's index in the sequence `Analyser::for_each_token` yields, the first absolute and each
@@ -30,7 +30,7 @@ use mosaica_types::AttrLocalId;
 use crate::varint::take_varint;
 
 /// A text column's positions file within its directory.
-pub const POSITIONS_FILE: &str = "positions.arrow";
+pub const POSITIONS_FILE: &str = "positions";
 
 /// The name of the one column a positions file holds.
 pub const POSITIONS_COLUMN: &str = "positions";
@@ -328,15 +328,11 @@ mod tests {
     fn file_of(records: &[Vec<u8>]) -> (tempfile::TempDir, ColumnPositions) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(POSITIONS_FILE);
-        let mut spool = mosaica_authz::PostingsSpool::for_column(
-            &path.with_extension("spool"),
-            POSITIONS_COLUMN,
-        )
-        .unwrap();
+        let mut writer = mosaica_authz::RecordWriter::create(&path, POSITIONS_COLUMN).unwrap();
         for record in records {
-            spool.append(record).unwrap();
+            writer.append(record).unwrap();
         }
-        spool.finish(&path).unwrap();
+        writer.finish().unwrap();
         let file = ColumnPositions::open(&path, false).unwrap();
         (dir, file)
     }

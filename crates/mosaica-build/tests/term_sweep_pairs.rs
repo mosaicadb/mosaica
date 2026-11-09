@@ -17,7 +17,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 use mosaica_authz::{
     sweep_term_postings, write_delta_tier, write_postings, DeltaTier, PostingRef, PostingsReader,
-    PostingsSpool,
+    RecordWriter, POSTINGS_COLUMN,
 };
 use mosaica_store::PairsParquetWriter;
 use mosaica_types::TermId;
@@ -59,7 +59,7 @@ fn entities_of(posting: PostingRef<'_>) -> Vec<u32> {
 }
 
 /// **End to end: the term sweep drives `PairsParquetWriter` through `push_iter`, and the resulting
-/// `pairs.parquet` agrees with the swept `postings.arrow` about every folded deletion** — the
+/// `pairs.parquet` agrees with the swept `postings` about every folded deletion** — the
 /// "done when" property named directly in issue #76, checked against a real Parquet file rather
 /// than the sweep's in-memory callback argument.
 ///
@@ -69,26 +69,25 @@ fn entities_of(posting: PostingRef<'_>) -> Vec<u32> {
 ///
 /// **Mutation:** feed `push_iter` the pre-subtraction union instead of the sweep's own
 /// post-subtraction bitmap, and entity 3 would still appear in `pairs.parquet` while it is already
-/// gone from `postings.arrow` — exactly the disagreement the I1 mask differential exists to catch.
+/// gone from `postings` — exactly the disagreement the I1 mask differential exists to catch.
 #[test]
 fn pairs_parquet_agrees_with_swept_postings_about_a_folded_deletion() {
     let dir = tempfile::TempDir::new().unwrap();
 
-    let base_path = dir.path().join("base-postings.arrow");
+    let base_path = dir.path().join("base-postings");
     write_postings(&base_path, &[vec![1, 2, 3, 4, 5]], THRESHOLD).unwrap();
     let base = PostingsReader::open(&base_path, false).unwrap();
 
-    let tier_path = dir.path().join("tier.arrow");
+    let tier_path = dir.path().join("tier");
     write_delta_tier(&tier_path, &[(TermId::new(1), vec![10, 11, 12])], THRESHOLD).unwrap();
     let tier = Arc::new(DeltaTier::open(&tier_path).unwrap());
 
     let tombstones = Bitmap::of(&[3]);
 
-    let spool_path = dir.path().join("sweep.spool");
-    let postings_path = dir.path().join("postings.arrow");
+    let postings_path = dir.path().join("postings");
     let pairs_path = dir.path().join("pairs.parquet");
 
-    let mut spool = PostingsSpool::create(&spool_path).unwrap();
+    let mut postings = RecordWriter::create(&postings_path, POSTINGS_COLUMN).unwrap();
     let mut pairs_writer = PairsParquetWriter::create(&pairs_path).unwrap();
     sweep_term_postings(
         2,
@@ -96,7 +95,7 @@ fn pairs_parquet_agrees_with_swept_postings_about_a_folded_deletion() {
         &[tier],
         &tombstones,
         THRESHOLD,
-        &mut spool,
+        &mut postings,
         |term, bitmap| {
             pairs_writer
                 .push_iter(term.raw(), bitmap.iter())
@@ -104,7 +103,7 @@ fn pairs_parquet_agrees_with_swept_postings_about_a_folded_deletion() {
         },
     )
     .unwrap();
-    spool.finish(&postings_path).unwrap();
+    postings.finish().unwrap();
     pairs_writer.finish().unwrap();
 
     let reader = PostingsReader::open(&postings_path, false).unwrap();
@@ -124,7 +123,7 @@ fn pairs_parquet_agrees_with_swept_postings_about_a_folded_deletion() {
     );
 
     // Restated as an explicit agreement check, term by term, rather than trusting the literal
-    // above alone: every entity `postings.arrow` names for a term is named by exactly the same
+    // above alone: every entity `postings` names for a term is named by exactly the same
     // set of rows in `pairs.parquet`, and nothing else is.
     for t in 0..2u32 {
         let from_postings = posting_entities(t);
@@ -136,7 +135,7 @@ fn pairs_parquet_agrees_with_swept_postings_about_a_folded_deletion() {
         let from_postings_as_u64: Vec<u64> = from_postings.iter().map(|&e| e as u64).collect();
         assert_eq!(
             from_pairs, from_postings_as_u64,
-            "term {t}: pairs.parquet and postings.arrow disagree"
+            "term {t}: pairs.parquet and postings disagree"
         );
     }
     assert!(

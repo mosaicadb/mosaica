@@ -47,7 +47,7 @@ use std::fs::File;
 use std::io::{self, BufWriter};
 
 use croaring::Bitmap;
-use mosaica_authz::PostingsSpool;
+use mosaica_authz::{RecordWriter, POSTINGS_COLUMN};
 use mosaica_filter::{
     ColumnPositions, ColumnPostings, PositionsCursor, SortedDict, SortedDictWriter, TextIndexFiles,
     TextLayerCounts,
@@ -74,58 +74,36 @@ pub enum Posting<'a> {
 }
 
 /// Writes one text layer's dictionary, postings and positions a term at a time and in step, so
-/// record *i* of each is term *i*'s. The postings and positions are spooled beside the files they
-/// assemble, and a writer dropped before [`Self::finish`] removes its spools. The presence is the
-/// caller's to write.
+/// record *i* of each is term *i*'s. A writer dropped before [`Self::finish`] removes its postings
+/// and positions files. The presence is the caller's to write.
 pub struct TextIndexWriter {
-    files: TextIndexFiles,
-    open: Option<OpenFiles>,
+    open: OpenFiles,
     items: u64,
     terms: u64,
 }
 
 struct OpenFiles {
     dict: SortedDictWriter<BufWriter<File>>,
-    postings: PostingsSpool,
+    postings: RecordWriter,
     positions: PositionsWriter,
 }
 
 impl TextIndexWriter {
     pub fn create(files: TextIndexFiles) -> io::Result<TextIndexWriter> {
-        let opened = (|| -> io::Result<OpenFiles> {
-            Ok(OpenFiles {
-                postings: PostingsSpool::create(&files.postings.with_extension("spool"))?,
-                positions: PositionsWriter::create(&files.positions.with_extension("spool"))?,
+        Ok(TextIndexWriter {
+            open: OpenFiles {
+                postings: RecordWriter::create(&files.postings, POSTINGS_COLUMN)?,
+                positions: PositionsWriter::create(&files.positions)?,
                 dict: SortedDictWriter::new(BufWriter::new(File::create(&files.dict)?))?,
-            })
-        })();
-        let mut writer = TextIndexWriter {
-            files,
-            open: None,
+            },
             items: 0,
             terms: 0,
-        };
-        match opened {
-            Ok(open) => {
-                writer.open = Some(open);
-                Ok(writer)
-            }
-            Err(e) => {
-                writer.remove_spools();
-                Err(e)
-            }
-        }
-    }
-
-    fn files(&mut self) -> &mut OpenFiles {
-        self.open
-            .as_mut()
-            .expect("a writer holds its files until it finishes")
+        })
     }
 
     /// Begin `term`, held by `items` items, and return its ordinal. Terms must ascend strictly.
     pub fn begin_term(&mut self, term: &str, items: u64) -> io::Result<u32> {
-        let open = self.files();
+        let open = &mut self.open;
         let ordinal = open.dict.push(term)?;
         open.positions.begin(items)?;
         self.items = items;
@@ -134,7 +112,7 @@ impl TextIndexWriter {
 
     /// The positions of the term's next item, its items in ascending order.
     pub fn push_item(&mut self, positions: &[u32]) -> io::Result<()> {
-        self.files().positions.push(positions)
+        self.open.positions.push(positions)
     }
 
     /// End the term with its posting, which holds the items whose positions were pushed.
@@ -159,40 +137,24 @@ impl TextIndexWriter {
                 self.terms, self.items
             )));
         }
-        let open = self.files();
+        let open = &mut self.open;
         open.positions.end()?;
         open.postings.append(&record)?;
         self.terms += 1;
         Ok(())
     }
 
-    /// Assemble the postings and positions, and return the number of terms.
-    pub fn finish(mut self) -> io::Result<u64> {
-        let open = self.open.take().expect("a writer finishes once");
-        let finished = open
-            .dict
-            .finish()
-            .map_err(io::Error::from)
-            .and_then(|_| open.postings.finish(&self.files.postings))
-            .and_then(|()| open.positions.finish(&self.files.positions));
-        if finished.is_err() {
-            self.remove_spools();
-        }
-        finished?;
+    /// Complete the three files, and return the number of terms.
+    pub fn finish(self) -> io::Result<u64> {
+        let OpenFiles {
+            dict,
+            postings,
+            positions,
+        } = self.open;
+        dict.finish()?;
+        postings.finish()?;
+        positions.finish()?;
         Ok(self.terms)
-    }
-
-    fn remove_spools(&self) {
-        let _ = std::fs::remove_file(self.files.postings.with_extension("spool"));
-        let _ = std::fs::remove_file(self.files.positions.with_extension("spool"));
-    }
-}
-
-impl Drop for TextIndexWriter {
-    fn drop(&mut self) {
-        if self.open.take().is_some() {
-            self.remove_spools();
-        }
     }
 }
 

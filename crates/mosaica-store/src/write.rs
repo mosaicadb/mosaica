@@ -6,8 +6,7 @@
 //! [`SegmentWriter`] takes segment rows one at a time, in row order, and holds none of them: each
 //! column's bytes go straight to a spool file beside the output, and the single record batch
 //! contracts §2.6 requires is assembled at [`SegmentWriter::finish`] with the spools
-//! memory-mapped as its values buffers. That is `PostingsSpool`'s discipline
-//! (`mosaica_authz::postings`), for the same reason — the compaction fold's pass 1 streams the
+//! memory-mapped as its values buffers, because the compaction fold's pass 1 streams the
 //! whole corpus through here and may not materialise it (compaction §3), and merge's measured
 //! **4.4–4.9× peak over its inputs' bytes** is what
 //! forced `max_merged_segment_bytes` to stay where decision 0049 left it.
@@ -431,8 +430,7 @@ pub(crate) struct ColumnSpool {
     /// dropping it would lose up to seven rows' values with the row count still agreeing.
     bit_buf: u8,
     bit_len: u8,
-    /// Var-width kinds only: Arrow's `i32` offset table, which has no file-backed form — a
-    /// `LargeBinary`'s `i64` twin is what `PostingsSpool` holds for the same reason.
+    /// Var-width kinds only: Arrow's `i32` offset table, which has no file-backed form.
     offsets: Vec<i32>,
 }
 
@@ -472,8 +470,7 @@ impl ColumnSpool {
     }
 
     /// The running `i32` offset after appending `len` more bytes, refusing the overflow rather
-    /// than wrapping — `PostingsSpool`'s `next_offset` rule, at `i32` because Arrow's `Utf8`
-    /// offsets are 32-bit.
+    /// than wrapping, at `i32` because Arrow's `Utf8` offsets are 32-bit.
     fn next_offset(&self, len: usize, name: &str) -> io::Result<i32> {
         let last = *self
             .offsets
@@ -592,7 +589,7 @@ impl ColumnSpool {
             });
         }
 
-        // SAFETY: identical to `ColumnsRef::load`'s and `PostingsSpool::finish`'s mmap arm — `arc`
+        // SAFETY: identical to `ColumnsRef::load`'s mmap arm — `arc`
         // owns the mapping for as long as any `Buffer` built from it is alive (captured as the
         // buffer's `Allocation`), the mapping is valid for `len` bytes for its whole lifetime, and
         // memmap2 never returns a null base pointer.

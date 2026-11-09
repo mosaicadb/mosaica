@@ -226,7 +226,7 @@ fn flushed_bundle_at(root: &Path, tenancy: u16) {
 
     // The flushed entities' postings live in a delta tier the base `pairs.parquet` has never
     // seen — the state the pairs check must not refuse.
-    let delta_rel = shard_rel("views/s0/segments/flush-1/delta.arrow");
+    let delta_rel = shard_rel("views/s0/segments/flush-1/delta");
     let delta_path = prefix_dir.join(&delta_rel);
     mosaica_authz::write_delta_tier(
         &delta_path,
@@ -552,7 +552,7 @@ fn a_posting_past_the_high_water_is_refused() {
     let temp = tempfile::TempDir::new().unwrap();
     flushed_bundle(temp.path());
     let root = bundle_root(&temp);
-    let rel = &shard_rel("terms/postings.arrow");
+    let rel = &shard_rel("terms/postings");
     let path = root.join("v00000").join(rel);
 
     let mut per_term = read_base_postings(&path);
@@ -573,7 +573,7 @@ fn a_posting_with_a_duplicate_entity_is_refused() {
     let temp = tempfile::TempDir::new().unwrap();
     flushed_bundle(temp.path());
     let root = bundle_root(&temp);
-    let rel = &shard_rel("terms/postings.arrow");
+    let rel = &shard_rel("terms/postings");
     let path = root.join("v00000").join(rel);
 
     let per_term = read_base_postings(&path);
@@ -593,7 +593,12 @@ fn a_posting_with_a_duplicate_entity_is_refused() {
     damaged.extend_from_slice(&first.to_le_bytes());
     damaged.extend_from_slice(&first.to_le_bytes());
     records[carried] = damaged;
-    mosaica_authz::write_posting_records(&path, &records).unwrap();
+    let mut postings =
+        mosaica_authz::RecordWriter::create(&path, mosaica_authz::POSTINGS_COLUMN).unwrap();
+    for record in &records {
+        postings.append(record).unwrap();
+    }
+    postings.finish().unwrap();
     refresh_digest(&root, rel);
 
     expect_refusal(&root, "strictly ascending");
@@ -637,7 +642,7 @@ fn a_pairs_file_missing_a_base_pair_is_refused() {
     let path = root.join("v00000").join(rel);
 
     let mut per_term =
-        read_base_postings(&root.join("v00000").join(shard_rel("terms/postings.arrow")));
+        read_base_postings(&root.join("v00000").join(shard_rel("terms/postings")));
     let with_rows = per_term
         .iter()
         .position(|entities| !entities.is_empty())

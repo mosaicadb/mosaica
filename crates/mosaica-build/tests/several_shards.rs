@@ -461,7 +461,7 @@ impl Shard<'_> {
     fn tokens(&self, rel: String) -> BTreeMap<String, Vec<u32>> {
         let dir = self.dir(rel.clone());
         let dict = SortedDict::open_dir(&dir, Access::Read).unwrap();
-        let postings = self.postings(&format!("{rel}/postings.arrow"));
+        let postings = self.postings(&format!("{rel}/postings"));
         (0..dict.len())
             .map(|ordinal| {
                 let key = dict.key_of(ordinal, &mut Vec::new()).unwrap().to_string();

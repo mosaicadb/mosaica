@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn map_engine_error_sanitises_its_store_and_io_arms() {
         let engine_err = EngineError::Io(std::io::Error::other(
-            "/srv/mosaica/v00000/partitions/default/terms/postings.arrow: bad",
+            "/srv/mosaica/v00000/partitions/default/terms/postings: bad",
         ));
         let (_, _, detail) = map_engine_error(engine_err).parts();
         assert!(

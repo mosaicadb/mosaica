@@ -163,10 +163,8 @@ pub fn write_empty_shard(shard: &EmptyShard<'_>) -> Result<EmptyShardWritten> {
     std::fs::create_dir_all(&terms_dir).map_err(io(&terms_dir))?;
     let postings_rel = layout.postings_rel();
     let postings_path = out.path(&postings_rel);
-    let spool_path = terms_dir.join("postings.spool");
-    mosaica_authz::postings::PostingsSpool::create(&spool_path)
-        .map_err(io(&spool_path))?
-        .finish(&postings_path)
+    mosaica_authz::RecordWriter::create(&postings_path, mosaica_authz::POSTINGS_COLUMN)
+        .and_then(mosaica_authz::RecordWriter::finish)
         .map_err(io(&postings_path))?;
     out.push(postings_rel);
     if shard.pairs {

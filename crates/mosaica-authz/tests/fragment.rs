@@ -48,7 +48,7 @@ fn write_random_postings(
         }
         per_term.push(set.into_iter().collect::<Vec<u32>>());
     }
-    let path = dir.join("postings.arrow");
+    let path = dir.join("postings");
     write_postings(&path, &per_term, SMALL_TERM_THRESHOLD).unwrap();
     (path, per_term)
 }

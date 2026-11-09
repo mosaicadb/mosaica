@@ -1,11 +1,8 @@
-//! Byte-identity tests for the streaming writers: `DictStreamWriter` against `DictWriter`, and
-//! `PostingsSpool` against `write_posting_records`.
+//! Byte-identity tests: `DictStreamWriter` against `DictWriter`, and the two posting encoders.
 
 use std::fs;
 use tempfile::TempDir;
-use mosaica_authz::{
-    encode_posting, write_posting_records, Dict, DictStreamWriter, DictWriter, PostingsSpool,
-};
+use mosaica_authz::{encode_posting, Dict, DictStreamWriter, DictWriter};
 
 /// Distinct descriptors of varied lengths, including one empty descriptor. Distinctness is the
 /// streaming writer's caller contract; without it `DictWriter` would deduplicate.
@@ -72,59 +69,6 @@ fn dict_stream_writer_matches_dict_writer_bytes_when_empty() {
         fs::read(&buffered_paths[0]).unwrap(),
         "an empty dictionary must still write an identical (empty) extent"
     );
-}
-
-/// A few hundred encoded records straddling the tag-0/tag-1 threshold, including empty entity
-/// lists (a one-byte, tag-only record).
-fn posting_records(n: usize) -> Vec<Vec<u8>> {
-    (0..n)
-        .map(|t| {
-            let count = (t * 7) % 90;
-            let entities: Vec<u32> = (0..count as u32).map(|k| k * 3 + t as u32).collect();
-            encode_posting(t, &entities, 32).unwrap()
-        })
-        .collect()
-}
-
-fn assert_spool_matches_buffered(records: &[Vec<u8>]) {
-    let temp = TempDir::new().unwrap();
-
-    let buffered_path = temp.path().join("buffered.arrow");
-    write_posting_records(&buffered_path, records).unwrap();
-
-    let spool_path = temp.path().join("postings.spool");
-    let streamed_path = temp.path().join("streamed.arrow");
-    let mut spool = PostingsSpool::create(&spool_path).unwrap();
-    for record in records {
-        spool.append(record).unwrap();
-    }
-    spool.finish(&streamed_path).unwrap();
-
-    assert!(
-        !spool_path.exists(),
-        "spool file must be deleted after a successful write"
-    );
-    assert_eq!(
-        fs::read(&streamed_path).unwrap(),
-        fs::read(&buffered_path).unwrap(),
-        "postings.arrow bytes must be identical for {} record(s)",
-        records.len()
-    );
-}
-
-#[test]
-fn postings_spool_matches_write_posting_records_bytes() {
-    assert_spool_matches_buffered(&posting_records(300));
-}
-
-#[test]
-fn postings_spool_matches_for_zero_records() {
-    assert_spool_matches_buffered(&[]);
-}
-
-#[test]
-fn postings_spool_matches_for_a_single_record() {
-    assert_spool_matches_buffered(&posting_records(1));
 }
 
 /// `encode_posting_bitmap` and `encode_posting` agree byte for byte, across the tag boundary.

@@ -5,7 +5,7 @@ use std::io;
 use std::path::Path;
 
 use bitpacking::{BitPacker, BitPacker4x};
-use mosaica_authz::PostingsSpool;
+use mosaica_authz::RecordWriter;
 use mosaica_filter::{put_varint, POSITIONS_BLOCK, POSITIONS_COLUMN};
 
 /// One term's occurrences in a batch of documents: each item holding it, and the token positions
@@ -69,9 +69,10 @@ impl Occurrences {
     }
 }
 
-/// Writes a positions file record by record, each record streamed to a spool block by block.
+/// Writes a positions file record by record, each record streamed into the file block by block
+/// and its block table written back over its head when it ends.
 pub(crate) struct PositionsWriter {
-    spool: PostingsSpool,
+    file: RecordWriter,
     /// Items the open term's posting holds, and how many of them have been pushed.
     items: u64,
     pushed: u64,
@@ -87,9 +88,9 @@ pub(crate) struct PositionsWriter {
 }
 
 impl PositionsWriter {
-    pub(crate) fn create(spool_path: &Path) -> io::Result<PositionsWriter> {
+    pub(crate) fn create(path: &Path) -> io::Result<PositionsWriter> {
         Ok(PositionsWriter {
-            spool: PostingsSpool::for_column(spool_path, POSITIONS_COLUMN)?,
+            file: RecordWriter::create(path, POSITIONS_COLUMN)?,
             items: 0,
             pushed: 0,
             open: false,
@@ -118,7 +119,7 @@ impl PositionsWriter {
             .checked_mul(8)
             .and_then(|h| usize::try_from(h).ok())
             .ok_or_else(|| invalid("a term's block table does not fit in memory"))?;
-        self.spool.begin_record(head)?;
+        self.file.begin_record(head)?;
         self.items = items;
         self.pushed = 0;
         self.open = true;
@@ -165,7 +166,7 @@ impl PositionsWriter {
         if !self.counts.is_empty() {
             self.write_block()?;
         }
-        self.spool.end_record(&self.table)?;
+        self.file.end_record(&self.table)?;
         self.open = false;
         Ok(())
     }
@@ -179,7 +180,7 @@ impl PositionsWriter {
         for run in self.gaps.chunks(POSITIONS_BLOCK) {
             put_run(run, &mut self.bytes);
         }
-        self.spool.extend_record(&self.bytes)?;
+        self.file.extend_record(&self.bytes)?;
         self.written += self.bytes.len() as u64;
         self.blocks += 1;
         self.counts.clear();
@@ -187,13 +188,13 @@ impl PositionsWriter {
         Ok(())
     }
 
-    pub(crate) fn finish(self, path: &Path) -> io::Result<()> {
+    pub(crate) fn finish(self) -> io::Result<()> {
         if self.open {
             return Err(invalid(
                 "the positions file finished inside a term's record",
             ));
         }
-        self.spool.finish(path)
+        self.file.finish()
     }
 }
 
@@ -239,7 +240,7 @@ mod tests {
 
     fn write(dir: &Path, terms: &[Vec<Vec<u32>>]) -> ColumnPositions {
         let path = dir.join(POSITIONS_FILE);
-        let mut writer = PositionsWriter::create(&path.with_extension("spool")).unwrap();
+        let mut writer = PositionsWriter::create(&path).unwrap();
         for items in terms {
             writer.begin(items.len() as u64).unwrap();
             for positions in items {
@@ -247,7 +248,7 @@ mod tests {
             }
             writer.end().unwrap();
         }
-        writer.finish(&path).unwrap();
+        writer.finish().unwrap();
         ColumnPositions::open(&path, false).unwrap()
     }
 
@@ -304,11 +305,11 @@ mod tests {
     fn a_short_run_is_written_as_varints() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(POSITIONS_FILE);
-        let mut writer = PositionsWriter::create(&path.with_extension("spool")).unwrap();
+        let mut writer = PositionsWriter::create(&path).unwrap();
         writer.begin(1).unwrap();
         writer.push(&[300]).unwrap();
         writer.end().unwrap();
-        writer.finish(&path).unwrap();
+        writer.finish().unwrap();
         let array = mosaica_authz::open_record_column(&path, false, POSITIONS_COLUMN).unwrap();
         let mut want = vec![0u8];
         put_varint(300, &mut want);
@@ -321,7 +322,7 @@ mod tests {
     #[test]
     fn the_writer_refuses_what_the_format_cannot_hold() {
         let dir = tempfile::tempdir().unwrap();
-        let mut writer = PositionsWriter::create(&dir.path().join("p.spool")).unwrap();
+        let mut writer = PositionsWriter::create(&dir.path().join("p")).unwrap();
         assert!(writer.begin(0).is_err());
         writer.begin(1).unwrap();
         assert!(writer.push(&[]).is_err());

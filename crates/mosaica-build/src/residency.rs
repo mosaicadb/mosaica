@@ -105,7 +105,7 @@
 //!
 //! ⊘ **The disk figure is neither a bound nor a measurement, and it decides nothing.** Most terms
 //! are arithmetic over a fixed width and are exact; several are stated ceilings a term of the right
-//! shape sits far below (`postings.arrow` over a relation whose terms encode as runs — GBIF's 253
+//! shape sits far below (`postings` over a relation whose terms encode as runs — GBIF's 253
 //! country terms are 33,714 bytes against the hundreds of megabytes charged); and four are
 //! estimates that a corpus shape can exceed, each saying so at itself: the record blob's blocks at
 //! half the characters ([`EXTENT_SHARE`]), a published member entry at three bytes
@@ -543,7 +543,7 @@ const RECORD_UTF8_FIELD_BYTES: u64 = RECORD_FIELD_BYTES + 4;
 const ORACLE_BYTES_PER_PAIR_TENTHS: u64 = 42;
 
 /// What a `text` column's **token index** costs against its characters, in hundredths:
-/// `postings.arrow` and `dict.bin` together.
+/// `postings` and `dict.bin` together.
 ///
 /// ⊘ **An estimate above every measurement, not a ceiling.** Measured on the 10⁷ MedCPT sample:
 /// 0.166 of the characters on `abstract` (1.365 GB over 8.21 GB), 0.282 on `title`, 0.198 on
@@ -557,7 +557,7 @@ const ORACLE_BYTES_PER_PAIR_TENTHS: u64 = 42;
 /// column will be.
 const TEXT_INDEX_SHARE_PERCENT: u64 = 35;
 
-/// What a `text` column's `positions.arrow` costs against its characters, in hundredths.
+/// What a `text` column's `positions` costs against its characters, in hundredths.
 ///
 /// ⊘ **An estimate, not a ceiling.** A position is a gap packed to its run's width, a byte or less
 /// for every word but the rarest. Measured on the 2.4×10⁶ arXiv sample: 0.204 of the characters on
@@ -604,7 +604,7 @@ fn term_image_bitmap_bytes(n: u64) -> u64 {
     n.div_ceil(values_per_byte).saturating_mul(3)
 }
 
-/// What `terms/postings.arrow` comes to for a relation whose terms have these pre-dedup row
+/// What `terms/postings` comes to for a relation whose terms have these pre-dedup row
 /// counts, over an entity space of `n`.
 ///
 /// **Not `4 × pairs`, in either direction.** The file is one `LargeBinaryArray` record a term —
@@ -1816,8 +1816,8 @@ pub(crate) fn disk(
     );
     push(
         format!(
-            "postings.arrow, one record over each of {} term(s) at its own row count — 8 B of \
-             Arrow offset and a tag each, then 4 B an entity below 32 of them and a ceiling of \
+            "the postings, one record over each of {} term(s) at its own row count — 8 B of \
+             offset and a tag each, then 4 B an entity below 32 of them and a ceiling of \
              Roaring above",
             term_rows.len()
         ),
@@ -1877,7 +1877,7 @@ pub(crate) fn disk(
         );
     }
     // **Blob residency and a token index are independent, and a `text` column is both.** A column
-    // whose value lives in the record blob still owes `postings.arrow` and `dict.bin` wherever it
+    // whose value lives in the record blob still owes `postings` and `dict.bin` wherever it
     // is indexed (`pipeline::blob_resident`), and those two files are in the bundle from the index
     // phase to the end of the build. Skipping the rest of this loop for a blob-resident column
     // left an indexed `text` column's whole index uncharged: **176.81 B/item on the 10⁷ MedCPT
@@ -1899,9 +1899,9 @@ pub(crate) fn disk(
             // and what they rest on; the presence bitmap is charged at a bit an item.
             push(
                 format!(
-                    "attribute '{}': the text index's postings.arrow and dict.bin, at an \
+                    "attribute '{}': the text index's postings and dict.bin, at an \
                      estimate of {TEXT_INDEX_SHARE_PERCENT}% of the column's {} MiB of \
-                     characters, its positions.arrow at {TEXT_POSITIONS_SHARE_PERCENT}%, and its \
+                     characters, its positions at {TEXT_POSITIONS_SHARE_PERCENT}%, and its \
                      presence bitmap",
                     attribute.name,
                     characters >> 20
@@ -3347,7 +3347,7 @@ mod tests {
     }
 
     /// **An indexed `text` column's token index is in the bundle, and is charged.** Its
-    /// `postings.arrow` and `dict.bin` are written at the index phase and released by nothing. A
+    /// `postings` and `dict.bin` are written at the index phase and released by nothing. A
     /// model that stopped at the column's blob residency reached neither: 176.81 B/item on the
     /// 10⁷ MedCPT sample, 23% of that bundle.
     #[test]
@@ -3357,7 +3357,7 @@ mod tests {
         let term = disk
             .terms
             .iter()
-            .find(|t| t.what.contains("the text index's postings.arrow"))
+            .find(|t| t.what.contains("the text index's postings"))
             .expect("an indexed text column's token index is a term of its own");
         assert!(term.bytes > 0, "{}", term.what);
         assert!(
@@ -3523,7 +3523,7 @@ mod tests {
         );
     }
 
-    /// **`postings.arrow` is a record a term, not four bytes a pair.** A relation of singleton
+    /// **`postings` is a record a term, not four bytes a pair.** A relation of singleton
     /// terms costs thirteen bytes a pair — eight of Arrow offset, a tag and four of entity — where
     /// `4 × pairs` charges four.
     #[test]
@@ -3809,7 +3809,7 @@ require_member_visibility = "none"
         assert!(
             !written
                 .iter()
-                .any(|f| f == "columns.arrow" || f == "postings.arrow"),
+                .any(|f| f == "columns.arrow" || f == "postings"),
             "the refusal should land before any segment is written; found {written:?}"
         );
         // And the partial prefix goes back, so a retry has the disk the first attempt took. The

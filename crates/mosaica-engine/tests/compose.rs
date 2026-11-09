@@ -62,7 +62,7 @@ fn build_fixture() -> Fixture {
     // Term 0: entities [0, 500). Term 1: entities [500, 510). Both granted.
     let per_term: Vec<Vec<u32>> = vec![(0..500).collect(), (500..510).collect()];
 
-    let postings_path = temp.path().join("postings.arrow");
+    let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &per_term, SMALL_TERM_THRESHOLD).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
 

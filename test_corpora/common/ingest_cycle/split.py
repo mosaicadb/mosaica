@@ -399,7 +399,7 @@ def shard_state(bundle: Path) -> tuple[str, list[dict]]:
     for partition in sorted(path for path in (root / "partitions").iterdir() if path.is_dir()):
         _, published = newest_publication(root, partition.name)
         for record in shard_records(published):
-            postings = shard_dir(root, partition.name, record["id"]) / "terms" / "postings.arrow"
+            postings = shard_dir(root, partition.name, record["id"]) / "terms" / "postings"
             shards.append(
                 {
                     "partition": partition.name,
