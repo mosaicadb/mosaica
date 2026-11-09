@@ -375,7 +375,15 @@ impl StepLog {
 }
 
 impl mosaica_build::BuildObserver for StepLog {
-    fn stage_end(&self, _: mosaica_build::BuildStage, _: std::time::Duration, _: u64, _: u64) {}
+    fn stage_end(
+        &self,
+        _: mosaica_build::BuildStage,
+        _: std::time::Duration,
+        _: u64,
+        _: u64,
+        _: u64,
+    ) {
+    }
 
     fn progress(&self) -> Option<&mosaica_types::progress::Tracker> {
         Some(&self.tracker)

@@ -471,24 +471,24 @@ struct BuildPlan {
 
 impl BuildPlan {
     /// A term index's allowance from the sizing, which is `None` only where no column takes the
-    /// pass and so nothing reads it: what the budget leaves of nothing, in that case.
+    /// pass and so nothing reads it: the pass's floor, in that case.
     fn term_index_allowance(
         &self,
         sized: Option<mosaica_filter_write::Allowance>,
     ) -> mosaica_filter_write::Allowance {
         sized.unwrap_or_else(|| {
-            mosaica_filter_write::Allowance::new(self.budget, 0, rayon::current_num_threads())
+            mosaica_filter_write::Allowance::new(0, 0, rayon::current_num_threads())
         })
     }
 }
 
-/// The budget when none is given: what this process could take
-/// ([`mosaica_types::process::available_memory`]), damped to leave room for the page cache and the
-/// allocator's slack; clamped so a tiny CI box still gets a workable floor.
+/// The budget when none is given: what this process plans to take
+/// ([`mosaica_types::process::memory_to_take`]), clamped so a tiny CI box still gets a workable
+/// floor.
 pub(crate) fn detect_memory_budget() -> u64 {
     const FALLBACK: u64 = 24 << 30;
-    match mosaica_types::process::available_memory() {
-        Some(bound) => ((bound as f64 * 0.8) as u64).clamp(2 << 30, 1 << 40),
+    match mosaica_types::process::memory_to_take() {
+        Some(bound) => bound.clamp(2 << 30, 1 << 40),
         None => FALLBACK,
     }
 }
@@ -554,6 +554,26 @@ fn plan_build(
         crate::residency::routes_for(args, n, numbers_bytes, &payloads, free, route, budget);
     report_column_routes(args, &routes, &tail, free);
     let (phase, peak) = tail.memory_peak();
+    // Over budget with the stages themselves within it is the term index's floor: its allowance is
+    // what the phase leaves, and at least 8 MiB a thread.
+    let floor = tail
+        .term_index_at(phase)
+        .filter(|_| peak > budget && tail.memory_outside_term_indexes(phase) <= budget);
+    if let Some(floor) = floor {
+        return Err(BuildError::Invalid(format!(
+            "this build's {} phase holds about {} MiB beside its term index, which leaves under \
+             the {} MiB a term index's pass needs, {} MiB for each of its {} thread(s), of the {} \
+             MiB memory budget. Raise --memory-budget, or run on fewer threads \
+             (RAYON_NUM_THREADS). Where the bytes are:{}",
+            phase.name(),
+            tail.memory_outside_term_indexes(phase) >> 20,
+            floor.bytes >> 20,
+            mosaica_filter_write::WORKER_BYTES_MIN >> 20,
+            floor.threads,
+            budget >> 20,
+            tail.describe_memory(phase)
+        )));
+    }
     if peak > budget {
         return Err(BuildError::Invalid(format!(
             "this build's entity-order stages need about {} MiB in the {} phase, over the {} MiB \
@@ -576,29 +596,36 @@ fn plan_build(
     // is recoverable and discloses nothing. A term index's allowance is left out of the doubling:
     // it is what the phase leaves of the budget, and a bound its pass keeps rather than a figure
     // the model estimates.
-    else if let Some((phase, held)) = crate::residency::Phase::ALL
+    let (held_phase, held) = crate::residency::Phase::ALL
         .iter()
         .map(|&phase| (phase, tail.memory_outside_term_indexes(phase)))
         .max_by_key(|&(_, bytes)| bytes)
-        .filter(|&(_, held)| held.saturating_mul(2) > budget)
-    {
+        .expect("Phase::ALL is not empty");
+    if held.saturating_mul(2) > budget {
         eprintln!(
             "warning: this build's entity-order stages need at least {} MiB in the {} phase \
              against a {} MiB budget, and that figure is a lower bound — it counts what the stages \
              hold, not the readers and allocator around them (measured at roughly half the real \
              peak). Where the bytes are:{}",
             held >> 20,
-            phase.name(),
+            held_phase.name(),
             budget >> 20,
-            tail.describe_memory(phase)
+            tail.describe_memory(held_phase)
         );
     }
 
+    // What the stages hold, and the term index's allowance beside it where that phase has one: the
+    // allowance is what the phase leaves, so the phase's total would read as the budget.
+    let allowance = tail
+        .term_index_at(held_phase)
+        .map_or(String::new(), |allowance| {
+            format!(" and a term index's {} MiB", allowance.bytes >> 20)
+        });
     eprintln!(
-        "memory: about {} MiB at the {} phase of a {} MiB budget; publication batches of at most \
-         {} member entries, a {} MiB unique index spill, {} term-image worker(s)",
-        peak >> 20,
-        phase.name(),
+        "memory: about {} MiB at the {} phase{allowance}, of a {} MiB budget; publication batches \
+         of at most {} member entries, a {} MiB unique index spill, {} term-image worker(s)",
+        held >> 20,
+        held_phase.name(),
         budget >> 20,
         tail.sizing.publication_batch,
         tail.sizing.unique_spill >> 20,
@@ -816,7 +843,7 @@ fn report_term_indexes(
                      cascade pass(es) under a fan-in of {}",
                     characters >> 20,
                     allowance.cascade_passes(runs),
-                    allowance.fan_in(1)
+                    allowance.fan_in()
                 )
             }
             None => String::new(),
@@ -1844,7 +1871,7 @@ fn build_bundle(
         (BuildStage::TextIndex, scoped_cost.text),
     ] {
         if !cost.elapsed.is_zero() {
-            timer.charge(stage, cost.elapsed, cost.rows);
+            timer.charge(stage, cost.elapsed, cost.rows, cost.passes);
         }
     }
     // Which of those columns each view's row space carries (`views.md` §5) — resolved once, here,
@@ -1890,7 +1917,7 @@ fn build_bundle(
             // still open here, and swept by the `close` below whether this stage succeeds or
             // not.
             tmp.path(),
-            args.memory_budget.unwrap_or_else(detect_memory_budget),
+            plan.budget,
         )?;
         crate::report_shapes(&plan.shape_reports);
         let derived = crate::layers::predicate_artifact_keys(
@@ -1963,7 +1990,7 @@ fn build_bundle(
     let mut filter_paths = Vec::new();
     for (k, span) in filled.iter().enumerate() {
         window_shard(&mut attributes_by_entity, &mut open_extents, span);
-        let (paths, text_index) = write_filter_postings(
+        let (paths, costs) = write_filter_postings(
             &prefix_dir,
             span.layout(),
             &args.schema,
@@ -1975,7 +2002,13 @@ fn build_bundle(
         filter_paths.extend(paths);
         // The text columns' share, charged out of the block rather than measured beside it — the
         // two interleave over one column loop, so a boundary in time cannot separate them.
-        timer.charge(BuildStage::TextIndex, text_index.elapsed, text_index.rows);
+        timer.charge(
+            BuildStage::TextIndex,
+            costs.text.elapsed,
+            costs.text.rows,
+            costs.text.passes,
+        );
+        timer.passes(costs.filter.passes);
     }
     // The columns' steps are over, and what is left of the stage is its own.
     let owed = |attribute| postings_are_owed(&args.schema, attribute);
@@ -3118,11 +3151,11 @@ fn write_scoped_columns(
     scratch: &crate::column::ColumnScratch,
     allowance: mosaica_filter_write::Allowance,
     steps: Steps<'_>,
-) -> Result<(Vec<PathBuf>, Vec<ScopedRenderColumn>, ScopedIndexCost)> {
+) -> Result<(Vec<PathBuf>, Vec<ScopedRenderColumn>, IndexCosts)> {
     let mut paths = Vec::new();
     let mut render_columns: Vec<ScopedRenderColumn> = Vec::new();
     let plans = ColumnPlans::for_allowance(allowance);
-    let mut cost = ScopedIndexCost::default();
+    let mut cost = IndexCosts::default();
     for (family_index, family) in args.scoped_attributes.iter().enumerate() {
         let attribute = &family.attribute;
         // **What `render` buys, and the one place it still does not reach.** The build's own
@@ -3192,6 +3225,7 @@ fn write_scoped_columns(
                     };
                     charge.elapsed += started.elapsed();
                     charge.rows += indexed.rows;
+                    charge.passes += indexed.passes as u64;
                     steps.begin(BuildStage::AttributeTail, &[], None);
                 }
             }
@@ -3273,14 +3307,16 @@ fn write_scoped_column(
             indexed = Some(Indexed {
                 stage: BuildStage::TextIndex,
                 rows: written.terms,
+                passes: written.passes,
             });
         }
         paths.extend(write_scoped_prose(&column_dir, values)?);
         return Ok((paths, indexed));
     }
-    let indexed = (attribute.index || scoped_postings_are_owed(attribute)).then_some(Indexed {
+    let mut indexed = (attribute.index || scoped_postings_are_owed(attribute)).then_some(Indexed {
         stage: BuildStage::FilterPostings,
         rows: values.len() as u64,
+        passes: 0,
     });
     let column_steps = match indexed {
         Some(_) => {
@@ -3306,6 +3342,9 @@ fn write_scoped_column(
         plans.keyword,
         column_steps,
     )?;
+    if let Some(indexed) = &mut indexed {
+        indexed.passes = written.passes;
+    }
     fsync_file(&values_path)?;
     paths.push(values_path);
     if let Some(dict_path) = written.dict {
@@ -3336,14 +3375,15 @@ fn write_scoped_column(
 struct Indexed {
     stage: BuildStage,
     rows: u64,
+    /// The cascade passes its term index took.
+    passes: usize,
 }
 
-/// What a group-scoped family's indexed columns cost inside the attribute tail, by the stage each
-/// is charged to.
+/// What indexed columns cost, by the stage each is charged to.
 #[derive(Default)]
-struct ScopedIndexCost {
-    filter: IndexCost,
-    text: IndexCost,
+pub(crate) struct IndexCosts {
+    pub(crate) filter: IndexCost,
+    pub(crate) text: IndexCost,
 }
 
 /// One view's column of a group-scoped `text` family, its prose as a record blob under
@@ -3617,7 +3657,7 @@ pub(crate) fn write_filter_postings(
     spilled: &[crate::extents::OpenExtents],
     allowance: mosaica_filter_write::Allowance,
     steps: Steps<'_>,
-) -> Result<(Vec<PathBuf>, IndexCost)> {
+) -> Result<(Vec<PathBuf>, IndexCosts)> {
     write_filter_postings_banded(
         prefix_dir,
         layout,
@@ -3660,6 +3700,8 @@ impl ColumnPlans {
 pub(crate) struct IndexCost {
     pub(crate) elapsed: std::time::Duration,
     pub(crate) rows: u64,
+    /// The cascade passes the columns' term indexes took, summed.
+    pub(crate) passes: u64,
 }
 
 /// Entity ids the postings emit holds in flight — the shared emit's own constant, so the build and
@@ -3676,9 +3718,9 @@ fn write_filter_postings_banded(
     spilled: &[crate::extents::OpenExtents],
     plans: ColumnPlans,
     steps: Steps<'_>,
-) -> Result<(Vec<PathBuf>, IndexCost)> {
+) -> Result<(Vec<PathBuf>, IndexCosts)> {
     let mut paths = Vec::new();
-    let mut text = IndexCost::default();
+    let mut costs = IndexCosts::default();
     let owed = schema
         .attributes
         .iter()
@@ -3721,8 +3763,9 @@ fn write_filter_postings_banded(
                 plans.text,
                 steps,
             )?;
-            text.elapsed += started.elapsed();
-            text.rows += written.terms;
+            costs.text.elapsed += started.elapsed();
+            costs.text.rows += written.terms;
+            costs.text.passes += written.passes as u64;
             paths.extend(written.paths);
             continue;
         }
@@ -3752,6 +3795,7 @@ fn write_filter_postings_banded(
             plans.keyword,
             steps,
         )?;
+        costs.filter.passes += written.passes as u64;
         fsync_file(&values_path)?;
         paths.push(values_path);
         // The dictionary is not an accelerator and the ordering above does not apply to it: a
@@ -3783,7 +3827,7 @@ fn write_filter_postings_banded(
         fsync_file(&path)?;
         paths.push(path);
     }
-    Ok((paths, text))
+    Ok((paths, costs))
 }
 
 /// Write the record blob — `attrs/record/{blocks.bin,hasrow.roaring,directory.arrow}` — for every
@@ -4205,6 +4249,8 @@ struct WrittenColumn {
     presence: bool,
     /// The layer's sorted dictionary, for the one family that has one.
     dict: Option<PathBuf>,
+    /// The cascade passes the dictionary's merge took.
+    passes: usize,
 }
 
 /// Write one column's values in entity order, its presence bitmap where presence is partial, and
@@ -4244,6 +4290,7 @@ fn write_column_values(
     let presence_path = &column_dir.join(mosaica_filter::PRESENCE_FILE);
     let mut presence = Presence::default();
     let mut dict = None;
+    let mut passes = 0;
     // The entities the pass over the values has reached, all of them once it ends.
     let mut reached = steps.batched();
 
@@ -4272,7 +4319,7 @@ fn write_column_values(
             Some(extents) => KeywordValues::Extents(extents),
             None => KeywordValues::Column(values),
         };
-        dict = Some(write_keyword_column(
+        let (dict_path, taken) = write_keyword_column(
             column_dir,
             values_path,
             attribute,
@@ -4281,7 +4328,9 @@ fn write_column_values(
             &mut reached,
             &mut writer,
             keyword_plan,
-        )?);
+        )?;
+        dict = Some(dict_path);
+        passes = taken;
     } else if attribute.vocabulary.is_some() {
         let mut held: Vec<u32> = Vec::new();
         for (entity, value) in values.iter().enumerate() {
@@ -4328,6 +4377,7 @@ fn write_column_values(
     Ok(WrittenColumn {
         presence: presence.is_some(),
         dict,
+        passes,
     })
 }
 
@@ -4493,13 +4543,15 @@ impl KeywordValues<'_> {
 ///
 /// **The same allowance the text pass takes** ([`crate::residency::Sizing::term_index`]), because
 /// both run in the same phase, one column at a time. The pass is one walk of the column in row
-/// order, so one chunk is live and the allowance is that chunk; its cascade and merge then read the
-/// runs under the same allowance.
+/// order, so one chunk is live and the allowance is that chunk, up to what its `u32` offsets
+/// address ([`mosaica_filter_write::Allowance::chunk`]); its cascade and merge then read the runs
+/// under the same allowance.
 ///
 /// **A hashed chunk is bounded by its keys, not its rows**: its rows leave as ids the moment they
 /// are read, so a column with few keys is one chunk at any row count. A sorted chunk holds its rows
-/// until it sorts them, so its bound is rows. Where the boundaries fall changes no byte of the
-/// output ([`tests::chunking_the_keyword_column_does_not_change_its_bytes`]).
+/// until it sorts them, so its bound is rows. Either closes when what its keys or rows cost and its
+/// characters together reach the chunk. Where the boundaries fall changes no byte of the output
+/// ([`tests::chunking_the_keyword_column_does_not_change_its_bytes`]).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct KeywordDictPlan {
     chunk_rows: usize,
@@ -4526,7 +4578,7 @@ const KEYWORD_MIN_CHUNK_BYTES: usize = 1 << 20;
 impl KeywordDictPlan {
     /// The plan an allowance derives.
     pub(crate) fn for_allowance(allowance: mosaica_filter_write::Allowance) -> KeywordDictPlan {
-        let bytes = usize::try_from(allowance.bytes).unwrap_or(usize::MAX);
+        let bytes = allowance.chunk(1);
         KeywordDictPlan {
             chunk_rows: (bytes / KEYWORD_ROW_BYTES).max(KEYWORD_MIN_CHUNK_ROWS),
             chunk_keys: (bytes / KEYWORD_KEY_BYTES).max(KEYWORD_MIN_CHUNK_ROWS),
@@ -4585,7 +4637,7 @@ const KEYWORD_REMAP_PARTITION: &str = "keyword-remap";
 const KEYWORD_REMAP_RECORD: usize = 8;
 
 /// Keys, and records, per batch the merge hands to the dictionary's and the remap's writers, at
-/// [`KeywordDictPlan::for_budget`].
+/// [`KeywordDictPlan::for_allowance`].
 const KEYWORD_MERGE_BATCH: usize = 1 << 14;
 
 /// Batches in flight to each writer.
@@ -4869,7 +4921,8 @@ impl<'a> KeywordChunks<'a> {
                 };
                 self.ids.push(id)?;
                 if self.table.len() >= self.plan.chunk_keys
-                    || self.text.len() >= self.plan.chunk_bytes
+                    || self.table.len() * KEYWORD_KEY_BYTES + self.text.len()
+                        >= self.plan.chunk_bytes
                 {
                     self.close(None)?;
                 } else if self.plan.forced.is_none() && self.rule.row(new, self.plan.window) {
@@ -4893,7 +4946,8 @@ impl<'a> KeywordChunks<'a> {
                 self.pairs
                     .push(mosaica_filter_write::KeyRow::new(key.as_bytes(), at, row));
                 if self.pairs.len() >= self.plan.chunk_rows
-                    || self.text.len() >= self.plan.chunk_bytes
+                    || self.pairs.len() * KEYWORD_ROW_BYTES + self.text.len()
+                        >= self.plan.chunk_bytes
                 {
                     self.close(None)?;
                 }
@@ -5006,7 +5060,7 @@ impl<'a> KeywordChunks<'a> {
 }
 
 /// One indexed keyword column's dictionary and its ordinal values file. Returns the dictionary's
-/// path.
+/// path and the cascade passes its merge took.
 ///
 /// # The shape: chunk, merge the keys, translate the ids
 ///
@@ -5051,7 +5105,7 @@ fn write_keyword_column(
     reached: &mut Batched<'_>,
     writer: &mut ValueColumnWriter,
     plan: KeywordDictPlan,
-) -> Result<PathBuf> {
+) -> Result<(PathBuf, usize)> {
     let refuse =
         |detail: String| BuildError::Invalid(format!("attribute '{}': {detail}", attribute.name));
 
@@ -5073,7 +5127,7 @@ fn write_keyword_column(
     let keys_held: u64 = chunks.iter().map(|chunk| chunk.keys as u64).sum();
 
     // ---- 2. the cascade --------------------------------------------------------------------------
-    let (runs, _) = cascade_sorted_runs(
+    let (runs, passes) = cascade_sorted_runs(
         column_dir,
         "keyword",
         RunPayload::Rows,
@@ -5323,7 +5377,7 @@ fn write_keyword_column(
     for path in [&ids.path, &perms.path] {
         std::fs::remove_file(path).map_err(|e| BuildError::io(path, e))?;
     }
-    Ok(dict_path)
+    Ok((dict_path, passes))
 }
 
 /// Values pushed to the column writer at a time. The writer spools each chunk as it arrives, so
@@ -5429,8 +5483,8 @@ pub(crate) struct TextIndexPlan {
 
 impl TextIndexPlan {
     /// The plan an allowance derives ([`crate::residency::Sizing::term_index`]): each of its
-    /// threads' accumulators takes an equal share of it, and the merge the whole of it once they
-    /// are gone.
+    /// threads' accumulators takes an equal share of it, up to what a chunk's offsets address, and
+    /// the merge the whole of it once they are gone.
     pub(crate) fn for_allowance(allowance: mosaica_filter_write::Allowance) -> TextIndexPlan {
         let threads = allowance.threads;
         // **Eight chunks a thread, and the number is measured rather than chosen.** A
@@ -5567,10 +5621,10 @@ impl TextValues<'_> {
 ///    sorted. A worker's residency is the budget whatever the documents are, and the run count grows
 ///    instead of the peak.
 /// 3. **Cascade**, where there are more runs than the allowance's fan-in, which is what its read
-///    buffers pay for under the descriptors a merge may hold ([`cascade_sorted_runs`]). Groups of
-///    runs are merged into intermediate runs, several at once, until what is left fits in one
-///    merge. The build prints the passes it forecasts before it starts and the passes each column
-///    took as it finishes.
+///    buffers pay for under the descriptors a merge may hold ([`cascade_sorted_runs`]). As many
+///    leading runs as bring the count to the fan-in are merged in groups into intermediate runs,
+///    several groups at once. The build prints the passes it forecasts before it starts, and the
+///    passes taken among its stage figures.
 /// 4. **Merge.** [`mosaica_filter_write::merge_text_runs`] merges the runs k-way on the term, and
 ///    each term's entities by comparing the runs' heads, because the windows do not partition
 ///    entity space.
@@ -5713,7 +5767,7 @@ fn write_text_index(
     eprintln!(
         "text index '{}': {runs} run(s), {passes} cascade pass(es) under a fan-in of {}",
         attribute.name,
-        plan.allowance.fan_in(1)
+        plan.allowance.fan_in()
     );
     let terms = writer.finish().map_err(failed)?;
     mosaica_filter::write_presence(&files.presence, &values.present()?)
@@ -5725,6 +5779,7 @@ fn write_text_index(
     Ok(WrittenTextIndex {
         paths: files.paths().map(Path::to_path_buf).into(),
         terms,
+        passes,
     })
 }
 
@@ -5765,6 +5820,8 @@ fn index_text_window(
 struct WrittenTextIndex {
     paths: Vec<PathBuf>,
     terms: u64,
+    /// The cascade passes its merge took.
+    passes: usize,
 }
 
 /// Does this column owe a postings file?
@@ -6214,6 +6271,10 @@ mod tests {
             bytes: 32 * mosaica_filter_write::RUN_BUFFER_MIN as u64,
             threads: 4,
         };
+
+    /// An accumulator's budget a little above what a spill holds beside it and its first pool
+    /// page, so that it spills a run every few documents of the text fixture.
+    const SMALL_WORKER: usize = mosaica_filter_write::SPILL_BUF_BYTES + (300 << 10);
 
     /// **The extent route is decided by the order a column's readers want, not by its type.**
     ///
@@ -6788,11 +6849,12 @@ mod tests {
             TextIndexPlan::explicit(128, 1 << 30, 1 << 22),
             TextIndexPlan::explicit(999, 1 << 30, 1 << 22),
             // The byte budget: one small enough that every document spills, and one a little
-            // above the accumulator's first pool page, so that each worker spills several runs of
-            // several documents, its terms gathered across the windows it took.
+            // above a spill's writer buffer and the accumulator's first pool page, so that each
+            // worker spills several runs of several documents, its terms gathered across the
+            // windows it took.
             TextIndexPlan::explicit(4_096, 1, 1 << 22),
-            TextIndexPlan::explicit(4_096, 300 << 10, 1 << 22),
-            TextIndexPlan::explicit(7, 300 << 10, 1 << 22),
+            TextIndexPlan::explicit(4_096, SMALL_WORKER, 1 << 22),
+            TextIndexPlan::explicit(7, SMALL_WORKER, 1 << 22),
             // The merge's other encoder: a cap of 1 sends every term above one posting through
             // the Roaring arm.
             TextIndexPlan::explicit(4_096, 1 << 30, 1),
@@ -7010,8 +7072,8 @@ mod tests {
         keys
     }
 
-    /// The chunk sizes the keyword tests run under. `1` spills a run per row and cascades — 257
-    /// runs over the test plans' fan-in of 32 — and `4_096` is one chunk for the whole column; the
+    /// The chunk sizes the keyword tests run under. `1` spills a run per row and cascades, 257
+    /// runs over the test plans' fan-in of 32, and `4_096` is one chunk for the whole column; the
     /// rest divide the corpus, and do not, and align to the 64-entity words presence is stored in,
     /// and do not.
     const KEYWORD_CHUNKS: [usize; 7] = [1, 2, 3, 7, 64, 300, 4_096];

@@ -192,10 +192,19 @@ pub fn tracker() -> Tracker {
 /// Notified as each stage completes.
 ///
 /// `rows` is whatever the stage counted — items, pairs, terms — and is stage-specific rather than
-/// uniform, because a uniform "rows" would be a lie for half of them. `peak_rss_kib` is sampled
-/// at stage end, which is enough to see which stage owns the build's high-water mark.
+/// uniform, because a uniform "rows" would be a lie for half of them. `passes` is the cascade
+/// passes the stage's term indexes took over their runs, summed, and zero for a stage that merges
+/// none. `peak_rss_kib` is sampled at stage end, which is enough to see which stage owns the
+/// build's high-water mark.
 pub trait BuildObserver: Send + Sync {
-    fn stage_end(&self, stage: BuildStage, elapsed: Duration, rows: u64, peak_rss_kib: u64);
+    fn stage_end(
+        &self,
+        stage: BuildStage,
+        elapsed: Duration,
+        rows: u64,
+        passes: u64,
+        peak_rss_kib: u64,
+    );
 
     /// The tracker the build opens a step in as each stage begins and counts that step's work
     /// into, or `None` for an observer of stage ends alone.
@@ -217,7 +226,7 @@ pub struct NoopObserver;
 
 impl BuildObserver for NoopObserver {
     #[inline(always)]
-    fn stage_end(&self, _: BuildStage, _: Duration, _: u64, _: u64) {}
+    fn stage_end(&self, _: BuildStage, _: Duration, _: u64, _: u64, _: u64) {}
 }
 
 /// Peak RSS in KiB from `/proc/self/status`'s `VmHWM`, or 0 where unavailable.
@@ -244,6 +253,8 @@ pub(crate) struct StageTimer<'a> {
     steps: Steps<'a>,
     start: std::time::Instant,
     open: Option<BuildStage>,
+    /// The cascade passes counted into the open stage.
+    passes: u64,
 }
 
 impl<'a> StageTimer<'a> {
@@ -253,6 +264,7 @@ impl<'a> StageTimer<'a> {
             steps: Steps::of(observer),
             start: std::time::Instant::now(),
             open: None,
+            passes: 0,
         }
     }
 
@@ -275,6 +287,11 @@ impl<'a> StageTimer<'a> {
         self.steps.open(stage, parts, counted, false);
     }
 
+    /// Count `passes` cascade passes into the open stage's figures.
+    pub(crate) fn passes(&mut self, passes: u64) {
+        self.passes += passes;
+    }
+
     /// Close the open stage, `stage`. `rows` is its count.
     ///
     /// **The allocator's free pages go back to the kernel here**, which is what makes a stage
@@ -284,8 +301,9 @@ impl<'a> StageTimer<'a> {
         debug_assert_eq!(self.open.take(), Some(stage), "{stage:?} ended unopened");
         crate::trim_heap();
         let now = std::time::Instant::now();
+        let passes = std::mem::take(&mut self.passes);
         self.observer
-            .stage_end(stage, now - self.start, rows, peak_rss_kib());
+            .stage_end(stage, now - self.start, rows, passes, peak_rss_kib());
         if self.steps.live.is_some() {
             self.observer.step_ended();
         }
@@ -300,9 +318,9 @@ impl<'a> StageTimer<'a> {
     /// visits a text column and a category column in whatever order the schema declares them, so
     /// their costs cannot be separated by a boundary in time. The pass opens the charged stage's
     /// steps itself ([`Steps::begin`]).
-    pub(crate) fn charge(&mut self, stage: BuildStage, elapsed: Duration, rows: u64) {
+    pub(crate) fn charge(&mut self, stage: BuildStage, elapsed: Duration, rows: u64, passes: u64) {
         self.observer
-            .stage_end(stage, elapsed, rows, peak_rss_kib());
+            .stage_end(stage, elapsed, rows, passes, peak_rss_kib());
         self.start += elapsed;
     }
 }
@@ -405,6 +423,9 @@ pub struct StageRecord {
     pub wall_s: f64,
     /// Whatever the stage counted — items, pairs, terms. Stage-specific, never uniform.
     pub rows: u64,
+    /// The cascade passes the stage's term indexes took over their runs, summed.
+    #[serde(default)]
+    pub cascade_passes: u64,
     /// The **process's** high-water mark at the moment the stage ended, not the stage's own: it
     /// only rises, so a stage that adds nothing repeats the last figure. What it locates is the
     /// stage the peak arrived in.
@@ -444,7 +465,14 @@ impl JsonStageTimings {
 }
 
 impl BuildObserver for JsonStageTimings {
-    fn stage_end(&self, stage: BuildStage, elapsed: Duration, rows: u64, peak_rss_kib: u64) {
+    fn stage_end(
+        &self,
+        stage: BuildStage,
+        elapsed: Duration,
+        rows: u64,
+        passes: u64,
+        peak_rss_kib: u64,
+    ) {
         let ended_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
@@ -457,6 +485,7 @@ impl BuildObserver for JsonStageTimings {
                 stage: stage.name().to_string(),
                 wall_s,
                 rows,
+                cascade_passes: passes,
                 peak_rss_kib,
                 started_at: ended_at - wall_s,
                 ended_at,
@@ -471,22 +500,35 @@ mod tests {
     #[test]
     fn a_json_sink_records_one_row_per_report_in_order() {
         let sink = JsonStageTimings::new();
-        sink.stage_end(BuildStage::Dictionary, Duration::from_millis(1500), 7, 1024);
-        sink.stage_end(BuildStage::Layers, Duration::from_millis(500), 9, 2048);
+        sink.stage_end(
+            BuildStage::Dictionary,
+            Duration::from_millis(1500),
+            7,
+            0,
+            1024,
+        );
+        sink.stage_end(
+            BuildStage::TextIndex,
+            Duration::from_millis(500),
+            9,
+            2,
+            2048,
+        );
         let records = sink.records();
         assert_eq!(
             records.iter().map(|r| r.stage.as_str()).collect::<Vec<_>>(),
-            ["dictionary", "layers"]
+            ["dictionary", "text_index"]
         );
         assert!((records[0].wall_s - 1.5).abs() < 1e-9);
         assert_eq!(records[0].rows, 7);
+        assert_eq!(records[1].cascade_passes, 2);
         assert_eq!(records[1].peak_rss_kib, 2048);
     }
 
     #[test]
     fn a_stages_start_is_its_end_less_its_wall_time() {
         let sink = JsonStageTimings::new();
-        sink.stage_end(BuildStage::TextIndex, Duration::from_secs(3), 0, 0);
+        sink.stage_end(BuildStage::TextIndex, Duration::from_secs(3), 0, 0, 0);
         let r = &sink.records()[0];
         assert!((r.ended_at - r.started_at - 3.0).abs() < 1e-6);
         assert!(
@@ -500,7 +542,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("stages.json");
         let sink = JsonStageTimings::new();
-        sink.stage_end(BuildStage::Manifests, Duration::from_millis(250), 3, 16);
+        sink.stage_end(BuildStage::Manifests, Duration::from_millis(250), 3, 0, 16);
         sink.write(&path).expect("write");
         let back: Vec<StageRecord> =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");

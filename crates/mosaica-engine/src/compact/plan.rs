@@ -128,8 +128,8 @@ impl NoFold {
                 "the shard holds no segment to compact, so there is nothing to do"
             }
             NoFold::InsufficientMemory { .. } => {
-                "the compaction needs more memory than the host has available (`need_bytes` \
-                 against `had_bytes`); free memory on the host and ask again"
+                "the compaction needs more memory than its share of what the host has available \
+                 (`need_bytes` against `had_bytes`); free memory on the host and ask again"
             }
             NoFold::InsufficientDisc { .. } => {
                 "the compaction needs free disc space of one and a half times the shard's files \

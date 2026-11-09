@@ -1113,48 +1113,19 @@ fn ingest_rows(engine: &Engine, round: usize, batch: usize) {
 /// a rate that moves when the device does.
 const P3_RATES: [Option<u64>; 6] = [None, Some(2048), Some(1024), Some(512), Some(128), Some(32)];
 
-/// How much page cache this process can actually hold, and where the number came from.
+/// How much page cache this process can actually hold.
 ///
 /// **P3's whole meaning is this number against the bundle's size**, so the probe reports it rather
 /// than leaving a reader to reconstruct it from a host they do not have. With a bundle smaller than
 /// the cache nothing is ever evicted, the streaming read costs only bandwidth, and the resulting
 /// ratios understate the fold by the larger of its two terms.
 ///
-/// Two sources, and the smaller wins: the process's cgroup v2 `memory.max` — which charges page
+/// It is what the process could take ([`mosaica_types::process::available_memory`]): the smaller
+/// of `MemAvailable` and what is left under the process's cgroup v2 limit, which charges page
 /// cache and reclaims against it, so a `systemd-run --scope -p MemoryMax=…` is the cheap way to
-/// reach the eviction regime without a bundle larger than the machine — and `MemAvailable`, which
-/// is the bound when no cgroup limit is set.
-fn page_cache_bound() -> (u64, &'static str) {
-    let available = std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|meminfo| {
-            meminfo
-                .lines()
-                .find(|line| line.starts_with("MemAvailable:"))
-                .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
-                .map(|kib| kib * 1024)
-        })
-        .unwrap_or(u64::MAX);
-
-    let cgroup_max = std::fs::read_to_string("/proc/self/cgroup")
-        .ok()
-        .and_then(|cgroup| {
-            let path = cgroup
-                .lines()
-                .next()?
-                .split(':')
-                .nth(2)?
-                .trim_start_matches('/');
-            std::fs::read_to_string(format!("/sys/fs/cgroup/{path}/memory.max")).ok()
-        })
-        .and_then(|max| max.trim().parse::<u64>().ok())
-        .unwrap_or(u64::MAX);
-
-    if cgroup_max < available {
-        (cgroup_max, "cgroup memory.max")
-    } else {
-        (available, "MemAvailable")
-    }
+/// reach the eviction regime without a bundle larger than the machine.
+fn page_cache_bound() -> u64 {
+    mosaica_types::process::available_memory().unwrap_or(u64::MAX)
 }
 
 /// Read every file under `root`, once, at `rate_mib_s` (or as fast as the device allows when
@@ -1289,10 +1260,10 @@ fn a_streaming_read_of_the_whole_bundle_against_a_live_viewport() {
     let on_disc = bundle_bytes(&root);
     let segments = engine.generation().bundle.only_shard().views["s0"].segments.len();
     // **The regime, stated before the figures, because the figures mean nothing without it.**
-    let (cache, source) = page_cache_bound();
+    let cache = page_cache_bound();
     let resident = on_disc <= cache;
     eprintln!(
-        "  bundle {:.2} GiB across {segments} segments | page cache {:.2} GiB ({source}) \
+        "  bundle {:.2} GiB across {segments} segments | page cache {:.2} GiB \
          ⇒ {}",
         on_disc as f64 / (1u64 << 30) as f64,
         cache as f64 / (1u64 << 30) as f64,
@@ -2107,9 +2078,9 @@ fn a_live_viewport_against_a_real_fold_with_and_without_the_advice() {
 /// 4.7× at one configuration across four runs — larger than anything between the arms.
 fn p4_across_arms() {
     let exe = std::env::current_exe().expect("the test binary knows its own path");
-    let (cache, source) = page_cache_bound();
+    let cache = page_cache_bound();
     eprintln!(
-        "P4: page cache bound {:.2} GiB ({source}) — the bundle must exceed it for these ratios \
+        "P4: page cache bound {:.2} GiB — the bundle must exceed it for these ratios \
          to be about eviction",
         cache as f64 / (1u64 << 30) as f64
     );
@@ -2200,9 +2171,9 @@ fn p4_one_arm(advice: bool) {
 
     let full = engine.authorise(&full_coverage_credential()).unwrap();
     let on_disc = bundle_bytes(&root);
-    let (cache, source) = page_cache_bound();
+    let cache = page_cache_bound();
     eprintln!(
-        "  bundle {:.2} GiB | page cache {:.2} GiB ({source}) ⇒ {}",
+        "  bundle {:.2} GiB | page cache {:.2} GiB ⇒ {}",
         on_disc as f64 / (1u64 << 30) as f64,
         cache as f64 / (1u64 << 30) as f64,
         if on_disc <= cache {

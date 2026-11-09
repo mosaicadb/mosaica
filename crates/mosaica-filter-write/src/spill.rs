@@ -918,12 +918,17 @@ pub const RUN_BUFFER_MIN: usize = 256 << 10;
 /// without spilling every few documents.
 pub const WORKER_BYTES_MIN: usize = 8 << 20;
 
+/// The most one chunk of a pass holds in memory, an accumulator's or a keyword chunk's: 2 GiB.
+/// Their keys, chains and rows are addressed by `u32` offsets and counts, and half of what those
+/// address leaves room for a chunk to pass its bound by one document before it spills.
+pub const CHUNK_BYTES_MAX: usize = 1 << 31;
+
 /// What one term index's pass may hold, and on how many threads it runs.
 ///
 /// **One rule, for the build and the service.** [`Allowance::new`] takes what is to be had (a
-/// build's `--memory-budget`, or the memory a server has available) less what the rest of the
-/// pass's stage holds beside it. Everything the pass holds is charged against the one figure: its
-/// accumulators while it tokenises, a share each ([`Self::per_worker`]), and after them the read
+/// build's `--memory-budget`, or a server's share of the memory it may take) less what the rest of
+/// the pass's stage holds beside it. Everything the pass holds is charged against the one figure:
+/// its chunks while it reads the column, a share each ([`Self::chunk`]), and after them the read
 /// buffers of the merge and of any cascade pass before it, and those passes' writers. So a stated
 /// budget is not exceeded by a pass that grows to fill it.
 ///
@@ -941,30 +946,40 @@ impl Allowance {
     /// rest of its stage holds `resident` of them.
     pub fn new(budget: u64, resident: u64, threads: usize) -> Allowance {
         let threads = threads.max(1);
-        let least = threads as u64 * WORKER_BYTES_MIN as u64;
         Allowance {
-            bytes: budget.saturating_sub(resident).max(least),
+            bytes: budget.saturating_sub(resident).max(Self::floor(threads)),
             threads,
         }
     }
 
-    /// What each of the pass's accumulators may allocate before it spills.
-    pub fn per_worker(&self) -> usize {
-        usize::try_from(self.bytes / self.threads.max(1) as u64).unwrap_or(usize::MAX)
+    /// The least a pass on `threads` threads is given: [`WORKER_BYTES_MIN`] each.
+    pub fn floor(threads: usize) -> u64 {
+        threads.max(1) as u64 * WORKER_BYTES_MIN as u64
     }
 
-    /// **The fan-in: the most runs one merge level opens**, with `ranges` merges in flight at once,
-    /// F = M / (W × B) with each cursor at [`RUN_BUFFER_MIN`]. Held under [`merge_descriptors`],
-    /// since every cursor on one run shares its descriptor and the runs are what is counted, and
-    /// three at least, so that a cascade pass reduces two runs into one with its writer beside
-    /// them.
+    /// What each of `chunks` held at once may allocate before it spills: an equal share, and at
+    /// most [`CHUNK_BYTES_MAX`].
+    pub fn chunk(&self, chunks: usize) -> usize {
+        usize::try_from(self.bytes / chunks.max(1) as u64)
+            .unwrap_or(usize::MAX)
+            .min(CHUNK_BYTES_MAX)
+    }
+
+    /// What each of the pass's accumulators may allocate before it spills, one a thread.
+    pub fn per_worker(&self) -> usize {
+        self.chunk(self.threads)
+    }
+
+    /// **The fan-in: the most runs one merge opens**, F = M / B with each cursor at
+    /// [`RUN_BUFFER_MIN`]. Held under [`merge_descriptors`], since every cursor on one run shares
+    /// its descriptor and the runs are what is counted, and three at least, so that a cascade pass
+    /// reduces two runs into one with its writer beside them.
     ///
     /// One level over R runs fits while R is at most F. R is the run bytes over a run's size, and a
     /// run's size follows the allowance over the threads, so one level holds a corpus whose run
     /// bytes grow as the square of the allowance. Above that the cascade takes a pass.
-    pub fn fan_in(&self, ranges: usize) -> usize {
-        let by_memory = self.bytes / (ranges.max(1) as u64 * RUN_BUFFER_MIN as u64);
-        usize::try_from(by_memory)
+    pub fn fan_in(&self) -> usize {
+        usize::try_from(self.bytes / RUN_BUFFER_MIN as u64)
             .unwrap_or(usize::MAX)
             .min(merge_descriptors())
             .max(3)
@@ -980,10 +995,10 @@ impl Allowance {
 
     /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance.
     pub fn cascade_passes(&self, mut runs: usize) -> usize {
-        let fan_in = self.fan_in(1);
         let mut passes = 0;
-        while runs > fan_in {
-            runs = runs.div_ceil(cascade_group(runs, fan_in));
+        while runs > self.fan_in() {
+            let pass = CascadePass::of(runs, self.fan_in(), self.threads);
+            runs -= pass.taken - pass.groups;
             passes += 1;
         }
         passes
@@ -998,11 +1013,54 @@ pub fn merge_descriptors() -> usize {
     usize::try_from(mosaica_types::process::descriptor_limit() / 2).unwrap_or(usize::MAX)
 }
 
-/// The runs one cascade group merges where `runs` are left over a fan-in of `fan_in`: the fewest
-/// that bring the pass's output to the fan-in, so the next level is the final merge, and at most
-/// one less than the fan-in, for the group's writer.
-fn cascade_group(runs: usize, fan_in: usize) -> usize {
-    runs.div_ceil(fan_in).clamp(2, fan_in - 1)
+/// What one cascade pass merges: the leading `taken` runs, in `groups` groups of as near one width
+/// as they divide into, each group into one run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CascadePass {
+    taken: usize,
+    groups: usize,
+}
+
+impl CascadePass {
+    /// **The fewest leading runs that bring `runs` to `fan_in`**, at a width that lets `threads`
+    /// groups be in flight at once. Merging g runs into one takes g − 1 off the count, so k groups
+    /// over the excess E = R − F take E + k runs. The groups are at least `threads`, where the
+    /// excess allows, so that they run at once; then the width that fits `threads` groups and
+    /// their writers in the fan-in; then the widest a group can be, F − 1, which serves one group
+    /// at a time. Where even that width cannot reach the fan-in in one pass, every run is merged in
+    /// groups of F − 1, and the next pass takes what is left.
+    fn of(runs: usize, fan_in: usize, threads: usize) -> CascadePass {
+        let excess = runs - fan_in;
+        let at = |width: usize| {
+            let groups = excess.div_ceil(width - 1).max(threads.min(excess));
+            (excess + groups <= runs).then_some(CascadePass {
+                taken: excess + groups,
+                groups,
+            })
+        };
+        let parallel = (fan_in / threads.max(1))
+            .saturating_sub(1)
+            .clamp(2, fan_in - 1);
+        at(parallel)
+            .or_else(|| at(fan_in - 1))
+            .unwrap_or(CascadePass {
+                taken: runs,
+                groups: runs.div_ceil(fan_in - 1),
+            })
+    }
+
+    /// The groups' runs, in order, the first `taken % groups` one wider than the rest.
+    fn split<T>(self, runs: &[T]) -> Vec<&[T]> {
+        let (width, wider) = (self.taken / self.groups, self.taken % self.groups);
+        let mut groups = Vec::with_capacity(self.groups);
+        let mut at = 0;
+        for group in 0..self.groups {
+            let end = at + width + usize::from(group < wider);
+            groups.push(&runs[at..end]);
+            at = end;
+        }
+        groups
+    }
 }
 
 /// Reduce `receipts` to at most the allowance's fan-in, deleting each pass's inputs as it goes, and
@@ -1010,15 +1068,16 @@ fn cascade_group(runs: usize, fan_in: usize) -> usize {
 /// families cascading in one directory cannot collide. On an error the cascade removes every file
 /// it wrote, and leaves the caller's runs to the caller.
 ///
-/// **A pass merges groups of runs into one intermediate run each, several groups at once.** Each
-/// group is as small as brings the pass's output under the fan-in ([`cascade_group`]), and as many
-/// groups run at once as their cursors' and writers' buffers fit in the allowance, up to its
-/// threads. So the groups in flight hold no more than one merge level would, and a corpus whose
-/// runs are under the square of the fan-in takes one pass. An intermediate run is written by the
+/// **A pass merges only as many leading runs as bring the count to the fan-in**, in groups of one
+/// run each, several groups at once ([`CascadePass::of`]). As many groups run at once as their
+/// cursors' and writers' buffers fit in the allowance, up to its threads, so the groups in flight
+/// hold no more than one merge level would. The runs past the groups are left as they are, so a
+/// pass rewrites about the excess over the fan-in rather than every run, and a corpus whose runs
+/// are under about the square of the fan-in takes one pass. An intermediate run is written by the
 /// same writer as an accumulator's, so the cascade adds a pass and not a format.
 ///
-/// Groups are taken in order and each group merges in order, so the entity ordering the final
-/// merge relies on survives every pass.
+/// Each group's run takes the place of its runs, and each group merges in order, so the entity
+/// ordering the final merge relies on survives every pass.
 pub fn cascade_sorted_runs(
     column_dir: &Path,
     family: &str,
@@ -1026,14 +1085,17 @@ pub fn cascade_sorted_runs(
     mut receipts: Vec<SpillReceipt>,
     allowance: Allowance,
 ) -> io::Result<(Vec<SpillReceipt>, usize)> {
-    let fan_in = allowance.fan_in(1);
+    let fan_in = allowance.fan_in();
+    let mut written: Vec<PathBuf> = Vec::new();
     let mut pass = 0usize;
     while receipts.len() > fan_in {
-        let group = cascade_group(receipts.len(), fan_in);
-        let in_flight = (fan_in / (group + 1)).clamp(1, allowance.threads.max(1));
-        let buffer = allowance.buffer(in_flight * (group + 1));
+        let plan = CascadePass::of(receipts.len(), fan_in, allowance.threads);
+        let widest = plan.taken.div_ceil(plan.groups);
+        let in_flight = (fan_in / (widest + 1)).clamp(1, allowance.threads.max(1));
+        let buffer = allowance.buffer(in_flight * (widest + 1));
         let path =
             |index: usize| column_dir.join(format!("{family}-merge-{pass:02}-{index:05}.spill"));
+        written.extend((0..plan.groups).map(path));
         // Deleted per group rather than per pass: a corpus that reaches the cascade at all is one
         // whose runs are large, and holding a whole pass's inputs beside a whole pass's outputs
         // would double the spill's peak on disk.
@@ -1041,7 +1103,7 @@ pub fn cascade_sorted_runs(
             merge_group(runs, &path(index), payload, buffer)
                 .and_then(|run| remove_runs(runs).map(|()| run))
         };
-        let groups: Vec<&[SpillReceipt]> = receipts.chunks(group).collect();
+        let groups = plan.split(&receipts[..plan.taken]);
         let merged: io::Result<Vec<SpillReceipt>> = match in_flight {
             1 => groups.iter().copied().enumerate().map(merge).collect(),
             _ => rayon::ThreadPoolBuilder::new()
@@ -1054,13 +1116,13 @@ pub fn cascade_sorted_runs(
                 }),
         };
         match merged {
-            Ok(merged) => receipts = merged,
+            Ok(mut merged) => {
+                merged.extend(receipts.drain(plan.taken..));
+                receipts = merged;
+            }
             Err(e) => {
-                for index in 0..groups.len() {
-                    let _ = std::fs::remove_file(path(index));
-                }
-                if pass > 0 {
-                    let _ = remove_runs(&receipts);
+                for path in &written {
+                    let _ = std::fs::remove_file(path);
                 }
                 return Err(e);
             }
@@ -1336,8 +1398,8 @@ mod tests {
     }
 
     /// **The allowance is what the budget leaves**, and never less than the pass runs in. Its
-    /// fan-in is what it pays for at the smallest buffer, divided among the ranges in flight, and
-    /// each cursor's buffer is its share, between the smallest and the largest.
+    /// fan-in is what it pays for at the smallest buffer, and each cursor's buffer is its share,
+    /// between the smallest and the largest.
     #[test]
     fn the_allowance_is_what_the_budget_leaves_and_pays_for_the_fan_in() {
         assert_eq!(Allowance::new(8 << 30, 1 << 30, 4).bytes, 7 << 30);
@@ -1349,11 +1411,57 @@ mod tests {
         assert_eq!(floor.bytes, 4 * WORKER_BYTES_MIN as u64);
 
         let allowance = Allowance::new(64 * RUN_BUFFER_MIN as u64, 0, 1);
-        assert_eq!(allowance.fan_in(1), 64.min(merge_descriptors()));
-        assert_eq!(allowance.fan_in(4), 16);
+        assert_eq!(allowance.fan_in(), 64.min(merge_descriptors()));
         assert_eq!(allowance.buffer(64), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1_000), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1), SPILL_BUF_BYTES);
+    }
+
+    /// **No chunk outgrows what its `u32` offsets address**, however large the allowance: an
+    /// accumulator's share and a keyword chunk's whole allowance both stop at [`CHUNK_BYTES_MAX`],
+    /// and a share under it is the allowance's own.
+    #[test]
+    fn a_chunk_stays_within_what_its_offsets_address() {
+        let large = Allowance::new(64 << 30, 0, 4);
+        assert_eq!(large.per_worker(), CHUNK_BYTES_MAX);
+        assert_eq!(large.chunk(1), CHUNK_BYTES_MAX);
+        assert!((CHUNK_BYTES_MAX as u64) < u64::from(u32::MAX));
+        let small = Allowance::new(4 << 30, 0, 4);
+        assert_eq!(small.per_worker(), 1 << 30);
+    }
+
+    /// **A cascade pass merges only the leading runs that bring the count to the fan-in**, in at
+    /// least as many groups as there are threads, and takes every run only where no narrower pass
+    /// reaches it.
+    #[test]
+    fn a_cascade_pass_merges_the_excess_and_no_more() {
+        // 104 runs over a fan-in of 100 on four threads: four groups of two.
+        let pass = CascadePass::of(104, 100, 4);
+        assert_eq!(
+            pass,
+            CascadePass {
+                taken: 8,
+                groups: 4
+            }
+        );
+        let widths: Vec<usize> = pass.split(&[0u8; 8]).iter().map(|g| g.len()).collect();
+        assert_eq!(widths, [2, 2, 2, 2]);
+        // An excess too large for groups that run four at once takes groups of F - 1.
+        let pass = CascadePass::of(400, 12, 4);
+        assert_eq!(pass.taken, 400);
+        assert!(pass
+            .split(&[0u8; 400])
+            .iter()
+            .all(|g| (2..=11).contains(&g.len())));
+        // Every pass's output count is what the next one starts from.
+        for (runs, fan_in, threads) in [(104, 100, 4), (40, 12, 4), (5_000, 100, 12), (13, 12, 1)] {
+            let pass = CascadePass::of(runs, fan_in, threads);
+            let left = runs - pass.taken + pass.groups;
+            assert!(left < runs, "{runs} runs over {fan_in}");
+            if pass.taken < runs {
+                assert_eq!(left, fan_in, "{runs} runs over {fan_in}");
+            }
+        }
     }
 
     /// **More runs than the fan-in are cascaded, several groups at once, in the passes the
@@ -1393,7 +1501,8 @@ mod tests {
         };
         let expected = merged(&receipts);
 
-        // A fan-in of twelve: groups of four, two at once, and one pass.
+        // A fan-in of twelve over forty runs: the excess of 28 takes four groups of eight, one at
+        // a time, and the eight runs past them are left as they are.
         let allowance = Allowance {
             bytes: 12 * RUN_BUFFER_MIN as u64,
             threads: 4,
@@ -1406,15 +1515,20 @@ mod tests {
             allowance,
         )
         .unwrap();
-        assert!(
-            left.len() <= allowance.fan_in(1),
-            "{} runs left",
-            left.len()
-        );
+        assert!(left.len() <= allowance.fan_in(), "{} runs left", left.len());
         assert_eq!(passes, allowance.cascade_passes(runs as usize));
         assert_eq!(passes, 1);
         assert_eq!(merged(&left), expected);
-        assert!(receipts.iter().all(|run| !run.path.exists()));
+        let left_paths: Vec<&PathBuf> = left.iter().map(|run| &run.path).collect();
+        let (kept, merged_away): (Vec<&SpillReceipt>, Vec<&SpillReceipt>) = receipts
+            .iter()
+            .partition(|run| left_paths.contains(&&run.path));
+        assert_eq!(
+            kept.len(),
+            8,
+            "the runs past the groups are left as they are"
+        );
+        assert!(merged_away.iter().all(|run| !run.path.exists()));
         remove_runs(&left).unwrap();
         assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
     }

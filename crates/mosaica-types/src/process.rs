@@ -1,14 +1,13 @@
 //! The process's own resources: what the C allocator holds, what the kernel says is resident,
 //! what the machine has available, and how many files the process may hold open.
 //!
-//! Shared by the build and the serve path, which are one database
-//! ([decision 0091](../../../docs/decisions/0091-build-is-ingest-into-an-empty-database.md)) and
-//! therefore one implementation of anything they both do. The build trims at every
-//! stage boundary; the server caps the arena count at startup and trims on a growth cadence. Both
-//! want the same three primitives, and a second copy of [`resident_bytes`]' parser would be a
-//! second answer to "how much of this process is anonymous memory". Both size a term index's
-//! merge from [`available_memory`] and [`descriptor_limit`], and the binary raises the descriptor
-//! limit for both at startup ([`raise_descriptor_limit`]).
+//! Shared by the build and the serve path, which are one database and therefore one
+//! implementation of anything they both do. The build trims at every stage boundary; the server
+//! caps the arena count at startup and trims on a growth cadence. Both want the same three
+//! primitives, and a second copy of [`resident_bytes`]' parser would be a second answer to "how
+//! much of this process is anonymous memory". Both size a term index's pass from
+//! [`memory_to_take`] and [`descriptor_limit`], and the binary raises the descriptor limit for both
+//! at startup ([`raise_descriptor_limit`]).
 //!
 //! # Why an allocator call is a Mosaica concern at all
 //!
@@ -125,14 +124,15 @@ pub fn resident_bytes() -> Resident {
 }
 
 /// Memory this process could take without reclaiming anything it needs, in bytes: the smaller of
-/// `MemAvailable` and this process's cgroup v2 `memory.max`. `None` where `/proc/meminfo` cannot
-/// be read.
+/// `MemAvailable` and what is left under this process's cgroup v2 limit, `memory.max` less
+/// `memory.current`. `None` where `/proc/meminfo` cannot be read.
 ///
 /// **Both sources, because either can be the real bound.** `MemAvailable` is the kernel's estimate
 /// of what an allocation could get on the host; `memory.max` is the ceiling this process is killed
-/// at, and it charges page cache against itself. A process inside a 4 GiB container on a 48 GiB
-/// machine that read only the first would size itself for the machine. A `memory.max` of `max`
-/// does not parse, which leaves `MemAvailable` as the answer.
+/// at, and `memory.current` is what the cgroup already holds against it, page cache included. A
+/// process inside a 4 GiB container on a 48 GiB machine that read only the first would size itself
+/// for the machine. A cgroup with no limit, or none to be read, leaves `MemAvailable` as the
+/// answer.
 pub fn available_memory() -> Option<u64> {
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
     let available = meminfo
@@ -140,19 +140,37 @@ pub fn available_memory() -> Option<u64> {
         .find(|line| line.starts_with("MemAvailable:"))
         .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
         .map(|kib| kib * 1024)?;
-    let limit = std::fs::read_to_string("/proc/self/cgroup")
+    let left = std::fs::read_to_string("/proc/self/cgroup")
         .ok()
-        .and_then(|cgroup| {
-            let path = cgroup
-                .lines()
-                .next()?
-                .split(':')
-                .nth(2)?
-                .trim_start_matches('/');
-            std::fs::read_to_string(format!("/sys/fs/cgroup/{path}/memory.max")).ok()
-        })
-        .and_then(|max| max.trim().parse::<u64>().ok());
-    Some(limit.map_or(available, |limit| limit.min(available)))
+        .and_then(|cgroup| cgroup_left(&cgroup, |file| std::fs::read_to_string(file).ok()));
+    Some(left.map_or(available, |left| left.min(available)))
+}
+
+/// What is left under the cgroup v2 memory limit of the process whose `/proc/self/cgroup` is
+/// `cgroup`, reading its files through `read`: `memory.max` less `memory.current`. `None` where
+/// the process is in no v2 group, the group has no limit, or either file cannot be read.
+fn cgroup_left(cgroup: &str, read: impl Fn(&str) -> Option<String>) -> Option<u64> {
+    let path = cgroup
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))?
+        .trim()
+        .trim_start_matches('/');
+    let dir = match path {
+        "" => "/sys/fs/cgroup".to_string(),
+        path => format!("/sys/fs/cgroup/{path}"),
+    };
+    let figure = |file: &str| read(&format!("{dir}/{file}"))?.trim().parse::<u64>().ok();
+    Some(figure("memory.max")?.saturating_sub(figure("memory.current")?))
+}
+
+/// The share of [`available_memory`] a process plans to take, in bytes: four fifths of it, leaving
+/// the rest for the page cache the process reads through and the allocator's slack. `None` where
+/// the available memory cannot be read.
+///
+/// The build's default `--memory-budget` is this, and a server sizes its writers from it, so
+/// neither plans to take all of what is available.
+pub fn memory_to_take() -> Option<u64> {
+    available_memory().map(|available| available / 5 * 4)
 }
 
 /// The files this process may hold open at once: its soft `RLIMIT_NOFILE`. 1,024, the soft limit
@@ -222,6 +240,34 @@ pub fn human_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The limit is the v2 group's, and what the group holds comes off it.** The `0::` line names
+    /// the group wherever it falls among a hybrid hierarchy's v1 lines, and a limit of `max` is no
+    /// limit.
+    #[test]
+    fn what_is_left_is_the_v2_limit_less_what_the_group_holds() {
+        let cgroup = "9:name=systemd:/\n4:memory:/v1/group\n0::/app/server\n";
+        let files = |max: &'static str| {
+            move |file: &str| match file {
+                "/sys/fs/cgroup/app/server/memory.max" => Some(max.to_string()),
+                "/sys/fs/cgroup/app/server/memory.current" => Some("6442450944\n".to_string()),
+                _ => None,
+            }
+        };
+        assert_eq!(cgroup_left(cgroup, files("8589934592\n")), Some(2 << 30));
+        assert_eq!(cgroup_left(cgroup, files("max\n")), None);
+        assert_eq!(cgroup_left(cgroup, files("4294967296\n")), Some(0));
+        assert_eq!(
+            cgroup_left("4:memory:/v1/group\n", files("8589934592")),
+            None
+        );
+        let root = |file: &str| match file {
+            "/sys/fs/cgroup/memory.max" => Some("1073741824".to_string()),
+            "/sys/fs/cgroup/memory.current" => Some("0".to_string()),
+            _ => None,
+        };
+        assert_eq!(cgroup_left("0::/\n", root), Some(1 << 30));
+    }
 
     #[test]
     fn a_byte_count_reads_to_three_figures_in_binary_units() {

@@ -8,6 +8,19 @@ use mosaica_types::progress::Tracker;
 
 use crate::write::{Job, Jobs};
 
+/// The kinds of background work that size themselves from memory: a flush, whose text layers take
+/// a term index's allowance, and a fold, whose pre-flight refuses what will not fit.
+const MEMORY_WRITERS: u64 = 2;
+
+/// **What one background writer may plan to take, read once at the start of its operation**: an
+/// equal share, one for each kind in [`MEMORY_WRITERS`], of what the process plans to take
+/// ([`mosaica_types::process::memory_to_take`]). At most one unit of each kind is in flight
+/// ([`Background`]) and none knows what the others hold, so a fixed share each is what keeps them
+/// together under that figure, however they overlap. `None` where the memory cannot be read.
+pub(crate) fn writer_memory() -> Option<u64> {
+    mosaica_types::process::memory_to_take().map(|bytes| bytes / MEMORY_WRITERS)
+}
+
 /// Whether a unit of one kind is running, or finished and not yet published, read from its two
 /// flags.
 pub(crate) fn outstanding(in_flight: &AtomicBool, completed_pending: &AtomicBool) -> bool {

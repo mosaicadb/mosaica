@@ -635,6 +635,7 @@ fn execute_flush_stages(
     laps: &mut FlushLaps,
 ) -> Result<CompletedFlush, MaintenanceFailed> {
     laps.start();
+    let text_allowance = text_layer_allowance();
     let consumed: Vec<EntityId> = plan.items.iter().map(|(entity, _)| *entity).collect();
     let numbers = numbers_of(&plan, &ctx)?;
     let tenancies = ctx.tenancy.of_each(numbers.iter().copied());
@@ -783,7 +784,7 @@ fn execute_flush_stages(
         texts: scoped_texts,
         created: scoped_columns,
         bases,
-    } = write_scoped_extents(&plan, &ctx)?;
+    } = write_scoped_extents(&plan, &ctx, text_allowance)?;
     for extent in &scoped_extents {
         for rel in [&extent.extent.values, &extent.extent.presence]
             .into_iter()
@@ -809,7 +810,7 @@ fn execute_flush_stages(
         }
     }
     laps.begin(FlushStage::TextExtents, None);
-    let mut text_extents = write_text_extents(&plan, &ctx, laps)?;
+    let mut text_extents = write_text_extents(&plan, &ctx, text_allowance, laps)?;
     text_extents.extend(scoped_texts);
     // Every file of every text extent is digested: `publish_fold` discards the fold if one digest
     // is missing.
@@ -1568,6 +1569,7 @@ pub(crate) struct ScopedColumnSpec {
 fn write_text_extents(
     plan: &FlushPlan,
     ctx: &FlushContext,
+    allowance: mosaica_filter_write::Allowance,
     laps: &mut FlushLaps,
 ) -> Result<Vec<mosaica_store::manifest::TextExtent>, MaintenanceFailed> {
     if ctx.text_schema.is_empty() {
@@ -1595,7 +1597,7 @@ fn write_text_extents(
             &spec.analyser,
             rows,
             TextTarget::of(ctx),
-            text_layer_allowance(),
+            allowance,
             sub,
         )? {
             out.push(extent);
@@ -1604,13 +1606,13 @@ fn write_text_extents(
     Ok(out)
 }
 
-/// What one text layer's pass may hold: the memory the server has available now, by the rule a
-/// build's term index is sized by, on the one thread a flush runs on. Read at each layer, since
-/// what is available moves while the server runs; where it cannot be read, the least the pass runs
-/// in.
+/// What each of a flush's text layers may hold, read once a flush: a background writer's share of
+/// what the server may take ([`crate::write::writer_memory`]), by the rule a build's term index is
+/// sized by, on the one thread a flush runs on. The layers are written one at a time, so each takes
+/// the whole of it; where the memory cannot be read, the least the pass runs in.
 fn text_layer_allowance() -> mosaica_filter_write::Allowance {
-    let available = mosaica_types::process::available_memory().unwrap_or(0);
-    mosaica_filter_write::Allowance::new(available, 0, 1)
+    let share = crate::write::writer_memory().unwrap_or(0);
+    mosaica_filter_write::Allowance::new(share, 0, 1)
 }
 
 /// Where a text layer's files go. What [`write_text_layer`] needs of a [`FlushContext`], so a
@@ -1766,6 +1768,7 @@ fn scoped_column_rel(ctx: &FlushContext, column: &str) -> String {
 fn write_scoped_extents(
     plan: &FlushPlan,
     ctx: &FlushContext,
+    text_allowance: mosaica_filter_write::Allowance,
 ) -> Result<ScopedWrite, MaintenanceFailed> {
     let mut extents = Vec::new();
     let mut texts = Vec::new();
@@ -1808,7 +1811,7 @@ fn write_scoped_extents(
                 analyser,
                 scoped_rows(spec, plan)?,
                 TextTarget::of(ctx),
-                text_layer_allowance(),
+                text_allowance,
                 None,
             )? {
                 texts.push(extent);

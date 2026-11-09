@@ -36,8 +36,9 @@
 //! The accumulator counts what it has allocated: the pool's pages, its term-state pages, the
 //! capacity of its key bytes and table, and its per-document buffers. Before each document it
 //! spills if that, plus what its term state, key bytes and table would allocate were every token
-//! of the document a new term, would reach its budget; a growing array's old copy is live while it
-//! moves, so the new copy is counted whole. The table's entries can still grow past that estimate
+//! of the document a new term, plus what a spill of all those terms would hold beside them, would
+//! reach its budget; a growing array's old copy is live while it moves, so the new copy is counted
+//! whole. The table's entries can still grow past that estimate
 //! by up to the size of one document, when a spill has released them and one document then adds
 //! more than twice their capacity.
 //!
@@ -46,10 +47,11 @@
 //! page. The per-document buffers return to a small size at each spill, so one long document does
 //! not shrink every run after it.
 //!
-//! A spill holds beside the accumulator about forty bytes a term for the ranking and, for each
-//! term whose documents arrived out of entity order, a copy of its chain and eight bytes an
-//! entity, kept at the size of the largest such term. That is at most about four times that one
-//! term's chain. Every other term is written from the pool as it stands.
+//! A spill holds beside the accumulator forty bytes a term for the ranking and its run writer's
+//! buffer ([`SPILL_TERM_BYTES`], [`SPILL_BUF_BYTES`]), and these are counted. For each term whose
+//! documents arrived out of entity order it also holds a copy of its chain and eight bytes an
+//! entity, kept at the size of the largest such term, which is not counted: at most about four
+//! times that one term's chain. Every other term is written from the pool as it stands.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -57,10 +59,10 @@ use std::path::{Path, PathBuf};
 use croaring::Bitmap;
 use mosaica_filter::{put_varint, take_varint};
 
-use crate::chunk_dict::{rank_table, KeyRef, KeyTable, Lookup, SortOn};
+use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
 use crate::spill::{
     cascade_sorted_runs, encode_entity, fingerprint, remove_runs, Allowance, RunPayload,
-    SpillReceipt, TextRunMerge, TextRunWriter,
+    SpillReceipt, TextRunMerge, TextRunWriter, SPILL_BUF_BYTES,
 };
 use crate::text::{Posting, TextIndexWriter};
 
@@ -87,6 +89,11 @@ const SLICE_BYTES: [usize; 9] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 
 /// The bytes at the end of each slice that hold the address of the next.
 const LINK_BYTES: usize = 8;
+
+/// What a spill's ranking holds a term: the row it sorts and its rank, then the key in order and
+/// the id at that rank.
+const SPILL_TERM_BYTES: usize =
+    std::mem::size_of::<KeyRow>() + std::mem::size_of::<KeyRef>() + 2 * std::mem::size_of::<u32>();
 
 /// Items each per-document buffer is returned to at a spill.
 const DOCUMENT_BUFFER_ITEMS: usize = 1 << 12;
@@ -216,7 +223,8 @@ impl TermAccumulator {
 
     /// What the term state, key bytes and table would allocate, beyond what they hold, were
     /// `terms` new terms of `bytes` bytes in all added: each array that would grow, at its new
-    /// size, and each page of state.
+    /// size, and each page of state. And what a spill of every term then held would hold beside
+    /// them: its ranking and its writer's buffer.
     fn growth(&self, terms: usize, bytes: usize) -> usize {
         let grown = |len: usize, capacity: usize, more: usize| {
             if len + more > capacity {
@@ -228,6 +236,8 @@ impl TermAccumulator {
         self.terms.growth(terms)
             + grown(self.keys.len(), self.keys.capacity(), bytes)
             + self.table.growth(terms)
+            + (self.terms.len + terms) * SPILL_TERM_BYTES
+            + SPILL_BUF_BYTES
     }
 
     /// The id of `term`, given one if it is new.

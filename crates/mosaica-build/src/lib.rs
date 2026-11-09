@@ -1973,7 +1973,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
         // pipeline writes.
         // The text columns' timing is the streaming pipeline's stage split (`observer.rs`); this
         // path is the equivalence oracle and is not observed, so it drops it.
-        let (mut paths, _text) = pipeline::write_filter_postings(
+        let (mut paths, _costs) = pipeline::write_filter_postings(
             &prefix_dir,
             layout,
             &args.schema,

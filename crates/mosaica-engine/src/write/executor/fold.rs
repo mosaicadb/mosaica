@@ -1410,7 +1410,7 @@ impl Executor {
             self.health.overlay_diverged.load(Ordering::SeqCst),
             crate::compact::FoldResources {
                 available_memory: match self.deps.switches.fold_memory.load(Ordering::SeqCst) {
-                    0 => mosaica_types::process::available_memory(),
+                    0 => writer_memory(),
                     bytes => Some(bytes),
                 },
                 free_disc: free_disc(&self.deps.bundle_root),

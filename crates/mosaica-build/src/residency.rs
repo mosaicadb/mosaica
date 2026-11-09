@@ -79,11 +79,12 @@
 //!
 //! ⊘ **The memory figure is a lower bound, and measured to be about half the real peak.**
 //! Transients inside a stage — a Parquet decode buffer, an analyser's scratch, the allocator's own
-//! slack — are not enumerated, and [`SLACK`] is one constant standing in for all of them. The one build it has been
-//! checked against ([`tests::the_model_is_checked_against_an_observed_peak`], 10⁶ items, one `text`
-//! column, 10⁶ member rows) read **208 MiB against an observed 338 MiB**, leaving out the stages
-//! sized to what their phase leaves, and the trace shows why: the process was already at 332 MiB
-//! in its first stage, reading the points file, before a single term below existed.
+//! slack — are not enumerated, and [`SLACK`] is one constant standing in for all of them. The one
+//! build it has been measured against ([`tests::the_model_is_measured_against_an_observed_peak`],
+//! 10⁶ items, one `text` column, 10⁶ member rows) read **208 MiB against an observed 338 MiB**,
+//! leaving out the stages sized to what their phase leaves, and the trace shows why: the process
+//! was already at 332 MiB in its first stage, reading the points file, before a single term below
+//! existed.
 //!
 //! **A term index's pass takes what its phase leaves of the budget**, and is charged at that
 //! ([`Residency::with_term_indexes`], [`mosaica_filter_write::Allowance`]): the text index and the
@@ -348,15 +349,22 @@ impl Residency {
         self
     }
 
-    /// What `phase` holds beside its term index's allowance: the terms the model is a lower bound
-    /// over, the allowance being a bound the pass keeps itself.
-    pub fn memory_outside_term_indexes(&self, phase: Phase) -> u64 {
-        let allowance = match phase {
+    /// The allowance of the term index whose pass runs in `phase`, if one does.
+    pub fn term_index_at(&self, phase: Phase) -> Option<mosaica_filter_write::Allowance> {
+        match phase {
             Phase::Index => self.sizing.term_index,
             Phase::Join => self.sizing.scoped_term_index,
             _ => None,
-        };
-        self.memory_at(phase) - allowance.map_or(0, |allowance| allowance.bytes)
+        }
+    }
+
+    /// What `phase` holds beside its term index's allowance: the terms the model is a lower bound
+    /// over, the allowance being a bound the pass keeps itself.
+    pub fn memory_outside_term_indexes(&self, phase: Phase) -> u64 {
+        self.memory_at(phase)
+            - self
+                .term_index_at(phase)
+                .map_or(0, |allowance| allowance.bytes)
     }
 
     /// The phase that asks the machine for most, and what it comes to: the figure
@@ -2630,6 +2638,50 @@ fn uncompressed_column_bytes(
 mod tests {
     use super::*;
 
+    /// **A term index takes what its phase leaves of the budget, and a budget that cannot pay for
+    /// its floor is over.** At the other terms plus the floor the phase totals the budget exactly;
+    /// a byte less and it is over, which is what `plan_build` refuses; above it, the term index's
+    /// bytes are the budget less the rest of the phase.
+    #[test]
+    fn a_term_index_takes_what_its_phase_leaves_and_its_floor_is_charged() {
+        const THREADS: usize = 4;
+        let held = 100 << 20;
+        let model = Residency {
+            terms: vec![Term {
+                what: "the rest of the index phase".into(),
+                bytes: held,
+                mapped: false,
+                phases: Phases::INDEX,
+                constant: true,
+            }],
+            sizing: Sizing::default(),
+        };
+        let floor = mosaica_filter_write::Allowance::floor(THREADS);
+
+        let fits = model
+            .clone()
+            .with_term_indexes(held + floor, THREADS, true, false);
+        assert_eq!(fits.memory_at(Phase::Index), held + floor);
+        assert_eq!(
+            fits.term_index_at(Phase::Index).map(|a| a.bytes),
+            Some(floor)
+        );
+        assert_eq!(fits.memory_outside_term_indexes(Phase::Index), held);
+
+        let short = held + floor - 1;
+        let refused = model.clone().with_term_indexes(short, THREADS, true, false);
+        assert!(refused.memory_peak().1 > short);
+
+        let budget = 2 << 30;
+        let roomy = model.with_term_indexes(budget, THREADS, true, false);
+        assert_eq!(
+            roomy.sizing.term_index.map(|a| a.bytes),
+            Some(budget - held)
+        );
+        assert_eq!(roomy.memory_at(Phase::Index), budget);
+        assert_eq!(roomy.sizing.scoped_term_index, None);
+    }
+
     /// The model at a budget no publication batch can be the binding term of, which is what every
     /// test below wants: they read the per-entry arithmetic, and the batch sizing is
     /// [`crate::layers::publication_batch_entries`]'s own to test.
@@ -4106,9 +4158,13 @@ require_member_visibility = "none"
             .sum()
     }
 
+    /// **The model beside a real build's peak, printed and not asserted.** At 10⁶ items, one
+    /// `text` column and 10⁶ member rows it measured 208 MiB modelled against 338 MiB observed,
+    /// leaving out the stages sized to what their phases leave; the process held 332 MiB in its
+    /// first stage, reading the points file, before any term of the model existed.
     #[test]
-    #[ignore = "writes and builds a real corpus to check the model's constants against a peak"]
-    fn the_model_is_checked_against_an_observed_peak() {
+    #[ignore = "writes and builds a real corpus to measure the model's constants against a peak"]
+    fn the_model_is_measured_against_an_observed_peak() {
         const N: u64 = 1_000_000;
 
         struct Trace;
@@ -4118,10 +4174,11 @@ require_member_visibility = "none"
                 stage: crate::observer::BuildStage,
                 elapsed: std::time::Duration,
                 rows: u64,
+                passes: u64,
                 peak_rss_kib: u64,
             ) {
                 println!(
-                    "{:>16}  {:>8.2}s  rows={rows:<12} peak={:>6} MiB",
+                    "{:>16}  {:>8.2}s  rows={rows:<12} passes={passes} peak={:>6} MiB",
                     stage.name(),
                     elapsed.as_secs_f64(),
                     peak_rss_kib / 1024
