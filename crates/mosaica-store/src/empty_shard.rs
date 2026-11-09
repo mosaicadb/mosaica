@@ -82,6 +82,7 @@ pub fn write_empty_value_column(
         &values,
         &dir.join(mosaica_filter::PRESENCE_FILE),
         value_column_kind(arrow_type, category),
+        Some(0),
     )
     .and_then(|writer| writer.finish(None))
     .map_err(io(&values))?;
@@ -349,18 +350,8 @@ impl Written<'_> {
         let segment_rel = layout.segment_rel(view.id, seg_id);
         let segment_dir = self.dir(&segment_rel)?;
 
-        let morton = segment_dir.join("morton.u32");
-        std::fs::File::create(&morton).map_err(io(&morton))?;
-        crate::write::CutWriter::create(&segment_dir)
-            .and_then(|cuts| cuts.finish())
-            .map_err(io(&segment_dir))?;
-        let columns = segment_dir.join("columns.arrow");
-        crate::columns::ColumnsPlan::new(&view.render, 0)
-            .and_then(|plan| crate::columns::ColumnsFile::create(&columns, plan))
-            .and_then(|file| file.finish())
-            .map_err(io(&columns))?;
-        crate::bands::BandWriter::create(&segment_dir, indexed)
-            .and_then(|bands| bands.finish(&segment_dir))
+        crate::write::SegmentWriter::create(&segment_dir, &view.render, indexed, 0)
+            .and_then(|writer| writer.finish())
             .map_err(io(&segment_dir))?;
         for name in crate::SEGMENT_FILES {
             self.push(format!("{segment_rel}/{name}"));

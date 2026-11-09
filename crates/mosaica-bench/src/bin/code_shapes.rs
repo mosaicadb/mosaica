@@ -300,6 +300,7 @@ fn main() -> Result<(), BoxError> {
                 &blocks.join(VALUES_FILE),
                 &blocks.join(PRESENCE_FILE),
                 kind,
+                Some(codes.len()),
             )?;
             writer.push(&codes)?;
             writer.finish(None)?;

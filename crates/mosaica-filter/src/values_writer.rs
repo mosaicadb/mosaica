@@ -18,16 +18,23 @@
 //! values. At 10⁹ a `u32` column is 4 GB, and materialising it to hand to the one-shot writer is
 //! exactly the transient the fold's memory plan says the pass avoids (`filter-index.md` §6.2).
 //!
-//! Streaming cannot be done by appending record batches: the reader decodes a **single** batch and
-//! refuses a second (`read_values`), because it borrows its values from the batch's buffers rather
-//! than copying them, and concatenating is the copy that construction exists to avoid. So values
-//! are spooled to a temporary file as they arrive, only the running count is held,
-//! and `finish` memory-maps the spool as the array's own buffer and writes the one record batch
-//! from it. The bytes are the bytes [`write_value_column`] would have written, which
+//! The reader decodes a **single** batch and refuses a second (`read_values`), because it borrows
+//! its values from the batch's buffers rather than copying them. So a column written in chunks is
+//! still one batch:
+//!
+//! - **A flat column** is laid out at its final size when the writer is created, which needs its
+//!   value count, and each chunk is written at its offset as it arrives
+//!   ([`mosaica_authz::arrow_file::InPlaceFile`]). Nothing is held and nothing is written twice.
+//! - **Codes written a block at a time** cannot be: their encoded length is known only once the
+//!   presence bitmap handed to `finish` divides them into blocks. They are spooled to a file beside
+//!   the column as they arrive, and `finish` maps the spool, encodes it a block at a time, and
+//!   writes the one record batch.
+//!
+//! Either way the bytes are the bytes [`write_value_column`] would have written, which
 //! `values_writer.rs`'s byte-identity test pins rather than asserts — the fold's "equivalent to a
 //! single build" claim is byte-identity, so it has to be checked as one.
 //!
-//! **The spooled bytes are native-endian**, which is not a portability lapse: the target is
+//! **Values are written native-endian**, which is not a portability lapse: the target is
 //! byte-identity with the column the one-shot writer builds, and that column is whatever the
 //! machine's `ScalarBuffer` holds. Both paths therefore agree on any platform, and both are
 //! little-endian on every platform this runs on.
@@ -43,6 +50,7 @@ use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use croaring::{Bitmap, Portable};
+use mosaica_authz::arrow_file::{write_single_batch, FileLayout, InPlaceFile};
 
 use crate::values::ordinals::{self, BlockEncoder, CodeBytes, Parts, Width};
 use crate::values::Codes;
@@ -125,18 +133,6 @@ impl ColumnKind {
         }
     }
 
-    /// Bytes per value as spooled. **Every value column is fixed-width**: a keyword's values are
-    /// `u32` ordinals into its layer's dictionary, and the dictionary is a separate artefact this
-    /// writer knows nothing about, so there is no variable-width case to spool an offset array for.
-    /// Codes written a block at a time are spooled at their own width.
-    fn width(self) -> usize {
-        match self {
-            ColumnKind::U8 | ColumnKind::I8 => 1,
-            ColumnKind::U16 | ColumnKind::I16 | ColumnKind::Ordinals16 => 2,
-            ColumnKind::U32 | ColumnKind::I32 | ColumnKind::F32 | ColumnKind::Ordinals => 4,
-            ColumnKind::U64 | ColumnKind::I64 | ColumnKind::F64 => 8,
-        }
-    }
 }
 
 /// Serialise a presence bitmap in the **one** encoding every producer of a value column writes.
@@ -181,28 +177,15 @@ fn check_presence(values: usize, presence: Option<&Bitmap>) -> io::Result<()> {
     Ok(())
 }
 
-/// The single schema/batch/IPC-writer invocation behind both writers.
-///
-/// Byte-identity between the whole-column path and the streaming one requires this to be literally
-/// the same code rather than two copies that could drift. The column carries no validity buffer on
-/// either path: a value column's absences live in the presence bitmap, and a spurious all-valid
-/// buffer would change the file's bytes.
-fn write_value_array(path: &Path, array: ArrayRef, ty: DataType) -> io::Result<()> {
-    let schema = Arc::new(Schema::new(vec![Field::new("value", ty, false)]));
-    let batch =
-        RecordBatch::try_new(schema.clone(), vec![array]).map_err(|e| invalid(e.to_string()))?;
-    write_batch(path, &batch)
+/// The schema of a value column of type `ty`. The column carries no validity buffer of its own: a
+/// value column's absences live in the presence bitmap.
+fn value_schema(ty: DataType) -> Arc<Schema> {
+    Arc::new(Schema::new(vec![Field::new("value", ty, false)]))
 }
 
 /// Write one record batch as an Arrow IPC file.
 fn write_batch(path: &Path, batch: &RecordBatch) -> io::Result<()> {
-    let file = File::create(path)?;
-    let mut w = arrow::ipc::writer::FileWriter::try_new(file, batch.schema_ref())
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    w.write(batch)
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    w.finish().map_err(|e| io::Error::other(e.to_string()))?;
-    Ok(())
+    write_single_batch(path, batch.schema(), batch.columns().to_vec())
 }
 
 /// Write a value column, and its presence bitmap where presence is partial.
@@ -268,7 +251,7 @@ pub fn write_value_column(
             return Ok(());
         }
     };
-    write_value_array(values_path, array, ty)?;
+    write_single_batch(values_path, value_schema(ty), vec![array])?;
 
     if let Some(p) = presence {
         write_presence(presence_path, p)?;
@@ -277,8 +260,9 @@ pub fn write_value_column(
 }
 
 /// One spool file: bytes appended as they arrive, mapped back as an Arrow buffer at assembly.
+/// The file is removed however the spool ends; a mapping taken by [`Spool::map`] outlives it.
 struct Spool {
-    path: PathBuf,
+    file: SpoolFile,
     writer: BufWriter<File>,
     len: u64,
 }
@@ -294,19 +278,13 @@ impl Spool {
             .truncate(true)
             .open(&path)?;
         Ok(Spool {
-            path,
+            file: SpoolFile(path),
             writer: BufWriter::new(file),
             len: 0,
         })
     }
 
-    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.writer.write_all(bytes)?;
-        self.len += bytes.len() as u64;
-        Ok(())
-    }
-
-    /// Flush, fsync and map the spool as a buffer of exactly `expect` bytes.
+    /// Flush and map the spool as a buffer of exactly `expect` bytes.
     ///
     /// The length check is not ceremony: the buffer's length is what the array will read through,
     /// so a spool shorter than the offsets account for would hand the array bytes belonging to
@@ -316,13 +294,10 @@ impl Spool {
             .writer
             .into_inner()
             .map_err(io::IntoInnerError::into_error)?;
-        // The spool is about to be read back through a memory map; its bytes must be durable and
-        // visible before the map is taken.
-        file.sync_all()?;
         if self.len != expect as u64 {
             return Err(invalid(format!(
                 "value column spool {} holds {} bytes but the column accounts for {expect}",
-                self.path.display(),
+                self.file.0.display(),
                 self.len
             )));
         }
@@ -333,27 +308,69 @@ impl Spool {
             // every wider `ScalarBuffer` — `MutableBuffer` is aligned for any of them.
             return Ok(arrow::buffer::MutableBuffer::new(0).into());
         }
+        // The map reads the page cache the flush wrote to; nothing reads the spool after a crash.
         let mapping = unsafe { memmap2::Mmap::map(&file) }?;
         if mapping.len() != expect {
             return Err(invalid(format!(
                 "value column spool {} mapped {} bytes, not the {expect} expected",
-                self.path.display(),
+                self.file.0.display(),
                 mapping.len()
             )));
         }
         let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-        // SAFETY: `arc` owns the mapping for as long as any `Buffer` built from it is alive (it is
-        // captured as the buffer's `Allocation`), the mapping is valid for `expect` bytes for its
-        // whole lifetime, and `memmap2::Mmap` never returns a null base pointer. The mapping's
-        // base is page-aligned, which satisfies the alignment every `ScalarBuffer` built over it
-        // requires.
+        // SAFETY: `arc` owns the mapping for as long as any `Buffer` built from it is alive (it
+        // is captured as the buffer's `Allocation`), the mapping is valid for `expect` bytes for
+        // its whole lifetime, and `memmap2::Mmap` never returns a null base pointer. The
+        // mapping's base is page-aligned, which satisfies the alignment every `ScalarBuffer` built
+        // over it requires.
         let ptr = NonNull::new(arc.as_ptr() as *mut u8)
             .expect("memmap2::Mmap never returns a null base pointer");
         Ok(unsafe { Buffer::from_custom_allocation(ptr, expect, arc) })
     }
 }
 
-/// Bytes accumulated before a spool write. Values are converted one at a time, so this bounds the
+/// Where a column's bytes go as they are pushed.
+enum Sink {
+    /// A flat column's values buffer, written in place at `at`.
+    InPlace { file: InPlaceFile, at: u64 },
+    /// Codes waiting for presence to divide them into blocks.
+    Spool(Spool),
+}
+
+/// Somewhere [`spool_values`] writes bytes in order.
+trait Out {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
+
+    /// Write what `scratch` holds and empty it.
+    fn drain(&mut self, scratch: &mut Vec<u8>) -> io::Result<()> {
+        self.write(scratch)?;
+        scratch.clear();
+        Ok(())
+    }
+}
+
+impl Out for Spool {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.writer.write_all(bytes)?;
+        self.len += bytes.len() as u64;
+        Ok(())
+    }
+}
+
+impl Out for Sink {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        match self {
+            Sink::InPlace { file, at } => {
+                file.put(0, *at, bytes)?;
+                *at += bytes.len() as u64;
+                Ok(())
+            }
+            Sink::Spool(spool) => spool.write(bytes),
+        }
+    }
+}
+
+/// Bytes accumulated before a write. Values are converted one at a time, so this bounds the
 /// conversion buffer at 64 KB whatever size chunk a caller pushes.
 const SCRATCH: usize = 1 << 16;
 
@@ -363,35 +380,58 @@ const SCRATCH: usize = 1 << 16;
 /// Values arrive in **entity order** — for a partial column, in the order of the presence
 /// bitmap's set bits, which is the same rank-addressed order the scan reads them back in.
 ///
-/// The spool file is a sibling of `values.arrow` and is removed when the column is written; a
-/// writer dropped without finishing removes it too, so an abandoned fold does not leave a 4 GB
-/// transient behind.
+/// A writer dropped without finishing removes what it wrote, so an abandoned fold leaves neither
+/// a column-sized file nor a spool behind.
 pub struct ValueColumnWriter {
     kind: ColumnKind,
     values_path: PathBuf,
     presence_path: PathBuf,
-    values: Option<Spool>,
-    /// Removes the spool when the writer is dropped: a writer that never reached
-    /// [`ValueColumnWriter::finish`] (an error part-way through a fold, a panic) leaves it behind
-    /// otherwise, and the spool is the size of the column.
-    _spool: SpoolFile,
+    sink: Sink,
+    /// How many values the caller said it would push, where it said so.
+    rows: Option<usize>,
     count: usize,
     scratch: Vec<u8>,
 }
 
 impl ValueColumnWriter {
-    /// Create the writer for a column of `kind`, spooling beside `values_path`.
-    pub fn create(values_path: &Path, presence_path: &Path, kind: ColumnKind) -> io::Result<Self> {
-        let mut name = values_path.as_os_str().to_os_string();
-        name.push(".spool");
-        let path = PathBuf::from(name);
-        let values = Spool::create(path.clone())?;
+    /// Create the writer for a column of `kind` that will be pushed `rows` values.
+    ///
+    /// A flat column is laid out at `values_path` now and needs `rows`. A column written a block
+    /// at a time is spooled beside `values_path` until [`Self::finish`], and `rows`, where given,
+    /// is checked there.
+    pub fn create(
+        values_path: &Path,
+        presence_path: &Path,
+        kind: ColumnKind,
+        rows: Option<usize>,
+    ) -> io::Result<Self> {
+        let sink = if kind.blocked() {
+            let mut name = values_path.as_os_str().to_os_string();
+            name.push(".spool");
+            Sink::Spool(Spool::create(PathBuf::from(name))?)
+        } else {
+            let rows = rows.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "value column at {}: a {kind:?} column is laid out before its values \
+                         arrive, so its writer needs the number of values it will be pushed",
+                        values_path.display()
+                    ),
+                )
+            })?;
+            let layout = FileLayout::new(value_schema(kind.arrow_type()), rows)?;
+            Sink::InPlace {
+                file: InPlaceFile::create(values_path, layout)?,
+                at: 0,
+            }
+        };
         Ok(ValueColumnWriter {
             kind,
             values_path: values_path.to_path_buf(),
             presence_path: presence_path.to_path_buf(),
-            values: Some(values),
-            _spool: SpoolFile(path),
+            sink,
+            rows,
             count: 0,
             scratch: Vec::with_capacity(SCRATCH),
         })
@@ -410,7 +450,7 @@ impl ValueColumnWriter {
     /// Append a chunk of values, in entity order.
     ///
     /// The chunk's family must match the declared kind. A chunk of the wrong width would be
-    /// spooled as bytes and read back at the declared width — every value after it addressed
+    /// written as bytes and read back at the declared width — every value after it addressed
     /// wrongly, with no error anywhere — so it is refused rather than reinterpreted.
     pub fn push(&mut self, chunk: &Codes) -> io::Result<()> {
         let kind = ColumnKind::of(chunk);
@@ -426,10 +466,17 @@ impl ValueColumnWriter {
                 self.kind
             )));
         }
-        let spool = self
-            .values
-            .as_mut()
-            .expect("the values spool is taken only by finish, which consumes the writer");
+        if let Some(rows) = self.rows.filter(|rows| self.count + chunk.len() > *rows) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "value column at {}: {} values pushed to a column created for {rows}",
+                    self.values_path.display(),
+                    self.count + chunk.len()
+                ),
+            ));
+        }
+        let sink = &mut self.sink;
         let scratch = &mut self.scratch;
         if self.kind.blocked() {
             let mut at = 0;
@@ -441,9 +488,9 @@ impl ValueColumnWriter {
                 match self.kind {
                     ColumnKind::Ordinals16 => {
                         let narrow = codes.iter().map(|&c| c as u16);
-                        spool_values(spool, narrow, u16::to_ne_bytes, scratch)?
+                        spool_values(sink, narrow, u16::to_ne_bytes, scratch)?
                     }
-                    _ => spool_values(spool, codes.iter().copied(), u32::to_ne_bytes, scratch)?,
+                    _ => spool_values(sink, codes.iter().copied(), u32::to_ne_bytes, scratch)?,
                 }
                 at += take;
             }
@@ -453,7 +500,7 @@ impl ValueColumnWriter {
         macro_rules! scalars {
             ($v:expr) => {{
                 let v = $v;
-                spool_values(spool, v.iter().copied(), |x| x.to_ne_bytes(), scratch)?;
+                spool_values(sink, v.iter().copied(), |x| x.to_ne_bytes(), scratch)?;
                 self.count += v.len();
             }};
         }
@@ -473,59 +520,39 @@ impl ValueColumnWriter {
         Ok(())
     }
 
-    /// Assemble the column: one record batch over the mapped spool, and the presence bitmap where
-    /// presence is partial. `presence` follows [`write_value_column`]'s rule exactly — `None`
-    /// means every entity in `0..len()` carries a value.
+    /// Finish the column, and write the presence bitmap where presence is partial. `presence`
+    /// follows [`write_value_column`]'s rule exactly — `None` means every entity in `0..len()`
+    /// carries a value.
     pub fn finish(mut self, presence: Option<&Bitmap>) -> io::Result<()> {
         check_presence(self.count, presence)?;
-        let values = self
-            .values
-            .take()
-            .expect("the values spool is taken only here");
-        let values_spool = values.path.clone();
-
-        let buffer = values.map(self.count * self.kind.width())?;
-        if let Some(code_bytes) = self.kind.code_bytes() {
-            match code_bytes {
-                CodeBytes::Two => {
-                    let pushed = ScalarBuffer::<u16>::new(buffer, 0, self.count);
-                    write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
-                }
-                CodeBytes::Four => {
-                    let pushed = ScalarBuffer::<u32>::new(buffer, 0, self.count);
-                    write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
-                }
-            }
-            std::fs::remove_file(&values_spool)?;
-            if let Some(p) = presence {
-                write_presence(&self.presence_path, p)?;
-            }
-            return Ok(());
+        self.sink.drain(&mut self.scratch)?;
+        if let Some(rows) = self.rows.filter(|rows| *rows != self.count) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "value column at {}: {} values pushed to a column created for {rows}",
+                    self.values_path.display(),
+                    self.count
+                ),
+            ));
         }
-        macro_rules! borrowed {
-            ($arr:ty) => {
-                Arc::new(<$arr>::new(ScalarBuffer::new(buffer, 0, self.count), None)) as ArrayRef
-            };
-        }
-        let array: ArrayRef = match self.kind {
-            ColumnKind::U8 => borrowed!(arrow::array::UInt8Array),
-            ColumnKind::U16 => borrowed!(arrow::array::UInt16Array),
-            ColumnKind::U32 => borrowed!(arrow::array::UInt32Array),
-            ColumnKind::U64 => borrowed!(arrow::array::UInt64Array),
-            ColumnKind::I8 => borrowed!(arrow::array::Int8Array),
-            ColumnKind::I16 => borrowed!(arrow::array::Int16Array),
-            ColumnKind::I32 => borrowed!(arrow::array::Int32Array),
-            ColumnKind::I64 => borrowed!(arrow::array::Int64Array),
-            ColumnKind::F32 => borrowed!(arrow::array::Float32Array),
-            ColumnKind::F64 => borrowed!(arrow::array::Float64Array),
-            ColumnKind::Ordinals | ColumnKind::Ordinals16 => {
-                unreachable!("blocked codes are written above")
+        match self.sink {
+            Sink::InPlace { file, .. } => file.finish()?,
+            Sink::Spool(spool) => {
+                let code_bytes = self.kind.code_bytes().expect("only a blocked kind is spooled");
+                let buffer = spool.map(self.count * code_bytes.bytes() as usize)?;
+                match code_bytes {
+                    CodeBytes::Two => {
+                        let pushed = ScalarBuffer::<u16>::new(buffer, 0, self.count);
+                        write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
+                    }
+                    CodeBytes::Four => {
+                        let pushed = ScalarBuffer::<u32>::new(buffer, 0, self.count);
+                        write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
+                    }
+                }
             }
-        };
-        // The array — and with it the mapping — is dropped inside, so the spool is only removed
-        // once `values.arrow` is fully written.
-        write_value_array(&self.values_path, array, self.kind.arrow_type())?;
-        std::fs::remove_file(&values_spool)?;
+        }
         if let Some(p) = presence {
             write_presence(&self.presence_path, p)?;
         }
@@ -542,9 +569,11 @@ impl Drop for SpoolFile {
     }
 }
 
-/// Append `values` to `spool` in native byte order, through `scratch`.
+/// Append `values` to `sink` in native byte order, through `scratch`, which is written out
+/// whenever it is full and carries its remainder to the next call: a caller pushing many short
+/// runs costs one write a [`SCRATCH`], not one a run. [`Out::drain`] writes the last of it.
 fn spool_values<T: Copy, const N: usize>(
-    spool: &mut Spool,
+    out: &mut impl Out,
     values: impl IntoIterator<Item = T>,
     bytes: impl Fn(T) -> [u8; N],
     scratch: &mut Vec<u8>,
@@ -552,12 +581,9 @@ fn spool_values<T: Copy, const N: usize>(
     for v in values {
         scratch.extend_from_slice(&bytes(v));
         if scratch.len() >= SCRATCH {
-            spool.write(scratch)?;
-            scratch.clear();
+            out.drain(scratch)?;
         }
     }
-    spool.write(scratch)?;
-    scratch.clear();
     Ok(())
 }
 
@@ -574,8 +600,7 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
     let counts = ordinals::block_counts(values.len(), ranks.as_ref());
     let mut name = values_path.as_os_str().to_os_string();
     name.push(".blocks.spool");
-    let guard = SpoolFile(PathBuf::from(name));
-    let mut data = Spool::create(guard.0.clone())?;
+    let mut data = Spool::create(PathBuf::from(name))?;
     let mut widths = Vec::with_capacity(counts.len());
     let mut dict_lens = Vec::with_capacity(counts.len());
     let mut encoder = BlockEncoder::default();
@@ -619,7 +644,7 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
             Width::Plain => code_bytes.bytes() * u64::from(count),
             Width::Empty | Width::Const => 0,
         };
-        data.write(&[0u8; 3][..(size - written) as usize])?;
+        scratch.extend_from_slice(&[0u8; 3][..(size - written) as usize]);
         bytes += size;
     }
     if slot != values.len() {
@@ -630,6 +655,7 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
             values.len()
         )));
     }
+    data.drain(&mut scratch)?;
     let parts = Parts {
         code_bytes,
         widths: ScalarBuffer::from(widths),
@@ -637,7 +663,5 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
         dict_lens: ScalarBuffer::from(dict_lens),
         data: ScalarBuffer::new(data.map(bytes as usize)?, 0, (bytes / 4) as usize),
     };
-    write_batch(values_path, &ordinals::batch_of_parts(parts)?)?;
-    drop(guard);
-    Ok(())
+    write_batch(values_path, &ordinals::batch_of_parts(parts)?)
 }

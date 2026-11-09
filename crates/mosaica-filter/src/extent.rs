@@ -105,7 +105,8 @@ pub fn write_extent(
         }
         None => None,
     };
-    let mut writer = ValueColumnWriter::create(&values_path, &presence_path, kind)?;
+    let mut writer =
+        ValueColumnWriter::create(&values_path, &presence_path, kind, Some(codes.len()))?;
     writer.push(codes)?;
     writer.finish(Some(presence))?;
     Ok((values_path, presence_path, dict_path))

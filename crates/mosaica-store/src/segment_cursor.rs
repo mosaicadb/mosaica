@@ -121,9 +121,19 @@ impl SegmentCursor {
         key: &mosaica_types::IdentityKey,
         shard: mosaica_types::ShardId,
     ) -> Result<mosaica_types::EntityId> {
+        self.entity_at(self.row, key, shard)
+    }
+
+    /// The entity row `row` belongs to.
+    pub(crate) fn entity_at(
+        &self,
+        row: usize,
+        key: &mosaica_types::IdentityKey,
+        shard: mosaica_types::ShardId,
+    ) -> Result<mosaica_types::EntityId> {
         self.entities.entity_of(
-            self.row as u32,
-            self.columns.mosaica_id()[self.row],
+            row as u32,
+            self.columns.mosaica_id()[row],
             key,
             shard,
             &self.seg_id,

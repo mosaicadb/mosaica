@@ -7,26 +7,16 @@
 //! the same records ([`crate::DeltaTier`]).
 //!
 //! Postings are entity-space only; `RowId` never appears here.
-//!
-//! It also holds two general Arrow helpers: [`decode_single_batch`], which other crates' readers
-//! use for their own IPC files, and `mapped_buffer`, which maps a file as an Arrow buffer.
 
-use std::fs::File;
 use std::io;
 use std::path::Path;
-use std::ptr::NonNull;
-use std::sync::Arc;
 
 use arrow::array::{Array, LargeBinaryArray};
-use arrow::buffer::Buffer;
-use arrow::datatypes::SchemaRef;
-use arrow::ipc::reader::{read_footer_length, FileDecoder};
-use arrow::ipc::{root_as_footer, MetadataVersion};
-use arrow::record_batch::RecordBatch;
 use croaring::{Bitmap, BitmapView, Portable};
 
 use mosaica_types::TermId;
 
+use crate::arrow_file::invalid_data;
 use crate::records::{open_record_column, RecordWriter};
 
 /// The column name of every postings file, keyed or not.
@@ -107,18 +97,6 @@ pub fn encode_posting_bitmap(bitmap: &Bitmap, small_term_threshold: u32) -> io::
         record.extend_from_slice(&optimised.serialize::<Portable>());
     }
     Ok(record)
-}
-
-/// Memory-map `file` whole as an Arrow buffer, without copying.
-pub(crate) fn mapped_buffer(file: &File) -> io::Result<Buffer> {
-    let mapping = unsafe { memmap2::Mmap::map(file) }?;
-    let len = mapping.len();
-    let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-    // SAFETY: `arc` owns the mapping for as long as any Buffer built from it is alive, and the
-    // mapping is valid for `len` bytes for its entire lifetime.
-    let ptr = NonNull::new(arc.as_ptr() as *mut u8)
-        .expect("memmap2::Mmap never returns a null base pointer");
-    Ok(unsafe { Buffer::from_custom_allocation(ptr, len, arc) })
 }
 
 /// A borrowed view of one term's postings, tied to the lifetime of the [`PostingsReader`] that
@@ -334,102 +312,6 @@ fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) 
         }
     }
     Ok(())
-}
-
-/// Decode the single record batch of an Arrow IPC FILE held in `buffer`, without copying its
-/// buffers, subject to alignment. `what` names the artefact in error messages. Public because
-/// the attribute value column is read the same way, for the same reason.
-pub fn decode_single_batch(buffer: &Buffer, what: &str) -> io::Result<RecordBatch> {
-    const FOOTER_TRAILER_LEN: usize = 10; // 4-byte footer length + 6-byte "ARROW1" magic
-    if buffer.len() < FOOTER_TRAILER_LEN {
-        return Err(invalid_data(format!("{what}: file too short to contain a footer")));
-    }
-
-    let trailer_start = buffer.len() - FOOTER_TRAILER_LEN;
-    let trailer: [u8; FOOTER_TRAILER_LEN] = buffer[trailer_start..]
-        .try_into()
-        .expect("view length matches FOOTER_TRAILER_LEN");
-    let footer_len =
-        read_footer_length(trailer).map_err(|e| invalid_data(format!("{what}: {e}")))?;
-    if footer_len > trailer_start {
-        return Err(invalid_data(format!("{what}: footer length exceeds file size")));
-    }
-
-    let footer = root_as_footer(&buffer[trailer_start - footer_len..trailer_start])
-        .map_err(|e| invalid_data(format!("{what}: invalid footer: {e}")))?;
-
-    let schema_fb = footer
-        .schema()
-        .ok_or_else(|| invalid_data(format!("{what}: footer has no schema")))?;
-    let schema: SchemaRef = Arc::new(
-        arrow::ipc::convert::try_fb_to_schema(schema_fb)
-            .map_err(|e| invalid_data(format!("{what}: invalid schema: {e}")))?,
-    );
-
-    let version: MetadataVersion = footer.version();
-    let mut decoder = FileDecoder::new(schema, version);
-
-    if let Some(dictionaries) = footer.dictionaries() {
-        for block in dictionaries.iter() {
-            let (offset, block_len) = checked_block_range(block, buffer.len(), what)?;
-            let data = buffer.slice_with_length(offset, block_len);
-            decoder
-                .read_dictionary(block, &data)
-                .map_err(|e| invalid_data(format!("{what}: {e}")))?;
-        }
-    }
-
-    let batches = footer
-        .recordBatches()
-        .ok_or_else(|| invalid_data(format!("{what}: footer has no record batches")))?;
-    if batches.len() != 1 {
-        return Err(invalid_data(format!(
-            "{what}: expected exactly one record batch, found {}",
-            batches.len()
-        )));
-    }
-
-    let block = batches.get(0);
-    let (offset, block_len) = checked_block_range(block, buffer.len(), what)?;
-    let data = buffer.slice_with_length(offset, block_len);
-
-    decoder
-        .read_record_batch(block, &data)
-        .map_err(|e| invalid_data(format!("{what}: {e}")))?
-        .ok_or_else(|| invalid_data(format!("{what}: record batch block decoded to nothing")))
-}
-
-/// Validate a footer `Block`'s `(offset, bodyLength + metaDataLength)` against the file length,
-/// returning them as checked `usize`s. A corrupt footer could report a negative value or an
-/// overflowing sum, and `Buffer::slice_with_length` panics on out-of-bounds input, so every
-/// field is checked here first.
-fn checked_block_range(
-    block: &arrow::ipc::Block,
-    buffer_len: usize,
-    what: &str,
-) -> io::Result<(usize, usize)> {
-    let offset = usize::try_from(block.offset())
-        .map_err(|_| invalid_data(format!("{what}: block offset is negative")))?;
-    let body_len = usize::try_from(block.bodyLength())
-        .map_err(|_| invalid_data(format!("{what}: block bodyLength is negative")))?;
-    let meta_len = usize::try_from(block.metaDataLength())
-        .map_err(|_| invalid_data(format!("{what}: block metaDataLength is negative")))?;
-    let block_len = body_len
-        .checked_add(meta_len)
-        .ok_or_else(|| invalid_data(format!("{what}: block length overflows")))?;
-    let end = offset
-        .checked_add(block_len)
-        .ok_or_else(|| invalid_data(format!("{what}: block offset + length overflows")))?;
-    if end > buffer_len {
-        return Err(invalid_data(format!(
-            "{what}: block range [{offset}, {end}) exceeds file length {buffer_len}"
-        )));
-    }
-    Ok((offset, block_len))
-}
-
-pub(crate) fn invalid_data(msg: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
 
 #[cfg(test)]

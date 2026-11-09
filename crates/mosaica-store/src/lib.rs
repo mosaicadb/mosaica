@@ -4,7 +4,6 @@
 
 pub mod access_column;
 pub mod bands;
-pub mod columns;
 pub mod coordinates;
 pub mod declaration;
 pub mod derived;

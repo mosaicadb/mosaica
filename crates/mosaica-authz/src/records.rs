@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use arrow::array::LargeBinaryArray;
 use arrow::buffer::{Buffer, MutableBuffer, OffsetBuffer, ScalarBuffer};
 
-use crate::postings::{invalid_data, mapped_buffer};
+use crate::arrow_file::{invalid_data, mapped_buffer};
 
 // The reader borrows the offsets and keys as native integers, which are the file's little-endian
 // ones only on a little-endian target.

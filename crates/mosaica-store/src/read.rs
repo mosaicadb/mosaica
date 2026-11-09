@@ -16,10 +16,7 @@ use arrow::array::{
     StringArray, TimestampMicrosecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
 };
 use arrow::buffer::Buffer;
-use arrow::datatypes::{DataType, SchemaRef, TimeUnit};
-use arrow::ipc::convert::try_fb_to_schema;
-use arrow::ipc::reader::{read_footer_length, FileDecoder};
-use arrow::ipc::{root_as_footer, root_as_message, Block, MetadataVersion};
+use arrow::datatypes::{DataType, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use memmap2::Mmap;
 use sha2::{Digest, Sha256};
@@ -2378,8 +2375,8 @@ impl ScalarSlice<'_> {
 }
 
 /// A zero-copy, mmap-backed view of `columns.arrow`. Validated once at [`ColumnsRef::load`]:
-/// exactly one record batch, uncompressed, 8-byte-aligned buffers (via
-/// [`FileDecoder::with_require_alignment`]), and the two fixed columns present with the
+/// exactly one record batch, uncompressed, buffers aligned for their types
+/// ([`mosaica_authz::decode_single_batch`]), and the two fixed columns present with the
 /// expected names and types (contracts §2.6; the `priority` column is cut — decision 0046 —
 /// and a pre-cut bundle carrying it is a typed error here, never a silently ignored column). Every accessor below borrows directly from the
 /// underlying `RecordBatch`'s buffers — no per-call copy.
@@ -2429,7 +2426,8 @@ impl ColumnsRef {
         let allocation: Arc<Mmap> = Arc::clone(&arc);
         let buffer = unsafe { Buffer::from_custom_allocation(ptr, len, allocation) };
 
-        let batch = decode_single_batch(&buffer, path)?;
+        let batch = mosaica_authz::decode_single_batch(&buffer, "columns.arrow")
+            .map_err(|e| invalid_columns(path, &e.to_string()))?;
         validate_schema(&batch, path)?;
 
         let scalar_index: HashMap<String, usize> = batch
@@ -2698,149 +2696,6 @@ fn reject_nulls(
         });
     }
     Ok(())
-}
-
-/// Decode the (single, uncompressed, 8-byte-aligned) record batch of an Arrow IPC FILE held in
-/// `buffer`, zero-copy. Structurally the same footer/dictionary/block walk as
-/// `mosaica_authz::postings::decode_single_batch`, generalised to any single-record-batch
-/// schema and hardened with two checks that file has no need of: `with_require_alignment(true)`
-/// (fail closed on a misaligned buffer rather than silently reallocating) and an explicit
-/// rejection of compressed batches (§ "no compression" in the task brief — decoding would
-/// otherwise quietly succeed via an allocated, decompressed copy, defeating the zero-copy
-/// contract without ever raising an error). Errors come back as `StoreError::InvalidColumns`.
-pub(crate) fn decode_single_batch(buffer: &Buffer, path: &Path) -> Result<RecordBatch> {
-    const FOOTER_TRAILER_LEN: usize = 10; // 4-byte footer length + 6-byte "ARROW1" magic
-    if buffer.len() < FOOTER_TRAILER_LEN {
-        return Err(invalid_columns(path, "file too short to contain a footer"));
-    }
-
-    let trailer_start = buffer.len() - FOOTER_TRAILER_LEN;
-    let trailer: [u8; FOOTER_TRAILER_LEN] = buffer[trailer_start..]
-        .try_into()
-        .expect("view length matches FOOTER_TRAILER_LEN");
-    let footer_len = read_footer_length(trailer)
-        .map_err(|e| invalid_columns(path, &format!("bad footer length: {e}")))?;
-    if footer_len > trailer_start {
-        return Err(invalid_columns(path, "footer length exceeds file size"));
-    }
-
-    let footer = root_as_footer(&buffer[trailer_start - footer_len..trailer_start])
-        .map_err(|e| invalid_columns(path, &format!("invalid footer: {e}")))?;
-
-    if footer.dictionaries().map(|d| d.len()).unwrap_or(0) != 0 {
-        return Err(invalid_columns(
-            path,
-            "dictionary-encoded columns are not supported",
-        ));
-    }
-
-    let schema_fb = footer
-        .schema()
-        .ok_or_else(|| invalid_columns(path, "footer has no schema"))?;
-    let schema: SchemaRef = Arc::new(
-        try_fb_to_schema(schema_fb)
-            .map_err(|e| invalid_columns(path, &format!("invalid schema: {e}")))?,
-    );
-
-    let version: MetadataVersion = footer.version();
-    let decoder = FileDecoder::new(schema, version).with_require_alignment(true);
-
-    let batches = footer
-        .recordBatches()
-        .ok_or_else(|| invalid_columns(path, "footer has no record batches"))?;
-    if batches.len() != 1 {
-        return Err(invalid_columns(
-            path,
-            &format!("expected exactly one record batch, found {}", batches.len()),
-        ));
-    }
-
-    let block = batches.get(0);
-    let (offset, body_len, meta_len) = checked_block_range(path, block, buffer.len())?;
-    let data = buffer.slice_with_length(offset, body_len + meta_len);
-
-    reject_if_compressed(path, &data, meta_len)?;
-
-    decoder
-        .read_record_batch(block, &data)
-        .map_err(|e| invalid_columns(path, &format!("{e}")))?
-        .ok_or_else(|| invalid_columns(path, "record batch block decoded to nothing"))
-}
-
-const CONTINUATION_MARKER: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
-
-/// Parse the IPC `Message` metadata prefix of a record-batch block and reject it outright if
-/// its body is compressed. This duplicates a small slice of what `FileDecoder::read_record_batch`
-/// parses internally — there is no public API to ask "was this compressed?" after the fact,
-/// and by the time the batch is decoded a compressed buffer has already been silently
-/// reallocated into an owned, decompressed copy.
-fn reject_if_compressed(path: &Path, data: &Buffer, meta_len: usize) -> Result<()> {
-    if meta_len > data.len() {
-        return Err(invalid_columns(
-            path,
-            "block metaDataLength exceeds block data",
-        ));
-    }
-    let meta = &data[..meta_len];
-    if meta.len() < 4 {
-        return Err(invalid_columns(path, "message metadata too short"));
-    }
-    let stripped = if meta[..4] == CONTINUATION_MARKER {
-        if meta.len() < 8 {
-            return Err(invalid_columns(path, "message metadata too short"));
-        }
-        &meta[8..]
-    } else {
-        &meta[4..]
-    };
-    let message = root_as_message(stripped)
-        .map_err(|e| invalid_columns(path, &format!("invalid message metadata: {e}")))?;
-    let record_batch = message.header_as_record_batch().ok_or_else(|| {
-        invalid_columns(
-            path,
-            &format!(
-                "expected a RecordBatch message, found header type {:?}",
-                message.header_type()
-            ),
-        )
-    })?;
-    if record_batch.compression().is_some() {
-        return Err(invalid_columns(
-            path,
-            "compressed record batches are not supported (uncompressed buffers only, R4)",
-        ));
-    }
-    Ok(())
-}
-
-/// Validate a footer `Block`'s `(offset, bodyLength, metaDataLength)` against the file length,
-/// returning them as checked `usize`s (see `mosaica_authz::postings::checked_block_range` for
-/// the identical rationale: `Block`'s fields are `i64` in the flatbuffer schema, and
-/// `Buffer::slice_with_length` panics on out-of-bounds input rather than erroring).
-fn checked_block_range(
-    path: &Path,
-    block: &Block,
-    buffer_len: usize,
-) -> Result<(usize, usize, usize)> {
-    let offset = usize::try_from(block.offset())
-        .map_err(|_| invalid_columns(path, "block offset is negative"))?;
-    let body_len = usize::try_from(block.bodyLength())
-        .map_err(|_| invalid_columns(path, "block bodyLength is negative"))?;
-    let meta_len = usize::try_from(block.metaDataLength())
-        .map_err(|_| invalid_columns(path, "block metaDataLength is negative"))?;
-    let total = body_len
-        .checked_add(meta_len)
-        .ok_or_else(|| invalid_columns(path, "block length overflows"))?;
-    let end = offset
-        .checked_add(total)
-        .ok_or_else(|| invalid_columns(path, "block offset + length overflows"))?;
-    if end > buffer_len {
-        return Err(invalid_columns(
-            path,
-            &format!("block range [{offset}, {end}) exceeds file length {buffer_len}"),
-        ));
-    }
-    Ok((offset, body_len, meta_len))
 }
 
 fn invalid_columns(path: &Path, detail: &str) -> StoreError {

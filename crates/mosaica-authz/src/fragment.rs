@@ -22,7 +22,8 @@ use sha2::{Digest, Sha256};
 
 use mosaica_types::TermId;
 
-use crate::postings::{invalid_data, union_postings, PostingRef, PostingsReader};
+use crate::arrow_file::invalid_data;
+use crate::postings::{union_postings, PostingRef, PostingsReader};
 use mosaica_cache::{
     Cancel, CacheWeight, SingleFlightCache, SingleFlightError, WaitEnded, WaitingBuildError,
 };

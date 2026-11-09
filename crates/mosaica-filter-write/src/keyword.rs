@@ -797,6 +797,7 @@ mod tests {
             &values,
             &presence,
             mosaica_filter::ColumnKind::Ordinals,
+            Some(built.column.codes().len()),
         )
         .expect("the build's writer");
         writer.push(built.column.codes()).expect("push");

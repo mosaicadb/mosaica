@@ -1,3 +1,4 @@
+pub mod arrow_file;
 pub mod dict;
 pub mod fragment;
 pub mod label;
@@ -6,6 +7,7 @@ pub mod records;
 pub mod term_sweep;
 pub mod tier;
 
+pub use arrow_file::decode_single_batch;
 pub use dict::{
     coalesce_dict_extents, Dict, DictStreamWriter, DictWriter, MAX_DISTINCT_TERMS,
     MAX_KEYS_PER_ITEM, PUBLIC_LABEL, PUBLIC_TERM,
@@ -17,8 +19,8 @@ pub use fragment::{
 };
 pub use label::{index_keys, LabelIndex};
 pub use postings::{
-    decode_single_batch, encode_posting, encode_posting_bitmap, union_postings, write_postings,
-    PostingBitmap, PostingRef, PostingsReader, POSTINGS_COLUMN,
+    encode_posting, encode_posting_bitmap, union_postings, write_postings, PostingBitmap,
+    PostingRef, PostingsReader, POSTINGS_COLUMN,
 };
 pub use records::{open_record_column, RecordWriter};
 pub use term_sweep::sweep_term_postings;
