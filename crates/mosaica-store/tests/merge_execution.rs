@@ -469,16 +469,9 @@ fn the_k_way_merge_emits_exactly_what_a_concatenate_and_sort_would() {
     }
 }
 
-/// **The spools do not survive the merge that wrote them.**
-///
-/// `SegmentWriter` streams each column to a file beside its output and maps it back at `finish`.
-/// At the fold's scale those spools are the corpus (compaction §3, ~12 GB at 10⁹), and a filled
-/// device takes the whole write path down with it (write-path §1.3) — so they are unlinked by a
-/// destructor rather than by a line at the bottom of the happy path.
-///
-/// **Mutation:** replace `SpoolGuard`'s `Drop` with a `remove_file` at the end of `finish` and this
-/// still passes; delete either and it fails. What it pins is that a published segment directory
-/// holds exactly the files the manifest names.
+/// **A merged segment directory holds exactly the files the manifest names**, and no transient
+/// beside them: at the fold's scale a stray copy of a column is the corpus (compaction §3, ~12 GB
+/// at 10⁹), and a filled device takes the whole write path down with it (write-path §1.3).
 #[test]
 fn a_merged_segment_directory_holds_no_spool_files() {
     let dir = tempfile::TempDir::new().unwrap();

@@ -27,8 +27,13 @@ fn both(
 
     let streamed = dir.join("streamed.arrow");
     let streamed_presence = dir.join("streamed.roaring");
-    let mut w = ValueColumnWriter::create(&streamed, &streamed_presence, ColumnKind::of(whole))
-        .expect("create");
+    let mut w = ValueColumnWriter::create(
+        &streamed,
+        &streamed_presence,
+        ColumnKind::of(whole),
+        Some(whole.len()),
+    )
+    .expect("create");
     for chunk in chunks {
         w.push(&chunk).expect("push");
     }
@@ -156,6 +161,7 @@ fn a_chunk_of_the_wrong_family_is_refused() {
         &dir.path().join("v.arrow"),
         &dir.path().join("p.roaring"),
         ColumnKind::U32,
+        Some(3),
     )
     .expect("create");
     w.push(&Codes::U32(vec![1u32, 2].into())).expect("push");
@@ -184,6 +190,7 @@ fn a_presence_bitmap_that_does_not_match_the_value_count_is_refused_by_both_writ
         &dir.path().join("v2.arrow"),
         &dir.path().join("p2.roaring"),
         ColumnKind::U32,
+        Some(3),
     )
     .expect("create");
     w.push(&Codes::U32(vec![1u32, 2, 3].into())).expect("push");
@@ -199,6 +206,7 @@ fn an_abandoned_writer_leaves_no_spool_behind() {
             &dir.path().join("v.arrow"),
             &dir.path().join("p.roaring"),
             ColumnKind::U32,
+            Some(100),
         )
         .expect("create");
         w.push(&Codes::U32(vec![7u32; 100].into())).expect("push");
@@ -208,4 +216,30 @@ fn an_abandoned_writer_leaves_no_spool_behind() {
         .map(|e| e.expect("entry").file_name())
         .collect();
     assert!(left.is_empty(), "{left:?}");
+}
+
+/// A flat column is laid out for the count it was created with: more values are refused when they
+/// arrive, fewer when it finishes, and neither leaves a file.
+#[test]
+fn a_flat_column_holds_exactly_the_count_it_was_created_for() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let values = dir.path().join("v.arrow");
+    let presence = dir.path().join("p.roaring");
+
+    let mut w =
+        ValueColumnWriter::create(&values, &presence, ColumnKind::U16, Some(3)).expect("create");
+    w.push(&Codes::U16(vec![1u16, 2].into())).expect("push");
+    w.push(&Codes::U16(vec![3u16, 4].into())).expect_err("a fourth value is refused");
+    drop(w);
+    assert!(!values.exists());
+
+    let mut w =
+        ValueColumnWriter::create(&values, &presence, ColumnKind::U16, Some(3)).expect("create");
+    w.push(&Codes::U16(vec![1u16, 2].into())).expect("push");
+    w.finish(None).expect_err("two values are refused");
+    assert!(!values.exists());
+
+    ValueColumnWriter::create(&values, &presence, ColumnKind::U16, None)
+        .err()
+        .expect("a flat column with no count is refused");
 }

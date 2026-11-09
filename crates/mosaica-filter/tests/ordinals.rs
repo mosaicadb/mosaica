@@ -45,8 +45,9 @@ fn shaped(n: usize, draw: &mut Draw) -> Vec<u32> {
 fn written(dir: &Path, values: &[u32], presence: Option<&Bitmap>) -> ValueColumn {
     let values_path = dir.join(VALUES_FILE);
     let presence_path = dir.join(PRESENCE_FILE);
-    let mut writer = ValueColumnWriter::create(&values_path, &presence_path, ColumnKind::Ordinals)
-        .expect("create");
+    let mut writer =
+        ValueColumnWriter::create(&values_path, &presence_path, ColumnKind::Ordinals, None)
+            .expect("create");
     for chunk in values.chunks(9_973) {
         writer.push(&Codes::U32(chunk.to_vec().into())).expect("push");
     }
@@ -290,7 +291,7 @@ fn a_u16_category_answers_and_reads_back_as_its_flat_codes() {
     let values_path = dir.path().join(VALUES_FILE);
     let presence_path = dir.path().join(PRESENCE_FILE);
     let mut writer =
-        ValueColumnWriter::create(&values_path, &presence_path, ColumnKind::Ordinals16)
+        ValueColumnWriter::create(&values_path, &presence_path, ColumnKind::Ordinals16, None)
             .expect("create");
     for chunk in codes.chunks(7_001) {
         writer.push(&Codes::U16(chunk.to_vec().into())).expect("push");
@@ -341,6 +342,7 @@ fn a_u16_column_refuses_wider_codes() {
         &dir.path().join(VALUES_FILE),
         &dir.path().join(PRESENCE_FILE),
         ColumnKind::Ordinals16,
+        None,
     )
     .expect("create");
     assert!(writer.push(&Codes::U32(vec![70_000].into())).is_err());

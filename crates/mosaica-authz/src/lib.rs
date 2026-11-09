@@ -1,3 +1,4 @@
+pub mod arrow_file;
 pub mod dict;
 pub mod fragment;
 pub mod label;
@@ -15,8 +16,9 @@ pub use fragment::{
     Grant,
 };
 pub use label::{index_keys, LabelIndex};
+pub use arrow_file::decode_single_batch;
 pub use postings::{
-    decode_single_batch, encode_posting, encode_posting_bitmap, open_record_column,
+    encode_posting, encode_posting_bitmap, open_record_column,
     union_postings, write_posting_records, write_postings, PostingBitmap, PostingRef, PostingsReader, PostingsSpool,
 };
 pub use term_sweep::sweep_term_postings;
