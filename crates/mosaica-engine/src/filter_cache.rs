@@ -513,6 +513,7 @@ mod tests {
     /// worth copying the entry for are scanned and not kept, another view's leaf is its own entry,
     /// and a digest collision is scanned whole.
     #[test]
+    #[allow(clippy::single_range_in_vec_init)]
     fn a_row_leaf_scans_only_the_rows_its_entry_has_not() {
         let generation = Generation::synthetic("v00000", 1, 0, Overlay::new(), IngestBuffer::new());
         let shard = generation.only_shard();
