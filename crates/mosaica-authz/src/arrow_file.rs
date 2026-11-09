@@ -18,14 +18,16 @@
 //! The framing is produced by Arrow's own `FileWriter`, never by a second encoder, run once over a
 //! batch of the real schema and row count whose buffers are untouched anonymous mappings, into a
 //! [`Recorder`] that keeps every byte it is handed except the values buffers, whose position and
-//! length it records. An untouched mapping costs address space and no resident page, and the
-//! writer reads none of it: a null-free array's null count is a stored number, and no other field
-//! of the metadata depends on a value.
+//! length it records, and the validity bitmaps, which are all ones and are kept as their position
+//! and length. An untouched mapping costs address space and no resident page, and the writer reads
+//! none of it: no field of the metadata depends on a value. The writer does allocate each column's
+//! bitmap, `rows / 8` bytes, while the layout is learnt.
 //!
 //! This depends on the writer handing each values buffer to the sink as the array's own bytes.
 //! An `arrow` whose writer copied them would leave a column's values unrecognised, and the layout
 //! is refused rather than made wrong: [`FileLayout::new`] checks every column's buffer was found
-//! at its full length, and keeps no framing write longer than [`MAX_FRAMING_WRITE`].
+//! at its full length, and keeps no framing write longer than [`MAX_FRAMING_WRITE`] that is not
+//! all ones, which a copy of an untouched mapping never is.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
@@ -35,7 +37,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 
 use arrow::array::{make_array, ArrayData, ArrayRef};
-use arrow::buffer::{BooleanBuffer, Buffer, MutableBuffer, NullBuffer};
+use arrow::buffer::{Buffer, MutableBuffer};
 use arrow::datatypes::{DataType, SchemaRef};
 use arrow::ipc::reader::{read_footer_length, FileDecoder};
 use arrow::ipc::writer::FileWriter;
@@ -282,35 +284,26 @@ impl FileLayout {
             })
             .collect::<io::Result<_>>()?;
 
-        // One untouched mapping per column for its values and one for its validity bitmap, which
-        // Arrow would otherwise allocate and fill with ones itself, every column's at once. Each
-        // span is the buffer's own length, not the mapping's: two mappings can be adjacent, and a
-        // span rounded up would claim a neighbour's first byte.
-        let validity_bytes = rows.div_ceil(8);
+        // One untouched mapping per column for its values. Each span is the buffer's own length,
+        // not the mapping's: two mappings can be adjacent, and a span rounded up would claim a
+        // neighbour's first byte.
         let mut regions: Vec<(memmap2::MmapMut, usize)> = Vec::with_capacity(widths.len());
-        let mut validity: Vec<memmap2::MmapMut> = Vec::with_capacity(widths.len());
         for width in &widths {
             let bytes = buffer_bytes(*width, rows)?;
             regions.push((untouched(bytes)?, bytes));
-            validity.push(untouched(validity_bytes)?);
         }
 
         let mut columns: Vec<ArrayRef> = Vec::with_capacity(widths.len());
-        for (index, ((region, bytes), nulls)) in regions.iter().zip(&validity).enumerate() {
-            // SAFETY: both mappings outlive every buffer built over them: `regions` and
-            // `validity` are dropped below, after the writer has finished and the batch is gone.
-            let (values, nulls) = unsafe { (over(region, *bytes), over(nulls, validity_bytes)) };
-            // SAFETY: the bitmap reads as all null and the count says none. Both are what the IPC
-            // writer is meant to see: it copies the count into the metadata and never reads the
-            // bits, which the recorder recognises by address and writes as `0xFF`.
-            let nulls = unsafe { NullBuffer::new_unchecked(BooleanBuffer::new(nulls, 0, rows), 0) };
-            // SAFETY: the data is the right length for `rows` values of the column's type, which
-            // is all an unvalidated primitive or boolean array needs.
+        for (index, (region, bytes)) in regions.iter().enumerate() {
+            // SAFETY: the mapping outlives every buffer built over it: `regions` is dropped below,
+            // after the writer has finished and the batch is gone.
+            let values = unsafe { over(region, *bytes) };
+            // SAFETY: the buffer is the right length for `rows` values of the column's type, which
+            // is all an unvalidated primitive or boolean array with no nulls needs.
             let data = unsafe {
                 ArrayData::builder(schema.field(index).data_type().clone())
                     .len(rows)
                     .add_buffer(values)
-                    .nulls(Some(nulls))
                     .build_unchecked()
             };
             columns.push(make_array(data));
@@ -323,10 +316,6 @@ impl FileLayout {
             spans: regions
                 .iter()
                 .map(|(region, bytes)| (region.as_ptr() as usize, *bytes))
-                .collect(),
-            validity: validity
-                .iter()
-                .map(|region| (region.as_ptr() as usize, validity_bytes))
                 .collect(),
             framing: Vec::new(),
             validity_runs: Vec::new(),
@@ -343,7 +332,6 @@ impl FileLayout {
         }
         drop(batch);
         drop(regions);
-        drop(validity);
         for (column, width) in widths.iter().enumerate() {
             let bytes = buffer_bytes(*width, rows)? as u64;
             if bytes > 0 && sink.values[column].1 != bytes {
@@ -399,9 +387,6 @@ unsafe fn over(region: &memmap2::MmapMut, bytes: usize) -> Buffer {
 struct Recorder {
     at: u64,
     spans: Vec<(usize, usize)>,
-    /// The validity mappings, whose bytes stand for `0xFF`: what Arrow writes for a column with no
-    /// null buffer.
-    validity: Vec<(usize, usize)>,
     framing: Vec<(u64, Vec<u8>)>,
     validity_runs: Vec<(u64, u64)>,
     values: Vec<(u64, u64)>,
@@ -414,12 +399,14 @@ impl Write for Recorder {
         let within = |&(base, len): &(usize, usize)| {
             len > 0 && start >= base && start + buf.len() <= base + len
         };
-        let owner = self.spans.iter().position(within);
-        let validity = self.validity.iter().any(within);
-        match owner {
+        match self.spans.iter().position(within) {
             Some(column) => self.values[column] = (self.at, buf.len() as u64),
-            None if validity => self.validity_runs.push((self.at, buf.len() as u64)),
             None if buf.len() <= MAX_FRAMING_WRITE => self.framing.push((self.at, buf.to_vec())),
+            // A validity bitmap: Arrow allocates and writes one of ones for a column with no
+            // nulls. A values buffer copied from its untouched mapping would be zeros, never this.
+            None if buf.iter().all(|byte| *byte == 0xFF) => {
+                self.validity_runs.push((self.at, buf.len() as u64))
+            }
             None => {
                 self.failed.get_or_insert_with(|| {
                     format!(
@@ -623,6 +610,48 @@ mod tests {
         )]));
         write_single_batch(&path, schema, vec![Arc::new(array)]).unwrap();
         decode_single_batch(&read_buffer(&path).unwrap(), "dict").unwrap_err();
+    }
+
+    /// A file filled in place is the file Arrow writes for the same batch, at a row count whose
+    /// validity bitmaps are past the largest write the layout keeps as framing.
+    #[test]
+    fn a_file_filled_in_place_is_the_file_arrow_writes() {
+        use arrow::array::{BooleanArray, UInt8Array};
+
+        let dir = tempfile::tempdir().unwrap();
+        let rows = 8 * MAX_FRAMING_WRITE + 13;
+        let ints: Vec<i64> = (0..rows as i64).map(|i| i * 7 - 3).collect();
+        let bytes: Vec<u8> = (0..rows).map(|i| i as u8).collect();
+        let bools: Vec<bool> = (0..rows).map(|i| i % 3 == 0).collect();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("ints", DataType::Int64, false),
+            Field::new("bytes", DataType::UInt8, false),
+            Field::new("bools", DataType::Boolean, false),
+        ]));
+
+        let whole = dir.path().join("whole.arrow");
+        let bool_array = BooleanArray::from(bools);
+        let packed = bool_array.values().inner().as_slice().to_vec();
+        write_single_batch(
+            &whole,
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(ints.clone())),
+                Arc::new(UInt8Array::from(bytes.clone())),
+                Arc::new(bool_array),
+            ],
+        )
+        .unwrap();
+
+        let in_place = dir.path().join("in-place.arrow");
+        let file = InPlaceFile::create(&in_place, FileLayout::new(schema, rows).unwrap()).unwrap();
+        let int_bytes: Vec<u8> = ints.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        file.put(0, 0, &int_bytes).unwrap();
+        file.put(1, 0, &bytes).unwrap();
+        file.put(2, 0, &packed).unwrap();
+        file.finish().unwrap();
+
+        assert_eq!(std::fs::read(&in_place).unwrap(), std::fs::read(&whole).unwrap());
     }
 
     #[test]
