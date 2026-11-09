@@ -1489,6 +1489,7 @@ export function createStore(options: StoreOptions): Store {
 
     const viewChannel = new ArtifactChannel(client, {
       clock,
+      retry: {...RETRY_DEFAULTS, ...options.driver},
       view: id,
       quantisation: q,
       projection: m.views.find((v) => v.id === id)?.projection ?? 'none',

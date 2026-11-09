@@ -14,6 +14,9 @@ container image.
   keyword filter and inside an aggregate's count, as it already did inside a text filter. Those
   requests used to run to their end, so a viewer changing filters quickly left the server
   computing answers nobody was waiting for.
+- The TypeScript store sends a request for a layer's artifacts again when Mosaica sheds it
+  (`429`) or is still starting (`503`), as it does a map request. It used to give up at once, so
+  the clusters and their labels stayed off the map until the camera next moved.
 
 ## [0.3.0] - 2026-11-08
 
