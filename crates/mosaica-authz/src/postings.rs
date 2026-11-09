@@ -241,8 +241,9 @@ impl PostingsReader {
         read_posting(&self.array, idx).map(Some)
     }
 
-    /// Record `ordinal` as the file holds it, `u8 tag ‖ payload`, checked at open as every record
-    /// is, or `None` where the file carries no record for it.
+    /// Record `ordinal` as the file holds it, `u8 tag ‖ payload`, or `None` where the file carries
+    /// no record for it. Every record was checked at open: a tag-0 payload ascends strictly and a
+    /// tag-1 payload is exactly a portable bitmap.
     pub fn record_at(&self, ordinal: u32) -> Option<&[u8]> {
         let idx = ordinal as usize;
         (idx < self.array.len()).then(|| self.array.value(idx))
@@ -290,8 +291,10 @@ pub(crate) fn validate_records(array: &LargeBinaryArray) -> io::Result<()> {
     }
 }
 
-/// A tag-1 payload is accepted on [`mosaica_roaring::exact_portable`]'s rule, which is what makes
-/// the view [`read_posting`] builds safe. `scratch` is that rule's buffer.
+/// A tag-0 payload must hold whole `u32`s ascending strictly, as [`encode_posting`] writes them, so
+/// no reader counts an entity twice. A tag-1 payload is accepted on
+/// [`mosaica_roaring::exact_portable`]'s rule, which is what makes the view [`read_posting`] builds
+/// safe. `scratch` is that rule's buffer.
 fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) -> io::Result<()> {
     let bytes = array.value(idx);
     let (tag, payload) = bytes
@@ -305,6 +308,16 @@ fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) 
                     "postings: term {idx} tag-0 payload length {} is not a multiple \
                      of 4",
                     payload.len()
+                )));
+            }
+            let entities = payload.as_chunks::<4>().0;
+            if !entities
+                .windows(2)
+                .all(|w| u32::from_le_bytes(w[0]) < u32::from_le_bytes(w[1]))
+            {
+                return Err(invalid_data(format!(
+                    "postings: term {idx}'s tag-0 entities do not ascend strictly; rebuild the \
+                     file"
                 )));
             }
         }
@@ -445,6 +458,20 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("postings");
         write_raw_records(&path, &[&[2u8, 1, 2, 3, 4]]).unwrap();
+
+        let err = PostingsReader::open(&path, false).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn open_rejects_a_tag_0_payload_that_does_not_ascend_strictly() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("postings");
+        let mut repeated = vec![0u8];
+        for entity in [3u32, 7, 7] {
+            repeated.extend_from_slice(&entity.to_le_bytes());
+        }
+        write_raw_records(&path, &[&repeated]).unwrap();
 
         let err = PostingsReader::open(&path, false).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
