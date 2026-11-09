@@ -37,12 +37,14 @@
 //!
 //! # Projections
 //!
-//! An expression answered over items, leaves combined by conjunction and disjunction, also keeps
-//! the rows in one view of the items it matches among those the grant admits, before deletions and
-//! suppressions are taken out. Its answer over a request's candidate is that set intersected with
-//! the candidate, so a request reads the rows over its own domain and narrows them through its
-//! composed mask, which removes exactly the rows of items outside the candidate. The entry is a row
-//! entry covering every row of the view, under a key of its own.
+//! An expression answered in entity space alone also keeps the rows in one view of the items it
+//! matches among those the grant admits, before deletions and suppressions are taken out. Each of
+//! its leaves decides each item by the item alone, so its answer over a request's candidate is
+//! that set intersected with the candidate, plus whatever it matches among the candidate's
+//! buffered items, which the grant's fragment does not hold. A request reads the rows over its own
+//! domain, adds the rows of those buffered items it matches, and narrows the answer through its
+//! composed mask, which removes exactly the rows of items outside the candidate. The entry is a
+//! row entry covering every row of the view, under a key of its own.
 //!
 //! # Bound and peak
 //!
@@ -310,7 +312,7 @@ fn key_over(
 
 /// The key of the rows, in `view` at `incarnation`, of the items `expr` matches in `shard` for
 /// `grant`, and its canonical bytes; `None` for an expression the shard's filter columns do not
-/// answer over items ([`FilterColumns::answered_over_items`]).
+/// answer in entity space alone ([`FilterColumns::answered_over_items`]).
 pub(crate) fn projection_key_of(
     shard: &Shard,
     grant: [u8; 32],
@@ -332,6 +334,10 @@ pub(crate) fn projection_key_of(
             }
             FilterExpr::AnyOf(kids) => {
                 out.push(1);
+                kids
+            }
+            FilterExpr::NoneOf(kids) => {
+                out.push(2);
                 kids
             }
             _ => return None,

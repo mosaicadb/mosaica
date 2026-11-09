@@ -1201,11 +1201,17 @@ impl Engine {
                             region: None,
                             unmasked,
                         };
+                        let buffered = |mut rows: croaring::Bitmap| -> Result<croaring::Bitmap> {
+                            rows |= self
+                                .buffered_matches(served, side, &resolved, &req.cancel, expr)?
+                                .and(&domain_rows);
+                            Ok(rows)
+                        };
                         let kept = projection.as_ref().and_then(|key| {
                             crate::filter_cache::projected_rows(&self.filter_cache, key, &domain_rows)
                         });
                         let mut out = if let Some(rows) = kept {
-                            projected(rows, None)
+                            projected(buffered(rows)?, None)
                         } else {
                             let routed = route(expr, choice)?;
                             probe.lap(|t| &mut t.filter_eval_ns);
@@ -1237,6 +1243,8 @@ impl Engine {
                                         key,
                                         &domain_rows,
                                     )?
+                                    .map(buffered)
+                                    .transpose()?
                                     .map(|rows| projected(rows, Some(matched))),
                                 _ => None,
                             };
@@ -1332,6 +1340,47 @@ impl Engine {
             .filter_crossings_projected
             .fetch_add(1, Ordering::Relaxed);
         Ok(Some(answer))
+    }
+
+    /// The rows in `side` of the items `expr` matches among the request's candidate set's buffered
+    /// items with a row in the view: what rows kept over the grant's fragment do not hold, since the
+    /// fragment holds no buffered item.
+    fn buffered_matches(
+        &self,
+        served: &ServedView<'_>,
+        side: &ServedSide<'_>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+        expr: &crate::filter::FilterExpr,
+    ) -> Result<croaring::Bitmap> {
+        let buffered: croaring::Bitmap = side
+            .shard
+            .buffered_rows(served.name)
+            .unwrap_or_default()
+            .iter()
+            .map(|entity| entity.raw() as u32)
+            .collect();
+        if buffered.is_empty() {
+            return Ok(croaring::Bitmap::new());
+        }
+        let candidate = self.filter_candidate_within(
+            served.session,
+            side.shard,
+            Some(&side.geometry.fragment),
+            &buffered,
+        )?;
+        let routed = self.route_filters_under(
+            served,
+            side,
+            FilterCandidate::Within(&candidate),
+            resolved,
+            cancel,
+            |route| route(expr, crate::filter::RouteChoice::Entity),
+        )?;
+        Ok(match routed {
+            crate::filter::RoutedFilter::Entity(items) => side.data.row_space.project(&items),
+            crate::filter::RoutedFilter::Row(_) => croaring::Bitmap::new(),
+        })
     }
 
     /// The visible entities whose rows lie in `domain`, the rows a request's tiles span in `side`

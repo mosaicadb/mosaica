@@ -172,23 +172,11 @@ impl FilterColumns {
         self.columns.get(column).is_some_and(|held| held.filterable)
     }
 
-    /// Whether `expr` is answered over items by every route alike, so its answer over a candidate is
-    /// its answer over any wider set, intersected with the candidate: a leaf a value column or a
-    /// text index answers, or a conjunction or disjunction of such expressions. A negation keeps the
-    /// candidate's items that carry no value, and a unique index answers a buffered item, so neither
-    /// is.
+    /// Whether `expr` can be answered in entity space alone. Each of its leaves then decides each
+    /// item by the item alone, so its answer over a candidate is its answer over any wider set,
+    /// intersected with the candidate.
     pub(crate) fn answered_over_items(&self, expr: &FilterExpr) -> bool {
-        match expr {
-            FilterExpr::Leaf { column, operand } => {
-                self.unique_keys(column, operand).is_none()
-                    && self.has_value_route(column)
-                    && self.placements.get(column).is_some_and(|held| held.entity)
-            }
-            FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) => {
-                !kids.is_empty() && kids.iter().all(|kid| self.answered_over_items(kid))
-            }
-            _ => false,
-        }
+        self.space_of(expr, RouteChoice::Entity) == Ok(Space::Entity)
     }
 
     /// How many entities the base postings hold for the values an `eq` or `in` names, over the whole

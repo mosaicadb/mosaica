@@ -692,6 +692,36 @@ fn ingest_and_flush_with(
     allocated.raw()
 }
 
+/// Ingest one item carrying `archive` and no department, and wait for the commit window that
+/// buffers it, without a flush.
+fn ingest_buffered_with(engine: &mosaica_engine::Engine, external: &str, archive: WalScalar) {
+    let buffered = engine.write_executor_stats().buffered_items;
+    let row = UnallocatedRow {
+        view: "s0".to_string(),
+        join: None,
+        descriptors: vec![b"0".to_vec()],
+        x: 5.0,
+        y: 5.0,
+        scalars: vec![
+            WalScalar::Null,
+            archive,
+            WalScalar::Utf8(format!("{external}-title")),
+            WalScalar::I32(1),
+            WalScalar::Null,
+            WalScalar::Utf8(format!("shared {external}")),
+        ],
+        terms: engine.resolve_terms(&[b"0".to_vec()]),
+        scoped: Vec::new(),
+    };
+    engine
+        .ingest_rows(vec![row], external.to_string(), [0u8; 32])
+        .expect("ingest is accepted");
+    wait_until("the commit window to publish", || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        engine.write_executor_stats().buffered_items > buffered
+    });
+}
+
 /// The candidate a full-coverage session sees against the engine's live generation.
 fn live_candidate(engine: &mosaica_engine::Engine) -> (Arc<mosaica_engine::Generation>, Bitmap) {
     let session = engine
@@ -4720,10 +4750,10 @@ fn rows_already_kept_are_read_on_the_row_route() {
 /// **An entity-route filter's rows are kept per grant and read by every later viewport.** The
 /// first request over the whole extent projects the items `archive` `xx` matches and keeps their
 /// rows; a repeat, and a narrow window that would take the row route, read them and project
-/// nothing. A disjunction is kept the same way, and a negation, which no kept rows can answer, is
-/// projected on every request. Another grant keeps its own, a suppression removes its item from
-/// the kept rows' answer at once, and a flush projects again with the flushed item. Every answer is
-/// the one an engine keeping nothing gives.
+/// nothing. A disjunction and a negation are kept the same way. Another grant keeps its own, a
+/// suppression removes its item from the kept rows' answer at once, items buffered after a deletion
+/// are answered as an engine keeping nothing answers them, and a flush projects again with the
+/// flushed item. Every answer is the one an engine keeping nothing gives.
 #[test]
 fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
     let fx = fixture();
@@ -4782,13 +4812,13 @@ fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
     let (_, projected, _) = ask(&full, 0, FULL_VIEWPORT, &either);
     assert_eq!(projected, 0);
     let neither = FilterExpr::NoneOf(vec![xx()]);
-    for _ in 0..2 {
+    let others: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| archive_of(e) != Some("xx"))
+        .map(id_of)
+        .collect();
+    for want_projected in [1, 0] {
         let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &neither);
-        let others: std::collections::BTreeSet<u64> = (0..N)
-            .filter(|&e| archive_of(e) != Some("xx"))
-            .map(id_of)
-            .collect();
-        assert_eq!((got, projected), (others, 1), "a negation is projected each time");
+        assert_eq!((got, projected), (others.clone(), want_projected), "a negation is kept");
     }
 
     let part = engine.authorise(&subset_credential()).unwrap();
@@ -4808,6 +4838,24 @@ fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
     let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
     assert_eq!(projected, 0, "a suppression leaves the kept rows");
     assert!(!got.contains(&id_of(hidden)) && got.len() == first.len() - 1);
+
+    // A deleted item's number may be issued to the next item a window inserts, so the buffer can
+    // hold an item whose number already has a row in the view.
+    let deleted = (0..N)
+        .find(|&e| archive_of(e).is_none())
+        .expect("an item carries no archive");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&deleted]),
+            mosaica_lifecycle::wal::ChangeOp::Delete,
+        )
+        .expect("a deletion is accepted");
+    for (external, archive) in [("buffered-none", WalScalar::Null), ("buffered-yy", WalScalar::Utf8("yy".to_string()))] {
+        ingest_buffered_with(&engine, external, archive);
+    }
+    for expr in [xx(), neither.clone(), either.clone()] {
+        ask(&full, 0, FULL_VIEWPORT, &expr);
+    }
 
     let flushed = ingest_and_flush_with(
         &engine,

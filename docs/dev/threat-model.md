@@ -132,12 +132,14 @@ shard's filter columns, which a flush, a coalesce, a compaction and a schema cha
 condition answered over items, such as a text `match` or a range on a column, keeps the items it
 matches among those the grant admits before deletions and suppressions are taken out. A request
 reads that entry only by intersecting it with its own candidate set, which has them taken out.
-Where such a condition, or a conjunction or disjunction of them, is crossed into a view's rows, the
-cache also keeps those rows: the rows in that view of the items it matches among those the grant
-admits, before deletions and suppressions are taken out. A request reads them over its own rows and
-narrows them through its own composed visible set, which removes the rows of every item outside its
-candidate set. A negation and a lookup on a unique field are never kept this way, because their
-answer over the request's candidate set can hold items the grant's answer does not. A
+Where a filter answered from items alone is crossed into a view's rows, the cache also keeps those
+rows: the rows in that view of the items it matches among those the grant admits, before deletions
+and suppressions are taken out. Each condition decides each item by the item alone, so the filter's
+answer over a request's candidate set is the kept answer narrowed to that set, together with
+whatever it matches among the set's buffered items, which the grant's items do not include. A
+request therefore reads the kept rows over its own rows, adds the rows of those buffered items the
+filter matches, evaluated for that request, and narrows the whole through its own composed visible
+set, which removes the rows of every item outside its candidate set. A
 condition on a rendered column answered over a view's rows keeps the rows read for it so far and
 those of them that match, before any mask, and its key also names the view, the view's incarnation
 and the shard's segments, which a merge moves as well. A request reads that entry over its own rows
