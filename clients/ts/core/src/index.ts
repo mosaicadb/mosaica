@@ -39,6 +39,7 @@ export type {
   FieldSummary,
   ArtifactsProjection,
   FiltersProjection,
+  HeldRegion,
   InViewCounts,
   LegendProjection,
   MarksProjection,

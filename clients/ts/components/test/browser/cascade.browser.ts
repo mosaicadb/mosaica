@@ -146,7 +146,7 @@ describe('a list that opens over what sits below it', () => {
         meta: {declaredScalars: [], layers: [], views: [], filterOperands: columns.map((column) => ({column, family: 'keyword', operands: ['eq']})), selection: {}},
         status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
         view: {id: 's0'},
-        filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
+        filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
         legend: {colourBy: null},
         artifacts: {served: [], colours: new Map()},
         aggregates: new Map()
@@ -207,7 +207,7 @@ describe('the filter panel', () => {
         meta: {declaredScalars: [{name: 'archive', arrowType: 'u16', category: {}, render: false}], layers: [], views: [], filterOperands: [{column: 'archive', family: 'category', operands: ['in']}], selection: {maxAggregateTop: 1000}},
         status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
         view: {id: 's0', inView: null},
-        filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
+        filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
         legend: {colourBy: null, categories: {}, ranks: {}},
         artifacts: {served: [], colours: new Map()}
       };

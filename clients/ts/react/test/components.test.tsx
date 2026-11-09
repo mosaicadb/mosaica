@@ -198,7 +198,7 @@ describe('@mosaicajs/react/components', () => {
         filterOperands: [{column: 'archive', family: 'category', operands: ['eq', 'in']}]
       }),
       status: status({}),
-      filters: {draft: {filter: {archive: {family: 'category', keys: []}}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0}
+      filters: {draft: {filter: {archive: {family: 'category', keys: []}}, highlight: {}}, expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0}
     });
     const seen: string[] = [];
     await act(async () => root.render(createElement(MosaicaFilter, {store, column: 'archive', onFilterChange: (e) => seen.push(String(e.detail.column))})));

@@ -10,7 +10,9 @@
 //! two regions compose as intersection and union; past the cell budget the answer is a cover — a
 //! superset, with a verdict that is the shape's and not the principal's; and the leaf by artifact
 //! is the artifact's own masked count, an empty operand for an id that names nothing, one that is
-//! suppressed and one withheld by the principal's criterion, with the three responses equal.
+//! suppressed and one withheld by the principal's criterion, with the three responses equal. A
+//! region naming another view is the viewer's items inside it there, counted in the request's view
+//! among the items that view holds, and composes with the view's own regions.
 
 mod common;
 
@@ -748,4 +750,152 @@ fn a_region_answer_is_re_taken_at_the_generation_a_merge_renumbered_its_rows_in(
          built against the old row space: {:?}",
         engine.region_cache_stats()
     );
+}
+
+/// Where `s1` places an item: `s0`'s position transposed, so a shape in one view and the same
+/// numbers in the other name different items.
+fn transposed(e: u64) -> (f64, f64) {
+    let (x, y) = position(e);
+    (y, x)
+}
+
+/// What `s1` holds: three items in four, so some of a shape's items in `s0` have no row there.
+fn in_s1(e: u64) -> bool {
+    !e.is_multiple_of(4)
+}
+
+/// The fixture with a second view, `s1`, over [`in_s1`]'s items at [`transposed`] positions, in
+/// several shards.
+fn build_two_views(dir: &std::path::Path) -> std::path::PathBuf {
+    let (points, s1_points, pairs) = (
+        dir.join("points.parquet"),
+        dir.join("s1-points.parquet"),
+        dir.join("pairs.parquet"),
+    );
+    write_points_n(&points, N_ITEMS);
+    write_points_at(&s1_points, (0..N_ITEMS).filter(|&e| in_s1(e)), transposed);
+    write_pairs_n(&pairs, N_ITEMS);
+    let view = |id: &str, points: &std::path::Path| mosaica_build::ViewArgs {
+        visibility: None,
+        view_id: id.to_string(),
+        title: None,
+        projection: mosaica_spatial::Projection::None,
+        extent: extent(),
+        points: Some(points.to_path_buf()),
+        point_fields: Default::default(),
+        select: None,
+        access: mosaica_build::config::AccessInput::relation(pairs.clone()),
+    };
+    let schema = id_schema();
+    let out = dir.join("bundle");
+    mosaica_build::build(&mosaica_build::BuildArgs {
+        views: vec![view("s0", &points), view("s1", &s1_points)],
+        anchor: 0,
+        groups: Vec::new(),
+        scoped_attributes: Vec::new(),
+        attribute_sources: mosaica_build::config::AttributeSource::over(points.clone(), &schema),
+        out: out.clone(),
+        limit: None,
+        shard_size: Some(N_ITEMS / 3),
+        strict: false,
+        identity_key: test_key(),
+        layers: Vec::new(),
+        layer_inputs: Vec::new(),
+        scoped_layers: Default::default(),
+        emit_oracle_pairs: false,
+        batch_items: None,
+        memory_budget: None,
+        band_rows: None,
+        schema,
+    })
+    .expect("the two-view fixture builds");
+    out
+}
+
+fn in_view(view: &str, shape: &Arc<Shape>) -> FilterExpr {
+    FilterExpr::Region(RegionLeaf::InView {
+        view: view.to_string(),
+        region: Box::new(RegionLeaf::Shape(Arc::clone(shape))),
+    })
+}
+
+fn viewport_of(engine: &Engine, view: &str, credential: &[u8], filter: FilterExpr) -> ViewportOut {
+    let session = engine.authorise(credential).unwrap();
+    let request = ViewportRequest::new(view, 0, WHOLE_MAP, N_ITEMS as usize).filter(filter);
+    engine
+        .viewport(&session, request)
+        .expect("a viewport answers")
+}
+
+#[test]
+fn a_region_of_another_view_is_the_items_inside_it_there() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = build_two_views(tmp.path());
+    let engine = open_engine_uncapped(&root, &tmp.path().join("cache"), &tmp.path().join("wal"));
+    let a = lasso();
+    let b = circle();
+    // `b` drawn in `s1`, against the positions `s1` placed its items at.
+    let in_s1_b = |e: u64| {
+        let (x, y) = transposed(e);
+        let ext = extent();
+        b.contains((
+            fixed32(x, ext.x_min, ext.x_max),
+            fixed32(y, ext.y_min, ext.y_max),
+        ))
+    };
+
+    for credential in [full_coverage_credential(), subset_credential()] {
+        let sees = |e: u64| credential == full_coverage_credential() || subset_sees(e);
+        // Asked in `s1`, `a` is read where `s0` placed the items, and only `s1`'s count them.
+        let inside_a = viewport_of(&engine, "s1", &credential, in_view("s0", &a));
+        let want = (0..N_ITEMS)
+            .filter(|&e| sees(e) && in_s1(e) && a.contains(quantised(e)))
+            .count() as u64;
+        assert!(want > 0, "a real subset");
+        assert_eq!(
+            matched(&inside_a),
+            want,
+            "the lasso drawn in s0, counted in s1"
+        );
+        assert_eq!(inside_a.region, Some(RegionVerdict::Exact));
+
+        let outside_a = viewport_of(
+            &engine,
+            "s1",
+            &credential,
+            FilterExpr::NoneOf(vec![in_view("s0", &a)]),
+        );
+        assert_eq!(
+            matched(&inside_a) + matched(&outside_a),
+            visible(&inside_a),
+            "inside and outside partition the visible set"
+        );
+
+        // With `s1`'s own region, the items inside both.
+        let both = viewport_of(
+            &engine,
+            "s1",
+            &credential,
+            FilterExpr::AllOf(vec![in_view("s0", &a), region(&b)]),
+        );
+        let want_both = (0..N_ITEMS)
+            .filter(|&e| sees(e) && in_s1(e) && a.contains(quantised(e)) && in_s1_b(e))
+            .count() as u64;
+        assert_eq!(
+            matched(&both),
+            want_both,
+            "a region from each view composes"
+        );
+
+        // The other way round: `s1`'s circle counted in `s0`, which holds every item.
+        let from_s1 = viewport_of(&engine, "s0", &credential, in_view("s1", &b));
+        let want_from_s1 = (0..N_ITEMS)
+            .filter(|&e| sees(e) && in_s1(e) && in_s1_b(e))
+            .count() as u64;
+        assert_eq!(
+            matched(&from_s1),
+            want_from_s1,
+            "the circle drawn in s1, counted in s0"
+        );
+    }
 }

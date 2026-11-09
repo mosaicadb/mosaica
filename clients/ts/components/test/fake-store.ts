@@ -76,7 +76,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     artifacts: {layer: null, layers: [], served: [], colourServed: [], attached: new Map(), lineage: servedLineage([]), status: 'idle', refusal: null, version: 0, held: 0, table: new SessionArtifactTable(), servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}},
     selection: {item: null, itemRefusal: null, artifact: null, artifactRefusal: null},
     region: null,
-    filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
+    filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
     legend: {ranks: {}, domains: {}, samples: {}, missing: {}, categories: {}, categoryErrors: {}, colourBy: null, sizeBy: null},
     replica: {bytes: 0, points: 0, bands: 0, views: 0, lastPlan: null},
     aggregates: new Map(),
@@ -126,6 +126,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     setView: spy('setView'),
     setFilters: spy('setFilters'),
     setMembers: spy('setMembers'),
+    setRegions: spy('setRegions'),
     setAggregate: spy('setAggregate'),
     // Answered from `browsePages`, which a test sets: keyed by the form the request took, so a
     // walk can be scripted without a network. Every call is still recorded as `browse`.

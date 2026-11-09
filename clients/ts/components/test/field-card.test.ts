@@ -39,7 +39,7 @@ const META = meta({
   layers: [topicsLayer]
 });
 
-const filtersOf = (draft: FilterDraft, over: Partial<FiltersProjection> = {}): FiltersProjection => ({draft, expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0, ...over});
+const filtersOf = (draft: FilterDraft, over: Partial<FiltersProjection> = {}): FiltersProjection => ({draft, expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0, ...over});
 
 async function mountCard(field: string, draft: FilterDraft = {filter: {}, highlight: {}}, over: Partial<FiltersProjection> = {}, attrs = '') {
   const host = await mount(`<mosaica-field-card field="${field}" ${attrs}></mosaica-field-card>`);

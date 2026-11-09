@@ -45,7 +45,7 @@ You can create and drop a group's views while the database runs. A group can als
 A viewer can switch between views without losing their filters, since those are about the items, not the layout. What else they keep depends on whether the two views share a layout:
 
 - **Within a view group sharing one layout**, such as a year shown quarter by quarter, a switch keeps the camera and the selected region, and the map asks the next view for the same tiles.
-- **Between layouts**, a switch drops the selected region and the camera, since a position in one layout means nothing in another. The map frames the new view on the items the filters match there.
+- **Between layouts**, a switch drops the camera, since a position in one layout means nothing in another. The selected region keeps filtering: it becomes a filter on the items inside it in the view it was drawn in, wherever the new view places them, and the filter list shows it as a chip naming that view. A viewer can select a cluster in one layout and then a place in another, and see the items in both. Switching back to the region's own view selects it again, and the chip's × removes it. The map frames the new view on the items the filters match there.
 
 ## Basemaps
 

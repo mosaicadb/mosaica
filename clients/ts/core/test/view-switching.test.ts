@@ -233,7 +233,81 @@ describe('a switch within a group keeps the camera and the selection', () => {
   });
 });
 
-describe('a switch across frames publishes no camera and drops the selection', () => {
+/** Every `region` operand anywhere in a filter expression. */
+function regionsIn(expr: unknown): Record<string, unknown>[] {
+  if (!expr || typeof expr !== 'object') return [];
+  const node = expr as Record<string, unknown>;
+  if (node.region) return [node.region as Record<string, unknown>];
+  return ['all_of', 'any_of', 'none_of'].flatMap((key) => (Array.isArray(node[key]) ? (node[key] as unknown[]).flatMap(regionsIn) : []));
+}
+
+describe('a switch across frames holds the selection under the view it was drawn in', () => {
+  async function selectedThenFar() {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const opened = open({view: 'v0', clock, scheduler});
+    const {store} = opened;
+    await clock.advance(1);
+    await shown(store, clock, scheduler);
+    store.select({kind: 'box', bbox: [10, 10, 20, 20]});
+    await clock.advance(600);
+    scheduler.flush();
+    store.setCurrentView('far');
+    store.setView(camera(store.frame(), [-1000, -500, 1000, 500], 800, 400));
+    await clock.advance(600);
+    scheduler.flush();
+    return {...opened, clock, scheduler};
+  }
+  const lastFilters = (asked: (id: string) => unknown[][], id: string) => (asked(id).at(-1)![1] as FakeRequest).filters;
+
+  it('keeps filtering the incoming view with the shape named in its own view', async () => {
+    const {store, asked} = await selectedThenFar();
+    expect(store.get('region')).toBeNull();
+    expect(store.get('filters').regions).toEqual([{view: 'v0', shape: {kind: 'box', bbox: [10, 10, 20, 20]}}]);
+    expect(regionsIn(lastFilters(asked, 'far'))).toEqual([{bbox: [10, 10, 20, 20], view: 'v0'}]);
+  });
+
+  it('selects the shape again on the way back, and holds the incoming view’s own there', async () => {
+    const {store, asked, clock, scheduler} = await selectedThenFar();
+    store.select({kind: 'lasso', points: [[0, 0], [500, 0], [0, 300]], outside: true});
+    await clock.advance(600);
+    scheduler.flush();
+    expect(regionsIn(lastFilters(asked, 'far'))).toHaveLength(2);
+
+    store.setCurrentView('v0');
+    store.setView(camera(store.frame(), [0, 0, 50, 50], 800, 400));
+    await clock.advance(600);
+    scheduler.flush();
+    expect(store.get('region')!.shape).toEqual({kind: 'box', bbox: [10, 10, 20, 20]});
+    expect(store.get('filters').regions).toEqual([{view: 'far', shape: {kind: 'lasso', points: [[0, 0], [500, 0], [0, 300]], outside: true}}]);
+    const filters = lastFilters(asked, 'v0') as {all_of: unknown[]};
+    expect(regionsIn(filters)).toEqual([{polygon: [[0, 0], [500, 0], [0, 300]], view: 'far'}, {bbox: [10, 10, 20, 20]}]);
+    // The held lasso is outside its shape.
+    expect(filters.all_of).toContainEqual({none_of: [{region: {polygon: [[0, 0], [500, 0], [0, 300]], view: 'far'}}]});
+  });
+
+  it('takes a stated list whole: removing a held region stops it filtering, and one for the current view is selected', async () => {
+    const {store, asked, clock, scheduler} = await selectedThenFar();
+    store.setRegions([]);
+    await clock.advance(600);
+    scheduler.flush();
+    expect(store.get('filters').regions).toEqual([]);
+    expect(regionsIn(lastFilters(asked, 'far'))).toEqual([]);
+
+    store.setRegions([
+      {view: 'v0', shape: {kind: 'box', bbox: [1, 1, 2, 2]}},
+      {view: 'v0', shape: {kind: 'box', bbox: [3, 3, 4, 4]}},
+      {view: 'far', shape: {kind: 'box', bbox: [-10, -10, 10, 10]}}
+    ]);
+    await clock.advance(600);
+    scheduler.flush();
+    expect(store.get('filters').regions).toEqual([{view: 'v0', shape: {kind: 'box', bbox: [3, 3, 4, 4]}}]);
+    expect(store.get('region')!.shape).toEqual({kind: 'box', bbox: [-10, -10, 10, 10]});
+    expect(regionsIn(lastFilters(asked, 'far'))).toEqual([{bbox: [3, 3, 4, 4], view: 'v0'}, {bbox: [-10, -10, 10, 10]}]);
+  });
+});
+
+describe('a switch across frames publishes no camera', () => {
   it('publishes an empty frame at loading, asks nothing, and answers the map’s refit', async () => {
     const clock = fakeClock();
     const scheduler = fakeScheduler();

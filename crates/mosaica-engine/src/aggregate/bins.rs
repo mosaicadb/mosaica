@@ -586,7 +586,7 @@ impl Numbers {
         let (mut tally, mut none, items, through) = found;
         if !through.is_empty() {
             let rows = croaring::Bitmap::of(&through);
-            let entities = super::set::crossing(cx.engine, cx.open, place, &rows)?;
+            let entities = cx.engine.entities_of_rows(&cx.open.served, place, &rows)?;
             let (more, without) = cx
                 .engine
                 .pool
@@ -1027,7 +1027,7 @@ impl Reader<'_> {
             });
             return Ok(summary.finish(none));
         }
-        let entities = super::set::crossing(cx.engine, cx.open, place, rows)?;
+        let entities = cx.engine.entities_of_rows(&cx.open.served, place, rows)?;
         let (summary, none) = cx
             .engine
             .pool

@@ -51,7 +51,7 @@ pub const UNRESOLVABLE_VALUE: AttrLocalId = AttrLocalId::new(0);
 /// The leaf name a region leaf answers to, the one word a column may not be called.
 pub const REGION_COLUMN: &str = "region";
 
-/// The `region` leaf's two spellings: a row-space operand over the whole view.
+/// The `region` leaf: a row-space operand over the whole view.
 ///
 /// A shape arrives already canonical, so the same shape from two callers is one row set. A
 /// published shape this principal would not be served, or an id naming nothing, is an empty
@@ -62,6 +62,12 @@ pub enum RegionLeaf {
     Shape(Arc<mosaica_spatial::shape::Shape>),
     /// A published artifact's membership.
     Artifact(mosaica_types::MosaicaId),
+    /// A shape or artifact of another view, `view` by its id: the items the viewer sees inside it
+    /// there, as their rows in the request's view. `region` is never itself `InView`.
+    InView {
+        view: String,
+        region: Box<RegionLeaf>,
+    },
 }
 
 /// The leaf name a `member_of` leaf answers to, reserved exactly as `region` is.

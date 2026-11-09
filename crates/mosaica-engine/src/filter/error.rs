@@ -163,6 +163,9 @@ pub enum FilterError {
     /// whose segments could not be assembled. Fail-closed: an empty operand here would be
     /// indistinguishable from a shape that holds nothing.
     RegionUnavailable(String),
+    /// A region leaf naming another view waited on that view's geometry, which a concurrent
+    /// request was building, past the wait's bound. The caller is told to retry.
+    RegionViewBuilding,
     /// A `member_of` leaf reached the entity-space evaluator. Row space only, exactly as
     /// [`FilterError::RegionInEntitySpace`] is.
     MemberOfInEntitySpace,
@@ -225,6 +228,10 @@ impl std::fmt::Display for FilterError {
             FilterError::RegionUnavailable(detail) => write!(
                 f,
                 "the 'region' leaf could not be resolved against this generation ({detail})"
+            ),
+            FilterError::RegionViewBuilding => write!(
+                f,
+                "the view a 'region' leaf names was being prepared for this viewer; retry"
             ),
             FilterError::MemberOfInEntitySpace => write!(
                 f,
@@ -299,6 +306,7 @@ impl FilterError {
             | FilterError::MembershipUnavailable(_)
             | FilterError::RegionInEntitySpace
             | FilterError::RegionUnavailable(_)
+            | FilterError::RegionViewBuilding
             | FilterError::MemberOfInEntitySpace
             | FilterError::MemberOfUnavailable(_)
             | FilterError::UniqueUnreadable { .. }
