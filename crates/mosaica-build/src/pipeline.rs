@@ -167,7 +167,8 @@ use crate::{
     PairsParquetWriter, PREFIX, SEG_ID,
 };
 use mosaica_filter_write::{
-    cascade_sorted_runs, RunPayload, SpillReceipt, TermAccumulator, TextRunMerge, TextRunWriter,
+    cascade_sorted_runs, RunPayload, SpillReceipt, TermAccumulator, TermMerge, TextRunReader,
+    TextRunWriter,
 };
 use mosaica_types::progress::{Batched, Part, Unit};
 use mosaica_types::splitmix64;
@@ -5226,8 +5227,12 @@ fn write_keyword_column(
         let merged = (|| -> Result<(u64, u64)> {
             let run_error = |e| spill::run_error(column_dir, e);
             let buffer = plan.allowance.buffer(runs.len());
-            let mut merge =
-                TextRunMerge::open(&runs, RunPayload::Rows, buffer).map_err(run_error)?;
+            let mut merge = runs
+                .iter()
+                .map(|run| TextRunReader::open(run, RunPayload::Rows, buffer))
+                .collect::<std::io::Result<Vec<_>>>()
+                .and_then(TermMerge::open)
+                .map_err(run_error)?;
             let mut records: Vec<u8> = Vec::new();
             let (mut keys, mut emitted) = (0u64, 0u64);
             while merge.next_term().map_err(run_error)? {
@@ -5527,7 +5532,7 @@ impl TextIndexPlan {
         TextIndexPlan {
             chunks: (threads * 8).max(1),
             worker_bytes: allowance.per_worker(),
-            merge_slice_cap: mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
+            merge_slice_cap: allowance.slice_cap(),
             allowance,
         }
     }
@@ -5631,26 +5636,30 @@ impl TextValues<'_> {
 ///    of the arena or of the extents, and the windows are indexed in parallel. A worker keeps one
 ///    [`mosaica_filter_write::TermAccumulator`] across every window it takes.
 /// 2. **Spill.** An accumulator writes what it holds as a **sorted run** when what it has allocated
-///    reaches the plan's per-worker budget, and once when the pass ends. It holds each term's
-///    entities and positions in the run's format, so a term whose documents arrived in entity order
-///    is copied into the run as it stands, and only a term whose documents did not has its entities
-///    sorted. A worker's residency is the budget whatever the documents are, and the run count grows
-///    instead of the peak.
-/// 3. **Cascade**, where there are more runs than the allowance's fan-in, which is what its read
-///    buffers pay for under the descriptors a merge may hold ([`cascade_sorted_runs`]). As many
-///    leading runs as bring the count to the fan-in are merged in groups into intermediate runs,
-///    several groups at once. The build prints the passes it forecasts before it starts, and the
-///    passes taken among its stage figures.
-/// 4. **Merge.** [`mosaica_filter_write::merge_text_runs`] merges the runs k-way on the term, and
-///    each term's entities by comparing the runs' heads, because the windows do not partition
-///    entity space.
+///    reaches the plan's per-worker budget. It holds each term's entities and positions in the
+///    run's format, so a term whose documents arrived in entity order is copied into the run as it
+///    stands, and only a term whose documents did not has its entities sorted. A worker's
+///    residency is the budget whatever the documents are, and the run count grows instead of the
+///    peak. What an accumulator holds when the pass ends is ranked and kept in memory, not spilled.
+/// 3. **Merge.** [`mosaica_filter_write::write_text_index`] merges the runs and the accumulators'
+///    held terms together, k-way on the term, through the one term merge the fold and the coalesce
+///    write through too ([`mosaica_filter_write::TermMerge`]), and each term's entities by
+///    comparing the sources' heads, because the windows do not partition entity space. The runs
+///    are read through what the allowance leaves beside the held terms. Where that cannot pay for
+///    a read buffer a run, the largest accumulators are spilled after all; and where every one is
+///    spilled and the runs are more than the allowance's fan-in, which is what its read buffers
+///    pay for under the descriptors a merge may hold, they are cascaded first
+///    ([`cascade_sorted_runs`]): as many leading runs as bring the count to the fan-in are merged
+///    in groups into intermediate runs, several groups at once. The build prints the passes it
+///    forecasts before it starts, and the runs, held accumulators and passes taken as it ends.
 ///
 /// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
 /// sorted distinct term set and a posting is the set of entities carrying its term; neither
-/// depends on where a window boundary fell or how often a worker spilled.
-/// [`tests::chunking_the_text_index_does_not_change_its_bytes`] is the assertion, over a corpus
-/// whose entity count straddles the chunk sizes it is emitted under: a boundary that split a
-/// term's postings between two runs and lost one half would otherwise be invisible.
+/// depends on where a window boundary fell, how often a worker spilled, or whether a term was
+/// read from a run or from memory. [`tests::chunking_the_text_index_does_not_change_its_bytes`]
+/// is the assertion, over a corpus whose entity count straddles the chunk sizes it is emitted
+/// under: a boundary that split a term's postings between two runs and lost one half would
+/// otherwise be invisible.
 ///
 /// # What each step costs, and what bounds it
 ///
@@ -5660,13 +5669,12 @@ impl TextValues<'_> {
 ///   in it scales with the corpus. A term costs about 40 bytes of state beyond its entities and
 ///   positions, and most terms in a run occur once, so on English-like prose a run is about a
 ///   quarter of the memory that wrote it at 32 MiB a worker, and more at larger allowances.
-/// * The merge holds one open reader per run: a read buffer, its share of the same allowance once
-///   the accumulators are gone, and the head *term*, never the head's entities, which is why a
-///   run's reader inside [`TextRunMerge`] decodes a record's postings only when they are asked
+/// * The merge holds the accumulators it kept, and one open reader per run: a read buffer, its
+///   share of what the allowance leaves beside them, and the head *term*, never the head's
+///   entities, which is why a run's reader decodes a record's postings only when they are asked
 ///   for. The cascade holds the run count to the allowance's fan-in.
-/// * One merged term's entity list is capped at [`mosaica_filter_write::TEXT_MERGE_SLICE_CAP`],
-///   above which it accumulates into a Roaring bitmap and encodes through the byte-identical
-///   bitmap encoder.
+/// * One merged term's entity list is capped at the plan's slice cap, above which it accumulates
+///   into a Roaring bitmap and encodes through the byte-identical bitmap encoder.
 ///
 /// # Terms and postings
 ///
@@ -5759,30 +5767,32 @@ fn write_text_index(
         indexed
     })?;
     let workers = idle.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let receipts: Vec<Vec<SpillReceipt>> = workers
+    let gathered: Vec<mosaica_filter_write::Gathered> = workers
         .into_par_iter()
-        .map(|worker| worker.terms.into_runs())
+        .map(|worker| worker.terms.finish())
         .collect::<std::io::Result<_>>()
         .map_err(|e| spill::run_error(column_dir, e))?;
-    let receipts: Vec<SpillReceipt> = receipts.into_iter().flatten().collect();
-    let runs = receipts.len();
 
-    // ---- 2. cascade and merge: one sorted term stream into the dictionary, postings, positions -
+    // ---- 2. merge: one sorted term stream into the dictionary, postings, positions -----------
     let files = mosaica_filter::TextIndexFiles::in_dir(column_dir);
     let failed = |e: std::io::Error| BuildError::io(&files.dict, e);
     let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).map_err(failed)?;
-    let passes = mosaica_filter_write::merge_text_runs(
+    let merged = mosaica_filter_write::write_text_index(
         column_dir,
         "text",
-        receipts,
+        gathered,
         &mut writer,
         plan.merge_slice_cap,
         plan.allowance,
     )
     .map_err(|e| spill::run_error(column_dir, e))?;
     eprintln!(
-        "text index '{}': {runs} run(s), {passes} cascade pass(es) under a fan-in of {}",
+        "text index '{}': {} run(s) and {} accumulator(s) held in memory, {} cascade pass(es) \
+         under a fan-in of {}",
         attribute.name,
+        merged.runs,
+        merged.held,
+        merged.passes,
         plan.allowance.fan_in()
     );
     let terms = writer.finish().map_err(failed)?;
@@ -5795,7 +5805,7 @@ fn write_text_index(
     Ok(WrittenTextIndex {
         paths: files.paths().map(Path::to_path_buf).into(),
         terms,
-        passes,
+        passes: merged.passes,
     })
 }
 

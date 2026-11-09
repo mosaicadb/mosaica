@@ -8,9 +8,9 @@
 //! band, member and identity run files and `mosaica_store`'s partition bucket files carry the same
 //! receipt.
 //!
-//! A **sorted run** is written by [`TextRunWriter`] and read back by a run reader inside
-//! [`TextRunMerge`], which merges runs k-way on the term. [`cascade_sorted_runs`] reduces more runs
-//! than one merge may hold open. A malformed run is refused as [`io::ErrorKind::InvalidData`].
+//! A **sorted run** is written by [`TextRunWriter`] and read back by [`TextRunReader`], one of the
+//! sources [`TermMerge`] merges. [`cascade_sorted_runs`] reduces more runs than one merge may hold
+//! open. A malformed run is refused as [`io::ErrorKind::InvalidData`].
 //!
 //! **What a merge may hold is an [`Allowance`]**, the one rule the build and the service both size
 //! a term index's pass by. Its fan-in, and the read buffer each run's cursor gets, are what the
@@ -28,6 +28,8 @@ use std::sync::Arc;
 
 use mosaica_filter::{common_prefix_len, put_varint, take_varint, VarintError};
 use mosaica_types::splitmix64;
+
+use crate::merge::{TermMerge, TermSource};
 
 /// Buffer size for spill I/O, both directions, and the largest read buffer a merge gives a run's
 /// cursor. Four mebibytes: large enough that the syscall cost is noise against the encode/decode
@@ -467,18 +469,19 @@ impl TextRunWriter {
     }
 }
 
-/// Streams a text run back **term by term**, verifying count and anchor at end of stream.
+/// Streams a text run back **term by term**, as a [`TermSource`], verifying count and anchor at end
+/// of stream.
 ///
 /// **The head's entities are not decoded until they are asked for.** A k-way merge holds one open
 /// reader per run and compares only their head terms, so a reader that eagerly materialised each
-/// head's entity list would put *k* whole posting lists in memory to choose between *k* strings —
-/// which is the residency this whole pass exists to bound. [`Self::advance`] reads the term and
-/// its length and stops; [`Self::next_entity`] decodes them, and `advance` drains whatever a
-/// caller left rather than trusting it to have consumed the record.
+/// head's entity list would put *k* whole posting lists in memory to choose between *k* strings,
+/// which is the residency this whole pass exists to bound. [`TermSource::next_term`] reads the term
+/// and its length and stops; [`TermSource::next_entity`] decodes them, and `next_term` drains
+/// whatever a caller left rather than trusting it to have consumed the record.
 ///
-/// Verification is terminal — a running sum can only be checked once the stream ends — and the
-/// merge drains every run to completion.
-struct TextRunReader {
+/// Verification is terminal (a running sum can only be checked once the stream ends), and a merge
+/// moves every source to its end.
+pub struct TextRunReader {
     path: PathBuf,
     payload: RunPayload,
     reader: BufReader<RunCursor>,
@@ -498,7 +501,7 @@ struct TextRunReader {
     last_entity: u32,
     expect_count: u64,
     expect_anchor: u64,
-    count: u64,
+    pairs: u64,
     anchor: u64,
     done: bool,
 }
@@ -521,35 +524,8 @@ impl Read for RunCursor {
     }
 }
 
-impl TextRunReader {
-    /// A reader of the run `receipt` names, from its start, through `file`, which is that run's
-    /// open file, with a read buffer of `buffer` bytes.
-    fn open(
-        file: Arc<File>,
-        receipt: &SpillReceipt,
-        payload: RunPayload,
-        buffer: usize,
-    ) -> TextRunReader {
-        TextRunReader {
-            path: receipt.path.clone(),
-            payload,
-            positions: Vec::new(),
-            reader: BufReader::with_capacity(buffer, RunCursor { file, at: 0 }),
-            term: Vec::new(),
-            mark: 0,
-            pending: 0,
-            taken: 0,
-            last_entity: 0,
-            expect_count: receipt.count,
-            expect_anchor: receipt.anchor,
-            count: 0,
-            anchor: 0,
-            done: false,
-        }
-    }
-
-    /// Move to the next term, returning `false` at a *verified* end of stream.
-    fn advance(&mut self) -> io::Result<bool> {
+impl TermSource for TextRunReader {
+    fn next_term(&mut self) -> io::Result<bool> {
         if self.done {
             return Ok(false);
         }
@@ -590,7 +566,7 @@ impl TextRunReader {
         if count == 0 {
             return Err(self.malformed("a term with no entities"));
         }
-        if self.count + count as u64 > self.expect_count {
+        if self.pairs + count as u64 > self.expect_count {
             return Err(self.malformed(&format!(
                 "trailing data: more pairs than the receipt's count {}",
                 self.expect_count
@@ -603,32 +579,59 @@ impl TextRunReader {
         Ok(true)
     }
 
-    /// The head term. Meaningful only after [`Self::advance`] returned `true`.
     fn term(&self) -> &[u8] {
         &self.term
     }
 
-    /// How many entities the head carries, decoded or not.
-    fn pending(&self) -> u32 {
-        self.pending
+    fn count(&self) -> u64 {
+        u64::from(self.taken) + u64::from(self.pending)
     }
 
-    /// The term's positions in the entity [`Self::next_entity`] last returned: empty in a
-    /// [`RunPayload::Rows`] run.
-    fn positions(&self) -> &[u32] {
-        &self.positions
-    }
-
-    /// The head's next entity, or `None` once it is drained.
-    ///
-    /// **One at a time, because the runs do not partition entity space.** A run's entities ascend
+    /// One at a time, because the runs do not partition entity space: a run's entities ascend
     /// within its own record, but the build divides the arena and not entity space, so a term's
-    /// merged list is produced by comparing the runs' heads. That needs a head to look at.
+    /// merged list is produced by comparing the runs' heads.
     fn next_entity(&mut self) -> io::Result<Option<u32>> {
         if self.pending == 0 {
             return Ok(None);
         }
         self.decode_entity().map(Some)
+    }
+
+    fn positions(&self) -> &[u32] {
+        &self.positions
+    }
+}
+
+impl TextRunReader {
+    /// A reader of the run `receipt` names, from its start, with a read buffer of `buffer` bytes.
+    pub fn open(
+        receipt: &SpillReceipt,
+        payload: RunPayload,
+        buffer: usize,
+    ) -> io::Result<TextRunReader> {
+        let file = File::open(&receipt.path).map_err(|e| at(&receipt.path, e))?;
+        Ok(TextRunReader {
+            path: receipt.path.clone(),
+            payload,
+            positions: Vec::new(),
+            reader: BufReader::with_capacity(
+                buffer,
+                RunCursor {
+                    file: Arc::new(file),
+                    at: 0,
+                },
+            ),
+            term: Vec::new(),
+            mark: 0,
+            pending: 0,
+            taken: 0,
+            last_entity: 0,
+            expect_count: receipt.count,
+            expect_anchor: receipt.anchor,
+            pairs: 0,
+            anchor: 0,
+            done: false,
+        })
     }
 
     fn decode_entity(&mut self) -> io::Result<u32> {
@@ -647,7 +650,7 @@ impl TextRunReader {
         self.last_entity = entity;
         self.taken += 1;
         self.pending -= 1;
-        self.count += 1;
+        self.pairs += 1;
         self.anchor = self
             .anchor
             .wrapping_add(splitmix64(self.mark ^ entity as u64));
@@ -676,10 +679,10 @@ impl TextRunReader {
     }
 
     fn verify_end(&mut self) -> io::Result<()> {
-        if self.count != self.expect_count {
+        if self.pairs != self.expect_count {
             return Err(self.malformed(&format!(
                 "pair count mismatch: decoded {} pairs but the receipt says {}",
-                self.count, self.expect_count
+                self.pairs, self.expect_count
             )));
         }
         if self.anchor != self.expect_anchor {
@@ -706,207 +709,6 @@ impl TextRunReader {
     fn malformed(&self, detail: &str) -> io::Error {
         malformed(&self.path, detail)
     }
-}
-
-// --------------------------------------------------------------------------------------------
-// The merge, and the cascade above it
-// --------------------------------------------------------------------------------------------
-
-/// A k-way merge over open run cursors, yielding each distinct term once with its entities in
-/// ascending order.
-///
-/// The heap holds **run indices**, and the comparison reaches into the readers — so a term is
-/// never copied into the heap and the merge allocates nothing per record.
-///
-/// **The entities are merged, not concatenated.** A run holds entities from all over entity space
-/// and two runs' lists interleave — [`Self::drain`] compares their heads. What that costs is a
-/// comparison per posting against a copy per posting; what it buys is a sequential read of a file
-/// larger than the machine.
-pub struct TextRunMerge {
-    cursors: Vec<TextRunReader>,
-    heap: Vec<usize>,
-    /// The selected term. Held as bytes because that is what the cursors compare on, and because
-    /// the caller needs it after the runs carrying it have left the heap.
-    term: Vec<u8>,
-    /// The runs whose head is the selected term, ascending — drained in this order.
-    selected: Vec<usize>,
-    /// Entities the selected term carries across all of them.
-    postings: u64,
-    /// The selected runs' unconsumed heads, `(entity, run)`, smallest first. Held on the merge
-    /// rather than built per term so a corpus's whole vocabulary costs one allocation.
-    heads: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>>,
-}
-
-impl TextRunMerge {
-    /// A merge over `receipts`, each run read through a buffer of `buffer` bytes.
-    pub fn open(
-        receipts: &[SpillReceipt],
-        payload: RunPayload,
-        buffer: usize,
-    ) -> io::Result<TextRunMerge> {
-        let mut cursors: Vec<TextRunReader> = Vec::with_capacity(receipts.len());
-        let mut heap: Vec<usize> = Vec::with_capacity(receipts.len());
-        for receipt in receipts {
-            let file = File::open(&receipt.path).map_err(|e| at(&receipt.path, e))?;
-            let mut reader = TextRunReader::open(Arc::new(file), receipt, payload, buffer);
-            // A run with no terms at all — an empty chunk — verifies its receipt here and takes no
-            // place in the heap.
-            if reader.advance()? {
-                heap.push(cursors.len());
-            }
-            cursors.push(reader);
-        }
-        for root in (0..heap.len() / 2).rev() {
-            text_heap_sift_down(&mut heap, &cursors, root);
-        }
-        Ok(TextRunMerge {
-            cursors,
-            heap,
-            term: Vec::new(),
-            selected: Vec::new(),
-            postings: 0,
-            heads: std::collections::BinaryHeap::new(),
-        })
-    }
-
-    /// Select the next distinct term, or `false` when every run is exhausted. The previous term's
-    /// runs are advanced here rather than by the caller, so a caller that took fewer entities than
-    /// the term carried still leaves the stream where the next record starts.
-    pub fn next_term(&mut self) -> io::Result<bool> {
-        for &run in &self.selected {
-            if self.cursors[run].advance()? {
-                text_heap_push(&mut self.heap, &self.cursors, run);
-            }
-        }
-        self.selected.clear();
-        self.postings = 0;
-        let Some(&first) = self.heap.first() else {
-            return Ok(false);
-        };
-        self.term.clear();
-        self.term.extend_from_slice(self.cursors[first].term());
-        while self
-            .heap
-            .first()
-            .is_some_and(|&top| self.cursors[top].term() == self.term.as_slice())
-        {
-            let top = text_heap_pop(&mut self.heap, &self.cursors);
-            self.postings += self.cursors[top].pending() as u64;
-            self.selected.push(top);
-        }
-        Ok(true)
-    }
-
-    pub fn term(&self) -> &[u8] {
-        &self.term
-    }
-
-    /// How many entities the selected term carries. Known before a single one is decoded, which is
-    /// what lets the caller choose an encoder without buffering to find out.
-    pub fn postings(&self) -> u64 {
-        self.postings
-    }
-
-    /// Feed the selected term's entities to `sink`, ascending, each with the term's positions in it
-    /// (none in a run of rows), checking the ascent as it goes. A failure of the runs reaches the
-    /// caller through `lift`, in the sink's error type.
-    ///
-    /// The check is over the *merged* list, not each run's: a run's own ascent is the writer's
-    /// business, and what could go wrong here is the merge. It is also what catches a position
-    /// carried by two runs — which cannot happen in either caller, because a text entity has
-    /// exactly one live arena record and one window holds it, and a keyword row is visited once by
-    /// one walk — and is exactly the failure a silent `>=` would hide. `encode_posting` re-checks
-    /// the slice path, but the bitmap path has no such check to make — a `Bitmap` is a set — which
-    /// is why the test lives here rather than there.
-    pub fn drain<E>(
-        &mut self,
-        lift: impl Fn(io::Error) -> E,
-        sink: &mut impl FnMut(u32, &[u32]) -> Result<(), E>,
-    ) -> Result<(), E> {
-        self.heads.clear();
-        for i in 0..self.selected.len() {
-            let run = self.selected[i];
-            if let Some(entity) = self.cursors[run].next_entity().map_err(&lift)? {
-                self.heads.push(std::cmp::Reverse((entity, run)));
-            }
-        }
-        let mut last: Option<u32> = None;
-        while let Some(std::cmp::Reverse((entity, run))) = self.heads.pop() {
-            if let Some(previous) = last {
-                if entity <= previous {
-                    return Err(lift(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "run merge: term {:?}'s entity {entity} does not ascend past \
-                             {previous}: two runs carry the same entity for one term, or the same \
-                             row for one key",
-                            String::from_utf8_lossy(&self.term)
-                        ),
-                    )));
-                }
-            }
-            last = Some(entity);
-            // A run's head entity is the last it decoded, so its positions are still the reader's.
-            sink(entity, self.cursors[run].positions())?;
-            if let Some(next) = self.cursors[run].next_entity().map_err(&lift)? {
-                self.heads.push(std::cmp::Reverse((next, run)));
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Order two runs by their head term, ties broken by run index so that equal terms leave the heap
-/// in ascending entity order.
-fn text_run_before(cursors: &[TextRunReader], a: usize, b: usize) -> bool {
-    match cursors[a].term().cmp(cursors[b].term()) {
-        std::cmp::Ordering::Less => true,
-        std::cmp::Ordering::Greater => false,
-        std::cmp::Ordering::Equal => a < b,
-    }
-}
-
-fn text_heap_sift_down(heap: &mut [usize], cursors: &[TextRunReader], mut node: usize) {
-    loop {
-        let left = node * 2 + 1;
-        if left >= heap.len() {
-            return;
-        }
-        let right = left + 1;
-        let child = if right < heap.len() && text_run_before(cursors, heap[right], heap[left]) {
-            right
-        } else {
-            left
-        };
-        if !text_run_before(cursors, heap[child], heap[node]) {
-            return;
-        }
-        heap.swap(node, child);
-        node = child;
-    }
-}
-
-fn text_heap_push(heap: &mut Vec<usize>, cursors: &[TextRunReader], run: usize) {
-    heap.push(run);
-    let mut node = heap.len() - 1;
-    while node > 0 {
-        let parent = (node - 1) / 2;
-        if !text_run_before(cursors, heap[node], heap[parent]) {
-            return;
-        }
-        heap.swap(node, parent);
-        node = parent;
-    }
-}
-
-fn text_heap_pop(heap: &mut Vec<usize>, cursors: &[TextRunReader]) -> usize {
-    let top = heap[0];
-    let last = heap.pop().expect("the heap is not empty");
-    if !heap.is_empty() {
-        heap[0] = last;
-        text_heap_sift_down(heap, cursors, 0);
-    }
-    top
 }
 
 // --------------------------------------------------------------------------------------------
@@ -994,6 +796,15 @@ impl Allowance {
         usize::try_from(self.bytes / cursors.max(1) as u64)
             .unwrap_or(usize::MAX)
             .clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES)
+    }
+
+    /// The most entities a merge holds as a slice for one term before it holds them as a bitmap:
+    /// what the allowance pays for at four bytes an entity, and at most
+    /// [`crate::TEXT_MERGE_SLICE_CAP`].
+    pub fn slice_cap(&self) -> usize {
+        usize::try_from(self.bytes / std::mem::size_of::<u32>() as u64)
+            .unwrap_or(usize::MAX)
+            .min(crate::TEXT_MERGE_SLICE_CAP)
     }
 
     /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance.
@@ -1146,7 +957,11 @@ fn merge_group(
     payload: RunPayload,
     buffer: usize,
 ) -> io::Result<SpillReceipt> {
-    let mut merge = TextRunMerge::open(runs, payload, buffer)?;
+    let mut merge = TermMerge::open(
+        runs.iter()
+            .map(|run| TextRunReader::open(run, payload, buffer))
+            .collect::<io::Result<Vec<_>>>()?,
+    )?;
     let mut writer = TextRunWriter::buffered(path, payload, buffer)?;
     while merge.next_term()? {
         let count = u32::try_from(merge.postings()).map_err(|_| {
@@ -1213,8 +1028,7 @@ mod tests {
 
     /// A reader of the run `receipt` names.
     fn open_reader(receipt: &SpillReceipt, payload: RunPayload) -> TextRunReader {
-        let file = File::open(&receipt.path).unwrap();
-        TextRunReader::open(Arc::new(file), receipt, payload, RUN_BUFFER_MIN)
+        TextRunReader::open(receipt, payload, RUN_BUFFER_MIN).unwrap()
     }
 
     /// One whole record of a run of rows.
@@ -1250,14 +1064,14 @@ mod tests {
         let receipt = writer.finish().unwrap();
         let mut reader = open_reader(&receipt, RunPayload::Positions);
         for (term, items) in &records {
-            assert!(reader.advance().unwrap());
+            assert!(reader.next_term().unwrap());
             assert_eq!(reader.term(), *term);
             for (entity, positions) in items {
                 assert_eq!(reader.next_entity().unwrap(), Some(*entity));
                 assert_eq!(reader.positions(), positions.as_slice());
             }
         }
-        assert!(!reader.advance().unwrap());
+        assert!(!reader.next_term().unwrap());
 
         // The last byte is the last position's gap: changed, the anchor no longer agrees.
         let mut bytes = fs::read(&path).unwrap();
@@ -1265,7 +1079,7 @@ mod tests {
         fs::write(&path, &bytes).unwrap();
         let mut reader = open_reader(&receipt, RunPayload::Positions);
         assert!((|| -> io::Result<()> {
-            while reader.advance()? {}
+            while reader.next_term()? {}
             Ok(())
         })()
         .is_err());
@@ -1299,17 +1113,17 @@ mod tests {
     fn read_text_run(receipt: &SpillReceipt) -> io::Result<Vec<(String, Vec<u32>)>> {
         let mut reader = open_reader(receipt, RunPayload::Rows);
         let mut out = Vec::new();
-        while reader.advance()? {
+        while reader.next_term()? {
             let term = String::from_utf8(reader.term().to_vec()).unwrap();
-            let expected = reader.pending();
+            let expected = reader.count();
             let mut entities = Vec::new();
             while let Some(entity) = reader.next_entity()? {
                 entities.push(entity);
             }
             assert_eq!(
-                entities.len() as u32,
+                entities.len() as u64,
                 expected,
-                "`pending` promised the count"
+                "`count` promised the count"
             );
             out.push((term, entities));
         }
@@ -1490,8 +1304,13 @@ mod tests {
             })
             .collect();
         let merged = |receipts: &[SpillReceipt]| {
-            let mut merge =
-                TextRunMerge::open(receipts, RunPayload::Rows, RUN_BUFFER_MIN).unwrap();
+            let mut merge = TermMerge::open(
+                receipts
+                    .iter()
+                    .map(|receipt| open_reader(receipt, RunPayload::Rows))
+                    .collect(),
+            )
+            .unwrap();
             let mut out = Vec::new();
             while merge.next_term().unwrap() {
                 let mut entities = Vec::new();
@@ -1569,7 +1388,7 @@ mod tests {
 
             let mut reader = open_reader(&receipt, RunPayload::Rows);
             let mut read: Vec<(Vec<u8>, Vec<u32>)> = Vec::new();
-            while reader.advance().unwrap() {
+            while reader.next_term().unwrap() {
                 let term = reader.term().to_vec();
                 let mut entities = Vec::new();
                 while let Some(entity) = reader.next_entity().unwrap() {

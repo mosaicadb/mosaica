@@ -1,12 +1,18 @@
-//! The text family's two lifecycle transformations: the fold's merge of every layer into one base,
-//! and the coalesce's merge of a window of extents into one extent (`records-and-search.md` §7;
-//! `filter-index.md` §5.2 for the coalesce, §6.2 for the fold).
+//! A text layer's writer, the one function that writes a merge's terms into it, and the text
+//! family's two lifecycle transformations built on them: the fold's merge of every layer into one
+//! base, and the coalesce's merge of a window of extents into one extent
+//! (`records-and-search.md` §7; `filter-index.md` §5.2 for the coalesce, §6.2 for the fold).
 //!
-//! **One merge, two obligations**, exactly as the value and keyword families are arranged here. The
-//! k-way walk below is the whole of both passes: every term of every layer in sorted order, its
-//! posting the union of the layers that hold it and its positions theirs in item order, written
-//! into one dictionary, one postings file and one positions file. What differs is small, and
-//! getting either wrong is silent:
+//! # One merge for every route
+//!
+//! The build, the flush, the fold and the coalesce all write a text layer through
+//! [`write_terms`] over a [`TermMerge`]: the build and the flush over runs and accumulators, the
+//! fold and the coalesce over finished layers ([`LayerTerms`]). So a layer's bytes are a function
+//! of its term set alone, whichever route wrote it. Each term's posting is held as an ascending
+//! slice up to the merge's slice cap and as a bitmap above it, built from the entities as they
+//! arrive either way, and encoded through the one canonical posting encoder.
+//!
+//! What differs between the fold and the coalesce is small, and getting either wrong is silent:
 //!
 //! - The fold **retires**: `D₀`'s entities are subtracted from every posting and a term whose every
 //!   carrier was blanked is not written at all, so the word leaves the corpus with the documents
@@ -16,6 +22,13 @@
 //! Both write the presence of what they merged, less the tombstones, and both refuse inputs that
 //! hold one entity twice: an entity's text is in exactly one layer of a column, and a union of
 //! postings would hide a second copy where no later pass could find it.
+//!
+//! **A term only one layer holds, and none of whose carriers is tombstoned, is copied**: its
+//! posting record and its positions record are the bytes that layer stores, so the pass costs a
+//! copy for every term the changes since the last fold did not touch. The posting was checked when
+//! the layer was opened, as every tag-1 record is, and the positions are checked as a reader
+//! decodes them, in the copy as in the original. A term whose carriers are all tombstoned is not
+//! copied either.
 //!
 //! # Why a text column may be coalesced where a keyword column may not
 //!
@@ -47,14 +60,32 @@ use std::fs::File;
 use std::io::{self, BufWriter};
 
 use croaring::Bitmap;
-use mosaica_authz::{RecordWriter, POSTINGS_COLUMN};
+use mosaica_authz::{PostingRef, RecordWriter, POSTINGS_COLUMN};
 use mosaica_filter::{
     ColumnPositions, ColumnPostings, PositionsCursor, SortedDict, SortedDictWriter, TextIndexFiles,
     TextLayerCounts,
 };
 use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
 
+use crate::merge::{DictCursor, Records, TermMerge, TermSource};
 use crate::positions::PositionsWriter;
+use crate::spill::Allowance;
+
+/// Entities held as a `u32` slice for one merged term before the merge switches to a Roaring
+/// bitmap.
+///
+/// **This is the merge's only term that grows with the corpus, and this is what bounds it.** A term
+/// carried by a quarter of the corpus is 10⁸ entities at 10⁹ items, which as a `Vec<u32>` is 400 MB
+/// for one record. Above the cap the merge accumulates into a `Bitmap` instead and encodes from
+/// that; the two encoders are byte-identical over the same set (pinned by
+/// `postings::the_bitmap_and_slice_encoders_agree_byte_for_byte`), so the cap is a memory knob and
+/// not a format decision. 16 MB, which no vocabulary reaches by accident. A merge holds at most
+/// what its allowance pays for ([`Allowance::slice_cap`]).
+pub const TEXT_MERGE_SLICE_CAP: usize = 1 << 22;
+
+/// Entities staged before each hand-off to croaring in the merge's bitmap arm: `add_many`
+/// amortises over a run of values.
+const TEXT_MERGE_STAGE_ENTITIES: usize = 1 << 16;
 
 /// One input layer: its dictionary, its postings and positions over that dictionary, and the
 /// entities it holds a value for. They travel together because an ordinal is a position in *this*
@@ -144,6 +175,17 @@ impl TextIndexWriter {
         Ok(())
     }
 
+    /// Write `term` whole from `records`, as a finished layer stores them. The records are another
+    /// layer's, read and checked by its readers, so they are written as they are.
+    fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()> {
+        let open = &mut self.open;
+        open.dict.push(term)?;
+        open.positions.copy(records.positions)?;
+        open.postings.append(records.posting)?;
+        self.terms += 1;
+        Ok(())
+    }
+
     /// Complete the three files, and return the number of terms.
     pub fn finish(self) -> io::Result<u64> {
         let OpenFiles {
@@ -162,16 +204,79 @@ fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-/// The fold's pass: every layer merged into one base index, with `tombstones` subtracted.
+/// Write every term `merge` yields into `writer`, holding each term's entities as a slice of at
+/// most `slice_cap` and as a bitmap above it. A term no source yields an entity for is not
+/// written, and a term one finished layer holds whole is copied from it.
+pub(crate) fn write_terms<S: TermSource>(
+    merge: &mut TermMerge<S>,
+    writer: &mut TextIndexWriter,
+    slice_cap: usize,
+) -> io::Result<()> {
+    let mut entities: Vec<u32> = Vec::new();
+    let mut staged: Vec<u32> = Vec::new();
+    while merge.next_term()? {
+        // **The retention statement.** A term every one of whose carriers was blanked is not
+        // written at all: no empty posting, no dictionary key and no positions record, so the word
+        // leaves the corpus with the documents that used it. A copy is never of such a term.
+        let items = merge.postings();
+        if items == 0 {
+            continue;
+        }
+        let term = text_term(merge.term())?;
+        if let Some(records) = merge.records() {
+            writer.copy_term(term, records)?;
+            continue;
+        }
+        writer.begin_term(term, items)?;
+        if items <= slice_cap as u64 {
+            entities.clear();
+            merge.drain(std::convert::identity, &mut |entity, positions| {
+                entities.push(entity);
+                writer.push_item(positions)
+            })?;
+            writer.end_term(Posting::Ascending(&entities))?;
+        } else {
+            let mut bitmap = Bitmap::new();
+            staged.clear();
+            merge.drain(std::convert::identity, &mut |entity, positions| {
+                staged.push(entity);
+                if staged.len() >= TEXT_MERGE_STAGE_ENTITIES {
+                    bitmap.add_many(&staged);
+                    staged.clear();
+                }
+                writer.push_item(positions)
+            })?;
+            bitmap.add_many(&staged);
+            writer.end_term(Posting::Set(&bitmap))?;
+        }
+    }
+    Ok(())
+}
+
+/// A term as the index's dictionary holds it. The analyser gives `&str`, and a finished layer's
+/// dictionary decodes to `&str`, so a term that is not UTF-8 is a damaged run.
+pub(crate) fn text_term(term: &[u8]) -> io::Result<&str> {
+    std::str::from_utf8(term).map_err(|e| {
+        invalid(format!(
+            "a text term is not UTF-8 ({e}); the analyser gives only UTF-8, so the run holding it \
+             is damaged"
+        ))
+    })
+}
+
+/// The fold's pass: every layer merged into one base index, with `tombstones` subtracted, holding
+/// what `allowance` pays for.
 pub fn merge_text_layers(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     out: TextIndexFiles,
+    allowance: Allowance,
 ) -> io::Result<()> {
-    merge(inputs, tombstones, out, "the fold's text pass")
+    merge(inputs, tombstones, out, allowance, "the fold's text pass")
 }
 
-/// The coalesce's pass: a window of a column's extents merged into one extent.
+/// The coalesce's pass: a window of a column's extents merged into one extent, holding what
+/// `allowance` pays for.
 ///
 /// Retires nothing, and writes the presence union its replacement rule is checked against — the
 /// engine's composition requires a coalesced layer's presence to **equal** the union of the layers
@@ -180,7 +285,11 @@ pub fn merge_text_layers(
 ///
 /// Refuses fewer than two inputs: this collapses a window into one extent and there is nothing to
 /// collapse below two.
-pub fn coalesce_text_extents(inputs: &[TextLayerRef<'_>], out: TextIndexFiles) -> io::Result<()> {
+pub fn coalesce_text_extents(
+    inputs: &[TextLayerRef<'_>],
+    out: TextIndexFiles,
+    allowance: Allowance,
+) -> io::Result<()> {
     const PASS: &str = "the text coalesce";
     if inputs.len() < 2 {
         return Err(invalid(format!(
@@ -189,25 +298,17 @@ pub fn coalesce_text_extents(inputs: &[TextLayerRef<'_>], out: TextIndexFiles) -
             inputs.len()
         )));
     }
-    merge(inputs, &Bitmap::new(), out, PASS)
+    merge(inputs, &Bitmap::new(), out, allowance, PASS)
 }
 
-/// One input's share of the term being merged: the entities its posting holds and a cursor over
-/// their positions, read in step.
-struct Share<'a> {
-    entities: croaring::bitmap::BitmapIterator<'a>,
-    head: Option<u32>,
-    rank: u64,
-    positions: PositionsCursor<'a>,
-}
-
-/// The k-way merge itself: every term of every layer, in sorted order, with `tombstones` subtracted
-/// from each one's postings and positions and an emptied term dropped, and the presence of every
-/// input less `tombstones`.
+/// Every term of every layer, in sorted order, with `tombstones` subtracted from each one's
+/// postings and positions and an emptied term dropped, and the presence of every input less
+/// `tombstones`.
 fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     out: TextIndexFiles,
+    allowance: Allowance,
     pass: &str,
 ) -> io::Result<()> {
     let presence = crate::disjoint_union(inputs.iter().map(|input| input.present), pass)?;
@@ -223,106 +324,291 @@ fn merge(
 
     let presence_path = out.presence.clone();
     let mut writer = TextIndexWriter::create(out)?;
-
-    // One decode buffer for the whole merge, and one owned key per layer: `key_of` borrows the
-    // scratch it decodes into, and a cursor has to hold its key across the comparisons that pick
-    // the least. `None` is an exhausted layer.
-    let mut scratch: Vec<u8> = Vec::new();
-    let mut at: Vec<u32> = vec![0; inputs.len()];
-    let mut current: Vec<Option<String>> = Vec::with_capacity(inputs.len());
-    for input in inputs {
-        current.push(cursor_key(input.dict, 0, &mut scratch)?);
-    }
-
-    let mut least = String::new();
-    let mut holding: Vec<(usize, AttrLocalId, Bitmap)> = Vec::with_capacity(inputs.len());
-    loop {
-        // Linear over the layers rather than through a heap: the layer count is one base plus the
-        // flush extents published since the last fold, so it is small, and a heap would cost a
-        // clone per term to save a comparison per term.
-        let mut chosen: Option<usize> = None;
-        for (i, key) in current.iter().enumerate() {
-            let Some(key) = key else { continue };
-            if chosen.is_none_or(|c| key < current[c].as_ref().expect("a chosen layer has a key")) {
-                chosen = Some(i);
-            }
-        }
-        let Some(chosen) = chosen else { break };
-        least.clear();
-        least.push_str(
-            current[chosen]
-                .as_ref()
-                .expect("the chosen layer has a key"),
-        );
-
-        // **Every layer holding this term, not the first**: a word in two layers is one term of the
-        // merged index, and its posting is the union of theirs.
-        holding.clear();
-        let mut entities = Bitmap::new();
-        for i in 0..inputs.len() {
-            if current[i].as_deref() != Some(least.as_str()) {
-                continue;
-            }
-            let ordinal = AttrLocalId::new(at[i]);
-            let held = inputs[i].postings.entities(ordinal)?;
-            entities |= &held;
-            holding.push((i, ordinal, held));
-            at[i] += 1;
-            current[i] = cursor_key(inputs[i].dict, at[i], &mut scratch)?;
-        }
-        entities.andnot_inplace(tombstones);
-        // **The retention statement.** A term every one of whose carriers was blanked is not
-        // written — not as an empty posting, not as a dictionary key, not as a positions record —
-        // so the word leaves the corpus with the documents that used it. With an empty tombstone
-        // set, as a coalesce passes, nothing here can fire: no input posting is empty, the writers
-        // never emit one.
-        if entities.is_empty() {
-            continue;
-        }
-        // The writer refuses a key that does not ascend strictly, so a merge that lost its order
-        // stops here rather than publishing a dictionary whose ordinals mean nothing.
-        writer.begin_term(&least, entities.cardinality())?;
-        let mut shares: Vec<Share<'_>> = Vec::with_capacity(holding.len());
-        for (i, ordinal, held) in &holding {
-            let mut iter = held.iter();
-            shares.push(Share {
-                head: iter.next(),
-                entities: iter,
-                rank: 0,
-                positions: inputs[*i].positions.cursor(*ordinal, held.cardinality())?,
-            });
-        }
-        // The inputs' items in item order, each kept item's positions copied across.
-        loop {
-            let mut next: Option<usize> = None;
-            for (s, share) in shares.iter().enumerate() {
-                let Some(head) = share.head else { continue };
-                if next.is_none_or(|n| head < shares[n].head.expect("a chosen share has a head")) {
-                    next = Some(s);
-                }
-            }
-            let Some(next) = next else { break };
-            let share = &mut shares[next];
-            let entity = share.head.expect("the chosen share has a head");
-            if !tombstones.contains(entity) {
-                writer.push_item(share.positions.positions(share.rank)?)?;
-            }
-            share.rank += 1;
-            share.head = share.entities.next();
-        }
-        drop(shares);
-        writer.end_term(Posting::Set(&entities))?;
-    }
-
+    let sources = inputs
+        .iter()
+        .map(|input| LayerTerms::new(input, tombstones))
+        .collect();
+    write_terms(
+        &mut TermMerge::open(sources)?,
+        &mut writer,
+        allowance.slice_cap(),
+    )?;
     writer.finish()?;
     mosaica_filter::write_presence(&presence_path, &presence.andnot(tombstones))
 }
 
-/// The key at `ordinal`, owned, or `None` where the ordinal is past the dictionary's end.
-fn cursor_key(dict: &SortedDict, ordinal: u32, scratch: &mut Vec<u8>) -> io::Result<Option<String>> {
-    if ordinal >= dict.len() {
-        return Ok(None);
+/// Entities a finished layer's term source decodes from its posting at a time.
+const LAYER_BATCH: usize = 1 << 10;
+
+/// A finished text layer as a term source: each term of its dictionary, with the entities its
+/// posting holds that `tombstones` does not, each with its positions.
+///
+/// A term's count is taken before any entity is read, as the posting's cardinality less its
+/// intersection with the tombstones, both read from the mapped posting without materialising it.
+struct LayerTerms<'a> {
+    dict: DictCursor<'a>,
+    postings: &'a ColumnPostings,
+    positions: &'a ColumnPositions,
+    tombstones: &'a Bitmap,
+    posting: Option<PostingRef<'a>>,
+    cursor: Option<PositionsCursor<'a>>,
+    records: Option<Records<'a>>,
+    /// Entities the posting holds, and how many of them are tombstoned.
+    held: u64,
+    dead: u64,
+    /// The next entity's rank in the posting, and the last entity decoded.
+    rank: u64,
+    last: Option<u32>,
+    /// Entities decoded from the posting and not yet yielded, from `at`.
+    batch: Vec<u32>,
+    at: usize,
+    current: Vec<u32>,
+}
+
+impl<'a> LayerTerms<'a> {
+    fn new(layer: &TextLayerRef<'a>, tombstones: &'a Bitmap) -> LayerTerms<'a> {
+        LayerTerms {
+            dict: DictCursor::new(layer.dict, None),
+            postings: layer.postings,
+            positions: layer.positions,
+            tombstones,
+            posting: None,
+            cursor: None,
+            records: None,
+            held: 0,
+            dead: 0,
+            rank: 0,
+            last: None,
+            batch: Vec::with_capacity(LAYER_BATCH),
+            at: 0,
+            current: Vec::new(),
+        }
     }
-    let key = dict.key_of(ordinal, scratch)?;
-    Ok(Some(key.to_string()))
+
+    /// Decode the posting's next entities into the batch, returning `false` past its last.
+    fn refill(&mut self) -> bool {
+        self.batch.clear();
+        self.at = 0;
+        let Some(posting) = &self.posting else {
+            return false;
+        };
+        match posting {
+            PostingRef::Array(bytes) => {
+                let from = (self.rank as usize).saturating_mul(4).min(bytes.len());
+                self.batch.extend(
+                    bytes[from..]
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .take(LAYER_BATCH)
+                        .map(|chunk| u32::from_le_bytes(*chunk)),
+                );
+            }
+            PostingRef::Roaring(view) => {
+                let mut entities = view.iter();
+                match self.last.map(|last| last.checked_add(1)) {
+                    Some(None) => return false,
+                    Some(Some(next)) => entities.reset_at_or_after(next),
+                    None => {}
+                }
+                self.batch.resize(LAYER_BATCH, 0);
+                let taken = entities.next_many(&mut self.batch);
+                self.batch.truncate(taken);
+            }
+        }
+        self.last = self.batch.last().copied().or(self.last);
+        !self.batch.is_empty()
+    }
+}
+
+impl TermSource for LayerTerms<'_> {
+    fn next_term(&mut self) -> io::Result<bool> {
+        self.posting = None;
+        self.cursor = None;
+        self.records = None;
+        if !self.dict.next_term()? {
+            return Ok(false);
+        }
+        let id = AttrLocalId::new(self.dict.at());
+        let posting = self.postings.posting(id)?.ok_or_else(|| {
+            invalid(format!(
+                "term {} has no posting record, though the layer's counts agree",
+                id.raw()
+            ))
+        })?;
+        self.held = posting.cardinality();
+        self.dead = match &posting {
+            _ if self.tombstones.is_empty() => 0,
+            PostingRef::Roaring(view) => self.tombstones.and_cardinality(view),
+            array => array.iter().filter(|&e| self.tombstones.contains(e)).count() as u64,
+        };
+        if self.dead == 0 {
+            if let Some(posting) = self.postings.record(id) {
+                let positions = self.positions.record(id)?;
+                self.records = Some(Records { posting, positions });
+            }
+        }
+        self.cursor = Some(self.positions.cursor(id, self.held)?);
+        self.posting = Some(posting);
+        self.rank = 0;
+        self.last = None;
+        self.batch.clear();
+        self.at = 0;
+        Ok(true)
+    }
+
+    fn term(&self) -> &[u8] {
+        self.dict.term()
+    }
+
+    fn count(&self) -> u64 {
+        self.held - self.dead
+    }
+
+    fn next_entity(&mut self) -> io::Result<Option<u32>> {
+        loop {
+            if self.at == self.batch.len() && !self.refill() {
+                return Ok(None);
+            }
+            let entity = self.batch[self.at];
+            self.at += 1;
+            let rank = self.rank;
+            self.rank += 1;
+            if self.dead > 0 && self.tombstones.contains(entity) {
+                continue;
+            }
+            let cursor = self.cursor.as_mut().expect("a term has a positions cursor");
+            self.current.clear();
+            self.current.extend_from_slice(cursor.positions(rank)?);
+            return Ok(Some(entity));
+        }
+    }
+
+    fn positions(&self) -> &[u32] {
+        &self.current
+    }
+
+    fn records(&self) -> Option<Records<'_>> {
+        self.records
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{write_text_index, TermAccumulator};
+    use std::path::Path;
+
+    type Documents = Vec<(u32, Vec<&'static str>)>;
+
+    fn files(dir: &Path, tag: &str) -> TextIndexFiles {
+        TextIndexFiles {
+            dict: dir.join(format!("{tag}-dict.bin")),
+            postings: dir.join(format!("{tag}-postings")),
+            positions: dir.join(format!("{tag}-positions")),
+            presence: dir.join(format!("{tag}-presence.roaring")),
+        }
+    }
+
+    /// A layer over `documents`, written as the build and the flush write one.
+    fn build(dir: &Path, tag: &str, documents: &Documents) -> TextIndexFiles {
+        let out = files(dir, tag);
+        let mut terms = TermAccumulator::new(dir, tag, usize::MAX);
+        for (entity, tokens) in documents {
+            terms
+                .add_document(*entity, |push| tokens.iter().for_each(|t| push(t)))
+                .unwrap();
+        }
+        let mut writer = TextIndexWriter::create(out.clone()).unwrap();
+        let gathered = vec![terms.finish().unwrap()];
+        let allowance = Allowance::new(0, 0, 1);
+        write_text_index(dir, tag, gathered, &mut writer, 1 << 22, allowance).unwrap();
+        writer.finish().unwrap();
+        let present: Bitmap = documents.iter().map(|(entity, _)| *entity).collect();
+        mosaica_filter::write_presence(&out.presence, &present).unwrap();
+        out
+    }
+
+    struct Layer {
+        dict: SortedDict,
+        postings: ColumnPostings,
+        positions: ColumnPositions,
+        present: Bitmap,
+    }
+
+    fn open(files: &TextIndexFiles) -> Layer {
+        Layer {
+            dict: SortedDict::open(&files.dict, mosaica_filter::Access::Read).unwrap(),
+            postings: ColumnPostings::open(&files.postings, false).unwrap(),
+            positions: ColumnPositions::open(&files.positions, false).unwrap(),
+            present: mosaica_filter::read_presence(&files.presence).unwrap(),
+        }
+    }
+
+    /// The bytes of a layer's dictionary, postings and positions.
+    fn bytes(files: &TextIndexFiles) -> Vec<Vec<u8>> {
+        [&files.dict, &files.postings, &files.positions]
+            .iter()
+            .map(|path| std::fs::read(path).unwrap())
+            .collect()
+    }
+
+    /// **A fold and a coalesce write the terms a build of what survives writes, byte for byte**, on
+    /// each of their routes. In the base, `kept` is carried only by entities the fold keeps, so it is copied whole,
+    /// and `partly` and `tie` lose a carrier each and are re-encoded. `tie`'s first container is
+    /// `{0, 1, 2}` once entity 3 goes, which costs the same as a run and as an array, and the base
+    /// held it as a run of four. `gone`'s only carrier is tombstoned, so it leaves the dictionary
+    /// though only one layer holds it. The extent's `fresh` is copied, and `shared` is in both.
+    #[test]
+    fn a_fold_and_a_coalesce_write_what_a_build_of_the_survivors_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        let base: Documents = (0..4u32)
+            .map(|entity| match entity {
+                1 => (entity, vec!["tie", "shared", "tie"]),
+                3 => (entity, vec!["gone", "tie"]),
+                _ => (entity, vec!["tie"]),
+            })
+            .chain((0..80u32).map(|k| {
+                let tokens = match k % 2 {
+                    0 => vec!["partly", "partly"],
+                    _ => vec!["tie", "kept", "partly", "kept"],
+                };
+                ((1 << 16) + 2 * k, tokens)
+            }))
+            .collect();
+        let extent: Documents = (0..10u32)
+            .map(|k| (200_000 + k, vec!["fresh", "shared"]))
+            .collect();
+        let tombstones = Bitmap::of(&[3, (1 << 16) + 4]);
+
+        let base_files = build(dir, "base", &base);
+        let extent_files = build(dir, "extent", &extent);
+        let layers = [open(&base_files), open(&extent_files)];
+        let inputs: Vec<TextLayerRef<'_>> = layers
+            .iter()
+            .map(|layer| TextLayerRef {
+                dict: &layer.dict,
+                postings: &layer.postings,
+                positions: &layer.positions,
+                present: &layer.present,
+            })
+            .collect();
+        let allowance = Allowance::new(0, 0, 1);
+
+        let folded = files(dir, "folded");
+        merge_text_layers(&inputs, &tombstones, folded.clone(), allowance).unwrap();
+        let survivors: Documents = base
+            .iter()
+            .chain(&extent)
+            .filter(|(entity, _)| !tombstones.contains(*entity))
+            .cloned()
+            .collect();
+        assert_eq!(bytes(&folded), bytes(&build(dir, "survivors", &survivors)));
+
+        let coalesced = files(dir, "coalesced");
+        coalesce_text_extents(&inputs, coalesced.clone(), allowance).unwrap();
+        let every: Documents = base.iter().chain(&extent).cloned().collect();
+        assert_eq!(bytes(&coalesced), bytes(&build(dir, "every", &every)));
+    }
 }

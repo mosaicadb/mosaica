@@ -647,8 +647,9 @@ const TEXT_POSITIONS_SHARE_PERCENT: u64 = 25;
 const TEXT_RUN_SHARE_PERCENT: u64 = 25;
 
 /// The runs a text index over `characters` bytes of prose is forecast to spill under `allowance`:
-/// its runs, at the column's characters as [`entity_order_residency`] charges them, over a run's
-/// forecast size, and at least one a thread, each spilling once at the end.
+/// its fills, at the column's characters as [`entity_order_residency`] charges them, over a run's
+/// forecast size, less one a thread, since what each accumulator holds at the end of the pass is
+/// merged from memory.
 pub(crate) fn expected_text_runs(
     characters: u64,
     allowance: mosaica_filter_write::Allowance,
@@ -656,7 +657,7 @@ pub(crate) fn expected_text_runs(
     let run = (allowance.per_worker() as u64 * TEXT_RUN_SHARE_PERCENT / 100).max(1);
     usize::try_from(characters.div_ceil(run))
         .unwrap_or(usize::MAX)
-        .max(allowance.threads)
+        .saturating_sub(allowance.threads)
 }
 
 /// What one `dict.bin` entry costs beyond the characters it holds, in tenths of a byte: two

@@ -68,15 +68,11 @@
 //!
 //! The price is paid in decodes. [`mosaica_filter::SortedDict`] offers a whole-file `walk` and a
 //! random `key_of`, and `walk` is push-driven, so N of them cannot be interleaved into an N-way
-//! merge; the cursor below therefore steps with `key_of`, which re-decodes its block from the
-//! restart each time and so costs `(K + 1) / 2` — 8.5 entry decodes per key at the shipped restart
-//! interval of 16. Against the dictionary campaign's **measured** 11.0–18.8 ns per key of decode,
-//! that **models** to ~0.1–0.16 µs per key per pass: sub-second
-//! for a coalesce window, seconds to tens of seconds for a fold at 10⁸ keys inside a nightly gated
-//! window that already runs minutes to hours (decisions 0056, 0057). The alternative — spooling
-//! each input's decoded keys to a temporary file and merging pull-style cursors over the spools —
-//! buys back the constant at the cost of a second on-disk format and its own failure modes, and is
-//! not taken while the pass is time-rich and memory-poor. Revisit with a measurement, not a hunch.
+//! merge; the merge's dictionary cursor therefore steps with `key_of`, which re-decodes its block
+//! from the restart each time and so costs `(K + 1) / 2`, 8.5 entry decodes per key at the
+//! shipped restart interval of 16. Against the dictionary campaign's **measured** 11.0–18.8 ns per
+//! key of decode, that **models** to ~0.1–0.16 µs per key per pass: sub-second for a coalesce
+//! window, seconds to tens of seconds for a fold at 10⁸ keys.
 //!
 //! # What is deliberately not here
 //!
@@ -90,6 +86,7 @@ use std::path::Path;
 use croaring::Bitmap;
 use mosaica_filter::{Access, ColumnKind, SortedDict, SortedDictWriter, ValueColumn};
 
+use crate::merge::{DictCursor, TermMerge};
 use crate::{invalid, merge_order, write_merged};
 use mosaica_roaring::RankedRuns;
 
@@ -265,16 +262,13 @@ fn live_ordinals(
 ///
 /// `live` restricts each layer to the ordinals a surviving entity reaches; `None` — the coalesce's
 /// case — takes every key. Keys equal across layers collapse to one merged ordinal, which is the
-/// interning a merge is for.
+/// interning a merge is for. The layers are merged by the one term merge, each through a
+/// [`DictCursor`].
 ///
 /// **The output is written at the default restart interval whatever the inputs used**, for the
 /// reason the presence bitmap is normalised at the value writer (index §6.2): a rebuilt artefact
 /// must be a function of its content alone, or a folded column and a freshly built one over the
 /// same live entities would differ in bytes without differing in meaning.
-///
-/// The least key is found by a linear sweep of the layers rather than by a heap. The layer count is
-/// the coalesce's width or the fold's surviving handful — tens, which §5.2 holds it at — where a
-/// heap's log factor buys less than the branch it costs and the reader loses a loop they can check.
 pub(crate) fn merge_dictionaries(
     layers: &[KeywordLayer<'_>],
     live: Option<&[Bitmap]>,
@@ -285,39 +279,25 @@ pub(crate) fn merge_dictionaries(
         .iter()
         .map(|layer| vec![NO_KEY; layer.dict.len() as usize])
         .collect();
-    let mut cursors = Vec::with_capacity(layers.len());
-    for (i, layer) in layers.iter().enumerate() {
-        cursors.push(KeyCursor::open(layer.dict, live.map(|sets| &sets[i]))?);
-    }
+    let mut merge = TermMerge::open(
+        layers
+            .iter()
+            .enumerate()
+            .map(|(i, layer)| DictCursor::new(layer.dict, live.map(|sets| &sets[i])))
+            .collect(),
+    )?;
 
     let mut writer = SortedDictWriter::new(BufWriter::new(std::fs::File::create(dict_path)?))?;
-    let mut least: Vec<u8> = Vec::new();
-    loop {
-        let mut any = false;
-        for cursor in &cursors {
-            if let Some(key) = cursor.key() {
-                if !any || key < least.as_slice() {
-                    least.clear();
-                    least.extend_from_slice(key);
-                    any = true;
-                }
-            }
-        }
-        if !any {
-            break;
-        }
+    while merge.next_term()? {
         // Valid UTF-8 by the reader's own decode check; re-derived here because `push` takes a
         // `&str` and a lossy conversion would put a replacement character in a key.
-        let key = std::str::from_utf8(&least)
+        let key = std::str::from_utf8(merge.term())
             .map_err(|e| invalid(format!("{pass}: a decoded key is not valid UTF-8: {e}")))?;
         // The writer refuses a key that does not ascend strictly, so a merge that lost its order
         // stops here rather than producing a dictionary whose ordinals mean nothing.
         let ordinal = writer.push(key)?;
-        for (i, cursor) in cursors.iter_mut().enumerate() {
-            if cursor.key() == Some(least.as_slice()) {
-                remap[i][cursor.at() as usize] = ordinal;
-                cursor.advance()?;
-            }
+        for (i, cursor) in merge.selected() {
+            remap[i][cursor.at() as usize] = ordinal;
         }
     }
     writer.finish()?;
@@ -436,60 +416,6 @@ pub(crate) fn verify_remap(
         }
     }
     Ok(())
-}
-
-/// A sequential reader over one dictionary's live keys, stepping with
-/// [`mosaica_filter::SortedDict::key_of`].
-///
-/// The module doc argues the constant this costs and the spool that would buy it back. What the
-/// cursor gives in exchange is that N of them coexist, which `walk` — push-driven and without an
-/// early exit, both deliberate — cannot offer.
-struct KeyCursor<'a> {
-    dict: &'a SortedDict,
-    live: Option<&'a Bitmap>,
-    /// The ordinal whose key `scratch` holds; `dict.len()` once exhausted.
-    at: u32,
-    scratch: Vec<u8>,
-}
-
-impl<'a> KeyCursor<'a> {
-    fn open(dict: &'a SortedDict, live: Option<&'a Bitmap>) -> io::Result<Self> {
-        let mut cursor = KeyCursor {
-            dict,
-            live,
-            at: 0,
-            scratch: Vec::new(),
-        };
-        cursor.seek()?;
-        Ok(cursor)
-    }
-
-    /// The key this cursor is positioned on, or `None` once it is exhausted.
-    fn key(&self) -> Option<&[u8]> {
-        (self.at < self.dict.len()).then_some(self.scratch.as_slice())
-    }
-
-    fn at(&self) -> u32 {
-        self.at
-    }
-
-    fn advance(&mut self) -> io::Result<()> {
-        self.at += 1;
-        self.seek()
-    }
-
-    /// Settle on the first live ordinal at or after `at`, decoding its key.
-    fn seek(&mut self) -> io::Result<()> {
-        while self.at < self.dict.len() {
-            if self.live.is_none_or(|live| live.contains(self.at)) {
-                self.dict.key_of(self.at, &mut self.scratch)?;
-                return Ok(());
-            }
-            self.at += 1;
-        }
-        self.scratch.clear();
-        Ok(())
-    }
 }
 
 #[cfg(test)]

@@ -8,18 +8,26 @@ use mosaica_types::progress::Tracker;
 
 use crate::write::{Job, Jobs};
 
-/// The kinds of background work that can each hold much of the memory at once: a flush, whose
-/// text layers take a term index's allowance from its share, and a fold, which leaves the other
-/// share free beside it. A fold's pre-flight refuses only what will not fit in what is available.
-const MEMORY_WRITERS: u64 = 2;
+/// The kinds of background work that can each hold much of the memory at once: a flush, a fold and
+/// a coalesce, each of whose text layers take a term index's allowance from its share. A fold's
+/// pre-flight refuses only what will not fit in what is available.
+const MEMORY_WRITERS: u64 = 3;
 
 /// **What one background writer may plan to take, read once at the start of its operation**: an
 /// equal share, one for each kind in [`MEMORY_WRITERS`], of what the process plans to take
 /// ([`mosaica_types::process::memory_to_take`]). At most one unit of each kind is in flight
 /// ([`Background`]) and none knows what the others hold, so a fixed share each is what keeps them
 /// together under that figure, however they overlap. `None` where the memory cannot be read.
-pub(crate) fn writer_memory() -> Option<u64> {
+fn writer_memory() -> Option<u64> {
     mosaica_types::process::memory_to_take().map(|bytes| bytes / MEMORY_WRITERS)
+}
+
+/// What each of a background writer's term indexes may hold, read once an operation: its share
+/// ([`writer_memory`]) by the rule a build's term index is sized by, on the one thread the writer
+/// runs on. Its layers are written one at a time, so each takes the whole of it; where the memory
+/// cannot be read, the least a pass runs in.
+pub(crate) fn writer_allowance() -> mosaica_filter_write::Allowance {
+    mosaica_filter_write::Allowance::new(writer_memory().unwrap_or(0), 0, 1)
 }
 
 /// Whether a unit of one kind is running, or finished and not yet published, read from its two

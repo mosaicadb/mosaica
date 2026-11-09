@@ -72,23 +72,27 @@
 //! built one over the same live entities are the same bytes — and it is why one crate holds both
 //! producers' emit rather than each holding its own.
 //!
-//! # Spill files and sorted runs
+//! # Spill files, sorted runs and the one term merge
 //!
 //! The `spill` module holds the receipt every spill file is verified against ([`SpillReceipt`])
 //! and the sorted run a term index or a keyword dictionary spills: its writer
-//! ([`TextRunWriter`]), the k-way merge over runs ([`TextRunMerge`]) and the cascade that reduces
-//! more runs than one merge may hold open ([`cascade_sorted_runs`]). The build's spill files and
+//! ([`TextRunWriter`]), its reader ([`TextRunReader`]) and the cascade that reduces more runs than
+//! one merge may hold open ([`cascade_sorted_runs`]). The build's spill files and
 //! `mosaica-store`'s partition use the receipt from here. It also holds the one rule a term index's
 //! pass is sized by, [`Allowance`]: what its stage leaves of the memory to be had, which pays for
 //! the accumulators and then for the merge's fan-in.
 //!
-//! A text index's terms are gathered in a [`TermAccumulator`], which spills those runs when its
-//! share of the allowance fills, and the runs are merged into the index by [`merge_text_runs`].
-//! The build and the flush share both.
+//! Every merge over sorted terms is one [`TermMerge`] over [`TermSource`]s: the build's keyword
+//! runs, a text index's runs and the terms its accumulators held at the end of their pass, and
+//! the fold's and the coalesce's finished layers of either family. A text index's terms are
+//! gathered in a [`TermAccumulator`], which spills runs when its share of the allowance fills,
+//! and [`write_text_index`] merges what it gathered into the index. The build and the flush share
+//! both, and the fold and the coalesce write through the same merge.
 
 mod accumulator;
 mod chunk_dict;
 mod keyword;
+mod merge;
 mod positions;
 mod record;
 mod spill;
@@ -106,23 +110,25 @@ use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 use mosaica_filter::{Codes, ColumnKind, ValueColumn, ValueColumnWriter};
 use mosaica_roaring::RankedRuns;
 
-pub use accumulator::{merge_text_runs, TermAccumulator, TEXT_MERGE_SLICE_CAP};
+pub use accumulator::{write_text_index, Gathered, TermAccumulator, TextMerge};
 pub use chunk_dict::{
     dictionary_of, key_prefix, prefers_sort, rank_rows, rank_table, KeyRef, KeyRow, KeyTable,
     Lookup, SortOn, Vacant, WindowRule, KEY_WINDOW_ROWS,
 };
 pub use keyword::{coalesce_keyword_extents, fold_keyword_column, KeywordLayer};
+pub use merge::{TermMerge, TermSource};
 pub use record::{
     coalesce_record_extents, fold_record_blob, merge_record_rows, write_prose, write_text_rows,
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
 pub use spill::{
     at_end, cascade_sorted_runs, merge_descriptors, read_varint, Allowance, RunPayload,
-    SpillFileError, SpillReceipt, TextRunMerge, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
+    SpillFileError, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
     WORKER_BYTES_MIN,
 };
 pub use text::{
     coalesce_text_extents, merge_text_layers, Posting, TextIndexWriter, TextLayerRef,
+    TEXT_MERGE_SLICE_CAP,
 };
 
 /// The vocabulary's reserved *absent* code: never drawn, never bound to a key, and carried by
@@ -790,11 +796,11 @@ mod tests {
         let c_present = bitmap([2]);
         let out = |tag: &str| text_files(dir, &format!("{tag}-out"));
         let fold = |inputs: &[TextLayerRef<'_>], tombstones: &Bitmap, tag: &str| {
-            merge_text_layers(inputs, tombstones, out(tag))
+            merge_text_layers(inputs, tombstones, out(tag), Allowance::new(0, 0, 1))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
         let coalesce = |inputs: &[TextLayerRef<'_>], tag: &str| {
-            coalesce_text_extents(inputs, out(tag))
+            coalesce_text_extents(inputs, out(tag), Allowance::new(0, 0, 1))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
 

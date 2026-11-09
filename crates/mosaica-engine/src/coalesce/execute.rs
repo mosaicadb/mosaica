@@ -337,7 +337,11 @@ pub(super) fn coalesce_text_window(
         presence: format!("{column_rel}/{}", mosaica_filter::PRESENCE_FILE),
         prose,
     };
-    mosaica_filter_write::coalesce_text_extents(&inputs, out.clone())
+    mosaica_filter_write::coalesce_text_extents(
+        &inputs,
+        out.clone(),
+        crate::write::writer_allowance(),
+    )
         .map_err(failed(format!("text coalesce for '{column}'")))?;
     digest_outputs(
         files,

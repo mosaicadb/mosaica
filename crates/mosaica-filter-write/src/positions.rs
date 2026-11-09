@@ -110,6 +110,16 @@ impl PositionsWriter {
         Ok(())
     }
 
+    /// Write a whole record as another positions file holds it, between terms.
+    pub(crate) fn copy(&mut self, record: &[u8]) -> io::Result<()> {
+        if self.open {
+            return Err(invalid(
+                "a term's positions were copied inside another term's record",
+            ));
+        }
+        self.file.append(record)
+    }
+
     fn write_block(&mut self) -> io::Result<()> {
         if self.blocks > 0 {
             self.table.extend_from_slice(&self.written.to_le_bytes());

@@ -163,6 +163,16 @@ impl ColumnPostings {
         self.base.posting_at(value.raw())
     }
 
+    /// `value`'s record as a positional file holds it, checked at open, for a writer that copies
+    /// it whole. `None` where it has no record, and for a keyed file, whose records are found by
+    /// search and are not copied.
+    pub fn record(&self, value: AttrLocalId) -> Option<&[u8]> {
+        match &self.base {
+            BaseTier::Positional(reader) => reader.record_at(value.raw()),
+            BaseTier::Keyed(_) => None,
+        }
+    }
+
     /// [`Self::narrow`] with the running set narrowed in place: `live ∩= the value's entities`.
     ///
     /// Chaining `narrow` allocates a fresh bitmap at every step, and over a conjunction of common

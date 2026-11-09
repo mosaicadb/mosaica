@@ -635,7 +635,7 @@ fn execute_flush_stages(
     laps: &mut FlushLaps,
 ) -> Result<CompletedFlush, MaintenanceFailed> {
     laps.start();
-    let text_allowance = text_layer_allowance();
+    let text_allowance = crate::write::writer_allowance();
     let consumed: Vec<EntityId> = plan.items.iter().map(|(entity, _)| *entity).collect();
     let numbers = numbers_of(&plan, &ctx)?;
     let tenancies = ctx.tenancy.of_each(numbers.iter().copied());
@@ -1606,15 +1606,6 @@ fn write_text_extents(
     Ok(out)
 }
 
-/// What each of a flush's text layers may hold, read once a flush: a background writer's share of
-/// what the server may take ([`crate::write::writer_memory`]), by the rule a build's term index is
-/// sized by, on the one thread a flush runs on. The layers are written one at a time, so each takes
-/// the whole of it; where the memory cannot be read, the least the pass runs in.
-fn text_layer_allowance() -> mosaica_filter_write::Allowance {
-    let share = crate::write::writer_memory().unwrap_or(0);
-    mosaica_filter_write::Allowance::new(share, 0, 1)
-}
-
 /// Where a text layer's files go. What [`write_text_layer`] needs of a [`FlushContext`], so a
 /// test can write a layer without building one.
 struct TextTarget<'a> {
@@ -1641,8 +1632,8 @@ impl<'a> TextTarget<'a> {
 /// `Text*` sub-laps where the caller's stage is `TextExtents`, and is `None` from the scoped pass.
 ///
 /// The terms are gathered in the accumulator the build's text pass uses, which spills sorted runs
-/// beside the layer's files when it has allocated `allowance`; the runs are merged into the layer
-/// under the same allowance and removed.
+/// beside the layer's files when it has allocated `allowance`; the runs and what it holds at the
+/// end are merged into the layer under the same allowance, and the runs removed.
 #[allow(clippy::too_many_arguments)]
 fn write_text_layer(
     rel_dir: &str,
@@ -1704,13 +1695,15 @@ fn write_text_layer(
     };
     let failed = |e: std::io::Error| MaintenanceFailed(format!("{dict_rel}: {e}"));
     let mut writer = mosaica_filter_write::TextIndexWriter::create(files).map_err(failed)?;
-    terms
-        .write_index(
-            &mut writer,
-            mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
-            allowance,
-        )
-        .map_err(failed)?;
+    mosaica_filter_write::write_text_index(
+        &dir,
+        &format!("{}-text-merge", target.seg_id),
+        vec![terms.finish().map_err(failed)?],
+        &mut writer,
+        allowance.slice_cap(),
+        allowance,
+    )
+    .map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextDict);
     writer.finish().map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextPostings);

@@ -120,8 +120,9 @@ impl ColumnPositions {
         self.array.len() as u32
     }
 
-    /// A cursor over `term`'s record, whose posting holds `items` items.
-    pub fn cursor(&self, term: AttrLocalId, items: u64) -> io::Result<PositionsCursor<'_>> {
+    /// `term`'s record as the file holds it, for a writer that copies it whole. Its bytes are
+    /// checked as a cursor decodes them, wherever the copy is read.
+    pub fn record(&self, term: AttrLocalId) -> io::Result<&[u8]> {
         let ordinal = term.raw() as usize;
         if ordinal >= self.array.len() {
             return Err(malformed(format!(
@@ -129,7 +130,13 @@ impl ColumnPositions {
                 self.array.len()
             )));
         }
-        let record = self.array.value(ordinal);
+        Ok(self.array.value(ordinal))
+    }
+
+    /// A cursor over `term`'s record, whose posting holds `items` items.
+    pub fn cursor(&self, term: AttrLocalId, items: u64) -> io::Result<PositionsCursor<'_>> {
+        let ordinal = term.raw() as usize;
+        let record = self.record(term)?;
         let blocks = items.div_ceil(POSITIONS_BLOCK as u64);
         let table = blocks
             .saturating_sub(1)
