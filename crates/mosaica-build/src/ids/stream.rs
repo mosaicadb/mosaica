@@ -30,6 +30,7 @@ use std::time::SystemTime;
 
 use super::run::{RunReader, RunReceipt, RunWriter};
 use rayon::prelude::*;
+use mosaica_filter_write::mix64;
 use mosaica_lifecycle::resolve::{self, Batch, Named, Refusal};
 use mosaica_store::key_index::{Key, KeySpill};
 use mosaica_store::unique::{KeyKind, UniqueKey};
@@ -44,7 +45,7 @@ use super::{
 use crate::error::{BuildError, Result};
 use crate::observer::{BuildStage, Steps};
 use crate::row_groups::FileGroups;
-use crate::spill::{self, boundaries_uniform, mix64, MappedArray, Partition};
+use crate::spill::{self, boundaries_uniform, MappedArray, Partition};
 
 /// A row the walk has not decided, in a file's numbers.
 const PENDING: u32 = u32::MAX;

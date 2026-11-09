@@ -166,6 +166,9 @@ use crate::{
     fsync_file, validate_args, write_manifests, BuildArgs, BuildReport, BundleFiles,
     PairsParquetWriter, PREFIX, SEG_ID,
 };
+use mosaica_filter_write::{
+    cascade_sorted_runs, mix64, RunPayload, SpillReceipt, TextRunMerge, TextRunWriter,
+};
 use mosaica_types::progress::{Batched, Part, Unit};
 
 /// One item's position in the signature sort. 16 bytes, four-byte aligned — every field is a
@@ -209,20 +212,6 @@ fn input_changed(detail: &str) -> BuildError {
         "the input files changed while the build was reading them ({detail}); \
          the files a build reads must not change until it ends"
     ))
-}
-
-/// The order-independent content anchor the multi-pass checks accumulate: a wrapping sum of
-/// `mix64` over each element. A plain sum of raw values can be *compensated* — replace rows
-/// `{1, 3}` with `{2, 2}` and count and sum both survive — so each value is put through a
-/// full-avalanche mixer first, which makes an accidental compensating mutation implausible
-/// rather than easy. (splitmix64's finalizer, same constants contracts §2.6 fixes for the
-/// identity construction. Not cryptographic, and not meant to be: an adversary who can rewrite
-/// build inputs mid-run does not need hash collisions.)
-fn mix64(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^ (x >> 31)
 }
 
 /// Bit `i` of a packed bitset.
@@ -417,7 +406,7 @@ impl BucketSink {
 
 enum BucketStore {
     Ram(Option<Vec<u64>>),
-    Files(Vec<Option<spill::SpillReceipt>>),
+    Files(Vec<Option<SpillReceipt>>),
 }
 
 impl BucketStore {
@@ -1587,7 +1576,7 @@ fn build_bundle(
     // cache. Each view's own geometry stays: pass two is what reads it. Nothing to release where
     // the anchor covered the union and no array was written.
     drop(anchor_maps);
-    let band_receipts: Vec<spill::SpillReceipt> = band_writers
+    let band_receipts: Vec<SpillReceipt> = band_writers
         .into_iter()
         .map(|w| w.finish())
         .collect::<Result<_>>()?;
@@ -4662,7 +4651,7 @@ impl IdWriter {
     }
 
     /// The receipt and the ids pushed.
-    fn finish(mut self) -> Result<(spill::SpillReceipt, u64)> {
+    fn finish(mut self) -> Result<(SpillReceipt, u64)> {
         if !self.block.is_empty() {
             self.block.resize(KEYWORD_ID_BLOCK * 4, 0);
             self.spill.push_bytes(&self.block)?;
@@ -4680,7 +4669,7 @@ struct IdReader {
 }
 
 impl IdReader {
-    fn open(receipt: &spill::SpillReceipt, count: u64) -> Result<IdReader> {
+    fn open(receipt: &SpillReceipt, count: u64) -> Result<IdReader> {
         if receipt.count != count.div_ceil(KEYWORD_ID_BLOCK as u64) {
             return Err(BuildError::Invalid(format!(
                 "{}: {} blocks where {count} ids need {}",
@@ -4770,7 +4759,7 @@ struct KeywordChunks<'a> {
     rule: mosaica_filter_write::WindowRule,
     ids: IdWriter,
     perms: IdWriter,
-    runs: Vec<spill::SpillReceipt>,
+    runs: Vec<SpillReceipt>,
     chunks: Vec<ChunkMeta>,
     scratch: Vec<u32>,
 }
@@ -4876,16 +4865,17 @@ impl<'a> KeywordChunks<'a> {
                     "a keyword column spilled more chunks than a u32 can number".to_string(),
                 )
             })?;
-            let path = self.dir.join(format!("keyword-run-{chunk:05}.spill"));
+            let dir = &self.dir;
+            let path = dir.join(format!("keyword-run-{chunk:05}.spill"));
             let (mode, size) = (self.mode, self.plan.merge_batch);
             let (text, table, pairs) = (&self.text, &mut self.table, &mut self.pairs);
             let (scratch, ids, perms) = (&mut self.scratch, &mut self.ids, &mut self.perms);
             // The run is written on its own thread while the chunk is ranked.
-            let (keys, run) = std::thread::scope(|scope| -> Result<(u32, spill::SpillReceipt)> {
+            let (keys, run) = std::thread::scope(|scope| -> Result<(u32, SpillReceipt)> {
                 let (queue, batches) =
                     std::sync::mpsc::sync_channel::<KeyBatch>(KEYWORD_MERGE_DEPTH);
-                let writer = scope.spawn(move || -> Result<spill::SpillReceipt> {
-                    let mut run = spill::TextRunWriter::create(&path, spill::RunPayload::Rows)?;
+                let writer = scope.spawn(move || -> std::io::Result<SpillReceipt> {
+                    let mut run = TextRunWriter::create(&path, RunPayload::Rows)?;
                     for batch in batches {
                         for key in batch.keys() {
                             run.begin(key, 1)?;
@@ -4917,7 +4907,7 @@ impl<'a> KeywordChunks<'a> {
                 };
                 let sent = ranked.and_then(|keys| sender.flush().map(|()| keys));
                 drop(sender);
-                let run = joined(writer)?;
+                let run = joined(writer).map_err(|e| spill::run_error(dir, e))?;
                 let keys = sent?;
                 let ranks = if mode == ChunkMode::Hash { perms } else { ids };
                 for &rank in scratch.iter() {
@@ -4959,7 +4949,7 @@ impl<'a> KeywordChunks<'a> {
     }
 
     /// Close the last chunk and hand back the streams and runs, releasing the chunk's buffers.
-    fn finish(mut self) -> Result<(IdWriter, IdWriter, Vec<spill::SpillReceipt>, Vec<ChunkMeta>)> {
+    fn finish(mut self) -> Result<(IdWriter, IdWriter, Vec<SpillReceipt>, Vec<ChunkMeta>)> {
         self.close(None)?;
         Ok((self.ids, self.perms, self.runs, self.chunks))
     }
@@ -4975,7 +4965,7 @@ impl<'a> KeywordChunks<'a> {
 ///    sorted, as one run. A row leaves the chunk as a `u32` in the id stream and never enters the
 ///    merge.
 /// 2. **Cascade**, where the chunks are more runs than one merge may hold file descriptors for
-///    ([`RUN_MERGE_FAN_IN`]).
+///    ([`cascade_sorted_runs`]).
 /// 3. **Merge.** The runs are merged k-way on the key. Each distinct key is pushed once to
 ///    [`mosaica_filter::SortedDictWriter`], and the ordinal it returns is pushed to the remap
 ///    partition once for every chunk holding the key. A chunk's keys leave the merge ascending, so
@@ -5033,7 +5023,8 @@ fn write_keyword_column(
     let keys_held: u64 = chunks.iter().map(|chunk| chunk.keys as u64).sum();
 
     // ---- 2. the cascade --------------------------------------------------------------------------
-    let runs = cascade_sorted_runs(column_dir, "keyword", spill::RunPayload::Rows, runs)?;
+    let runs = cascade_sorted_runs(column_dir, "keyword", RunPayload::Rows, runs)
+        .map_err(|e| spill::run_error(column_dir, e))?;
     let spilled: u64 = runs.iter().map(|run| run.count).sum();
     if spilled != keys_held {
         return Err(refuse(format!(
@@ -5107,15 +5098,16 @@ fn write_keyword_column(
 
         let mut merged_keys = KeySender::new(key_queue, plan.merge_batch);
         let merged = (|| -> Result<(u64, u64)> {
-            let mut merge = TextRunMerge::open(&runs, spill::RunPayload::Rows)?;
+            let run_error = |e| spill::run_error(column_dir, e);
+            let mut merge = TextRunMerge::open(&runs, RunPayload::Rows).map_err(run_error)?;
             let mut records: Vec<u8> = Vec::new();
             let (mut keys, mut emitted) = (0u64, 0u64);
-            while merge.next_term()? {
+            while merge.next_term().map_err(run_error)? {
                 let ordinal = u32::try_from(keys).map_err(|_| {
                     refuse("the column has more distinct keys than a u32 can number".to_string())
                 })?;
                 merged_keys.push(merge.term())?;
-                merge.drain(&mut |chunk, _| {
+                merge.drain(run_error, &mut |chunk, _| {
                     if chunk as usize >= chunks.len() {
                         return Err(refuse(format!(
                             "a key is carried by chunk {chunk}, past the {} chunks the column has",
@@ -5508,12 +5500,12 @@ impl TextIndexPlan {
 ///
 /// 1. **Chunk.** Entity space is split into contiguous ascending ranges ([`TextIndexPlan`]) and the
 ///    ranges are indexed in parallel. Each worker accumulates its own `(term → entities)` map.
-/// 2. **Spill.** A worker writes its map out as a **sorted run** ([`crate::spill::TextRunWriter`])
+/// 2. **Spill.** A worker writes its map out as a **sorted run** ([`TextRunWriter`])
 ///    when its tracked footprint reaches the plan's per-worker budget, and again at the end of its
 ///    chunk. So a worker's residency is the budget whatever the documents are, and the run count
 ///    grows instead of the peak.
 /// 3. **Cascade**, where there are more runs than one merge may hold file descriptors for
-///    ([`RUN_MERGE_FAN_IN`]). Groups of runs are merged into intermediate runs, in order, until
+///    ([`cascade_sorted_runs`]). Groups of runs are merged into intermediate runs, in order, until
 ///    what is left fits in one merge. Nothing but a very large corpus reaches this.
 /// 4. **Merge.** The runs are merged k-way on the term, and each merged term's entity lists are
 ///    concatenated in run order. That is what makes the entity lists ascending *for free*: chunks
@@ -5533,8 +5525,8 @@ impl TextIndexPlan {
 /// * The chunk pass holds `threads × worker_bytes`, which is [`TEXT_BUDGET_SHARE`] of the build's
 ///   memory budget. Nothing in it scales with the corpus.
 /// * The merge holds one open reader per run — a read buffer and the head *term*, never the head's
-///   entities, which is why [`crate::spill::TextRunReader`] decodes a record's postings only when
-///   they are asked for. The run count is capped by the cascade, so this is a constant too.
+///   entities, which is why a run's reader inside [`TextRunMerge`] decodes a record's postings only
+///   when they are asked for. The run count is capped by the cascade, so this is a constant too.
 /// * One merged term's entity list is capped at [`TEXT_MERGE_SLICE_CAP`], above which it
 ///   accumulates into a Roaring bitmap and encodes through the byte-identical bitmap encoder.
 ///
@@ -5677,7 +5669,7 @@ fn write_text_index(
     // the cost the type exists to amortise — and it holds no per-document state, so it is `Sync`
     // and the workers borrow it. What each worker does hold of its own is the normalisation
     // scratch, which is per document by nature.
-    let receipts: Vec<Vec<spill::SpillReceipt>> = chunks
+    let receipts: Vec<Vec<SpillReceipt>> = chunks
         .par_iter()
         .enumerate()
         .map(|(chunk, &window)| {
@@ -5693,15 +5685,15 @@ fn write_text_index(
             )
         })
         .collect::<Result<Vec<_>>>()?;
-    let receipts: Vec<spill::SpillReceipt> = receipts.into_iter().flatten().collect();
+    let receipts: Vec<SpillReceipt> = receipts.into_iter().flatten().collect();
 
     // ---- 2. the cascade, where a corpus produced more runs than one merge may hold open ------
-    let receipts =
-        cascade_sorted_runs(column_dir, "text", spill::RunPayload::Positions, receipts)?;
+    let receipts = cascade_sorted_runs(column_dir, "text", RunPayload::Positions, receipts)
+        .map_err(|e| spill::run_error(column_dir, e))?;
 
     // ---- 3. the merge: one sorted term stream into the dictionary, postings and positions ----
     let files = mosaica_filter::TextIndexFiles::in_dir(column_dir);
-    let terms = merge_text_runs(files.clone(), &receipts, plan.merge_slice_cap)?;
+    let terms = merge_text_runs(column_dir, files.clone(), &receipts, plan.merge_slice_cap)?;
     mosaica_filter::write_presence(&files.presence, &values.present()?)
         .map_err(|e| BuildError::io(&files.presence, e))?;
     for path in files.paths() {
@@ -5739,7 +5731,7 @@ fn index_text_chunk(
     analyser: &mosaica_analyse::Analyser,
     worker_bytes: usize,
     steps: Steps<'_>,
-) -> Result<Vec<spill::SpillReceipt>> {
+) -> Result<Vec<SpillReceipt>> {
     let mut documents = steps.batched();
     let mut receipts = Vec::new();
     let mut terms: std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences> =
@@ -5794,16 +5786,17 @@ fn spill_text_run(
     chunk: usize,
     seq: &mut usize,
     terms: &mut std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences>,
-    receipts: &mut Vec<spill::SpillReceipt>,
+    receipts: &mut Vec<SpillReceipt>,
 ) -> Result<()> {
     if terms.is_empty() {
         return Ok(());
     }
+    let run_error = |e| spill::run_error(column_dir, e);
     let path = column_dir.join(format!("text-run-{chunk:05}-{seq:04}.spill"));
-    let mut writer = spill::TextRunWriter::create(&path, spill::RunPayload::Positions)?;
+    let mut writer = TextRunWriter::create(&path, RunPayload::Positions).map_err(run_error)?;
     {
         // **Visited in item order, because the window walked the arena and not entity space.** A
-        // run's entities must ascend strictly within a term (`spill::TextRunWriter::push_entity`
+        // run's entities must ascend strictly within a term (`TextRunWriter::push_entity`
         // refuses otherwise), and they arrive in the order the documents sit in the arena. The
         // sort is over one worker's accumulator, which the byte budget bounds, so it is a bounded
         // cost per run rather than a term-sized one at the merge.
@@ -5817,217 +5810,27 @@ fn spill_text_run(
                     path.display()
                 ))
             })?;
-            writer.begin(term, count)?;
-            occurrences.for_each_item(|entity, positions| writer.push_entity(entity, positions))?;
+            writer.begin(term, count).map_err(run_error)?;
+            occurrences
+                .for_each_item(|entity, positions| writer.push_entity(entity, positions))
+                .map_err(run_error)?;
         }
     }
-    receipts.push(writer.finish()?);
+    receipts.push(writer.finish().map_err(run_error)?);
     *terms = std::collections::HashMap::new();
     *seq += 1;
     Ok(())
 }
 
-/// A k-way merge over open run cursors, yielding each distinct term once with its entities in
-/// ascending order.
-///
-/// The heap holds **run indices**, and the comparison reaches into the readers — so a term is
-/// never copied into the heap and the merge allocates nothing per record.
-///
-/// **The entities are merged, not concatenated.** They used to be concatenated: chunks partitioned
-/// entity space ascending, the run list was held in chunk order, and a term's list was therefore
-/// sorted for free. The chunk pass divides the *arena* now (`column.rs`), so a run holds entities
-/// from all over entity space and two runs' lists interleave — [`Self::drain`] compares their
-/// heads. What that costs is a comparison per posting against a copy per posting; what it buys is
-/// a sequential read of a file larger than the machine.
-struct TextRunMerge {
-    cursors: Vec<spill::TextRunReader>,
-    heap: Vec<usize>,
-    /// The selected term. Held as bytes because that is what the cursors compare on, and because
-    /// the caller needs it after the runs carrying it have left the heap.
-    term: Vec<u8>,
-    /// The runs whose head is the selected term, ascending — drained in this order.
-    selected: Vec<usize>,
-    /// Entities the selected term carries across all of them.
-    postings: u64,
-    /// The selected runs' unconsumed heads, `(entity, run)`, smallest first. Held on the merge
-    /// rather than built per term so a corpus's whole vocabulary costs one allocation.
-    heads: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>>,
-}
-
-impl TextRunMerge {
-    fn open(receipts: &[spill::SpillReceipt], payload: spill::RunPayload) -> Result<TextRunMerge> {
-        let mut cursors: Vec<spill::TextRunReader> = Vec::with_capacity(receipts.len());
-        let mut heap: Vec<usize> = Vec::with_capacity(receipts.len());
-        for receipt in receipts {
-            let mut reader = spill::TextRunReader::open(receipt, payload)?;
-            // A run with no terms at all — an empty chunk — verifies its receipt here and takes no
-            // place in the heap.
-            if reader.advance()? {
-                heap.push(cursors.len());
-            }
-            cursors.push(reader);
-        }
-        for root in (0..heap.len() / 2).rev() {
-            text_heap_sift_down(&mut heap, &cursors, root);
-        }
-        Ok(TextRunMerge {
-            cursors,
-            heap,
-            term: Vec::new(),
-            selected: Vec::new(),
-            postings: 0,
-            heads: std::collections::BinaryHeap::new(),
-        })
-    }
-
-    /// Select the next distinct term, or `false` when every run is exhausted. The previous term's
-    /// runs are advanced here rather than by the caller, so a caller that took fewer entities than
-    /// the term carried still leaves the stream where the next record starts.
-    fn next_term(&mut self) -> Result<bool> {
-        for &run in &self.selected {
-            if self.cursors[run].advance()? {
-                text_heap_push(&mut self.heap, &self.cursors, run);
-            }
-        }
-        self.selected.clear();
-        self.postings = 0;
-        let Some(&first) = self.heap.first() else {
-            return Ok(false);
-        };
-        self.term.clear();
-        self.term.extend_from_slice(self.cursors[first].term());
-        while self
-            .heap
-            .first()
-            .is_some_and(|&top| self.cursors[top].term() == self.term.as_slice())
-        {
-            let top = text_heap_pop(&mut self.heap, &self.cursors);
-            self.postings += self.cursors[top].pending() as u64;
-            self.selected.push(top);
-        }
-        Ok(true)
-    }
-
-    fn term(&self) -> &[u8] {
-        &self.term
-    }
-
-    /// How many entities the selected term carries. Known before a single one is decoded, which is
-    /// what lets the caller choose an encoder without buffering to find out.
-    fn postings(&self) -> u64 {
-        self.postings
-    }
-
-    /// Feed the selected term's entities to `sink`, ascending, each with the term's positions in it
-    /// (none in a run of rows), checking the ascent as it goes.
-    ///
-    /// The check is over the *merged* list, not each run's: a run's own ascent is the writer's
-    /// business, and what could go wrong here is the merge. It is also what catches a position
-    /// carried by two runs — which cannot happen in either caller, because a text entity has
-    /// exactly one live arena record and one window holds it, and a keyword row is visited once by
-    /// one walk — and is exactly the failure a silent `>=` would hide. `encode_posting` re-checks
-    /// the slice path, but the bitmap path has no such check to make — a `Bitmap` is a set — which
-    /// is why the test lives here rather than there.
-    fn drain(&mut self, sink: &mut impl FnMut(u32, &[u32]) -> Result<()>) -> Result<()> {
-        self.heads.clear();
-        for i in 0..self.selected.len() {
-            let run = self.selected[i];
-            if let Some(entity) = self.cursors[run].next_entity()? {
-                self.heads.push(std::cmp::Reverse((entity, run)));
-            }
-        }
-        let mut last: Option<u32> = None;
-        while let Some(std::cmp::Reverse((entity, run))) = self.heads.pop() {
-            if let Some(previous) = last {
-                if entity <= previous {
-                    return Err(BuildError::Invalid(format!(
-                        "run merge: {entity} does not ascend past {previous} — two runs carry \
-                         the same entity for one term, or the same row for one key"
-                    )));
-                }
-            }
-            last = Some(entity);
-            // A run's head entity is the last it decoded, so its positions are still the reader's.
-            sink(entity, self.cursors[run].positions())?;
-            if let Some(next) = self.cursors[run].next_entity()? {
-                self.heads.push(std::cmp::Reverse((next, run)));
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Runs opened at once by one merge — the text index's and the keyword column's alike, both
-/// spilling the same run format.
-///
-/// **A merge holds a file descriptor per run, and the run count is a function of the corpus.** A
-/// worker spills whenever its budget fills, so a corpus far larger than memory produces far more
-/// runs than a process may hold open — which would be `EMFILE` at hour two on exactly the corpus
-/// this whole shape exists to make buildable. Above the cap the runs are merged in passes: groups
-/// of [`RUN_MERGE_FAN_IN`] into one intermediate run each, until what is left fits in one merge.
-/// An intermediate run is written by the same writer as a worker's, so the cascade adds a pass and
-/// not a format.
-///
-/// A hundred and twenty-eight, which is comfortably under the 1,024 soft limit a Linux process
-/// ordinarily starts with and above the run count an ordinary corpus produces — 7.4×10⁷ Overture
-/// names at eight chunks a thread on twelve cores is 96 runs, one merge and no cascade. The passes
-/// are sequential: the cascade is I/O and the final merge is sequential anyway, so running the
-/// groups in parallel would buy a fraction of a rare path at the cost of multiplying the very
-/// descriptor count the cap exists to hold down — `threads × fan-in` is not a number this can
-/// bound on a machine whose core count it does not know.
-const RUN_MERGE_FAN_IN: usize = 128;
-
-/// Reduce `receipts` to at most [`RUN_MERGE_FAN_IN`] runs, deleting each pass's inputs as it goes.
-/// `family` names the intermediate files, so two column families cascading in one directory cannot
-/// collide.
-///
-/// Groups are taken in order and each group merges in order, so the entity ordering the final
-/// merge relies on survives every pass.
-fn cascade_sorted_runs(
-    column_dir: &Path,
-    family: &str,
-    payload: spill::RunPayload,
-    mut receipts: Vec<spill::SpillReceipt>,
-) -> Result<Vec<spill::SpillReceipt>> {
-    let mut pass = 0usize;
-    while receipts.len() > RUN_MERGE_FAN_IN {
-        let mut merged = Vec::with_capacity(receipts.len().div_ceil(RUN_MERGE_FAN_IN));
-        for (group, runs) in receipts.chunks(RUN_MERGE_FAN_IN).enumerate() {
-            let path = column_dir.join(format!("{family}-merge-{pass:02}-{group:05}.spill"));
-            let mut merge = TextRunMerge::open(runs, payload)?;
-            let mut writer = spill::TextRunWriter::create(&path, payload)?;
-            while merge.next_term()? {
-                let count = u32::try_from(merge.postings()).map_err(|_| {
-                    BuildError::Invalid(format!(
-                        "text run merge: term {:?} carries more entities than a u32 can count",
-                        String::from_utf8_lossy(merge.term())
-                    ))
-                })?;
-                writer.begin(merge.term(), count)?;
-                merge.drain(&mut |entity, positions| writer.push_entity(entity, positions))?;
-            }
-            merged.push(writer.finish()?);
-            // Deleted per group rather than per pass: a corpus that reaches the cascade at all is
-            // one whose runs are large, and holding a whole pass's inputs beside a whole pass's
-            // outputs would double the spill's peak on disk for no reason.
-            for receipt in runs {
-                std::fs::remove_file(&receipt.path)
-                    .map_err(|e| BuildError::io(&receipt.path, e))?;
-            }
-        }
-        receipts = merged;
-        pass += 1;
-    }
-    Ok(receipts)
-}
-
 /// Merge the sorted runs into the dictionary, postings and positions, and return the term count.
 fn merge_text_runs(
+    column_dir: &Path,
     files: mosaica_filter::TextIndexFiles,
-    receipts: &[spill::SpillReceipt],
+    receipts: &[SpillReceipt],
     merge_slice_cap: usize,
 ) -> Result<u64> {
-    let mut merge = TextRunMerge::open(receipts, spill::RunPayload::Positions)?;
+    let run_error = |e| spill::run_error(column_dir, e);
+    let mut merge = TextRunMerge::open(receipts, RunPayload::Positions).map_err(run_error)?;
     let dict_path = files.dict.clone();
     let failed = |e: std::io::Error| BuildError::io(&dict_path, e);
     let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).map_err(failed)?;
@@ -6035,7 +5838,7 @@ fn merge_text_runs(
     let mut entities: Vec<u32> = Vec::new();
     let mut staged: Vec<u32> = Vec::new();
 
-    while merge.next_term()? {
+    while merge.next_term().map_err(run_error)? {
         let term = std::str::from_utf8(merge.term()).map_err(|e| {
             BuildError::Invalid(format!(
                 "text run merge: a term is not UTF-8 ({e}) — the analyser emits `&str`, so this \
@@ -6046,7 +5849,7 @@ fn merge_text_runs(
 
         if merge.postings() <= merge_slice_cap as u64 {
             entities.clear();
-            merge.drain(&mut |entity, positions| {
+            merge.drain(run_error, &mut |entity, positions| {
                 entities.push(entity);
                 writer.push_item(positions).map_err(failed)
             })?;
@@ -6058,7 +5861,7 @@ fn merge_text_runs(
             // would be the only term in the pass whose residency the plan does not bound.
             let mut bitmap = croaring::Bitmap::new();
             staged.clear();
-            merge.drain(&mut |entity, positions| {
+            merge.drain(run_error, &mut |entity, positions| {
                 staged.push(entity);
                 if staged.len() >= TEXT_MERGE_STAGE_ENTITIES {
                     bitmap.add_many(&staged);
@@ -6082,59 +5885,6 @@ fn merge_text_runs(
 /// Entities staged before each hand-off to croaring in the merge's bitmap arm — the same batching
 /// `mosaica_roaring` uses, and for the same reason: `add_many` amortises over a run of values.
 const TEXT_MERGE_STAGE_ENTITIES: usize = 1 << 16;
-
-/// Order two runs by their head term, ties broken by run index so that equal terms leave the heap
-/// in ascending entity order.
-fn text_run_before(cursors: &[spill::TextRunReader], a: usize, b: usize) -> bool {
-    match cursors[a].term().cmp(cursors[b].term()) {
-        std::cmp::Ordering::Less => true,
-        std::cmp::Ordering::Greater => false,
-        std::cmp::Ordering::Equal => a < b,
-    }
-}
-
-fn text_heap_sift_down(heap: &mut [usize], cursors: &[spill::TextRunReader], mut node: usize) {
-    loop {
-        let left = node * 2 + 1;
-        if left >= heap.len() {
-            return;
-        }
-        let right = left + 1;
-        let child = if right < heap.len() && text_run_before(cursors, heap[right], heap[left]) {
-            right
-        } else {
-            left
-        };
-        if !text_run_before(cursors, heap[child], heap[node]) {
-            return;
-        }
-        heap.swap(node, child);
-        node = child;
-    }
-}
-
-fn text_heap_push(heap: &mut Vec<usize>, cursors: &[spill::TextRunReader], run: usize) {
-    heap.push(run);
-    let mut node = heap.len() - 1;
-    while node > 0 {
-        let parent = (node - 1) / 2;
-        if !text_run_before(cursors, heap[node], heap[parent]) {
-            return;
-        }
-        heap.swap(node, parent);
-        node = parent;
-    }
-}
-
-fn text_heap_pop(heap: &mut Vec<usize>, cursors: &[spill::TextRunReader]) -> usize {
-    let top = heap[0];
-    let last = heap.pop().expect("the heap is not empty");
-    if !heap.is_empty() {
-        heap[0] = last;
-        text_heap_sift_down(heap, cursors, 0);
-    }
-    top
-}
 
 /// One text column's index: the files written, and the term count [`BuildStage::TextIndex`]
 /// reports.

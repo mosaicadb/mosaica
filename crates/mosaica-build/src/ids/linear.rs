@@ -2,6 +2,7 @@
 //! files read before hold: the linear build's numbering and the streaming build's reference.
 
 use rustc_hash::FxHashMap;
+use mosaica_filter_write::mix64;
 use mosaica_lifecycle::resolve::{self, Batch, Holder, Holdings, RowIdentity, Verdict};
 use mosaica_types::{EntityId, ItemAt, MosaicaId, ShardId};
 
@@ -10,7 +11,6 @@ use super::scan::FileRead;
 use super::{check_cap, Limit, Limited, Numbering, Numbers, Read, ReadInput, ReadRows};
 use crate::error::{BuildError, Result};
 use crate::row_groups::FileGroups;
-use crate::spill::mix64;
 
 /// Who holds each value of each unique field, and each item's value of each field. The build
 /// numbers items before it places them in shards, so it names each item in shard 0 by its number.

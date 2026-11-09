@@ -299,7 +299,8 @@ pub(crate) struct ReadRows {
     pub numbers: Numbers,
     pub groups: Option<Vec<usize>>,
     /// How many of the file's rows name an item, and the order-independent sum of their numbers
-    /// ([`crate::spill::mix64`]), for a later pass over the same file to be checked against.
+    /// ([`mosaica_filter_write::mix64`]), for a later pass over the same file to be checked
+    /// against.
     pub named: u64,
     pub mixed: u64,
 }

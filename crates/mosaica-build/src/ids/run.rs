@@ -11,10 +11,11 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use mosaica_filter::{put_varint64, take_varint64};
+use mosaica_filter_write::mix64;
 use mosaica_store::key_index::Key;
 
 use crate::error::{BuildError, Result};
-use crate::spill::{mix64, read_varint};
+use crate::spill::read_varint;
 
 const BUFFER: usize = 4 << 20;
 

@@ -1,5 +1,5 @@
 //! The partition: the primitive a pass that produces values in one order and needs them in
-//! another goes through, with the receipts and anchors that make a spill file's bytes trustworthy.
+//! another goes through, and the bucket files and record readers it spills through.
 //!
 //! **It lives here rather than in the build because the build and the engine's fold run the same
 //! pass** (owner ruling, 2026-09-12;
@@ -11,7 +11,8 @@
 //! uneven enough to need.
 //!
 //! Everything here is **fail-closed**: `finish` returns a [`SpillReceipt`] carrying the record
-//! count and a content anchor (a wrapping sum of [`mix64`] over each record), and every read path
+//! count and a content anchor (a wrapping sum of [`mix64`] over each record; both are
+//! `mosaica_filter_write`'s), and every read path
 //! verifies both before its contents are trusted. A truncated, tampered or doubly-appended spill
 //! file surfaces as a typed error, never as a silent partial read — on the build's side these files
 //! feed the permanent entity-ID assignment (I9), so an undetected short read would be baked into
@@ -23,6 +24,8 @@
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+
+use mosaica_filter_write::{mix64, SpillReceipt, SPILL_BUF_BYTES};
 
 use crate::error::{Result, StoreError};
 
@@ -38,48 +41,6 @@ fn io(path: &Path, source: std::io::Error) -> StoreError {
         path: path.to_path_buf(),
         source,
     }
-}
-
-/// Buffer size for spill I/O, both directions. Four mebibytes: large enough that the syscall
-/// cost is noise against the encode/decode work, small enough to be irrelevant against the
-/// build's peak memory.
-pub const SPILL_BUF_BYTES: usize = 4 << 20;
-
-/// splitmix64's finalizer — a private **twin of `mosaica_build`'s identity mixer**, same constants (the ones
-/// contracts §2.6 fixes for the identity construction).
-///
-/// Duplicated rather than shared or passed in: the pipeline's copy is private to a file this
-/// task may not modify, and threading a fn pointer through every writer just to avoid a
-/// three-line pure function would couple this module's API to its first caller. The constants
-/// are pinned by [`tests::mix64_matches_the_splitmix64_test_vector`], so the twins cannot
-/// drift silently.
-///
-/// Why a mixed sum and not a plain one: a plain sum of raw values can be *compensated* —
-/// replace records `{1, 3}` with `{2, 2}` and count and sum both survive — so each record is
-/// put through a full-avalanche mixer first. Not cryptographic, and not meant to be: this
-/// defends against torn writes, truncation and accidental double-appends, not an adversary
-/// with write access to the build's own scratch directory.
-pub fn mix64(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^ (x >> 31)
-}
-
-/// What `finish` hands back and every read path verifies against: the file, how many records
-/// it holds, and the content anchor over those records.
-///
-/// The receipt lives in the build's memory, never on disk — a receipt stored beside the file
-/// it vouches for could be tampered with in the same incident, and the build that wrote the
-/// spill is the only reader it will ever have.
-#[derive(Debug, Clone)]
-pub struct SpillReceipt {
-    pub path: PathBuf,
-    /// Records written: `u64` values for a bucket file, `(term, entity)` pairs for a band file.
-    pub count: u64,
-    /// Wrapping sum of [`mix64`] over each record — the raw `u64` for a bucket file,
-    /// [`pack_pair`] for a band file.
-    pub anchor: u64,
 }
 
 // --------------------------------------------------------------------------------------------
@@ -657,15 +618,6 @@ mod tests {
         let mut bytes = fs::read(path).unwrap();
         bytes.extend_from_slice(extra);
         fs::write(path, bytes).unwrap();
-    }
-
-    /// Pins the constants against `mosaica-build`'s `pipeline::mix64` (both are splitmix64's
-    /// finalizer): the
-    /// widely published first output of splitmix64 seeded with 0. If either twin's constants
-    /// drift, one of the two crates' copies of this vector fails.
-    #[test]
-    fn mix64_matches_the_splitmix64_test_vector() {
-        assert_eq!(mix64(0), 0xE220_A839_7B1D_CDAF);
     }
 
     // ---- bucket files -----------------------------------------------------------------

@@ -71,11 +71,20 @@
 //! just written. That sharing is §6.2's byte-identity argument — a folded column and a freshly
 //! built one over the same live entities are the same bytes — and it is why one crate holds both
 //! producers' emit rather than each holding its own.
+//!
+//! # Spill files and sorted runs
+//!
+//! The `spill` module holds the receipt every spill file is verified against ([`SpillReceipt`],
+//! [`mix64`]) and the sorted run a term index or a keyword dictionary spills: its writer
+//! ([`TextRunWriter`]), the k-way merge over runs ([`TextRunMerge`]) and the cascade that reduces
+//! more runs than one merge may hold open ([`cascade_sorted_runs`]). The build's spill files and
+//! `mosaica-store`'s partition use the receipt from here.
 
 mod chunk_dict;
 mod keyword;
 mod positions;
 mod record;
+mod spill;
 mod text;
 
 use std::collections::BTreeMap;
@@ -100,6 +109,10 @@ pub use record::{
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
 pub use positions::Occurrences;
+pub use spill::{
+    at_end, cascade_sorted_runs, mix64, read_varint, RunPayload, SpillReceipt, TextRunMerge,
+    TextRunWriter, SPILL_BUF_BYTES,
+};
 pub use text::{
     coalesce_text_extents, merge_text_layers, Posting, TextIndexWriter, TextLayerRef,
 };

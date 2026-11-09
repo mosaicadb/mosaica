@@ -397,7 +397,8 @@ where
     writer.finish()
 }
 
-fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
+/// How many leading bytes `a` and `b` share: the prefix a front-coded key stream omits.
+pub fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 

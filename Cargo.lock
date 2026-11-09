@@ -2299,6 +2299,7 @@ dependencies = [
  "mosaica-filter",
  "mosaica-roaring",
  "mosaica-types",
+ "proptest",
  "rayon",
  "tempfile",
  "zstd",
