@@ -899,6 +899,13 @@ fn present_rows(segment: &SegmentData, column: &str, row_base: u32) -> Option<cr
 /// contiguous in entity space and 3–5× for a scattered one, and a real result is scattered:
 /// entity ids are uncorrelated with any attribute. `Engine::filter_crossing_routes` is the
 /// observable that would catch this ratio drifting wrong.
+///
+/// ⊘ **Measured again** once the crossing tested rows through a probe and the projection ran on
+/// the pool's threads, on a 4-core Xeon over 10⁹ entities with a result scattered across them: over
+/// a 4.2-million-row domain the projection was faster up to 2× and the per-tile crossing from 4×,
+/// on one thread and on four. Over a 1-million-row domain the per-tile crossing was faster at
+/// every ratio from 0.25× up, so a projection taken there costs a little more the first time, and
+/// is kept for the next viewport ([`crate::filter_rows_cache`]).
 const PER_TILE_CROSSING_RATIO: u64 = 3;
 
 /// Split a chunk of the crossing domain no smaller than this, so a viewport small enough that the
