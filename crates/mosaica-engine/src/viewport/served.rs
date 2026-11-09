@@ -77,16 +77,6 @@ impl<'a> ServedView<'a> {
         })
     }
 
-    /// The filter columns of each side `mask` reads, in the order of [`Self::filtered_sides`].
-    pub(crate) fn filter_columns(
-        &self,
-        mask: &ShardedMask,
-    ) -> Vec<&'a crate::filter::FilterColumns> {
-        self.filtered_sides(mask)
-            .map(|(_, side, _)| &*side.shard.filter_columns)
-            .collect()
-    }
-
     /// Each side's locator of its segments' positions, in the order of [`Self::sides`].
     pub(crate) fn locators(&self) -> Vec<crate::derived::RowLocator<'a>> {
         self.sides

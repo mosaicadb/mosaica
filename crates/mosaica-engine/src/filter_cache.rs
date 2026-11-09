@@ -32,9 +32,8 @@
 //! viewer may see. A request reads the entry over its own domain and narrows the answer through
 //! its composed mask, as it narrows a scan's, so nothing in the entry reaches a response the mask
 //! has not admitted. The rows are those of the shard's segments, which a flush, a merge and a
-//! compaction renumber, so the key names the shard's `segments_version` beside the rest. It names
-//! the grant too, as every entry here does, though the rows do not depend on it, so whether an
-//! entry is held says nothing about sessions under other grants.
+//! compaction renumber, so the key names the shard's `segments_version` beside the rest, and the
+//! grant, as every key here does.
 //!
 //! # Bound and peak
 //!
@@ -56,7 +55,7 @@ use croaring::{Bitmap, Portable};
 use mosaica_cache::{
     CacheWeight, Cancel, NeverCancelled, Peek, SingleFlightCache, WaitEnded, WaitingBuildError,
 };
-use mosaica_roaring::for_each_run_in;
+use mosaica_roaring::Runs;
 use mosaica_types::ShardId;
 
 use crate::cancel::CancelToken;
@@ -64,7 +63,7 @@ use crate::filter::{FilterColumns, FilterError, FilterOperand, LeafQuery, Scalar
 use crate::{Generation, Shard};
 
 /// `serve.filter_cache_bytes` where it is not set.
-pub const DEFAULT_FILTER_CACHE_BYTES: u64 = 256 << 20;
+pub const DEFAULT_FILTER_CACHE_BYTES: u64 = 1 << 30;
 
 /// What one leaf's entry in one shard is a function of.
 ///
@@ -107,6 +106,25 @@ pub(crate) struct KeptLeaf {
 enum Held {
     Entities(Bitmap),
     Rows { covered: Bitmap, matched: Bitmap },
+}
+
+impl KeptLeaf {
+    /// An entity leaf's matches. An entity key never names a row entry, since only a row key
+    /// names a `segments_version`.
+    fn entities(&self) -> &Bitmap {
+        match &self.held {
+            Held::Entities(entities) => entities,
+            Held::Rows { .. } => unreachable!("an entity leaf's key names an entity entry"),
+        }
+    }
+
+    /// A row leaf's rows scanned and rows matched.
+    fn rows(&self) -> (&Bitmap, &Bitmap) {
+        match &self.held {
+            Held::Rows { covered, matched } => (covered, matched),
+            Held::Entities(_) => unreachable!("a row leaf's key names a row entry"),
+        }
+    }
 }
 
 impl CacheWeight for KeptLeaf {
@@ -241,17 +259,7 @@ pub(crate) fn key_of(
     column: &str,
     query: LeafQuery<'_>,
 ) -> (LeafKey, Vec<u8>) {
-    let canonical = canonical(column, query);
-    let key = LeafKey {
-        shard: shard.id(),
-        columns: Arc::as_ptr(&shard.filter_columns) as usize,
-        identity: shard.identity,
-        watermark: shard.watermark,
-        grant,
-        digest: crate::region::digest_of(&canonical),
-        segments: None,
-    };
-    (key, canonical)
+    key_over(shard, grant, canonical(column, query), None)
 }
 
 /// The key of row leaf `column` `operand` in `view`, at `incarnation`, in `shard` for `grant`, and
@@ -264,13 +272,19 @@ pub(crate) fn row_key_of(
     column: &str,
     operand: &FilterOperand,
 ) -> (LeafKey, Vec<u8>) {
-    let leaf = canonical(column, LeafQuery::Value(operand));
-    let mut canonical = Vec::with_capacity(13 + view.len() + leaf.len());
+    let mut canonical = canonical(column, LeafQuery::Value(operand));
     canonical.push(3);
-    canonical.extend_from_slice(&(view.len() as u32).to_le_bytes());
-    canonical.extend_from_slice(view.as_bytes());
     canonical.extend_from_slice(&incarnation.to_le_bytes());
-    canonical.extend_from_slice(&leaf);
+    canonical.extend_from_slice(view.as_bytes());
+    key_over(shard, grant, canonical, Some(shard.segments_version))
+}
+
+fn key_over(
+    shard: &Shard,
+    grant: [u8; 32],
+    canonical: Vec<u8>,
+    segments: Option<u64>,
+) -> (LeafKey, Vec<u8>) {
     let key = LeafKey {
         shard: shard.id(),
         columns: Arc::as_ptr(&shard.filter_columns) as usize,
@@ -278,77 +292,84 @@ pub(crate) fn row_key_of(
         watermark: shard.watermark,
         grant,
         digest: crate::region::digest_of(&canonical),
-        segments: Some(shard.segments_version),
+        segments,
     };
     (key, canonical)
 }
 
-/// How many times the rows a request scans its entry must hold before the entry is left as it was:
-/// keeping them copies the entry, at about a fiftieth of a scan's cost a row. A records walk reads
-/// a view a few thousand rows a page, so an entry it grows stops growing rather than being copied
-/// once a page.
+/// How many of `domain`'s rows, ascending disjoint ranges, `cache`'s entry for a row leaf holds.
+pub(crate) fn kept_rows(
+    cache: &FilterCache,
+    (key, canonical): (LeafKey, Vec<u8>),
+    domain: &[Range<u32>],
+) -> u64 {
+    let Peek::Ready(entry) = cache.peek(&key) else {
+        return 0;
+    };
+    if entry.canonical != canonical {
+        return 0;
+    }
+    let covered = entry.rows().0;
+    domain
+        .iter()
+        .map(|range| covered.range_cardinality(range.clone()))
+        .sum()
+}
+
+/// An entry is not grown where it already holds this many times the rows a request scans.
 const KEEP_GROWTH_RATIO: u64 = 32;
 
-/// The rows over `domain`, ascending disjoint ranges, a row leaf matches: from `cache`'s entry for
-/// it over the rows the entry has scanned, and from `scan` over the rest, which the entry then
-/// holds as well. An entry is left as it was where it would outgrow the bound, or where it holds
-/// [`KEEP_GROWTH_RATIO`] times the rows scanned. A digest collision is scanned whole.
+/// The rows of `wanted`, the request's domain `domain` as a bitmap, a row leaf matches: from
+/// `cache`'s entry for it over the rows the entry has scanned, and from `scan` over the rest, which
+/// the entry then holds as well, unless it would outgrow the bound or already holds
+/// [`KEEP_GROWTH_RATIO`] times them. A digest collision is scanned whole.
 pub(crate) fn rows_answer<E>(
     cache: &FilterCache,
     shard: &Shard,
     (key, canonical): (LeafKey, Vec<u8>),
     domain: &[Range<u32>],
+    wanted: &Bitmap,
     scan: impl FnOnce(&[Range<u32>]) -> Result<Bitmap, E>,
 ) -> Result<Bitmap, E> {
     if cache.bound_bytes() == 0 {
         return scan(domain);
     }
     let entry = match cache.peek(&key) {
-        Peek::Ready(entry) if entry.canonical == canonical => Some(entry),
+        Peek::Ready(entry) if entry.canonical == canonical => entry,
         Peek::Ready(_) => return scan(domain),
-        Peek::Building | Peek::Absent => None,
+        Peek::Building | Peek::Absent => {
+            let fresh = scan(domain)?;
+            keep(cache, shard, key, canonical, wanted.clone(), fresh.clone());
+            return Ok(fresh);
+        }
     };
-    let held = match entry.as_deref().map(|entry| &entry.held) {
-        Some(Held::Rows { covered, matched }) => Some((covered, matched)),
-        Some(Held::Entities(_)) | None => None,
-    };
-    let mut wanted = Bitmap::new();
-    for range in domain {
-        wanted.add_range(range.clone());
-    }
-    let missing = match held {
-        Some((covered, _)) => wanted.andnot(covered),
-        None => wanted.clone(),
-    };
-    let mut answer = match held {
-        Some((_, matched)) => matched.and(&wanted),
-        None => Bitmap::new(),
-    };
+    let (covered, matched) = entry.rows();
+    let mut answer = matched.and(wanted);
+    let missing = wanted.andnot(covered);
     if missing.is_empty() {
         return Ok(answer);
     }
-    let mut ranges = Vec::new();
-    for range in domain {
-        for_each_run_in(&missing, range.clone(), &mut |run| ranges.push(run));
-    }
+    let ranges: Vec<Range<u32>> = Runs::new(&missing)
+        .map(|(start, last)| start..last + 1)
+        .collect();
     let fresh = scan(&ranges)?;
     answer.or_inplace(&fresh);
-    if held.is_some_and(|(covered, _)| {
-        missing.cardinality().saturating_mul(KEEP_GROWTH_RATIO) < covered.cardinality()
-    }) {
-        return Ok(answer);
+    if missing.cardinality().saturating_mul(KEEP_GROWTH_RATIO) >= covered.cardinality() {
+        let grown = (covered.or(&missing), matched.or(&fresh));
+        keep(cache, shard, key, canonical, grown.0, grown.1);
     }
-    let held_bytes = entry.as_ref().map_or(0, |entry| entry.cache_weight_bytes());
-    let grown = held_bytes
-        + missing.get_serialized_size_in_bytes::<Portable>() as u64
-        + fresh.get_serialized_size_in_bytes::<Portable>() as u64;
-    if grown > cache.bound_bytes() {
-        return Ok(answer);
-    }
-    let (mut covered, mut matched) = match held {
-        Some((covered, matched)) => (covered.or(&missing), matched.or(&fresh)),
-        None => (missing, fresh),
-    };
+    Ok(answer)
+}
+
+/// Make `covered` and `matched` `key`'s entry, where they fit the bound.
+fn keep(
+    cache: &FilterCache,
+    shard: &Shard,
+    key: LeafKey,
+    canonical: Vec<u8>,
+    mut covered: Bitmap,
+    mut matched: Bitmap,
+) {
     for bitmap in [&mut covered, &mut matched] {
         bitmap.run_optimize();
         bitmap.shrink_to_fit();
@@ -358,10 +379,11 @@ pub(crate) fn rows_answer<E>(
         columns: Arc::downgrade(&shard.filter_columns),
         held: Held::Rows { covered, matched },
     };
-    drop(entry);
+    if kept.cache_weight_bytes() > cache.bound_bytes() {
+        return;
+    }
     cache.evict(&key);
     let _ = cache.get_or_try_build(key, || Ok::<_, std::convert::Infallible>(kept));
-    Ok(answer)
 }
 
 /// `evaluate(candidate)`, from `cache`'s entry for `leaf` in `shard` intersected with `candidate`.
@@ -416,9 +438,6 @@ pub(crate) fn answer(
             Peek::Building | Peek::Absent => return evaluate(candidate),
         }
     };
-    let Held::Entities(entities) = &entry.held else {
-        return evaluate(candidate);
-    };
     if entry.canonical != canonical {
         return evaluate(candidate);
     }
@@ -426,7 +445,7 @@ pub(crate) fn answer(
         entry.columns.as_ptr(),
         Arc::as_ptr(&shard.filter_columns)
     ));
-    Ok(entities.and(candidate))
+    Ok(entry.entities().and(candidate))
 }
 
 #[cfg(test)]
@@ -511,7 +530,7 @@ mod tests {
     /// **A row leaf scans only the rows its entry has not, and reads the rest from it**: a pan
     /// scans what it adds, a window inside what has been scanned scans nothing, rows too few to be
     /// worth copying the entry for are scanned and not kept, another view's leaf is its own entry,
-    /// and a digest collision is scanned whole.
+    /// and a digest collision is scanned whole. The rows an entry holds are counted over a domain.
     #[test]
     #[allow(clippy::single_range_in_vec_init)]
     fn a_row_leaf_scans_only_the_rows_its_entry_has_not() {
@@ -523,7 +542,8 @@ mod tests {
         let matches = Bitmap::of(&[2, 15, 30, 45]);
         let scanned = std::cell::RefCell::new(Vec::new());
         let ask = |leaf, domain: &[Range<u32>]| {
-            rows_answer(&cache, shard, leaf, domain, |ranges: &[Range<u32>]| {
+            let wanted = crate::compose::rows_of(domain);
+            rows_answer(&cache, shard, leaf, domain, &wanted, |ranges: &[Range<u32>]| {
                 scanned.borrow_mut().extend_from_slice(ranges);
                 let mut out = Bitmap::new();
                 for range in ranges {
@@ -542,6 +562,8 @@ mod tests {
         assert_eq!(scans(key("s0"), &[10..40]), (Bitmap::of(&[15, 30]), vec![20..40]));
         assert_eq!(scans(key("s0"), &[0..5, 25..35]), (Bitmap::of(&[2, 30]), vec![]));
         assert_eq!(cache.len(), 1);
+        assert_eq!(kept_rows(&cache, key("s0"), &[0..5, 35..50]), 10);
+        assert_eq!(kept_rows(&cache, key("s1"), &[0..5]), 0);
         for _ in 0..2 {
             let got = scans(key("s0"), &[40..41]);
             assert_eq!(got, (Bitmap::new(), vec![40..41]), "too little to keep");

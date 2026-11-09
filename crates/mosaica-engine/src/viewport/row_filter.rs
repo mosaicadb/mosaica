@@ -121,6 +121,7 @@ impl Engine {
         let row_space = &side.data.row_space;
         let segments = &side.segments[..];
         let total_rows = row_space.total_rows();
+        let domain_rows = crate::compose::rows_of(domain);
         // Every entity-space verdict's row image, crossed together in one walk.
         let verdicts = tree.entity_verdicts();
         let mut whole_view = tree.is_whole_view();
@@ -155,10 +156,6 @@ impl Engine {
                     } else {
                         // Clamped so the combined answer never claims a row outside what
                         // `FilterRows::Viewport` says was tested.
-                        let mut domain_rows = croaring::Bitmap::new();
-                        for range in domain {
-                            domain_rows.add_range(range.clone());
-                        }
                         verdicts
                             .iter()
                             .map(|v| row_space.project(v).and(&domain_rows))
@@ -172,11 +169,7 @@ impl Engine {
                 total_rows: u32::try_from(total_rows).unwrap_or(u32::MAX),
             }
         } else {
-            let mut domain_rows = croaring::Bitmap::new();
-            for range in domain {
-                domain_rows.add_range(range.clone());
-            }
-            RowScope::Domain(domain_rows)
+            RowScope::Domain(&domain_rows)
         };
         let grant = served.session.terms_digest();
         let scan = |column: &str, family: crate::filter::Family, operand: &FilterOperand| {
@@ -188,9 +181,15 @@ impl Engine {
                 column,
                 operand,
             );
-            crate::filter_cache::rows_answer(&self.filter_cache, side.shard, key, domain, |ranges| {
-                scan_rows(segments, ranges, column, LeafValues::of(family, operand).predicate())
-            })
+            let values = LeafValues::of(family, operand);
+            crate::filter_cache::rows_answer(
+                &self.filter_cache,
+                side.shard,
+                key,
+                domain,
+                &domain_rows,
+                |ranges| scan_rows(segments, ranges, column, values.predicate()),
+            )
         };
         let mut next_image = 0usize;
         let rows = self
@@ -208,7 +207,7 @@ impl Engine {
 
     /// `expr` routed in `side` and, where it routes to row space, evaluated over every row of the
     /// view it can match: the rows of the drawn region that bounds it ([`bounding_region`]), and
-    /// the whole view where none does. `both` decides a column with both routes, the same in every
+    /// the whole view where none does. `choice` decides a column with both routes, the same in every
     /// side of the request ([`Engine::region_routes`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn route_over_view(
@@ -217,12 +216,9 @@ impl Engine {
         side: &ServedSide<'_>,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
-        route: &dyn Fn(
-            &crate::filter::FilterExpr,
-            crate::filter::BothRoutes<'_>,
-        ) -> Result<crate::filter::RoutedFilter>,
+        route: &RouteFilter<'_>,
         expr: &crate::filter::FilterExpr,
-        both: crate::filter::BothRoutes<'_>,
+        choice: crate::filter::RouteChoice<'_>,
     ) -> Result<OverView> {
         let domain = match bounding_region(expr) {
             Some(leaf) => self
@@ -237,7 +233,7 @@ impl Engine {
             Some(domain) => (domain, domain.iter().map(|r| u64::from(r.end - r.start)).sum()),
             None => (std::slice::from_ref(&whole), total),
         };
-        Ok(match route(expr, both)? {
+        Ok(match route(expr, choice)? {
             crate::filter::RoutedFilter::Entity(entities) => OverView::Entities(entities),
             crate::filter::RoutedFilter::Row(tree) => {
                 let region = tree.region_verdict();
@@ -251,40 +247,115 @@ impl Engine {
         })
     }
 
-    /// How a column with both routes is routed in `expr` over the whole view, decided once for
-    /// every side `mask` reads as the viewport decides it for a request's tiles: by cost over the
-    /// rows of the drawn region that bounds `expr` in every side, and the entity route where no
-    /// region bounds it. `columns` are those sides' filter columns ([`ServedView::filter_columns`]).
-    pub(crate) fn region_routes<'c>(
-        &self,
-        served: &ServedView<'_>,
+    /// What a column with both routes costs in `expr` over the whole view, decided once for every
+    /// side `mask` reads as the viewport decides it for a request's tiles: over the rows of the
+    /// drawn region that bounds `expr` in every side. `None` where no region bounds it, and such a
+    /// column then takes the entity route ([`ViewLeafCosts::routes`]).
+    pub(crate) fn region_costs<'r>(
+        &'r self,
+        served: &'r ServedView<'r>,
         mask: &ShardedMask,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         expr: &crate::filter::FilterExpr,
-        columns: &'c [&'c crate::filter::FilterColumns],
-    ) -> Result<crate::filter::BothRoutes<'c>> {
-        use crate::filter::BothRoutes;
+    ) -> Result<Option<ViewLeafCosts<'r>>> {
         let Some(leaf) = bounding_region(expr) else {
-            return Ok(BothRoutes::Entity);
+            return Ok(None);
         };
-        let mut rows = 0u64;
+        let mut sides = Vec::new();
         for (_, side, _) in served.filtered_sides(mask) {
             let held = self
                 .region_rows(leaf, served, side, resolved, cancel)
                 .map_err(filter_refusal)?;
             let Some(domain) = held.domain else {
-                return Ok(BothRoutes::Entity);
+                return Ok(None);
             };
-            rows += domain.iter().map(|r| u64::from(r.end - r.start)).sum::<u64>();
+            sides.push((side, domain.to_vec()));
         }
-        Ok(BothRoutes::Cheaper {
-            rows,
-            visible: mask.visible_total(),
-            columns,
-        })
+        Ok(Some(self.leaf_costs(served, sides, mask.visible_total())))
+    }
+
+    /// [`ViewLeafCosts`] over `sides`, each with the rows the request reads there.
+    pub(crate) fn leaf_costs<'r>(
+        &'r self,
+        served: &'r ServedView<'r>,
+        sides: Vec<(&'r ServedSide<'r>, Vec<Range<u32>>)>,
+        visible: u64,
+    ) -> ViewLeafCosts<'r> {
+        ViewLeafCosts {
+            engine: self,
+            grant: served.session.terms_digest(),
+            view: served.name,
+            rows: sides
+                .iter()
+                .flat_map(|(_, domain)| domain)
+                .map(|r| u64::from(r.end - r.start))
+                .sum(),
+            visible,
+            sides,
+            priced: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
+
+/// What a leaf over a column with both routes costs over the rows one request reads in each side:
+/// the postings it holds and the rows the filter cache already holds for it, summed over the sides.
+pub(crate) struct ViewLeafCosts<'r> {
+    engine: &'r Engine,
+    grant: [u8; 32],
+    view: &'r str,
+    sides: Vec<(&'r ServedSide<'r>, Vec<Range<u32>>)>,
+    rows: u64,
+    visible: u64,
+    /// Each leaf priced so far: routing a tree prices a leaf once for every node above it.
+    priced: std::sync::Mutex<Vec<(String, FilterOperand, crate::filter::LeafCost)>>,
+}
+
+impl ViewLeafCosts<'_> {
+    /// The route each such leaf takes, chosen by these costs.
+    pub(crate) fn routes(&self) -> crate::filter::RouteChoice<'_> {
+        crate::filter::RouteChoice::Cheaper {
+            rows: self.rows,
+            visible: self.visible,
+            leaf: self,
+        }
+    }
+}
+
+impl crate::filter::LeafCosts for ViewLeafCosts<'_> {
+    fn cost(&self, column: &str, operand: &FilterOperand) -> crate::filter::LeafCost {
+        let mut priced = self.priced.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, _, cost)) = priced.iter().find(|(c, o, _)| c == column && o == operand) {
+            return *cost;
+        }
+        let mut cost = crate::filter::LeafCost {
+            posting: Some(0),
+            kept: 0,
+        };
+        for (side, domain) in &self.sides {
+            let posting = side.shard.filter_columns.posting_entities(column, operand);
+            cost.posting = cost.posting.zip(posting).map(|(sum, held)| sum + held);
+            let key = crate::filter_cache::row_key_of(
+                side.shard,
+                self.grant,
+                self.view,
+                side.data.incarnation,
+                column,
+                operand,
+            );
+            cost.kept += crate::filter_cache::kept_rows(&self.engine.filter_cache, key, domain);
+        }
+        priced.push((column.to_string(), operand.clone(), cost));
+        cost
+    }
+}
+
+/// One expression routed in one side by [`Engine::route_filters_under`].
+pub(crate) type RouteFilter<'a> = dyn Fn(
+        &crate::filter::FilterExpr,
+        crate::filter::RouteChoice<'_>,
+    ) -> Result<crate::filter::RoutedFilter>
+    + 'a;
 
 /// [`Engine::route_over_view`]'s answer.
 pub(crate) enum OverView {
@@ -389,19 +460,19 @@ type RowLeafScan<'a> =
     dyn Fn(&str, crate::filter::Family, &FilterOperand) -> Result<croaring::Bitmap> + Sync + 'a;
 
 /// The rows a row-space evaluation answers over — see [`Engine::evaluate_row_route`].
-enum RowScope {
+enum RowScope<'d> {
     /// Every row of the view: the tree holds nothing the request's domain bounds.
     WholeView { total_rows: u32 },
     /// The request's own rows, as one bitmap, because a sibling leaf is bounded by them.
-    Domain(croaring::Bitmap),
+    Domain(&'d croaring::Bitmap),
 }
 
-impl RowScope {
+impl RowScope<'_> {
     /// Every row in scope, which a negation subtracts its matches from.
     fn all_rows(&self) -> croaring::Bitmap {
         match self {
             RowScope::WholeView { total_rows } => croaring::Bitmap::from_range(0..*total_rows),
-            RowScope::Domain(rows) => rows.clone(),
+            RowScope::Domain(rows) => (*rows).clone(),
         }
     }
 
@@ -423,7 +494,7 @@ fn eval_row_expr(
     images: &[croaring::Bitmap],
     next_image: &mut usize,
     scan: &RowLeafScan<'_>,
-    scope: &RowScope,
+    scope: &RowScope<'_>,
 ) -> Result<croaring::Bitmap> {
     use crate::filter::RowExpr;
     match expr {
@@ -1071,14 +1142,14 @@ impl Engine {
             return Ok((mask, None));
         }
         check_cancelled(&req.cancel)?;
-        // The route rule reads the request's whole extent, its visible total and the postings of
-        // every shard it reads, so a leaf takes the same space in every shard.
-        let columns = served.filter_columns(&mask);
-        let both = crate::filter::BothRoutes::Cheaper {
-            rows: tiling.rows_in_ranges,
-            visible: v_total,
-            columns: &columns,
-        };
+        // The route rule reads the request's whole extent and visible total, and every shard's
+        // postings and kept rows, so a leaf takes the same space in every shard.
+        let sides = served
+            .filtered_sides(&mask)
+            .map(|(place, side, _)| (side, tiling.domain_in(place).0))
+            .collect();
+        let costs = self.leaf_costs(served, sides, v_total);
+        let choice = costs.routes();
         let mut region_verdict: Option<crate::region::RegionVerdict> = None;
         let mut filters = Vec::new();
         let mut highlights = Vec::new();
@@ -1105,7 +1176,7 @@ impl Engine {
                                         per_tile_only: bool,
                                         count_matched: bool|
                      -> Result<(FilterRows, Option<crate::region::RegionVerdict>)> {
-                        let routed = route(expr, both)?;
+                        let routed = route(expr, choice)?;
                         probe.lap(|t| &mut t.filter_eval_ns);
                         let mut out = self.rows_of_routed(
                             served,
@@ -1254,10 +1325,7 @@ impl Engine {
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         body: impl FnOnce(
-            &dyn Fn(
-                &crate::filter::FilterExpr,
-                crate::filter::BothRoutes<'_>,
-            ) -> Result<crate::filter::RoutedFilter>,
+            &RouteFilter<'_>,
         ) -> Result<T>,
     ) -> Result<T> {
         // The fragment a leaf's kept answer is taken over, where the whole candidate is known.
@@ -1325,10 +1393,10 @@ impl Engine {
             unique: &unique,
             leaves,
         };
-        body(&|expr: &crate::filter::FilterExpr, both: crate::filter::BothRoutes<'_>| {
+        body(&|expr: &crate::filter::FilterExpr, choice: crate::filter::RouteChoice<'_>| {
             side.shard
                 .filter_columns
-                .evaluate_routed(expr, candidate, both, &resolvers, cancel)
+                .evaluate_routed(expr, candidate, choice, &resolvers, cancel)
                 .map_err(filter_refusal)
         })
     }

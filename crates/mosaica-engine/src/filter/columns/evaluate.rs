@@ -19,25 +19,41 @@ use crate::filter::scan::{scan, scan_layer};
 use crate::filter::check_cancelled;
 
 /// Which route a leaf over a column affording both takes, for one request.
-#[derive(Debug, Clone, Copy)]
-pub enum BothRoutes<'a> {
+#[derive(Clone, Copy)]
+pub enum RouteChoice<'a> {
     Entity,
     Row,
-    /// Whichever costs less, where the row route reads `rows` rows, the viewer sees `visible`
-    /// entities, and `columns` are the filter columns of every shard the request reads, so a leaf
-    /// takes the same route in each.
+    /// Whichever costs less, where the request reads `rows` rows, the viewer sees `visible`
+    /// entities, and `leaf` prices each leaf over every shard the request reads, so a leaf takes
+    /// the same route in each.
     Cheaper {
         rows: u64,
         visible: u64,
-        columns: &'a [&'a FilterColumns],
+        leaf: &'a dyn LeafCosts,
     },
 }
 
+/// What routing one leaf over a column with both routes costs, for one request.
+pub trait LeafCosts: Sync {
+    fn cost(&self, column: &str, operand: &FilterOperand) -> LeafCost;
+}
+
+/// One leaf's [`LeafCosts::cost`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LeafCost {
+    /// How many entities the leaf's postings hold, where its column answers it from them
+    /// ([`FilterColumns::posting_entities`]).
+    pub posting: Option<u64>,
+    /// How many of the request's rows the filter cache already holds the leaf's rows for, which the
+    /// row route reads without a scan.
+    pub kept: u64,
+}
+
 /// How many rows the row route scans in the time the entity route projects one matched entity
-/// into row space: 1.28 ns an entity projected at 10⁹ against 0.48–0.73 ns a row scanned.
+/// into row space.
 const ROWS_PER_PROJECTED_ENTITY: u64 = 2;
 
-/// Whether a leaf is cheaper read over `rows` rows than evaluated in entity space, where the
+/// Whether a leaf is cheaper scanned over `rows` rows than evaluated in entity space, where the
 /// viewer sees `visible` entities and `posting` is how many entities the leaf's postings hold, for
 /// a leaf its column answers from postings. Over a scanned column the entity route reads every
 /// visible entity, at about a row's cost each. Over postings it reads only the postings named, and
@@ -160,7 +176,7 @@ impl FilterColumns {
     /// column answers it from them; `None` for any other leaf, or a posting that will not read.
     /// The postings route is taken only under `visibility = "public"`, where a value's posting is
     /// published.
-    fn posting_entities(&self, column: &str, operand: &FilterOperand) -> Option<u64> {
+    pub(crate) fn posting_entities(&self, column: &str, operand: &FilterOperand) -> Option<u64> {
         let ColumnLayers::Values {
             postings: Some(postings),
             route: Route::Postings,
@@ -208,9 +224,7 @@ impl FilterColumns {
 
     /// Evaluate a filter expression's entity-space part and route the rest.
     ///
-    /// `both` decides a both-routes column's leaf: a per-request quantity, so it arrives as an
-    /// argument rather than being stored at open, unlike [`Route`], which must not vary per
-    /// request since the postings' work is a function of the value named.
+    /// `choice` decides a leaf over a column with both routes.
     ///
     /// A tree with no row-space leaf returns [`RoutedFilter::Entity`]. Otherwise every maximal
     /// entity-space sub-tree is evaluated here, under `candidate`, and the returned [`RowExpr`]
@@ -223,11 +237,11 @@ impl FilterColumns {
         &self,
         expr: &FilterExpr,
         candidate: &Bitmap,
-        both: BothRoutes<'_>,
+        choice: RouteChoice<'_>,
         resolvers: &RowLeafResolvers<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<RoutedFilter, FilterError> {
-        if self.admitted_space(expr, both, resolvers.layers)? == Space::Entity {
+        if self.admitted_space(expr, choice, resolvers.layers)? == Space::Entity {
             return Ok(RoutedFilter::Entity(self.eval(
                 expr,
                 candidate,
@@ -237,7 +251,7 @@ impl FilterColumns {
             )?));
         }
         Ok(RoutedFilter::Row(
-            self.route(expr, candidate, both, resolvers, cancel)?,
+            self.route(expr, candidate, choice, resolvers, cancel)?,
         ))
     }
 
@@ -252,14 +266,14 @@ impl FilterColumns {
         expr: &FilterExpr,
         layer_levels: &dyn Fn(&str) -> Option<u32>,
     ) -> Result<(), FilterError> {
-        self.admitted_space(expr, BothRoutes::Entity, layer_levels)
+        self.admitted_space(expr, RouteChoice::Entity, layer_levels)
             .map(|_| ())
     }
 
     fn admitted_space(
         &self,
         expr: &FilterExpr,
-        both: BothRoutes<'_>,
+        choice: RouteChoice<'_>,
         layer_levels: &dyn Fn(&str) -> Option<u32>,
     ) -> Result<Space, FilterError> {
         fn layers(
@@ -288,7 +302,7 @@ impl FilterColumns {
             }
         }
         expr.check()?;
-        let space = self.space_of(expr, both)?;
+        let space = self.space_of(expr, choice)?;
         layers(expr, layer_levels)?;
         Ok(space)
     }
@@ -299,7 +313,7 @@ impl FilterColumns {
         &self,
         column: &str,
         operand: &FilterOperand,
-        both: BothRoutes<'_>,
+        choice: RouteChoice<'_>,
     ) -> Result<Space, FilterError> {
         if column == REGION_COLUMN || column == MEMBER_OF_COLUMN {
             return Ok(Space::Row);
@@ -313,19 +327,16 @@ impl FilterColumns {
         Ok(match (entity, placement.row) {
             (true, false) => Space::Entity,
             (false, true) => Space::Row,
-            (true, true) => match both {
-                BothRoutes::Entity => Space::Entity,
-                BothRoutes::Row => Space::Row,
-                BothRoutes::Cheaper {
+            (true, true) => match choice {
+                RouteChoice::Entity => Space::Entity,
+                RouteChoice::Row => Space::Row,
+                RouteChoice::Cheaper {
                     rows,
                     visible,
-                    columns,
+                    leaf,
                 } => {
-                    let posting = columns
-                        .iter()
-                        .map(|held| held.posting_entities(column, operand))
-                        .sum();
-                    if row_route_pays(rows, visible, posting) {
+                    let cost = leaf.cost(column, operand);
+                    if row_route_pays(rows.saturating_sub(cost.kept), visible, cost.posting) {
                         Space::Row
                     } else {
                         Space::Entity
@@ -349,14 +360,14 @@ impl FilterColumns {
 
     /// Which space `expr` evaluates in. `Entity` means the whole sub-tree can be answered by the
     /// existing entity-space evaluation.
-    fn space_of(&self, expr: &FilterExpr, both: BothRoutes<'_>) -> Result<Space, FilterError> {
+    fn space_of(&self, expr: &FilterExpr, choice: RouteChoice<'_>) -> Result<Space, FilterError> {
         match expr {
-            FilterExpr::Leaf { column, operand } => self.leaf_space(column, operand, both),
+            FilterExpr::Leaf { column, operand } => self.leaf_space(column, operand, choice),
             FilterExpr::Region(_) | FilterExpr::MemberOf(_) => Ok(Space::Row),
             FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
                 let mut all_entity = true;
                 for kid in kids {
-                    if self.space_of(kid, both)? != Space::Entity {
+                    if self.space_of(kid, choice)? != Space::Entity {
                         all_entity = false;
                     }
                 }
@@ -375,11 +386,11 @@ impl FilterColumns {
         &self,
         expr: &FilterExpr,
         candidate: &Bitmap,
-        both: BothRoutes<'_>,
+        choice: RouteChoice<'_>,
         resolvers: &RowLeafResolvers<'_>,
         cancel: &Option<CancelToken>,
     ) -> Result<RowExpr, FilterError> {
-        if self.space_of(expr, both)? == Space::Entity {
+        if self.space_of(expr, choice)? == Space::Entity {
             return Ok(RowExpr::Entity(self.eval(
                 expr,
                 candidate,
@@ -398,17 +409,17 @@ impl FilterColumns {
             FilterExpr::MemberOf(leaf) => Ok(RowExpr::MemberOf((resolvers.members)(leaf)?)),
             FilterExpr::AllOf(kids) => Ok(RowExpr::AllOf(
                 kids.iter()
-                    .map(|kid| self.route(kid, candidate, both, resolvers, cancel))
+                    .map(|kid| self.route(kid, candidate, choice, resolvers, cancel))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             FilterExpr::AnyOf(kids) => Ok(RowExpr::AnyOf(
                 kids.iter()
-                    .map(|kid| self.route(kid, candidate, both, resolvers, cancel))
+                    .map(|kid| self.route(kid, candidate, choice, resolvers, cancel))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             FilterExpr::NoneOf(kids) => Ok(RowExpr::NotInRows(
                 kids.iter()
-                    .map(|kid| self.route(kid, candidate, both, resolvers, cancel))
+                    .map(|kid| self.route(kid, candidate, choice, resolvers, cancel))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
         }

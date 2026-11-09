@@ -374,7 +374,7 @@ struct RawServe {
     /// scattered. Each request in flight can hold one evicted entry beside the bound. `0` keeps
     /// none.
     ///
-    /// Default: `268435456` (256 MiB).
+    /// Default: `1073741824` (1 GiB).
     filter_cache_bytes: Option<u64>,
     /// The most values one page of `GET /v1/categories/{column}` returns, and the page size of a
     /// request that names none. A larger `limit` is lowered to it.

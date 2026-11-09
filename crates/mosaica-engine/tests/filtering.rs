@@ -30,7 +30,7 @@ use croaring::Bitmap;
 use mosaica_build::config::Config;
 use mosaica_build::{build, BuildArgs};
 use mosaica_engine::filter::{
-    candidate, BothRoutes, ComposeError, Endpoint, FilterColumns, FilterError, FilterExpr,
+    candidate, RouteChoice, ComposeError, Endpoint, FilterColumns, FilterError, FilterExpr,
     FilterOperand, OpenedExtent, Scalar, MAX_FILTER_DEPTH,
 };
 use mosaica_engine::ViewportRequest;
@@ -4669,6 +4669,50 @@ fn a_render_leaf_is_answered_from_the_rows_it_has_scanned() {
     assert!(after.contains(&id), "the flushed item is matched");
 }
 
+/// **Rows the filter cache already holds are not counted against the row route.** One value of
+/// `archive` takes the entity route over the whole extent while nothing is kept. Four quarters of
+/// the map each take the row route and between them keep every row, after which the whole extent
+/// takes the row route too, reads every row from the cache, scans none, and draws the same marks.
+#[test]
+fn rows_already_kept_are_read_on_the_row_route() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-route-kept");
+    let wal = fx._dir.path().join("wal-route-kept");
+    let engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let xx = || {
+        leaf(
+            "archive",
+            FilterOperand::Equals(AttrLocalId::new(fx.archive_codes["xx"])),
+        )
+    };
+    let ask = |zoom: u8, window: [f64; 4]| {
+        let (routes, scans) = (engine.filter_row_routes(), engine.filter_cache_stats().misses);
+        let out = engine
+            .viewport(
+                &session,
+                ViewportRequest::new("s0", zoom, window, 10_000).filter(xx()),
+            )
+            .expect("the window answers");
+        let ids: std::collections::BTreeSet<u64> =
+            out.points.mosaica_ids.iter().copied().collect();
+        let row_routed = engine.filter_row_routes() - routes == 1;
+        (ids, row_routed, engine.filter_cache_stats().misses - scans)
+    };
+
+    let (unkept, row_routed, _) = ask(0, FULL_VIEWPORT);
+    assert!(!row_routed, "with nothing kept the whole extent takes the entity route");
+    for (x, y) in [(0.0, 0.0), (500.0, 0.0), (0.0, 500.0), (500.0, 500.0)] {
+        // Inside the quarter's tile, so the request reads that tile alone.
+        let (_, row_routed, _) = ask(1, [x + 1.0, y + 1.0, x + 499.0, y + 499.0]);
+        assert!(row_routed, "a quarter at ({x}, {y}) takes the row route");
+    }
+    let (kept, row_routed, scans) = ask(0, FULL_VIEWPORT);
+    assert!(row_routed, "every row is kept, so the whole extent takes the row route");
+    assert_eq!(scans, 0, "and scans nothing");
+    assert_eq!(kept, unkept);
+}
+
 /// **A negation is the visible set minus the matches on either route**, over two columns, one of
 /// which the row route reads from the hot column. The row route's complement holds every row of
 /// the window, a suppressed one and one outside the principal's grant among them, and only the
@@ -5034,7 +5078,7 @@ fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
     };
     let routed = |cancel: &Option<mosaica_engine::CancelToken>| {
         fx.columns
-            .evaluate_routed(&tree, &cand, BothRoutes::Entity, &resolvers, cancel)
+            .evaluate_routed(&tree, &cand, RouteChoice::Entity, &resolvers, cancel)
     };
 
     match routed(&Some(token.clone())).expect("a live request answers") {
@@ -5066,13 +5110,13 @@ fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
     };
     assert_eq!(
         fx.columns
-            .evaluate_routed(&keyword, &cand, BothRoutes::Entity, &flipping, &Some(token.clone()))
+            .evaluate_routed(&keyword, &cand, RouteChoice::Entity, &flipping, &Some(token.clone()))
             .err(),
         Some(FilterError::Cancelled)
     );
     assert_eq!(
         fx.columns
-            .evaluate_routed(&phrase_of_five(), &cand, BothRoutes::Entity, &resolvers, &cancelled())
+            .evaluate_routed(&phrase_of_five(), &cand, RouteChoice::Entity, &resolvers, &cancelled())
             .err(),
         Some(FilterError::Cancelled),
         "a phrase under a request already gone is not checked at all"
