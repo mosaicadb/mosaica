@@ -6947,9 +6947,9 @@ mod tests {
     ///
     /// The merge's term ranges must not be observable either: several ranges over runs, over the
     /// accumulators held in memory and over a cascade's runs, on one thread and several, with a
-    /// window as wide as the ranges and as narrow as the threads, and with a range buffer of a
-    /// byte, so that every range but the head waits part way through its first term and goes on
-    /// into the writer from there.
+    /// window as wide as the ranges and as narrow as the threads, many more ranges than threads,
+    /// and with a range buffer of a byte, so that every range but the head waits part way through
+    /// its first term and goes on into the writer from there.
     #[test]
     fn chunking_the_text_index_does_not_change_its_bytes() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -7007,6 +7007,8 @@ mod tests {
             TextIndexPlan::explicit(64, 1 << 30, 1 << 22).in_ranges(ranges(16, 4, 4, 256)),
             TextIndexPlan::explicit(64, 1 << 30, 1).in_ranges(ranges(5, 1, 1, 1)),
             TextIndexPlan::explicit(4_096, 1, 1 << 22).in_ranges(ranges(6, 4, 8, 1 << 10)),
+            // Many more ranges than threads, each starting part way through the runs' blocks.
+            TextIndexPlan::explicit(7, SMALL_WORKER, 1 << 22).in_ranges(ranges(300, 3, 6, 64)),
         ]
         .into_iter()
         .enumerate()

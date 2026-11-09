@@ -23,10 +23,12 @@
 //! Every error a run's reader or writer returns names its file, an I/O failure as a
 //! [`SpillFileError`], and every refusal the merge makes of its own names its term.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use mosaica_filter::{
@@ -229,9 +231,13 @@ pub(crate) fn encode_entity(
 ///
 /// **After the records, a sparse index**, so that a reader can start at a term rather than at the
 /// file's start: the first record at or after every [`RUN_INDEX_STRIDE`] bytes is written with
-/// nothing shared, and its term is a key of a [`SortedDict`] written after the records, whose
-/// ordinal names that record's offset in a `u64` array after it. A trailer ends the file:
-/// `records_len u64 ‖ index_len u64 ‖ largest u32 ‖ "MSR2"`, `largest` being the most entities one
+/// nothing shared, and its term is a key of a [`SortedDict`] written after the records. The
+/// records from one such record to the next are its block, and the dictionary's ordinal names two
+/// `u64`s in an array after it: the offset of the block's first record and of its last. Every
+/// record of a block but the last ends within the stride, so a reader that starts at a block and
+/// is past its last record's term goes to the next block without decoding that record, which may
+/// be a term of any size. A trailer ends the file:
+/// `records_len u64 ‖ index_len u64 ‖ largest u32 ‖ "MSR3"`, `largest` being the most entities one
 /// term holds. [`RunFile`] reads it.
 ///
 /// **The entity delta is per TERM, not per file**, which is where this differs from a band file. A
@@ -260,20 +266,23 @@ pub struct TextRunWriter {
     anchor: u64,
     /// [`fingerprint`] of the open term, folded once per record rather than once per pair.
     mark: u64,
-    /// Bytes of records written, the index's terms and their offsets, and the offset at or after
-    /// which the next record is one of them.
+    /// Bytes of records written and where the last record began, the index's terms and each
+    /// block's first and last offsets, and the offset at or after which the next record begins a
+    /// block.
     written: u64,
+    began: u64,
     index: SortedDictWriter<Vec<u8>>,
-    offsets: Vec<u64>,
+    blocks: Vec<u64>,
     next_point: u64,
 }
 
-/// Bytes of a run between the records its sparse index names: what a reader that starts at a
-/// term decodes at most before it reaches the term.
-pub const RUN_INDEX_STRIDE: u64 = 8 << 10;
+/// Bytes of a run between the records its sparse index names: about what a reader that starts at
+/// a term passes before it reaches the term, which a merge in many ranges pays on every run for
+/// every range.
+pub const RUN_INDEX_STRIDE: u64 = 4 << 10;
 
 /// The last four bytes of a run.
-const RUN_MAGIC: [u8; 4] = *b"MSR2";
+const RUN_MAGIC: [u8; 4] = *b"MSR3";
 
 /// The bytes of a run's trailer: the records' and the index's lengths, the most entities a term
 /// holds, and [`RUN_MAGIC`].
@@ -314,8 +323,9 @@ impl TextRunWriter {
             anchor: 0,
             mark: 0,
             written: 0,
+            began: 0,
             index: SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
-            offsets: Vec::new(),
+            blocks: Vec::new(),
             next_point: 0,
         })
     }
@@ -381,12 +391,16 @@ impl TextRunWriter {
         let shared = match point {
             true => {
                 self.index.push(key).map_err(io::Error::from)?;
-                self.offsets.push(self.written);
+                if self.terms > 0 {
+                    self.blocks.push(self.began);
+                }
+                self.blocks.push(self.written);
                 self.next_point = self.written + RUN_INDEX_STRIDE;
                 0
             }
             false => common_prefix_len(&self.prev, term),
         };
+        self.began = self.written;
         let mut record = std::mem::take(&mut self.record);
         record.clear();
         put_varint(shared as u32, &mut record);
@@ -520,7 +534,10 @@ impl TextRunWriter {
         );
         let (mut tail, stats) = index.into_output().map_err(io::Error::from)?;
         let index_len = stats.bytes;
-        for offset in &self.offsets {
+        if self.terms > 0 {
+            self.blocks.push(self.began);
+        }
+        for offset in &self.blocks {
             tail.extend_from_slice(&offset.to_le_bytes());
         }
         tail.extend_from_slice(&records.to_le_bytes());
@@ -558,8 +575,25 @@ pub(crate) struct RunFile {
     /// The most entities a term of the run holds, which every record is checked against.
     largest: u32,
     index: SortedDict,
-    /// Where the index's offsets start in the file.
-    offsets_at: u64,
+    /// Where the index's blocks start in the file.
+    blocks_at: u64,
+    /// The records before this offset have been given back to the file system.
+    released: AtomicU64,
+}
+
+/// Where a reader that starts at a key begins, and where it goes past the block it begins in.
+struct Start {
+    block: Block,
+    /// Where the block's last record begins.
+    last: u64,
+    next: Block,
+}
+
+/// The offset of a block's first record and the term the index names there, or the end of the
+/// records and none.
+struct Block {
+    at: u64,
+    named: Option<Vec<u8>>,
 }
 
 /// The most entities one term of the run `receipt` names holds, read from its trailer alone. Every
@@ -636,14 +670,14 @@ impl RunFile {
             })?;
         let index = SortedDict::map_within(&file, records, index_len)
             .map_err(|e| malformed(path, format_args!("its index: {e}")))?;
-        if index_end + 8 * u64::from(index.len()) + RUN_TRAILER != len {
+        if index_end + 16 * u64::from(index.len()) + RUN_TRAILER != len {
             return Err(malformed(
                 path,
                 format_args!(
                     "{len} bytes where {records} of records, a {index_len}-byte index and {} \
-                     offsets make {}",
+                     blocks make {}",
                     index.len(),
-                    index_end + 8 * u64::from(index.len()) + RUN_TRAILER
+                    index_end + 16 * u64::from(index.len()) + RUN_TRAILER
                 ),
             ));
         }
@@ -655,7 +689,8 @@ impl RunFile {
             records,
             largest,
             index,
-            offsets_at: index_end,
+            blocks_at: index_end,
+            released: AtomicU64::new(0),
         })
     }
 
@@ -664,57 +699,79 @@ impl RunFile {
         self.records
     }
 
-    /// The offset of the record index entry `ordinal` names.
-    fn offset(&self, ordinal: u32) -> io::Result<u64> {
-        let mut bytes = [0u8; 8];
+    /// The offsets of the first and the last record of the block index entry `ordinal` names.
+    fn block(&self, ordinal: u32) -> io::Result<(u64, u64)> {
+        let mut bytes = [0u8; 16];
         read_at(
             &self.file,
             &mut bytes,
-            self.offsets_at + 8 * u64::from(ordinal),
+            self.blocks_at + 16 * u64::from(ordinal),
         )
         .map_err(|e| at(&self.path, e))?;
-        let offset = u64::from_le_bytes(bytes);
-        if offset >= self.records {
+        let first = u64::from_le_bytes(bytes[..8].try_into().expect("eight bytes"));
+        let last = u64::from_le_bytes(bytes[8..].try_into().expect("eight bytes"));
+        if first > last || last >= self.records {
             return Err(malformed(
                 &self.path,
                 format_args!(
-                    "index entry {ordinal} names offset {offset}, past the {} bytes of records",
+                    "index entry {ordinal} names a block from {first} to {last}, which the {} \
+                     bytes of records cannot hold",
                     self.records
                 ),
             ));
         }
-        Ok(offset)
+        Ok((first, last))
     }
 
-    /// Where a reader starting at `key` begins: the last record the index names whose term is at
-    /// or before `key`, with that term, or the file's start where there is none.
-    pub fn start_of(&self, key: &[u8]) -> io::Result<(u64, Option<Vec<u8>>)> {
+    /// The offset of the block index entry `ordinal` names, or the end of the records past the
+    /// last.
+    fn block_start(&self, ordinal: u32) -> io::Result<u64> {
+        match ordinal < self.index.len() {
+            true => self.block(ordinal).map(|(first, _)| first),
+            false => Ok(self.records),
+        }
+    }
+
+    /// Where a reader starting at `key` begins: the last block whose term is at or before `key`,
+    /// or the first, which begins the file.
+    fn start_of(&self, key: &[u8]) -> io::Result<Start> {
         let index_error = |e: mosaica_filter::DictError| malformed(&self.path, e);
         let rank = self.index.rank(key).map_err(index_error)?;
-        let mut scratch = Vec::new();
-        let at = match rank < self.index.len()
-            && self
-                .index
-                .key_of(rank, &mut scratch)
-                .map_err(index_error)?
-                .as_bytes()
-                == key
-        {
+        let exact = rank < self.index.len()
+            && self.index.key_of(rank, &mut Vec::new()).map_err(index_error)?.as_bytes() == key;
+        let ordinal = match exact {
             true => rank,
-            false if rank == 0 => return Ok((0, None)),
-            false => rank - 1,
+            false => rank.saturating_sub(1),
         };
-        let term = self.index.key_of(at, &mut scratch).map_err(index_error)?;
-        Ok((self.offset(at)?, Some(term.as_bytes().to_vec())))
+        let (block, last) = self.block_at(ordinal)?;
+        let (next, _) = self.block_at(ordinal + 1)?;
+        Ok(Start { block, last, next })
+    }
+
+    /// Block `ordinal` and where its last record begins, or the end of the records past the last
+    /// block.
+    fn block_at(&self, ordinal: u32) -> io::Result<(Block, u64)> {
+        if ordinal >= self.index.len() {
+            let end = Block {
+                at: self.records,
+                named: None,
+            };
+            return Ok((end, self.records));
+        }
+        let mut scratch = Vec::new();
+        let term = self
+            .index
+            .key_of(ordinal, &mut scratch)
+            .map_err(|e| malformed(&self.path, e))?;
+        let (at, last) = self.block(ordinal)?;
+        let named = Some(term.as_bytes().to_vec());
+        Ok((Block { at, named }, last))
     }
 
     /// About `samples` of its index's terms, evenly spaced, each with the bytes of records from it
     /// to the next.
     pub(crate) fn samples(&self, samples: usize) -> io::Result<Vec<Sample>> {
-        crate::merge::samples(&self.index, samples, |ordinal| match ordinal {
-            o if o == self.index.len() => Ok(self.records),
-            o => self.offset(o),
-        })
+        crate::merge::samples(&self.index, samples, |ordinal| self.block_start(ordinal))
         .map_err(|e| match e.kind() {
             io::ErrorKind::InvalidData => malformed(&self.path, e),
             _ => e,
@@ -727,11 +784,13 @@ impl RunFile {
         check_receipt(&self.path, (pairs, anchor), (self.count, self.anchor))
     }
 
-    /// Give back the disk the records before `offset` take, where the file system can.
+    /// Give back the disk the records before `offset` take, where the file system can, in whole
+    /// multiples of [`RELEASE_ALIGN`] past what was given back before.
     pub fn release_before(&self, offset: u64) {
         let offset = offset.min(self.records) / RELEASE_ALIGN * RELEASE_ALIGN;
-        if offset > 0 {
-            mosaica_types::process::release_span(&self.file, 0, offset);
+        let released = self.released.fetch_max(offset, Ordering::Relaxed);
+        if offset > released {
+            mosaica_types::process::release_span(&self.file, released, offset - released);
         }
     }
 }
@@ -774,6 +833,9 @@ impl Beside<'_> {
 /// read short, or a reader not handed back, fails the merge. Once every range that reads a span of
 /// a run is written, the span is given back to the file system. Returns the writer, and the plan
 /// the merge ran to.
+///
+/// A range reads each run from where its first term's block begins, and its reader reads little
+/// more than it decodes, so a merge of many small ranges reads each run about once.
 pub fn merge_runs<W: RangeWriter>(
     receipts: &[SpillReceipt],
     writer: W,
@@ -800,20 +862,10 @@ pub fn merge_runs<W: RangeWriter>(
         samples.extend((how.beside.samples)(each));
     }
     let ranges = split(samples, plan.ranges);
-    // Per range, the offset in each run its readers start from, found in the runs' indexes.
-    let starts = ranges
-        .iter()
-        .map(|range| {
-            files
-                .iter()
-                .map(|file| match &range.lo {
-                    Some(lo) => file.start_of(lo).map(|(offset, _)| offset),
-                    None => Ok(0),
-                })
-                .collect::<io::Result<Vec<u64>>>()
-        })
-        .collect::<io::Result<Vec<_>>>()?;
     let decoded = Mutex::new(vec![(0u64, 0u64); files.len()]);
+    // Per range merged and not yet written, the offset in each run its readers began at, which no
+    // later range reads before.
+    let began: Mutex<HashMap<usize, Vec<u64>>> = Mutex::default();
     let writer = merge_ranges(
         writer,
         &ranges,
@@ -823,7 +875,13 @@ pub fn merge_runs<W: RangeWriter>(
                 .iter()
                 .map(|file| TextRunReader::open(file, how.payload, plan.read))
                 .collect();
+            let index = turn.index();
             let readers = work(range, readers, turn)?;
+            let offsets = readers.iter().map(TextRunReader::began).collect();
+            began
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(index, offsets);
             let mut decoded = decoded.lock().unwrap_or_else(PoisonError::into_inner);
             for (sum, reader) in decoded.iter_mut().zip(&readers) {
                 let (pairs, anchor) = reader.share();
@@ -832,10 +890,12 @@ pub fn merge_runs<W: RangeWriter>(
             Ok(())
         },
         |range| {
-            if let Some(next) = starts.get(range + 1) {
-                for (file, &offset) in files.iter().zip(next) {
-                    file.release_before(offset);
-                }
+            let offsets = began
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&range);
+            for (file, offset) in files.iter().zip(offsets.into_iter().flatten()) {
+                file.release_before(offset);
             }
         },
     )?;
@@ -846,8 +906,9 @@ pub fn merge_runs<W: RangeWriter>(
     Ok((writer, plan))
 }
 
-/// What a span of a run is given back in multiples of: a file system's block, or a multiple of it.
-const RELEASE_ALIGN: u64 = 64 << 10;
+/// What a span of a run is given back in multiples of: a multiple of a file system's block, and
+/// large enough that a merge of many ranges gives a run back in a few calls.
+const RELEASE_ALIGN: u64 = 1 << 20;
 
 /// `buf.len()` bytes of `file` at `offset`.
 fn read_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
@@ -894,6 +955,31 @@ fn check_receipt(
     Ok(())
 }
 
+/// The head `bytes` begins with, where it is whole among them: its shared prefix, its suffix, its
+/// count and its length.
+fn head_in(bytes: &[u8]) -> Option<(usize, &[u8], u32, usize)> {
+    let mut at = 0;
+    let shared = take_varint(bytes, &mut at).ok()? as usize;
+    let suffix_len = take_varint(bytes, &mut at).ok()? as usize;
+    let suffix = bytes.get(at..at.checked_add(suffix_len)?)?;
+    at += suffix_len;
+    let count = take_varint(bytes, &mut at).ok()?;
+    Some((shared, suffix, count, at))
+}
+
+/// The bytes of the entity `bytes` begins with, encoded as [`encode_entity`] does, where it is
+/// whole among them.
+fn entity_len(bytes: &[u8], payload: RunPayload) -> Option<usize> {
+    let mut at = 0;
+    take_varint(bytes, &mut at).ok()?;
+    if payload == RunPayload::Positions {
+        for _ in 0..take_varint(bytes, &mut at).ok()? {
+            take_varint(bytes, &mut at).ok()?;
+        }
+    }
+    Some(at)
+}
+
 /// Streams a text run back **term by term**, as a [`TermSource`], from its start or from a term.
 ///
 /// **The head's entities are not decoded until they are asked for.** A k-way merge holds one open
@@ -910,6 +996,8 @@ pub struct TextRunReader<'r> {
     run: &'r RunFile,
     payload: RunPayload,
     reader: BufReader<RunCursor<'r>>,
+    /// The offset it began reading at.
+    began: u64,
     /// The term's positions in the entity [`Self::next_entity`] last returned.
     positions: Vec<u32>,
     /// The head term, front-decoded against its predecessor.
@@ -935,17 +1023,24 @@ pub struct TextRunReader<'r> {
 }
 
 /// A cursor's place in a run's records, read at its own offset (`pread`), so every cursor on one
-/// run shares the run's one descriptor. It reads nothing past the records.
+/// run shares the run's one descriptor. It reads nothing past the records. It reads
+/// [`RUN_READ_FIRST`] bytes first, and twice what it read last after that, up to its reader's
+/// buffer, so a reader over a range that holds few of the run's records reads few more.
 struct RunCursor<'r> {
     file: &'r File,
     at: u64,
     end: u64,
+    next: usize,
 }
+
+/// What a run's cursor reads first.
+const RUN_READ_FIRST: usize = 16 << 10;
 
 impl Read for RunCursor<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let room = usize::try_from(self.end - self.at).unwrap_or(usize::MAX);
-        let len = room.min(buf.len());
+        let len = room.min(buf.len()).min(self.next);
+        self.next = self.next.saturating_mul(2);
         let buf = &mut buf[..len];
         if buf.is_empty() {
             return Ok(0);
@@ -956,6 +1051,17 @@ impl Read for RunCursor<'_> {
         let read = std::os::windows::fs::FileExt::seek_read(self.file, buf, self.at)?;
         self.at += read as u64;
         Ok(read)
+    }
+}
+
+impl Seek for RunCursor<'_> {
+    /// To an offset from the records' start, and no further than their end.
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        let SeekFrom::Start(at) = to else {
+            return Err(io::Error::other("a run's cursor seeks only from the records' start"));
+        };
+        self.at = at.min(self.end);
+        Ok(self.at)
     }
 }
 
@@ -988,22 +1094,31 @@ impl TermSource for TextRunReader<'_> {
         }
     }
 
-    /// From the last record the index names at or before `key`, the records before `key` are
-    /// decoded, so that a damaged one is still refused, and not counted in [`Self::share`]: the
-    /// reader of the range before this one counts them.
+    /// From the last block the index names at or before `key`, the reader passes the records
+    /// before `key`, reading each one's term and finding where its entities end without decoding
+    /// them. The reader of the range before this one decodes them, checks them and counts them in
+    /// its [`Self::share`]. The block's last record, which alone may pass the stride, is not read
+    /// past its term where that is before `key`: the reader goes on at the next block, whose term
+    /// is after `key`.
     fn seek(&mut self, key: &[u8]) -> io::Result<()> {
         if self.pairs > 0 || !self.term.is_empty() || self.peeked {
             return Err(self.malformed("a reader seeks before its first term"));
         }
-        let (offset, mut named) = self.run.start_of(key)?;
-        self.reader.get_mut().at = offset;
+        let Start { block, last, next } = self.run.start_of(key)?;
+        self.began = block.at;
         self.whole = false;
         let counted = (self.pairs, self.anchor);
-        while let Some(shared) = self.read_head()? {
+        let mut past = Some((last, next));
+        let mut named = self.go_to(block)?;
+        loop {
+            let begins = self.offset();
+            let Some(shared) = self.read_head()? else {
+                break;
+            };
             if let Some(named) = named.take() {
                 if shared != 0 || self.term != named {
                     return Err(self.malformed(&format!(
-                        "the index names {:?} at offset {offset}, where the record is {:?}",
+                        "the index names {:?} at offset {begins}, where the record is {:?}",
                         String::from_utf8_lossy(&named),
                         String::from_utf8_lossy(&self.term)
                     )));
@@ -1013,9 +1128,11 @@ impl TermSource for TextRunReader<'_> {
                 self.peeked = true;
                 break;
             }
-            while self.pending > 0 {
-                self.decode_entity()?;
+            if let Some((_, next)) = past.take_if(|(last, _)| *last == begins) {
+                named = self.go_to(next)?;
+                continue;
             }
+            self.pass_entities()?;
         }
         (self.pairs, self.anchor) = counted;
         Ok(())
@@ -1058,8 +1175,10 @@ impl<'r> TextRunReader<'r> {
                     file: &run.file,
                     at: 0,
                     end: run.records,
+                    next: RUN_READ_FIRST,
                 },
             ),
+            began: 0,
             term: Vec::new(),
             mark: 0,
             pending: 0,
@@ -1078,6 +1197,25 @@ impl<'r> TextRunReader<'r> {
         (self.pairs, self.anchor)
     }
 
+    /// The offset it began reading at: no record before it is read by this reader, or by one over
+    /// a later range.
+    pub(crate) fn began(&self) -> u64 {
+        self.began
+    }
+
+    /// The offset of the next byte it decodes.
+    fn offset(&self) -> u64 {
+        self.reader.get_ref().at - self.reader.buffer().len() as u64
+    }
+
+    /// Go on at `block`, returning the term the index names there.
+    fn go_to(&mut self, block: Block) -> io::Result<Option<Vec<u8>>> {
+        self.reader
+            .seek(SeekFrom::Start(block.at))
+            .map_err(|e| at(&self.run.path, e))?;
+        Ok(block.named)
+    }
+
     /// Read the next record's term and count, returning its shared prefix, or `None` at the end of
     /// the records.
     fn read_head(&mut self) -> io::Result<Option<usize>> {
@@ -1085,31 +1223,20 @@ impl<'r> TextRunReader<'r> {
             self.done = true;
             return Ok(None);
         }
-        let shared = self.next_u32()? as usize;
-        if shared > self.term.len() {
-            return Err(self.malformed(&format!(
-                "shared prefix {shared} exceeds the previous term's {} bytes",
-                self.term.len()
-            )));
-        }
-        let suffix_len = self.next_u32()? as usize;
-        self.term.truncate(shared);
-        // Read through `take` and grow rather than `resize`-then-`read_exact`: `suffix_len` comes
-        // off the file, and a corrupted one would otherwise be an allocation of whatever it says
-        // before a single byte is checked against what the file actually holds.
-        let got = (&mut self.reader)
-            .take(suffix_len as u64)
-            .read_to_end(&mut self.term)
-            .map_err(|e| at(&self.run.path, e))?;
-        if got != suffix_len {
-            return Err(self.malformed("truncated inside a term's bytes"));
-        }
+        let (shared, count) = match head_in(self.reader.buffer()) {
+            Some((shared, suffix, count, len)) if shared <= self.term.len() => {
+                self.term.truncate(shared);
+                self.term.extend_from_slice(suffix);
+                self.reader.consume(len);
+                (shared, count)
+            }
+            _ => self.read_head_across()?,
+        };
         if self.term.is_empty() {
             return Err(self.malformed("the empty string is not a term"));
         }
         // Refused rather than decoded: the writer refuses a zero-entity record, so one here is a
         // malformed file and not a term that lost its postings.
-        let count = self.next_u32()?;
         if count == 0 {
             return Err(self.malformed("a term with no entities"));
         }
@@ -1130,6 +1257,51 @@ impl<'r> TextRunReader<'r> {
         self.taken = 0;
         self.last_entity = 0;
         Ok(Some(shared))
+    }
+
+    /// Read a head that is not whole in what the reader holds, a varint at a time, into the term,
+    /// returning its shared prefix and its count.
+    fn read_head_across(&mut self) -> io::Result<(usize, u32)> {
+        let shared = self.next_u32()? as usize;
+        if shared > self.term.len() {
+            return Err(self.malformed(&format!(
+                "shared prefix {shared} exceeds the previous term's {} bytes",
+                self.term.len()
+            )));
+        }
+        let suffix_len = self.next_u32()? as usize;
+        self.term.truncate(shared);
+        // Read through `take` and grow rather than `resize`-then-`read_exact`: `suffix_len` comes
+        // off the file, and a corrupted one would otherwise be an allocation of whatever it says
+        // before a single byte is checked against what the file actually holds.
+        let got = (&mut self.reader)
+            .take(suffix_len as u64)
+            .read_to_end(&mut self.term)
+            .map_err(|e| at(&self.run.path, e))?;
+        if got != suffix_len {
+            return Err(self.malformed("truncated inside a term's bytes"));
+        }
+        Ok((shared, self.next_u32()?))
+    }
+
+    /// Go past the head's entities, finding where each ends: in what the reader holds where the
+    /// entity is whole there, and a varint at a time where it is not.
+    fn pass_entities(&mut self) -> io::Result<()> {
+        while self.pending > 0 {
+            match entity_len(self.reader.buffer(), self.payload) {
+                Some(len) => self.reader.consume(len),
+                None => {
+                    self.next_u32()?;
+                    if self.payload == RunPayload::Positions {
+                        for _ in 0..self.next_u32()? {
+                            self.next_u32()?;
+                        }
+                    }
+                }
+            }
+            self.pending -= 1;
+        }
+        Ok(())
     }
 
     fn decode_entity(&mut self) -> io::Result<u32> {
@@ -1808,14 +1980,25 @@ mod tests {
     }
 
     /// **A run read in term ranges, each started from the run's index, gives back every record
-    /// once**, and what the ranges decoded between them checks against the receipt. A range
-    /// whose index entry names another record is refused.
+    /// once**, and what the ranges decoded between them checks against the receipt, where ranges
+    /// start between terms and just past records larger than the index's stride, which a range
+    /// passes without decoding. A range whose index entry names another record is refused, and so
+    /// is a run whose index sends a range past records no range then reads.
     #[test]
     fn a_run_read_in_ranges_gives_back_each_record_once() {
         let temp = tempfile::TempDir::new().unwrap();
         let path = temp.path().join("ranges.spill");
-        let records: Vec<(String, Vec<u32>)> = (0..4_000u32)
-            .map(|t| (format!("term{t:05}"), (0..5).map(|k| k * 7 + t).collect()))
+        let records: Vec<(String, Vec<u32>)> = (0..3_000u32)
+            .map(|t| {
+                let entities = match t % 29 {
+                    0 => 5 * RUN_INDEX_STRIDE as u32 / 4,
+                    _ => 5,
+                };
+                (
+                    format!("term{t:05}"),
+                    (0..entities).map(|k| k * 3 + t).collect(),
+                )
+            })
             .collect();
         let receipt = write_text_run(
             &path,
@@ -1828,39 +2011,82 @@ mod tests {
         let points = run.samples(usize::MAX).unwrap();
         assert!(points.len() > 4, "{} index entries", points.len());
 
-        let mut read: Vec<(String, Vec<u32>)> = Vec::new();
-        let (mut pairs, mut anchor) = (0u64, 0u64);
-        for range in crate::merge::split(run.samples(16).unwrap(), 5) {
-            let mut merge =
-                TermMerge::range(vec![open_reader(&run, RunPayload::Rows)], &range).unwrap();
-            while merge.next_term().unwrap() {
-                let mut entities = Vec::new();
-                merge
-                    .drain(std::convert::identity, &mut |entity, _| {
-                        entities.push(entity);
-                        Ok(())
-                    })
-                    .unwrap();
-                read.push((String::from_utf8(merge.term().to_vec()).unwrap(), entities));
+        // From the start, from index entries, and from between two terms, some of them just past
+        // a record larger than the stride.
+        let read_in = |run: &RunFile, ranges: &[TermRange]| {
+            let mut read: Vec<(String, Vec<u32>)> = Vec::new();
+            let (mut pairs, mut anchor) = (0u64, 0u64);
+            for range in ranges {
+                let mut merge =
+                    TermMerge::range(vec![open_reader(run, RunPayload::Rows)], range).unwrap();
+                while merge.next_term().unwrap() {
+                    let mut entities = Vec::new();
+                    merge
+                        .drain(std::convert::identity, &mut |entity, _| {
+                            entities.push(entity);
+                            Ok(())
+                        })
+                        .unwrap();
+                    read.push((String::from_utf8(merge.term().to_vec()).unwrap(), entities));
+                }
+                let (p, a) = merge.into_sources()[0].share();
+                (pairs, anchor) = (pairs + p, anchor.wrapping_add(a));
             }
-            let (p, a) = merge.into_sources()[0].share();
-            (pairs, anchor) = (pairs + p, anchor.wrapping_add(a));
-        }
+            (read, pairs, anchor)
+        };
+        let between = |term: &[u8]| [term, b"~"].concat();
+        let mut bounds: Vec<Vec<u8>> = records
+            .iter()
+            .enumerate()
+            .filter(|(t, _)| t % 13 == 0 || t % 29 == 0)
+            .map(|(_, (term, _))| between(term.as_bytes()))
+            .chain(points.iter().step_by(3).map(|point| point.key.clone()))
+            .collect();
+        bounds.sort();
+        bounds.dedup();
+        let ranges = ranges_between(bounds);
+        let (read, pairs, anchor) = read_in(&run, &ranges);
         assert_eq!(read, records);
         run.check(pairs, anchor).unwrap();
         assert_refused(run.check(pairs - 1, anchor));
 
-        // Index entry 1 named at entry 2's offset.
         let bytes = fs::read(&path).unwrap();
         let tail = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
-        let offsets = tail(bytes.len() - 24) + tail(bytes.len() - 16);
-        let mut damaged = bytes.clone();
-        damaged.copy_within(offsets + 16..offsets + 24, offsets + 8);
+        let blocks = tail(bytes.len() - 24) + tail(bytes.len() - 16);
         drop(run);
+
+        // Index entry 1 named at entry 2's offset.
+        let mut damaged = bytes.clone();
+        damaged.copy_within(blocks + 32..blocks + 40, blocks + 16);
         fs::write(&path, damaged).unwrap();
         let run = open_run(&receipt);
         let mut reader = open_reader(&run, RunPayload::Rows);
         assert_refused(reader.seek(&points[1].key));
+        drop(run);
+
+        // Entry 1's block said to end at its first record, which the range after it passes and
+        // goes on at entry 2, so that the records between are read by no range.
+        let mut damaged = bytes.clone();
+        damaged.copy_within(blocks + 16..blocks + 24, blocks + 24);
+        fs::write(&path, damaged).unwrap();
+        let run = open_run(&receipt);
+        let (_, pairs, anchor) = read_in(&run, &ranges_between(vec![between(&points[1].key)]));
+        assert_refused(run.check(pairs, anchor));
+    }
+
+    /// The ranges `bounds`, ascending, divide the terms into.
+    fn ranges_between(bounds: Vec<Vec<u8>>) -> Vec<TermRange> {
+        let bounds: Vec<Option<Vec<u8>>> = std::iter::once(None)
+            .chain(bounds.into_iter().map(Some))
+            .chain(std::iter::once(None))
+            .collect();
+        bounds
+            .windows(2)
+            .map(|pair| TermRange {
+                lo: pair[0].clone(),
+                hi: pair[1].clone(),
+            })
+            .collect()
     }
 
     /// **The allowance is what the budget leaves**, and never less than the pass runs in. Its

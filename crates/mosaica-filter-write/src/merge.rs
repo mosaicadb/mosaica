@@ -15,7 +15,8 @@
 //! # In parallel, by term range
 //!
 //! A merge divides its term space into [`TermRange`]s of about equal bytes, [`split`] from keys
-//! sampled from its sources ([`Sample`]), several to a thread ([`RangePlan`]). Each range is a
+//! sampled from its sources ([`Sample`]): as many as keep each range's input within what a range
+//! holds before its turn, and several to a thread ([`RangePlan`]). Each range is a
 //! [`TermMerge`] of its own over sources started at its first key, and the ranges run on the plan's
 //! threads, at most its window of them issued and not yet written ([`Ordered`]). The output is
 //! written in term order by [`merge_ranges`]: the earliest range not yet written writes straight
@@ -347,7 +348,7 @@ pub(crate) fn samples(
 /// one range.
 pub const RANGE_BYTES_MIN: u64 = 8 << 20;
 
-/// Ranges a merge divides its terms into for each thread, at the most, so that a thread that
+/// Ranges a merge divides its terms into for each thread, at the least, so that a thread that
 /// finishes early takes another.
 pub const RANGES_PER_THREAD: usize = 4;
 
@@ -355,7 +356,7 @@ pub const RANGES_PER_THREAD: usize = 4;
 pub const RANGE_BUFFER_MAX: usize = 64 << 20;
 
 /// Keys a merge samples from all its sources together to place its ranges, at the most.
-const SAMPLES_MAX: usize = 1 << 16;
+const SAMPLES_MAX: usize = 1 << 20;
 
 /// One range of a merge's terms: from `lo`, or the first term, up to but not including `hi`, or
 /// past the last.
@@ -382,16 +383,19 @@ impl RangePlan {
     /// where each thread holds `each` bytes beside its readers.
     ///
     /// It runs on [`Allowance::merge_threads`] over the runs the cascade left, or fewer where its
-    /// input is too small for that many ranges. The ranges are sized by bytes,
-    /// [`RANGES_PER_THREAD`] a thread at most, and the window is two ranges a thread, one on one
-    /// thread.
+    /// input is too small for that many ranges, and the window is two ranges a thread, one on one
+    /// thread. The ranges are sized by bytes: enough that a range's input, which its output does
+    /// not much exceed, fits the buffer, so that a range that is not yet written seldom waits; at
+    /// least [`RANGES_PER_THREAD`] a thread; and none of less than [`RANGE_BYTES_MIN`].
     pub fn new(allowance: Allowance, bytes: u64, runs: usize, each: u64) -> RangePlan {
         let most = usize::try_from(bytes / RANGE_BYTES_MIN)
             .unwrap_or(usize::MAX)
             .max(1);
         let threads = allowance.merge_threads(each, runs).min(most);
-        let ranges = most.min(RANGES_PER_THREAD * threads);
-        RangePlan::with(allowance, ranges, threads, 2 * threads, runs, each)
+        let least = most.min(RANGES_PER_THREAD * threads);
+        let plan = RangePlan::with(allowance, least, threads, 2 * threads, runs, each);
+        let fit = usize::try_from(bytes.div_ceil(plan.buffer as u64)).unwrap_or(usize::MAX);
+        RangePlan::with(allowance, fit.clamp(least, most), threads, 2 * threads, runs, each)
     }
 
     /// A plan of `ranges` ranges on `threads` threads, `window` of them in flight (one on one
@@ -596,6 +600,12 @@ pub enum Out<'t, W: RangeWriter> {
 }
 
 impl<W: RangeWriter> Turn<'_, W> {
+    /// The index of the range among those [`merge_ranges`] was given, which `written` is called
+    /// with.
+    pub fn index(&self) -> usize {
+        self.seq as usize
+    }
+
     /// Where the next term goes: the writer, once every range before this one is written, and what
     /// the range holds until then. Called between terms.
     pub fn out(&mut self) -> io::Result<Out<'_, W>> {
@@ -696,5 +706,34 @@ impl TermSource for DictCursor<'_> {
 
     fn positions(&self) -> &[u32] {
         &[]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **A merge has enough ranges that each one's input fits the buffer a range holds before it
+    /// waits**, at least [`RANGES_PER_THREAD`] a thread, and none of less than [`RANGE_BYTES_MIN`],
+    /// so that a small merge is one range.
+    #[test]
+    fn a_merge_has_ranges_whose_input_fits_the_buffer() {
+        let allowance = Allowance::new(16 << 30, 0, 4);
+        let small = RangePlan::new(allowance, RANGE_BYTES_MIN, 0, 0);
+        assert_eq!((small.ranges, small.threads), (1, 1));
+
+        let few = RangePlan::new(allowance, 4 * RANGE_BUFFER_MAX as u64, 0, 0);
+        assert_eq!(few.threads, 4);
+        assert_eq!(few.ranges, RANGES_PER_THREAD * few.threads);
+
+        for bytes in [1 << 36, 1 << 40, 1_234_567_890_123] {
+            let plan = RangePlan::new(allowance, bytes, 0, 0);
+            assert_eq!(plan.ranges as u64, bytes.div_ceil(plan.buffer as u64), "{bytes}");
+        }
+
+        // An allowance whose buffer is under the least a range is given: ranges of that least.
+        let tight = RangePlan::new(Allowance::new(0, 0, 4), 1 << 40, 0, 0);
+        assert!((tight.buffer as u64) < RANGE_BYTES_MIN);
+        assert_eq!(tight.ranges as u64, (1 << 40) / RANGE_BYTES_MIN);
     }
 }
