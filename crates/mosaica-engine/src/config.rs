@@ -40,7 +40,9 @@ pub struct EngineConfig {
     /// The size of `Engine::open`'s single shared `rayon::ThreadPool`, which every admitted
     /// request's tile loop installs onto. Sized to fill the machine; see
     /// [`default_compute_threads`]. A `0` falls back to rayon's own default rather than a pool
-    /// that can run nothing.
+    /// that can run nothing. It also sizes the background writers: the flush, the fold and the
+    /// coalesce each merge on ⌈compute_threads / 3⌉ threads of their own beside the pool, so
+    /// lowering it slows them too.
     pub compute_threads: usize,
     /// The flush tick, in seconds: the period at which geometry is published. Bounded from below
     /// by the background refresh: a tick shorter than one refresh round leaves every session

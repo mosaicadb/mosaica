@@ -1517,7 +1517,6 @@ impl Engine {
             bundle_root: self.bundle_root.clone(),
             identity_key: self.identity_key,
             pool: Arc::clone(&self.pool),
-            compute_threads: self.pool.current_num_threads(),
         }
     }
 

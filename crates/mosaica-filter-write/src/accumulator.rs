@@ -14,8 +14,7 @@
 //!   inserted.
 //! - **About forty bytes of state a term**: where its chain starts and ends and the bytes it holds,
 //!   its last entity, how many entities it holds, and its share of the receipt. The states are
-//!   held in pages, so they
-//!   grow without moving.
+//!   held in pages, so they grow without moving.
 //!
 //! A document's tokens are grouped by term before they are inserted, because the run format writes
 //! how often an entity holds a term before the positions.
@@ -74,9 +73,8 @@ use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
 use crate::merge::{Ranges, TermMerge, TermSource};
 use crate::spill::{
     cascade_sorted_runs, encode_entity, fingerprint, merge_runs, remove_runs, run_largest,
-    Allowance, Beside,
-    RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN,
-    SPILL_BUF_BYTES,
+    Allowance, Beside, RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader, TextRunWriter,
+    RUN_BUFFER_MIN, SPILL_BUF_BYTES,
 };
 use crate::text::{write_range, TextIndexWriter};
 
@@ -488,8 +486,8 @@ pub fn write_text_index(
     drop(gathered);
     let left = allowance.less(held.iter().map(|h| h.allocated() as u64).sum());
     // Each merge thread holds a term's entities as a slice, up to the cap or the most a term can
-    // gather from its sources, and a copy of the largest held term that arrived in several
-    // segments. A term above the cap is held as a bitmap, bounded by its posting rather than by
+    // gather from its sources, and a cursor on each held accumulator, each holding a copy of its
+    // largest term that arrived in several segments. A term above the cap is held as a bitmap, bounded by its posting rather than by
     // the allowance, until such a term is merged in entity ranges.
     let largest = runs.iter().try_fold(
         held.iter().map(Held::largest).sum::<u64>(),
@@ -503,7 +501,7 @@ pub fn write_text_index(
         }
     };
     let each = (merge_slice_cap as u64).min(largest) * std::mem::size_of::<u32>() as u64
-        + held.iter().map(Held::copy_bytes).max().unwrap_or(0);
+        + held.iter().map(Held::copy_bytes).sum::<u64>();
     let figures = TextMerge {
         runs: runs.len(),
         held: held.len(),

@@ -1263,16 +1263,18 @@ impl Allowance {
         self.chunk(self.threads)
     }
 
-    /// **The threads a merge over `runs` runs runs on, and the fan-in its cascade reduces them
+    /// **The threads a merge over `runs` sorted runs takes, and the fan-in its cascade reduces them
     /// to**, where each merge thread holds `each` bytes beside its readers. One rule settles both,
     /// and more threads never cost a cascade pass:
     ///
     /// - T threads pay where each can hold `each`, its share of the merge's window of range
     ///   buffers at their least, and a reader on [`FAN_IN_MIN`] runs. Their fan-in is
-    ///   F_T = (M − T × what each holds) / (T × B), with B [`RUN_BUFFER_MIN`].
-    /// - The merge takes the most threads, above one, that pay and whose F_T is at least `runs`,
-    ///   so that it needs no cascade at all. Where there are none it takes one thread, whose
-    ///   fan-in is M / B, and the cascade reduces the runs to that as it always has.
+    ///   F_T = (M − T × what each holds) / (T × B), with B [`RUN_BUFFER_MIN`], one formula for
+    ///   every T.
+    /// - The merge takes the most threads that pay and whose fan-in the cascade reaches in as many
+    ///   passes as it reaches one thread's: none, where some T above one reads every run, and
+    ///   otherwise the passes one thread needs, aimed at the larger T's fan-in. Where no T above
+    ///   one does that, it takes one thread.
     ///
     /// [`cascade_sorted_runs`] reduces to [`Self::fan_in`], and [`crate::RangePlan`] runs on these
     /// threads over the runs the cascade leaves.
@@ -1281,9 +1283,10 @@ impl Allowance {
             t as u64 * (Self::per_thread(t, each) + (FAN_IN_MIN * RUN_BUFFER_MIN) as u64)
                 <= self.bytes
         };
+        let passes = self.passes_to(runs, self.fan_in_on(1, each));
         (2..=self.threads.max(1))
             .rev()
-            .find(|&t| pays(t) && runs <= self.fan_in_on(t, each))
+            .find(|&t| pays(t) && self.passes_to(runs, self.fan_in_on(t, each)) == passes)
             .unwrap_or(1)
     }
 
@@ -1309,18 +1312,26 @@ impl Allowance {
         self.fan_in_on(self.merge_threads(each, runs), each)
     }
 
-    /// F_T, the fan-in on `threads` threads: on one, what the whole allowance's readers pay for.
+    /// F_T, the fan-in on `threads` threads.
     fn fan_in_on(&self, threads: usize, each: u64) -> usize {
-        let bytes = match threads {
-            1 => self.bytes,
-            _ => self
-                .bytes
-                .saturating_sub(threads as u64 * Self::per_thread(threads, each)),
-        };
+        let bytes = self
+            .bytes
+            .saturating_sub(threads as u64 * Self::per_thread(threads, each));
         usize::try_from(bytes / (threads as u64 * RUN_BUFFER_MIN as u64))
             .unwrap_or(usize::MAX)
             .min(merge_descriptors())
             .max(FAN_IN_MIN)
+    }
+
+    /// The passes the cascade takes to bring `runs` runs to `fan_in`.
+    fn passes_to(&self, mut runs: usize, fan_in: usize) -> usize {
+        let mut passes = 0;
+        while runs > fan_in {
+            let pass = CascadePass::of(runs, fan_in, self.threads);
+            runs -= pass.taken - pass.groups;
+            passes += 1;
+        }
+        passes
     }
 
     /// The readers it pays for at [`RUN_BUFFER_MIN`] each, under [`merge_descriptors`]: what the
@@ -1342,15 +1353,8 @@ impl Allowance {
 
     /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance,
     /// each merge thread holding `each` bytes beside its readers.
-    pub fn cascade_passes(&self, mut runs: usize, each: u64) -> usize {
-        let fan_in = self.fan_in(each, runs);
-        let mut passes = 0;
-        while runs > fan_in {
-            let pass = CascadePass::of(runs, fan_in, self.threads);
-            runs -= pass.taken - pass.groups;
-            passes += 1;
-        }
-        passes
+    pub fn cascade_passes(&self, runs: usize, each: u64) -> usize {
+        self.passes_to(runs, self.fan_in(each, runs))
     }
 }
 
@@ -1747,6 +1751,20 @@ mod tests {
         }
     }
 
+    /// A record holding more entities than the trailer says any term of the run holds.
+    #[test]
+    fn text_run_past_its_largest_term_is_caught() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("text-run.spill");
+        let records = vec![("alpha", vec![1, 5, 9]), ("bravo", vec![2, 4])];
+        let receipt = write_text_run(&path, &records);
+        let mut bytes = fs::read(&path).unwrap();
+        let at = bytes.len() - 8;
+        bytes[at..at + 4].copy_from_slice(&2u32.to_le_bytes());
+        fs::write(&path, bytes).unwrap();
+        assert_refused(read_text_run(&receipt));
+    }
+
     #[test]
     fn text_run_trailing_data_is_caught() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -1860,27 +1878,34 @@ mod tests {
 
         let allowance = Allowance::new(64 * RUN_BUFFER_MIN as u64, 0, 1);
         assert_eq!(allowance.fan_in(0, 100), 64.min(merge_descriptors()));
-        // Several threads only where they pay for what they hold and a reader on every run with no
-        // cascade; otherwise one, whose fan-in is the whole allowance's.
+        // The most threads that pay for what they hold and a reader on every run the cascade
+        // leaves, where the cascade takes no more passes for them than for one thread; one
+        // thread's fan-in charges what it holds as every count's does.
         let four = Allowance {
             bytes: 64 * RUN_BUFFER_MIN as u64,
             threads: 4,
         };
-        let cases = [(0, 10), (0, 20), (0, 40), (40 * RUN_BUFFER_MIN as u64, 0)];
+        let cases = [
+            (0, 10),
+            (0, 20),
+            (0, 40),
+            (0, 200),
+            (40 * RUN_BUFFER_MIN as u64, 0),
+        ];
         for (each, runs) in cases {
             let threads = four.merge_threads(each, runs);
             let fan_in = four.fan_in(each, runs);
-            let held = threads as u64 * (each + 2 * RUN_BUFFER_MIN as u64)
+            let held = threads as u64 * Allowance::per_thread(threads, each)
                 + (threads * fan_in * RUN_BUFFER_MIN) as u64;
-            match threads {
-                1 => assert_eq!(fan_in, 64.min(merge_descriptors())),
-                _ => assert!(runs <= fan_in && held <= four.bytes, "{threads} hold {held}"),
-            }
+            assert!(held <= four.bytes, "{threads} threads hold {held}");
+            let one = four.fan_in_on(1, each);
+            assert_eq!(one as u64, 64 - each / RUN_BUFFER_MIN as u64);
+            assert_eq!(four.cascade_passes(runs, each), four.passes_to(runs, one));
             assert_eq!(RangePlan::new(four, u64::MAX, runs, each).threads, threads);
         }
         assert_eq!(
             cases.map(|(each, runs)| four.merge_threads(each, runs)),
-            [4, 2, 1, 1]
+            [4, 2, 1, 3, 1]
         );
         assert_eq!(allowance.buffer(64), RUN_BUFFER_MIN);
         assert_eq!(allowance.buffer(1_000), RUN_BUFFER_MIN);

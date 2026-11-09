@@ -842,8 +842,8 @@ fn report_term_indexes(
                 // What each thread of the merge holds beside its readers, the held terms aside.
                 let slice = (mosaica_filter_write::TEXT_MERGE_SLICE_CAP * 4) as u64;
                 format!(
-                    "; a text index over {} MiB of characters spills about {runs} run(s), {} \
-                     cascade pass(es) under a fan-in of {}",
+                    "; a text index over {} MiB of characters spills about {runs} run(s), \
+                     forecast to take {} cascade pass(es) under a fan-in of {}",
                     characters >> 20,
                     allowance.cascade_passes(runs, slice),
                     allowance.fan_in(slice, runs)

@@ -1524,7 +1524,7 @@ impl Executor {
             }
         }
         let ctx = crate::compact::FoldContext {
-            allowance: crate::write::writer_allowance(self.deps.compute_threads),
+            allowance: crate::write::writer_allowance(self.deps.pool.current_num_threads()),
             from_prefix_dir: self.prefix_dir(generation),
             to_prefix_dir: self.deps.bundle_root.join(&to_prefix),
             to_prefix: to_prefix.clone(),

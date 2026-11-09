@@ -82,7 +82,7 @@ Keep the bundle and the log on a local disc. A fast SSD matters most when the bu
 
 ## CPU
 
-Requests run on a pool of `compute_threads`, which defaults to the number of CPUs the process may use, so more cores let more requests run at once. Lower it to leave some for other work on the same machine.
+Requests run on a pool of `compute_threads`, which defaults to the number of CPUs the process may use, so more cores let more requests run at once. Lower it to leave some for other work on the same machine. The flush, the fold and the coalesce each merge on a third of `compute_threads`, rounded up, beside that pool, so lowering it also slows them.
 
 The annotations a map draws come from `POST /v1/artifacts/viewport`, which takes one request per compute thread at a time by default (`artifact_admission`). A request past that, and past as many waiting, is answered `429`, which `/control/status` counts under `artifacts.shed_total`. `max_artifacts_per_tile`, 1,000 by default, is the most artifacts one request may ask for in each tile and level.
 
