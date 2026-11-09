@@ -278,9 +278,12 @@ pub struct GenerationStamp {
 // as a keyword's ordinals are, and every such file records its codes' width. A 51 bundle is refused.
 // 53: every postings, positions and delta-tier file is a record container, its records followed by
 // their offsets, any keys and a trailer, and is named without `.arrow`. A 52 bundle is refused.
+// 54: a tag-1 posting and a presence bitmap are serialised from their set alone, a container whose
+// run and array forms cost the same held as an array, and a tag-0 posting must ascend strictly. A
+// 53 bundle is refused.
 // Each bump makes a stale local bundle a loud refusal rather than a silent misread — a fail-closed
 // guard, not compatibility.
-pub const BUNDLE_FORMAT: u32 = 53;
+pub const BUNDLE_FORMAT: u32 = 54;
 pub const API_VERSION: u32 = 1;
 pub const ABI_VERSION: u32 = 1;
 pub const ROW_ABSENT: u32 = 0xFFFF_FFFF;

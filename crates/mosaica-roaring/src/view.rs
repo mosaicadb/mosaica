@@ -6,6 +6,19 @@ use std::sync::Arc;
 
 use croaring::{Bitmap, BitmapView, Frozen, Portable};
 
+/// `bitmap`'s portable serialisation as a function of its set alone, run-optimised.
+///
+/// `run_optimize` keeps a container's kind where a run and an array serialise to the same size,
+/// so a bitmap holding a run container (one a set operation made) and one built from the sorted
+/// values would otherwise serialise one set two ways. Converting every run container back first
+/// puts each container in the kind its cardinality gives, which is how a bitmap built from the
+/// sorted values holds it, and `run_optimize` then decides the same way for both.
+pub fn canonical_portable(mut bitmap: Bitmap) -> Vec<u8> {
+    bitmap.remove_run_compression();
+    bitmap.run_optimize();
+    bitmap.serialize::<Portable>()
+}
+
 /// The bitmap `bytes` hold in the portable format, or `None` unless serialising it gives back
 /// exactly `bytes`.
 ///

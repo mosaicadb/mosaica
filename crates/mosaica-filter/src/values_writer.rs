@@ -48,7 +48,7 @@ use arrow::array::ArrayRef;
 use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use croaring::{Bitmap, Portable};
+use croaring::Bitmap;
 use mosaica_authz::arrow_file::{mapped_buffer, write_single_batch, FileLayout, InPlaceFile};
 
 use crate::values::ordinals::{self, BlockEncoder, CodeBytes, Parts, Width};
@@ -140,13 +140,11 @@ impl ColumnKind {
 /// function of how the producer's bitmap happened to be built: the build's presence arrives from
 /// repeated `add`, where the fold's arrives as a union of its layers' `present()` — already
 /// run-compressed for a universal base — and croaring serialises the two encodings differently.
-/// The same entity set would then produce two different files, which is exactly the byte-identity
-/// `filter-index.md` §6.2 claims between a folded column and a freshly built one. Run-optimising
-/// here settles it in the direction that is also the smaller file.
+/// The same entity set would then produce two different files, where a folded column and a
+/// freshly built one must be the same bytes. [`mosaica_roaring::canonical_portable`] settles it,
+/// run-optimised, which is also the smaller file.
 fn presence_bytes(presence: &Bitmap) -> Vec<u8> {
-    let mut normalised = presence.clone();
-    normalised.run_optimize();
-    normalised.serialize::<Portable>()
+    mosaica_roaring::canonical_portable(presence.clone())
 }
 
 /// Write the entities a layer holds a value for, read back by [`crate::read_presence`].

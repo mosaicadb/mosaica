@@ -88,18 +88,11 @@ pub fn encode_posting_bitmap(bitmap: &Bitmap, small_term_threshold: u32) -> io::
     Ok(roaring_record(bitmap.clone()))
 }
 
-/// The tag-1 record of `bitmap`, as a function of its set alone.
-///
-/// `run_optimize` keeps a container's kind where a run and an array serialise to the same size,
-/// so a bitmap holding a run container (one a set operation made) and one built from the sorted
-/// entities would otherwise encode one set two ways. Converting every run container back first
-/// puts each container in the kind its cardinality gives, which is how a bitmap built from the
-/// sorted entities holds it, and `run_optimize` then decides the same way for both.
-fn roaring_record(mut bitmap: Bitmap) -> Vec<u8> {
-    bitmap.remove_run_compression();
-    bitmap.run_optimize();
+/// The tag-1 record of `bitmap`, as a function of its set alone
+/// ([`mosaica_roaring::canonical_portable`]).
+fn roaring_record(bitmap: Bitmap) -> Vec<u8> {
     let mut record = vec![1u8];
-    record.extend_from_slice(&bitmap.serialize::<Portable>());
+    record.extend_from_slice(&mosaica_roaring::canonical_portable(bitmap));
     record
 }
 

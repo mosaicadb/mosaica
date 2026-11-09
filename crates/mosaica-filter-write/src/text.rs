@@ -545,20 +545,22 @@ mod tests {
         }
     }
 
-    /// The bytes of a layer's dictionary, postings and positions.
+    /// The bytes of each of a layer's files.
     fn bytes(files: &TextIndexFiles) -> Vec<Vec<u8>> {
-        [&files.dict, &files.postings, &files.positions]
+        files
+            .paths()
             .iter()
             .map(|path| std::fs::read(path).unwrap())
             .collect()
     }
 
-    /// **A fold and a coalesce write the terms a build of what survives writes, byte for byte**, on
-    /// each of their routes. In the base, `kept` is carried only by entities the fold keeps, so it is copied whole,
-    /// and `partly` and `tie` lose a carrier each and are re-encoded. `tie`'s first container is
-    /// `{0, 1, 2}` once entity 3 goes, which costs the same as a run and as an array, and the base
-    /// held it as a run of four. `gone`'s only carrier is tombstoned, so it leaves the dictionary
-    /// though only one layer holds it. The extent's `fresh` is copied, and `shared` is in both.
+    /// **A fold and a coalesce write the layer a build of what survives writes, byte for byte**, on
+    /// each of their routes. In the base, `kept` is carried only by entities the fold keeps, so it
+    /// is copied whole, and `partly` and `tie` lose a carrier each and are re-encoded. `tie`'s first
+    /// container is `{0, 1, 2}` once entity 3 goes, which costs the same as a run and as an array,
+    /// and the base held it as a run of four; the folded presence's first container is the same.
+    /// `gone`'s only carrier is tombstoned, so it leaves the dictionary though only one layer holds
+    /// it. The extent's `fresh` is copied, and `shared` is in both.
     #[test]
     fn a_fold_and_a_coalesce_write_what_a_build_of_the_survivors_writes() {
         let dir = tempfile::tempdir().unwrap();
