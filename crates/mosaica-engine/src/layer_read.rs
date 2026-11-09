@@ -109,9 +109,14 @@ impl Engine {
                         match self.route_over_view(
                             served, side, &resolved, cancel, route, expr, prefer_row,
                         )? {
-                            crate::viewport::OverView::Entities(entities) => {
-                                (side.data.row_space.project(&entities), None)
-                            }
+                            crate::viewport::OverView::Entities(entities) => (
+                                crate::viewport::project_until(
+                                    &side.data.row_space,
+                                    &entities,
+                                    cancel,
+                                )?,
+                                None,
+                            ),
                             crate::viewport::OverView::Rows { rows, region } => (rows, region),
                         },
                     )
@@ -589,19 +594,26 @@ impl ReadLevel {
     /// Every artifact's visible members in `filter_rows` (indexed like `served.sides`) over every
     /// side: in each side the request reads, one walk of `visible ∩ filter` through the side's
     /// column, which needs no per-artifact membership, summed. `None` unless every side the request
-    /// reads has a column.
+    /// reads has a column, and once the request holding `cancel` has gone, which each walk reads
+    /// between its chunks; a caller that passes a token reads it again where this answers `None`.
     pub(crate) fn filtered_counts(
         &self,
         engine: &Engine,
         mask: &ShardedMask,
         filter_rows: &[impl std::borrow::Borrow<Bitmap>],
+        cancel: &Option<crate::CancelToken>,
     ) -> Option<Arc<Vec<u64>>> {
         let sides: Vec<Vec<u32>> = self
             .forms
             .filtered_inputs(mask, filter_rows)?
             .into_iter()
-            .map(|(column, visible)| engine.pool.install(|| column.histogram_over(&visible)))
-            .collect();
+            .map(|(column, visible)| {
+                let walked = engine.pool.install(|| {
+                    column.accumulate(&visible, None, &|| !crate::cancel::gone(cancel))
+                });
+                walked.map(|level| level.counts)
+            })
+            .collect::<Option<_>>()?;
         Some(Arc::new(summed_counts(&sides)))
     }
 

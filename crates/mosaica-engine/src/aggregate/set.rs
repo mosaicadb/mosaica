@@ -453,6 +453,11 @@ impl<'a> Cx<'a> {
             .sum()
     }
 
+    /// The request's cancellation, for a pass that reads it between its pieces.
+    pub(super) fn cancel(&self) -> &Option<CancelToken> {
+        &self.clock.cancel
+    }
+
     /// [`Clock::check_ended`]: `Err(EngineError::Cancelled)` once the client has gone, or once
     /// the stream deadline has passed after the response's first page, which a caller maps to an
     /// end by `deadline`.

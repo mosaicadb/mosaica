@@ -180,6 +180,10 @@ pub const DEFAULT_RESTART_INTERVAL: u32 = 16;
 /// refused by the footer's copy before any offset in it is believed.
 const MAGIC: [u8; 4] = *b"MSDC";
 
+/// How many blocks [`SortedDict::walk_until`] decodes between two asks of its `stop`: tens of
+/// microseconds of the walk at the default restart interval.
+const STOP_EVERY_BLOCKS: u32 = 256;
+
 /// `version | restart_interval | key_count | block_count | blocks_len | MAGIC`.
 const FOOTER_LEN: usize = 4 + 4 + 4 + 4 + 8 + 4;
 
@@ -736,10 +740,25 @@ impl SortedDict {
     ///
     /// One decode buffer is threaded through the whole file so the order check spans block
     /// boundaries.
-    pub fn walk(&self, mut f: impl FnMut(u32, &str)) -> Result<(), DictError> {
+    pub fn walk(&self, f: impl FnMut(u32, &str)) -> Result<(), DictError> {
+        self.walk_until(&|| false, f).map(|_| ())
+    }
+
+    /// [`Self::walk`], given up once `stop` answers true: `Ok(false)`, with the keys before that
+    /// point visited. `stop` is asked every [`STOP_EVERY_BLOCKS`] blocks and is told nothing of
+    /// the keys, so where a walk ends is its caller's doing and never a function of what the keys
+    /// hold. It is for a caller whose own reader has gone.
+    pub fn walk_until(
+        &self,
+        stop: &dyn Fn() -> bool,
+        mut f: impl FnMut(u32, &str),
+    ) -> Result<bool, DictError> {
         let mut key = Vec::new();
         let mut error: Option<DictError> = None;
         for block in 0..self.block_count {
+            if block % STOP_EVERY_BLOCKS == 0 && stop() {
+                return Ok(false);
+            }
             self.decode_block(
                 block,
                 &mut key,
@@ -760,7 +779,7 @@ impl SortedDict {
                 return Err(e);
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Visit the keys at `wanted` — **strictly ascending ordinals** — decoding each block that

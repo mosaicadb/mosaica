@@ -178,14 +178,22 @@ impl Field {
         let mut sides = Vec::new();
         for place in cx.reads() {
             cx.check_clock()?;
-            sides.push(match self.held && (set.has_entities(place) || !self.drawn) {
-                true => self.counts_by_entity(cx, place, set.entities(cx, place)?)?,
-                false => cx
-                    .engine
-                    .pool
-                    .install(|| tally_rows(set.cells(cx, place), cx.segments(place), &self.column)),
-            });
+            sides.push(
+                match self.held && (set.has_entities(place) || !self.drawn) {
+                    true => self.counts_by_entity(cx, place, set.entities(cx, place)?)?,
+                    false => cx.engine.pool.install(|| {
+                        tally_rows(
+                            set.cells(cx, place),
+                            cx.segments(place),
+                            &self.column,
+                            cx.cancel(),
+                        )
+                    }),
+                },
+            );
         }
+        // A pass the client left part of the way through counted only some pieces.
+        crate::cancel::check_cancelled(cx.cancel())?;
         Ok(Counts::summed(sides))
     }
 
@@ -335,11 +343,13 @@ fn sizes(codes: &[u32], set: &Counts, reference: Option<&Counts>) -> Vec<(u64, u
 }
 
 /// A drawn column's codes over a set's rows, counted in one parallel pass. Code 0 and a segment
-/// without the column count as no value.
+/// without the column count as no value. Once the request holding `cancel` has gone the pieces not
+/// yet begun are skipped, so the caller reads the clock before it uses the counts.
 fn tally_rows(
     set: CellSet<'_>,
     segments: &[(&mosaica_store::read::SegmentData, u32)],
     column: &str,
+    cancel: &Option<crate::CancelToken>,
 ) -> Counts {
     let pieces = pieces(segments);
     // Indexed by code up to the widest code any segment stores, a map where one stores 32 bits.
@@ -357,6 +367,9 @@ fn tally_rows(
     let tally = pieces
         .par_iter()
         .fold(empty, |mut tally, (s, rows)| {
+            if crate::cancel::gone(cancel) {
+                return tally;
+            }
             let (segment, row_base) = segments[*s];
             let base = row_base as usize;
             match segment.columns.scalar(column) {

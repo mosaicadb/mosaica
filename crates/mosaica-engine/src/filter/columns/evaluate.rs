@@ -15,7 +15,7 @@ use crate::filter::expr::{
 };
 use mosaica_store::unique::{key_of_integer, UniqueKey};
 use crate::filter::scan::text::{phrase_match, text_match};
-use crate::filter::scan::{scan, scan_layer};
+use crate::filter::scan::{in_spans, scan, scan_layer};
 use crate::filter::check_cancelled;
 
 /// The space a sub-tree evaluates in: [`FilterColumns::space_of`]'s answer.
@@ -72,7 +72,7 @@ impl FilterColumns {
         };
 
         leaves(name, LeafQuery::Value(operand), candidate, &|candidate| {
-            resolve_values(name, layers, postings, route, operand, candidate)
+            resolve_values(name, layers, postings, route, operand, candidate, cancel)
         })
     }
 
@@ -393,7 +393,8 @@ impl FilterColumns {
 
 /// A leaf over one column's value layers under `candidate`. The base build's answer comes from
 /// the postings where the column's route reads them; every extent layer is scanned, since no flush
-/// writes postings.
+/// writes postings. A scan ends with [`FilterError::Cancelled`] once the request holding `cancel`
+/// has gone.
 fn resolve_values(
     name: &str,
     layers: &[Layer],
@@ -401,6 +402,7 @@ fn resolve_values(
     route: Route,
     operand: &FilterOperand,
     candidate: &Bitmap,
+    cancel: &Option<CancelToken>,
 ) -> Result<Bitmap, FilterError> {
     if let (Route::Postings, Some(postings), Some(values)) = (route, postings, codes_of(operand)) {
         let mut out = resolve_union(postings, values)
@@ -409,13 +411,14 @@ fn resolve_values(
         // Selected by the absence of a manifest path, not position: a coalesce appends its
         // replacement at the end of the list.
         for layer in layers.iter().filter(|l| l.values_rel.is_some()) {
-            out |= scan(&layer.values, operand, candidate);
+            out |= in_spans(candidate, cancel, |part| scan(&layer.values, operand, part))
+                .ok_or(FilterError::Cancelled)?;
         }
         return Ok(out);
     }
     let mut out = Bitmap::new();
     for layer in layers {
-        out |= scan_layer(name, layer, operand, candidate)?;
+        out |= scan_layer(name, layer, operand, candidate, cancel)?;
     }
     Ok(out)
 }

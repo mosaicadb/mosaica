@@ -275,7 +275,7 @@ impl Layer {
                             set_rows[place] = cx.sets.set.rows(cx, place);
                         }
                         let histogram = read
-                            .filtered_counts(engine, mask, &set_rows)
+                            .filtered_counts(engine, mask, &set_rows, &None)
                             .expect("a level with a column in every shard counts through them");
                         ordinals
                             .iter()

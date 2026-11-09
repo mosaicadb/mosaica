@@ -160,7 +160,7 @@ impl HeldFilter {
         level.filtered = match held {
             Some(counts) => counts.counts.clone(),
             None => {
-                let counts = level.filtered_counts(engine, mask, &self.rows);
+                let counts = level.filtered_counts(engine, mask, &self.rows, &None);
                 self.levels.insert(
                     key,
                     HeldCounts {

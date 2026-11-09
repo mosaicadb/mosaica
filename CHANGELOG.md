@@ -8,6 +8,13 @@ container image.
 
 ## [Unreleased]
 
+### Fixed
+
+- When a client goes away, Mosaica stops working on its request inside a column, range, `in` or
+  keyword filter and inside an aggregate's count, as it already did inside a text filter. Those
+  requests used to run to their end, so a viewer changing filters quickly left the server
+  computing answers nobody was waiting for.
+
 ## [0.3.0] - 2026-11-08
 
 ### Changed

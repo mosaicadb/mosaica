@@ -225,7 +225,8 @@ impl WalkCx for PageCx<'_> {
         let side = self.side(place);
         let rows_in_ranges: u64 = domain.iter().map(|r| r.len() as u64).sum();
         let body = |route: &dyn Fn(&FilterExpr, bool) -> Result<crate::filter::RoutedFilter>| {
-            engine.rows_of_routed(side, route(expr, true)?, domain, rows_in_ranges, per_tile_only)
+            let routed = route(expr, true)?;
+            engine.rows_of_routed(side, routed, domain, rows_in_ranges, per_tile_only, cancel)
         };
         let served = &self.open.served;
         let candidate = match candidate {

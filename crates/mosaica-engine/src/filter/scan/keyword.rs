@@ -4,6 +4,8 @@ use croaring::Bitmap;
 use mosaica_filter::{CodeSet, Codes, DictError, KeyMatcher, SortedDict, ValueColumn};
 use mosaica_types::AttrLocalId;
 
+use super::in_spans;
+use crate::cancel::{gone, CancelToken};
 use crate::filter::expr::FilterOperand;
 use crate::filter::{Endpoint, Scalar};
 
@@ -120,18 +122,22 @@ pub(in crate::filter) fn scan_ordinals(
 }
 
 /// One operand against one keyword layer: resolve in that layer's dictionary, then scan its
-/// ordinals.
+/// ordinals. `None` once the request holding `cancel` has gone, which the dictionary's walk and
+/// the scan read as they go ([`in_spans`]).
 pub(in crate::filter) fn scan_keyword(
     values: &ValueColumn,
     dict: &SortedDict,
     operand: &FilterOperand,
     candidate: &Bitmap,
-) -> Result<Bitmap, DictError> {
+    cancel: &Option<CancelToken>,
+) -> Result<Option<Bitmap>, DictError> {
     if let FilterOperand::TextContains(needle) = operand {
-        return keyword_contains(values, dict, needle, candidate);
+        return keyword_contains(values, dict, needle, candidate, cancel);
     }
     let predicate = keyword_ordinals(dict, operand)?;
-    Ok(scan_ordinals(values, &predicate, candidate))
+    Ok(in_spans(candidate, cancel, |part| {
+        scan_ordinals(values, &predicate, part)
+    }))
 }
 
 /// Which of `contains`' two routes a layer takes.
@@ -187,7 +193,8 @@ fn keyword_contains(
     dict: &SortedDict,
     needle: &str,
     candidate: &Bitmap,
-) -> Result<Bitmap, DictError> {
+    cancel: &Option<CancelToken>,
+) -> Result<Option<Bitmap>, DictError> {
     // Every key contains the empty needle, so the answer is the whole ordinal range: carries a
     // value in this column. No key is read, since no key's content bears on the answer.
     if needle.is_empty() {
@@ -202,11 +209,13 @@ fn keyword_contains(
                 hi: dict.len() - 1,
             }
         };
-        return Ok(scan_ordinals(values, &whole, candidate));
+        return Ok(in_spans(candidate, cancel, |part| {
+            scan_ordinals(values, &whole, part)
+        }));
     }
     match contains_route(candidate.cardinality(), u64::from(dict.len())) {
-        ContainsRoute::Broad => contains_broad(values, dict, needle, candidate),
-        ContainsRoute::Narrow => contains_narrow(values, dict, needle, candidate),
+        ContainsRoute::Broad => contains_broad(values, dict, needle, candidate, cancel),
+        ContainsRoute::Narrow => contains_narrow(values, dict, needle, candidate, cancel),
     }
 }
 
@@ -216,24 +225,31 @@ fn contains_broad(
     dict: &SortedDict,
     needle: &str,
     candidate: &Bitmap,
-) -> Result<Bitmap, DictError> {
-    // `SortedDict::walk` has no early exit by construction, so the walk's cost is the dictionary's
-    // size and never the needle's selectivity. The matcher is built once outside it, since a
-    // searcher constructed per key was measured at up to 47% of this route's cost.
+    cancel: &Option<CancelToken>,
+) -> Result<Option<Bitmap>, DictError> {
+    // The walk ends early only where the request itself has gone, which is no function of the
+    // keys, so its cost is the dictionary's size and never the needle's selectivity. The matcher
+    // is built once outside it, since a searcher constructed per key was measured at up to 47% of
+    // this route's cost.
     //
     // Matches go into a table over the dictionary's ordinals rather than a list: it bounds the
     // allocation (a one-byte needle over a near-unique vocabulary matches most of it) and makes
     // the scan that follows cost the same per slot however many keys matched.
     let mut matched = CodeSet::over_domain(dict.len().saturating_sub(1));
     let matcher = KeyMatcher::new(needle);
-    dict.walk(|ordinal, key| {
+    let walked = dict.walk_until(&|| gone(cancel), |ordinal, key| {
         if matcher.matches(key) {
             matched.insert(ordinal);
         }
     })?;
+    if !walked {
+        return Ok(None);
+    }
     // No key matched: an empty table, and the scan still runs over every candidate slot exactly as
     // it does for a full one.
-    Ok(values.scan_ordinal_set(candidate, &matched))
+    Ok(in_spans(candidate, cancel, |part| {
+        values.scan_ordinal_set(part, &matched)
+    }))
 }
 
 /// The narrow route: read only the dictionary the candidate's own values occupy.
@@ -252,11 +268,12 @@ fn contains_narrow(
     dict: &SortedDict,
     needle: &str,
     candidate: &Bitmap,
-) -> Result<Bitmap, DictError> {
+    cancel: &Option<CancelToken>,
+) -> Result<Option<Bitmap>, DictError> {
     // A keyword layer's ordinals are `u32`, flat or in blocks; any other column would match
     // nothing here.
     if !matches!(values.codes(), Codes::U32(_) | Codes::Ordinals(_)) {
-        return Ok(Bitmap::new());
+        return Ok(Some(Bitmap::new()));
     }
     let held = values.codes().len().min(candidate.cardinality() as usize);
     let mut wanted: Vec<u32> = Vec::with_capacity(held);
@@ -273,7 +290,9 @@ fn contains_narrow(
     })?;
     // The same table the broad route ends in: an empty one scans every candidate slot exactly as a
     // full one does.
-    Ok(values.scan_ordinal_set(candidate, &matched))
+    Ok(in_spans(candidate, cancel, |part| {
+        values.scan_ordinal_set(part, &matched)
+    }))
 }
 
 #[cfg(test)]
@@ -737,8 +756,12 @@ mod tests {
             Bitmap::new(),
         ] {
             for needle in ["1001", "arxiv", "0001", "zzz", "/", "math/0001"] {
-                let broad = contains_broad(&values, &d, needle, &candidate).unwrap();
-                let narrow = contains_narrow(&values, &d, needle, &candidate).unwrap();
+                let broad = contains_broad(&values, &d, needle, &candidate, &None)
+                    .unwrap()
+                    .unwrap();
+                let narrow = contains_narrow(&values, &d, needle, &candidate, &None)
+                    .unwrap()
+                    .unwrap();
                 assert_eq!(
                     members(&broad),
                     members(&narrow),
@@ -772,9 +795,13 @@ mod tests {
         ] {
             for needle in ["0001", "arxiv", "zzz", "/", "math/0001", ""] {
                 let _ = take_scan_work();
-                let broad = contains_broad(&values, &d, needle, &candidate).unwrap();
+                let broad = contains_broad(&values, &d, needle, &candidate, &None)
+                    .unwrap()
+                    .unwrap();
                 let broad_work = take_scan_work();
-                let narrow = contains_narrow(&values, &d, needle, &candidate).unwrap();
+                let narrow = contains_narrow(&values, &d, needle, &candidate, &None)
+                    .unwrap()
+                    .unwrap();
                 let narrow_work = take_scan_work();
                 assert_eq!(
                     members(&broad),
@@ -807,8 +834,16 @@ mod tests {
         for candidate in [set(&[0, 1, 2, 3, 4, 5]), set(&[1, 4]), set(&[5])] {
             for needle in ["b", "ab", "cd", "q"] {
                 assert_eq!(
-                    members(&contains_broad(&values, &d, needle, &candidate).unwrap()),
-                    members(&contains_narrow(&values, &d, needle, &candidate).unwrap()),
+                    members(
+                        &contains_broad(&values, &d, needle, &candidate, &None)
+                            .unwrap()
+                            .unwrap()
+                    ),
+                    members(
+                        &contains_narrow(&values, &d, needle, &candidate, &None)
+                            .unwrap()
+                            .unwrap()
+                    ),
                     "routes disagree on {needle:?}"
                 );
             }
@@ -822,11 +857,19 @@ mod tests {
         let values = universal(&[0, 1]);
         let candidate = set(&[0, 1]);
         assert_eq!(
-            members(&contains_broad(&values, &d, "phab", &candidate).unwrap()),
+            members(
+                &contains_broad(&values, &d, "phab", &candidate, &None)
+                    .unwrap()
+                    .unwrap()
+            ),
             vec![1]
         );
         assert_eq!(
-            members(&contains_narrow(&values, &d, "phab", &candidate).unwrap()),
+            members(
+                &contains_narrow(&values, &d, "phab", &candidate, &None)
+                    .unwrap()
+                    .unwrap()
+            ),
             vec![1]
         );
     }
