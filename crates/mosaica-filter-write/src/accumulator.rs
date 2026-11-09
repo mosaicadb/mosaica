@@ -32,18 +32,22 @@
 //! # Memory
 //!
 //! The accumulator counts what it has allocated: the pool's pages, its term-state pages, the
-//! capacity of its key bytes and table, and its per-document buffers. Before each document it spills if that, plus
-//! what its term state, key bytes and table would allocate were every token of the document a new
-//! term, would reach its budget; a growing array's old copy is live while it moves, so the new copy
-//! is counted whole. Within a document it can exceed the budget only by that document's own
-//! buffers and the slices its terms open, at most 4 KiB for each distinct term of the document.
-//! The per-document buffers return to a small size at each spill, so one long document does not
-//! shrink every run after it.
+//! capacity of its key bytes and table, and its per-document buffers. Before each document it
+//! spills if that, plus what its term state, key bytes and table would allocate were every token
+//! of the document a new term, would reach its budget; a growing array's old copy is live while it
+//! moves, so the new copy is counted whole. The table's entries can still grow past that estimate
+//! by up to the size of one document, when a spill has released them and one document then adds
+//! more than twice their capacity.
 //!
-//! A spill holds beside the accumulator about forty bytes a term for the ranking, and, for the
-//! term being written if its documents arrived out of entity order, a copy of its chain and eight
-//! bytes an entity. That is at most about four times that one term's chain. Every other term is
-//! written from the pool as it stands.
+//! Within a document the accumulator can exceed its budget by that document's encoded bytes and
+//! per-document buffers, plus one partly filled slice for each distinct term and one new pool
+//! page. The per-document buffers return to a small size at each spill, so one long document does
+//! not shrink every run after it.
+//!
+//! A spill holds beside the accumulator about forty bytes a term for the ranking and, for each
+//! term whose documents arrived out of entity order, a copy of its chain and eight bytes an
+//! entity, kept at the size of the largest such term. That is at most about four times that one
+//! term's chain. Every other term is written from the pool as it stands.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -409,7 +413,6 @@ impl TermAccumulator {
                 sort_segments(term, &chain, &mut entries)?;
                 let body = Body::Sorted(&chain, &entries);
                 visit(term, state.pairs, state.anchor, &body)?;
-                (chain, entries) = (Vec::new(), Vec::new());
             } else {
                 visit(term, state.pairs, state.anchor, &Body::Chain(&pool, state))?;
             }

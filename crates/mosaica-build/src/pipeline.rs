@@ -5414,8 +5414,7 @@ impl TextIndexPlan {
         //
         // ⊘ **The tail is smaller, not gone.** Four of the 96 chunks still ran ~60 s after the
         // other 92 had finished, so most of the chunk pass is still one region's segmentation.
-        // Splitting finer again is worth about a further 30 s on this corpus, measured when each
-        // chunk still spilled runs of its own, and is not taken.
+        // Splitting finer again would shorten that tail further, and is not taken.
         //
         // **The chunks are arena windows now, not entity ranges** (`column.rs`), so the number is
         // a target and the arena's own record marks decide how close to it the split lands. Eight
