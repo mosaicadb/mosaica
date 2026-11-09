@@ -1,7 +1,6 @@
 //! A text layer's writer, the one function that writes a merge's terms into it, and the text
 //! family's two lifecycle transformations built on them: the fold's merge of every layer into one
-//! base, and the coalesce's merge of a window of extents into one extent
-//! (`records-and-search.md` §7; `filter-index.md` §5.2 for the coalesce, §6.2 for the fold).
+//! base, and the coalesce's merge of a window of extents into one extent.
 //!
 //! # One merge for every route
 //!
@@ -16,8 +15,8 @@
 //!
 //! - The fold **retires**: `D₀`'s entities are subtracted from every posting and a term whose every
 //!   carrier was blanked is not written at all, so the word leaves the corpus with the documents
-//!   that used it. A coalesce **retires nothing** — removal is Rule F's alone (write-path §5.4) —
-//!   so it passes an empty tombstone set and there is no parameter that could spell anything else.
+//!   that used it. A coalesce **retires nothing**, since removal is the fold's alone, so it passes
+//!   an empty tombstone set and there is no parameter that could spell anything else.
 //!
 //! Both write the presence of what they merged, less the tombstones, and both refuse inputs that
 //! hold one entity twice: an entity's text is in exactly one layer of a column, and a union of
@@ -69,7 +68,6 @@ use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
 
 use crate::merge::{DictCursor, Records, TermMerge, TermSource};
 use crate::positions::PositionsWriter;
-use crate::spill::Allowance;
 
 /// Entities held as a `u32` slice for one merged term before the merge switches to a Roaring
 /// bitmap.
@@ -79,8 +77,7 @@ use crate::spill::Allowance;
 /// for one record. Above the cap the merge accumulates into a `Bitmap` instead and encodes from
 /// that; the two encoders are byte-identical over the same set (pinned by
 /// `postings::the_bitmap_and_slice_encoders_agree_byte_for_byte`), so the cap is a memory knob and
-/// not a format decision. 16 MB, which no vocabulary reaches by accident. A merge holds at most
-/// what its allowance pays for ([`Allowance::slice_cap`]).
+/// not a format decision. 16 MB, which no vocabulary reaches by accident.
 pub const TEXT_MERGE_SLICE_CAP: usize = 1 << 22;
 
 /// Entities staged before each hand-off to croaring in the merge's bitmap arm: `add_many`
@@ -175,8 +172,9 @@ impl TextIndexWriter {
         Ok(())
     }
 
-    /// Write `term` whole from `records`, as a finished layer stores them. The records are another
-    /// layer's, read and checked by its readers, so they are written as they are.
+    /// Write `term` whole from `records`, as a finished layer stores them. The posting was checked
+    /// when that layer's postings were opened, and the positions are checked wherever a reader
+    /// decodes them, so both are written as they are.
     fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()> {
         let open = &mut self.open;
         open.dict.push(term)?;
@@ -264,19 +262,16 @@ pub(crate) fn text_term(term: &[u8]) -> io::Result<&str> {
     })
 }
 
-/// The fold's pass: every layer merged into one base index, with `tombstones` subtracted, holding
-/// what `allowance` pays for.
+/// The fold's pass: every layer merged into one base index, with `tombstones` subtracted.
 pub fn merge_text_layers(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     out: TextIndexFiles,
-    allowance: Allowance,
 ) -> io::Result<()> {
-    merge(inputs, tombstones, out, allowance, "the fold's text pass")
+    merge(inputs, tombstones, out, "the fold's text pass")
 }
 
-/// The coalesce's pass: a window of a column's extents merged into one extent, holding what
-/// `allowance` pays for.
+/// The coalesce's pass: a window of a column's extents merged into one extent.
 ///
 /// Retires nothing, and writes the presence union its replacement rule is checked against — the
 /// engine's composition requires a coalesced layer's presence to **equal** the union of the layers
@@ -285,11 +280,7 @@ pub fn merge_text_layers(
 ///
 /// Refuses fewer than two inputs: this collapses a window into one extent and there is nothing to
 /// collapse below two.
-pub fn coalesce_text_extents(
-    inputs: &[TextLayerRef<'_>],
-    out: TextIndexFiles,
-    allowance: Allowance,
-) -> io::Result<()> {
+pub fn coalesce_text_extents(inputs: &[TextLayerRef<'_>], out: TextIndexFiles) -> io::Result<()> {
     const PASS: &str = "the text coalesce";
     if inputs.len() < 2 {
         return Err(invalid(format!(
@@ -298,7 +289,7 @@ pub fn coalesce_text_extents(
             inputs.len()
         )));
     }
-    merge(inputs, &Bitmap::new(), out, allowance, PASS)
+    merge(inputs, &Bitmap::new(), out, PASS)
 }
 
 /// Every term of every layer, in sorted order, with `tombstones` subtracted from each one's
@@ -308,7 +299,6 @@ fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     out: TextIndexFiles,
-    allowance: Allowance,
     pass: &str,
 ) -> io::Result<()> {
     let presence = crate::disjoint_union(inputs.iter().map(|input| input.present), pass)?;
@@ -331,7 +321,7 @@ fn merge(
     write_terms(
         &mut TermMerge::open(sources)?,
         &mut writer,
-        allowance.slice_cap(),
+        TEXT_MERGE_SLICE_CAP,
     )?;
     writer.finish()?;
     mosaica_filter::write_presence(&presence_path, &presence.andnot(tombstones))
@@ -496,7 +486,7 @@ impl TermSource for LayerTerms<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{write_text_index, TermAccumulator};
+    use crate::{write_text_index, Allowance, TermAccumulator};
     use std::path::Path;
 
     type Documents = Vec<(u32, Vec<&'static str>)>;
@@ -596,10 +586,9 @@ mod tests {
                 present: &layer.present,
             })
             .collect();
-        let allowance = Allowance::new(0, 0, 1);
 
         let folded = files(dir, "folded");
-        merge_text_layers(&inputs, &tombstones, folded.clone(), allowance).unwrap();
+        merge_text_layers(&inputs, &tombstones, folded.clone()).unwrap();
         let survivors: Documents = base
             .iter()
             .chain(&extent)
@@ -609,7 +598,7 @@ mod tests {
         assert_eq!(bytes(&folded), bytes(&build(dir, "survivors", &survivors)));
 
         let coalesced = files(dir, "coalesced");
-        coalesce_text_extents(&inputs, coalesced.clone(), allowance).unwrap();
+        coalesce_text_extents(&inputs, coalesced.clone()).unwrap();
         let every: Documents = base.iter().chain(&extent).cloned().collect();
         assert_eq!(bytes(&coalesced), bytes(&build(dir, "every", &every)));
     }

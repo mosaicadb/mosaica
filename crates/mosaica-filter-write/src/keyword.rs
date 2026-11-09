@@ -66,13 +66,9 @@
 //! bounds the pass transient (§5.2), since decoding un-elides exactly the shared prefixes the
 //! format exists to elide.
 //!
-//! The price is paid in decodes. [`mosaica_filter::SortedDict`] offers a whole-file `walk` and a
-//! random `key_of`, and `walk` is push-driven, so N of them cannot be interleaved into an N-way
-//! merge; the merge's dictionary cursor therefore steps with `key_of`, which re-decodes its block
-//! from the restart each time and so costs `(K + 1) / 2`, 8.5 entry decodes per key at the
-//! shipped restart interval of 16. Against the dictionary campaign's **measured** 11.0–18.8 ns per
-//! key of decode, that **models** to ~0.1–0.16 µs per key per pass: sub-second for a coalesce
-//! window, seconds to tens of seconds for a fold at 10⁸ keys.
+//! The price is paid in decodes: the merge's [`DictCursor`] steps with `key_of`, whose cost its
+//! doc gives. That is sub-second for a coalesce window and seconds to tens of seconds for a fold
+//! at 10⁸ keys.
 //!
 //! # What is deliberately not here
 //!

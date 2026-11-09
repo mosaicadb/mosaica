@@ -506,6 +506,13 @@ pub struct TextRunReader {
     done: bool,
 }
 
+/// The run `receipt` names, opened for its readers to share.
+pub fn run_file(receipt: &SpillReceipt) -> io::Result<Arc<File>> {
+    File::open(&receipt.path)
+        .map(Arc::new)
+        .map_err(|e| at(&receipt.path, e))
+}
+
 /// A cursor's place in a run's file. It reads at its own offset (`pread`), so every cursor on one
 /// run shares the run's one descriptor.
 struct RunCursor {
@@ -603,24 +610,20 @@ impl TermSource for TextRunReader {
 }
 
 impl TextRunReader {
-    /// A reader of the run `receipt` names, from its start, with a read buffer of `buffer` bytes.
+    /// A reader of the run `receipt` names, from its start, through `file`, which is that run's
+    /// open file ([`run_file`]), with a read buffer of `buffer` bytes. Several readers may share
+    /// one file, each reading at its own offset.
     pub fn open(
+        file: Arc<File>,
         receipt: &SpillReceipt,
         payload: RunPayload,
         buffer: usize,
-    ) -> io::Result<TextRunReader> {
-        let file = File::open(&receipt.path).map_err(|e| at(&receipt.path, e))?;
-        Ok(TextRunReader {
+    ) -> TextRunReader {
+        TextRunReader {
             path: receipt.path.clone(),
             payload,
             positions: Vec::new(),
-            reader: BufReader::with_capacity(
-                buffer,
-                RunCursor {
-                    file: Arc::new(file),
-                    at: 0,
-                },
-            ),
+            reader: BufReader::with_capacity(buffer, RunCursor { file, at: 0 }),
             term: Vec::new(),
             mark: 0,
             pending: 0,
@@ -631,7 +634,7 @@ impl TextRunReader {
             pairs: 0,
             anchor: 0,
             done: false,
-        })
+        }
     }
 
     fn decode_entity(&mut self) -> io::Result<u32> {
@@ -798,15 +801,6 @@ impl Allowance {
             .clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES)
     }
 
-    /// The most entities a merge holds as a slice for one term before it holds them as a bitmap:
-    /// what the allowance pays for at four bytes an entity, and at most
-    /// [`crate::TEXT_MERGE_SLICE_CAP`].
-    pub fn slice_cap(&self) -> usize {
-        usize::try_from(self.bytes / std::mem::size_of::<u32>() as u64)
-            .unwrap_or(usize::MAX)
-            .min(crate::TEXT_MERGE_SLICE_CAP)
-    }
-
     /// The cascade passes [`cascade_sorted_runs`] takes over `runs` runs under this allowance.
     pub fn cascade_passes(&self, mut runs: usize) -> usize {
         let mut passes = 0;
@@ -959,7 +953,7 @@ fn merge_group(
 ) -> io::Result<SpillReceipt> {
     let mut merge = TermMerge::open(
         runs.iter()
-            .map(|run| TextRunReader::open(run, payload, buffer))
+            .map(|run| Ok(TextRunReader::open(run_file(run)?, run, payload, buffer)))
             .collect::<io::Result<Vec<_>>>()?,
     )?;
     let mut writer = TextRunWriter::buffered(path, payload, buffer)?;
@@ -1028,7 +1022,7 @@ mod tests {
 
     /// A reader of the run `receipt` names.
     fn open_reader(receipt: &SpillReceipt, payload: RunPayload) -> TextRunReader {
-        TextRunReader::open(receipt, payload, RUN_BUFFER_MIN).unwrap()
+        TextRunReader::open(run_file(receipt).unwrap(), receipt, payload, RUN_BUFFER_MIN)
     }
 
     /// One whole record of a run of rows.

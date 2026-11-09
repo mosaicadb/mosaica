@@ -5229,7 +5229,10 @@ fn write_keyword_column(
             let buffer = plan.allowance.buffer(runs.len());
             let mut merge = runs
                 .iter()
-                .map(|run| TextRunReader::open(run, RunPayload::Rows, buffer))
+                .map(|run| {
+                    let file = mosaica_filter_write::run_file(run)?;
+                    Ok(TextRunReader::open(file, run, RunPayload::Rows, buffer))
+                })
                 .collect::<std::io::Result<Vec<_>>>()
                 .and_then(TermMerge::open)
                 .map_err(run_error)?;
@@ -5532,7 +5535,7 @@ impl TextIndexPlan {
         TextIndexPlan {
             chunks: (threads * 8).max(1),
             worker_bytes: allowance.per_worker(),
-            merge_slice_cap: allowance.slice_cap(),
+            merge_slice_cap: mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
             allowance,
         }
     }

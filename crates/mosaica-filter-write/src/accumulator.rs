@@ -57,11 +57,11 @@
 //! # The end of the pass
 //!
 //! What an accumulator holds when its pass ends is not spilled. [`TermAccumulator::finish`] ranks
-//! it once, as a spill would, and hands it back as a [`Held`] source beside its runs, and
-//! [`write_text_index`] merges the runs and the held sources together into the index. The merge's
-//! read buffers are what the allowance leaves beside the held sources, so where they do not leave
-//! enough for the runs, the largest held sources are spilled after all, one at a time, until they
-//! do. A pass that never spilled writes no run at all.
+//! it once, as a spill would, and hands it back as [`Held`] terms beside its runs, and
+//! [`write_text_index`] merges the runs and the held terms together into the index. The merge's
+//! read buffers are what the allowance leaves beside the held terms, so where that is not enough
+//! for the runs, the largest are spilled after all, one accumulator's at a time, until it is. A pass
+//! that never spilled writes no run at all.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -71,8 +71,8 @@ use mosaica_filter::{put_varint, take_varint, VarintError};
 use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
 use crate::merge::{TermMerge, TermSource};
 use crate::spill::{
-    cascade_sorted_runs, encode_entity, fingerprint, merge_descriptors, remove_runs, Allowance,
-    RunPayload, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
+    cascade_sorted_runs, encode_entity, fingerprint, remove_runs, run_file, Allowance, RunPayload,
+    SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
 };
 use crate::text::{write_terms, TextIndexWriter};
 
@@ -324,7 +324,7 @@ impl TermAccumulator {
     /// Write what the accumulator holds as one sorted run, if it holds anything, and empty it,
     /// ranking its terms where `sort` says. A run that fails part-written is removed.
     fn spill(&mut self, sort: SortOn) -> io::Result<()> {
-        let Some(mut held) = self.rank(sort)? else {
+        let Some(held) = self.rank(sort)? else {
             return Ok(());
         };
         let path = self
@@ -373,14 +373,6 @@ impl TermAccumulator {
             pool,
             sorted,
             order,
-            next: 0,
-            state: TermState::default(),
-            chain: Vec::new(),
-            entries: Vec::new(),
-            reading: ChainAt::default(),
-            taken: 0,
-            last: 0,
-            positions: Vec::new(),
         }))
     }
 
@@ -417,7 +409,7 @@ impl Gathered {
 
     /// Spill the held terms as one more run.
     fn spill(&mut self) -> io::Result<()> {
-        if let Some(mut held) = self.held.take() {
+        if let Some(held) = self.held.take() {
             let path = self
                 .dir
                 .join(format!("{}-{:05}.spill", self.stem, self.runs.len()));
@@ -446,10 +438,11 @@ pub struct TextMerge {
 /// each term's entities held as a slice of at most `merge_slice_cap`. Every run is removed,
 /// whether or not the merge succeeds. `family` names the cascade's files in `dir`.
 ///
-/// The held sources stay in memory, and the runs are read through what the allowance leaves
-/// beside them, at least [`RUN_BUFFER_MIN`] a run. Where that is too little, the largest held
-/// source is spilled, and the next, until the runs fit; where every one is spilled and the runs
-/// are more than the allowance's fan-in, they are cascaded first.
+/// The held terms stay in memory, and the runs are read through what the allowance leaves beside
+/// them, at least [`RUN_BUFFER_MIN`] a run. Where that is too little, the largest held terms are
+/// spilled, one accumulator's at a time, until it is enough. Where the runs are then more than
+/// what is left pays for, or than the descriptors a merge may hold, they are cascaded first under
+/// what is left.
 pub fn write_text_index(
     dir: &Path,
     family: &str,
@@ -459,14 +452,12 @@ pub fn write_text_index(
     allowance: Allowance,
 ) -> io::Result<TextMerge> {
     gathered.sort_by_key(Gathered::held_bytes);
-    let fits = |gathered: &[Gathered]| {
+    let short = |gathered: &[Gathered]| {
         let runs: usize = gathered.iter().map(|g| g.runs.len()).sum();
         let held: u64 = gathered.iter().map(Gathered::held_bytes).sum();
-        runs <= merge_descriptors()
-            && (runs as u64).saturating_mul(RUN_BUFFER_MIN as u64)
-                <= allowance.bytes.saturating_sub(held)
+        (runs as u64).saturating_mul(RUN_BUFFER_MIN as u64) > allowance.bytes.saturating_sub(held)
     };
-    while !fits(&gathered) {
+    while short(&gathered) {
         match gathered.iter_mut().rev().find(|g| g.held.is_some()) {
             Some(largest) => largest.spill()?,
             None => break,
@@ -478,33 +469,32 @@ pub fn write_text_index(
         .flat_map(|g| std::mem::take(&mut g.runs))
         .collect();
     drop(gathered);
-    let held_bytes: u64 = held.iter().map(|h| h.allocated() as u64).sum();
+    let left = Allowance {
+        bytes: allowance
+            .bytes
+            .saturating_sub(held.iter().map(|h| h.allocated() as u64).sum()),
+        threads: allowance.threads,
+    };
     let figures = TextMerge {
         runs: runs.len(),
         held: held.len(),
         passes: 0,
     };
 
-    let cascaded = match held.is_empty() {
-        true => cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone(), allowance),
-        false => Ok((runs.clone(), 0)),
-    };
+    let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone(), left);
     // What the accumulators or the cascade's threads freed in their own arenas goes back before
     // the merge's buffers are taken.
     mosaica_types::process::trim_heap();
     let merged = match &cascaded {
-        Ok((left, _)) => {
-            let buffer = Allowance {
-                bytes: allowance.bytes.saturating_sub(held_bytes),
-                threads: allowance.threads,
-            }
-            .buffer(left.len());
-            left.iter()
+        Ok((left_runs, _)) => {
+            let buffer = left.buffer(left_runs.len());
+            left_runs
+                .iter()
                 .map(|run| {
-                    TextRunReader::open(run, RunPayload::Positions, buffer)
-                        .map(|reader| Box::new(reader) as Box<dyn TermSource>)
+                    let file = run_file(run)?;
+                    Ok(Source::Run(TextRunReader::open(file, run, RunPayload::Positions, buffer)))
                 })
-                .chain(held.into_iter().map(|h| Ok(Box::new(h) as Box<dyn TermSource>)))
+                .chain(held.iter().map(|h| Ok(Source::Held(h.cursor()))))
                 .collect::<io::Result<Vec<_>>>()
                 .and_then(TermMerge::open)
                 .and_then(|mut merge| write_terms(&mut merge, writer, merge_slice_cap))
@@ -519,8 +509,47 @@ pub fn write_text_index(
     merged.and(removed).and(passes).map(|passes| TextMerge { passes, ..figures })
 }
 
-/// What an accumulator held when its pass ended, ranked: a [`TermSource`] over its terms in order,
-/// each term's entities read from its chain in the pool.
+/// One source of a text index's merge: a run, or an accumulator's held terms.
+enum Source<'a> {
+    Run(TextRunReader),
+    Held(HeldCursor<'a>),
+}
+
+impl TermSource for Source<'_> {
+    fn next_term(&mut self) -> io::Result<bool> {
+        match self {
+            Source::Run(run) => run.next_term(),
+            Source::Held(held) => held.next_term(),
+        }
+    }
+    fn term(&self) -> &[u8] {
+        match self {
+            Source::Run(run) => run.term(),
+            Source::Held(held) => held.term(),
+        }
+    }
+    fn count(&self) -> u64 {
+        match self {
+            Source::Run(run) => run.count(),
+            Source::Held(held) => held.count(),
+        }
+    }
+    fn next_entity(&mut self) -> io::Result<Option<u32>> {
+        match self {
+            Source::Run(run) => run.next_entity(),
+            Source::Held(held) => held.next_entity(),
+        }
+    }
+    fn positions(&self) -> &[u32] {
+        match self {
+            Source::Run(run) => run.positions(),
+            Source::Held(held) => held.positions(),
+        }
+    }
+}
+
+/// What an accumulator held when its pass ended: its terms, ranked, and each one's chain in the
+/// pool. A [`HeldCursor`] reads them in order.
 pub struct Held {
     keys: Vec<u8>,
     terms: States,
@@ -528,7 +557,66 @@ pub struct Held {
     /// The terms in order, and each one's id in `terms`.
     sorted: Vec<KeyRef>,
     order: Vec<u32>,
-    /// The rank of the next term, and the state of the one the source is at.
+}
+
+impl Held {
+    /// The bytes it holds.
+    fn allocated(&self) -> usize {
+        self.pool.pages.len() * PAGE_BYTES
+            + self.terms.allocated()
+            + self.keys.capacity()
+            + self.sorted.capacity() * std::mem::size_of::<KeyRef>()
+            + self.order.capacity() * std::mem::size_of::<u32>()
+    }
+
+    /// A [`TermSource`] over every term, from the first.
+    fn cursor(&self) -> HeldCursor<'_> {
+        HeldCursor {
+            held: self,
+            next: 0,
+            state: TermState::default(),
+            chain: Vec::new(),
+            entries: Vec::new(),
+            reading: ChainAt::default(),
+            taken: 0,
+            last: 0,
+            positions: Vec::new(),
+        }
+    }
+
+    /// Write every term as one run at `path`, through a buffer of `buffer` bytes: a term of one
+    /// segment copied from the pool as it stands, and one of several re-encoded from its sorted
+    /// entities. A run that fails part-written is removed.
+    fn write_run(&self, path: &Path, buffer: usize) -> io::Result<SpillReceipt> {
+        let written = (|| {
+            let mut writer = TextRunWriter::buffered(path, RunPayload::Positions, buffer)?;
+            let mut cursor = self.cursor();
+            while cursor.next_term()? {
+                let state = &cursor.state;
+                let body = match state.segmented {
+                    true => Body::Sorted(&cursor.chain, &cursor.entries),
+                    false => Body::Chain(&self.pool, state),
+                };
+                let term = cursor.term();
+                writer.push_body(term, state.pairs, state.anchor, |emit| body.write(emit))?;
+            }
+            writer.finish()
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(path);
+        }
+        written
+    }
+}
+
+/// A place in a [`Held`]'s terms, and the term it is at, as a [`TermSource`]. Several may read one
+/// `Held` at once.
+///
+/// A term of several segments has its chain copied and its entities sorted, eight bytes an entity
+/// beside the copy, kept at the size of the largest such term.
+struct HeldCursor<'a> {
+    held: &'a Held,
+    /// The rank of the next term, and the state of the one the cursor is at.
     next: usize,
     state: TermState,
     /// A term of several segments: its chain, and its entities sorted, each with where its
@@ -543,65 +631,30 @@ pub struct Held {
     positions: Vec<u32>,
 }
 
-impl Held {
-    /// The bytes it holds.
-    fn allocated(&self) -> usize {
-        self.pool.pages.len() * PAGE_BYTES
-            + self.terms.allocated()
-            + self.keys.capacity()
-            + self.sorted.capacity() * std::mem::size_of::<KeyRef>()
-            + self.order.capacity() * std::mem::size_of::<u32>()
-            + self.chain.capacity()
-            + self.entries.capacity() * std::mem::size_of::<(u32, u32)>()
-    }
-
-    /// Write every term as one run at `path`, through a buffer of `buffer` bytes: a term of one
-    /// segment copied from the pool as it stands, and one of several re-encoded from its sorted
-    /// entities. A run that fails part-written is removed.
-    fn write_run(&mut self, path: &Path, buffer: usize) -> io::Result<SpillReceipt> {
-        let written = (|| {
-            let mut writer = TextRunWriter::buffered(path, RunPayload::Positions, buffer)?;
-            while self.next_term()? {
-                let term = key_bytes(&self.keys, &self.sorted[self.next - 1]);
-                let state = &self.state;
-                let body = match state.segmented {
-                    true => Body::Sorted(&self.chain, &self.entries),
-                    false => Body::Chain(&self.pool, state),
-                };
-                writer.push_body(term, state.pairs, state.anchor, |emit| body.write(emit))?;
-            }
-            writer.finish()
-        })();
-        if written.is_err() {
-            let _ = std::fs::remove_file(path);
-        }
-        written
-    }
-}
-
-impl TermSource for Held {
+impl TermSource for HeldCursor<'_> {
     fn next_term(&mut self) -> io::Result<bool> {
-        let Some(&id) = self.order.get(self.next) else {
+        let held = self.held;
+        let Some(&id) = held.order.get(self.next) else {
             return Ok(false);
         };
-        let term = key_bytes(&self.keys, &self.sorted[self.next]);
+        let term = key_bytes(&held.keys, &held.sorted[self.next]);
         self.next += 1;
-        self.state = *self.terms.get(id);
+        self.state = *held.terms.get(id);
         self.taken = 0;
         if self.state.segmented {
             self.chain.clear();
             let chain = &mut self.chain;
-            self.pool
+            held.pool
                 .slices(&self.state, |slice| chain.extend_from_slice(slice));
             sort_segments(term, &self.chain, &mut self.entries)?;
         } else {
-            self.reading = self.pool.chain(&self.state);
+            self.reading = held.pool.chain(&self.state);
         }
         Ok(true)
     }
 
     fn term(&self) -> &[u8] {
-        key_bytes(&self.keys, &self.sorted[self.next - 1])
+        key_bytes(&self.held.keys, &self.held.sorted[self.next - 1])
     }
 
     fn count(&self) -> u64 {
@@ -620,7 +673,7 @@ impl TermSource for Held {
             read_positions(|| next(chain, &mut at), &mut self.positions)?;
             entity
         } else {
-            let (pool, reading) = (&self.pool, &mut self.reading);
+            let (pool, reading) = (&self.held.pool, &mut self.reading);
             let gap = pool.varint(reading)?;
             let entity = match self.taken {
                 0 => gap,
@@ -992,21 +1045,21 @@ mod tests {
             if spill {
                 gathered.spill().unwrap();
             }
-            let mut sources: Vec<Box<dyn TermSource>> = gathered
+            let held = gathered.held.take();
+            let mut sources: Vec<Source<'_>> = gathered
                 .runs
                 .iter()
                 .map(|run| {
-                    let reader =
-                        TextRunReader::open(run, RunPayload::Positions, RUN_BUFFER_MIN).unwrap();
-                    Box::new(reader) as Box<dyn TermSource>
+                    let file = run_file(run).unwrap();
+                    Source::Run(TextRunReader::open(
+                        file,
+                        run,
+                        RunPayload::Positions,
+                        RUN_BUFFER_MIN,
+                    ))
                 })
                 .collect();
-            sources.extend(
-                gathered
-                    .held
-                    .take()
-                    .map(|held| Box::new(held) as Box<dyn TermSource>),
-            );
+            sources.extend(held.iter().map(|held| Source::Held(held.cursor())));
 
             let mut merge = TermMerge::open(sources).unwrap();
             let mut read: BTreeMap<Vec<u8>, BTreeMap<u32, Vec<u32>>> = BTreeMap::new();

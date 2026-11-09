@@ -122,7 +122,7 @@ pub use record::{
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
 pub use spill::{
-    at_end, cascade_sorted_runs, merge_descriptors, read_varint, Allowance, RunPayload,
+    at_end, cascade_sorted_runs, merge_descriptors, read_varint, run_file, Allowance, RunPayload,
     SpillFileError, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
     WORKER_BYTES_MIN,
 };
@@ -796,11 +796,11 @@ mod tests {
         let c_present = bitmap([2]);
         let out = |tag: &str| text_files(dir, &format!("{tag}-out"));
         let fold = |inputs: &[TextLayerRef<'_>], tombstones: &Bitmap, tag: &str| {
-            merge_text_layers(inputs, tombstones, out(tag), Allowance::new(0, 0, 1))
+            merge_text_layers(inputs, tombstones, out(tag))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
         let coalesce = |inputs: &[TextLayerRef<'_>], tag: &str| {
-            coalesce_text_extents(inputs, out(tag), Allowance::new(0, 0, 1))
+            coalesce_text_extents(inputs, out(tag))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
 

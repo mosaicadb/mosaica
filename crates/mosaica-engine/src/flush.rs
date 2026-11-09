@@ -1700,7 +1700,7 @@ fn write_text_layer(
         &format!("{}-text-merge", target.seg_id),
         vec![terms.finish().map_err(failed)?],
         &mut writer,
-        allowance.slice_cap(),
+        mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
         allowance,
     )
     .map_err(failed)?;

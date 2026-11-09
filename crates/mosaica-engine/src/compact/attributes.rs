@@ -94,7 +94,6 @@ pub(super) fn fold_text_columns(
         |d| d.arrow_type == ScalarType::Text && d.index,
         |f| f.arrow_type == ScalarType::Text && f.index,
     );
-    let allowance = crate::write::writer_allowance();
     for job in &jobs {
         let column_rel = job.rel.clone();
         let from_dir = ctx.from_prefix_dir.join(&column_rel);
@@ -154,11 +153,9 @@ pub(super) fn fold_text_columns(
                 present: &layer.present,
             })
             .collect();
-        mosaica_filter_write::merge_text_layers(&inputs, &plan.tombstones, to.clone(), allowance)
-            .map_err(failed(Pass::Attributes.at(format!(
-                "text: column '{}'",
-                job.name
-            ))))?;
+        mosaica_filter_write::merge_text_layers(&inputs, &plan.tombstones, to.clone()).map_err(
+            failed(Pass::Attributes.at(format!("text: column '{}'", job.name))),
+        )?;
 
         for (name, path) in [
             mosaica_filter::DICT_FILE,
