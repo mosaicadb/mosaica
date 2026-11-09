@@ -202,7 +202,7 @@ impl Engine {
     /// `expr` routed in `side` and, where it routes to row space, evaluated over every row of the
     /// view it can match: the rows of the drawn region that bounds it ([`bounding_region`]), and
     /// the whole view where none does. `choice` decides a column with both routes, the same in every
-    /// side of the request ([`Engine::region_routes`]).
+    /// side of the request ([`Engine::region_costs`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn route_over_view(
         &self,
@@ -244,19 +244,19 @@ impl Engine {
     /// What a column with both routes costs in `expr` over the whole view, decided once for every
     /// side `mask` reads as the viewport decides it for a request's tiles: over the rows of the
     /// drawn region that bounds `expr` in every side. `None` where no region bounds it, and such a
-    /// column then takes the entity route ([`ViewLeafCosts::routes`]).
-    pub(crate) fn region_costs<'r>(
-        &'r self,
-        served: &'r ServedView<'r>,
+    /// column then takes the entity route.
+    pub(crate) fn region_costs(
+        &self,
+        served: &ServedView<'_>,
         mask: &ShardedMask,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         expr: &crate::filter::FilterExpr,
-    ) -> Result<Option<ViewLeafCosts<'r>>> {
+    ) -> Result<Option<ViewLeafCosts>> {
         let Some(leaf) = bounding_region(expr) else {
             return Ok(None);
         };
-        let mut sides = Vec::new();
+        let mut domains = Vec::new();
         for (_, side, _) in served.filtered_sides(mask) {
             let held = self
                 .region_rows(leaf, served, side, resolved, cancel)
@@ -264,83 +264,98 @@ impl Engine {
             let Some(domain) = held.domain else {
                 return Ok(None);
             };
-            sides.push((side, domain.to_vec()));
+            domains.push((side, domain));
         }
-        Ok(Some(self.leaf_costs(served, sides, mask.visible_total())))
+        let sides: Vec<_> = domains.iter().map(|(side, domain)| (*side, &domain[..])).collect();
+        Ok(Some(self.leaf_costs(served, &sides, mask.visible_total(), [expr])))
     }
 
-    /// [`ViewLeafCosts`] over `sides`, each with the rows the request reads there.
-    pub(crate) fn leaf_costs<'r>(
-        &'r self,
-        served: &'r ServedView<'r>,
-        sides: Vec<(&'r ServedSide<'r>, Vec<Range<u32>>)>,
+    /// [`ViewLeafCosts`] for every leaf of `exprs` over `sides`, each with the rows the request
+    /// reads there.
+    pub(crate) fn leaf_costs<'e>(
+        &self,
+        served: &ServedView<'_>,
+        sides: &[(&ServedSide<'_>, &[Range<u32>])],
         visible: u64,
-    ) -> ViewLeafCosts<'r> {
+        exprs: impl IntoIterator<Item = &'e crate::filter::FilterExpr>,
+    ) -> ViewLeafCosts {
+        fn leaves<'e>(
+            expr: &'e crate::filter::FilterExpr,
+            out: &mut Vec<(&'e str, &'e FilterOperand)>,
+        ) {
+            use crate::filter::FilterExpr;
+            match expr {
+                FilterExpr::Leaf { column, operand } => out.push((column, operand)),
+                FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
+                    kids.iter().for_each(|kid| leaves(kid, out))
+                }
+                FilterExpr::Region(_) | FilterExpr::MemberOf(_) => {}
+            }
+        }
+        let mut named = Vec::new();
+        exprs.into_iter().for_each(|expr| leaves(expr, &mut named));
+        let grant = served.session.terms_digest();
+        let priced = named
+            .into_iter()
+            .map(|(column, operand)| {
+                let mut cost = crate::filter::LeafCost {
+                    posting: Some(0),
+                    kept: 0,
+                };
+                for (side, domain) in sides {
+                    let posting = side.shard.filter_columns.posting_entities(column, operand);
+                    cost.posting = cost.posting.zip(posting).map(|(sum, held)| sum + held);
+                    let key = crate::filter_cache::row_key_of(
+                        side.shard,
+                        grant,
+                        served.name,
+                        side.data.incarnation,
+                        column,
+                        operand,
+                    );
+                    cost.kept += crate::filter_cache::kept_rows(&self.filter_cache, key, domain);
+                }
+                (column.to_string(), operand.clone(), cost)
+            })
+            .collect();
         ViewLeafCosts {
-            engine: self,
-            grant: served.session.terms_digest(),
-            view: served.name,
             rows: sides
                 .iter()
-                .flat_map(|(_, domain)| domain)
+                .flat_map(|(_, domain)| domain.iter())
                 .map(|r| u64::from(r.end - r.start))
                 .sum(),
             visible,
-            sides,
-            priced: std::sync::Mutex::new(Vec::new()),
+            priced,
         }
     }
 }
 
-/// What a leaf over a column with both routes costs over the rows one request reads in each side:
-/// the postings it holds and the rows the filter cache already holds for it, summed over the sides.
-pub(crate) struct ViewLeafCosts<'r> {
-    engine: &'r Engine,
-    grant: [u8; 32],
-    view: &'r str,
-    sides: Vec<(&'r ServedSide<'r>, Vec<Range<u32>>)>,
+/// What each leaf over a column with both routes costs over the rows one request reads in each
+/// side: the postings it holds and the rows the filter cache already holds for it, summed over the
+/// sides.
+pub(crate) struct ViewLeafCosts {
     rows: u64,
     visible: u64,
-    /// Each leaf priced so far: routing a tree prices a leaf once for every node above it.
-    priced: std::sync::Mutex<Vec<(String, FilterOperand, crate::filter::LeafCost)>>,
+    priced: Vec<(String, FilterOperand, crate::filter::LeafCost)>,
 }
 
-impl ViewLeafCosts<'_> {
+impl ViewLeafCosts {
     /// The route each such leaf takes, chosen by these costs.
     pub(crate) fn routes(&self) -> crate::filter::RouteChoice<'_> {
         crate::filter::RouteChoice::Cheaper {
             rows: self.rows,
             visible: self.visible,
-            leaf: self,
+            costs: self,
         }
     }
 }
 
-impl crate::filter::LeafCosts for ViewLeafCosts<'_> {
+impl crate::filter::LeafCosts for ViewLeafCosts {
     fn cost(&self, column: &str, operand: &FilterOperand) -> crate::filter::LeafCost {
-        let mut priced = self.priced.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((_, _, cost)) = priced.iter().find(|(c, o, _)| c == column && o == operand) {
-            return *cost;
-        }
-        let mut cost = crate::filter::LeafCost {
-            posting: Some(0),
-            kept: 0,
-        };
-        for (side, domain) in &self.sides {
-            let posting = side.shard.filter_columns.posting_entities(column, operand);
-            cost.posting = cost.posting.zip(posting).map(|(sum, held)| sum + held);
-            let key = crate::filter_cache::row_key_of(
-                side.shard,
-                self.grant,
-                self.view,
-                side.data.incarnation,
-                column,
-                operand,
-            );
-            cost.kept += crate::filter_cache::kept_rows(&self.engine.filter_cache, key, domain);
-        }
-        priced.push((column.to_string(), operand.clone(), cost));
-        cost
+        self.priced
+            .iter()
+            .find(|(c, o, _)| c == column && o == operand)
+            .map_or_else(Default::default, |(_, _, cost)| *cost)
     }
 }
 
@@ -1152,11 +1167,16 @@ impl Engine {
         check_cancelled(&req.cancel)?;
         // The route rule reads the request's whole extent and visible total, and every shard's
         // postings and kept rows, so a leaf takes the same space in every shard.
-        let sides = served
+        let placed: Vec<_> = served
             .filtered_sides(&mask)
-            .map(|(place, side, _)| (side, tiling.domain_in(place).0))
+            .map(|(place, side, _)| (side, tiling.domain_in(place)))
             .collect();
-        let costs = self.leaf_costs(served, sides, v_total);
+        let sides: Vec<_> = placed
+            .iter()
+            .map(|(side, (domain, _))| (*side, &domain[..]))
+            .collect();
+        let exprs = req.filter.iter().chain(req.highlight.iter());
+        let costs = self.leaf_costs(served, &sides, v_total, exprs);
         let choice = costs.routes();
         let mut region_verdict: Option<crate::region::RegionVerdict> = None;
         let mut filters = Vec::new();
@@ -1166,12 +1186,13 @@ impl Engine {
         let may_narrow = self.switches.tile_filters_enabled.load(Ordering::Relaxed)
             && (always || narrowing_may_pay(tiling.rows_in_ranges, v_total));
         let grant = served.session.terms_digest();
-        for (place, side, _) in served.filtered_sides(&mask) {
-            let (domain, rows_in_ranges) = tiling.domain_in(place);
-            let domain_rows = crate::compose::rows_of(&domain);
+        let keeps = self.filter_cache.bound_bytes() > 0;
+        for (side, (domain, rows_in_ranges)) in &placed {
+            let (side, rows_in_ranges) = (*side, *rows_in_ranges);
+            let domain_rows = crate::compose::rows_of(domain);
             let tiles = may_narrow.then_some(&domain_rows);
             let within = match tiles {
-                Some(tiles) => self.tiles_candidate(served, side, &domain, tiles, rows_in_ranges)?,
+                Some(tiles) => self.tiles_candidate(served, side, domain, tiles, rows_in_ranges)?,
                 None => None,
             };
             let candidate = match &within {
@@ -1186,82 +1207,73 @@ impl Engine {
                                         per_tile_only: bool,
                                         count_matched: bool|
                      -> Result<(FilterRows, Option<crate::region::RegionVerdict>)> {
-                        let projection = crate::filter_cache::projection_key_of(
-                            side.shard,
-                            grant,
-                            served.name,
-                            side.data.incarnation,
-                            expr,
-                        );
-                        let projected = |rows, unmasked| RoutedRows {
-                            rows: FilterRows::Viewport {
-                                rows,
-                                domain: domain.clone(),
-                            },
-                            region: None,
-                            unmasked,
-                        };
-                        let buffered = |mut rows: croaring::Bitmap| -> Result<croaring::Bitmap> {
-                            rows |= self
-                                .buffered_matches(served, side, &resolved, &req.cancel, expr)?
-                                .and(&domain_rows);
-                            Ok(rows)
-                        };
+                        let projection = keeps
+                            .then(|| {
+                                crate::filter_cache::projection_key_of(
+                                    side.shard,
+                                    grant,
+                                    served.name,
+                                    side.data.incarnation,
+                                    expr,
+                                )
+                            })
+                            .flatten();
                         let kept = projection.as_ref().and_then(|key| {
                             crate::filter_cache::projected_rows(&self.filter_cache, key, &domain_rows)
                         });
-                        let mut out = if let Some(rows) = kept {
-                            projected(buffered(rows)?, None)
-                        } else {
-                            let routed = route(expr, choice)?;
-                            probe.lap(|t| &mut t.filter_eval_ns);
-                            // Kept where this request projects its own result anyway, and never
-                            // from a candidate narrowed to the tiles.
-                            let matched = match &routed {
-                                crate::filter::RoutedFilter::Entity(entities)
-                                    if within.is_none() =>
-                                {
-                                    Some(entities.cardinality()).filter(|&matched| {
-                                        crossing_projects(
-                                            &side.data.row_space,
-                                            matched,
-                                            rows_in_ranges,
-                                            per_tile_only,
-                                        )
-                                    })
-                                }
-                                _ => None,
-                            };
-                            let built = match (matched, projection) {
-                                (Some(matched), Some(key)) => self
-                                    .project_kept(
-                                        served,
-                                        side,
-                                        &resolved,
-                                        &req.cancel,
-                                        expr,
-                                        key,
-                                        &domain_rows,
-                                    )?
-                                    .map(buffered)
-                                    .transpose()?
-                                    .map(|rows| projected(rows, Some(matched))),
-                                _ => None,
-                            };
-                            match built {
-                                Some(out) => out,
-                                None => self.rows_of_routed(
+                        // Built where the request evaluates every item it may see, never only those
+                        // of its tiles.
+                        let builds = within.is_none()
+                            && side.shard.filter_columns.routes_to_items(expr, choice);
+                        let found = match (kept, projection) {
+                            (Some(rows), _) => Some(RoutedRows {
+                                rows: FilterRows::Viewport {
+                                    rows,
+                                    domain: domain.to_vec(),
+                                },
+                                region: None,
+                                unmasked: None,
+                            }),
+                            (None, Some(key)) if builds => Some(self.rows_over_fragment(
+                                served,
+                                side,
+                                &resolved,
+                                &req.cancel,
+                                expr,
+                                key,
+                                (domain, &domain_rows, rows_in_ranges),
+                                per_tile_only,
+                            )?),
+                            _ => None,
+                        };
+                        let mut out = match found {
+                            Some(found) => {
+                                probe.lap(|t| &mut t.filter_eval_ns);
+                                self.with_buffered(
+                                    served,
+                                    side,
+                                    &resolved,
+                                    &req.cancel,
+                                    expr,
+                                    &domain_rows,
+                                    found,
+                                )?
+                            }
+                            None => {
+                                let routed = route(expr, choice)?;
+                                probe.lap(|t| &mut t.filter_eval_ns);
+                                self.rows_of_routed(
                                     served,
                                     side,
                                     routed,
-                                    &domain,
+                                    domain,
                                     rows_in_ranges,
                                     per_tile_only,
-                                )?,
+                                )?
                             }
                         };
                         if let (Some(tiles), Some(_)) = (tiles, &within) {
-                            out.rows = out.rows.held_to(tiles, domain.clone());
+                            out.rows = out.rows.held_to(tiles, domain.to_vec());
                         }
                         if let (true, Some(matched)) = (count_matched, out.unmasked) {
                             probe.count(|t| &mut t.filter_matched, matched);
@@ -1303,12 +1315,12 @@ impl Engine {
         ))
     }
 
-    /// The rows of `domain_rows`, before the mask, of the items `expr` matches among those the
-    /// session's grant admits in `side`: `expr` evaluated over the grant's fragment, as the filter
-    /// cache evaluates a leaf, projected into the view whole and kept in the filter cache under
-    /// `key`. `None` where `expr` does not route to items alone.
+    /// `expr`'s rows over a request's domain in `side`, given as its ranges, its rows and how many
+    /// rows it holds, before the mask and without the request's buffered items: `expr` evaluated
+    /// once, over the grant's fragment ([`Self::items_over_fragment`]), and crossed into the view.
+    /// Where it is projected whole, its rows are kept in the filter cache under `key`.
     #[allow(clippy::too_many_arguments)]
-    fn project_kept(
+    fn rows_over_fragment(
         &self,
         served: &ServedView<'_>,
         side: &ServedSide<'_>,
@@ -1316,22 +1328,16 @@ impl Engine {
         cancel: &Option<CancelToken>,
         expr: &crate::filter::FilterExpr,
         key: (crate::filter_cache::LeafKey, Vec<u8>),
-        domain_rows: &croaring::Bitmap,
-    ) -> Result<Option<croaring::Bitmap>> {
-        let fragment = self.fragment_for(served.session, side.shard, Some(&side.geometry.fragment))?;
-        let fragment = fragment.view();
-        let routed = self.route_filters_under(
-            served,
-            side,
-            FilterCandidate::Whole(&fragment),
-            resolved,
-            cancel,
-            |route| route(expr, crate::filter::RouteChoice::Entity),
-        )?;
-        let crate::filter::RoutedFilter::Entity(items) = routed else {
-            return Ok(None);
-        };
+        (domain, domain_rows, rows_in_ranges): (&[Range<u32>], &croaring::Bitmap, u64),
+        per_tile_only: bool,
+    ) -> Result<RoutedRows> {
+        let items = self.items_over_fragment(served, side, resolved, cancel, expr)?;
         let row_space = &side.data.row_space;
+        let matched = items.cardinality();
+        if !crossing_projects(row_space, matched, rows_in_ranges, per_tile_only) {
+            let routed = crate::filter::RoutedFilter::Entity(items);
+            return self.rows_of_routed(served, side, routed, domain, rows_in_ranges, per_tile_only);
+        }
         let rows = row_space.project(&items);
         let answer = rows.and(domain_rows);
         let total_rows = u32::try_from(row_space.total_rows()).unwrap_or(u32::MAX);
@@ -1339,7 +1345,79 @@ impl Engine {
         self.counters
             .filter_crossings_projected
             .fetch_add(1, Ordering::Relaxed);
-        Ok(Some(answer))
+        Ok(RoutedRows {
+            rows: FilterRows::Viewport {
+                rows: answer,
+                domain: domain.to_vec(),
+            },
+            region: None,
+            unmasked: Some(matched),
+        })
+    }
+
+    /// `out` with the rows of `expr`'s matches among the request's buffered items added
+    /// ([`Self::buffered_matches`]), within `domain_rows` where `out` answers over a domain.
+    #[allow(clippy::too_many_arguments)]
+    fn with_buffered(
+        &self,
+        served: &ServedView<'_>,
+        side: &ServedSide<'_>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+        expr: &crate::filter::FilterExpr,
+        domain_rows: &croaring::Bitmap,
+        mut out: RoutedRows,
+    ) -> Result<RoutedRows> {
+        let extra = self.buffered_matches(served, side, resolved, cancel, expr)?;
+        if !extra.is_empty() {
+            out.rows = match out.rows {
+                FilterRows::Complete(rows) => FilterRows::Complete(rows.or(&extra)),
+                FilterRows::Viewport { rows, domain } => FilterRows::Viewport {
+                    rows: rows.or(&extra.and(domain_rows)),
+                    domain,
+                },
+            };
+        }
+        Ok(out)
+    }
+
+    /// The items `expr` matches among those the session's grant admits in `side`, before deletions
+    /// and suppressions: `expr` evaluated in entity space over the grant's fragment, as the filter
+    /// cache evaluates a leaf.
+    fn items_over_fragment(
+        &self,
+        served: &ServedView<'_>,
+        side: &ServedSide<'_>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+        expr: &crate::filter::FilterExpr,
+    ) -> Result<croaring::Bitmap> {
+        let fragment = self.fragment_for(served.session, side.shard, Some(&side.geometry.fragment))?;
+        let fragment = fragment.view();
+        let candidate = FilterCandidate::Whole(&fragment);
+        self.items_under(served, side, candidate, resolved, cancel, expr)
+    }
+
+    /// The items `expr` matches under `candidate` in `side`, evaluated in entity space. `expr`
+    /// must route there under [`crate::filter::RouteChoice::Entity`].
+    fn items_under(
+        &self,
+        served: &ServedView<'_>,
+        side: &ServedSide<'_>,
+        candidate: FilterCandidate<'_>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+        expr: &crate::filter::FilterExpr,
+    ) -> Result<croaring::Bitmap> {
+        let routed = self.route_filters_under(served, side, candidate, resolved, cancel, |route| {
+            route(expr, crate::filter::RouteChoice::Entity)
+        })?;
+        match routed {
+            crate::filter::RoutedFilter::Entity(items) => Ok(items),
+            crate::filter::RoutedFilter::Row(_) => {
+                unreachable!("an expression routed to entity space has no row leaf")
+            }
+        }
     }
 
     /// The rows in `side` of the items `expr` matches among the request's candidate set's buffered
@@ -1353,13 +1431,11 @@ impl Engine {
         cancel: &Option<CancelToken>,
         expr: &crate::filter::FilterExpr,
     ) -> Result<croaring::Bitmap> {
-        let buffered: croaring::Bitmap = side
-            .shard
-            .buffered_rows(served.name)
-            .unwrap_or_default()
-            .iter()
-            .map(|entity| entity.raw() as u32)
-            .collect();
+        let entity = |entity: &mosaica_types::EntityId| u32::try_from(entity.raw()).ok();
+        let buffered: croaring::Bitmap = match side.shard.buffered_rows(served.name) {
+            Some(listed) => listed.iter().filter_map(entity).collect(),
+            None => side.shard.buffer.iter().filter_map(|(id, _)| entity(id)).collect(),
+        };
         if buffered.is_empty() {
             return Ok(croaring::Bitmap::new());
         }
@@ -1369,18 +1445,9 @@ impl Engine {
             Some(&side.geometry.fragment),
             &buffered,
         )?;
-        let routed = self.route_filters_under(
-            served,
-            side,
-            FilterCandidate::Within(&candidate),
-            resolved,
-            cancel,
-            |route| route(expr, crate::filter::RouteChoice::Entity),
-        )?;
-        Ok(match routed {
-            crate::filter::RoutedFilter::Entity(items) => side.data.row_space.project(&items),
-            crate::filter::RoutedFilter::Row(_) => croaring::Bitmap::new(),
-        })
+        let candidate = FilterCandidate::Within(&candidate);
+        let items = self.items_under(served, side, candidate, resolved, cancel, expr)?;
+        Ok(side.data.row_space.project(&items))
     }
 
     /// The visible entities whose rows lie in `domain`, the rows a request's tiles span in `side`

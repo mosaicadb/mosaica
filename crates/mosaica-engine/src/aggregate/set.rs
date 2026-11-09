@@ -269,7 +269,7 @@ pub(super) fn compose(
         _ => None,
     };
     let resolved = ResolvedLeaves::new(&open.mask);
-    let costs = |expr: Option<&FilterExpr>| -> Result<Option<ViewLeafCosts<'_>>> {
+    let costs = |expr: Option<&FilterExpr>| -> Result<Option<ViewLeafCosts>> {
         match expr {
             Some(expr) if !prefer_row => {
                 engine.region_costs(served, &open.mask, &resolved, &req.cancel, expr)

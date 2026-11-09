@@ -30,8 +30,8 @@ use croaring::Bitmap;
 use mosaica_build::config::Config;
 use mosaica_build::{build, BuildArgs};
 use mosaica_engine::filter::{
-    candidate, RouteChoice, ComposeError, Endpoint, FilterColumns, FilterError, FilterExpr,
-    FilterOperand, OpenedExtent, Scalar, MAX_FILTER_DEPTH,
+    candidate, ComposeError, Endpoint, FilterColumns, FilterError, FilterExpr, FilterOperand,
+    OpenedExtent, RouteChoice, Scalar, MAX_FILTER_DEPTH,
 };
 use mosaica_engine::ViewportRequest;
 use mosaica_lifecycle::command::UnallocatedRow;
@@ -4750,10 +4750,11 @@ fn rows_already_kept_are_read_on_the_row_route() {
 /// **An entity-route filter's rows are kept per grant and read by every later viewport.** The
 /// first request over the whole extent projects the items `archive` `xx` matches and keeps their
 /// rows; a repeat, and a narrow window that would take the row route, read them and project
-/// nothing. A disjunction and a negation are kept the same way. Another grant keeps its own, a
-/// suppression removes its item from the kept rows' answer at once, items buffered after a deletion
-/// are answered as an engine keeping nothing answers them, and a flush projects again with the
-/// flushed item. Every answer is the one an engine keeping nothing gives.
+/// nothing. A disjunction and a negation are kept the same way, and a filter naming a unique field
+/// is not. Another grant keeps its own, a suppression and its lift reach the kept rows' answer at
+/// once, as do a deletion and items buffered after it, and a flush projects again with the flushed
+/// item. Every answer is the one an engine keeping nothing gives, and the one the fixture's values
+/// give.
 #[test]
 fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
     let fx = fixture();
@@ -4821,6 +4822,18 @@ fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
         assert_eq!((got, projected), (others.clone(), want_projected), "a negation is kept");
     }
 
+    let by_id = FilterExpr::AnyOf(vec![
+        xx(),
+        leaf("id", FilterOperand::NumEquals(Scalar::Int(5))),
+    ]);
+    let five = std::collections::BTreeSet::from([id_of(5)]);
+    for _ in 0..2 {
+        let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &by_id);
+        let want: std::collections::BTreeSet<u64> =
+            want(&["xx"], &everyone).union(&five).copied().collect();
+        assert_eq!((got, projected), (want, 1), "a unique field's filter is not kept");
+    }
+
     let part = engine.authorise(&subset_credential()).unwrap();
     let sees = |e: u64| terms_of(e).contains(&SUBSET_TERM);
     let (got, projected, _) = ask(&part, 0, FULL_VIEWPORT, &xx());
@@ -4835,12 +4848,18 @@ fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
             mosaica_lifecycle::wal::ChangeOp::Suppress,
         )
         .expect("a suppression is accepted");
+    let shown = |e: u64| e != hidden;
     let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
-    assert_eq!(projected, 0, "a suppression leaves the kept rows");
-    assert!(!got.contains(&id_of(hidden)) && got.len() == first.len() - 1);
+    assert_eq!((got, projected), (want(&["xx"], &shown), 0), "a suppression leaves the kept rows");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&hidden]),
+            mosaica_lifecycle::wal::ChangeOp::Unsuppress,
+        )
+        .expect("a lift is accepted");
+    let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((got, projected), (first.clone(), 0), "a lift reaches the kept rows' answer");
 
-    // A deleted item's number may be issued to the next item a window inserts, so the buffer can
-    // hold an item whose number already has a row in the view.
     let deleted = (0..N)
         .find(|&e| archive_of(e).is_none())
         .expect("an item carries no archive");
@@ -4850,11 +4869,25 @@ fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
             mosaica_lifecycle::wal::ChangeOp::Delete,
         )
         .expect("a deletion is accepted");
-    for (external, archive) in [("buffered-none", WalScalar::Null), ("buffered-yy", WalScalar::Utf8("yy".to_string()))] {
+    for (external, archive) in [
+        ("buffered-none", WalScalar::Null),
+        ("buffered-xx", WalScalar::Utf8("xx".to_string())),
+    ] {
         ingest_buffered_with(&engine, external, archive);
     }
-    for expr in [xx(), neither.clone(), either.clone()] {
-        ask(&full, 0, FULL_VIEWPORT, &expr);
+    // A buffered item has no row in the view yet, so no answer draws it.
+    let live = |e: u64| e != deleted;
+    let not_xx: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| live(e) && archive_of(e) != Some("xx"))
+        .map(id_of)
+        .collect();
+    for (expr, expected) in [
+        (xx(), want(&["xx"], &live)),
+        (neither.clone(), not_xx),
+        (either.clone(), want(&["xx", "zz"], &live)),
+    ] {
+        let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &expr);
+        assert_eq!((got, projected), (expected, 0), "{expr:?} after a deletion and an ingest");
     }
 
     let flushed = ingest_and_flush_with(

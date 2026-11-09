@@ -371,8 +371,9 @@ struct RawServe {
     /// filter does not run it again. A condition is a `match` or `phrase`, or a range, an `eq` or
     /// an `in` on a column, each kept apart so a combined filter reuses its parts. One entry is a
     /// bitmap over a shard's items, about 12 MB at 10⁸ items for a condition half of them match,
-    /// scattered. A filter answered from the items' values alone also keeps the map rows of the
-    /// items it matches, so a later viewport reads them instead of finding them again. A condition
+    /// scattered. A filter answered over the whole map from the items' values, and naming no unique
+    /// field, also keeps the map rows of the items it matches, so a later viewport reads them
+    /// instead of finding them again. A condition
     /// on a rendered column answered from the map's rows keeps the rows it has read and those it
     /// matched, and a pan reads only the rows it brings into view. A merge also starts either kind
     /// of rows again. Each request in flight can hold one evicted entry beside the bound. `0` keeps

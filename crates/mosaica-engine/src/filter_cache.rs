@@ -37,14 +37,14 @@
 //!
 //! # Projections
 //!
-//! An expression answered in entity space alone also keeps the rows in one view of the items it
-//! matches among those the grant admits, before deletions and suppressions are taken out. Each of
-//! its leaves decides each item by the item alone, so its answer over a request's candidate is
-//! that set intersected with the candidate, plus whatever it matches among the candidate's
-//! buffered items, which the grant's fragment does not hold. A request reads the rows over its own
-//! domain, adds the rows of those buffered items it matches, and narrows the answer through its
-//! composed mask, which removes exactly the rows of items outside the candidate. The entry is a
-//! row entry covering every row of the view, under a key of its own.
+//! An expression whose leaves decide each item from its own values
+//! ([`FilterColumns::answered_over_items`]) also keeps the rows in one view of the items it matches
+//! among those the grant admits, before deletions and suppressions are taken out. Its answer over
+//! a request's candidate is that set intersected with the candidate, plus whatever it matches
+//! among the candidate's buffered items, which the grant's fragment does not hold. A request reads
+//! the rows over its own domain, adds the rows of those buffered items it matches, and narrows the
+//! answer through its composed mask, which removes exactly the rows of items outside the
+//! candidate. The entry is a row entry covering every row of the view, under a key of its own.
 //!
 //! # Bound and peak
 //!
@@ -55,9 +55,10 @@
 //! peak ≈ filter_cache_bytes + compute_admission × the largest answer
 //! ```
 //!
-//! An answer is a bitmap over the shard's entities: about 12 MB at 10⁸ entities for a phrase or a
-//! range that half of them match, scattered, and kilobytes for a topical one. The leaf's canonical
-//! bytes are held and counted beside it.
+//! An entity leaf's answer is a bitmap over the shard's entities: about 12 MB at 10⁸ entities for a
+//! phrase or a range that half of them match, scattered, and kilobytes for a topical one. A row
+//! entry is a bitmap over one view's rows, the same size for the same matches, and a request that
+//! builds one holds it until it is kept. The canonical bytes are held and counted beside each.
 
 use std::ops::Range;
 use std::sync::{Arc, Weak};
@@ -311,8 +312,8 @@ fn key_over(
 }
 
 /// The key of the rows, in `view` at `incarnation`, of the items `expr` matches in `shard` for
-/// `grant`, and its canonical bytes; `None` for an expression the shard's filter columns do not
-/// answer in entity space alone ([`FilterColumns::answered_over_items`]).
+/// `grant`, and its canonical bytes; `None` for an expression whose leaves do not decide each item
+/// from its own values ([`FilterColumns::answered_over_items`]).
 pub(crate) fn projection_key_of(
     shard: &Shard,
     grant: [u8; 32],
@@ -324,6 +325,7 @@ pub(crate) fn projection_key_of(
         let kids = match expr {
             FilterExpr::Leaf { column, operand } => {
                 let leaf = canonical(column, LeafQuery::Value(operand));
+                out.push(3);
                 out.extend_from_slice(&(leaf.len() as u32).to_le_bytes());
                 out.extend_from_slice(&leaf);
                 return Some(());
@@ -425,7 +427,10 @@ pub(crate) fn rows_answer<E>(
         Peek::Ready(_) => return scan(domain),
         Peek::Building | Peek::Absent => {
             let fresh = scan(domain)?;
-            keep(cache, shard, key, canonical, wanted.clone(), fresh.clone());
+            let size = |bitmap: &Bitmap| bitmap.get_serialized_size_in_bytes::<Portable>() as u64;
+            if size(wanted) + size(&fresh) <= cache.bound_bytes() {
+                keep(cache, shard, key, canonical, wanted.clone(), fresh.clone());
+            }
             return Ok(fresh);
         }
     };

@@ -484,8 +484,8 @@ fn a_repeated_text_filter_is_answered_from_the_cache_with_the_same_items() {
     let restarted = cache(&engine);
     assert_eq!(
         (restarted.hits, restarted.misses),
-        (3, 6),
-        "a restart keeps nothing: each leaf is evaluated again, and its rows built from it"
+        (0, 6),
+        "a restart keeps nothing"
     );
 }
 
@@ -518,11 +518,7 @@ fn a_text_filter_answers_each_grant_its_own_items() {
     }
     let stats = cache(&engine);
     assert_eq!(stats.misses, 6, "each grant is evaluated once and keeps its rows");
-    assert_eq!(
-        stats.hits,
-        6,
-        "each grant builds its rows from its own leaf, and reads its own rows after"
-    );
+    assert_eq!(stats.hits, 3, "and read from its own rows after");
 }
 
 /// **A suppression, a lift, a deletion and a commit window each reach the next request from the
@@ -633,11 +629,7 @@ fn a_text_leaf_narrowed_by_its_siblings_keeps_nothing_the_bare_leaf_reads() {
     let excluded = FilterExpr::NoneOf(vec![ids, phrase("the quick")]);
     assert_eq!(matched(&engine, &session, narrowed), both);
     assert_eq!(matched(&engine, &session, excluded), neither);
-    assert_eq!(
-        cache(&engine).entries,
-        2,
-        "a narrowed leaf is not kept, and each filter keeps its rows"
-    );
+    assert_eq!(cache(&engine).entries, 0, "a narrowed leaf is not kept");
     for _ in 0..2 {
         assert_eq!(
             matched(&engine, &session, phrase("the quick")),

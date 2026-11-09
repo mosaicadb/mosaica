@@ -24,12 +24,12 @@ pub enum RouteChoice<'a> {
     Entity,
     Row,
     /// Whichever costs less, where the request reads `rows` rows, the viewer sees `visible`
-    /// entities, and `leaf` prices each leaf over every shard the request reads, so a leaf takes
+    /// entities, and `costs` prices each leaf over every shard the request reads, so a leaf takes
     /// the same route in each.
     Cheaper {
         rows: u64,
         visible: u64,
-        leaf: &'a dyn LeafCosts,
+        costs: &'a dyn LeafCosts,
     },
 }
 
@@ -172,11 +172,26 @@ impl FilterColumns {
         self.columns.get(column).is_some_and(|held| held.filterable)
     }
 
-    /// Whether `expr` can be answered in entity space alone. Each of its leaves then decides each
-    /// item by the item alone, so its answer over a candidate is its answer over any wider set,
-    /// intersected with the candidate.
+    /// Whether `expr` is routed to entity space alone under `choice`.
+    pub(crate) fn routes_to_items(&self, expr: &FilterExpr, choice: RouteChoice<'_>) -> bool {
+        self.space_of(expr, choice) == Ok(Space::Entity)
+    }
+
+    /// Whether every leaf of `expr` decides each item from that item's own values, so its answer
+    /// over a candidate is its answer over any wider set intersected with the candidate: `expr`
+    /// can be answered in entity space and names no unique index, whose answer also depends on
+    /// deletions and on numbers issued again.
     pub(crate) fn answered_over_items(&self, expr: &FilterExpr) -> bool {
-        self.space_of(expr, RouteChoice::Entity) == Ok(Space::Entity)
+        fn names_unique(columns: &FilterColumns, expr: &FilterExpr) -> bool {
+            match expr {
+                FilterExpr::Leaf { column, operand } => columns.unique_keys(column, operand).is_some(),
+                FilterExpr::AllOf(kids) | FilterExpr::AnyOf(kids) | FilterExpr::NoneOf(kids) => {
+                    kids.iter().any(|kid| names_unique(columns, kid))
+                }
+                FilterExpr::Region(_) | FilterExpr::MemberOf(_) => false,
+            }
+        }
+        self.routes_to_items(expr, RouteChoice::Entity) && !names_unique(self, expr)
     }
 
     /// How many entities the base postings hold for the values an `eq` or `in` names, over the whole
@@ -339,9 +354,9 @@ impl FilterColumns {
                 RouteChoice::Cheaper {
                     rows,
                     visible,
-                    leaf,
+                    costs,
                 } => {
-                    let cost = leaf.cost(column, operand);
+                    let cost = costs.cost(column, operand);
                     if row_route_pays(rows.saturating_sub(cost.kept), visible, cost.posting) {
                         Space::Row
                     } else {

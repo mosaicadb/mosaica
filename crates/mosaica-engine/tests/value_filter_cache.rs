@@ -362,11 +362,7 @@ fn a_value_filter_answers_each_grant_its_own_items() {
     }
     let stats = cache(&engine);
     assert_eq!(stats.misses, 6, "each grant is evaluated once and keeps its rows");
-    assert_eq!(
-        stats.hits,
-        6,
-        "each grant builds its rows from its own leaf, and reads its own rows after"
-    );
+    assert_eq!(stats.hits, 3, "and read from its own rows after");
 }
 
 /// **A suppression, a lift, a deletion and a commit window each reach the next request from the
