@@ -11,7 +11,8 @@
 //!   into its run as it stands, and the term's share of the run's receipt is summed as it is
 //!   inserted.
 //! - **About forty bytes of state a term**: where its chain starts and ends, its last entity, how
-//!   many entities it holds, and its share of the receipt.
+//!   many entities it holds, and its share of the receipt. The states are held in pages, so they
+//!   grow without moving.
 //!
 //! A document's tokens are grouped by term before they are inserted, because the run format writes
 //! how often an entity holds a term before the positions.
@@ -30,11 +31,19 @@
 //!
 //! # Memory
 //!
-//! The accumulator counts what it has allocated: the pool's pages, the capacity of its term state,
-//! key bytes and table, and its per-document buffers. It spills when that reaches its budget, which
-//! it checks between documents, so it may exceed the budget by one document and by the growth of a
-//! vector that doubled within it. The ranking a spill does holds about forty bytes a term beside
-//! it.
+//! The accumulator counts what it has allocated: the pool's pages, its term-state pages, the
+//! capacity of its key bytes and table, and its per-document buffers. Before each document it spills if that, plus
+//! what its term state, key bytes and table would allocate were every token of the document a new
+//! term, would reach its budget; a growing array's old copy is live while it moves, so the new copy
+//! is counted whole. Within a document it can exceed the budget only by that document's own
+//! buffers and the slices its terms open, at most 4 KiB for each distinct term of the document.
+//! The per-document buffers return to a small size at each spill, so one long document does not
+//! shrink every run after it.
+//!
+//! A spill holds beside the accumulator about forty bytes a term for the ranking, and, for the
+//! term being written if its documents arrived out of entity order, a copy of its chain and eight
+//! bytes an entity. That is at most about four times that one term's chain. Every other term is
+//! written from the pool as it stands.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -42,10 +51,10 @@ use std::path::{Path, PathBuf};
 use croaring::Bitmap;
 use mosaica_filter::{put_varint, take_varint};
 
-use crate::chunk_dict::{rank_table, KeyRef, KeyTable, Lookup};
+use crate::chunk_dict::{rank_table, KeyRef, KeyTable, Lookup, SortOn};
 use crate::spill::{
-    cascade_sorted_runs, encode_entity, fingerprint, RunPayload, SpillReceipt, TextRunMerge,
-    TextRunWriter,
+    cascade_sorted_runs, encode_entity, fingerprint, remove_runs, RunPayload, SpillReceipt,
+    TextRunMerge, TextRunWriter,
 };
 use crate::text::{Posting, TextIndexWriter};
 
@@ -73,6 +82,9 @@ const SLICE_BYTES: [usize; 9] = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
 /// The bytes at the end of each slice that hold the address of the next.
 const LINK_BYTES: usize = 8;
 
+/// Items each per-document buffer is returned to at a spill.
+const DOCUMENT_BUFFER_ITEMS: usize = 1 << 12;
+
 /// A text column's terms, the entities holding each and the positions at which they do, gathered a
 /// document at a time under a byte budget, and spilled as sorted runs whenever the budget fills.
 pub struct TermAccumulator {
@@ -85,8 +97,11 @@ pub struct TermAccumulator {
     keys: Vec<u8>,
     table: KeyTable,
     /// Each term's state, by its id in the table.
-    terms: Vec<TermState>,
+    terms: States,
     pool: Pool,
+    /// The open document's tokens, end to end, and where each ends.
+    text: Vec<u8>,
+    ends: Vec<u32>,
     /// The open document's tokens, as the term's id above the position.
     tokens: Vec<u64>,
     positions: Vec<u32>,
@@ -94,7 +109,7 @@ pub struct TermAccumulator {
 }
 
 /// One term's chain, and what it adds up to.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 struct TermState {
     /// The first slice, and where the next byte goes in the last.
     head: u64,
@@ -122,8 +137,10 @@ impl TermAccumulator {
             runs: Vec::new(),
             keys: Vec::new(),
             table: KeyTable::default(),
-            terms: Vec::new(),
+            terms: States::default(),
             pool: Pool::default(),
+            text: Vec::new(),
+            ends: Vec::new(),
             tokens: Vec::new(),
             positions: Vec::new(),
             encoded: Vec::new(),
@@ -131,36 +148,50 @@ impl TermAccumulator {
     }
 
     /// Add `entity`'s document, whose tokens `tokens` gives in order to the function it is passed,
-    /// and spill if the budget is then full. An entity's document is added once.
+    /// spilling first if the document could take the accumulator past its budget. An entity's
+    /// document is added once.
     pub fn add_document(
         &mut self,
         entity: u32,
         tokens: impl FnOnce(&mut dyn FnMut(&str)),
     ) -> io::Result<()> {
-        self.tokens.clear();
+        self.text.clear();
+        self.ends.clear();
         let mut failed = None;
-        let mut position = 0u32;
         tokens(&mut |token| {
-            if failed.is_some() {
-                return;
-            }
-            match self.intern(token.as_bytes()) {
-                Ok(id) => self.tokens.push(u64::from(id) << 32 | u64::from(position)),
-                Err(e) => failed = Some(e),
-            }
-            match position.checked_add(1) {
-                Some(next) => position = next,
-                None => {
-                    failed = Some(invalid(format!(
-                        "entity {entity}'s document holds more tokens than a u32 can number; \
-                         split it into several items"
-                    )))
+            self.text.extend_from_slice(token.as_bytes());
+            match u32::try_from(self.text.len()) {
+                Ok(end) => self.ends.push(end),
+                Err(_) => {
+                    failed.get_or_insert_with(|| {
+                        invalid(format!(
+                            "entity {entity}'s document holds more than 4 GiB of tokens; split it \
+                             into several items"
+                        ))
+                    });
                 }
             }
         });
         if let Some(e) = failed {
             return Err(e);
         }
+        if self.allocated() + self.growth(self.ends.len(), self.text.len()) >= self.budget {
+            // On this thread: a sort on the pool would let a worker waiting for it take another
+            // window and make another accumulator.
+            self.spill(SortOn::ThisThread)?;
+        }
+        let (text, ends) = (
+            std::mem::take(&mut self.text),
+            std::mem::take(&mut self.ends),
+        );
+        self.tokens.clear();
+        let mut start = 0;
+        for (position, &end) in (0u32..).zip(&ends) {
+            let id = self.intern(&text[start..end as usize])?;
+            self.tokens.push(u64::from(id) << 32 | u64::from(position));
+            start = end as usize;
+        }
+        (self.text, self.ends) = (text, ends);
         let mut tokens = std::mem::take(&mut self.tokens);
         tokens.sort_unstable();
         let mut from = 0;
@@ -174,10 +205,23 @@ impl TermAccumulator {
             from = to;
         }
         self.tokens = tokens;
-        if self.allocated() >= self.budget {
-            self.spill()?;
-        }
         Ok(())
+    }
+
+    /// What the term state, key bytes and table would allocate, beyond what they hold, were
+    /// `terms` new terms of `bytes` bytes in all added: each array that would grow, at its new
+    /// size, and each page of state.
+    fn growth(&self, terms: usize, bytes: usize) -> usize {
+        let grown = |len: usize, capacity: usize, more: usize| {
+            if len + more > capacity {
+                (len + more).max(capacity * 2)
+            } else {
+                0
+            }
+        };
+        self.terms.growth(terms)
+            + grown(self.keys.len(), self.keys.capacity(), bytes)
+            + self.table.growth(terms)
     }
 
     /// The id of `term`, given one if it is new.
@@ -216,7 +260,7 @@ impl TermAccumulator {
     /// Append `entity`, holding term `id` at `self.positions`, to the term's chain.
     fn insert(&mut self, id: u32, entity: u32) -> io::Result<()> {
         let term = key_bytes(&self.keys, &self.table.key(id));
-        let state = &mut self.terms[id as usize];
+        let state = self.terms.get_mut(id);
         self.encoded.clear();
         let gap = if state.pairs == 0 {
             entity
@@ -250,31 +294,51 @@ impl TermAccumulator {
     /// The bytes this accumulator has allocated.
     pub fn allocated(&self) -> usize {
         self.pool.pages.len() * PAGE_BYTES
-            + self.terms.capacity() * std::mem::size_of::<TermState>()
+            + self.terms.allocated()
             + self.keys.capacity()
             + self.table.allocated()
+            + self.text.capacity()
+            + self.ends.capacity() * std::mem::size_of::<u32>()
             + self.tokens.capacity() * std::mem::size_of::<u64>()
             + self.positions.capacity() * std::mem::size_of::<u32>()
             + self.encoded.capacity()
     }
 
-    /// Write what the accumulator holds as one sorted run, if it holds anything, and empty it.
-    pub fn spill(&mut self) -> io::Result<()> {
+    /// Write what the accumulator holds as one sorted run, if it holds anything, and empty it,
+    /// ranking its terms where `sort` says. A run that fails part-written is removed.
+    fn spill(&mut self, sort: SortOn) -> io::Result<()> {
         if self.terms.is_empty() {
             return Ok(());
         }
         let path = self
             .dir
             .join(format!("{}-{:05}.spill", self.stem, self.runs.len()));
-        let mut writer = TextRunWriter::create(&path, RunPayload::Positions)?;
-        self.drain(|term, pairs, body, anchor| writer.push_body(term, pairs, body, anchor))?;
-        self.runs.push(writer.finish()?);
+        match self.write_run(&path, sort) {
+            Ok(run) => self.runs.push(run),
+            Err(e) => {
+                let _ = std::fs::remove_file(&path);
+                return Err(e);
+            }
+        }
+        self.text.shrink_to(DOCUMENT_BUFFER_ITEMS);
+        self.ends.shrink_to(DOCUMENT_BUFFER_ITEMS);
+        self.tokens.shrink_to(DOCUMENT_BUFFER_ITEMS);
+        self.positions.shrink_to(DOCUMENT_BUFFER_ITEMS);
+        self.encoded.shrink_to(DOCUMENT_BUFFER_ITEMS);
         Ok(())
+    }
+
+    fn write_run(&mut self, path: &Path, sort: SortOn) -> io::Result<SpillReceipt> {
+        let mut writer = TextRunWriter::create(path, RunPayload::Positions)?;
+        self.drain(sort, |term, pairs, anchor, body| {
+            writer.push_body(term, pairs, anchor, |emit| body.write(emit))
+        })?;
+        writer.finish()
     }
 
     /// Spill what is left, and hand back every run spilled, for the caller to merge.
     pub fn into_runs(mut self) -> io::Result<Vec<SpillReceipt>> {
-        self.spill()?;
+        self.spill(SortOn::Pool)?;
         Ok(std::mem::take(&mut self.runs))
     }
 
@@ -286,11 +350,16 @@ impl TermAccumulator {
         merge_slice_cap: usize,
     ) -> io::Result<()> {
         if self.runs.is_empty() {
-            let mut entities = Vec::new();
-            return self.drain(|term, pairs, body, _| {
+            let (mut entities, mut bytes) = (Vec::new(), Vec::new());
+            return self.drain(SortOn::Pool, |term, pairs, _, body| {
                 writer.begin_term(text_term(term)?, u64::from(pairs))?;
+                bytes.clear();
+                body.write(&mut |piece| {
+                    bytes.extend_from_slice(piece);
+                    Ok(())
+                })?;
                 entities.clear();
-                for_each_entity(body, |entity, positions| {
+                for_each_entity(&bytes, |entity, positions| {
                     entities.push(entity);
                     writer.push_item(positions)
                 })?;
@@ -302,21 +371,24 @@ impl TermAccumulator {
         merge_text_runs(&dir, &family, self.into_runs()?, writer, merge_slice_cap)
     }
 
-    /// Visit every term in ascending order with its entity count, its body in the run format and
-    /// its share of the anchor, and leave the accumulator empty.
+    /// Visit every term in ascending order with its entity count, its share of the anchor and its
+    /// body in the run format, ranking the terms where `sort` says, and leave the accumulator
+    /// empty.
     fn drain(
         &mut self,
-        mut visit: impl FnMut(&[u8], u32, &[u8], u64) -> io::Result<()>,
+        sort: SortOn,
+        mut visit: impl FnMut(&[u8], u32, u64, &Body<'_>) -> io::Result<()>,
     ) -> io::Result<()> {
         let keys = std::mem::take(&mut self.keys);
         let terms = std::mem::take(&mut self.terms);
         let pool = std::mem::take(&mut self.pool);
-        let mut sorted: Vec<KeyRef> = Vec::with_capacity(terms.len());
+        let mut sorted: Vec<KeyRef> = Vec::with_capacity(terms.len);
         let mut ranks = Vec::new();
         rank_table(
             &mut self.table,
             |key| key_bytes(&keys, key),
             &mut ranks,
+            sort,
             |key| {
                 sorted.push(*key);
                 Ok::<(), io::Error>(())
@@ -327,24 +399,66 @@ impl TermAccumulator {
             order[rank as usize] = id as u32;
         }
         drop(ranks);
-        let (mut chain, mut body, mut entries) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut chain, mut entries) = (Vec::new(), Vec::new());
         for (key, &id) in sorted.iter().zip(&order) {
             let term = key_bytes(&keys, key);
-            let state = &terms[id as usize];
-            pool.gather(state, &mut chain);
+            let state = terms.get(id);
             if state.segmented {
-                sort_segments(term, &chain, &mut entries, &mut body)?;
-                visit(term, state.pairs, &body, state.anchor)?;
+                chain.clear();
+                pool.slices(state, |slice| chain.extend_from_slice(slice));
+                sort_segments(term, &chain, &mut entries)?;
+                let body = Body::Sorted(&chain, &entries);
+                visit(term, state.pairs, state.anchor, &body)?;
+                (chain, entries) = (Vec::new(), Vec::new());
             } else {
-                visit(term, state.pairs, &chain, state.anchor)?;
+                visit(term, state.pairs, state.anchor, &Body::Chain(&pool, state))?;
             }
         }
-        // The buffers keep their capacity for the next fill, and are counted in it.
+        // The key bytes keep their capacity for the next fill, and are counted in it.
         self.keys = keys;
         self.keys.clear();
-        self.terms = terms;
-        self.terms.clear();
         Ok(())
+    }
+}
+
+/// A term's body in the run format, as a spill writes it.
+enum Body<'a> {
+    /// A chain of one ascending segment, which is the body as it stands.
+    Chain(&'a Pool, &'a TermState),
+    /// A chain of several, and its entities sorted, each with where its positions start.
+    Sorted(&'a [u8], &'a [(u32, u32)]),
+}
+
+impl Body<'_> {
+    /// Hand the body to `emit`, in order, in pieces.
+    fn write(&self, emit: &mut dyn FnMut(&[u8]) -> io::Result<()>) -> io::Result<()> {
+        match self {
+            Body::Chain(pool, term) => {
+                let mut written = Ok(());
+                pool.slices(term, |slice| {
+                    if written.is_ok() {
+                        written = emit(slice);
+                    }
+                });
+                written
+            }
+            Body::Sorted(chain, entries) => {
+                let mut previous = None;
+                let mut gap = Vec::with_capacity(5);
+                for &(entity, start) in entries.iter() {
+                    gap.clear();
+                    put_varint(entity - previous.unwrap_or(0), &mut gap);
+                    emit(&gap)?;
+                    let mut end = start as usize;
+                    for _ in 0..next(chain, &mut end)? {
+                        next(chain, &mut end)?;
+                    }
+                    emit(&chain[start as usize..end])?;
+                    previous = Some(entity);
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -398,14 +512,16 @@ fn for_each_entity(
     Ok(())
 }
 
-/// Re-encode a chain of several ascending segments as one: its entities in ascending order, each
-/// with its positions as they were encoded. `entries` is scratch.
-fn sort_segments(
-    term: &[u8],
-    chain: &[u8],
-    entries: &mut Vec<(u32, usize, usize)>,
-    body: &mut Vec<u8>,
-) -> io::Result<()> {
+/// The entities of a chain of several ascending segments into `entries`, ascending, each with
+/// where its positions start in the chain. An entity that holds the term twice is refused.
+fn sort_segments(term: &[u8], chain: &[u8], entries: &mut Vec<(u32, u32)>) -> io::Result<()> {
+    if u32::try_from(chain.len()).is_err() {
+        return Err(invalid(format!(
+            "term {:?} holds more than 4 GiB of entities and positions in one accumulator; give \
+             it a smaller budget",
+            String::from_utf8_lossy(term)
+        )));
+    }
     entries.clear();
     let (mut at, mut last) = (0, 0u32);
     while at < chain.len() {
@@ -417,38 +533,26 @@ fn sort_segments(
         } else {
             last.wrapping_add(gap)
         };
-        let start = at;
+        entries.push((entity, at as u32));
         for _ in 0..next(chain, &mut at)? {
             next(chain, &mut at)?;
         }
-        entries.push((entity, start, at));
         last = entity;
     }
     // A stable sort, which merges the ascending segments it finds.
-    entries.sort_by_key(|&(entity, _, _)| entity);
-    body.clear();
-    let mut previous = None;
-    for &(entity, start, end) in entries.iter() {
-        let gap = match previous {
-            None => entity,
-            Some(previous) if entity > previous => entity - previous,
-            Some(_) => {
-                return Err(invalid(format!(
-                    "entity {entity} holds term {:?} in two documents; add an entity's document \
-                     once",
-                    String::from_utf8_lossy(term)
-                )))
-            }
-        };
-        put_varint(gap, body);
-        body.extend_from_slice(&chain[start..end]);
-        previous = Some(entity);
+    entries.sort_by_key(|&(entity, _)| entity);
+    if let Some(pair) = entries.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+        return Err(invalid(format!(
+            "entity {} holds term {:?} in two documents; add an entity's document once",
+            pair[0].0,
+            String::from_utf8_lossy(term)
+        )));
     }
     Ok(())
 }
 
 /// Merge text runs into `writer`: cascaded first where there are more than one merge may hold
-/// open, then merged k-way on the term. The runs are removed, whether or not the merge succeeds.
+/// open, then merged k-way on the term. Every run is removed, whether or not the merge succeeds.
 /// `family` names the cascade's files in `dir`.
 pub fn merge_text_runs(
     dir: &Path,
@@ -457,15 +561,13 @@ pub fn merge_text_runs(
     writer: &mut TextIndexWriter,
     merge_slice_cap: usize,
 ) -> io::Result<()> {
-    let mut left = runs.clone();
-    let merged = cascade_sorted_runs(dir, family, RunPayload::Positions, runs).and_then(|runs| {
-        left = runs;
-        merge_runs(&left, writer, merge_slice_cap)
-    });
-    let removed = left
-        .iter()
-        .try_for_each(|run| std::fs::remove_file(&run.path));
-    merged.and(removed)
+    let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone());
+    let merged = match &cascaded {
+        Ok(left) => merge_runs(left, writer, merge_slice_cap),
+        Err(_) => Ok(()),
+    };
+    let removed = remove_runs(runs.iter().chain(cascaded.iter().flatten()));
+    cascaded.and(merged).and(removed)
 }
 
 fn merge_runs(
@@ -505,6 +607,52 @@ fn merge_runs(
 
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+/// Term states by id, in pages of [`STATE_PAGE`], so they grow a page at a time and never move.
+#[derive(Default)]
+struct States {
+    pages: Vec<Box<[TermState]>>,
+    len: usize,
+}
+
+/// Term states in one page of [`States`].
+const STATE_PAGE: usize = 1 << 12;
+
+impl States {
+    fn push(&mut self, state: TermState) {
+        if self.len == self.pages.len() * STATE_PAGE {
+            self.pages
+                .push(vec![TermState::default(); STATE_PAGE].into_boxed_slice());
+        }
+        self.pages[self.len / STATE_PAGE][self.len % STATE_PAGE] = state;
+        self.len += 1;
+    }
+
+    fn get(&self, id: u32) -> &TermState {
+        let id = id as usize;
+        &self.pages[id / STATE_PAGE][id % STATE_PAGE]
+    }
+
+    fn get_mut(&mut self, id: u32) -> &mut TermState {
+        let id = id as usize;
+        &mut self.pages[id / STATE_PAGE][id % STATE_PAGE]
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn allocated(&self) -> usize {
+        self.pages.len() * STATE_PAGE * std::mem::size_of::<TermState>()
+    }
+
+    /// The bytes the pages `terms` more states would need take.
+    fn growth(&self, terms: usize) -> usize {
+        ((self.len + terms).div_ceil(STATE_PAGE)).saturating_sub(self.pages.len())
+            * STATE_PAGE
+            * std::mem::size_of::<TermState>()
+    }
 }
 
 /// Pages that terms' slices are carved from, addressed by a `u64`: the page above the offset.
@@ -557,17 +705,16 @@ impl Pool {
         }
     }
 
-    /// `term`'s chain, its slices end to end, into `out`.
-    fn gather(&self, term: &TermState, out: &mut Vec<u8>) {
-        out.clear();
+    /// Each slice of `term`'s chain, in order.
+    fn slices(&self, term: &TermState, mut visit: impl FnMut(&[u8])) {
         let (mut at, mut level) = (term.head, 0);
         loop {
             let end = at + (SLICE_BYTES[level] - LINK_BYTES) as u64;
             if (at..=end).contains(&term.tail) {
-                out.extend_from_slice(self.bytes(at, (term.tail - at) as usize));
+                visit(self.bytes(at, (term.tail - at) as usize));
                 return;
             }
-            out.extend_from_slice(self.bytes(at, (end - at) as usize));
+            visit(self.bytes(at, (end - at) as usize));
             let link = self.bytes(end, LINK_BYTES);
             at = u64::from_le_bytes(link.try_into().expect("a link is eight bytes"));
             level = (level + 1).min(SLICE_BYTES.len() - 1);
@@ -635,7 +782,6 @@ mod tests {
                     .unwrap();
             }
             let runs = accumulator.into_runs().unwrap();
-            assert_eq!(runs.len(), if budget == 0 { documents.len() } else { 1 });
 
             let mut merge = TextRunMerge::open(&runs, RunPayload::Positions).unwrap();
             let mut read: BTreeMap<Vec<u8>, BTreeMap<u32, Vec<u32>>> = BTreeMap::new();

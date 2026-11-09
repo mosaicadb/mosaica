@@ -107,7 +107,7 @@ use mosaica_roaring::RankedRuns;
 pub use accumulator::{merge_text_runs, TermAccumulator, TEXT_MERGE_SLICE_CAP};
 pub use chunk_dict::{
     dictionary_of, key_prefix, prefers_sort, rank_rows, rank_table, KeyRef, KeyRow, KeyTable,
-    Lookup, Vacant, WindowRule, KEY_WINDOW_ROWS,
+    Lookup, SortOn, Vacant, WindowRule, KEY_WINDOW_ROWS,
 };
 pub use keyword::{coalesce_keyword_extents, fold_keyword_column, KeywordLayer};
 pub use record::{

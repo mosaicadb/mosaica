@@ -382,14 +382,20 @@ impl TextRunWriter {
         );
         self.last_entity = entity;
         self.started = true;
-        let written = self.write_body(&record, 1, anchor);
+        let written = self
+            .writer
+            .write_all(&record)
+            .map_err(|e| at(&self.path, e));
         self.record = record;
-        written
+        written?;
+        self.wrote(1, anchor);
+        Ok(())
     }
 
-    /// Write a whole record: `term`, and its `count` entities already encoded into `body` by
+    /// Write a whole record: `term`, and its `count` entities already encoded by
     /// [`encode_entity`], the first with its entity for its gap, and `anchor` the sum of what each
-    /// call returned.
+    /// call returned. `body` hands the encoded bytes, in order and in as many pieces as it likes,
+    /// to the function it is given.
     ///
     /// **The body is trusted**: it is written as given, and nothing here decodes it. A body that
     /// does not hold `count` well-formed entities ascending, or whose anchor is not `anchor`, is
@@ -398,20 +404,22 @@ impl TextRunWriter {
         &mut self,
         term: &[u8],
         count: u32,
-        body: &[u8],
         anchor: u64,
+        body: impl FnOnce(&mut dyn FnMut(&[u8]) -> io::Result<()>) -> io::Result<()>,
     ) -> io::Result<()> {
         self.begin(term, count)?;
-        self.write_body(body, count, anchor)
+        let (writer, path) = (&mut self.writer, &self.path);
+        body(&mut |piece| writer.write_all(piece).map_err(|e| at(path, e)))?;
+        self.wrote(count, anchor);
+        Ok(())
     }
 
-    /// Write `pairs` of the open term's entities, encoded into `body` by [`encode_entity`], and
-    /// fold their `anchor` into the receipt.
-    fn write_body(&mut self, body: &[u8], pairs: u32, anchor: u64) -> io::Result<()> {
+    /// Count `pairs` of the open term's entities as written, and fold their `anchor` into the
+    /// receipt.
+    fn wrote(&mut self, pairs: u32, anchor: u64) {
         self.owed -= pairs;
         self.count += pairs as u64;
         self.anchor = self.anchor.wrapping_add(anchor);
-        self.writer.write_all(body).map_err(|e| at(&self.path, e))
     }
 
     /// Flush, fsync, and hand back the receipt a run's reader must be given.
@@ -877,7 +885,8 @@ const RUN_MERGE_FAN_IN: usize = 128;
 
 /// Reduce `receipts` to at most `RUN_MERGE_FAN_IN` runs, deleting each pass's inputs as it goes.
 /// `family` names the intermediate files, so two column families cascading in one directory cannot
-/// collide.
+/// collide. On an error the cascade removes every file it wrote, and leaves the caller's runs to
+/// the caller.
 ///
 /// Groups are taken in order and each group merges in order, so the entity ordering the final
 /// merge relies on survives every pass.
@@ -892,35 +901,67 @@ pub fn cascade_sorted_runs(
         let mut merged = Vec::with_capacity(receipts.len().div_ceil(RUN_MERGE_FAN_IN));
         for (group, runs) in receipts.chunks(RUN_MERGE_FAN_IN).enumerate() {
             let path = column_dir.join(format!("{family}-merge-{pass:02}-{group:05}.spill"));
-            let mut merge = TextRunMerge::open(runs, payload)?;
-            let mut writer = TextRunWriter::create(&path, payload)?;
-            while merge.next_term()? {
-                let count = u32::try_from(merge.postings()).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!(
-                            "text run merge: term {:?} carries more entities than a u32 can count",
-                            String::from_utf8_lossy(merge.term())
-                        ),
-                    )
-                })?;
-                writer.begin(merge.term(), count)?;
-                merge.drain(std::convert::identity, &mut |entity, positions| {
-                    writer.push_entity(entity, positions)
-                })?;
-            }
-            merged.push(writer.finish()?);
             // Deleted per group rather than per pass: a corpus that reaches the cascade at all is
             // one whose runs are large, and holding a whole pass's inputs beside a whole pass's
             // outputs would double the spill's peak on disk for no reason.
-            for receipt in runs {
-                std::fs::remove_file(&receipt.path).map_err(|e| at(&receipt.path, e))?;
+            let written =
+                merge_group(runs, &path, payload).and_then(|run| remove_runs(runs).map(|()| run));
+            match written {
+                Ok(run) => merged.push(run),
+                Err(e) => {
+                    let _ = std::fs::remove_file(&path);
+                    let _ = remove_runs(&merged);
+                    if pass > 0 {
+                        let _ = remove_runs(&receipts);
+                    }
+                    return Err(e);
+                }
             }
         }
         receipts = merged;
         pass += 1;
     }
     Ok(receipts)
+}
+
+/// Merge `runs` into one run at `path`.
+fn merge_group(
+    runs: &[SpillReceipt],
+    path: &Path,
+    payload: RunPayload,
+) -> io::Result<SpillReceipt> {
+    let mut merge = TextRunMerge::open(runs, payload)?;
+    let mut writer = TextRunWriter::create(path, payload)?;
+    while merge.next_term()? {
+        let count = u32::try_from(merge.postings()).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "text run merge: term {:?} carries more entities than a u32 can count",
+                    String::from_utf8_lossy(merge.term())
+                ),
+            )
+        })?;
+        writer.begin(merge.term(), count)?;
+        merge.drain(std::convert::identity, &mut |entity, positions| {
+            writer.push_entity(entity, positions)
+        })?;
+    }
+    writer.finish()
+}
+
+/// Remove every run's file, carrying on past a failure, and return the first failure. A file that
+/// is already gone is not one.
+pub(crate) fn remove_runs<'a>(runs: impl IntoIterator<Item = &'a SpillReceipt>) -> io::Result<()> {
+    let mut first = Ok(());
+    for run in runs {
+        if let Err(e) = std::fs::remove_file(&run.path) {
+            if e.kind() != io::ErrorKind::NotFound && first.is_ok() {
+                first = Err(at(&run.path, e));
+            }
+        }
+    }
+    first
 }
 
 #[cfg(test)]

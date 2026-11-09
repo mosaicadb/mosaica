@@ -117,7 +117,7 @@ impl KeyRow {
 /// Rank rows by sorting them: `ranks[row]` becomes the rank of that row's key among the distinct
 /// keys, and `emit` is called once per distinct key, ascending. Returns the distinct count.
 ///
-/// `rows` is reordered, by a sort on the rayon pool. `ranks` must have a slot for every `row` the
+/// `rows` is reordered, by a sort where `sort` says. `ranks` must have a slot for every `row` the
 /// rows name.
 ///
 /// **No tiebreak on the row.** A tiebreak makes every element distinct, which defeats the
@@ -127,13 +127,18 @@ pub fn rank_rows<'k, E>(
     rows: &mut [KeyRow],
     bytes: impl Fn(&KeyRef) -> &'k [u8] + Sync,
     ranks: &mut [u32],
+    sort: SortOn,
     mut emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
-    rows.par_sort_unstable_by(|a, b| {
+    let order = |a: &KeyRow, b: &KeyRow| {
         a.prefix
             .cmp(&b.prefix)
             .then_with(|| bytes(&a.key).cmp(bytes(&b.key)))
-    });
+    };
+    match sort {
+        SortOn::Pool => rows.par_sort_unstable_by(order),
+        SortOn::ThisThread => rows.sort_unstable_by(order),
+    }
     let mut distinct = 0u32;
     let mut start = 0usize;
     while start < rows.len() {
@@ -154,6 +159,14 @@ pub fn rank_rows<'k, E>(
         start = end;
     }
     Ok(distinct)
+}
+
+/// Where a ranking sorts: on the rayon pool, or on the calling thread, for a caller that already
+/// runs one ranking a pool thread and whose waits would otherwise let the pool start more work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortOn {
+    Pool,
+    ThisThread,
 }
 
 /// How far ahead [`rank_rows`] asks for a key.
@@ -182,6 +195,7 @@ pub fn rank_table<'k, E>(
     table: &mut KeyTable,
     bytes: impl Fn(&KeyRef) -> &'k [u8] + Sync,
     perm: &mut Vec<u32>,
+    sort: SortOn,
     emit: impl FnMut(&KeyRef) -> Result<(), E>,
 ) -> Result<u32, E> {
     let entries = std::mem::take(table).entries;
@@ -193,7 +207,7 @@ pub fn rank_table<'k, E>(
     drop(entries);
     perm.clear();
     perm.resize(rows.len(), 0);
-    rank_rows(&mut rows, bytes, perm, emit)
+    rank_rows(&mut rows, bytes, perm, sort, emit)
 }
 
 /// An open-addressing table from a key to its provisional id, the ids issued in first-seen order.
@@ -239,6 +253,24 @@ impl KeyTable {
     /// Where the key with provisional id `id` is held.
     pub fn key(&self, id: u32) -> KeyRef {
         self.entries[id as usize]
+    }
+
+    /// The bytes the table would allocate, beyond what it holds, while taking `keys` new keys:
+    /// each array it would replace, at its new size, since the old one is live while it moves.
+    pub fn growth(&self, keys: usize) -> usize {
+        let held = self.entries.len() + keys;
+        let mut slots = 0;
+        let mut size = self.slots.len();
+        while held * 2 > size {
+            size = (size * 2).max(16);
+            slots += size * std::mem::size_of::<u64>();
+        }
+        let entries = if held > self.entries.capacity() {
+            held.max(self.entries.capacity() * 2) * std::mem::size_of::<KeyRef>()
+        } else {
+            0
+        };
+        slots + entries
     }
 
     /// The bytes the table has allocated.
@@ -390,7 +422,7 @@ pub fn dictionary_of<'a>(values: &[&'a str]) -> io::Result<(Vec<u32>, Vec<&'a st
             })
             .collect::<io::Result<_>>()?;
         let mut ordinals = vec![0u32; values.len()];
-        rank_rows(&mut rows, bytes, &mut ordinals, |key| {
+        rank_rows(&mut rows, bytes, &mut ordinals, SortOn::Pool, |key| {
             keys.push(values[key.at as usize]);
             Ok::<(), io::Error>(())
         })?;
@@ -398,7 +430,7 @@ pub fn dictionary_of<'a>(values: &[&'a str]) -> io::Result<(Vec<u32>, Vec<&'a st
     }
 
     let mut perm = Vec::new();
-    rank_table(&mut table, bytes, &mut perm, |key| {
+    rank_table(&mut table, bytes, &mut perm, SortOn::Pool, |key| {
         keys.push(values[key.at as usize]);
         Ok::<(), io::Error>(())
     })?;
@@ -482,7 +514,7 @@ mod tests {
         }
         let mut perm = Vec::new();
         let mut from_table = Vec::new();
-        rank_table(&mut table, bytes, &mut perm, |k| {
+        rank_table(&mut table, bytes, &mut perm, SortOn::Pool, |k| {
             from_table.push(bytes(k).to_vec());
             Ok::<(), ()>(())
         })
@@ -501,7 +533,7 @@ mod tests {
             .collect();
         let mut ranks = vec![0u32; owned.len()];
         let mut from_rows = Vec::new();
-        rank_rows(&mut rows, bytes, &mut ranks, |k| {
+        rank_rows(&mut rows, bytes, &mut ranks, SortOn::Pool, |k| {
             from_rows.push(bytes(k).to_vec());
             Ok::<(), ()>(())
         })

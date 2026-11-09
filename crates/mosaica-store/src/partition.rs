@@ -91,13 +91,13 @@ impl SpillWriter {
     }
 
     /// One fixed-width record, for a [`Partition`]'s bucket. The anchor is
-    /// [`mix64_bytes`]'s, so the record's width is part of what the receipt vouches for.
+    /// [`splitmix64_bytes`]'s, so the record's width is part of what the receipt vouches for.
     pub fn push_bytes(&mut self, record: &[u8]) -> Result<()> {
         self.writer
             .write_all(record)
             .map_err(|e| io(&self.path, e))?;
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64_bytes(record));
+        self.anchor = self.anchor.wrapping_add(splitmix64_bytes(record));
         Ok(())
     }
 
@@ -224,7 +224,7 @@ impl RecordReader {
             .read_exact(&mut self.record)
             .map_err(|e| io(&self.receipt.path, e))?;
         self.left -= 1;
-        self.anchor = self.anchor.wrapping_add(mix64_bytes(&self.record));
+        self.anchor = self.anchor.wrapping_add(splitmix64_bytes(&self.record));
         Ok(Some(&self.record))
     }
 }
@@ -536,7 +536,7 @@ impl PartitionStore {
             let bytes = &mut chunk[..records * width];
             file.read_exact(bytes).map_err(|e| io(&receipt.path, e))?;
             for record in bytes.chunks_exact(width) {
-                anchor = anchor.wrapping_add(mix64_bytes(record));
+                anchor = anchor.wrapping_add(splitmix64_bytes(record));
                 f(record)?;
             }
             left -= records as u64;
@@ -577,7 +577,7 @@ impl Drop for PartitionStore {
 ///
 /// A mixed sum rather than a plain one for the reason [`SpillReceipt`] gives, and per group rather
 /// than per record so a record of any width goes through the same arithmetic.
-fn mix64_bytes(record: &[u8]) -> u64 {
+fn splitmix64_bytes(record: &[u8]) -> u64 {
     let mut anchor = 0u64;
     for group in record.chunks(8) {
         let mut word = [0u8; 8];

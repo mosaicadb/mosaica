@@ -4893,6 +4893,7 @@ impl<'a> KeywordChunks<'a> {
                         table,
                         |k| chunk_key(text, k),
                         scratch,
+                        mosaica_filter_write::SortOn::Pool,
                         &mut emit,
                     ),
                     ChunkMode::Sort => {
@@ -4902,6 +4903,7 @@ impl<'a> KeywordChunks<'a> {
                             pairs,
                             |k| chunk_key(text, k),
                             scratch,
+                            mosaica_filter_write::SortOn::Pool,
                             &mut emit,
                         )
                     }
@@ -5404,16 +5406,16 @@ impl TextIndexPlan {
         // access term*, which for a geographic corpus means sorted by country. So the slow scripts
         // are contiguous, not spread. At two chunks a thread over 7.4×10⁷ Overture names, 23 of
         // the 24 chunks finished within 25 s of each other and the twenty-fourth ran alone for a
-        // further 90 s: the stage's wall time was one chunk's. Splitting finer costs a little more
-        // spill (a term repeated in more runs) and buys most of that tail back, and it costs
-        // no memory at all — the budget below is per *worker*, and only `threads` of them are ever
-        // live, however many chunks there are. At eight the same column's chunk pass finished in
-        // ~80 s against ~115 s, and the stage in 96.35 s against 148.00 s.
+        // further 90 s: the stage's wall time was one chunk's. Splitting finer buys most of that
+        // tail back, and it costs neither memory nor runs: a worker keeps one accumulator across
+        // every chunk it takes and spills only when its budget is full, and only `threads` workers
+        // are live, however many chunks there are. At eight the same column's chunk pass finished
+        // in ~80 s against ~115 s, and the stage in 96.35 s against 148.00 s.
         //
         // ⊘ **The tail is smaller, not gone.** Four of the 96 chunks still ran ~60 s after the
         // other 92 had finished, so most of the chunk pass is still one region's segmentation.
-        // Splitting finer again would need the fan-in raised with it, and is worth about a
-        // further 30 s on this corpus — measured, not modelled, and not taken.
+        // Splitting finer again is worth about a further 30 s on this corpus, measured when each
+        // chunk still spilled runs of its own, and is not taken.
         //
         // **The chunks are arena windows now, not entity ranges** (`column.rs`), so the number is
         // a target and the arena's own record marks decide how close to it the split lands. Eight
@@ -5549,7 +5551,7 @@ impl TextValues<'_> {
 ///   counts what it has allocated, which is [`TEXT_BUDGET_SHARE`] of the build's memory budget in
 ///   all. Nothing in it scales with the corpus. A term costs about 150 bytes beyond its entities
 ///   and positions, and most terms in a run occur once, so on English-like prose a run is about a
-///   quarter of the memory that wrote it at 32 MiB a worker, and half at 128 MiB.
+///   third of the memory that wrote it at 32 MiB a worker, and more at larger budgets.
 /// * The merge holds one open reader per run: a read buffer and the head *term*, never the head's
 ///   entities, which is why a run's reader inside [`TextRunMerge`] decodes a record's postings only
 ///   when they are asked for. The run count is capped by the cascade, so this is a constant too.
@@ -5598,7 +5600,9 @@ fn write_text_index(
     let analyser = mosaica_analyse::analyser_with_identity(identity)
         .ok_or_else(|| {
             BuildError::Invalid(format!(
-                "attribute '{}' declares analyser '{identity}', which this build does not carry.                  Its terms cannot be reproduced, so an index written now would answer every                  `match` from a segmentation the manifest does not describe",
+                "attribute '{}' declares analyser '{identity}', which this build does not carry. \
+                 Its terms cannot be reproduced, so an index written now would answer every \
+                 `match` from a segmentation the manifest does not describe",
                 attribute.name
             ))
         })?;
@@ -6729,11 +6733,12 @@ mod tests {
             TextIndexPlan::explicit(64, 1 << 30, 1 << 22),
             TextIndexPlan::explicit(128, 1 << 30, 1 << 22),
             TextIndexPlan::explicit(999, 1 << 30, 1 << 22),
-            // The byte budget, forcing several runs inside one chunk — including one small
-            // enough that every document spills.
+            // The byte budget: one small enough that every document spills, and one a little
+            // above the accumulator's first pool page, so that each worker spills several runs of
+            // several documents, its terms gathered across the windows it took.
             TextIndexPlan::explicit(4_096, 1, 1 << 22),
-            TextIndexPlan::explicit(4_096, 4_096, 1 << 22),
-            TextIndexPlan::explicit(1_000, 4_096, 1 << 22),
+            TextIndexPlan::explicit(4_096, 300 << 10, 1 << 22),
+            TextIndexPlan::explicit(7, 300 << 10, 1 << 22),
             // The merge's other encoder: a cap of 1 sends every term above one posting through
             // the Roaring arm.
             TextIndexPlan::explicit(4_096, 1 << 30, 1),

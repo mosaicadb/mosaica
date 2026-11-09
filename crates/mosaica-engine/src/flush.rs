@@ -1604,8 +1604,8 @@ fn write_text_extents(
     Ok(out)
 }
 
-/// The bytes one text layer's accumulator may allocate before it spills a run. A fixed allowance
-/// until the flush's is derived from the memory available.
+/// The bytes one text layer's accumulator may allocate before it spills a run, the same for every
+/// flush.
 const TEXT_LAYER_BUDGET: usize = 256 << 20;
 
 /// Where a text layer's files go. What [`write_text_layer`] needs of a [`FlushContext`], so a
