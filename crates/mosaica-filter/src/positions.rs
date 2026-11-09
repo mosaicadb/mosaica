@@ -133,6 +133,13 @@ impl ColumnPositions {
         Ok(self.array.value(ordinal))
     }
 
+    /// The bytes the records before ordinal `term` hold, for a writer that divides the file by
+    /// bytes. `term` may be the record count, which gives the whole.
+    pub fn bytes_before(&self, term: u32) -> u64 {
+        let offsets = self.array.value_offsets();
+        offsets[(term as usize).min(offsets.len() - 1)] as u64 - offsets[0] as u64
+    }
+
     /// A cursor over `term`'s record, whose posting holds `items` items.
     pub fn cursor(&self, term: AttrLocalId, items: u64) -> io::Result<PositionsCursor<'_>> {
         let ordinal = term.raw() as usize;

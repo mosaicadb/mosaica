@@ -24,11 +24,16 @@ fn writer_memory() -> Option<u64> {
 }
 
 /// What each of a background writer's term indexes may hold, read once an operation: its share
-/// ([`writer_memory`]) by the rule a build's term index is sized by, on the one thread the writer
-/// runs on. Its layers are written one at a time, so each takes the whole of it; where the memory
-/// cannot be read, the least a pass runs in.
+/// ([`writer_memory`]) by the rule a build's term index is sized by, and the machine's threads for
+/// its merges, which divide their terms into ranges as a build's do. Its layers are written one at
+/// a time, so each takes the whole of it; where the memory cannot be read, the least a pass runs
+/// in.
 pub(crate) fn writer_allowance() -> mosaica_filter_write::Allowance {
-    mosaica_filter_write::Allowance::new(writer_memory().unwrap_or(0), 0, 1)
+    mosaica_filter_write::Allowance::new(
+        writer_memory().unwrap_or(0),
+        0,
+        crate::config::default_compute_threads(),
+    )
 }
 
 /// Whether a unit of one kind is running, or finished and not yet published, read from its two

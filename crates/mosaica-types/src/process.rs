@@ -217,6 +217,33 @@ pub fn raise_descriptor_limit() -> u64 {
     descriptor_limit()
 }
 
+/// Give back to the file system the disk the `len` bytes of `file` from `offset` take, leaving the
+/// file's length as it is and those bytes reading as zeros: `fallocate` with
+/// `FALLOC_FL_PUNCH_HOLE` on Linux. Returns whether it did. Where the platform or the file system
+/// cannot, nothing changes.
+#[cfg(target_os = "linux")]
+pub fn release_span(file: &std::fs::File, offset: u64, len: u64) -> bool {
+    use std::os::fd::AsRawFd;
+    let (Ok(offset), Ok(len)) = (libc::off_t::try_from(offset), libc::off_t::try_from(len)) else {
+        return false;
+    };
+    // SAFETY: `fallocate` acts on an open descriptor the caller's `File` owns for the call.
+    unsafe {
+        libc::fallocate(
+            file.as_raw_fd(),
+            libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+            offset,
+            len,
+        ) == 0
+    }
+}
+
+/// [`release_span`] where the platform cannot: nothing changes.
+#[cfg(not(target_os = "linux"))]
+pub fn release_span(_file: &std::fs::File, _offset: u64, _len: u64) -> bool {
+    false
+}
+
 /// A byte count to three significant figures in binary units, such as `18.2 GiB` or `512 B`, as
 /// the progress records' readers and the build's reports of the term images and unique indexes
 /// print it.

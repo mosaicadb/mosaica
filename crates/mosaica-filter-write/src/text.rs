@@ -5,11 +5,14 @@
 //! # One merge for every route
 //!
 //! The build, the flush, the fold and the coalesce all write a text layer through
-//! [`write_terms`] over a [`TermMerge`]: the build and the flush over runs and accumulators, the
-//! fold and the coalesce over finished layers ([`LayerTerms`]). So a layer's bytes are a function
-//! of its term set alone, whichever route wrote it. Each term's posting is held as an ascending
-//! slice up to the merge's slice cap and as a bitmap above it, built from the entities as they
-//! arrive either way, and encoded through the one canonical posting encoder.
+//! [`write_range`], one term range of a [`TermMerge`] at a time: the build and the flush over runs
+//! and accumulators, the fold and the coalesce over finished layers ([`LayerTerms`]). So a layer's
+//! bytes are a function of its term set alone, whichever route wrote it and however its terms were
+//! divided. Each term's posting is held as an ascending slice up to the merge's slice cap and as a
+//! bitmap above it, built from the entities as they arrive either way, and encoded through the one
+//! canonical posting encoder. A range that is not yet being written encodes into [`HeldTerms`]
+//! exactly what the writer would write, and the writer takes it over, a term it left part way
+//! through included.
 //!
 //! What differs between the fold and the coalesce is small, and getting either wrong is silent:
 //!
@@ -66,8 +69,11 @@ use mosaica_filter::{
 };
 use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
 
-use crate::merge::{DictCursor, Records, TermMerge, TermSource};
-use crate::positions::PositionsWriter;
+use crate::merge::{
+    merge_ranges, split, DictCursor, Out, RangeWriter, Ranges, Records, TermMerge, TermSource, Turn,
+};
+use crate::positions::{HeldRecords, PositionsWriter, RecordSink};
+use crate::spill::{Allowance, Sample};
 
 /// Entities held as a `u32` slice for one merged term before the merge switches to a Roaring
 /// bitmap.
@@ -145,26 +151,7 @@ impl TextIndexWriter {
 
     /// End the term with its posting, which holds the items whose positions were pushed.
     pub fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()> {
-        let (held, record) = match posting {
-            Posting::Ascending(entities) => (
-                entities.len() as u64,
-                mosaica_authz::encode_posting(
-                    self.terms as usize,
-                    entities,
-                    SMALL_TERM_THRESHOLD_DEFAULT,
-                )?,
-            ),
-            Posting::Set(entities) => (
-                entities.cardinality(),
-                mosaica_authz::encode_posting_bitmap(entities, SMALL_TERM_THRESHOLD_DEFAULT)?,
-            ),
-        };
-        if held != self.items {
-            return Err(invalid(format!(
-                "term {} was begun for {} items and its posting holds {held}",
-                self.terms, self.items
-            )));
-        }
+        let record = encode(posting, self.terms, self.items)?;
         let open = &mut self.open;
         open.positions.end()?;
         open.postings.append(&record)?;
@@ -202,16 +189,164 @@ fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-/// Write every term `merge` yields into `writer`, holding each term's entities as a slice of at
-/// most `slice_cap` and as a bitmap above it. A term no source yields an entity for is not
-/// written, and a term one finished layer holds whole is copied from it.
-pub(crate) fn write_terms<S: TermSource>(
+/// A term's posting record, checked to hold the `items` items its term was begun for. `term` is
+/// its place in the layer, for the refusal.
+fn encode(posting: Posting<'_>, term: u64, items: u64) -> io::Result<Vec<u8>> {
+    let (held, record) = match posting {
+        Posting::Ascending(entities) => (
+            entities.len() as u64,
+            mosaica_authz::encode_posting(term as usize, entities, SMALL_TERM_THRESHOLD_DEFAULT)?,
+        ),
+        Posting::Set(entities) => (
+            entities.cardinality(),
+            mosaica_authz::encode_posting_bitmap(entities, SMALL_TERM_THRESHOLD_DEFAULT)?,
+        ),
+    };
+    if held != items {
+        return Err(invalid(format!(
+            "term {term} was begun for {items} items and its posting holds {held}"
+        )));
+    }
+    Ok(record)
+}
+
+/// What a text layer's terms are written into: the writer, or what a range of a parallel merge
+/// holds until its turn.
+trait TermOut {
+    fn begin_term(&mut self, term: &str, items: u64) -> io::Result<()>;
+    fn push_item(&mut self, positions: &[u32]) -> io::Result<()>;
+    fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()>;
+    fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()>;
+}
+
+impl TermOut for TextIndexWriter {
+    fn begin_term(&mut self, term: &str, items: u64) -> io::Result<()> {
+        TextIndexWriter::begin_term(self, term, items).map(|_| ())
+    }
+    fn push_item(&mut self, positions: &[u32]) -> io::Result<()> {
+        TextIndexWriter::push_item(self, positions)
+    }
+    fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()> {
+        TextIndexWriter::end_term(self, posting)
+    }
+    fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()> {
+        TextIndexWriter::copy_term(self, term, records)
+    }
+}
+
+/// The terms a range of a parallel merge has encoded while ranges before it are still being
+/// written: each term's key, posting record and positions record as the writer would write them,
+/// and the term it is part way through, whose positions are encoded as far as they have come.
+#[derive(Default)]
+pub struct HeldTerms {
+    keys: Vec<u8>,
+    key_ends: Vec<usize>,
+    postings: HeldRecords,
+    positions: Option<PositionsWriter<HeldRecords>>,
+    /// The open term's items, where one is open.
+    items: Option<u64>,
+}
+
+impl HeldTerms {
+    fn positions(&mut self) -> &mut PositionsWriter<HeldRecords> {
+        self.positions.get_or_insert_with(PositionsWriter::held)
+    }
+
+    fn push_key(&mut self, term: &str) {
+        self.keys.extend_from_slice(term.as_bytes());
+        self.key_ends.push(self.keys.len());
+    }
+
+    fn key(&self, i: usize) -> &str {
+        let start = i.checked_sub(1).map_or(0, |before| self.key_ends[before]);
+        std::str::from_utf8(&self.keys[start..self.key_ends[i]]).expect("a held key was a str")
+    }
+}
+
+impl TermOut for HeldTerms {
+    fn begin_term(&mut self, term: &str, items: u64) -> io::Result<()> {
+        self.positions().begin(items)?;
+        self.push_key(term);
+        self.items = Some(items);
+        Ok(())
+    }
+    fn push_item(&mut self, positions: &[u32]) -> io::Result<()> {
+        self.positions().push(positions)
+    }
+    fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()> {
+        let items = self.items.take().unwrap_or_default();
+        let record = encode(posting, self.postings.len() as u64, items)?;
+        self.positions().end()?;
+        self.postings.append(&record)
+    }
+    fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()> {
+        self.positions().copy(records.positions)?;
+        self.postings.append(records.posting)?;
+        self.push_key(term);
+        Ok(())
+    }
+}
+
+impl RangeWriter for TextIndexWriter {
+    type Held = HeldTerms;
+
+    fn held_bytes(held: &HeldTerms) -> usize {
+        held.keys.len()
+            + held.postings.bytes()
+            + held.positions.as_ref().map_or(0, |p| p.records().bytes())
+    }
+
+    fn write_held(&mut self, held: &mut HeldTerms) -> io::Result<()> {
+        let open = &mut self.open;
+        if let Some(positions) = &held.positions {
+            for i in 0..held.postings.len() {
+                open.dict.push(held.key(i))?;
+                open.positions.copy(positions.records().record(i))?;
+                open.postings.append(held.postings.record(i))?;
+                self.terms += 1;
+            }
+        }
+        if let Some(items) = held.items.take() {
+            open.dict.push(held.key(held.postings.len()))?;
+            open.positions.adopt(held.positions())?;
+            self.items = items;
+        }
+        held.keys.clear();
+        held.key_ends.clear();
+        held.postings.clear();
+        if let Some(positions) = &mut held.positions {
+            positions.clear();
+        }
+        Ok(())
+    }
+}
+
+/// Where a range's next term or item goes.
+fn out<'t>(turn: &'t mut Turn<'_, &mut TextIndexWriter>) -> io::Result<&'t mut dyn TermOut> {
+    Ok(match turn.out()? {
+        Out::Writer(writer) => &mut **writer,
+        Out::Held(held) => held,
+    })
+}
+
+/// Write the terms `merge` yields into a range's place in the output, holding each term's entities
+/// as a slice of at most `slice_cap` and as a bitmap above it. A term no source yields an entity
+/// for is not written, and a term one finished layer holds whole is copied from it. Where what the
+/// range holds reaches its buffer, it waits for its turn, part way through a term or between two.
+pub(crate) fn write_range<S: TermSource>(
     merge: &mut TermMerge<S>,
-    writer: &mut TextIndexWriter,
+    turn: &mut Turn<'_, &mut TextIndexWriter>,
     slice_cap: usize,
 ) -> io::Result<()> {
     let mut entities: Vec<u32> = Vec::new();
     let mut staged: Vec<u32> = Vec::new();
+    let item = |turn: &mut Turn<'_, &mut TextIndexWriter>, positions: &[u32]| {
+        out(turn)?.push_item(positions)?;
+        if turn.full() {
+            turn.wait()?;
+        }
+        Ok(())
+    };
     while merge.next_term()? {
         // **The retention statement.** A term every one of whose carriers was blanked is not
         // written at all: no empty posting, no dictionary key and no positions record, so the word
@@ -222,17 +357,22 @@ pub(crate) fn write_terms<S: TermSource>(
         }
         let term = text_term(merge.term())?;
         if let Some(records) = merge.records() {
-            writer.copy_term(term, records)?;
+            // A record copied whole is never held past the buffer: one that would pass it waits
+            // for its turn and goes straight into the writer.
+            if !turn.fits(records.posting.len() + records.positions.len()) {
+                turn.wait()?;
+            }
+            out(turn)?.copy_term(term, records)?;
             continue;
         }
-        writer.begin_term(term, items)?;
+        out(turn)?.begin_term(term, items)?;
         if items <= slice_cap as u64 {
             entities.clear();
             merge.drain(std::convert::identity, &mut |entity, positions| {
                 entities.push(entity);
-                writer.push_item(positions)
+                item(turn, positions)
             })?;
-            writer.end_term(Posting::Ascending(&entities))?;
+            out(turn)?.end_term(Posting::Ascending(&entities))?;
         } else {
             let mut bitmap = Bitmap::new();
             staged.clear();
@@ -242,10 +382,10 @@ pub(crate) fn write_terms<S: TermSource>(
                     bitmap.add_many(&staged);
                     staged.clear();
                 }
-                writer.push_item(positions)
+                item(turn, positions)
             })?;
             bitmap.add_many(&staged);
-            writer.end_term(Posting::Set(&bitmap))?;
+            out(turn)?.end_term(Posting::Set(&bitmap))?;
         }
     }
     Ok(())
@@ -262,13 +402,22 @@ pub(crate) fn text_term(term: &[u8]) -> io::Result<&str> {
     })
 }
 
-/// The fold's pass: every layer merged into one base index, with `tombstones` subtracted.
+/// The fold's pass: every layer merged into one base index, with `tombstones` subtracted, under
+/// `allowance`.
 pub fn merge_text_layers(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     out: TextIndexFiles,
+    allowance: Allowance,
 ) -> io::Result<()> {
-    merge(inputs, tombstones, out, "the fold's text pass")
+    merge(
+        inputs,
+        tombstones,
+        out,
+        "the fold's text pass",
+        allowance,
+        Ranges::Planned,
+    )
 }
 
 /// The coalesce's pass: a window of a column's extents merged into one extent.
@@ -280,7 +429,11 @@ pub fn merge_text_layers(
 ///
 /// Refuses fewer than two inputs: this collapses a window into one extent and there is nothing to
 /// collapse below two.
-pub fn coalesce_text_extents(inputs: &[TextLayerRef<'_>], out: TextIndexFiles) -> io::Result<()> {
+pub fn coalesce_text_extents(
+    inputs: &[TextLayerRef<'_>],
+    out: TextIndexFiles,
+    allowance: Allowance,
+) -> io::Result<()> {
     const PASS: &str = "the text coalesce";
     if inputs.len() < 2 {
         return Err(invalid(format!(
@@ -289,17 +442,27 @@ pub fn coalesce_text_extents(inputs: &[TextLayerRef<'_>], out: TextIndexFiles) -
             inputs.len()
         )));
     }
-    merge(inputs, &Bitmap::new(), out, PASS)
+    merge(
+        inputs,
+        &Bitmap::new(),
+        out,
+        PASS,
+        allowance,
+        Ranges::Planned,
+    )
 }
 
 /// Every term of every layer, in sorted order, with `tombstones` subtracted from each one's
 /// postings and positions and an emptied term dropped, and the presence of every input less
-/// `tombstones`.
+/// `tombstones`. The terms are merged in ranges as `ranges` says, divided by the layers' positions
+/// bytes, on the threads `allowance` gives.
 fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
     out: TextIndexFiles,
     pass: &str,
+    allowance: Allowance,
+    ranges: Ranges,
 ) -> io::Result<()> {
     let presence = crate::disjoint_union(inputs.iter().map(|input| input.present), pass)?;
     for (i, input) in inputs.iter().enumerate() {
@@ -314,14 +477,37 @@ fn merge(
 
     let presence_path = out.presence.clone();
     let mut writer = TextIndexWriter::create(out)?;
-    let sources = inputs
+    let bytes = inputs
         .iter()
-        .map(|input| LayerTerms::new(input, tombstones))
-        .collect();
-    write_terms(
-        &mut TermMerge::open(sources)?,
+        .map(|input| input.positions.bytes_before(input.positions.record_count()))
+        .sum();
+    let plan = ranges.plan(allowance, bytes, 0);
+    let mut samples: Vec<Sample> = Vec::new();
+    if plan.ranges > 1 {
+        for input in inputs {
+            samples.extend(DictCursor::samples(
+                input.dict,
+                plan.samples(inputs.len()),
+                |ordinal| input.positions.bytes_before(ordinal),
+            )?);
+        }
+    }
+    merge_ranges(
         &mut writer,
-        TEXT_MERGE_SLICE_CAP,
+        &split(samples, plan.ranges),
+        plan,
+        |range, turn| {
+            let sources = inputs
+                .iter()
+                .map(|input| LayerTerms::new(input, tombstones))
+                .collect();
+            write_range(
+                &mut TermMerge::range(sources, range)?,
+                turn,
+                TEXT_MERGE_SLICE_CAP,
+            )
+        },
+        |_| {},
     )?;
     writer.finish()?;
     mosaica_filter::write_presence(&presence_path, &presence.andnot(tombstones))
@@ -412,6 +598,10 @@ impl<'a> LayerTerms<'a> {
 }
 
 impl TermSource for LayerTerms<'_> {
+    fn seek(&mut self, key: &[u8]) -> io::Result<()> {
+        self.dict.seek(key)
+    }
+
     fn next_term(&mut self) -> io::Result<bool> {
         self.posting = None;
         self.cursor = None;
@@ -512,7 +702,16 @@ mod tests {
         let mut writer = TextIndexWriter::create(out.clone()).unwrap();
         let gathered = vec![terms.finish().unwrap()];
         let allowance = Allowance::new(0, 0, 1);
-        write_text_index(dir, tag, gathered, &mut writer, 1 << 22, allowance).unwrap();
+        write_text_index(
+            dir,
+            tag,
+            gathered,
+            &mut writer,
+            1 << 22,
+            allowance,
+            Ranges::Planned,
+        )
+        .unwrap();
         writer.finish().unwrap();
         let present: Bitmap = documents.iter().map(|(entity, _)| *entity).collect();
         mosaica_filter::write_presence(&out.presence, &present).unwrap();
@@ -588,17 +787,42 @@ mod tests {
             .collect();
 
         let folded = files(dir, "folded");
-        merge_text_layers(&inputs, &tombstones, folded.clone()).unwrap();
+        merge_text_layers(
+            &inputs,
+            &tombstones,
+            folded.clone(),
+            Allowance::new(0, 0, 1),
+        )
+        .unwrap();
         let survivors: Documents = base
             .iter()
             .chain(&extent)
             .filter(|(entity, _)| !tombstones.contains(*entity))
             .cloned()
             .collect();
-        assert_eq!(bytes(&folded), bytes(&build(dir, "survivors", &survivors)));
+        let built = bytes(&build(dir, "survivors", &survivors));
+        assert_eq!(bytes(&folded), built);
+        // In term ranges, each layer started at a range's first key, the same.
+        let ranged = files(dir, "ranged");
+        let fixed = Ranges::Fixed {
+            ranges: 4,
+            threads: 2,
+            window: 3,
+            buffer: 1,
+        };
+        merge(
+            &inputs,
+            &tombstones,
+            ranged.clone(),
+            "the test",
+            Allowance::new(0, 0, 2),
+            fixed,
+        )
+        .unwrap();
+        assert_eq!(bytes(&ranged), built);
 
         let coalesced = files(dir, "coalesced");
-        coalesce_text_extents(&inputs, coalesced.clone()).unwrap();
+        coalesce_text_extents(&inputs, coalesced.clone(), Allowance::new(0, 0, 1)).unwrap();
         let every: Documents = base.iter().chain(&extent).cloned().collect();
         assert_eq!(bytes(&coalesced), bytes(&build(dir, "every", &every)));
     }

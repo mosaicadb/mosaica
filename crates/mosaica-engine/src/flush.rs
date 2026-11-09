@@ -1653,7 +1653,7 @@ fn write_text_layer(
     let mut terms = mosaica_filter_write::TermAccumulator::new(
         &dir,
         format!("{}-text-run", target.seg_id),
-        allowance.per_worker(),
+        allowance.chunk(1),
     );
     let mut presence = croaring::Bitmap::new();
     let mut prose_rows: Vec<(u32, &str)> = Vec::new();
@@ -1702,6 +1702,7 @@ fn write_text_layer(
         &mut writer,
         mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
         allowance,
+        mosaica_filter_write::Ranges::Planned,
     )
     .map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextDict);

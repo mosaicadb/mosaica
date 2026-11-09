@@ -9,14 +9,17 @@
 //! receipt.
 //!
 //! A **sorted run** is written by [`TextRunWriter`] and read back by [`TextRunReader`], one of the
-//! sources [`TermMerge`] merges. [`cascade_sorted_runs`] reduces more runs than one merge may hold
-//! open. A malformed run is refused as [`io::ErrorKind::InvalidData`].
+//! sources [`TermMerge`] merges. A run ends in a sparse index of its terms, so that a reader can
+//! start at a term: a merge in term ranges ([`crate::merge`]) starts each range's readers there,
+//! and checks each run's receipt against what all its ranges decoded of it ([`RunSet`]).
+//! [`cascade_sorted_runs`] reduces more runs than one merge may hold open. A malformed run is
+//! refused as [`io::ErrorKind::InvalidData`].
 //!
 //! **What a merge may hold is an [`Allowance`]**, the one rule the build and the service both size
 //! a term index's pass by. Its fan-in, and the read buffer each run's cursor gets, are what the
 //! allowance pays for, under the share of the process's file descriptors a merge may take
 //! ([`merge_descriptors`]). Every cursor on a run reads it at its own offset through one shared
-//! descriptor.
+//! descriptor ([`RunFile`]).
 //! Every error a run's reader or writer returns names its file, an I/O failure as a
 //! [`SpillFileError`], and every refusal the merge makes of its own names its term.
 
@@ -24,12 +27,14 @@ use std::fmt::Display;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Mutex, PoisonError};
 
-use mosaica_filter::{common_prefix_len, put_varint, take_varint, VarintError};
+use mosaica_filter::{
+    common_prefix_len, put_varint, take_varint, SortedDict, SortedDictWriter, VarintError,
+};
 use mosaica_types::splitmix64;
 
-use crate::merge::{TermMerge, TermSource};
+use crate::merge::{TermMerge, TermRange, TermSource};
 
 /// Buffer size for spill I/O, both directions, and the largest read buffer a merge gives a run's
 /// cursor. Four mebibytes: large enough that the syscall cost is noise against the encode/decode
@@ -220,6 +225,12 @@ pub(crate) fn encode_entity(
 /// that makes this file large is exactly the one whose terms share them. Integrity is external, via
 /// the [`SpillReceipt`].
 ///
+/// **After the records, a sparse index**, so that a reader can start at a term rather than at the
+/// file's start: the first record at or after every [`RUN_INDEX_STRIDE`] bytes is written with
+/// nothing shared, and its term is a key of a [`SortedDict`] written after the records, whose
+/// ordinal names that record's offset in a `u64` array after it. A trailer ends the file:
+/// `records_len u64 ‖ index_len u64 ‖ "MSRI"`. [`RunFile`] reads it.
+///
 /// **The entity delta is per TERM, not per file**, which is where this differs from a band file. A
 /// band file's records ascend in entity across the whole file because its emitter walks items in
 /// assignment order; a run's do not — the run is term-major, so entities restart at each term's
@@ -244,7 +255,23 @@ pub struct TextRunWriter {
     anchor: u64,
     /// [`fingerprint`] of the open term, folded once per record rather than once per pair.
     mark: u64,
+    /// Bytes of records written, the index's terms and their offsets, and the offset at or after
+    /// which the next record is one of them.
+    written: u64,
+    index: SortedDictWriter<Vec<u8>>,
+    offsets: Vec<u64>,
+    next_point: u64,
 }
+
+/// Bytes of a run between the records its sparse index names: what a reader that starts at a
+/// term decodes at most before it reaches the term.
+pub const RUN_INDEX_STRIDE: u64 = 8 << 10;
+
+/// The last four bytes of a run.
+const RUN_MAGIC: [u8; 4] = *b"MSRI";
+
+/// The bytes of a run's trailer: the records' and the index's lengths, and [`RUN_MAGIC`].
+const RUN_TRAILER: u64 = 20;
 
 /// What a run carries for each entity of a term: nothing more, as the keyword column's runs, or the
 /// term's positions in it, as the text index's.
@@ -279,7 +306,20 @@ impl TextRunWriter {
             count: 0,
             anchor: 0,
             mark: 0,
+            written: 0,
+            index: SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
+            offsets: Vec::new(),
+            next_point: 0,
         })
+    }
+
+    /// Write `bytes` into the records.
+    fn put(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.writer
+            .write_all(bytes)
+            .map_err(|e| at(&self.path, e))?;
+        self.written += bytes.len() as u64;
+        Ok(())
     }
 
     /// Open a record: the term, and how many entities will follow.
@@ -324,15 +364,31 @@ impl TextRunWriter {
                 ),
             ));
         }
-        let shared = common_prefix_len(&self.prev, term);
-        self.record.clear();
-        put_varint(shared as u32, &mut self.record);
-        put_varint((term.len() - shared) as u32, &mut self.record);
-        self.record.extend_from_slice(&term[shared..]);
-        put_varint(entities, &mut self.record);
-        self.writer
-            .write_all(&self.record)
-            .map_err(|e| at(&self.path, e))?;
+        let point = self.written >= self.next_point;
+        let shared = match point {
+            true => {
+                let key = std::str::from_utf8(term).map_err(|e| {
+                    malformed(
+                        &self.path,
+                        format_args!("term {term:?} is not UTF-8 ({e}); a run's terms are text"),
+                    )
+                })?;
+                self.index.push(key).map_err(io::Error::from)?;
+                self.offsets.push(self.written);
+                self.next_point = self.written + RUN_INDEX_STRIDE;
+                0
+            }
+            false => common_prefix_len(&self.prev, term),
+        };
+        let mut record = std::mem::take(&mut self.record);
+        record.clear();
+        put_varint(shared as u32, &mut record);
+        put_varint((term.len() - shared) as u32, &mut record);
+        record.extend_from_slice(&term[shared..]);
+        put_varint(entities, &mut record);
+        let written = self.put(&record);
+        self.record = record;
+        written?;
 
         self.mark = fingerprint(term);
         self.prev.clear();
@@ -400,10 +456,7 @@ impl TextRunWriter {
         );
         self.last_entity = entity;
         self.started = true;
-        let written = self
-            .writer
-            .write_all(&record)
-            .map_err(|e| at(&self.path, e));
+        let written = self.put(&record);
         self.record = record;
         written?;
         self.wrote(1, anchor);
@@ -426,8 +479,7 @@ impl TextRunWriter {
         body: impl FnOnce(&mut dyn FnMut(&[u8]) -> io::Result<()>) -> io::Result<()>,
     ) -> io::Result<()> {
         self.begin(term, count)?;
-        let (writer, path) = (&mut self.writer, &self.path);
-        body(&mut |piece| writer.write_all(piece).map_err(|e| at(path, e)))?;
+        body(&mut |piece| self.put(piece))?;
         self.wrote(count, anchor);
         Ok(())
     }
@@ -440,8 +492,9 @@ impl TextRunWriter {
         self.anchor = self.anchor.wrapping_add(anchor);
     }
 
-    /// Flush, fsync, and hand back the receipt a run's reader must be given.
-    pub fn finish(self) -> io::Result<SpillReceipt> {
+    /// Write the index and the trailer, flush, fsync, and hand back the receipt a run's reader
+    /// must be given.
+    pub fn finish(mut self) -> io::Result<SpillReceipt> {
         if self.owed > 0 {
             return Err(malformed(
                 &self.path,
@@ -452,6 +505,20 @@ impl TextRunWriter {
                 ),
             ));
         }
+        let records = self.written;
+        let index = std::mem::replace(
+            &mut self.index,
+            SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
+        );
+        let (mut tail, stats) = index.into_output().map_err(io::Error::from)?;
+        let index_len = stats.bytes;
+        for offset in &self.offsets {
+            tail.extend_from_slice(&offset.to_le_bytes());
+        }
+        tail.extend_from_slice(&records.to_le_bytes());
+        tail.extend_from_slice(&index_len.to_le_bytes());
+        tail.extend_from_slice(&RUN_MAGIC);
+        self.put(&tail)?;
         let TextRunWriter {
             path,
             writer,
@@ -469,8 +536,335 @@ impl TextRunWriter {
     }
 }
 
-/// Streams a text run back **term by term**, as a [`TermSource`], verifying count and anchor at end
-/// of stream.
+/// A run opened for its readers: its file, which every reader on it reads at its own offset
+/// (`pread`) so that all of them share one descriptor, its receipt, and its sparse index, mapped
+/// rather than read.
+pub struct RunFile {
+    path: PathBuf,
+    file: File,
+    count: u64,
+    anchor: u64,
+    /// Bytes of records, which the index follows.
+    records: u64,
+    index: SortedDict,
+    /// Where the index's offsets start in the file.
+    offsets_at: u64,
+}
+
+/// One key of a source, and the bytes from it to the source's next sample: what a merge divides
+/// its term space by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Sample {
+    pub key: Vec<u8>,
+    pub bytes: u64,
+}
+
+impl RunFile {
+    /// Open the run `receipt` names, checking that its trailer, index and length agree.
+    pub fn open(receipt: &SpillReceipt) -> io::Result<RunFile> {
+        let path = &receipt.path;
+        // Writable as well, so that its spans can be given back as they are read.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .map_err(|e| at(path, e))?;
+        let len = file.metadata().map_err(|e| at(path, e))?.len();
+        let mut trailer = [0u8; RUN_TRAILER as usize];
+        if len < RUN_TRAILER {
+            return Err(malformed(path, format_args!("{len} bytes hold no trailer")));
+        }
+        read_at(&file, &mut trailer, len - RUN_TRAILER).map_err(|e| at(path, e))?;
+        if trailer[16..] != RUN_MAGIC {
+            return Err(malformed(path, "the trailer does not end the file"));
+        }
+        let records = u64::from_le_bytes(trailer[..8].try_into().expect("eight bytes"));
+        let index_len = u64::from_le_bytes(trailer[8..16].try_into().expect("eight bytes"));
+        let index_end = records
+            .checked_add(index_len)
+            .filter(|end| *end <= len - RUN_TRAILER)
+            .ok_or_else(|| {
+                malformed(
+                    path,
+                    format_args!(
+                        "{len} bytes cannot hold {records} bytes of records and a {index_len}-byte \
+                         index"
+                    ),
+                )
+            })?;
+        let index = SortedDict::map_within(&file, records, index_len)
+            .map_err(|e| malformed(path, format_args!("its index: {e}")))?;
+        if index_end + 8 * u64::from(index.len()) + RUN_TRAILER != len {
+            return Err(malformed(
+                path,
+                format_args!(
+                    "{len} bytes where {records} of records, a {index_len}-byte index and {} \
+                     offsets make {}",
+                    index.len(),
+                    index_end + 8 * u64::from(index.len()) + RUN_TRAILER
+                ),
+            ));
+        }
+        Ok(RunFile {
+            path: path.clone(),
+            file,
+            count: receipt.count,
+            anchor: receipt.anchor,
+            records,
+            index,
+            offsets_at: index_end,
+        })
+    }
+
+    /// The bytes its records take.
+    pub fn records(&self) -> u64 {
+        self.records
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The offset of the record index entry `ordinal` names.
+    fn offset(&self, ordinal: u32) -> io::Result<u64> {
+        let mut bytes = [0u8; 8];
+        read_at(
+            &self.file,
+            &mut bytes,
+            self.offsets_at + 8 * u64::from(ordinal),
+        )
+        .map_err(|e| at(&self.path, e))?;
+        let offset = u64::from_le_bytes(bytes);
+        if offset >= self.records {
+            return Err(malformed(
+                &self.path,
+                format_args!(
+                    "index entry {ordinal} names offset {offset}, past the {} bytes of records",
+                    self.records
+                ),
+            ));
+        }
+        Ok(offset)
+    }
+
+    /// Where a reader starting at `key` begins: the last record the index names whose term is at
+    /// or before `key`, with that term, or the file's start where there is none.
+    pub fn start_of(&self, key: &[u8]) -> io::Result<(u64, Option<Vec<u8>>)> {
+        let index_error = |e: mosaica_filter::DictError| malformed(&self.path, e);
+        let rank = self.index.rank(key).map_err(index_error)?;
+        let mut scratch = Vec::new();
+        let at = match rank < self.index.len()
+            && self
+                .index
+                .key_of(rank, &mut scratch)
+                .map_err(index_error)?
+                .as_bytes()
+                == key
+        {
+            true => rank,
+            false if rank == 0 => return Ok((0, None)),
+            false => rank - 1,
+        };
+        let term = self.index.key_of(at, &mut scratch).map_err(index_error)?;
+        Ok((self.offset(at)?, Some(term.as_bytes().to_vec())))
+    }
+
+    /// About `samples` of its index's terms, evenly spaced, each with the bytes of records from it
+    /// to the next.
+    pub fn samples(&self, samples: usize) -> io::Result<Vec<Sample>> {
+        let n = self.index.len() as usize;
+        let mut scratch = Vec::new();
+        let mut taken: Vec<(Vec<u8>, u64)> = Vec::new();
+        for i in 0..samples.min(n) {
+            let ordinal = (i * n / samples.min(n)) as u32;
+            let key = self
+                .index
+                .key_of(ordinal, &mut scratch)
+                .map_err(|e| malformed(&self.path, e))?;
+            taken.push((key.as_bytes().to_vec(), self.offset(ordinal)?));
+        }
+        let ends: Vec<u64> = taken
+            .iter()
+            .skip(1)
+            .map(|(_, offset)| *offset)
+            .chain([self.records])
+            .collect();
+        Ok(taken
+            .into_iter()
+            .zip(ends)
+            .map(|((key, offset), end)| Sample {
+                key,
+                bytes: end.saturating_sub(offset),
+            })
+            .collect())
+    }
+
+    /// Check what the readers that covered every record between them decoded, summed, against
+    /// the run's receipt.
+    pub fn check(&self, pairs: u64, anchor: u64) -> io::Result<()> {
+        check_receipt(&self.path, (pairs, anchor), (self.count, self.anchor))
+    }
+
+    /// Give back the disk the records before `offset` take, where the file system can.
+    pub fn release_before(&self, offset: u64) {
+        let offset = offset.min(self.records) / RELEASE_ALIGN * RELEASE_ALIGN;
+        if offset > 0 {
+            mosaica_types::process::release_span(&self.file, 0, offset);
+        }
+    }
+}
+
+/// The runs a merge in term ranges reads: each opened once, where each range starts in each, and
+/// what the ranges have decoded of each so far.
+pub struct RunSet {
+    files: Vec<RunFile>,
+    /// Per range, the offset in each run its readers start from.
+    starts: Vec<Vec<u64>>,
+    decoded: Mutex<Vec<(u64, u64)>>,
+}
+
+impl RunSet {
+    pub fn open(receipts: &[SpillReceipt]) -> io::Result<RunSet> {
+        Ok(RunSet {
+            files: receipts
+                .iter()
+                .map(RunFile::open)
+                .collect::<io::Result<_>>()?,
+            starts: Vec::new(),
+            decoded: Mutex::new(vec![(0, 0); receipts.len()]),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    /// The bytes their records take.
+    pub fn records(&self) -> u64 {
+        self.files.iter().map(RunFile::records).sum()
+    }
+
+    /// `each` keys sampled from each run's index.
+    pub fn samples(&self, each: usize) -> io::Result<Vec<Sample>> {
+        let mut samples = Vec::new();
+        for file in &self.files {
+            samples.extend(file.samples(each)?);
+        }
+        Ok(samples)
+    }
+
+    /// Find where each of `ranges` starts in each run, from the runs' indexes.
+    pub fn place(&mut self, ranges: &[TermRange]) -> io::Result<()> {
+        self.starts = ranges
+            .iter()
+            .map(|range| {
+                self.files
+                    .iter()
+                    .map(|file| match &range.lo {
+                        Some(lo) => file.start_of(lo).map(|(offset, _)| offset),
+                        None => Ok(0),
+                    })
+                    .collect()
+            })
+            .collect::<io::Result<_>>()?;
+        Ok(())
+    }
+
+    /// A reader of each run, in order, from its start.
+    pub fn readers(
+        &self,
+        payload: RunPayload,
+        buffer: usize,
+    ) -> impl Iterator<Item = TextRunReader<'_>> {
+        self.files
+            .iter()
+            .map(move |file| TextRunReader::open(file, payload, buffer))
+    }
+
+    /// Count what `readers`, one a run in order, decoded of one range.
+    pub fn tally<'a>(&self, readers: impl Iterator<Item = &'a TextRunReader<'a>>) {
+        let mut decoded = self.decoded.lock().unwrap_or_else(PoisonError::into_inner);
+        for (sum, reader) in decoded.iter_mut().zip(readers) {
+            let (pairs, anchor) = reader.share();
+            *sum = (sum.0 + pairs, sum.1.wrapping_add(anchor));
+        }
+    }
+
+    /// Range `range` and every range before it are written: give back what no later range reads.
+    pub fn written(&self, range: usize) {
+        if let Some(next) = self.starts.get(range + 1) {
+            for (file, &offset) in self.files.iter().zip(next) {
+                file.release_before(offset);
+            }
+        }
+    }
+
+    /// Check what the ranges decoded of each run against its receipt.
+    pub fn check(self) -> io::Result<()> {
+        let decoded = self
+            .decoded
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner);
+        for (file, (pairs, anchor)) in self.files.iter().zip(decoded) {
+            file.check(pairs, anchor)?;
+        }
+        Ok(())
+    }
+}
+
+/// What a span of a run is given back in multiples of: a file system's block, or a multiple of it.
+const RELEASE_ALIGN: u64 = 64 << 10;
+
+/// `buf.len()` bytes of `file` at `offset`.
+fn read_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    #[cfg(unix)]
+    return std::os::unix::fs::FileExt::read_exact_at(file, buf, offset);
+    #[cfg(windows)]
+    {
+        let mut done = 0;
+        while done < buf.len() {
+            match std::os::windows::fs::FileExt::seek_read(
+                file,
+                &mut buf[done..],
+                offset + done as u64,
+            )? {
+                0 => return Err(io::ErrorKind::UnexpectedEof.into()),
+                n => done += n,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Refuse a run whose decoded pairs and anchor are not its receipt's.
+fn check_receipt(
+    path: &Path,
+    (pairs, anchor): (u64, u64),
+    (count, expect): (u64, u64),
+) -> io::Result<()> {
+    if pairs != count {
+        return Err(malformed(
+            path,
+            format_args!("pair count mismatch: decoded {pairs} pairs but the receipt says {count}"),
+        ));
+    }
+    if anchor != expect {
+        return Err(malformed(
+            path,
+            format_args!(
+                "content anchor mismatch: recomputed {anchor:#018x} but the receipt says \
+                 {expect:#018x}: the file's bytes are not the bytes that were written"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Streams a text run back **term by term**, as a [`TermSource`], from its start or from a term.
 ///
 /// **The head's entities are not decoded until they are asked for.** A k-way merge holds one open
 /// reader per run and compares only their head terms, so a reader that eagerly materialised each
@@ -479,12 +873,13 @@ impl TextRunWriter {
 /// and its length and stops; [`TermSource::next_entity`] decodes them, and `next_term` drains
 /// whatever a caller left rather than trusting it to have consumed the record.
 ///
-/// Verification is terminal (a running sum can only be checked once the stream ends), and a merge
-/// moves every source to its end.
-pub struct TextRunReader {
-    path: PathBuf,
+/// A reader that read the whole run checks count and anchor against the receipt as it reaches the
+/// end, since a running sum can only be checked once the stream ends. A reader over a range of the
+/// run's terms decodes only that range, and its [`Self::share`] is what [`RunFile::check`] sums.
+pub struct TextRunReader<'r> {
+    run: &'r RunFile,
     payload: RunPayload,
-    reader: BufReader<RunCursor>,
+    reader: BufReader<RunCursor<'r>>,
     /// The term's positions in the entity [`Self::next_entity`] last returned.
     positions: Vec<u32>,
     /// The head term, front-decoded against its predecessor.
@@ -499,40 +894,47 @@ pub struct TextRunReader {
     taken: u32,
     /// The last entity decoded within the head, for the delta.
     last_entity: u32,
-    expect_count: u64,
-    expect_anchor: u64,
     pairs: u64,
     anchor: u64,
+    /// Whether the reader started at the run's first term, so that at its end it has decoded all of
+    /// it; whether the head was read by [`TermSource::seek`] and is yet to be yielded; whether the
+    /// records are exhausted.
+    whole: bool,
+    peeked: bool,
     done: bool,
 }
 
-/// The run `receipt` names, opened for its readers to share.
-pub fn run_file(receipt: &SpillReceipt) -> io::Result<Arc<File>> {
-    File::open(&receipt.path)
-        .map(Arc::new)
-        .map_err(|e| at(&receipt.path, e))
-}
-
-/// A cursor's place in a run's file. It reads at its own offset (`pread`), so every cursor on one
-/// run shares the run's one descriptor.
-struct RunCursor {
-    file: Arc<File>,
+/// A cursor's place in a run's records, read at its own offset (`pread`), so every cursor on one
+/// run shares the run's one descriptor. It reads nothing past the records.
+struct RunCursor<'r> {
+    file: &'r File,
     at: u64,
+    end: u64,
 }
 
-impl Read for RunCursor {
+impl Read for RunCursor<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let room = usize::try_from(self.end - self.at).unwrap_or(usize::MAX);
+        let len = room.min(buf.len());
+        let buf = &mut buf[..len];
+        if buf.is_empty() {
+            return Ok(0);
+        }
         #[cfg(unix)]
-        let read = std::os::unix::fs::FileExt::read_at(&*self.file, buf, self.at)?;
+        let read = std::os::unix::fs::FileExt::read_at(self.file, buf, self.at)?;
         #[cfg(windows)]
-        let read = std::os::windows::fs::FileExt::seek_read(&*self.file, buf, self.at)?;
+        let read = std::os::windows::fs::FileExt::seek_read(self.file, buf, self.at)?;
         self.at += read as u64;
         Ok(read)
     }
 }
 
-impl TermSource for TextRunReader {
+impl TermSource for TextRunReader<'_> {
     fn next_term(&mut self) -> io::Result<bool> {
+        if self.peeked {
+            self.peeked = false;
+            return Ok(true);
+        }
         if self.done {
             return Ok(false);
         }
@@ -541,49 +943,52 @@ impl TermSource for TextRunReader {
         while self.pending > 0 {
             self.decode_entity()?;
         }
-        if at_end(&mut self.reader).map_err(|e| at(&self.path, e))? {
-            self.verify_end()?;
-            return Ok(false);
+        match self.read_head()? {
+            Some(_) => Ok(true),
+            None => {
+                if self.whole {
+                    check_receipt(
+                        &self.run.path,
+                        (self.pairs, self.anchor),
+                        (self.run.count, self.run.anchor),
+                    )?;
+                }
+                Ok(false)
+            }
         }
-        let shared = self.next_u32()? as usize;
-        if shared > self.term.len() {
-            return Err(self.malformed(&format!(
-                "shared prefix {shared} exceeds the previous term's {} bytes",
-                self.term.len()
-            )));
+    }
+
+    /// From the last record the index names at or before `key`, the records before `key` are
+    /// decoded, so that a damaged one is still refused, and not counted in [`Self::share`]: the
+    /// reader of the range before this one counts them.
+    fn seek(&mut self, key: &[u8]) -> io::Result<()> {
+        if self.pairs > 0 || !self.term.is_empty() || self.peeked {
+            return Err(self.malformed("a reader seeks before its first term"));
         }
-        let suffix_len = self.next_u32()? as usize;
-        self.term.truncate(shared);
-        // Read through `take` and grow rather than `resize`-then-`read_exact`: `suffix_len` comes
-        // off the file, and a corrupted one would otherwise be an allocation of whatever it says
-        // before a single byte is checked against what the file actually holds.
-        let got = (&mut self.reader)
-            .take(suffix_len as u64)
-            .read_to_end(&mut self.term)
-            .map_err(|e| at(&self.path, e))?;
-        if got != suffix_len {
-            return Err(self.malformed("truncated inside a term's bytes"));
+        let (offset, mut named) = self.run.start_of(key)?;
+        self.reader.get_mut().at = offset;
+        self.whole = false;
+        let counted = (self.pairs, self.anchor);
+        while let Some(shared) = self.read_head()? {
+            if let Some(named) = named.take() {
+                if shared != 0 || self.term != named {
+                    return Err(self.malformed(&format!(
+                        "the index names {:?} at offset {offset}, where the record is {:?}",
+                        String::from_utf8_lossy(&named),
+                        String::from_utf8_lossy(&self.term)
+                    )));
+                }
+            }
+            if self.term.as_slice() >= key {
+                self.peeked = true;
+                break;
+            }
+            while self.pending > 0 {
+                self.decode_entity()?;
+            }
         }
-        if self.term.is_empty() {
-            return Err(self.malformed("the empty string is not a term"));
-        }
-        // Refused rather than decoded: the writer refuses a zero-entity record, so one here is a
-        // malformed file and not a term that lost its postings.
-        let count = self.next_u32()?;
-        if count == 0 {
-            return Err(self.malformed("a term with no entities"));
-        }
-        if self.pairs + count as u64 > self.expect_count {
-            return Err(self.malformed(&format!(
-                "trailing data: more pairs than the receipt's count {}",
-                self.expect_count
-            )));
-        }
-        self.mark = fingerprint(&self.term);
-        self.pending = count;
-        self.taken = 0;
-        self.last_entity = 0;
-        Ok(true)
+        (self.pairs, self.anchor) = counted;
+        Ok(())
     }
 
     fn term(&self) -> &[u8] {
@@ -609,32 +1014,86 @@ impl TermSource for TextRunReader {
     }
 }
 
-impl TextRunReader {
-    /// A reader of the run `receipt` names, from its start, through `file`, which is that run's
-    /// open file ([`run_file`]), with a read buffer of `buffer` bytes. Several readers may share
-    /// one file, each reading at its own offset.
-    pub fn open(
-        file: Arc<File>,
-        receipt: &SpillReceipt,
-        payload: RunPayload,
-        buffer: usize,
-    ) -> TextRunReader {
+impl<'r> TextRunReader<'r> {
+    /// A reader of `run`, from its start, with a read buffer of `buffer` bytes. Several readers
+    /// may read one run at once.
+    pub fn open(run: &'r RunFile, payload: RunPayload, buffer: usize) -> TextRunReader<'r> {
         TextRunReader {
-            path: receipt.path.clone(),
+            run,
             payload,
             positions: Vec::new(),
-            reader: BufReader::with_capacity(buffer, RunCursor { file, at: 0 }),
+            reader: BufReader::with_capacity(
+                buffer,
+                RunCursor {
+                    file: &run.file,
+                    at: 0,
+                    end: run.records,
+                },
+            ),
             term: Vec::new(),
             mark: 0,
             pending: 0,
             taken: 0,
             last_entity: 0,
-            expect_count: receipt.count,
-            expect_anchor: receipt.anchor,
             pairs: 0,
             anchor: 0,
+            whole: true,
+            peeked: false,
             done: false,
         }
+    }
+
+    /// The pairs this reader decoded and what they add to the anchor, for [`RunFile::check`].
+    pub fn share(&self) -> (u64, u64) {
+        (self.pairs, self.anchor)
+    }
+
+    /// Read the next record's term and count, returning its shared prefix, or `None` at the end of
+    /// the records.
+    fn read_head(&mut self) -> io::Result<Option<usize>> {
+        if at_end(&mut self.reader).map_err(|e| at(&self.run.path, e))? {
+            self.done = true;
+            return Ok(None);
+        }
+        let shared = self.next_u32()? as usize;
+        if shared > self.term.len() {
+            return Err(self.malformed(&format!(
+                "shared prefix {shared} exceeds the previous term's {} bytes",
+                self.term.len()
+            )));
+        }
+        let suffix_len = self.next_u32()? as usize;
+        self.term.truncate(shared);
+        // Read through `take` and grow rather than `resize`-then-`read_exact`: `suffix_len` comes
+        // off the file, and a corrupted one would otherwise be an allocation of whatever it says
+        // before a single byte is checked against what the file actually holds.
+        let got = (&mut self.reader)
+            .take(suffix_len as u64)
+            .read_to_end(&mut self.term)
+            .map_err(|e| at(&self.run.path, e))?;
+        if got != suffix_len {
+            return Err(self.malformed("truncated inside a term's bytes"));
+        }
+        if self.term.is_empty() {
+            return Err(self.malformed("the empty string is not a term"));
+        }
+        // Refused rather than decoded: the writer refuses a zero-entity record, so one here is a
+        // malformed file and not a term that lost its postings.
+        let count = self.next_u32()?;
+        if count == 0 {
+            return Err(self.malformed("a term with no entities"));
+        }
+        if self.pairs + count as u64 > self.run.count {
+            return Err(self.malformed(&format!(
+                "trailing data: more pairs than the receipt's count {}",
+                self.run.count
+            )));
+        }
+        self.mark = fingerprint(&self.term);
+        self.pending = count;
+        self.taken = 0;
+        self.last_entity = 0;
+        Ok(Some(shared))
     }
 
     fn decode_entity(&mut self) -> io::Result<u32> {
@@ -681,36 +1140,18 @@ impl TextRunReader {
         Ok(entity)
     }
 
-    fn verify_end(&mut self) -> io::Result<()> {
-        if self.pairs != self.expect_count {
-            return Err(self.malformed(&format!(
-                "pair count mismatch: decoded {} pairs but the receipt says {}",
-                self.pairs, self.expect_count
-            )));
-        }
-        if self.anchor != self.expect_anchor {
-            return Err(self.malformed(&format!(
-                "content anchor mismatch: recomputed {:#018x} but the receipt says {:#018x} — \
-                 the file's bytes are not the bytes that were written",
-                self.anchor, self.expect_anchor
-            )));
-        }
-        self.done = true;
-        Ok(())
-    }
-
     fn next_u32(&mut self) -> io::Result<u32> {
         read_varint(&mut self.reader, take_varint).map_err(|e| {
             if e.kind() == io::ErrorKind::InvalidData {
                 self.malformed(&e.to_string())
             } else {
-                at(&self.path, e)
+                at(&self.run.path, e)
             }
         })
     }
 
     fn malformed(&self, detail: &str) -> io::Error {
-        malformed(&self.path, detail)
+        malformed(&self.run.path, detail)
     }
 }
 
@@ -763,6 +1204,14 @@ impl Allowance {
     /// The least a pass on `threads` threads is given: [`WORKER_BYTES_MIN`] each.
     pub fn floor(threads: usize) -> u64 {
         threads.max(1) as u64 * WORKER_BYTES_MIN as u64
+    }
+
+    /// What is left of it once `bytes` of it are held.
+    pub fn less(&self, bytes: u64) -> Allowance {
+        Allowance {
+            bytes: self.bytes.saturating_sub(bytes),
+            threads: self.threads,
+        }
     }
 
     /// What each of `chunks` held at once may allocate before it spills: an equal share, and at
@@ -951,10 +1400,15 @@ fn merge_group(
     payload: RunPayload,
     buffer: usize,
 ) -> io::Result<SpillReceipt> {
+    let files = runs
+        .iter()
+        .map(RunFile::open)
+        .collect::<io::Result<Vec<_>>>()?;
     let mut merge = TermMerge::open(
-        runs.iter()
-            .map(|run| Ok(TextRunReader::open(run_file(run)?, run, payload, buffer)))
-            .collect::<io::Result<Vec<_>>>()?,
+        files
+            .iter()
+            .map(|run| TextRunReader::open(run, payload, buffer))
+            .collect(),
     )?;
     let mut writer = TextRunWriter::buffered(path, payload, buffer)?;
     while merge.next_term()? {
@@ -1012,6 +1466,12 @@ mod tests {
         fs::write(path, bytes).unwrap();
     }
 
+    /// The records' length a run's trailer gives.
+    fn open_run_len(bytes: &[u8]) -> usize {
+        let at = bytes.len() - 20;
+        u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize
+    }
+
     /// The read or write was refused as malformed, rather than failing for I/O.
     fn assert_refused<T: std::fmt::Debug>(result: io::Result<T>) {
         assert!(
@@ -1020,9 +1480,14 @@ mod tests {
         );
     }
 
-    /// A reader of the run `receipt` names.
-    fn open_reader(receipt: &SpillReceipt, payload: RunPayload) -> TextRunReader {
-        TextRunReader::open(run_file(receipt).unwrap(), receipt, payload, RUN_BUFFER_MIN)
+    /// The run `receipt` names, opened.
+    fn open_run(receipt: &SpillReceipt) -> RunFile {
+        RunFile::open(receipt).unwrap()
+    }
+
+    /// A reader of `run` from its start.
+    fn open_reader(run: &RunFile, payload: RunPayload) -> TextRunReader<'_> {
+        TextRunReader::open(run, payload, RUN_BUFFER_MIN)
     }
 
     /// One whole record of a run of rows.
@@ -1056,7 +1521,8 @@ mod tests {
             }
         }
         let receipt = writer.finish().unwrap();
-        let mut reader = open_reader(&receipt, RunPayload::Positions);
+        let run = open_run(&receipt);
+        let mut reader = open_reader(&run, RunPayload::Positions);
         for (term, items) in &records {
             assert!(reader.next_term().unwrap());
             assert_eq!(reader.term(), *term);
@@ -1067,11 +1533,15 @@ mod tests {
         }
         assert!(!reader.next_term().unwrap());
 
-        // The last byte is the last position's gap: changed, the anchor no longer agrees.
+        // The last byte of the records is the last position's gap: changed, the anchor no longer
+        // agrees.
+        let last = run.records() as usize - 1;
+        drop(run);
         let mut bytes = fs::read(&path).unwrap();
-        *bytes.last_mut().unwrap() ^= 1;
+        bytes[last] ^= 1;
         fs::write(&path, &bytes).unwrap();
-        let mut reader = open_reader(&receipt, RunPayload::Positions);
+        let run = open_run(&receipt);
+        let mut reader = open_reader(&run, RunPayload::Positions);
         assert!((|| -> io::Result<()> {
             while reader.next_term()? {}
             Ok(())
@@ -1105,7 +1575,8 @@ mod tests {
     }
 
     fn read_text_run(receipt: &SpillReceipt) -> io::Result<Vec<(String, Vec<u32>)>> {
-        let mut reader = open_reader(receipt, RunPayload::Rows);
+        let run = RunFile::open(receipt)?;
+        let mut reader = open_reader(&run, RunPayload::Rows);
         let mut out = Vec::new();
         while reader.next_term()? {
             let term = String::from_utf8(reader.term().to_vec()).unwrap();
@@ -1160,9 +1631,9 @@ mod tests {
         let path = temp.path().join("text-run.spill");
         let records = vec![("alpha", vec![1, 5, 9]), ("bravo", vec![2, 4])];
         let receipt = write_text_run(&path, &records);
-        // The last byte is an entity delta: flipping it changes a posting and nothing else, which
-        // is exactly the failure a count check alone would miss.
-        let last = fs::read(&path).unwrap().len() - 1;
+        // The last byte of the records is an entity delta: flipping it changes a posting and
+        // nothing else, which is exactly the failure a count check alone would miss.
+        let last = open_run(&receipt).records() as usize - 1;
         flip_byte(&path, last);
         assert_refused(read_text_run(&receipt));
     }
@@ -1185,9 +1656,19 @@ mod tests {
         let path = temp.path().join("text-run.spill");
         let records = vec![("alpha", vec![1, 5, 9])];
         let receipt = write_text_run(&path, &records);
-        // A whole extra record, well formed: `zz` with one entity. Only the receipt's pair count
-        // separates it from a legitimate stream.
+        // A whole extra record, well formed: `zz` with one entity, after the trailer, and the
+        // same record among the records with the trailer moved to agree. Only the receipt's pair
+        // count separates the second from a legitimate stream.
+        let whole = fs::read(&path).unwrap();
         append(&path, &[0, 2, b'z', b'z', 1, 3]);
+        assert_refused(read_text_run(&receipt));
+        let records_len = open_run_len(&whole);
+        let mut grown = whole[..records_len].to_vec();
+        grown.extend_from_slice(&[0, 2, b'z', b'z', 1, 3]);
+        grown.extend_from_slice(&whole[records_len..whole.len() - 20]);
+        grown.extend_from_slice(&(records_len as u64 + 6).to_le_bytes());
+        grown.extend_from_slice(&whole[whole.len() - 12..]);
+        fs::write(&path, grown).unwrap();
         assert_refused(read_text_run(&receipt));
     }
 
@@ -1209,6 +1690,62 @@ mod tests {
             push(&mut writer, b"bravo", &[1, 2]).unwrap();
             assert!(push(&mut writer, term, entities).is_err(), "{what}");
         }
+    }
+
+    /// **A run read in term ranges, each started from the run's index, gives back every record
+    /// once**, and what the ranges decoded between them checks against the receipt. A range
+    /// whose index entry names another record is refused.
+    #[test]
+    fn a_run_read_in_ranges_gives_back_each_record_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("ranges.spill");
+        let records: Vec<(String, Vec<u32>)> = (0..4_000u32)
+            .map(|t| (format!("term{t:05}"), (0..5).map(|k| k * 7 + t).collect()))
+            .collect();
+        let receipt = write_text_run(
+            &path,
+            &records
+                .iter()
+                .map(|(term, entities)| (term.as_str(), entities.clone()))
+                .collect::<Vec<_>>(),
+        );
+        let run = open_run(&receipt);
+        let points = run.samples(usize::MAX).unwrap();
+        assert!(points.len() > 4, "{} index entries", points.len());
+
+        let mut read: Vec<(String, Vec<u32>)> = Vec::new();
+        let (mut pairs, mut anchor) = (0u64, 0u64);
+        for range in crate::merge::split(run.samples(16).unwrap(), 5) {
+            let mut merge =
+                TermMerge::range(vec![open_reader(&run, RunPayload::Rows)], &range).unwrap();
+            while merge.next_term().unwrap() {
+                let mut entities = Vec::new();
+                merge
+                    .drain(std::convert::identity, &mut |entity, _| {
+                        entities.push(entity);
+                        Ok(())
+                    })
+                    .unwrap();
+                read.push((String::from_utf8(merge.term().to_vec()).unwrap(), entities));
+            }
+            let (p, a) = merge.into_sources()[0].share();
+            (pairs, anchor) = (pairs + p, anchor.wrapping_add(a));
+        }
+        assert_eq!(read, records);
+        run.check(pairs, anchor).unwrap();
+        assert_refused(run.check(pairs - 1, anchor));
+
+        // Index entry 1 named at entry 2's offset.
+        let bytes = fs::read(&path).unwrap();
+        let tail = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
+        let offsets = tail(bytes.len() - 20) + tail(bytes.len() - 12);
+        let mut damaged = bytes.clone();
+        damaged.copy_within(offsets + 16..offsets + 24, offsets + 8);
+        drop(run);
+        fs::write(&path, damaged).unwrap();
+        let run = open_run(&receipt);
+        let mut reader = open_reader(&run, RunPayload::Rows);
+        assert_refused(reader.seek(&points[1].key));
     }
 
     /// **The allowance is what the budget leaves**, and never less than the pass runs in. Its
@@ -1298,10 +1835,10 @@ mod tests {
             })
             .collect();
         let merged = |receipts: &[SpillReceipt]| {
+            let runs: Vec<RunFile> = receipts.iter().map(open_run).collect();
             let mut merge = TermMerge::open(
-                receipts
-                    .iter()
-                    .map(|receipt| open_reader(receipt, RunPayload::Rows))
+                runs.iter()
+                    .map(|run| open_reader(run, RunPayload::Rows))
                     .collect(),
             )
             .unwrap();
@@ -1357,16 +1894,15 @@ mod tests {
         #[test]
         fn any_text_run_round_trips(
             raw in prop::collection::vec(
-                (prop::collection::vec(prop::num::u8::ANY, 1..6),
-                 prop::collection::vec(prop::num::u32::ANY, 1..8)),
+                ("\\PC{1,5}", prop::collection::vec(prop::num::u32::ANY, 1..8)),
                 0..40),
         ) {
             let mut records: Vec<(Vec<u8>, Vec<u32>)> = raw
                 .into_iter()
-                .map(|(term, mut entities)| {
+                .map(|(term, mut entities): (String, Vec<u32>)| {
                     entities.sort_unstable();
                     entities.dedup();
-                    (term, entities)
+                    (term.into_bytes(), entities)
                 })
                 .collect();
             records.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1380,7 +1916,8 @@ mod tests {
             }
             let receipt = writer.finish().unwrap();
 
-            let mut reader = open_reader(&receipt, RunPayload::Rows);
+            let run = open_run(&receipt);
+            let mut reader = open_reader(&run, RunPayload::Rows);
             let mut read: Vec<(Vec<u8>, Vec<u32>)> = Vec::new();
             while reader.next_term().unwrap() {
                 let term = reader.term().to_vec();

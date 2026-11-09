@@ -3,25 +3,47 @@
 //! the fold's and the coalesce's finished layers.
 //!
 //! A [`TermSource`] yields its terms ascending, each with how many entities it holds for the term
-//! and then those entities ascending, each with the term's positions in it. Three kinds implement
-//! it: a spilled run ([`crate::TextRunWriter`]'s file, read by [`crate::TextRunReader`]), what an
-//! accumulator held when its pass ended (which [`crate::TermAccumulator::finish`] hands back), and
-//! a finished layer, read through the one [`DictCursor`] both families share. [`TermMerge`] merges
-//! any number of them, of any kind, k-way on the term, and each selected term's entities by
-//! comparing the sources' heads, because two sources need not partition entity space.
+//! and then those entities ascending, each with the term's positions in it, and can start at the
+//! first term at or after a key. Three kinds implement it: a spilled run ([`crate::TextRunWriter`]'s
+//! file, read by [`crate::TextRunReader`], which starts at a key through the run's sparse index),
+//! what an accumulator held when its pass ended (which [`crate::TermAccumulator::finish`] hands
+//! back, ranked, so that it starts at a key by binary search), and a finished layer, read through
+//! the one [`DictCursor`] both families share. [`TermMerge`] merges any number of them, of any
+//! kind, k-way on the term, and each selected term's entities by comparing the sources' heads,
+//! because two sources need not partition entity space.
+//!
+//! # In parallel, by term range
+//!
+//! A merge divides its term space into [`TermRange`]s of about equal bytes, [`split`] from keys
+//! sampled from its sources ([`Sample`]), several to a thread ([`MergePlan`]). Each range is a
+//! [`TermMerge`] of its own over sources started at its first key, and the ranges run on the plan's
+//! threads, at most its window of them issued and not yet written ([`Ordered`]). The output is
+//! written in term order by [`merge_ranges`]: the earliest range not yet written writes straight
+//! into the writer, and a later one holds what it encodes, up to the plan's buffer, then waits for
+//! its turn. A term is never divided between the two: one that passes the buffer while it is held
+//! waits for the ranges before it and then goes on into the writer. So what a merge writes is the
+//! same bytes however many ranges and threads it took.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::io;
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use croaring::Bitmap;
 use mosaica_filter::SortedDict;
+
+use crate::ordered::{FailOnPanic, Ordered};
+use crate::spill::{Allowance, Sample, RUN_BUFFER_MIN, SPILL_BUF_BYTES};
 
 /// One term-sorted input to a [`TermMerge`].
 pub trait TermSource {
     /// Move to the next term, returning `false` at the end, which a run verifies against its
     /// receipt. A source that has not been moved is before its first term.
     fn next_term(&mut self) -> io::Result<bool>;
+
+    /// Start before the first term at or after `key`, so that [`Self::next_term`] moves to it.
+    /// Called before the source has been moved.
+    fn seek(&mut self, key: &[u8]) -> io::Result<()>;
 
     /// The term the source is at.
     fn term(&self) -> &[u8];
@@ -66,9 +88,28 @@ pub struct TermMerge<S> {
     postings: u64,
     /// The selected sources' unconsumed heads, `(entity, source)`, smallest first.
     heads: BinaryHeap<Reverse<(u32, usize)>>,
+    /// The first term past the merge's range, where it has one.
+    hi: Option<Vec<u8>>,
 }
 
 impl<S: TermSource> TermMerge<S> {
+    /// A merge over the terms of `sources` in `range`.
+    pub fn range(mut sources: Vec<S>, range: &TermRange) -> io::Result<TermMerge<S>> {
+        if let Some(lo) = &range.lo {
+            for source in &mut sources {
+                source.seek(lo)?;
+            }
+        }
+        let mut merge = TermMerge::open(sources)?;
+        merge.hi = range.hi.clone();
+        Ok(merge)
+    }
+
+    /// The sources, wherever the merge left them.
+    pub fn into_sources(self) -> Vec<S> {
+        self.sources
+    }
+
     /// A merge over `sources`, each moved to its first term.
     pub fn open(mut sources: Vec<S>) -> io::Result<TermMerge<S>> {
         let mut heap = Vec::with_capacity(sources.len());
@@ -87,6 +128,7 @@ impl<S: TermSource> TermMerge<S> {
             selected: Vec::new(),
             postings: 0,
             heads: BinaryHeap::new(),
+            hi: None,
         })
     }
 
@@ -104,6 +146,13 @@ impl<S: TermSource> TermMerge<S> {
         let Some(&first) = self.heap.first() else {
             return Ok(false);
         };
+        if self
+            .hi
+            .as_deref()
+            .is_some_and(|hi| self.sources[first].term() >= hi)
+        {
+            return Ok(false);
+        }
         self.term.clear();
         self.term.extend_from_slice(self.sources[first].term());
         while self
@@ -268,9 +317,355 @@ impl<'a> DictCursor<'a> {
     pub fn at(&self) -> u32 {
         self.at
     }
+
+    /// About `samples` of its keys, evenly spaced by ordinal, each with `bytes` of what lies from
+    /// it to the next: the bytes before an ordinal, the whole at the dictionary's length.
+    pub(crate) fn samples(
+        dict: &SortedDict,
+        samples: usize,
+        bytes: impl Fn(u32) -> u64,
+    ) -> io::Result<Vec<Sample>> {
+        let n = dict.len() as usize;
+        let taken = samples.min(n);
+        let ordinals: Vec<u32> = (0..taken).map(|i| (i * n / taken) as u32).collect();
+        let mut scratch = Vec::new();
+        ordinals
+            .iter()
+            .enumerate()
+            .map(|(i, &ordinal)| {
+                let end = ordinals.get(i + 1).copied().unwrap_or(dict.len());
+                Ok(Sample {
+                    key: dict.key_of(ordinal, &mut scratch)?.as_bytes().to_vec(),
+                    bytes: bytes(end).saturating_sub(bytes(ordinal)),
+                })
+            })
+            .collect()
+    }
+}
+
+/// The least input a merge gives each range it divides its terms into, so that a small merge is
+/// one range.
+pub const RANGE_BYTES_MIN: u64 = 8 << 20;
+
+/// Ranges a merge divides its terms into for each thread, at the most, so that a thread that
+/// finishes early takes another.
+pub const RANGES_PER_THREAD: usize = 4;
+
+/// The most a range that is not yet written holds of its output before it waits.
+pub const RANGE_BUFFER_MAX: usize = 64 << 20;
+
+/// Keys a merge samples from all its sources together to place its ranges, at the most.
+const SAMPLES_MAX: usize = 1 << 16;
+
+/// One range of a merge's terms: from `lo`, or the first term, up to but not including `hi`, or
+/// past the last.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TermRange {
+    pub lo: Option<Vec<u8>>,
+    pub hi: Option<Vec<u8>>,
+}
+
+/// How a merge runs: how many ranges its terms are divided into and on how many threads, how many
+/// ranges may be issued and not yet written, what one of them holds of its output before it
+/// waits, and the read buffer each run's reader is given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MergePlan {
+    pub ranges: usize,
+    pub threads: usize,
+    pub window: usize,
+    pub buffer: usize,
+    pub read: usize,
+}
+
+impl MergePlan {
+    /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`.
+    ///
+    /// The ranges are sized by bytes, [`RANGES_PER_THREAD`] a thread at most, and the window is two
+    /// ranges a thread. What it holds is charged to the allowance: each thread's readers, one a run, and
+    /// the buffers of the ranges in the window but the one being written, each an equal share of
+    /// half the allowance up to [`RANGE_BUFFER_MAX`]. Where that is more than the allowance, the
+    /// merge takes fewer threads, down to one, whose one range in flight holds no buffer.
+    pub fn new(allowance: Allowance, bytes: u64, runs: usize) -> MergePlan {
+        let most = usize::try_from(bytes / RANGE_BYTES_MIN)
+            .unwrap_or(usize::MAX)
+            .max(1);
+        let mut threads = allowance.threads.clamp(1, most);
+        loop {
+            let ranges = most.min(RANGES_PER_THREAD * threads);
+            let plan = MergePlan::with(allowance, ranges, threads, 2 * threads, runs);
+            let held = (threads * runs) as u64 * RUN_BUFFER_MIN as u64
+                + (plan.window - 1) as u64 * plan.buffer as u64;
+            if threads == 1 || held <= allowance.bytes {
+                return plan;
+            }
+            threads -= 1;
+        }
+    }
+
+    /// A plan of `ranges` ranges on `threads` threads, `window` of them in flight, each held up to
+    /// its share of half the allowance, and the readers of `runs` runs a thread given the rest.
+    pub fn with(
+        allowance: Allowance,
+        ranges: usize,
+        threads: usize,
+        window: usize,
+        runs: usize,
+    ) -> MergePlan {
+        let ranges = ranges.max(1);
+        let threads = threads.clamp(1, ranges);
+        let window = window.clamp(threads, ranges.max(threads));
+        let buffer = usize::try_from(allowance.bytes / 2 / window as u64)
+            .unwrap_or(usize::MAX)
+            .clamp(RUN_BUFFER_MIN, RANGE_BUFFER_MAX);
+        let read = allowance
+            .less((window - 1) as u64 * buffer as u64)
+            .buffer(threads * runs.max(1))
+            .clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES);
+        MergePlan {
+            ranges,
+            threads,
+            window,
+            buffer,
+            read,
+        }
+    }
+
+    /// How many keys each of `sources` samples to place the ranges.
+    pub fn samples(&self, sources: usize) -> usize {
+        (8 * self.ranges).min(SAMPLES_MAX / sources.max(1)).max(2)
+    }
+}
+
+/// How a merge is divided: as its allowance pays for, or as fixed, for a test that must divide a
+/// small merge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Ranges {
+    #[default]
+    Planned,
+    Fixed {
+        ranges: usize,
+        threads: usize,
+        window: usize,
+        buffer: usize,
+    },
+}
+
+impl Ranges {
+    /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`.
+    pub fn plan(self, allowance: Allowance, bytes: u64, runs: usize) -> MergePlan {
+        match self {
+            Ranges::Planned => MergePlan::new(allowance, bytes, runs),
+            Ranges::Fixed {
+                ranges,
+                threads,
+                window,
+                buffer,
+            } => MergePlan {
+                buffer: buffer.max(1),
+                ..MergePlan::with(allowance, ranges, threads, window, runs)
+            },
+        }
+    }
+}
+
+/// Divide the terms `samples` describe, each standing for the bytes from its key to its source's
+/// next, into at most `ranges` ranges of about equal bytes, ascending and together covering every
+/// term.
+pub fn split(mut samples: Vec<Sample>, ranges: usize) -> Vec<TermRange> {
+    samples.sort_unstable_by(|a, b| a.key.cmp(&b.key));
+    let total: u128 = samples.iter().map(|sample| u128::from(sample.bytes)).sum();
+    let mut cuts: Vec<Vec<u8>> = Vec::new();
+    let mut before = 0u128;
+    for sample in samples {
+        let share = (cuts.len() as u128 + 1) * total / ranges.max(1) as u128;
+        if cuts.len() + 1 < ranges
+            && before > 0
+            && before >= share
+            && cuts.last().is_none_or(|last| *last < sample.key)
+        {
+            cuts.push(sample.key.clone());
+        }
+        before += u128::from(sample.bytes);
+    }
+    let mut bounds: Vec<Option<Vec<u8>>> = vec![None];
+    bounds.extend(cuts.into_iter().map(Some));
+    bounds.push(None);
+    bounds
+        .windows(2)
+        .map(|pair| TermRange {
+            lo: pair[0].clone(),
+            hi: pair[1].clone(),
+        })
+        .collect()
+}
+
+/// What a parallel merge writes its terms into, in term order, and what a range that is not yet
+/// being written holds of its output.
+pub trait RangeWriter: Send {
+    type Held: Default + Send;
+
+    /// The bytes `held` holds.
+    fn held_bytes(held: &Self::Held) -> usize;
+
+    /// Write what a range held, leaving it empty, and go on with a term it left open.
+    fn write_held(&mut self, held: &mut Self::Held) -> io::Result<()>;
+}
+
+impl<W: RangeWriter> RangeWriter for &mut W {
+    type Held = W::Held;
+
+    fn held_bytes(held: &Self::Held) -> usize {
+        W::held_bytes(held)
+    }
+
+    fn write_held(&mut self, held: &mut Self::Held) -> io::Result<()> {
+        (**self).write_held(held)
+    }
+}
+
+/// Run `work` over each of `ranges` as `plan` says, its output into `writer` in the ranges' order,
+/// and call `written` with each range's index once it and every range before it are written.
+pub fn merge_ranges<W: RangeWriter>(
+    writer: W,
+    ranges: &[TermRange],
+    plan: MergePlan,
+    work: impl Fn(&TermRange, &mut Turn<'_, W>) -> io::Result<()> + Sync,
+    written: impl Fn(usize) + Sync,
+) -> io::Result<W> {
+    let ordered = Ordered::<W::Held>::new(plan.window);
+    let sink = Mutex::new(writer);
+    let failure: Mutex<Option<io::Error>> = Mutex::new(None);
+    let worker = || {
+        let _stop = FailOnPanic(&ordered);
+        let result = (|| -> io::Result<()> {
+            while let Some(seq) = ordered.issue(ranges.len() as u64)? {
+                let mut turn = Turn {
+                    seq,
+                    ordered: &ordered,
+                    sink: &sink,
+                    direct: None,
+                    held: W::Held::default(),
+                    limit: plan.buffer,
+                    written: &written,
+                };
+                work(&ranges[seq as usize], &mut turn)?;
+                turn.finish()?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            failure
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get_or_insert(e);
+            ordered.fail();
+        }
+    };
+    match plan.threads.min(ranges.len()) {
+        0 | 1 => worker(),
+        threads => std::thread::scope(|scope| {
+            for _ in 0..threads {
+                scope.spawn(worker);
+            }
+        }),
+    }
+    if let Some(e) = failure.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        return Err(e);
+    }
+    Ok(sink.into_inner().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// One range's place in a parallel merge's output: the writer, once every range before it is
+/// written, and until then what it holds.
+pub struct Turn<'a, W: RangeWriter> {
+    seq: u64,
+    ordered: &'a Ordered<W::Held>,
+    sink: &'a Mutex<W>,
+    direct: Option<MutexGuard<'a, W>>,
+    held: W::Held,
+    limit: usize,
+    written: &'a (dyn Fn(usize) + Sync),
+}
+
+/// Where a range's next term goes.
+pub enum Out<'t, W: RangeWriter> {
+    Writer(&'t mut W),
+    Held(&'t mut W::Held),
+}
+
+impl<W: RangeWriter> Turn<'_, W> {
+    /// Where the next term goes: the writer, once every range before this one is written, and what
+    /// the range holds until then. Called between terms.
+    pub fn out(&mut self) -> io::Result<Out<'_, W>> {
+        if self.direct.is_none() && self.ordered.is_head(self.seq) {
+            self.take_writer()?;
+        }
+        Ok(match &mut self.direct {
+            Some(writer) => Out::Writer(&mut **writer),
+            None => Out::Held(&mut self.held),
+        })
+    }
+
+    /// Whether what the range holds has reached the plan's buffer, so that it waits for its turn.
+    pub fn full(&self) -> bool {
+        !self.fits(0)
+    }
+
+    /// Whether `bytes` more go where the next term goes without passing the plan's buffer.
+    pub fn fits(&self, bytes: usize) -> bool {
+        self.direct.is_some() || W::held_bytes(&self.held).saturating_add(bytes) < self.limit
+    }
+
+    /// Wait until every range before this one is written, write what it holds, and hand over the
+    /// writer, which the rest of the range goes into.
+    pub fn wait(&mut self) -> io::Result<&mut W> {
+        if self.direct.is_none() {
+            self.ordered.wait_head(self.seq)?;
+            self.take_writer()?;
+        }
+        Ok(&mut **self.direct.as_mut().expect("the writer was taken"))
+    }
+
+    fn take_writer(&mut self) -> io::Result<()> {
+        let mut writer = self.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        writer.write_held(&mut self.held)?;
+        self.direct = Some(writer);
+        Ok(())
+    }
+
+    /// The range is done: hand in what it holds, and write it and the ranges after it that are
+    /// done, in order, where the writer is free. A writer held by another thread is released by a
+    /// range that writes, which then looks again.
+    fn finish(mut self) -> io::Result<()> {
+        self.ordered.put(self.seq, std::mem::take(&mut self.held));
+        let mut writer = self.direct.take();
+        loop {
+            let mut sink = match writer.take() {
+                Some(sink) => sink,
+                None => match self.sink.try_lock() {
+                    Ok(sink) => sink,
+                    Err(TryLockError::WouldBlock) => return Ok(()),
+                    Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+                },
+            };
+            while let Some((seq, mut held)) = self.ordered.take(false)? {
+                sink.write_held(&mut held)?;
+                (self.written)(seq as usize);
+            }
+            drop(sink);
+            if !self.ordered.head_ready() {
+                return Ok(());
+            }
+        }
+    }
 }
 
 impl TermSource for DictCursor<'_> {
+    fn seek(&mut self, key: &[u8]) -> io::Result<()> {
+        self.next = self.dict.rank(key)?;
+        Ok(())
+    }
+
     fn next_term(&mut self) -> io::Result<bool> {
         while self.next < self.dict.len() {
             let ordinal = self.next;

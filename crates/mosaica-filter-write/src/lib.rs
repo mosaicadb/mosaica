@@ -84,15 +84,18 @@
 //!
 //! Every merge over sorted terms is one [`TermMerge`] over [`TermSource`]s: the build's keyword
 //! runs, a text index's runs and the terms its accumulators held at the end of their pass, and
-//! the fold's and the coalesce's finished layers of either family. A text index's terms are
-//! gathered in a [`TermAccumulator`], which spills runs when its share of the allowance fills,
-//! and [`write_text_index`] merges what it gathered into the index. The build and the flush share
-//! both, and the fold and the coalesce write through the same merge.
+//! the fold's and the coalesce's finished layers of either family. Each runs in term ranges on
+//! several threads and writes in term order through [`merge_ranges`], so its output is the same
+//! bytes however it was divided. A text index's terms are gathered in a [`TermAccumulator`], which
+//! spills runs when its share of the allowance fills, and [`write_text_index`] merges what it
+//! gathered into the index. The build and the flush share both, and the fold and the coalesce
+//! write through the same merge.
 
 mod accumulator;
 mod chunk_dict;
 mod keyword;
 mod merge;
+mod ordered;
 mod positions;
 mod record;
 mod spill;
@@ -116,15 +119,18 @@ pub use chunk_dict::{
     Lookup, SortOn, Vacant, WindowRule, KEY_WINDOW_ROWS,
 };
 pub use keyword::{coalesce_keyword_extents, fold_keyword_column, KeywordLayer};
-pub use merge::{TermMerge, TermSource};
+pub use merge::{
+    merge_ranges, split, MergePlan, Out, RangeWriter, Ranges, TermMerge, TermRange, TermSource,
+    Turn, RANGES_PER_THREAD, RANGE_BUFFER_MAX, RANGE_BYTES_MIN,
+};
 pub use record::{
     coalesce_record_extents, fold_record_blob, merge_record_rows, write_prose, write_text_rows,
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
 pub use spill::{
-    at_end, cascade_sorted_runs, merge_descriptors, read_varint, run_file, Allowance, RunPayload,
-    SpillFileError, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
-    WORKER_BYTES_MIN,
+    at_end, cascade_sorted_runs, merge_descriptors, read_varint, Allowance, RunFile, RunPayload,
+    RunSet, Sample, SpillFileError, SpillReceipt, TextRunReader, TextRunWriter, RUN_BUFFER_MIN,
+    RUN_INDEX_STRIDE, SPILL_BUF_BYTES, WORKER_BYTES_MIN,
 };
 pub use text::{
     coalesce_text_extents, merge_text_layers, Posting, TextIndexWriter, TextLayerRef,
@@ -796,11 +802,11 @@ mod tests {
         let c_present = bitmap([2]);
         let out = |tag: &str| text_files(dir, &format!("{tag}-out"));
         let fold = |inputs: &[TextLayerRef<'_>], tombstones: &Bitmap, tag: &str| {
-            merge_text_layers(inputs, tombstones, out(tag))
+            merge_text_layers(inputs, tombstones, out(tag), Allowance::new(0, 0, 1))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
         let coalesce = |inputs: &[TextLayerRef<'_>], tag: &str| {
-            coalesce_text_extents(inputs, out(tag))
+            coalesce_text_extents(inputs, out(tag), Allowance::new(0, 0, 1))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
 
