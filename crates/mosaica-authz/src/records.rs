@@ -290,6 +290,13 @@ fn padding(values: u64) -> u64 {
     values.wrapping_neg() % 8
 }
 
+/// The bytes `records` holds before record `record`, for a writer that divides a file by bytes.
+/// `record` may be the record count, which gives the whole.
+pub fn record_bytes_before(records: &LargeBinaryArray, record: u32) -> u64 {
+    let offsets = records.value_offsets();
+    offsets[(record as usize).min(offsets.len() - 1)] as u64 - offsets[0] as u64
+}
+
 /// Open an unkeyed record file whose column is named `column`, and return its records without
 /// copying them. When `mmap` is `true` the file is mapped, and otherwise read into memory.
 pub fn open_record_column(path: &Path, mmap: bool, column: &str) -> io::Result<LargeBinaryArray> {

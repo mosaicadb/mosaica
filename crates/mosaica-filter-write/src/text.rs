@@ -448,8 +448,8 @@ pub fn coalesce_text_extents(
 
 /// Every term of every layer, in sorted order, with `tombstones` subtracted from each one's
 /// postings and positions and an emptied term dropped, and the presence of every input less
-/// `tombstones`. The terms are merged in ranges as `ranges` says, divided by the layers' positions
-/// bytes, on the threads `allowance` gives.
+/// `tombstones`. The terms are merged in ranges as `ranges` says, divided by the layers' postings
+/// and positions bytes, on the threads `allowance` gives.
 fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
@@ -471,9 +471,12 @@ fn merge(
 
     let presence_path = out.presence.clone();
     let mut writer = TextIndexWriter::create(out)?;
+    let before = |input: &TextLayerRef<'_>, ordinal: u32| {
+        input.postings.bytes_before(ordinal) + input.positions.bytes_before(ordinal)
+    };
     let bytes = inputs
         .iter()
-        .map(|input| input.positions.bytes_before(input.positions.record_count()))
+        .map(|input| before(input, input.positions.record_count()))
         .sum();
     // A layer gives its largest posting only by reading every one, so the slice is charged at its
     // cap.
@@ -487,7 +490,7 @@ fn merge(
     if plan.ranges > 1 {
         for input in inputs {
             samples.extend(sample(input.dict, plan.samples(inputs.len()), |ordinal| {
-                Ok(input.positions.bytes_before(ordinal))
+                Ok(before(input, ordinal))
             })?);
         }
     }

@@ -358,6 +358,9 @@ pub const RANGE_BUFFER_MAX: usize = 64 << 20;
 /// Keys a merge samples from all its sources together to place its ranges, at the most.
 const SAMPLES_MAX: usize = 1 << 20;
 
+/// About what one sampled key holds: the key, and the bytes it stands for.
+const SAMPLE_BYTES: usize = 64;
+
 /// One range of a merge's terms: from `lo`, or the first term, up to but not including `hi`, or
 /// past the last.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -368,7 +371,8 @@ pub struct TermRange {
 
 /// How a merge runs: how many ranges its terms are divided into and on how many threads, how many
 /// ranges may be issued and not yet written, what one of them holds of its output before it
-/// waits, and the read buffer each run's reader is given.
+/// waits, the read buffer each run's reader is given, and how many keys it samples from all its
+/// sources together to place its ranges, at the most.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RangePlan {
     pub ranges: usize,
@@ -376,6 +380,7 @@ pub struct RangePlan {
     pub window: usize,
     pub buffer: usize,
     pub read: usize,
+    pub keys: usize,
 }
 
 impl RangePlan {
@@ -402,7 +407,8 @@ impl RangePlan {
     /// thread). Each thread holds its `each` bytes and a reader on each of `runs` runs, and each
     /// range in the window but the one being written holds up to an equal share of half what they
     /// leave, from [`RUN_BUFFER_MIN`] to [`RANGE_BUFFER_MAX`]; the readers' buffers are what is
-    /// left after that.
+    /// left after that. The keys sampled to place the ranges are let go before the ranges take
+    /// their buffers, and hold no more than the window's buffers would, up to [`SAMPLES_MAX`].
     pub fn with(
         allowance: Allowance,
         ranges: usize,
@@ -432,12 +438,13 @@ impl RangePlan {
             window,
             buffer,
             read,
+            keys: (window * buffer / SAMPLE_BYTES).min(SAMPLES_MAX),
         }
     }
 
     /// How many keys each of `sources` samples to place the ranges.
     pub fn samples(&self, sources: usize) -> usize {
-        (8 * self.ranges).min(SAMPLES_MAX / sources.max(1)).max(2)
+        (8 * self.ranges).min(self.keys / sources.max(1)).max(2)
     }
 }
 
@@ -715,25 +722,25 @@ mod tests {
 
     /// **A merge has enough ranges that each one's input fits the buffer a range holds before it
     /// waits**, at least [`RANGES_PER_THREAD`] a thread, and none of less than [`RANGE_BYTES_MIN`],
-    /// so that a small merge is one range.
+    /// so that a small merge is one range. The keys sampled to place them hold no more than the
+    /// window's buffers.
     #[test]
     fn a_merge_has_ranges_whose_input_fits_the_buffer() {
         let allowance = Allowance::new(16 << 30, 0, 4);
         let small = RangePlan::new(allowance, RANGE_BYTES_MIN, 0, 0);
         assert_eq!((small.ranges, small.threads), (1, 1));
 
-        let few = RangePlan::new(allowance, 4 * RANGE_BUFFER_MAX as u64, 0, 0);
-        assert_eq!(few.threads, 4);
-        assert_eq!(few.ranges, RANGES_PER_THREAD * few.threads);
-
-        for bytes in [1 << 36, 1 << 40, 1_234_567_890_123] {
+        for bytes in [4 * RANGE_BUFFER_MAX as u64, 1 << 36, 1 << 40, 1_234_567_890_123] {
             let plan = RangePlan::new(allowance, bytes, 0, 0);
-            assert_eq!(plan.ranges as u64, bytes.div_ceil(plan.buffer as u64), "{bytes}");
+            assert_eq!(plan.threads, 4);
+            assert!(bytes.div_ceil(plan.ranges as u64) <= plan.buffer as u64, "{bytes}");
+            assert!(plan.ranges >= RANGES_PER_THREAD * plan.threads, "{bytes}");
         }
 
         // An allowance whose buffer is under the least a range is given: ranges of that least.
         let tight = RangePlan::new(Allowance::new(0, 0, 4), 1 << 40, 0, 0);
         assert!((tight.buffer as u64) < RANGE_BYTES_MIN);
-        assert_eq!(tight.ranges as u64, (1 << 40) / RANGE_BYTES_MIN);
+        assert!((1 << 40) / tight.ranges as u64 >= RANGE_BYTES_MIN);
+        assert!(tight.samples(1) * SAMPLE_BYTES <= tight.window * tight.buffer);
     }
 }

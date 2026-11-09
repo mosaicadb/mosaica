@@ -49,6 +49,13 @@ impl BaseTier {
             BaseTier::Keyed(tier) => tier.term_count(),
         }
     }
+
+    fn bytes_before(&self, ordinal: u32) -> u64 {
+        match self {
+            BaseTier::Positional(reader) => reader.bytes_before(ordinal),
+            BaseTier::Keyed(tier) => tier.bytes_before(ordinal),
+        }
+    }
 }
 
 /// A column's postings file within its directory: a category's per-value postings, or a text
@@ -94,6 +101,13 @@ impl ColumnPostings {
     /// table and the dictionary know the domain.
     pub fn record_count(&self) -> u32 {
         self.base.record_count()
+    }
+
+    /// The bytes the records of the values before `value` hold, for a writer that divides the
+    /// file by bytes. `value` may be the record count of a positional column, which gives the
+    /// whole.
+    pub fn bytes_before(&self, value: u32) -> u64 {
+        self.base.bytes_before(value)
     }
 
     /// The entities carrying `value`.

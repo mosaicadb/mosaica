@@ -151,6 +151,13 @@ impl DeltaTier {
         self.terms.len() as u32
     }
 
+    /// The bytes the records of the terms before `t` hold, for a writer that divides the file by
+    /// bytes.
+    pub fn bytes_before(&self, t: u32) -> u64 {
+        let records = self.terms.partition_point(|&term| term < t);
+        crate::records::record_bytes_before(&self.postings, records as u32)
+    }
+
     /// The term ids this tier carries, ascending. Needed because [`Self::term_count`] is a
     /// record count, not an id domain: walking `0..term_count()` would find nothing.
     pub fn terms(&self) -> impl Iterator<Item = TermId> + '_ {

@@ -215,6 +215,12 @@ impl PostingsReader {
         self.array.len() as u32
     }
 
+    /// The bytes the records before term `t` hold, for a writer that divides the file by bytes.
+    /// `t` may be the term count, which gives the whole.
+    pub fn bytes_before(&self, t: u32) -> u64 {
+        crate::records::record_bytes_before(&self.array, t)
+    }
+
     /// Return term `t`'s postings, or `None` if this file carries no record for it.
     ///
     /// `None` is an ordinary answer, not a failure: a flush publishes a sparse tier holding only

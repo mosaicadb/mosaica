@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
@@ -1054,17 +1054,6 @@ impl Read for RunCursor<'_> {
     }
 }
 
-impl Seek for RunCursor<'_> {
-    /// To an offset from the records' start, and no further than their end.
-    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
-        let SeekFrom::Start(at) = to else {
-            return Err(io::Error::other("a run's cursor seeks only from the records' start"));
-        };
-        self.at = at.min(self.end);
-        Ok(self.at)
-    }
-}
-
 impl TermSource for TextRunReader<'_> {
     fn next_term(&mut self) -> io::Result<bool> {
         if self.peeked {
@@ -1074,8 +1063,8 @@ impl TermSource for TextRunReader<'_> {
         if self.done {
             return Ok(false);
         }
-        // Whatever the caller did not take: decoded and anchored, never skipped by seeking, so a
-        // malformation inside a record the merge had no use for is still caught.
+        // Whatever the caller did not take: decoded and anchored here, as a range's records always
+        // are, so a malformation inside a record the merge had no use for is still caught.
         while self.pending > 0 {
             self.decode_entity()?;
         }
@@ -1109,7 +1098,7 @@ impl TermSource for TextRunReader<'_> {
         self.whole = false;
         let counted = (self.pairs, self.anchor);
         let mut past = Some((last, next));
-        let mut named = self.go_to(block)?;
+        let mut named = self.go_to(block);
         loop {
             let begins = self.offset();
             let Some(shared) = self.read_head()? else {
@@ -1129,7 +1118,7 @@ impl TermSource for TextRunReader<'_> {
                 break;
             }
             if let Some((_, next)) = past.take_if(|(last, _)| *last == begins) {
-                named = self.go_to(next)?;
+                named = self.go_to(next);
                 continue;
             }
             self.pass_entities()?;
@@ -1209,11 +1198,11 @@ impl<'r> TextRunReader<'r> {
     }
 
     /// Go on at `block`, returning the term the index names there.
-    fn go_to(&mut self, block: Block) -> io::Result<Option<Vec<u8>>> {
-        self.reader
-            .seek(SeekFrom::Start(block.at))
-            .map_err(|e| at(&self.run.path, e))?;
-        Ok(block.named)
+    fn go_to(&mut self, block: Block) -> Option<Vec<u8>> {
+        let held = self.reader.buffer().len();
+        self.reader.consume(held);
+        self.reader.get_mut().at = block.at;
+        block.named
     }
 
     /// Read the next record's term and count, returning its shared prefix, or `None` at the end of
@@ -1284,22 +1273,22 @@ impl<'r> TextRunReader<'r> {
         Ok((shared, self.next_u32()?))
     }
 
-    /// Go past the head's entities, finding where each ends: in what the reader holds where the
-    /// entity is whole there, and a varint at a time where it is not.
+    /// Go past the head's entities, finding where each ends in what the reader holds where the
+    /// entity is whole there, and decoding it where it is not. A seek puts back what the decoded
+    /// ones add to the reader's counts.
     fn pass_entities(&mut self) -> io::Result<()> {
         while self.pending > 0 {
             match entity_len(self.reader.buffer(), self.payload) {
-                Some(len) => self.reader.consume(len),
+                Some(len) => {
+                    self.reader.consume(len);
+                    self.pending -= 1;
+                }
                 None => {
-                    self.next_u32()?;
-                    if self.payload == RunPayload::Positions {
-                        for _ in 0..self.next_u32()? {
-                            self.next_u32()?;
-                        }
-                    }
+                    // As the record's first, since the entities passed before it are not known.
+                    self.taken = 0;
+                    self.decode_entity()?;
                 }
             }
-            self.pending -= 1;
         }
         Ok(())
     }
@@ -2057,7 +2046,7 @@ mod tests {
 
         // Index entry 1 named at entry 2's offset.
         let mut damaged = bytes.clone();
-        damaged.copy_within(blocks + 32..blocks + 40, blocks + 16);
+        damaged.copy_within(blocks + 32..blocks + 48, blocks + 16);
         fs::write(&path, damaged).unwrap();
         let run = open_run(&receipt);
         let mut reader = open_reader(&run, RunPayload::Rows);

@@ -22,6 +22,6 @@ pub use postings::{
     encode_posting, encode_posting_bitmap, union_postings, write_postings, PostingBitmap,
     PostingRef, PostingsReader, POSTINGS_COLUMN,
 };
-pub use records::{open_record_column, RecordWriter};
+pub use records::{open_record_column, record_bytes_before, RecordWriter};
 pub use term_sweep::sweep_term_postings;
 pub use tier::{coalesce_delta_tiers, write_delta_tier, write_delta_tier_at, DeltaTier};
