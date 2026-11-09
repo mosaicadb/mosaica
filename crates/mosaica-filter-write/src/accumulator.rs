@@ -48,7 +48,8 @@
 //! not shrink every run after it.
 //!
 //! A spill holds beside the accumulator forty bytes a term for the ranking and its run writer's
-//! buffer ([`SPILL_TERM_BYTES`], [`SPILL_BUF_BYTES`]), and these are counted. For each term whose
+//! buffer, a sixteenth of the budget between [`RUN_BUFFER_MIN`] and [`SPILL_BUF_BYTES`]
+//! ([`SPILL_TERM_BYTES`]), and these are counted. For each term whose
 //! documents arrived out of entity order it also holds a copy of its chain and eight bytes an
 //! entity, kept at the size of the largest such term, which is not counted: at most about four
 //! times that one term's chain. Every other term is written from the pool as it stands.
@@ -62,7 +63,7 @@ use mosaica_filter::{put_varint, take_varint};
 use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
 use crate::spill::{
     cascade_sorted_runs, encode_entity, fingerprint, remove_runs, Allowance, RunPayload,
-    SpillReceipt, TextRunMerge, TextRunWriter, SPILL_BUF_BYTES,
+    SpillReceipt, TextRunMerge, TextRunWriter, RUN_BUFFER_MIN, SPILL_BUF_BYTES,
 };
 use crate::text::{Posting, TextIndexWriter};
 
@@ -237,7 +238,13 @@ impl TermAccumulator {
             + grown(self.keys.len(), self.keys.capacity(), bytes)
             + self.table.growth(terms)
             + (self.terms.len + terms) * SPILL_TERM_BYTES
-            + SPILL_BUF_BYTES
+            + self.writer_buffer()
+    }
+
+    /// The buffer a spill writes its run through: a sixteenth of the budget, so that a small one
+    /// is not mostly buffer, between [`RUN_BUFFER_MIN`] and [`SPILL_BUF_BYTES`].
+    fn writer_buffer(&self) -> usize {
+        (self.budget / 16).clamp(RUN_BUFFER_MIN, SPILL_BUF_BYTES)
     }
 
     /// The id of `term`, given one if it is new.
@@ -345,7 +352,8 @@ impl TermAccumulator {
     }
 
     fn write_run(&mut self, path: &Path, sort: SortOn) -> io::Result<SpillReceipt> {
-        let mut writer = TextRunWriter::create(path, RunPayload::Positions)?;
+        let mut writer =
+            TextRunWriter::buffered(path, RunPayload::Positions, self.writer_buffer())?;
         self.drain(sort, |term, pairs, anchor, body| {
             writer.push_body(term, pairs, anchor, |emit| body.write(emit))
         })?;
@@ -589,6 +597,9 @@ pub fn merge_text_runs(
     allowance: Allowance,
 ) -> io::Result<usize> {
     let cascaded = cascade_sorted_runs(dir, family, RunPayload::Positions, runs.clone(), allowance);
+    // What the accumulators or the cascade's threads freed in their own arenas goes back before
+    // the merge's buffers are taken.
+    mosaica_types::process::trim_heap();
     let merged = match &cascaded {
         Ok((left, _)) => merge_runs(left, writer, merge_slice_cap, allowance.buffer(left.len())),
         Err(_) => Ok(()),

@@ -6274,7 +6274,7 @@ mod tests {
 
     /// An accumulator's budget a little above what a spill holds beside it and its first pool
     /// page, so that it spills a run every few documents of the text fixture.
-    const SMALL_WORKER: usize = mosaica_filter_write::SPILL_BUF_BYTES + (300 << 10);
+    const SMALL_WORKER: usize = mosaica_filter_write::RUN_BUFFER_MIN + (300 << 10);
 
     /// **The extent route is decided by the order a column's readers want, not by its type.**
     ///

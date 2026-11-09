@@ -257,9 +257,12 @@ impl TextRunWriter {
         TextRunWriter::buffered(path, payload, SPILL_BUF_BYTES)
     }
 
-    /// A writer whose buffer is `buffer` bytes, for a cascade pass that charges it to its
-    /// allowance.
-    fn buffered(path: &Path, payload: RunPayload, buffer: usize) -> io::Result<TextRunWriter> {
+    /// A writer whose buffer is `buffer` bytes, for a pass that charges it to its allowance.
+    pub(crate) fn buffered(
+        path: &Path,
+        payload: RunPayload,
+        buffer: usize,
+    ) -> io::Result<TextRunWriter> {
         let file = File::create(path).map_err(|e| at(path, e))?;
         Ok(TextRunWriter {
             path: path.to_path_buf(),
@@ -1103,6 +1106,9 @@ pub fn cascade_sorted_runs(
             merge_group(runs, &path(index), payload, buffer)
                 .and_then(|run| remove_runs(runs).map(|()| run))
         };
+        // The pages the last pass's threads, or the accumulators before it, freed in their own
+        // arenas go back before this pass's buffers are taken, so the two are not held at once.
+        mosaica_types::process::trim_heap();
         let groups = plan.split(&receipts[..plan.taken]);
         let merged: io::Result<Vec<SpillReceipt>> = match in_flight {
             1 => groups.iter().copied().enumerate().map(merge).collect(),
