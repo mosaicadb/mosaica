@@ -1387,7 +1387,7 @@ pub fn read_items(engine: &Engine, session: &Session, read: &Items) -> ItemsRead
                 session,
                 ItemsRequest {
                     view: "s0",
-                    fields: &read.fields,
+                    fields: Some(&read.fields),
                     system_fields: &system,
                     filter: read.filter.clone(),
                     keep_unmatched: read.keep_unmatched,

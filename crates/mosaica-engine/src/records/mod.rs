@@ -92,8 +92,10 @@ pub struct ItemsRequest<'a> {
     /// A view id from `/v1/meta`. One this session cannot reach is an unknown view.
     pub view: &'a str,
     /// Declared fields, by name, in the order their columns are wanted. A group-scoped field may
-    /// be pinned as `<field>@<key>`.
-    pub fields: &'a [String],
+    /// be pinned as `<field>@<key>`. `None` is every field the view reads without a pin: the
+    /// declared fields in declaration order, then the group-scoped ones `view` decides, leaving
+    /// out group-scoped `text`.
+    pub fields: Option<&'a [String]>,
     /// Any of `position` and `labels`, in the order their columns are wanted.
     pub system_fields: &'a [String],
     /// The viewport's filter, resolved as it resolves one. `None` is every visible item.

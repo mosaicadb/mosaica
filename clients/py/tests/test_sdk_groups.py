@@ -15,6 +15,7 @@ import pyarrow as pa
 import pytest
 
 from conftest import browse, viewport
+from mosaica import Refusal
 from mosaica._database import create
 
 pytest.importorskip("pyarrow")
@@ -217,6 +218,44 @@ def test_each_view_of_a_group_has_its_own_row_space(grouped):
     # view's own rows, so the count is that half and not the group's.
     half = viewport(grouped, "slices:a", FRAME, terms=["alpha"])
     assert half["counts"]["visible"] == N // 2
+
+
+def test_views_attributes_and_layers_list_what_meta_describes(grouped):
+    """Each accessor returns the entries of `/v1/meta`, an attribute with its filter operators
+    added, and the operator and a reader are given the same lists."""
+    meta = grouped.meta()
+    assert grouped.views() == meta["views"]
+    assert grouped.layers() == meta["layers"]
+    assert [layer["name"] for layer in grouped.layers("slices:a")] == ["clusters"]
+
+    attributes = grouped.attributes()
+    described = meta["declared_scalars"] + meta["scoped_scalars"]
+    assert [a["name"] for a in attributes] == ["entity_id", "quality", "coverage"]
+    assert [{k: v for k, v in a.items() if k != "filters"} for a in attributes] == described
+    operators = {entry["column"]: entry["operands"] for entry in meta["filter_operands"]}
+    assert {a["name"]: a["filters"] for a in attributes} == operators
+    assert "range" in operators["quality"]
+
+    reader = grouped.viewer()
+    assert reader.views() == grouped.views()
+    assert reader.attributes("slices:b") == grouped.attributes("slices:b")
+    assert reader.layers() == grouped.layers()
+    for accessor in (grouped.attributes, grouped.layers):
+        with pytest.raises(Refusal):
+            accessor("slices:nowhere")
+
+
+def test_a_read_naming_no_fields_returns_the_attributes_its_view_holds(grouped):
+    """`items(view)` returns a column for each attribute `attributes(view)` lists, in that order,
+    with the values a read naming them returns."""
+    for view in ("slices:a", "slices:b"):
+        held = [a["name"] for a in grouped.attributes(view)]
+        assert "quality" in held, view
+        every = grouped.items(view)
+        assert every.column_names == ["mosaica_id", *held], view
+        assert every.num_rows == len(IDS)
+        assert every.equals(grouped.items(view, held)), view
+        assert grouped.view(view).items().equals(every), view
 
 
 def test_a_group_scoped_attribute_filters_inside_the_view_it_was_read_for(grouped):
@@ -424,6 +463,10 @@ def test_a_plain_view_declared_after_the_first_commit_is_created_and_served(grou
     assert report.plan[0] == "declare view 'extra'"
     assert report.rows_accepted == {"extra": 15}
     assert viewport(db, "extra", FRAME)["counts"]["visible"] == 15
+    # A view outside the group holds none of the group's attributes or layers.
+    assert [a["name"] for a in db.attributes("extra")] == ["entity_id"]
+    assert db.layers("extra") == []
+    assert db.items("extra").column_names == ["mosaica_id", "entity_id"]
 
 
 def test_a_later_commit_publishes_one_key_on_every_view_its_rows_name(grouped):

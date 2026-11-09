@@ -511,6 +511,7 @@ selection's filters and box as `filters`.
 ```python
 papers = db.items("s0", ["title", "primary_category"], position=True)
 papers.to_pandas()                            # every paper, as one DataFrame
+db.items("s0")                                # every paper with every field
 cs = db.viewer(["cs.LG"]).items("s0", ["title"], filters={"archive": {"eq": "cs"}})
 topics = db.artifacts("s0", "clusters/kmeans", ["key", "masked_count", "centroid"])
 db.view("s0").filter({"archive": {"eq": "cs"}}).items(["title"])   # a selection's own items
@@ -520,7 +521,9 @@ for batch in db.items("s0", ["title"], page_rows=10_000, batches=True):
 ```
 
 `items(view, fields, ...)` returns every item the reader may see in a view, with the columns
-named, as one pyarrow table. The server answers a page at a time, several pages to a response,
+named, as one pyarrow table. Without `fields` the server returns every column the view holds,
+which are those `attributes(view)` lists apart from a text column declared for a view group, and
+`fields=[]` returns `mosaica_id` alone. The server answers a page at a time, several pages to a response,
 and ends each response with a cursor for the next. `items` asks for responses until no row
 remains and joins their pages. The columns are `mosaica_id`, the fields in the order named, then
 with `position=True` the columns `mosaica:x` and `mosaica:y`, in the view's coordinates, and with
@@ -573,6 +576,9 @@ own; narrow the selection with `filter` instead. A selection holds no layer, so 
 
 ```python
 db.meta()                                     # the views, layers and columns, as a dictionary
+db.views()                                    # the views, as a list of meta's entries
+db.attributes("s0")                           # the attributes a view holds, each with its filters
+db.layers("s0")                               # the layers published in a view
 db.item(mosaica_id)                           # one item's record: fields, labels, views
 db.categories("primary_category")             # every value of a category column, as a table
 db.categories("primary_category", prefix="cs")   # the values starting "cs", with item counts

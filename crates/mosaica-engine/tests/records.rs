@@ -622,7 +622,7 @@ fn both_credential() -> Vec<u8> {
 fn request<'a>(view: &'a str, fields: &'a [String]) -> ItemsRequest<'a> {
     ItemsRequest {
         view,
-        fields,
+        fields: Some(fields),
         system_fields: &[],
         filter: None,
         keep_unmatched: false,
@@ -1933,6 +1933,45 @@ fn a_group_scoped_field_resolves_as_a_filter_leaf_does() {
         refused(SECRET, &Vec::new(), &outsider),
         EngineError::UnknownView(_)
     ));
+}
+
+/// **A read naming no fields returns every field its view reads under a bare name**: the declared
+/// fields in declaration order, then the group-scoped ones the view decides and the viewer
+/// reaches, without group-scoped text. Its pages are those of a read naming the same fields.
+#[test]
+fn a_read_naming_no_fields_returns_every_field_the_view_reads() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&both_credential()).unwrap();
+    let declared: Vec<String> = fx
+        .engine
+        .meta()
+        .declared_scalars
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
+    let first_page = |view: &str, fields: Option<&[String]>| {
+        let mut req = request(view, &[]);
+        req.fields = fields;
+        req.order = Some(RecordsOrder::Map);
+        req.page_rows = Some(500);
+        req.pages = Some(1);
+        let (sink, _) = respond(&fx.engine, &session, req).unwrap();
+        sink.pages.into_iter().next().unwrap().0
+    };
+    for (view, scoped) in [("s0", None), (Q1, Some("sentiment")), (SECRET, Some("hush"))] {
+        let mut expected = declared.clone();
+        expected.extend(scoped.map(str::to_string));
+        let every = first_page(view, None);
+        let columns: Vec<String> = every
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect();
+        assert_eq!(columns[0], "mosaica_id");
+        assert_eq!(columns[1..], expected[..], "the columns of {view}");
+        assert_eq!(every, first_page(view, Some(&expected)), "the page of {view}");
+    }
 }
 
 /// **A phrase over a group-scoped text column answers from that view's own text**, exactly as a

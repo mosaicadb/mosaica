@@ -53,15 +53,24 @@ pub(super) struct FieldPlan {
 impl FieldPlan {
     /// Resolve the request's `fields` and `system_fields` under `view`. A group-scoped field
     /// resolves as a filter leaf on it does, through the same resolution, with every family
-    /// admitted since a field need not be filterable to be read.
+    /// admitted since a field need not be filterable to be read. Without `fields`, the plan is
+    /// [`unpinned_fields`].
     pub(super) fn resolve(
         meta: &EngineMeta,
         view: &str,
         visible: &crate::gate::VisibleViews,
-        fields: &[String],
+        fields: Option<&[String]>,
         system_fields: &[String],
     ) -> Result<FieldPlan> {
         let refused = |why| Err(EngineError::RecordsRefused(why));
+        let every;
+        let fields = match fields {
+            Some(fields) => fields,
+            None => {
+                every = unpinned_fields(meta, view, visible);
+                &every
+            }
+        };
         let mut named: Vec<Named> = Vec::with_capacity(fields.len());
         for spelling in fields {
             if named.iter().any(|n| &n.name == spelling) {
@@ -90,6 +99,23 @@ impl FieldPlan {
             false => RecordsOrder::Map,
         }
     }
+}
+
+/// Every field `view` reads under its bare name: the declared fields in declaration order, then
+/// the group-scoped families this viewer reaches that `view` decides a stored column of.
+fn unpinned_fields(
+    meta: &EngineMeta,
+    view: &str,
+    visible: &crate::gate::VisibleViews,
+) -> Vec<String> {
+    let declared = meta.declared_scalars.iter().map(|d| &d.name);
+    let scoped = meta.scoped_scalars.iter().map(|f| &f.name).filter(|name| {
+        matches!(
+            meta.resolve_column(name, view, visible, |_| true, scoped_has_value_column),
+            Resolution::Scoped { .. }
+        )
+    });
+    declared.chain(scoped).cloned().collect()
 }
 
 fn resolve_field(

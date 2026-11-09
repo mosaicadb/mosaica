@@ -1593,6 +1593,38 @@ class Database:
         self._refuse_before_the_first_commit("meta")
         return self.viewer().meta()
 
+    def views(self) -> list:
+        """The views of the database, each as `meta()` describes it.
+
+        This is `Viewer.views` read as the operator.
+
+            [view["id"] for view in db.views()]
+        """
+        self._refuse_before_the_first_commit("views")
+        return self.viewer().views()
+
+    def attributes(self, view: str | None = None) -> list:
+        """The attributes of the database, or those one view holds, each as `meta()` describes it
+        with the filter operators it takes as `filters`.
+
+        This is `Viewer.attributes` read as the operator.
+
+            [(a["name"], a["arrow_type"], a["filters"]) for a in db.attributes("papers")]
+        """
+        self._refuse_before_the_first_commit("attributes")
+        return self.viewer().attributes(view)
+
+    def layers(self, view: str | None = None) -> list:
+        """The annotation layers of the database, or those published in one view, each as `meta()`
+        describes it.
+
+        This is `Viewer.layers` read as the operator.
+
+            [layer["name"] for layer in db.layers()]
+        """
+        self._refuse_before_the_first_commit("layers")
+        return self.viewer().layers(view)
+
     def item(self, mosaica_id) -> dict:
         """One item's full record, as a dictionary.
 
@@ -1608,12 +1640,14 @@ class Database:
         self._refuse_before_the_first_commit("item")
         return self.viewer().item(mosaica_id)
 
-    def items(self, view: str, fields: Sequence[str], **options):
-        """Every item in a view, with the fields named, as one pyarrow table.
+    def items(self, view: str, fields: Sequence[str] | None = None, **options):
+        """Every item in a view as one pyarrow table, with the fields named or, without `fields`,
+        every field of the view.
 
         This is `Viewer.items` read as the operator, who sees every item, with its keywords. With
         `batches=True` it returns the pages one at a time instead.
 
+            db.items("papers").to_pandas()
             db.items("papers", ["title", "year"]).to_pandas()
             db.items("papers", ["title"], filters={"year": {"eq": 2023}}, order="stored")
         """

@@ -28,11 +28,12 @@ pub(crate) struct ItemsArgs {
     /// The view to read, as `/v1/meta` names it. An item with no position in it is not returned.
     #[arg(long)]
     view: String,
-    /// The declared fields to return, comma-separated, in the order wanted. `--fields ''`
-    /// returns `mosaica_id` alone. A field declared for a view group, read under a view outside
-    /// that group, is named `<field>@<key>`. An undeclared or repeated field is refused.
+    /// The declared fields to return, comma-separated, in the order wanted. Without it every
+    /// field the view reads under its bare name is returned, and `--fields ''` returns
+    /// `mosaica_id` alone. A field declared for a view group, read under a view outside that
+    /// group, is named `<field>@<key>`. An undeclared or repeated field is refused.
     #[arg(long, value_name = "NAMES")]
-    fields: String,
+    fields: Option<String>,
     /// Return each item's position in the view as the columns `mosaica:x` and `mosaica:y`.
     #[arg(long)]
     position: bool,
@@ -202,7 +203,7 @@ fn wire_name(value: impl ValueEnum) -> Value {
 }
 
 pub(crate) fn items(args: ItemsArgs) -> ExitCode {
-    let request = request(&args.fields, args.filters.as_deref(), &args.paging).map(|mut request| {
+    let request = request(args.fields.as_deref(), args.filters.as_deref(), &args.paging).map(|mut request| {
         request.insert("view".into(), args.view.into());
         if args.position {
             request.insert("position".into(), true.into());
@@ -225,7 +226,7 @@ pub(crate) fn items(args: ItemsArgs) -> ExitCode {
 }
 
 pub(crate) fn artifacts(args: ArtifactsArgs) -> ExitCode {
-    let request = request(&args.fields, args.filters.as_deref(), &args.paging).map(|mut request| {
+    let request = request(Some(&args.fields), args.filters.as_deref(), &args.paging).map(|mut request| {
         request.insert("view".into(), args.view.into());
         request.insert("layer".into(), args.layer.into());
         if let Some(level) = args.level {
@@ -278,12 +279,14 @@ pub(crate) fn aggregate(args: AggregateArgs) -> ExitCode {
 
 /// The fields `items` and `artifacts` share, each sent only when given.
 fn request(
-    fields: &str,
+    fields: Option<&str>,
     filters: Option<&str>,
     paging: &Paging,
 ) -> Result<Map<String, Value>, String> {
     let mut request = paged(paging)?;
-    request.insert("fields".into(), names(fields));
+    if let Some(fields) = fields {
+        request.insert("fields".into(), names(fields));
+    }
     if let Some(filters) = filters {
         request.insert("filters".into(), filter_argument("--filters", filters)?);
     }
