@@ -212,10 +212,14 @@ impl std::fmt::Debug for IdentityKey {
     }
 }
 
-/// `splitmix64`, exactly as contracts §2.6 fixes it: all arithmetic wrapping `u64`, all
-/// shifts logical right shifts on unsigned values. Shift amounts 30, 27, 31, in that order.
+/// splitmix64's finaliser: all arithmetic wrapping `u64`, all shifts logical right shifts on
+/// unsigned values, shift amounts 30, 27, 31 in that order.
+///
+/// **Its output is in every bundle**: it is the round function of the `mosaica_id` permutation
+/// ([`IDENTITY_CONSTRUCTION`]), so a change to it changes every published identity. It is also
+/// the mixer of every spill file's receipt.
 #[inline]
-fn splitmix64(x: u64) -> u64 {
+pub fn splitmix64(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);

@@ -28,14 +28,14 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::run::{RunReader, RunReceipt, RunWriter};
+use super::run::{RunReader, RunWriter};
 use rayon::prelude::*;
-use mosaica_filter_write::mix64;
+use mosaica_filter_write::SpillReceipt;
 use mosaica_lifecycle::resolve::{self, Batch, Named, Refusal};
 use mosaica_store::key_index::{Key, KeySpill};
 use mosaica_store::unique::{KeyKind, UniqueKey};
 use mosaica_types::progress::{Part, Unit};
-use mosaica_types::{EntityId, ItemAt, ShardId};
+use mosaica_types::{splitmix64, EntityId, ItemAt, ShardId};
 
 use super::report::{Tally, OUTSIDE_LIMIT};
 use super::scan::{FileRead, Scanned};
@@ -130,7 +130,7 @@ pub(super) fn strict_refusal(refused: &[super::RefusedRows]) -> BuildError {
 
 /// The run of `(key, item)` the files read so far gave one field.
 struct HeldRun {
-    receipt: RunReceipt,
+    receipt: SpillReceipt,
     /// Where the run's second column is a row of a file whose rows are items `base + row`.
     base: Option<u32>,
     /// That file, where it is one every row of which created an item and gave it its value.
@@ -327,7 +327,7 @@ impl FieldSort {
 /// What merging one field against the holdings found.
 struct Merged {
     /// The file's `(key, row)` for keys nobody held, sorted: the values its accepted rows may set.
-    unset: Option<RunReceipt>,
+    unset: Option<SpillReceipt>,
     /// How many unset values several rows carry, in a file carrying several fields: which of those
     /// rows sets each is decided once every field is merged.
     candidates: u64,
@@ -636,7 +636,7 @@ impl Pass<'_> {
                         }),
                         _ => None,
                     };
-                    if let Some(limited) = self.limited.as_mut().filter(|_| unset.count() > 0) {
+                    if let Some(limited) = self.limited.as_mut().filter(|_| unset.count > 0) {
                         limited.given(field.position);
                     }
                     self.held.entry(field.position).or_default().push(HeldRun {
@@ -822,7 +822,7 @@ impl Pass<'_> {
                     _ => self.set_values::<u64>(unset, numbers, &created, base, limit.as_ref())?,
                 };
                 if let Some(limited) = self.limited.as_mut() {
-                    if runs.iter().any(|run| run.receipt.count() > 0) {
+                    if runs.iter().any(|run| run.receipt.count > 0) {
                         limited.given(field.position);
                     }
                     if raised {
@@ -858,7 +858,7 @@ impl Pass<'_> {
         use rayon::prelude::*;
         let mixed = (base..base + total)
             .into_par_iter()
-            .map(mix64)
+            .map(splitmix64)
             .reduce(|| 0, u64::wrapping_add);
         Ok(ReadRows {
             numbers: Numbers::Offset { base: base as u32 },
@@ -881,7 +881,7 @@ impl Pass<'_> {
     #[allow(clippy::chunks_exact_to_as_chunks)]
     fn set_values<K: Key>(
         &mut self,
-        unset: RunReceipt,
+        unset: SpillReceipt,
         numbers: &[u32],
         created: &Created,
         base: u64,
@@ -1234,7 +1234,7 @@ impl FileNumbers {
         }
         if let Some(number) = stored.checked_sub(1) {
             self.anchor.0 += 1;
-            self.anchor.1 = self.anchor.1.wrapping_add(mix64(u64::from(number)));
+            self.anchor.1 = self.anchor.1.wrapping_add(splitmix64(u64::from(number)));
         }
         Ok(())
     }

@@ -11,31 +11,15 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use mosaica_filter::{put_varint64, take_varint64};
-use mosaica_filter_write::mix64;
+use mosaica_filter_write::{SpillReceipt, SPILL_BUF_BYTES};
 use mosaica_store::key_index::Key;
+use mosaica_types::splitmix64;
 
 use crate::error::{BuildError, Result};
 use crate::spill::read_varint;
 
-const BUFFER: usize = 4 << 20;
-
-/// What a run's reader is checked against.
-#[derive(Debug, Clone)]
-pub(super) struct RunReceipt {
-    pub path: PathBuf,
-    count: u64,
-    anchor: u64,
-}
-
-impl RunReceipt {
-    /// How many entries the run holds.
-    pub fn count(&self) -> u64 {
-        self.count
-    }
-}
-
 fn entry_anchor(key: u128, value: u32) -> u64 {
-    mix64(key as u64 ^ (key >> 64) as u64).wrapping_add(mix64(u64::from(value) << 1 | 1))
+    splitmix64(key as u64 ^ (key >> 64) as u64).wrapping_add(splitmix64(u64::from(value) << 1 | 1))
 }
 
 pub(super) struct RunWriter<K: Key> {
@@ -53,7 +37,7 @@ impl<K: Key> RunWriter<K> {
         let file = File::create(path).map_err(|e| BuildError::io(path, e))?;
         Ok(RunWriter {
             path: path.to_path_buf(),
-            writer: BufWriter::with_capacity(BUFFER, file),
+            writer: BufWriter::with_capacity(SPILL_BUF_BYTES, file),
             record: Vec::new(),
             last: 0,
             count: 0,
@@ -83,7 +67,7 @@ impl<K: Key> RunWriter<K> {
         Ok(())
     }
 
-    pub fn finish(self) -> Result<RunReceipt> {
+    pub fn finish(self) -> Result<SpillReceipt> {
         let RunWriter {
             path,
             writer,
@@ -94,7 +78,7 @@ impl<K: Key> RunWriter<K> {
         writer
             .into_inner()
             .map_err(|e| BuildError::io(&path, e.into_error()))?;
-        Ok(RunReceipt {
+        Ok(SpillReceipt {
             path,
             count,
             anchor,
@@ -103,7 +87,7 @@ impl<K: Key> RunWriter<K> {
 }
 
 pub(super) struct RunReader<K: Key> {
-    receipt: RunReceipt,
+    receipt: SpillReceipt,
     reader: BufReader<File>,
     last: u128,
     left: u64,
@@ -112,11 +96,11 @@ pub(super) struct RunReader<K: Key> {
 }
 
 impl<K: Key> RunReader<K> {
-    pub fn open(receipt: &RunReceipt) -> Result<Self> {
+    pub fn open(receipt: &SpillReceipt) -> Result<Self> {
         let file = File::open(&receipt.path).map_err(|e| BuildError::io(&receipt.path, e))?;
         Ok(RunReader {
             receipt: receipt.clone(),
-            reader: BufReader::with_capacity(BUFFER, file),
+            reader: BufReader::with_capacity(SPILL_BUF_BYTES, file),
             last: 0,
             left: receipt.count,
             anchor: 0,

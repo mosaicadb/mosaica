@@ -2,15 +2,17 @@
 //! run a term index or a keyword dictionary spills and merges.
 //!
 //! Every spill is **fail-closed**: a writer's `finish` returns a [`SpillReceipt`] carrying the
-//! record count and a content anchor (a wrapping sum of [`mix64`] over each record), and every read
-//! path verifies both before its contents are trusted. A truncated, tampered or doubly-appended
-//! spill file surfaces as an error, never as a silent partial read. The build's bucket, band and
-//! member files and `mosaica_store`'s partitions carry the same receipt.
+//! record count and a content anchor (a wrapping sum of [`splitmix64`] over each record), and every
+//! read path verifies both before its contents are trusted. A truncated, tampered or
+//! doubly-appended spill file surfaces as an error, never as a silent partial read. The build's
+//! band, member and identity run files and `mosaica_store`'s partition bucket files carry the same
+//! receipt.
 //!
 //! A **sorted run** is written by [`TextRunWriter`] and read back by a run reader inside
 //! [`TextRunMerge`], which merges runs k-way on the term. [`cascade_sorted_runs`] reduces more runs
-//! than one merge may hold open. A malformed run is refused as [`io::ErrorKind::InvalidData`], and
-//! every error a run returns names its file.
+//! than one merge may hold open. A malformed run is refused as [`io::ErrorKind::InvalidData`].
+//! Every error a run's reader or writer returns names its file, an I/O failure as a
+//! [`SpillFileError`], and every refusal the merge makes of its own names its term.
 
 use std::fmt::Display;
 use std::fs::File;
@@ -18,47 +20,63 @@ use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use mosaica_filter::{common_prefix_len, put_varint, take_varint, VarintError};
+use mosaica_types::splitmix64;
 
 /// Buffer size for spill I/O, both directions. Four mebibytes: large enough that the syscall
 /// cost is noise against the encode/decode work, small enough to be irrelevant against the
 /// build's peak memory.
 pub const SPILL_BUF_BYTES: usize = 4 << 20;
 
-/// splitmix64's finalizer, with the constants contracts §2.6 fixes for the identity construction:
-/// the mixer every spill file's anchor sums, and the build's checks that a later pass read what an
-/// earlier one did.
-///
-/// Why a mixed sum and not a plain one: a plain sum of raw values can be *compensated* —
-/// replace records `{1, 3}` with `{2, 2}` and count and sum both survive — so each record is
-/// put through a full-avalanche mixer first. Not cryptographic, and not meant to be: this
-/// defends against torn writes, truncation and accidental double-appends, not an adversary
-/// with write access to the build's own scratch directory.
-pub fn mix64(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    x ^ (x >> 31)
-}
-
 /// What `finish` hands back and every read path verifies against: the file, how many records
 /// it holds, and the content anchor over those records.
 ///
-/// The receipt lives in the build's memory, never on disk — a receipt stored beside the file
-/// it vouches for could be tampered with in the same incident, and the build that wrote the
-/// spill is the only reader it will ever have.
+/// The receipt lives in the writer's memory, never on disk: a receipt stored beside the file it
+/// vouches for could be tampered with in the same incident, and the process that wrote the spill
+/// is the only reader it will ever have.
+///
+/// The anchor sums mixed values and not raw ones because a plain sum can be *compensated*: replace
+/// records `{1, 3}` with `{2, 2}` and count and sum both survive. It defends against torn writes,
+/// truncation and doubly-appended files, not against an adversary with write access to the spill
+/// directory.
 #[derive(Debug, Clone)]
 pub struct SpillReceipt {
     pub path: PathBuf,
-    /// Records written: `u64` values for a bucket file, `(term, entity)` pairs for a band file.
+    /// Records written. Each kind of spill file says what one record is.
     pub count: u64,
-    /// Wrapping sum of [`mix64`] over each record — the raw `u64` for a bucket file,
-    /// `pack_pair` for a band file.
+    /// Wrapping sum of [`splitmix64`] over a value each record determines, which each kind of spill
+    /// file defines.
     pub anchor: u64,
+}
+
+/// An I/O failure on one spill file, carried inside the [`io::Error`] the run layer returns so a
+/// caller can name the file in its own terms.
+#[derive(Debug)]
+pub struct SpillFileError {
+    pub path: PathBuf,
+    pub source: io::Error,
+}
+
+impl Display for SpillFileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.source)
+    }
+}
+
+impl std::error::Error for SpillFileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
 }
 
 /// `e`, with the file it concerns named.
 fn at(path: &Path, e: io::Error) -> io::Error {
-    io::Error::new(e.kind(), format!("{}: {e}", path.display()))
+    io::Error::new(
+        e.kind(),
+        SpillFileError {
+            path: path.to_path_buf(),
+            source: e,
+        },
+    )
 }
 
 /// A text run at `path` that is not what its writer may write or its reader may read.
@@ -134,9 +152,8 @@ pub fn read_varint<T>(
 ///
 /// A text run's records are keyed by the term *string*: there is no term id yet, because assigning
 /// one is what the merge these files feed does. So the anchor cannot use a band file's packed pair,
-/// and it folds the key's bytes to 64 bits instead. Not cryptographic, and for the same reason
-/// [`mix64`]'s doc gives: this defends against truncation, a torn write and a doubly-appended
-/// file, not against an adversary with write access to the build's own scratch.
+/// and it folds the key's bytes to 64 bits instead. Not cryptographic, for the reason
+/// [`SpillReceipt`] gives.
 fn fingerprint(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for &byte in bytes {
@@ -162,15 +179,16 @@ pub(crate) fn encode_entity(
     positions: &[u32],
 ) -> u64 {
     put_varint(gap, out);
-    let mut anchor = mix64(mark ^ entity as u64);
+    let mut anchor = splitmix64(mark ^ entity as u64);
     if payload == RunPayload::Positions {
         put_varint(positions.len() as u32, out);
         let mut previous = 0;
         for &position in positions {
             put_varint(position - previous, out);
             previous = position;
-            anchor =
-                anchor.wrapping_add(mix64(mark ^ entity as u64 ^ ((position as u64 + 1) << 32)));
+            anchor = anchor.wrapping_add(splitmix64(
+                mark ^ entity as u64 ^ ((position as u64 + 1) << 32),
+            ));
         }
     }
     anchor
@@ -369,20 +387,6 @@ impl TextRunWriter {
         written
     }
 
-    /// Write a whole record: `term`, and its `count` entities already encoded into `body` by
-    /// [`encode_entity`], with `anchor` the sum of what each call returned.
-    #[allow(dead_code)] // The accumulator's spill writes each of its terms through this.
-    pub(crate) fn push_body(
-        &mut self,
-        term: &[u8],
-        count: u32,
-        body: &[u8],
-        anchor: u64,
-    ) -> io::Result<()> {
-        self.begin(term, count)?;
-        self.write_body(body, count, anchor)
-    }
-
     /// Write `pairs` of the open term's entities, encoded into `body` by [`encode_entity`], and
     /// fold their `anchor` into the receipt.
     fn write_body(&mut self, body: &[u8], pairs: u32, anchor: u64) -> io::Result<()> {
@@ -579,7 +583,9 @@ impl TextRunReader {
         self.taken += 1;
         self.pending -= 1;
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ entity as u64));
+        self.anchor = self
+            .anchor
+            .wrapping_add(splitmix64(self.mark ^ entity as u64));
         self.positions.clear();
         if self.payload == RunPayload::Positions {
             let occurrences = self.next_u32()?;
@@ -596,7 +602,7 @@ impl TextRunReader {
                     .checked_add(gap)
                     .ok_or_else(|| self.malformed("a position overflows u32"))?;
                 self.positions.push(position);
-                self.anchor = self.anchor.wrapping_add(mix64(
+                self.anchor = self.anchor.wrapping_add(splitmix64(
                     self.mark ^ entity as u64 ^ ((position as u64 + 1) << 32),
                 ));
             }
@@ -760,8 +766,10 @@ impl TextRunMerge {
                     return Err(lift(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
-                            "run merge: {entity} does not ascend past {previous} — two runs \
-                             carry the same entity for one term, or the same row for one key"
+                            "run merge: term {:?}'s entity {entity} does not ascend past \
+                             {previous}: two runs carry the same entity for one term, or the same \
+                             row for one key",
+                            String::from_utf8_lossy(&self.term)
                         ),
                     )));
                 }
@@ -927,12 +935,6 @@ mod tests {
             matches!(&result, Err(e) if e.kind() == io::ErrorKind::InvalidData),
             "{result:?}"
         );
-    }
-
-    /// Pins the constants: the widely published first output of splitmix64 seeded with 0.
-    #[test]
-    fn mix64_matches_the_splitmix64_test_vector() {
-        assert_eq!(mix64(0), 0xE220_A839_7B1D_CDAF);
     }
 
     /// One whole record of a run of rows.

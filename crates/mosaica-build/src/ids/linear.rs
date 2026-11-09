@@ -2,9 +2,8 @@
 //! files read before hold: the linear build's numbering and the streaming build's reference.
 
 use rustc_hash::FxHashMap;
-use mosaica_filter_write::mix64;
 use mosaica_lifecycle::resolve::{self, Batch, Holder, Holdings, RowIdentity, Verdict};
-use mosaica_types::{EntityId, ItemAt, MosaicaId, ShardId};
+use mosaica_types::{splitmix64, EntityId, ItemAt, MosaicaId, ShardId};
 
 use super::report::{Tally, OUTSIDE_LIMIT};
 use super::scan::FileRead;
@@ -246,7 +245,7 @@ fn decide(
         };
         numbers[row] = item + 1;
         named += 1;
-        mixed = mixed.wrapping_add(mix64(u64::from(item)));
+        mixed = mixed.wrapping_add(splitmix64(u64::from(item)));
         if matches!(read.batch, Batch::Creates | Batch::Edits) {
             for &(field, key) in &identity.unique {
                 if let Some(old) = held.value.insert((item, field), key) {

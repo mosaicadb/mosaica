@@ -50,7 +50,7 @@
 //! ## The spill discipline
 //!
 //! Bucket and band files live under `<out>/.build-tmp/`, are deleted as consumed and
-//! on every exit path, and each carries a write-side `(count, mix64-sum)` receipt verified on
+//! on every exit path, and each carries a write-side `(count, splitmix64-sum)` receipt verified on
 //! read — the cross-pass anchor discipline extends across every spill boundary. Bands arrive
 //! with each term's entities strictly ascending by construction (bases ascend across batches,
 //! positions within one), which `encode_posting`'s unconditional sortedness check re-verifies
@@ -98,7 +98,7 @@
 //! process, so it is checked instead: every place a later pass depends on an earlier one — a
 //! source id that must resolve to an ordinal, a term bucket that must have room — is a typed
 //! error, never an `unwrap`; each later pass additionally re-accumulates an order-independent
-//! **content anchor** ([`mix64`] sums over the ids, and over the resolved `(ordinal, term)`
+//! **content anchor** ([`splitmix64`] sums over the ids, and over the resolved `(ordinal, term)`
 //! relation) and compares it against the first pass's, because counts alone accept
 //! substitutions that preserve them. A mutated input fails the build. (The anchors are
 //! avalanche-mixed sums, not cryptographic hashes: they make an accidental compensating
@@ -167,9 +167,10 @@ use crate::{
     PairsParquetWriter, PREFIX, SEG_ID,
 };
 use mosaica_filter_write::{
-    cascade_sorted_runs, mix64, RunPayload, SpillReceipt, TextRunMerge, TextRunWriter,
+    cascade_sorted_runs, RunPayload, SpillReceipt, TextRunMerge, TextRunWriter,
 };
 use mosaica_types::progress::{Batched, Part, Unit};
+use mosaica_types::splitmix64;
 
 /// One item's position in the signature sort. 16 bytes, four-byte aligned — every field is a
 /// component of the sort key, and holding the key in the record is what keeps the comparator a
@@ -952,9 +953,9 @@ fn build_bundle(
         }
     };
     // Each view's own anchors — how many of its rows name an item and an order-independent mixed
-    // sum of their numbers ([`mix64`]) — are on its numbers, and the geometry pass below is checked
-    // against them: a points file swapped mid-build would otherwise hand every item of that view
-    // another item's position, with nothing to notice.
+    // sum of their numbers ([`splitmix64`]) — are on its numbers, and the geometry pass below is
+    // checked against them: a points file swapped mid-build would otherwise hand every item of
+    // that view another item's position, with nothing to notice.
 
     timer.end(BuildStage::SourceIds, n);
     timer.begin(BuildStage::Dictionary, &[], None);
@@ -1206,7 +1207,7 @@ fn build_bundle(
                         *count += 1;
                     }
                     *points_seen += 1;
-                    *geom_anchor = geom_anchor.wrapping_add(mix64(source_id));
+                    *geom_anchor = geom_anchor.wrapping_add(splitmix64(source_id));
                     Ok(())
                 })
             };

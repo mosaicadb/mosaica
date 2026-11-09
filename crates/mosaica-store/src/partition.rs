@@ -10,13 +10,12 @@
 //! for itself is the Morton routing and `boundaries_from_histogram`, which only a build has a key
 //! uneven enough to need.
 //!
-//! Everything here is **fail-closed**: `finish` returns a [`SpillReceipt`] carrying the record
-//! count and a content anchor (a wrapping sum of [`mix64`] over each record; both are
-//! `mosaica_filter_write`'s), and every read path
-//! verifies both before its contents are trusted. A truncated, tampered or doubly-appended spill
-//! file surfaces as a typed error, never as a silent partial read — on the build's side these files
-//! feed the permanent entity-ID assignment (I9), so an undetected short read would be baked into
-//! every bundle the deployment ever ships.
+//! Everything here is **fail-closed**: `finish` returns a `mosaica_filter_write` [`SpillReceipt`]
+//! carrying the record count and a content anchor (a wrapping sum of [`splitmix64`] over each
+//! record), and every read path verifies both before its contents are trusted. A truncated,
+//! tampered or doubly-appended spill file surfaces as a typed error, never as a silent partial
+//! read. On the build's side these files feed the permanent entity-ID assignment (I9), so an
+//! undetected short read would be baked into every bundle the deployment ever ships.
 //!
 //! Mismatches are reported as [`StoreError::MalformedBundle`] naming the file and the mismatch
 //! kind; the message carries the discrimination a caller or operator needs.
@@ -25,7 +24,8 @@ use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use mosaica_filter_write::{mix64, SpillReceipt, SPILL_BUF_BYTES};
+use mosaica_filter_write::{SpillReceipt, SPILL_BUF_BYTES};
+use mosaica_types::splitmix64;
 
 use crate::error::{Result, StoreError};
 
@@ -86,7 +86,7 @@ impl SpillWriter {
             .write_all(&value.to_le_bytes())
             .map_err(|e| io(&self.path, e))?;
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64(value));
+        self.anchor = self.anchor.wrapping_add(splitmix64(value));
         Ok(())
     }
 
@@ -148,7 +148,7 @@ pub fn read_bucket(receipt: &SpillReceipt) -> Result<Vec<u64>> {
     let mut anchor = 0u64;
     for chunk in bytes.as_chunks::<8>().0 {
         let value = u64::from_le_bytes(*chunk);
-        anchor = anchor.wrapping_add(mix64(value));
+        anchor = anchor.wrapping_add(splitmix64(value));
         values.push(value);
     }
     if anchor != receipt.anchor {
@@ -573,16 +573,16 @@ impl Drop for PartitionStore {
     }
 }
 
-/// [`mix64`] over a record's bytes: each 8-byte group mixed and summed, the tail zero-padded.
+/// [`splitmix64`] over a record's bytes: each 8-byte group mixed and summed, the tail zero-padded.
 ///
-/// A mixed sum rather than a plain one for [`mix64`]'s own reason, and per group rather than per
-/// record so a record of any width goes through the same arithmetic.
+/// A mixed sum rather than a plain one for the reason [`SpillReceipt`] gives, and per group rather
+/// than per record so a record of any width goes through the same arithmetic.
 fn mix64_bytes(record: &[u8]) -> u64 {
     let mut anchor = 0u64;
     for group in record.chunks(8) {
         let mut word = [0u8; 8];
         word[..group.len()].copy_from_slice(group);
-        anchor = anchor.wrapping_add(mix64(u64::from_le_bytes(word)));
+        anchor = anchor.wrapping_add(splitmix64(u64::from_le_bytes(word)));
     }
     anchor
 }

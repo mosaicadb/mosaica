@@ -1,6 +1,6 @@
 mod identity;
 pub use identity::{
-    IdentityError, IdentityKey, ItemHigh, MosaicaId, Tenancy, IDENTITY_CONSTRUCTION,
+    splitmix64, IdentityError, IdentityKey, ItemHigh, MosaicaId, Tenancy, IDENTITY_CONSTRUCTION,
     IDENTITY_ROUNDS,
 };
 mod shard;

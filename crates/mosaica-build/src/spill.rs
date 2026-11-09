@@ -14,7 +14,7 @@
 //! * **Member runs and the member table** ([`MemberRunWriter`], [`MemberTable`]).
 //!
 //! The sorted run the text index and the keyword dictionary spill, and the receipt every spill
-//! here is verified against ([`SpillReceipt`], [`mix64`]), are `mosaica_filter_write`'s.
+//! here is verified against ([`SpillReceipt`]), are `mosaica_filter_write`'s.
 //! [`run_error`] puts the run layer's errors in the build's terms.
 //!
 //! Every spill is **fail-closed**: `finish` returns a [`SpillReceipt`] carrying the record count
@@ -35,7 +35,8 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use mosaica_filter::{put_varint, put_varint64, take_varint, take_varint64, VarintError};
-use mosaica_filter_write::{mix64, SpillReceipt, SPILL_BUF_BYTES};
+use mosaica_filter_write::{SpillReceipt, SPILL_BUF_BYTES};
+use mosaica_types::splitmix64;
 
 use crate::error::{BuildError, Result};
 
@@ -862,7 +863,7 @@ impl BandWriter {
         write_record(&mut self.writer, &self.path, &self.record)?;
         self.last_entity = entity;
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64(pack_pair(term, entity)));
+        self.anchor = self.anchor.wrapping_add(splitmix64(pack_pair(term, entity)));
         Ok(())
     }
 
@@ -978,7 +979,7 @@ impl BandReader {
             )));
         }
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64(pack_pair(term, entity)));
+        self.anchor = self.anchor.wrapping_add(splitmix64(pack_pair(term, entity)));
         Ok(Some((term, entity)))
     }
 
@@ -1034,12 +1035,15 @@ pub(crate) fn read_varint<T>(
 }
 
 /// An error of the run layer in the build's terms: a malformed run is [`BuildError::Invalid`], and
-/// any other failure an I/O error under `dir`. The run layer's message names the file either way.
+/// any other failure an I/O error on the file the run layer names, or under `dir` where it names
+/// none.
 pub(crate) fn run_error(dir: &Path, e: std::io::Error) -> BuildError {
     if e.kind() == std::io::ErrorKind::InvalidData {
-        BuildError::Invalid(e.to_string())
-    } else {
-        BuildError::io(dir, e)
+        return BuildError::Invalid(e.to_string());
+    }
+    match e.downcast::<mosaica_filter_write::SpillFileError>() {
+        Ok(file) => BuildError::io(&file.path, file.source),
+        Err(e) => BuildError::io(dir, e),
     }
 }
 
@@ -1072,7 +1076,8 @@ pub(crate) struct MemberRunWriter {
     taken: u32,
     count: u64,
     anchor: u64,
-    /// [`mix64`] of the open artifact's index, folded once per record rather than once per pair.
+    /// [`splitmix64`] of the open artifact's index, folded once per record rather than once per
+    /// pair.
     mark: u64,
 }
 
@@ -1127,7 +1132,7 @@ impl MemberRunWriter {
         put_varint(head, &mut self.record);
         put_varint(sources, &mut self.record);
         write_record(&mut self.writer, &self.path, &self.record)?;
-        self.mark = mix64(index as u64);
+        self.mark = splitmix64(index as u64);
         self.last_index = index;
         self.started = true;
         self.owed = sources;
@@ -1164,7 +1169,7 @@ impl MemberRunWriter {
         self.taken += 1;
         self.owed -= 1;
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ source));
+        self.anchor = self.anchor.wrapping_add(splitmix64(self.mark ^ source));
         Ok(())
     }
 
@@ -1289,7 +1294,7 @@ impl MemberRunReader {
                 self.expect_count
             )));
         }
-        self.mark = mix64(self.index as u64);
+        self.mark = splitmix64(self.index as u64);
         self.started = true;
         self.pending = count;
         self.taken = 0;
@@ -1332,7 +1337,7 @@ impl MemberRunReader {
         self.taken += 1;
         self.pending -= 1;
         self.count += 1;
-        self.anchor = self.anchor.wrapping_add(mix64(self.mark ^ source));
+        self.anchor = self.anchor.wrapping_add(splitmix64(self.mark ^ source));
         Ok(source)
     }
 
@@ -1429,7 +1434,7 @@ impl MemberTableWriter {
                 self.path.display()
             )));
         }
-        let mark = mix64(index as u64);
+        let mark = splitmix64(index as u64);
         let mut anchor = 0u64;
         let mut last = 0u64;
         let start = self.offset;
@@ -1451,7 +1456,7 @@ impl MemberTableWriter {
             write_record(&mut self.writer, &self.path, &self.record)?;
             self.offset += self.record.len() as u64;
             last = entity;
-            anchor = anchor.wrapping_add(mix64(mark ^ entity));
+            anchor = anchor.wrapping_add(splitmix64(mark ^ entity));
         }
         *extent = MemberExtent {
             offset: start,
@@ -1582,7 +1587,7 @@ impl MemberTable {
         let mut cursor = 0usize;
         let mut last = 0u64;
         let mut anchor = 0u64;
-        let mark = mix64(index as u64);
+        let mark = splitmix64(index as u64);
         for position in 0..extent.entries {
             let delta = take_varint64(scratch, &mut cursor)
                 .map_err(|e| self.malformed(index, &format!("the extent {e}")))?;
@@ -1593,7 +1598,7 @@ impl MemberTable {
                     .ok_or_else(|| self.malformed(index, "a member delta overflows u64"))?
             };
             last = entity;
-            anchor = anchor.wrapping_add(mix64(mark ^ entity));
+            anchor = anchor.wrapping_add(splitmix64(mark ^ entity));
             out.push(u32::try_from(entity).map_err(|_| {
                 self.malformed(
                     index,
