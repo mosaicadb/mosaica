@@ -1595,6 +1595,7 @@ fn write_text_extents(
             &spec.analyser,
             rows,
             TextTarget::of(ctx),
+            TEXT_LAYER_BUDGET,
             sub,
         )? {
             out.push(extent);
@@ -1602,6 +1603,10 @@ fn write_text_extents(
     }
     Ok(out)
 }
+
+/// The bytes one text layer's accumulator may allocate before it spills a run. A fixed allowance
+/// until the flush's is derived from the memory available.
+const TEXT_LAYER_BUDGET: usize = 256 << 20;
 
 /// Where a text layer's files go. What [`write_text_layer`] needs of a [`FlushContext`], so a
 /// test can write a layer without building one.
@@ -1627,6 +1632,11 @@ impl<'a> TextTarget<'a> {
 /// entities that carried prose — written under `rel_dir` and named for the flush. `None` where no
 /// row carried a value. `view` records the scope: entity-scoped or group-scoped. `sub` takes the
 /// `Text*` sub-laps where the caller's stage is `TextExtents`, and is `None` from the scoped pass.
+///
+/// The terms are gathered in the accumulator the build's text pass uses, which spills sorted runs
+/// beside the layer's files when it has allocated `budget` bytes; the runs are merged into the
+/// layer and removed.
+#[allow(clippy::too_many_arguments)]
 fn write_text_layer(
     rel_dir: &str,
     column: &str,
@@ -1634,6 +1644,7 @@ fn write_text_layer(
     analyser: &mosaica_analyse::Analyser,
     rows: Vec<(u32, &WalScalar)>,
     target: TextTarget<'_>,
+    budget: usize,
     mut sub: Option<TextLaps<'_>>,
 ) -> Result<Option<mosaica_store::manifest::TextExtent>, MaintenanceFailed> {
     let dir = target.prefix_dir.join(rel_dir);
@@ -1641,8 +1652,11 @@ fn write_text_layer(
         .map_err(|e| MaintenanceFailed(format!("{}: {e}", dir.display())))?;
     text_lap(&mut sub, FlushStage::TextRows);
 
-    let mut terms: std::collections::BTreeMap<String, mosaica_filter_write::Occurrences> =
-        std::collections::BTreeMap::new();
+    let mut terms = mosaica_filter_write::TermAccumulator::new(
+        &dir,
+        format!("{}-text-run", target.seg_id),
+        budget,
+    );
     let mut presence = croaring::Bitmap::new();
     let mut prose_rows: Vec<(u32, &str)> = Vec::new();
     let mut scratch = mosaica_analyse::TokenScratch::default();
@@ -1660,20 +1674,11 @@ fn write_text_layer(
         if view.is_some() {
             prose_rows.push((entity, prose));
         }
-        let mut position = 0u32;
-        analyser.for_each_token(prose, &mut scratch, &mut |token| {
-            match terms.get_mut(token) {
-                Some(occurrences) => {
-                    occurrences.add(entity, position);
-                }
-                None => {
-                    let mut occurrences = mosaica_filter_write::Occurrences::default();
-                    occurrences.add(entity, position);
-                    terms.insert(token.to_string(), occurrences);
-                }
-            }
-            position += 1;
-        });
+        terms
+            .add_document(entity, |push| {
+                analyser.for_each_token(prose, &mut scratch, &mut |token| push(token))
+            })
+            .map_err(|e| MaintenanceFailed(format!("column '{column}': {e}")))?;
         text_lap(&mut sub, FlushStage::TextTokeniseTerms);
     }
     if presence.is_empty() {
@@ -1692,22 +1697,9 @@ fn write_text_layer(
     };
     let failed = |e: std::io::Error| MaintenanceFailed(format!("{dict_rel}: {e}"));
     let mut writer = mosaica_filter_write::TextIndexWriter::create(files).map_err(failed)?;
-    let mut entities: Vec<u32> = Vec::new();
-    for (term, occurrences) in &terms {
-        writer
-            .begin_term(term, occurrences.items() as u64)
-            .map_err(failed)?;
-        entities.clear();
-        occurrences
-            .for_each_item(|entity, positions| {
-                entities.push(entity);
-                writer.push_item(positions)
-            })
-            .map_err(failed)?;
-        writer
-            .end_term(mosaica_filter_write::Posting::Ascending(&entities))
-            .map_err(failed)?;
-    }
+    terms
+        .write_index(&mut writer, mosaica_filter_write::TEXT_MERGE_SLICE_CAP)
+        .map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextDict);
     writer.finish().map_err(failed)?;
     text_lap(&mut sub, FlushStage::TextPostings);
@@ -1807,6 +1799,7 @@ fn write_scoped_extents(
                 analyser,
                 scoped_rows(spec, plan)?,
                 TextTarget::of(ctx),
+                TEXT_LAYER_BUDGET,
                 None,
             )? {
                 texts.push(extent);
@@ -2294,7 +2287,8 @@ mod tests {
     /// dictionary is the sorted distinct term set, each term's posting is the ascending list of the
     /// entities whose prose contains it (once, however often the row repeats it), each entity's
     /// positions are where the row says the term, and the presence bitmap holds every entity that
-    /// carried prose, the one whose prose analyses to no term included.
+    /// carried prose, the one whose prose analyses to no term included. A layer whose accumulator
+    /// spills runs is the same bytes as one written from memory.
     #[test]
     fn a_text_layer_round_trips_through_the_files_it_writes() {
         let analyser = mosaica_analyse::Analyser::default();
@@ -2335,82 +2329,104 @@ mod tests {
             "the fixture repeats a term within a row"
         );
 
-        let dir = tempfile::TempDir::new().expect("a temp dir");
-        let rows: Vec<(u32, &WalScalar)> = prose.iter().map(|(e, v)| (*e, v)).collect();
-        let extent = write_text_layer(
-            "attrs/title/extents",
-            "title",
-            None,
-            &analyser,
-            rows,
-            TextTarget {
-                prefix_dir: dir.path(),
-                seg_id: "flush-1-0",
-                scoped_incarnation: mosaica_types::view::DECLARED_INCARNATION,
-            },
-            None,
-        )
-        .expect("the layer writes")
-        .expect("rows carried prose");
+        // Unbounded, the layer is written from memory; with no budget, the accumulator spills a
+        // run after every row and the layer is merged from the runs. Both write the same bytes.
+        let mut written: Option<Vec<Vec<u8>>> = None;
+        for budget in [usize::MAX, 0] {
+            let dir = tempfile::TempDir::new().expect("a temp dir");
+            let rows: Vec<(u32, &WalScalar)> = prose.iter().map(|(e, v)| (*e, v)).collect();
+            let extent = write_text_layer(
+                "attrs/title/extents",
+                "title",
+                None,
+                &analyser,
+                rows,
+                TextTarget {
+                    prefix_dir: dir.path(),
+                    seg_id: "flush-1-0",
+                    scoped_incarnation: mosaica_types::view::DECLARED_INCARNATION,
+                },
+                budget,
+                None,
+            )
+            .expect("the layer writes")
+            .expect("rows carried prose");
 
-        let dict = mosaica_filter::SortedDict::open(
-            &dir.path().join(&extent.dict),
-            mosaica_filter::Access::Mapped,
-        )
-        .expect("the dictionary reopens");
-        dict.self_check().expect("the dictionary is well formed");
-        let mut keys = Vec::new();
-        dict.walk(|_, key| keys.push(key.to_string()))
-            .expect("the dictionary walks");
-        assert_eq!(
-            keys,
-            expected_terms.keys().cloned().collect::<Vec<_>>(),
-            "the dictionary is the sorted distinct term set"
-        );
+            let dict = mosaica_filter::SortedDict::open(
+                &dir.path().join(&extent.dict),
+                mosaica_filter::Access::Mapped,
+            )
+            .expect("the dictionary reopens");
+            dict.self_check().expect("the dictionary is well formed");
+            let mut keys = Vec::new();
+            dict.walk(|_, key| keys.push(key.to_string()))
+                .expect("the dictionary walks");
+            assert_eq!(
+                keys,
+                expected_terms.keys().cloned().collect::<Vec<_>>(),
+                "the dictionary is the sorted distinct term set"
+            );
 
-        let postings = mosaica_authz::postings::PostingsReader::open(
-            &dir.path().join(&extent.postings),
-            false,
-        )
-        .expect("the postings reopen");
-        assert_eq!(postings.term_count() as usize, expected_terms.len());
-        for (ordinal, (term, expected)) in expected_terms.iter().enumerate() {
-            let entities: Vec<u32> = postings
-                .posting_at(ordinal as u32)
-                .expect("the record decodes")
-                .expect("every term has a record")
-                .iter()
-                .collect();
-            assert_eq!(&entities, expected, "the posting of '{term}'");
-        }
-
-        let positions = mosaica_filter::ColumnPositions::open(
-            &dir.path().join(&extent.positions),
-            false,
-        )
-        .expect("the positions reopen");
-        assert_eq!(positions.record_count() as usize, expected_terms.len());
-        for (ordinal, (term, items)) in expected_positions.iter().enumerate() {
-            let mut cursor = positions
-                .cursor(mosaica_types::AttrLocalId::new(ordinal as u32), items.len() as u64)
-                .expect("every term has a record");
-            for (rank, want) in items.iter().enumerate() {
-                assert_eq!(
-                    cursor.positions(rank as u64).expect("the entry decodes"),
-                    want.as_slice(),
-                    "the positions of '{term}'"
-                );
+            let postings = mosaica_authz::postings::PostingsReader::open(
+                &dir.path().join(&extent.postings),
+                false,
+            )
+            .expect("the postings reopen");
+            assert_eq!(postings.term_count() as usize, expected_terms.len());
+            for (ordinal, (term, expected)) in expected_terms.iter().enumerate() {
+                let entities: Vec<u32> = postings
+                    .posting_at(ordinal as u32)
+                    .expect("the record decodes")
+                    .expect("every term has a record")
+                    .iter()
+                    .collect();
+                assert_eq!(&entities, expected, "the posting of '{term}'");
             }
-        }
 
-        let presence = mosaica_filter::read_presence(&dir.path().join(&extent.presence))
-            .expect("the presence reads");
-        assert_eq!(
-            presence.iter().collect::<Vec<_>>(),
-            expected_presence,
-            "presence holds every entity with prose, the empty string's included"
-        );
-        assert_eq!(expected_presence, vec![3, 5, 9, 11]);
+            let positions = mosaica_filter::ColumnPositions::open(
+                &dir.path().join(&extent.positions),
+                false,
+            )
+            .expect("the positions reopen");
+            assert_eq!(positions.record_count() as usize, expected_terms.len());
+            for (ordinal, (term, items)) in expected_positions.iter().enumerate() {
+                let mut cursor = positions
+                    .cursor(mosaica_types::AttrLocalId::new(ordinal as u32), items.len() as u64)
+                    .expect("every term has a record");
+                for (rank, want) in items.iter().enumerate() {
+                    assert_eq!(
+                        cursor.positions(rank as u64).expect("the entry decodes"),
+                        want.as_slice(),
+                        "the positions of '{term}'"
+                    );
+                }
+            }
+
+            let presence = mosaica_filter::read_presence(&dir.path().join(&extent.presence))
+                .expect("the presence reads");
+            assert_eq!(
+                presence.iter().collect::<Vec<_>>(),
+                expected_presence,
+                "presence holds every entity with prose, the empty string's included"
+            );
+            let files = [&extent.dict, &extent.postings, &extent.positions]
+                .map(|rel| std::fs::read(dir.path().join(rel)).expect("the file reads"));
+            match &written {
+                None => written = Some(files.to_vec()),
+                Some(first) => {
+                    assert_eq!(first, &files.to_vec(), "the same layer at budget {budget}")
+                }
+            }
+            let runs = std::fs::read_dir(dir.path().join("attrs/title/extents"))
+                .expect("the extents dir lists")
+                .filter(|entry| {
+                    let name = entry.as_ref().expect("an entry").file_name();
+                    name.to_string_lossy().ends_with(".spill")
+                })
+                .count();
+            assert_eq!(runs, 0, "the runs are removed");
+            assert_eq!(expected_presence, vec![3, 5, 9, 11]);
+        }
     }
 
     // ---- the keyword family's extent (records §4.3, §7) ------------------------------------

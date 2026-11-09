@@ -236,6 +236,17 @@ impl KeyTable {
         self.entries.is_empty()
     }
 
+    /// Where the key with provisional id `id` is held.
+    pub fn key(&self, id: u32) -> KeyRef {
+        self.entries[id as usize]
+    }
+
+    /// The bytes the table has allocated.
+    pub fn allocated(&self) -> usize {
+        self.slots.capacity() * std::mem::size_of::<u64>()
+            + self.entries.capacity() * std::mem::size_of::<KeyRef>()
+    }
+
     /// Empty the table, keeping the capacity it has.
     pub fn clear(&mut self) {
         self.slots.fill(EMPTY);

@@ -167,7 +167,7 @@ use crate::{
     PairsParquetWriter, PREFIX, SEG_ID,
 };
 use mosaica_filter_write::{
-    cascade_sorted_runs, RunPayload, SpillReceipt, TextRunMerge, TextRunWriter,
+    cascade_sorted_runs, RunPayload, SpillReceipt, TermAccumulator, TextRunMerge, TextRunWriter,
 };
 use mosaica_types::progress::{Batched, Part, Unit};
 use mosaica_types::splitmix64;
@@ -5353,10 +5353,10 @@ fn push_numeric_chunks(
     Ok(())
 }
 
-/// How the text index's chunk pass is sized: the entities one chunk covers, and the bytes one
-/// worker may accumulate before it spills a run.
+/// How the text index's pass is sized: how many windows the column is divided into, and the bytes
+/// one worker's accumulator may allocate before it spills a run.
 ///
-/// **Both are needed, and neither would do alone.** The chunk count is what the pass parallelises
+/// **Both are needed, and neither would do alone.** The window count is what the pass parallelises
 /// over, so it follows the machine; the byte budget is what bounds a worker's residency, and it
 /// has to hold whatever the documents turn out to be. A column of short names and a column of
 /// abstracts differ by two orders of magnitude in terms per entity, so a plan that sized chunks
@@ -5377,8 +5377,8 @@ pub(crate) struct TextIndexPlan {
 ///
 /// **It is a ceiling and not a working set.** What the pass actually holds is `threads` live
 /// workers' accumulators, and a worker reaches the budget only on a corpus whose documents are
-/// long enough to fill it: 7.4×10⁷ Overture names over 96 chunks on twelve threads spilled one run
-/// per chunk and 555 MB of run in total, so no worker came near it. The budget's job is to bound
+/// long enough to fill it: 7.4×10⁷ Overture names over 96 chunks on twelve threads spilled 555 MB
+/// of run in total, so no worker came near it. The budget's job is to bound
 /// the corpus that *would* exceed it, not to describe the one that does not.
 ///
 /// ⊘ This term is deliberately **not** added to `residency.rs`'s model. It is a sixteenth of the
@@ -5391,46 +5391,6 @@ const TEXT_BUDGET_MIN: u64 = 128 << 20;
 /// The floor on a worker's byte budget, so a tiny `--memory-budget` cannot derive a plan that
 /// spills a run per document.
 const TEXT_MIN_WORKER_BYTES: usize = 8 << 20;
-
-/// What one distinct term costs the accumulator beyond its characters, derived from the types:
-///
-/// - its slot in the hash table, a `Box<[u8]>` key and an [`mosaica_filter_write::Occurrences`],
-///   with a control byte, at the table's 7/8 load factor and doubled, since a table that has just
-///   grown is half empty: 148 B;
-/// - the first allocation of each of the two vectors an `Occurrences` holds, four elements apiece,
-///   and the key's own allocation, each at malloc's 16-byte header and rounding: 96 B.
-///
-/// 244 B in all. Measured at 165–213 B a term beside an 8-byte key's 32, over 10³ to 1.3×10⁵
-/// terms. **Erring high spills a run early, and erring low is the failure the bound exists to
-/// prevent.** The characters are charged at twice their length for the same reason (malloc rounding
-/// on a short key is most of the key).
-const TEXT_TERM_ENTRY_BYTES: usize = {
-    const fn chunk(requested: usize) -> usize {
-        (requested + 16).next_multiple_of(16)
-    }
-    let slot = std::mem::size_of::<(Box<[u8]>, mosaica_filter_write::Occurrences)>() + 1;
-    let first_items = chunk(4 * std::mem::size_of::<(u32, u32)>());
-    let first_positions = chunk(4 * std::mem::size_of::<u32>());
-    2 * slot * 8 / 7 + first_items + first_positions + 16
-};
-
-/// What one posting costs: eight bytes of item and position count charged at sixteen, because a
-/// `Vec` grows by doubling and is on average half empty.
-const TEXT_POSTING_BYTES: usize = 16;
-
-/// What one occurrence costs: four bytes of position, charged at eight for the same reason.
-const TEXT_POSITION_BYTES: usize = 8;
-
-/// Entities held as a `u32` slice for one merged term before the encode switches to Roaring.
-///
-/// **This is the merge's only unbounded term, and this is what bounds it.** A term carried by a
-/// quarter of the corpus is 10⁸ entities at 10⁹ items, which as a `Vec<u32>` is 400 MB for one
-/// record — the residency `mosaica_authz::postings::encode_posting_bitmap` was added to remove
-/// from compaction's fold, for exactly this reason. Above the cap the merge accumulates into a
-/// `Bitmap` instead and encodes from that; the two encoders are byte-identical over the same set
-/// (pinned by `postings::the_bitmap_and_slice_encoders_agree_byte_for_byte`), so the cap is a
-/// memory knob and not a format decision. 16 MB, which no vocabulary reaches by accident.
-const TEXT_MERGE_SLICE_CAP: usize = 1 << 22;
 
 impl TextIndexPlan {
     /// The plan a build's memory budget derives.
@@ -5463,7 +5423,7 @@ impl TextIndexPlan {
         TextIndexPlan {
             chunks: (threads * 8).max(1),
             worker_bytes,
-            merge_slice_cap: TEXT_MERGE_SLICE_CAP,
+            merge_slice_cap: mosaica_filter_write::TEXT_MERGE_SLICE_CAP,
         }
     }
 
@@ -5479,78 +5439,6 @@ impl TextIndexPlan {
     }
 }
 
-/// One text column's entity-space index: the per-layer token dictionary and the postings over it.
-///
-/// **The dictionary's ordinals are positions in the sorted distinct term set**, exactly as a
-/// keyword's are in its key set, and the postings are written in that same order — so posting *i*
-/// belongs to the *i*-th key the dictionary holds. Both files are produced by one pass over one
-/// sorted term stream, so an ordinal cannot drift between them: the ordinal a term gets is the one
-/// [`mosaica_filter::SortedDictWriter::push`] returns, and the record encoded against it is
-/// appended to the postings file before the next term is read.
-///
-/// # The shape: chunk, spill, merge
-///
-/// **The accumulator used to be one `HashMap` over the whole corpus, and that was a memory cost
-/// with no ceiling.** Every distinct term in the corpus and every posting of every term were live
-/// at once, then copied whole into a `Vec` for the sort before a byte was written — a function of
-/// corpus size with nothing to bound it, in the same file whose category emit bands its own
-/// transient to a constant the caller chooses. It was also entirely serial, over the most
-/// expensive per-entity work the build does.
-///
-/// So the pass is now three steps:
-///
-/// 1. **Chunk.** Entity space is split into contiguous ascending ranges ([`TextIndexPlan`]) and the
-///    ranges are indexed in parallel. Each worker accumulates its own `(term → entities)` map.
-/// 2. **Spill.** A worker writes its map out as a **sorted run** ([`TextRunWriter`])
-///    when its tracked footprint reaches the plan's per-worker budget, and again at the end of its
-///    chunk. So a worker's residency is the budget whatever the documents are, and the run count
-///    grows instead of the peak.
-/// 3. **Cascade**, where there are more runs than one merge may hold file descriptors for
-///    ([`cascade_sorted_runs`]). Groups of runs are merged into intermediate runs, in order, until
-///    what is left fits in one merge. Nothing but a very large corpus reaches this.
-/// 4. **Merge.** The runs are merged k-way on the term, and each merged term's entity lists are
-///    concatenated in run order. That is what makes the entity lists ascending *for free*: chunks
-///    partition entity space ascending, a worker's runs are emitted in the order it walked its
-///    chunk, and the run list is held in that same order — so concatenation is already sorted and
-///    no per-term sort exists anywhere in the pass.
-///
-/// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
-/// sorted distinct term set and a posting is the set of entities carrying its term; neither
-/// depends on where a chunk boundary fell or how often a worker spilled.
-/// [`tests::chunking_the_text_index_does_not_change_its_bytes`] is the assertion, over a corpus
-/// whose entity count straddles the chunk sizes it is emitted under — a boundary that split a
-/// term's postings between two runs and lost one half would otherwise be invisible.
-///
-/// # What each step costs, and what bounds it
-///
-/// * The chunk pass holds `threads × worker_bytes`, which is [`TEXT_BUDGET_SHARE`] of the build's
-///   memory budget. Nothing in it scales with the corpus.
-/// * The merge holds one open reader per run — a read buffer and the head *term*, never the head's
-///   entities, which is why a run's reader inside [`TextRunMerge`] decodes a record's postings only
-///   when they are asked for. The run count is capped by the cascade, so this is a constant too.
-/// * One merged term's entity list is capped at [`TEXT_MERGE_SLICE_CAP`], above which it
-///   accumulates into a Roaring bitmap and encodes through the byte-identical bitmap encoder.
-///
-/// # The pieces that did not change
-///
-/// **A term's first sighting is the only one that allocates.** The analyser hands back borrowed
-/// tokens ([`mosaica_analyse::Analyser::for_each_token`]) and the lookup is by `&[u8]`, so a term
-/// already in the map costs no allocation.
-///
-/// **The postings stream through [`mosaica_authz::RecordWriter`]** rather than being
-/// collected, and the dictionary through [`mosaica_filter::SortedDictWriter`]: neither file is
-/// ever held whole in memory.
-///
-/// **A term repeated within one document contributes one posting entry.** The analyser keeps
-/// duplicates and order because the positional payload upgrade (§4.5) needs both; a posting is a
-/// set, so the duplicate collapses here rather than in the analyser. Entities reach a worker
-/// ascending, so the duplicate is always the accumulator's last entry — the same `last()` test as
-/// before, and it stays correct because a chunk is an ascending range and never a scattered set.
-///
-/// The singleton encoding is `mosaica-authz`'s, unchanged: a term carried by few enough entities is
-/// a bare `u32` array rather than a serialised bitmap, which is what the string-storage campaign
-/// measured at 4.4× smaller on the singleton-heavy vocabularies real prose produces. Reusing that
-/// format rather than minting a second one is the whole reason this crate already depends on it.
 /// Where one text pass reads its prose from.
 ///
 /// **Two producers, one pass.** A bundle-wide `text` column is read from the record-blob extents
@@ -5619,8 +5507,73 @@ impl TextValues<'_> {
     }
 }
 
-/// Write one text column's index, counting in the open step each document it tokenises out of the
+/// Write one text column's entity-space index: the per-layer token dictionary, the postings and
+/// positions over it, and the presence. The open step counts each document tokenised out of the
 /// documents the column holds.
+///
+/// **The dictionary's ordinals are positions in the sorted distinct term set**, exactly as a
+/// keyword's are in its key set, and the postings are written in that same order, so posting *i*
+/// belongs to the *i*-th key the dictionary holds. Both files are produced by one pass over one
+/// sorted term stream, so an ordinal cannot drift between them: the ordinal a term gets is the one
+/// [`mosaica_filter::SortedDictWriter::push`] returns, and the record encoded against it is
+/// appended to the postings file before the next term is read.
+///
+/// # The shape: accumulate, spill, merge
+///
+/// 1. **Accumulate.** The column is divided into windows ([`TextIndexPlan`]), contiguous stretches
+///    of the arena or of the extents, and the windows are indexed in parallel. A worker keeps one
+///    [`mosaica_filter_write::TermAccumulator`] across every window it takes.
+/// 2. **Spill.** An accumulator writes what it holds as a **sorted run** when what it has allocated
+///    reaches the plan's per-worker budget, and once when the pass ends. It holds each term's
+///    entities and positions in the run's format, so a term whose documents arrived in entity order
+///    is copied into the run as it stands, and only a term whose documents did not has its entities
+///    sorted. A worker's residency is the budget whatever the documents are, and the run count grows
+///    instead of the peak.
+/// 3. **Cascade**, where there are more runs than one merge may hold file descriptors for
+///    ([`cascade_sorted_runs`]). Groups of runs are merged into intermediate runs, in order, until
+///    what is left fits in one merge. Nothing but a very large corpus reaches this.
+/// 4. **Merge.** [`mosaica_filter_write::merge_text_runs`] merges the runs k-way on the term, and
+///    each term's entities by comparing the runs' heads, because the windows do not partition
+///    entity space.
+///
+/// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
+/// sorted distinct term set and a posting is the set of entities carrying its term; neither
+/// depends on where a window boundary fell or how often a worker spilled.
+/// [`tests::chunking_the_text_index_does_not_change_its_bytes`] is the assertion, over a corpus
+/// whose entity count straddles the chunk sizes it is emitted under: a boundary that split a
+/// term's postings between two runs and lost one half would otherwise be invisible.
+///
+/// # What each step costs, and what bounds it
+///
+/// * The accumulate pass holds one accumulator a thread, each of at most `worker_bytes` as it
+///   counts what it has allocated, which is [`TEXT_BUDGET_SHARE`] of the build's memory budget in
+///   all. Nothing in it scales with the corpus. A term costs about 150 bytes beyond its entities
+///   and positions, and most terms in a run occur once, so on English-like prose a run is about a
+///   quarter of the memory that wrote it at 32 MiB a worker, and half at 128 MiB.
+/// * The merge holds one open reader per run: a read buffer and the head *term*, never the head's
+///   entities, which is why a run's reader inside [`TextRunMerge`] decodes a record's postings only
+///   when they are asked for. The run count is capped by the cascade, so this is a constant too.
+/// * One merged term's entity list is capped at [`mosaica_filter_write::TEXT_MERGE_SLICE_CAP`],
+///   above which it accumulates into a Roaring bitmap and encodes through the byte-identical
+///   bitmap encoder.
+///
+/// # Terms and postings
+///
+/// **A term is interned once.** The analyser hands back borrowed tokens
+/// ([`mosaica_analyse::Analyser::for_each_token`]) and the accumulator looks them up by their
+/// bytes, so a term it already holds costs no allocation.
+///
+/// **A term repeated within one document contributes one posting entry**, holding each position.
+/// The analyser keeps duplicates and order because the positions need both; the accumulator groups
+/// a document's tokens by term before it inserts them.
+///
+/// **The postings stream through [`mosaica_authz::RecordWriter`]** rather than being collected,
+/// and the dictionary through [`mosaica_filter::SortedDictWriter`]: neither file is ever held
+/// whole in memory.
+///
+/// The singleton encoding is `mosaica-authz`'s: a term carried by few enough entities is a bare
+/// `u32` array rather than a serialised bitmap, which is what the string-storage campaign measured
+/// at 4.4× smaller on the singleton-heavy vocabularies real prose produces.
 fn write_text_index(
     column_dir: &Path,
     attribute: &crate::config::Attribute,
@@ -5650,15 +5603,15 @@ fn write_text_index(
             ))
         })?;
 
-    // ---- 1. the chunk pass, in parallel, spilling sorted runs -------------------------------
+    // ---- 1. accumulate in parallel, spilling sorted runs -------------------------------------
     //
     // **Windows of the arena, not ranges of entity space.** Entity order is signature-then-Morton
     // order and the arena is in arrival order, so an entity range's documents are scattered
     // through the arena: at 1.02×10⁸ abstracts that is one major fault per document over a file
-    // two and a half times the size of the box, and the pass did not finish in four hours.
-    // Each worker now reads one contiguous stretch of
-    // the arena front to back and releases it behind itself, and what that costs is the two steps
-    // below: a sort at the spill and a merge rather than a concatenation at the fan-in.
+    // two and a half times the size of the box, and the pass did not finish in four hours. Each
+    // worker reads one contiguous stretch of the arena front to back and releases it behind
+    // itself, and what that costs is a sort at the spill of each term whose documents arrived out
+    // of entity order, and a merge of the runs' entities at the fan-in.
     let chunks = values.windows(plan.chunks);
     if let TextValues::Arena(column) = &values {
         // The join wrote every one of those bytes through the mapping, so they are all in this
@@ -5666,42 +5619,57 @@ fn write_text_index(
         // `MappedArena::unmap_pages`.
         column.unmap_arena_pages();
     }
-    // **One analyser, shared.** Its construction deserialises the segmenter's dictionary data —
-    // the cost the type exists to amortise — and it holds no per-document state, so it is `Sync`
-    // and the workers borrow it. What each worker does hold of its own is the normalisation
-    // scratch, which is per document by nature.
-    let receipts: Vec<Vec<SpillReceipt>> = chunks
-        .par_iter()
-        .enumerate()
-        .map(|(chunk, &window)| {
-            index_text_chunk(
-                column_dir,
-                chunk,
-                window,
-                &values,
-                attribute,
-                &analyser,
-                plan.worker_bytes,
-                steps,
-            )
-        })
-        .collect::<Result<Vec<_>>>()?;
+    // **One analyser, shared.** Its construction deserialises the segmenter's dictionary data,
+    // the cost the type exists to amortise, and it holds no per-document state, so it is `Sync`
+    // and the workers borrow it.
+    //
+    // **One accumulator a worker, kept across windows.** A window takes an idle accumulator, or
+    // makes one where none is idle, and gives it back when it is done, so there are as many as
+    // there are windows in flight and each spills only when its budget is full.
+    let idle = std::sync::Mutex::new(Vec::<TextWorker>::new());
+    let made = std::sync::atomic::AtomicUsize::new(0);
+    let idle_workers = || idle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    chunks.par_iter().try_for_each(|&window| -> Result<()> {
+        let mut worker = idle_workers().pop().unwrap_or_else(|| {
+            let n = made.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            TextWorker {
+                terms: TermAccumulator::new(
+                    column_dir,
+                    format!("text-run-{n:03}"),
+                    plan.worker_bytes,
+                ),
+                scratch: mosaica_analyse::TokenScratch::default(),
+            }
+        });
+        let indexed = index_text_window(column_dir, window, &values, &analyser, &mut worker, steps);
+        idle_workers().push(worker);
+        indexed
+    })?;
+    let workers = idle.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let receipts: Vec<Vec<SpillReceipt>> = workers
+        .into_par_iter()
+        .map(|worker| worker.terms.into_runs())
+        .collect::<std::io::Result<_>>()
+        .map_err(|e| spill::run_error(column_dir, e))?;
     let receipts: Vec<SpillReceipt> = receipts.into_iter().flatten().collect();
 
-    // ---- 2. the cascade, where a corpus produced more runs than one merge may hold open ------
-    let receipts = cascade_sorted_runs(column_dir, "text", RunPayload::Positions, receipts)
-        .map_err(|e| spill::run_error(column_dir, e))?;
-
-    // ---- 3. the merge: one sorted term stream into the dictionary, postings and positions ----
+    // ---- 2. cascade and merge: one sorted term stream into the dictionary, postings, positions -
     let files = mosaica_filter::TextIndexFiles::in_dir(column_dir);
-    let terms = merge_text_runs(column_dir, files.clone(), &receipts, plan.merge_slice_cap)?;
+    let failed = |e: std::io::Error| BuildError::io(&files.dict, e);
+    let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).map_err(failed)?;
+    mosaica_filter_write::merge_text_runs(
+        column_dir,
+        "text",
+        receipts,
+        &mut writer,
+        plan.merge_slice_cap,
+    )
+    .map_err(|e| spill::run_error(column_dir, e))?;
+    let terms = writer.finish().map_err(failed)?;
     mosaica_filter::write_presence(&files.presence, &values.present()?)
         .map_err(|e| BuildError::io(&files.presence, e))?;
     for path in files.paths() {
         fsync_file(path)?;
-    }
-    for receipt in &receipts {
-        std::fs::remove_file(&receipt.path).map_err(|e| BuildError::io(&receipt.path, e))?;
     }
 
     Ok(WrittenTextIndex {
@@ -5710,182 +5678,37 @@ fn write_text_index(
     })
 }
 
-/// Index one contiguous **arena window**, spilling one or more sorted runs.
+/// One worker of a text pass: its accumulator, and the analyser's normalisation buffer.
+struct TextWorker {
+    terms: TermAccumulator,
+    scratch: mosaica_analyse::TokenScratch,
+}
+
+/// Index one window into the accumulator of the worker that took it, which spills when its
+/// budget is full.
 ///
-/// The worker's whole residency is `terms` and the window's read buffer, and the budget bounds the
-/// first: the tracked figure is an estimate ([`TEXT_TERM_ENTRY_BYTES`]) rather than an allocator
-/// reading, so it is deliberately generous. A run is spilled the moment the estimate reaches the
-/// budget — mid document is not possible, because the check sits between documents, so the true
-/// overshoot is one document's terms.
-///
-/// A window yields the same `(entity, value)` pairs the entity walk did, in arena order rather
-/// than ascending: what is *not* a window's business is which entities they belong to, and the two
-/// places that used to get entity ordering for free — the duplicate collapse and the merge — pay
-/// for it at [`spill_text_run`] and [`TextRunMerge::drain`] instead.
-#[allow(clippy::too_many_arguments)]
-fn index_text_chunk(
+/// A window yields `(entity, value)` pairs in arena order rather than ascending; the accumulator
+/// does not rely on the order, and an entity appears in exactly one live arena record, so no two
+/// documents carry the same entity.
+fn index_text_window(
     column_dir: &Path,
-    chunk: usize,
     window: TextWindow,
     values: &TextValues<'_>,
-    _attribute: &crate::config::Attribute,
     analyser: &mosaica_analyse::Analyser,
-    worker_bytes: usize,
+    worker: &mut TextWorker,
     steps: Steps<'_>,
-) -> Result<Vec<SpillReceipt>> {
+) -> Result<()> {
     let mut documents = steps.batched();
-    let mut receipts = Vec::new();
-    let mut terms: std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences> =
-        std::collections::HashMap::new();
-    let mut bytes = 0usize;
-    let mut seq = 0usize;
-    // The analyser's normalisation buffer, held across the whole chunk rather than per document.
-    let mut scratch = mosaica_analyse::TokenScratch::default();
+    let TextWorker { terms, scratch } = worker;
     values.for_each_record_in(window, &mut |entity, prose| {
         documents.add(1);
-        let entity = entity as u32;
-        let mut position = 0u32;
-        analyser.for_each_token(prose, &mut scratch, &mut |token| {
-            // Looked up before it is owned: a term already seen costs no allocation, which over a
-            // corpus is every occurrence but the first of every word.
-            if let Some(occurrences) = terms.get_mut(token.as_bytes()) {
-                // A term repeated *within one document* adds a position to the item it already
-                // has, because a document is one record and its tokens arrive together: an entity
-                // appears in exactly one live arena record, so no two documents in this window
-                // carry the same entity.
-                if occurrences.add(entity, position) {
-                    bytes += TEXT_POSTING_BYTES;
-                }
-            } else {
-                let mut occurrences = mosaica_filter_write::Occurrences::default();
-                occurrences.add(entity, position);
-                terms.insert(token.as_bytes().into(), occurrences);
-                bytes += TEXT_TERM_ENTRY_BYTES + 2 * token.len() + TEXT_POSTING_BYTES;
-            }
-            bytes += TEXT_POSITION_BYTES;
-            position += 1;
-        });
-        if bytes >= worker_bytes {
-            spill_text_run(column_dir, chunk, &mut seq, &mut terms, &mut receipts)?;
-            bytes = 0;
-        }
-        Ok(())
-    })?;
-    spill_text_run(column_dir, chunk, &mut seq, &mut terms, &mut receipts)?;
-    Ok(receipts)
+        terms
+            .add_document(entity as u32, |push| {
+                analyser.for_each_token(prose, scratch, &mut |token| push(token))
+            })
+            .map_err(|e| spill::run_error(column_dir, e))
+    })
 }
-
-/// Sort a worker's accumulator by term and write it out as one run, leaving the accumulator empty.
-///
-/// The sort is over **borrowed keys**: a `Vec<(Box<[u8]>, Vec<u32>)>` of the map's contents would
-/// be the same second copy of every term the whole-corpus accumulator paid at its one sort, only
-/// per run. Replacing the map rather than clearing it is what makes the byte budget mean
-/// something — a cleared table keeps its capacity, so the next fill would count from zero against
-/// memory that was never released.
-fn spill_text_run(
-    column_dir: &Path,
-    chunk: usize,
-    seq: &mut usize,
-    terms: &mut std::collections::HashMap<Box<[u8]>, mosaica_filter_write::Occurrences>,
-    receipts: &mut Vec<SpillReceipt>,
-) -> Result<()> {
-    if terms.is_empty() {
-        return Ok(());
-    }
-    let run_error = |e| spill::run_error(column_dir, e);
-    let path = column_dir.join(format!("text-run-{chunk:05}-{seq:04}.spill"));
-    let mut writer = TextRunWriter::create(&path, RunPayload::Positions).map_err(run_error)?;
-    {
-        // **Visited in item order, because the window walked the arena and not entity space.** A
-        // run's entities must ascend strictly within a term (`TextRunWriter::push_entity`
-        // refuses otherwise), and they arrive in the order the documents sit in the arena. The
-        // sort is over one worker's accumulator, which the byte budget bounds, so it is a bounded
-        // cost per run rather than a term-sized one at the merge.
-        let mut order: Vec<&[u8]> = terms.keys().map(|key| &**key).collect();
-        order.sort_unstable();
-        for term in order {
-            let occurrences = &terms[term];
-            let count = u32::try_from(occurrences.items()).map_err(|_| {
-                BuildError::Invalid(format!(
-                    "text run {}: a term carries more entities than a u32 can count",
-                    path.display()
-                ))
-            })?;
-            writer.begin(term, count).map_err(run_error)?;
-            occurrences
-                .for_each_item(|entity, positions| writer.push_entity(entity, positions))
-                .map_err(run_error)?;
-        }
-    }
-    receipts.push(writer.finish().map_err(run_error)?);
-    *terms = std::collections::HashMap::new();
-    *seq += 1;
-    Ok(())
-}
-
-/// Merge the sorted runs into the dictionary, postings and positions, and return the term count.
-fn merge_text_runs(
-    column_dir: &Path,
-    files: mosaica_filter::TextIndexFiles,
-    receipts: &[SpillReceipt],
-    merge_slice_cap: usize,
-) -> Result<u64> {
-    let run_error = |e| spill::run_error(column_dir, e);
-    let mut merge = TextRunMerge::open(receipts, RunPayload::Positions).map_err(run_error)?;
-    let dict_path = files.dict.clone();
-    let failed = |e: std::io::Error| BuildError::io(&dict_path, e);
-    let mut writer = mosaica_filter_write::TextIndexWriter::create(files.clone()).map_err(failed)?;
-
-    let mut entities: Vec<u32> = Vec::new();
-    let mut staged: Vec<u32> = Vec::new();
-
-    while merge.next_term().map_err(run_error)? {
-        let term = std::str::from_utf8(merge.term()).map_err(|e| {
-            BuildError::Invalid(format!(
-                "text run merge: a term is not UTF-8 ({e}) — the analyser emits `&str`, so this \
-                 is a corrupted run rather than a corpus value"
-            ))
-        })?;
-        writer.begin_term(term, merge.postings()).map_err(failed)?;
-
-        if merge.postings() <= merge_slice_cap as u64 {
-            entities.clear();
-            merge.drain(run_error, &mut |entity, positions| {
-                entities.push(entity);
-                writer.push_item(positions).map_err(failed)
-            })?;
-            writer
-                .end_term(mosaica_filter_write::Posting::Ascending(&entities))
-                .map_err(failed)?;
-        } else {
-            // The cap's other side: a term this large is one record, and holding it as `u32`s
-            // would be the only term in the pass whose residency the plan does not bound.
-            let mut bitmap = croaring::Bitmap::new();
-            staged.clear();
-            merge.drain(run_error, &mut |entity, positions| {
-                staged.push(entity);
-                if staged.len() >= TEXT_MERGE_STAGE_ENTITIES {
-                    bitmap.add_many(&staged);
-                    staged.clear();
-                }
-                writer.push_item(positions).map_err(failed)
-            })?;
-            if !staged.is_empty() {
-                bitmap.add_many(&staged);
-                staged.clear();
-            }
-            writer
-                .end_term(mosaica_filter_write::Posting::Set(&bitmap))
-                .map_err(failed)?;
-        }
-    }
-
-    writer.finish().map_err(failed)
-}
-
-/// Entities staged before each hand-off to croaring in the merge's bitmap arm — the same batching
-/// `mosaica_roaring` uses, and for the same reason: `add_many` amortises over a run of values.
-const TEXT_MERGE_STAGE_ENTITIES: usize = 1 << 16;
 
 /// One text column's index: the files written, and the term count [`BuildStage::TextIndex`]
 /// reports.

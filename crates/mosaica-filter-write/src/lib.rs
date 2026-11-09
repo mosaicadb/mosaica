@@ -79,7 +79,12 @@
 //! ([`TextRunWriter`]), the k-way merge over runs ([`TextRunMerge`]) and the cascade that reduces
 //! more runs than one merge may hold open ([`cascade_sorted_runs`]). The build's spill files and
 //! `mosaica-store`'s partition use the receipt from here.
+//!
+//! A text index's terms are gathered in a [`TermAccumulator`], which spills those runs when its
+//! budget fills, and the runs are merged into the index by [`merge_text_runs`]. The build and the
+//! flush share both.
 
+mod accumulator;
 mod chunk_dict;
 mod keyword;
 mod positions;
@@ -99,6 +104,7 @@ use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 use mosaica_filter::{Codes, ColumnKind, ValueColumn, ValueColumnWriter};
 use mosaica_roaring::RankedRuns;
 
+pub use accumulator::{merge_text_runs, TermAccumulator, TEXT_MERGE_SLICE_CAP};
 pub use chunk_dict::{
     dictionary_of, key_prefix, prefers_sort, rank_rows, rank_table, KeyRef, KeyRow, KeyTable,
     Lookup, Vacant, WindowRule, KEY_WINDOW_ROWS,
@@ -108,7 +114,6 @@ pub use record::{
     coalesce_record_extents, fold_record_blob, merge_record_rows, write_prose, write_text_rows,
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
-pub use positions::Occurrences;
 pub use spill::{
     at_end, cascade_sorted_runs, read_varint, RunPayload, SpillFileError, SpillReceipt,
     TextRunMerge, TextRunWriter, SPILL_BUF_BYTES,

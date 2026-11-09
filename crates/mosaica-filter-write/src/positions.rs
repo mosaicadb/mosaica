@@ -1,5 +1,5 @@
-//! The writer of a text layer's positions file, and the accumulator its producers gather positions
-//! in. `mosaica_filter::positions` describes the format and reads it.
+//! The writer of a text layer's positions file. `mosaica_filter::positions` describes the format
+//! and reads it.
 
 use std::io;
 use std::path::Path;
@@ -7,67 +7,6 @@ use std::path::Path;
 use bitpacking::{BitPacker, BitPacker4x};
 use mosaica_authz::RecordWriter;
 use mosaica_filter::{put_varint, POSITIONS_BLOCK, POSITIONS_COLUMN};
-
-/// One term's occurrences in a batch of documents: each item holding it, and the token positions
-/// it holds it at.
-#[derive(Debug, Default)]
-pub struct Occurrences {
-    /// Each item and how many positions it holds, in the order the items arrived.
-    items: Vec<(u32, u32)>,
-    /// Every item's positions, in that same order.
-    positions: Vec<u32>,
-}
-
-impl Occurrences {
-    /// Record that the token of `entity` at `position` is this term, returning whether the item is
-    /// new to it. An item's tokens arrive together and in order.
-    pub fn add(&mut self, entity: u32, position: u32) -> bool {
-        self.positions.push(position);
-        match self.items.last_mut() {
-            Some((last, count)) if *last == entity => {
-                *count += 1;
-                false
-            }
-            _ => {
-                self.items.push((entity, 1));
-                true
-            }
-        }
-    }
-
-    /// How many items hold the term.
-    pub fn items(&self) -> usize {
-        self.items.len()
-    }
-
-    /// Each item with its positions, in ascending item order whatever order they arrived in.
-    pub fn for_each_item<E>(
-        &self,
-        mut visit: impl FnMut(u32, &[u32]) -> Result<(), E>,
-    ) -> Result<(), E> {
-        if self.items.is_sorted_by_key(|(entity, _)| *entity) {
-            let mut at = 0usize;
-            for &(entity, count) in &self.items {
-                visit(entity, &self.positions[at..at + count as usize])?;
-                at += count as usize;
-            }
-            return Ok(());
-        }
-        let mut starts = Vec::with_capacity(self.items.len());
-        let mut at = 0usize;
-        for &(_, count) in &self.items {
-            starts.push(at);
-            at += count as usize;
-        }
-        let mut order: Vec<usize> = (0..self.items.len()).collect();
-        order.sort_unstable_by_key(|&i| self.items[i].0);
-        for i in order {
-            let (entity, count) = self.items[i];
-            visit(entity, &self.positions[starts[i]..starts[i] + count as usize])?;
-        }
-        Ok(())
-    }
-}
 
 /// Writes a positions file record by record, each record streamed into the file block by block
 /// and its block table written back over its head when it ends.
@@ -332,26 +271,5 @@ mod tests {
         writer.push(&[1, 2]).unwrap();
         assert!(writer.push(&[1]).is_err(), "one item past the posting");
         writer.end().unwrap();
-    }
-
-    /// Items arriving out of order are visited ascending, each with its own positions.
-    #[test]
-    fn occurrences_are_visited_in_item_order() {
-        let mut occurrences = Occurrences::default();
-        for (entity, position) in [(9, 0), (9, 4), (2, 1), (5, 0), (5, 2), (5, 7)] {
-            occurrences.add(entity, position);
-        }
-        let mut seen = Vec::new();
-        occurrences
-            .for_each_item(|entity, positions| {
-                seen.push((entity, positions.to_vec()));
-                Ok::<(), ()>(())
-            })
-            .unwrap();
-        assert_eq!(
-            seen,
-            vec![(2, vec![1]), (5, vec![0, 2, 7]), (9, vec![0, 4])]
-        );
-        assert_eq!(occurrences.items(), 3);
     }
 }

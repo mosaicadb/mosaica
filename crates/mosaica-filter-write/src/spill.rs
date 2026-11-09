@@ -154,7 +154,7 @@ pub fn read_varint<T>(
 /// one is what the merge these files feed does. So the anchor cannot use a band file's packed pair,
 /// and it folds the key's bytes to 64 bits instead. Not cryptographic, for the reason
 /// [`SpillReceipt`] gives.
-fn fingerprint(bytes: &[u8]) -> u64 {
+pub(crate) fn fingerprint(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for &byte in bytes {
         hash ^= byte as u64;
@@ -195,7 +195,7 @@ pub(crate) fn encode_entity(
 }
 
 /// Appends one **text run**: a sorted, distinct term stream with each term's ascending entity
-/// list, spilled by one worker of the text index's chunk pass and consumed once by its merge.
+/// list, spilled by a text index's [`crate::TermAccumulator`] and consumed once by its merge.
 ///
 /// **The keyword column's dictionary pass spills the same file**, with a key for a term and a row
 /// for an entity: the two passes differ in what they merge the stream into and in nothing this
@@ -387,6 +387,24 @@ impl TextRunWriter {
         written
     }
 
+    /// Write a whole record: `term`, and its `count` entities already encoded into `body` by
+    /// [`encode_entity`], the first with its entity for its gap, and `anchor` the sum of what each
+    /// call returned.
+    ///
+    /// **The body is trusted**: it is written as given, and nothing here decodes it. A body that
+    /// does not hold `count` well-formed entities ascending, or whose anchor is not `anchor`, is
+    /// refused by the run's reader when it checks the receipt.
+    pub(crate) fn push_body(
+        &mut self,
+        term: &[u8],
+        count: u32,
+        body: &[u8],
+        anchor: u64,
+    ) -> io::Result<()> {
+        self.begin(term, count)?;
+        self.write_body(body, count, anchor)
+    }
+
     /// Write `pairs` of the open term's entities, encoded into `body` by [`encode_entity`], and
     /// fold their `anchor` into the receipt.
     fn write_body(&mut self, body: &[u8], pairs: u32, anchor: u64) -> io::Result<()> {
@@ -555,10 +573,9 @@ impl TextRunReader {
 
     /// The head's next entity, or `None` once it is drained.
     ///
-    /// **One at a time, because the merge is now a merge.** A run's entities ascend within its own
-    /// record, but the runs no longer partition entity space — the chunk pass divides the arena,
-    /// not entity space — so a term's merged list is produced by comparing the runs' heads rather
-    /// than by concatenating their records. That needs a head to look at.
+    /// **One at a time, because the runs do not partition entity space.** A run's entities ascend
+    /// within its own record, but the build divides the arena and not entity space, so a term's
+    /// merged list is produced by comparing the runs' heads. That needs a head to look at.
     fn next_entity(&mut self) -> io::Result<Option<u32>> {
         if self.pending == 0 {
             return Ok(None);
