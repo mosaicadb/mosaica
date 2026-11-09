@@ -2085,6 +2085,7 @@ dependencies = [
  "icu_normalizer",
  "icu_properties",
  "icu_segmenter",
+ "rand 0.8.8",
  "serde_json",
  "sha2",
 ]

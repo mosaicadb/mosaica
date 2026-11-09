@@ -55,9 +55,11 @@ pub const UNICODE: &str = "unicode";
 /// edit. The `p` part numbers the pipeline itself: increase it when a stage or the token rule
 /// changes. After either change, every column indexed under the old version must be rebuilt.
 ///
-/// All Unicode data the tokens depend on comes from those crates. The token rule reads icu4x's
-/// property tables, not `char::is_alphanumeric`, because std's tables change with the Rust
-/// toolchain.
+/// The Unicode data the tokens depend on comes from those crates, except on text that is all
+/// ASCII. There this crate's own word-break classes and fold restate what icu4x does for ASCII.
+/// Two differential tests compare that path with the linked icu4x, so an upgrade that changes
+/// icu4x's ASCII behaviour fails them. The token rule reads icu4x's property tables, not
+/// `char::is_alphanumeric`, because std's tables change with the Rust toolchain.
 const UNICODE_VERSION: &str = "icu4x-2.2/p1";
 
 /// The SHA-256 of each analyser's golden vectors, kept next to the analyser's version.
@@ -148,6 +150,8 @@ pub struct Analyser {
     fold: Fold,
     words: WordSegmenterBorrowed<'static>,
     classes: Classes,
+    /// The token rule, [`Classes::alphanumeric`], for each ASCII character.
+    ascii_alphanumeric: [bool; 128],
 }
 
 impl std::fmt::Debug for Analyser {
@@ -164,10 +168,13 @@ impl Default for Analyser {
 
 impl Analyser {
     pub fn new() -> Self {
+        let classes = Classes::new();
+        let ascii_alphanumeric = std::array::from_fn(|c| classes.alphanumeric(char::from(c as u8)));
         Analyser {
             fold: Fold::new(),
             words: WordSegmenter::new_auto(WordBreakInvariantOptions::default()),
-            classes: Classes::new(),
+            classes,
+            ascii_alphanumeric,
         }
     }
 
@@ -212,8 +219,58 @@ impl Analyser {
     /// `はとても` is split as `はと`/`て`/`も` and Thai `มาก` as `มา`/`ก`. A query for a word that was
     /// split wrongly does not find the document.
     pub fn for_each_token(&self, text: &str, scratch: &mut TokenScratch, f: &mut impl FnMut(&str)) {
+        // ASCII takes a shorter path, so text that is not all ASCII is cut into pieces and each
+        // piece is analysed alone. A cut falls after an ASCII space and before an ASCII character
+        // other than a space. The pieces then give the same tokens as the whole:
+        // - NFKC never reorders or composes an ASCII character with what precedes it, and case
+        //   folding maps each character on its own.
+        // - No word-break rule joins a space to what follows unless that is a space or an Extend,
+        //   Format or ZWJ character, and no rule looks past a space for its context.
+        // A cut before a space would not hold: a run of spaces followed by a combining vowel sign
+        // is one segment, and the vowel sign is alphanumeric.
+        let bytes = text.as_bytes();
+        let cut = |at: usize| bytes[at - 1] == b' ' && bytes[at].is_ascii() && bytes[at] != b' ';
+        let mut at = 0;
+        let mut unicode_from = None;
+        // At each test, `text[..at]` has been analysed except `text[unicode_from..at]`, a pending
+        // icu4x piece that a later piece may extend.
+        while let Some(first) = bytes[at..].iter().position(|b| !b.is_ascii()) {
+            let first = at + first;
+            let from = match (at + 1..first).rev().find(|&c| cut(c)) {
+                Some(ascii_end) => {
+                    if let Some(from) = unicode_from {
+                        self.piece_tokens(&text[from..at], scratch, f);
+                    }
+                    self.piece_tokens(&text[at..ascii_end], scratch, f);
+                    ascii_end
+                }
+                None => unicode_from.unwrap_or(at),
+            };
+            unicode_from = Some(from);
+            at = (first + 1..bytes.len())
+                .find(|&c| cut(c))
+                .unwrap_or(bytes.len());
+        }
+        if let Some(from) = unicode_from {
+            self.piece_tokens(&text[from..at], scratch, f);
+        }
+        if at < bytes.len() {
+            self.piece_tokens(&text[at..], scratch, f);
+        }
+    }
+
+    fn piece_tokens(&self, text: &str, scratch: &mut TokenScratch, f: &mut impl FnMut(&str)) {
         let folded = self.fold.fold_into(text, &mut scratch.normalised);
-        let mut breaks = self.words.segment_str(&folded);
+        if folded.is_ascii() {
+            self.ascii_tokens(&folded, f);
+        } else {
+            self.unicode_tokens(&folded, f);
+        }
+    }
+
+    /// The tokens of `folded`, segmented by icu4x.
+    fn unicode_tokens(&self, folded: &str, f: &mut impl FnMut(&str)) {
+        let mut breaks = self.words.segment_str(folded);
         let Some(mut start) = breaks.next() else {
             return;
         };
@@ -224,6 +281,83 @@ impl Analyser {
             }
             start = end;
         }
+    }
+
+    /// The tokens of `folded`, which is all ASCII, by the word-break rules restricted to ASCII.
+    /// A segment that can hold a letter or digit starts at a letter, a digit or `_` and runs on
+    /// through letters, digits and `_` (WB5, WB8 to WB10, WB13a, WB13b). A `.` or `'` between two
+    /// letters joins them (WB6, WB7), and a `.`, `'`, `,` or `;` between two digits joins them
+    /// (WB11, WB12). Any other character ends the segment, and a segment that starts at one holds
+    /// no letter or digit.
+    fn ascii_tokens(&self, folded: &str, f: &mut impl FnMut(&str)) {
+        let bytes = folded.as_bytes();
+        let mut at = 0;
+        while at < bytes.len() {
+            let start = at;
+            let mut last = ascii_break(bytes[at]);
+            at += 1;
+            if !last.word() {
+                continue;
+            }
+            while let Some(&b) = bytes.get(at) {
+                let class = ascii_break(b);
+                if class.word() {
+                    last = class;
+                    at += 1;
+                    continue;
+                }
+                let next = bytes
+                    .get(at + 1)
+                    .map_or(AsciiBreak::Other, |&b| ascii_break(b));
+                let joins = match class {
+                    AsciiBreak::MidNumLet => next == last && last != AsciiBreak::ExtendNumLet,
+                    AsciiBreak::MidNum => next == AsciiBreak::Numeric && last == next,
+                    _ => false,
+                };
+                if !joins {
+                    break;
+                }
+                at += 2;
+            }
+            if bytes[start..at]
+                .iter()
+                .any(|&b| self.ascii_alphanumeric[usize::from(b)])
+            {
+                f(&folded[start..at]);
+            }
+        }
+    }
+}
+
+/// The UAX #29 word-break property of an ASCII character, as icu4x assigns it. No ASCII
+/// character is MidLetter: icu4x gives `:` the property Other, so `a:b` is two words.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AsciiBreak {
+    ALetter,
+    Numeric,
+    ExtendNumLet,
+    MidNumLet,
+    MidNum,
+    Other,
+}
+
+impl AsciiBreak {
+    fn word(self) -> bool {
+        matches!(
+            self,
+            AsciiBreak::ALetter | AsciiBreak::Numeric | AsciiBreak::ExtendNumLet
+        )
+    }
+}
+
+fn ascii_break(b: u8) -> AsciiBreak {
+    match b {
+        b'a'..=b'z' | b'A'..=b'Z' => AsciiBreak::ALetter,
+        b'0'..=b'9' => AsciiBreak::Numeric,
+        b'_' => AsciiBreak::ExtendNumLet,
+        b'.' | b'\'' => AsciiBreak::MidNumLet,
+        b',' | b';' => AsciiBreak::MidNum,
+        _ => AsciiBreak::Other,
     }
 }
 
@@ -268,10 +402,21 @@ impl Fold {
     }
 
     /// [`Self::fold`], with the NFKC output written into `normalised`, a buffer the caller
-    /// reuses. The case-folding stage still allocates when it changes the text. Writing its
-    /// output into a buffer as well would need the `writeable` crate as a direct dependency, kept
-    /// at the version icu4x uses.
+    /// reuses. On text that is not all ASCII, the case-folding stage still allocates when it
+    /// changes the text. Writing its output into a buffer as well would need the `writeable` crate
+    /// as a direct dependency, kept at the version icu4x uses.
     pub fn fold_into<'a>(&self, text: &str, normalised: &'a mut String) -> Cow<'a, str> {
+        // NFKC leaves ASCII unchanged, and full case folding maps it to ASCII lowercase.
+        if text.is_ascii() {
+            normalised.clear();
+            normalised.push_str(text);
+            normalised.make_ascii_lowercase();
+            return Cow::Borrowed(normalised);
+        }
+        self.unicode_fold_into(text, normalised)
+    }
+
+    fn unicode_fold_into<'a>(&self, text: &str, normalised: &'a mut String) -> Cow<'a, str> {
         // `normalize` returns a borrow when the input is already normalised, but it finds that
         // out by normalising the whole input, so it saves no work. `normalize_to` always copies.
         normalised.clear();
@@ -514,6 +659,15 @@ fn collapse_whitespace(folded: &str) -> String {
 mod tests {
     use super::*;
 
+    /// The tokens of `text` by icu4x alone, without the ASCII path.
+    fn unicode_only_tokens(a: &Analyser, text: &str) -> Vec<String> {
+        let mut normalised = String::new();
+        let folded = a.fold.unicode_fold_into(text, &mut normalised);
+        let mut out = Vec::new();
+        a.unicode_tokens(&folded, &mut |token| out.push(token.to_string()));
+        out
+    }
+
     fn word_starts<'a>(s: &SuggestionFold, entry: &'a str) -> Vec<&'a str> {
         s.word_starts(entry.char_indices(), 0)
             .into_iter()
@@ -683,5 +837,61 @@ mod tests {
         assert_eq!(a.tokens("2026"), vec!["2026"]);
         assert_eq!(a.tokens("٣٤٥"), vec!["٣٤٥"]);
         assert_eq!(a.tokens("accession 2026"), vec!["accession", "2026"]);
+    }
+
+    /// Every string of up to five characters drawn from one or two characters of each ASCII
+    /// word-break class.
+    #[test]
+    fn the_ascii_path_tokenises_every_short_string_as_icu4x_does() {
+        let a = Analyser::new();
+        let sample = ['a', 'B', '1', '_', '\'', '.', ',', ';', ':', ' ', '\n', '-'];
+        let mut text = String::new();
+        for len in 1..=5u32 {
+            for mut n in 0..sample.len().pow(len) {
+                text.clear();
+                for _ in 0..len {
+                    text.push(sample[n % sample.len()]);
+                    n /= sample.len();
+                }
+                assert_eq!(a.tokens(&text), unicode_only_tokens(&a, &text), "{text:?}");
+            }
+        }
+    }
+
+    /// Longer ASCII strings, and text that mixes ASCII with characters that compose, fold, join
+    /// or segment across their neighbours, so that it is cut into pieces.
+    #[test]
+    fn the_ascii_path_and_the_pieces_tokenise_as_icu4x_does() {
+        use rand::{Rng, SeedableRng};
+        let a = Analyser::new();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(29);
+        let mut normalised = String::new();
+        for _ in 0..3_000 {
+            let text: String = (0..rng.gen_range(0..64))
+                .map(|_| match rng.gen_range(0..3) {
+                    0 => char::from(rng.gen_range(0..128u8)),
+                    _ => b"aZ09_.',;: "[rng.gen_range(0..11)].into(),
+                })
+                .collect();
+            assert_eq!(a.tokens(&text), unicode_only_tokens(&a, &text), "{text:?}");
+            assert_eq!(
+                a.fold().fold(&text),
+                a.fold().unicode_fold_into(&text, &mut normalised),
+                "{text:?}"
+            );
+        }
+
+        let fragments: Vec<&str> = "a|Word|x1|2.5|1,0|it's|a.b|a:b|_|-|.|\"| | |  |\n|\r\n|\t|é|\
+            e\u{301}|\u{301}|\u{93e}|क\u{93e}|\u{1680}|\u{3000}|\u{a0}|\u{2009}|ﬁ|\u{212a}|ſ|İ|ß|\
+            Σ|ＡＢ|１２|١٢٣|½|中文|日本語|ภาษาไทย|שלום|ש\"ל|\u{1f1eb}\u{1f1f7}|\u{1f44d}\u{1f3fd}|\
+            \u{200d}|\u{ad}|\u{2019}|\u{ff0e}"
+            .split('|')
+            .collect();
+        for _ in 0..3_000 {
+            let text: String = (0..rng.gen_range(1..16))
+                .map(|_| fragments[rng.gen_range(0..fragments.len())])
+                .collect();
+            assert_eq!(a.tokens(&text), unicode_only_tokens(&a, &text), "{text:?}");
+        }
     }
 }
