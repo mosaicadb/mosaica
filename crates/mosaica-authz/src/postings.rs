@@ -59,44 +59,48 @@ pub fn encode_posting(
         ));
     }
 
-    let mut record = Vec::new();
     if (entities.len() as u64) <= small_term_threshold as u64 {
+        let mut record = Vec::with_capacity(1 + 4 * entities.len());
         record.push(0u8);
         for entity in entities {
             record.extend_from_slice(&entity.to_le_bytes());
         }
-    } else {
-        let mut bitmap = Bitmap::of(entities);
-        bitmap.run_optimize();
-        record.push(1u8);
-        record.extend_from_slice(&bitmap.serialize::<Portable>());
+        return Ok(record);
     }
-    Ok(record)
+    Ok(roaring_record(Bitmap::of(entities)))
 }
 
 /// [`encode_posting`] from a `Bitmap` rather than a `&[u32]`, avoiding materialising a large
-/// term's bitmap as a `Vec<u32>` first. Byte-identical to [`encode_posting`] over the same set:
-/// both apply the same tag rule, tag 0 writes the same ascending `u32` LEs, and tag 1 runs the
-/// same `run_optimize` before the same `Portable` serialisation.
+/// term's bitmap as a `Vec<u32>` first. Byte-identical to [`encode_posting`] over the same set,
+/// however the bitmap was built: both apply the same tag rule, tag 0 writes the same ascending
+/// `u32` LEs, and tag 1 goes through [`roaring_record`].
 ///
 /// No sortedness check, and none is needed: a `Bitmap` is already a sorted, deduplicated set.
 pub fn encode_posting_bitmap(bitmap: &Bitmap, small_term_threshold: u32) -> io::Result<Vec<u8>> {
-    let cardinality = bitmap.cardinality();
-    let mut record = Vec::new();
-    if cardinality <= small_term_threshold as u64 {
-        record.push(0u8);
+    if bitmap.cardinality() <= small_term_threshold as u64 {
+        let mut record = vec![0u8];
         // Ascending by construction, since `Bitmap`'s iterator is ordered.
         for entity in bitmap.iter() {
             record.extend_from_slice(&entity.to_le_bytes());
         }
-    } else {
-        // Cloned because `run_optimize` mutates the caller's own working set.
-        let mut optimised = bitmap.clone();
-        optimised.run_optimize();
-        record.push(1u8);
-        record.extend_from_slice(&optimised.serialize::<Portable>());
+        return Ok(record);
     }
-    Ok(record)
+    Ok(roaring_record(bitmap.clone()))
+}
+
+/// The tag-1 record of `bitmap`, as a function of its set alone.
+///
+/// `run_optimize` keeps a container's kind where a run and an array serialise to the same size,
+/// so a bitmap holding a run container (one a set operation made) and one built from the sorted
+/// entities would otherwise encode one set two ways. Converting every run container back first
+/// puts each container in the kind its cardinality gives, which is how a bitmap built from the
+/// sorted entities holds it, and `run_optimize` then decides the same way for both.
+fn roaring_record(mut bitmap: Bitmap) -> Vec<u8> {
+    bitmap.remove_run_compression();
+    bitmap.run_optimize();
+    let mut record = vec![1u8];
+    record.extend_from_slice(&bitmap.serialize::<Portable>());
+    record
 }
 
 /// A borrowed view of one term's postings, tied to the lifetime of the [`PostingsReader`] that
@@ -235,6 +239,13 @@ impl PostingsReader {
             return Ok(None);
         }
         read_posting(&self.array, idx).map(Some)
+    }
+
+    /// Record `ordinal` as the file holds it, `u8 tag ‖ payload`, checked at open as every record
+    /// is, or `None` where the file carries no record for it.
+    pub fn record_at(&self, ordinal: u32) -> Option<&[u8]> {
+        let idx = ordinal as usize;
+        (idx < self.array.len()).then(|| self.array.value(idx))
     }
 }
 
