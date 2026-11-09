@@ -1,6 +1,6 @@
 //! **A field's figures for one request**: over the rows of the viewer's visible set in one view,
-//! how many hold no value of a number or timestamp field, and the count, sum, smallest and largest
-//! of the finite values the rest hold.
+//! how many hold no value of a number, timestamp or bool field, and the count, sum, smallest and
+//! largest of the finite values the rest hold.
 //!
 //! The visible set is split as a level's is ([`super`]'s module doc), `S = (F − D) ∪ T`, so the
 //! count, the sum and the rows with no value are `F − D + T` exactly. The sum is kept exactly

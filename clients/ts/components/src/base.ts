@@ -1,7 +1,7 @@
 import {ContextConsumer} from '@lit/context';
 import {LitElement, type PropertyValues} from 'lit';
 import {property} from 'lit/decorators.js';
-import {createStore, type SelectionShape, type Store, type TokenSupplier} from '@mosaicajs/client';
+import {createStore, isPopulated, type ColumnDraft, type Meta, type SelectionShape, type Store, type TokenSupplier} from '@mosaicajs/client';
 import type {SelectionShapeDetail, MosaicaEventDetails} from './events.js';
 import {storeContext} from './context.js';
 
@@ -281,6 +281,33 @@ export function keyTitle(store: Store | null, column: string, key: string): stri
   if (!store) return key;
   const named = store.get('legend').categories[column]?.find((v) => v.key === key) ?? store.get('filters').suggestions[column]?.values.find((v) => v.key === key);
   return named?.title ?? key;
+}
+
+/** A bool's two values, as the keys a bool card's rows carry. */
+export type BoolKey = 'true' | 'false';
+/** A bool's values in the order a card lists them. */
+export const BOOL_KEYS: readonly BoolKey[] = ['true', 'false'];
+/** A bool's values as the server stores, bins and filters them. */
+export const BOOL_NUMBERS: Record<BoolKey, 0 | 1> = {true: 1, false: 0};
+/** A bool's values as a card, a chip and an item card name them. */
+export const BOOL_WORDS: Record<BoolKey, string> = {true: 'yes', false: 'no'};
+
+/** Whether `column` is declared `bool`. */
+export function isBoolColumn(meta: Meta | null | undefined, column: string): boolean {
+  return meta?.declaredScalars.find((c) => c.name === column)?.arrowType === 'bool';
+}
+
+/** The values of a bool, true then false, that a clause on it keeps: those whose 1 or 0 lies within its range. */
+export function boolKeys(draft: ColumnDraft | undefined): BoolKey[] {
+  if (draft?.family !== 'numeric' || !isPopulated(draft)) return [];
+  const {gte, lte} = draft;
+  return BOOL_KEYS.filter((k) => (gte === null || BOOL_NUMBERS[k] >= gte) && (lte === null || BOOL_NUMBERS[k] <= lte));
+}
+
+/** The clause on a bool that keeps `keys`: a range over their 1 and 0, or no clause for none. */
+export function boolClause(keys: readonly BoolKey[]): ColumnDraft {
+  const values = keys.map((k) => BOOL_NUMBERS[k]);
+  return values.length === 0 ? {family: 'numeric', gte: null, lte: null} : {family: 'numeric', gte: Math.min(...values), lte: Math.max(...values)};
 }
 
 const DATE = new Intl.DateTimeFormat('en-GB', {day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'});

@@ -1,4 +1,4 @@
-//! A grouping by bins of a number or timestamp field: a histogram.
+//! A grouping by bins of a number, timestamp or bool field: a histogram.
 //!
 //! The bins' edges are the request's range cut into equal widths, or, with no range, readable
 //! edges around the smallest and largest value among the items the viewer may see in the view.
@@ -17,6 +17,9 @@
 //! every value is placed exactly and a `range` filter between two edges matches exactly the bin's
 //! items. A float field's edges are `f64`, and so are an integer field's where a bound of its
 //! range is fractional.
+//!
+//! A bool is binned as 0 for false and 1 for true. Its default edges are 0, 1 and 2, a bin for
+//! false and one for true, whatever the items hold, or 0 and 1 where one bin is asked for.
 //!
 //! Readable edges are multiples of 1, 2, 2.5 or 5 times a power of ten, whole numbers on an
 //! integer field. On a timestamp field they fall on whole seconds, minutes, hours, days, weeks
@@ -67,18 +70,20 @@ use crate::Generation;
 /// Entity ids one piece of a pass over a field's per-entity values spans.
 const ENTITY_PIECE: u64 = 1 << 20;
 
-/// A number or timestamp field resolved in one request's generation, and where its values are
-/// read.
+/// A number, timestamp or bool field resolved in one request's generation, and where its values
+/// are read.
 pub(super) struct Numbers {
     column: String,
     kind: Kind,
+    /// The field is a bool, read as 0 and 1.
+    boolean: bool,
     /// The field's per-entity values are held.
     held: bool,
     /// The field is drawn in every view's rows.
     drawn: bool,
 }
 
-/// A number or timestamp field as one request bins it.
+/// A number, timestamp or bool field as one request bins it.
 pub(super) struct Bins {
     field: Numbers,
     /// How the values are compared with the edges: the field's kind, or float where an integer
@@ -114,7 +119,7 @@ impl Kind {
     fn of(ty: ScalarType) -> Option<Kind> {
         use ScalarType as T;
         Some(match ty {
-            T::U8 | T::U16 | T::U32 | T::U64 => Kind::Unsigned,
+            T::Bool | T::U8 | T::U16 | T::U32 | T::U64 => Kind::Unsigned,
             T::I8 | T::I16 | T::I32 | T::I64 => Kind::Signed,
             T::F32 | T::F64 => Kind::Float,
             T::TimestampUs => Kind::Timestamp,
@@ -176,8 +181,8 @@ impl Edges {
 }
 
 impl Numbers {
-    /// The number or timestamp field `column` names, where its values can be read. `for_figures`
-    /// says whether field figures ask for it rather than bins, for the refusal.
+    /// The number, timestamp or bool field `column` names, where its values can be read.
+    /// `for_figures` says whether field figures ask for it rather than bins, for the refusal.
     pub(super) fn of(generation: &Generation, column: &str, for_figures: bool) -> Result<Numbers> {
         let manifest = &generation.bundle.manifest;
         let refused = |why: AggregateRefused| EngineError::AggregateRefused(why);
@@ -198,9 +203,6 @@ impl Numbers {
                 (family.arrow_type, family.vocabulary.is_some())
             }
         };
-        if ty == ScalarType::Bool && !for_figures {
-            return Err(refused(AggregateRefused::BinsOnBool(column.to_string())));
-        }
         let kind = Kind::of(ty).filter(|_| !vocabulary).ok_or_else(unfit)?;
         let held = generation.declared_columns().value_layers(column).is_some();
         let drawn = manifest
@@ -212,6 +214,7 @@ impl Numbers {
         Ok(Numbers {
             column: column.to_string(),
             kind,
+            boolean: ty == ScalarType::Bool,
             held,
             drawn,
         })
@@ -326,10 +329,13 @@ impl Bins {
         })
     }
 
-    /// The request's range cut into equal bins, or readable edges around the smallest and largest
-    /// value of every item this viewer may see in the view.
+    /// The request's range cut into equal bins, a bool's bins for false and true, or readable
+    /// edges around the smallest and largest value of every item this viewer may see in the view.
     fn edges(&self, cx: &Cx<'_>) -> Result<Edges> {
         let n = self.bins;
+        if self.range.is_none() && self.field.boolean {
+            return Ok(Edges::Ints(if n >= 2 { vec![0, 1, 2] } else { vec![0, 1] }));
+        }
         if let Some((lower, upper)) = self.range {
             return Ok(match self.kind {
                 Kind::Float => Edges::Floats(equal_floats(
@@ -701,34 +707,37 @@ impl Numbers {
                     let base = row_base as usize;
                     let present = segment.columns.presence(column).bitmap();
                     macro_rules! walk {
-                        ($values:expr, $num:expr) => {{
-                            let values = $values;
+                        ($read:expr) => {{
+                            let read = $read;
                             set.for_each_run(rows.clone(), &mut |run| {
                                 for row in run {
                                     let local = row as usize - base;
                                     if present.is_some_and(|p| !p.contains(local as u32)) {
                                         none += 1;
                                     } else {
-                                        tally.add($num(values[local]), row);
+                                        tally.add(read(local), row);
                                     }
                                 }
                             })
                         }};
                     }
+                    let int = |x: i128| K::int(x);
                     match segment.columns.scalar(column) {
-                        Some(ScalarSlice::U8(v)) => walk!(v, |x: u8| K::int(i128::from(x))),
-                        Some(ScalarSlice::U16(v)) => walk!(v, |x: u16| K::int(i128::from(x))),
-                        Some(ScalarSlice::U32(v)) => walk!(v, |x: u32| K::int(i128::from(x))),
-                        Some(ScalarSlice::U64(v)) => walk!(v, |x: u64| K::int(i128::from(x))),
-                        Some(ScalarSlice::I8(v)) => walk!(v, |x: i8| K::int(i128::from(x))),
-                        Some(ScalarSlice::I16(v)) => walk!(v, |x: i16| K::int(i128::from(x))),
-                        Some(ScalarSlice::I32(v)) => walk!(v, |x: i32| K::int(i128::from(x))),
-                        Some(ScalarSlice::I64(v)) => walk!(v, |x: i64| K::int(i128::from(x))),
-                        Some(ScalarSlice::TimestampUs(v)) => {
-                            walk!(v, |x: i64| K::int(i128::from(x)))
+                        Some(ScalarSlice::U8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U64(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I64(v)) | Some(ScalarSlice::TimestampUs(v)) => {
+                            walk!(|l: usize| int(i128::from(v[l])))
                         }
-                        Some(ScalarSlice::F32(v)) => walk!(v, |x: f32| K::float(f64::from(x))),
-                        Some(ScalarSlice::F64(v)) => walk!(v, |x: f64| K::float(x)),
+                        Some(ScalarSlice::F32(v)) => walk!(|l: usize| K::float(f64::from(v[l]))),
+                        Some(ScalarSlice::F64(v)) => walk!(|l: usize| K::float(v[l])),
+                        Some(ScalarSlice::Bool(v)) => {
+                            walk!(|l: usize| int(i128::from(v.value(l))))
+                        }
                         _ => none += set.count(rows.clone()),
                     }
                     (tally, none)
@@ -826,23 +835,15 @@ trait Num: Copy + PartialOrd + Send + Sync {
     fn exact(sum: Self::Sum) -> Sum;
 
     fn of_record(value: &RecordValue) -> Option<Self> {
-        Some(match *value {
-            RecordValue::U8(x) => Self::int(i128::from(x)),
-            RecordValue::U16(x) => Self::int(i128::from(x)),
-            RecordValue::U32(x) => Self::int(i128::from(x)),
-            RecordValue::U64(x) => Self::int(i128::from(x)),
-            RecordValue::I8(x) => Self::int(i128::from(x)),
-            RecordValue::I16(x) => Self::int(i128::from(x)),
-            RecordValue::I32(x) => Self::int(i128::from(x)),
-            RecordValue::I64(x) | RecordValue::TimestampUs(x) => Self::int(i128::from(x)),
-            RecordValue::F32(x) => Self::float(f64::from(x)),
-            RecordValue::F64(x) => Self::float(x),
-            _ => return None,
+        Some(match value.number()? {
+            Number::Int(x) => Self::int(x),
+            Number::Float(x) => Self::float(x),
         })
     }
 
     fn of_wal(value: &WalScalar) -> Option<Self> {
         Some(match *value {
+            WalScalar::Bool(x) => Self::int(i128::from(x)),
             WalScalar::U8(x) => Self::int(i128::from(x)),
             WalScalar::U16(x) => Self::int(i128::from(x)),
             WalScalar::U32(x) => Self::int(i128::from(x)),

@@ -490,9 +490,9 @@ db.view("s0").within((0, 0, 10, 10)).aggregate([top_five])
 `aggregate(view, groupings, filters=None, reference=None)` counts how the items the reader may see
 in a view are distributed, and returns one pyarrow table per grouping, in order. Each grouping names
 its figures: `"count": True` counts the items in each row, so `{"count": True}` is the size of the
-set. `"summary": [field, ...]` gives one row of each number or timestamp field's `values_<field>`,
-`missing_<field>`, `min_<field>`, `max_<field>` and `mean_<field>` over every item the reader may
-see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each;
+set. `"summary": [field, ...]` gives one row of each number, timestamp or bool field's
+`values_<field>`, `missing_<field>`, `min_<field>`, `max_<field>` and `mean_<field>` over every item
+the reader may see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each;
 they take no `"by"`, `"cells"`, `filters` or `reference`. `"by"` groups by the values of a category
 field declared with `index` or `render`, or by the artifacts of one level of a layer, as the `top`
 groups by count or the groups named in `values` or `artifacts`; `rest` and `none` rows count the

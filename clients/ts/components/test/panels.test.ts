@@ -843,6 +843,16 @@ describe('<mosaica-filter-panel>', () => {
     });
   });
 
+  it('names the values a clause on a bool keeps in its chip', async () => {
+    const host = await mount('<mosaica-filter-panel></mosaica-filter-panel>');
+    const panel = host.querySelector('mosaica-filter-panel') as MosaicaFilterPanel;
+    const withBool = {...META, declaredScalars: [...META.declaredScalars, scalar('retracted', 'bool')], filterOperands: [...META.filterOperands, {column: 'retracted', family: 'numeric' as const, operands: ['eq', 'in', 'range']}]};
+    const draft: FilterDraft = {filter: {retracted: {family: 'numeric', gte: 1, lte: 1}}, highlight: {retracted: {family: 'numeric', gte: 0, lte: 1}}};
+    panel.store = fakeStore({meta: withBool, status: status({}), filters: filtersOf(draft)});
+    await settle(host);
+    expect(deepAll(host, '[part="chip"]').map((c) => c.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['Retracted: yes', 'Retracted: yes, no']);
+  });
+
   it('leaves the subject row and the chips out under controls-only, and the cards out under chips-only', async () => {
     const draft: FilterDraft = {filter: {...none().filter, archive: {family: 'category', keys: ['cs']}}, highlight: {}};
     const controls = await mountPanel(draft, 'controls-only');
