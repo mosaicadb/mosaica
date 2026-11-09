@@ -8,8 +8,9 @@ use mosaica_types::progress::Tracker;
 
 use crate::write::{Job, Jobs};
 
-/// The kinds of background work that size themselves from memory: a flush, whose text layers take
-/// a term index's allowance, and a fold, whose pre-flight refuses what will not fit.
+/// The kinds of background work that can each hold much of the memory at once: a flush, whose
+/// text layers take a term index's allowance from its share, and a fold, which leaves the other
+/// share free beside it. A fold's pre-flight refuses only what will not fit in what is available.
 const MEMORY_WRITERS: u64 = 2;
 
 /// **What one background writer may plan to take, read once at the start of its operation**: an

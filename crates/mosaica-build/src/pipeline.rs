@@ -5144,6 +5144,8 @@ fn write_keyword_column(
     }
 
     // ---- 3. the merge: the dictionary, and each chunk's remap ------------------------------------
+    // The chunks' memory was freed on the pool's threads; hand it back before the merge's buffers.
+    mosaica_types::process::trim_heap();
     let dict_path = column_dir.join(mosaica_filter::DICT_FILE);
     let mut partition = spill::Partition::create(
         column_dir,

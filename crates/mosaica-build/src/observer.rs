@@ -424,7 +424,6 @@ pub struct StageRecord {
     /// Whatever the stage counted — items, pairs, terms. Stage-specific, never uniform.
     pub rows: u64,
     /// The cascade passes the stage's term indexes took over their runs, summed.
-    #[serde(default)]
     pub cascade_passes: u64,
     /// The **process's** high-water mark at the moment the stage ended, not the stage's own: it
     /// only rises, so a stage that adds nothing repeats the last figure. What it locates is the
