@@ -1,0 +1,205 @@
+# Every evening, on main: what the per-PR gate leaves out because it takes too long, and a speed
+# comparison with an earlier commit. Everything runs on GitHub's standard runners, which are free
+# for a public repository: 4 CPUs, 16 GB of memory, about 14 GB of free disc and six hours a job.
+#
+# - `ignored`: every `#[ignore]`d test, in release. Each builds its own data, except
+#   `reference_build_at_scale`, which reads a local corpus no runner has and is skipped by name.
+# - `endurance`: the conformance suite's endurance run (`conformance/suite/test_endurance.py`) at
+#   its full shape, on a seed taken from the date, which the job prints.
+# - `speed`: `scripts/bench_ab.py` builds, serves, queries, ingests into, deletes from and compacts
+#   each generated profile with two binaries on one runner, alternating them, and `speed-report`
+#   puts every profile's table in the run's summary. The candidate is the commit being run; the
+#   baseline is the `baseline` input, or main as it stood 24 hours earlier. On a day nothing
+#   merged the two are one commit, and the run measures the runner's own noise. A shared runner's
+#   timings drift by tens of percent from one machine to the next, so only a ratio taken on one
+#   machine is compared, and a row is marked only where the two sides' ranges do not overlap.
+#
+# A failure in any job turns the run red, and GitHub mails whoever last changed the schedule. The
+# schedule is in UTC, at 19:37 because GitHub delays scheduled runs most at the top of the hour.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "37 19 * * *"
+  # A change to the nightly itself runs it before it merges.
+  pull_request:
+    paths:
+      - .github/workflows/nightly.yml
+      - scripts/bench_ab.py
+      - scripts/bench_ab.requirements.txt
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: "The commit, branch or tag to compare speed with. Empty is main as it stood 24 hours ago."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+
+jobs:
+  ignored:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+      # A release build of every test binary does not fit beside the runner's preinstalled
+      # toolchains.
+      - name: free disc
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: nightly-release
+      # One test at a time: several build millions of items, and side by side they would not fit
+      # in the runner's memory. The benchmarks are left out, since they read the local corpus too.
+      - name: the ignored tests
+        run: |
+          cargo test --workspace --release --tests --no-fail-fast -- \
+            --ignored --test-threads=1 --skip reference_build_at_scale
+
+  endurance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: cargo build --release -p mosaica
+      - name: install the oracle's dependencies
+        run: |
+          python3 -m venv reference/.venv
+          reference/.venv/bin/pip install --upgrade pip
+          reference/.venv/bin/pip install $(reference/.venv/bin/python -c "
+          import tomllib
+          d = tomllib.load(open('reference/pyproject.toml', 'rb'))
+          print(' '.join(d['project']['dependencies'] + d['project']['optional-dependencies']['dev']))
+          ")
+      - name: the endurance run
+        run: |
+          export MOSAICA_SUITE_SEED=$(date -u +%Y%m%d)
+          echo "MOSAICA_SUITE_SEED=$MOSAICA_SUITE_SEED"
+          reference/.venv/bin/pytest conformance/suite/test_endurance.py -v
+        env:
+          MOSAICA_SUITE_ENDURANCE: "1"
+
+  binaries:
+    runs-on: ubuntu-24.04
+    outputs:
+      baseline: ${{ steps.refs.outputs.baseline }}
+      candidate: ${{ steps.refs.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: the two commits
+        id: refs
+        env:
+          WANTED: ${{ inputs.baseline }}
+        run: |
+          candidate=$(git rev-parse HEAD)
+          if [ -n "$WANTED" ]; then
+            baseline=$(git rev-parse --verify "$WANTED^{commit}" 2>/dev/null \
+              || git rev-parse --verify "origin/$WANTED^{commit}")
+          else
+            baseline=$(git rev-list -1 --first-parent --before="24 hours ago" origin/main)
+          fi
+          echo "baseline=$baseline" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+          echo "baseline $baseline, candidate $candidate"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: the candidate
+        run: |
+          cargo build --release -p mosaica
+          mkdir -p bin && cp target/release/mosaica bin/candidate
+      # Built in a worktree of its own into the same target directory, so the dependencies the two
+      # share are compiled once. Where both are one commit, the candidate is copied.
+      - name: the baseline
+        env:
+          BASELINE: ${{ steps.refs.outputs.baseline }}
+          CANDIDATE: ${{ steps.refs.outputs.candidate }}
+        run: |
+          if [ "$BASELINE" = "$CANDIDATE" ]; then
+            cp bin/candidate bin/baseline
+          else
+            git worktree add --detach ../baseline "$BASELINE"
+            (cd ../baseline && cargo build --release -p mosaica --target-dir "$GITHUB_WORKSPACE/target")
+            cp target/release/mosaica bin/baseline
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries
+          path: bin
+          retention-days: 3
+
+  speed:
+    needs: binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [fields, scatter, clustered, text, layers]
+    name: speed (${{ matrix.profile }})
+    steps:
+      - uses: actions/checkout@v7
+      # The largest profiles hold their corpus, a bundle and its log at once, about 16 GB.
+      - name: free disc
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/download-artifact@v8
+        with:
+          name: binaries
+          path: bin
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r scripts/bench_ab.requirements.txt
+      - name: ${{ matrix.profile }}
+        run: |
+          chmod +x bin/*
+          python3 scripts/bench_ab.py run --profile ${{ matrix.profile }} --repeat 5 \
+            --baseline bin/baseline --candidate bin/candidate \
+            --baseline-label "${{ needs.binaries.outputs.baseline }}" \
+            --candidate-label "${{ needs.binaries.outputs.candidate }}" \
+            --work "$RUNNER_TEMP/ab" --out speed-${{ matrix.profile }}.json
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: speed-${{ matrix.profile }}
+          path: speed-${{ matrix.profile }}.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+  speed-report:
+    needs: speed
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: speed-*
+          merge-multiple: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -r scripts/bench_ab.requirements.txt
+      - name: the comparison
+        run: python3 scripts/bench_ab.py report speed-*.json --summary "$GITHUB_STEP_SUMMARY" --fail-on-regression
