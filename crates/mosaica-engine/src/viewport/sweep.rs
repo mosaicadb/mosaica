@@ -1604,6 +1604,7 @@ mod across_tests {
     use super::*;
 
     use croaring::Bitmap;
+    use mosaica_types::RowId;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
     use rustc_hash::FxHashSet;

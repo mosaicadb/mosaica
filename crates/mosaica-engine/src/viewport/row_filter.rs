@@ -1489,46 +1489,63 @@ fn per_tile_crossing(
         .map(|mut images| images.pop().expect("one set in, one image out"))
 }
 
-/// [`per_tile_crossing`] over several entity sets at once: one walk, one `entity_of` per row.
-/// Returns one row image per input set, positionally. `None` where the row space declined to
-/// invert a row.
+/// [`per_tile_crossing`] over several entity sets at once: one walk, the rows' entities read from
+/// the row-to-entity tables a slice at a time. Returns one row image per input set, positionally.
+/// `None` where the row space cannot invert a row of the domain.
+///
+/// Each set is tested through a [`mosaica_roaring::Probe`], which finds an entity's container by
+/// one table load where croaring's `contains` binary-searches the keys. A viewport's entities are
+/// in no order a cache can follow, so the word a test of a bitset container reads is fetched
+/// [`PREFETCH_ROWS_AHEAD`] rows early.
 fn per_tile_crossing_multi(
     row_space: &mosaica_store::permutation::RowSpace,
     entity_sets: &[&croaring::Bitmap],
     domain: &[Range<u32>],
     rows_in_ranges: u64,
 ) -> Option<Vec<croaring::Bitmap>> {
+    let tables = row_space.row_entities()?;
+    if domain.iter().any(|range| range.end > tables.len()) {
+        return None;
+    }
+    let readable: Vec<mosaica_roaring::Readable<'_>> = entity_sets
+        .iter()
+        .map(|set| mosaica_roaring::Readable::of(set))
+        .collect();
+    let probes: Vec<mosaica_roaring::Probe<'_>> = readable.iter().map(|r| r.probe()).collect();
     let chunks = domain_chunks(domain, rows_in_ranges);
 
     let parts = over_chunks(&chunks, |chunk| {
         // Buffered so `add_many` appends a sorted run, where a per-row `add` re-locates it.
-        let mut rows: Vec<croaring::Bitmap> = entity_sets
-            .iter()
-            .map(|_| croaring::Bitmap::new())
-            .collect();
-        let mut bufs: Vec<Vec<u32>> = entity_sets
-            .iter()
-            .map(|_| Vec::with_capacity(1024))
-            .collect();
-        for row in chunk.iter().flat_map(Range::clone) {
-            let entity = row_space.entity_of(RowId::new(row))?;
-            let raw = entity.raw() as u32;
-            for (i, set) in entity_sets.iter().enumerate() {
-                if set.contains(raw) {
-                    bufs[i].push(row);
-                    if bufs[i].len() == 1024 {
-                        rows[i].add_many(&bufs[i]);
-                        bufs[i].clear();
+        let mut rows: Vec<croaring::Bitmap> =
+            probes.iter().map(|_| croaring::Bitmap::new()).collect();
+        let mut bufs: Vec<Vec<u32>> = probes.iter().map(|_| Vec::with_capacity(1024)).collect();
+        for range in chunk {
+            let mut row = range.start;
+            tables.for_each_slice(range.clone(), |entities| {
+                for (at, &entity) in entities.iter().enumerate() {
+                    if let Some(&ahead) = entities.get(at + PREFETCH_ROWS_AHEAD) {
+                        for probe in &probes {
+                            probe.prefetch(ahead);
+                        }
                     }
+                    for (i, probe) in probes.iter().enumerate() {
+                        if probe.contains(entity) {
+                            bufs[i].push(row);
+                            if bufs[i].len() == 1024 {
+                                rows[i].add_many(&bufs[i]);
+                                bufs[i].clear();
+                            }
+                        }
+                    }
+                    row += 1;
                 }
-            }
+            });
         }
         for (image, buf) in rows.iter_mut().zip(&bufs) {
             image.add_many(buf);
         }
-        Some(rows)
+        rows
     });
-    let parts: Vec<Vec<croaring::Bitmap>> = parts.into_iter().collect::<Option<_>>()?;
     let images = (0..entity_sets.len())
         .map(|i| {
             let refs: Vec<&croaring::Bitmap> = parts.iter().map(|p| &p[i]).collect();
@@ -1537,6 +1554,13 @@ fn per_tile_crossing_multi(
         .collect();
     Some(images)
 }
+
+/// How many rows ahead [`per_tile_crossing_multi`] fetches the word it will test a row's entity
+/// against. Measured over a 4,000,000-row domain against a 10⁹-entity result scattered over bitset
+/// containers, one thread: 152 ns a row through croaring's `contains`, 26 ns through the probe
+/// alone and 16 ns with the fetch 16 rows ahead. A result held in runs is read from cache already,
+/// and the fetch, which looks the container up a second time, costs it 14 ns a row against 20.
+const PREFETCH_ROWS_AHEAD: usize = 16;
 
 /// Cut `domain` into chunks of about one share of its rows each, shared by the crossing walk and
 /// the render-column scan so the two fan out identically. Consecutive ranges are gathered into a

@@ -46,7 +46,7 @@ use mosaica_store::vocabulary::Vocabularies;
 use mosaica_store::TileOrder;
 use mosaica_types::layer::ComputedProperty;
 use mosaica_types::{
-    EntityId, GenerationStamp, RowId, ShardId, ShardRow, TermId, MosaicaId, API_VERSION,
+    EntityId, GenerationStamp, ShardId, ShardRow, TermId, MosaicaId, API_VERSION,
 };
 
 use crate::cache::{CacheWaitEnded, Peek, RowProjectionKey, SessionGeometry};
