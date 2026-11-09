@@ -1,7 +1,7 @@
 //! Arrow IPC files of exactly one record batch: the one writer, the one decoder, and the layout of
 //! a fixed-width file filled in place.
 //!
-//! Every columnar artefact in a bundle is one of these, and each is written through
+//! Every Arrow file in a bundle is one of these, and each is written through
 //! [`write_single_batch`] or [`InPlaceFile`] and read through [`decode_single_batch`], so two files
 //! that hold the same batch hold the same bytes, and every reader refuses the same things.
 //!
@@ -100,7 +100,8 @@ fn map(file: &File, sequential: bool) -> io::Result<Buffer> {
 }
 
 /// Read the file at `path` into an owned buffer aligned for any Arrow type, which
-/// [`decode_single_batch`] requires of the buffers it borrows from.
+/// [`decode_single_batch`] and the record container ([`crate::records`]) require of the buffers
+/// they borrow from.
 pub fn read_buffer(path: &Path) -> io::Result<Buffer> {
     let mut file = File::open(path)?;
     let len = usize::try_from(file.metadata()?.len())
@@ -234,7 +235,7 @@ pub(crate) fn invalid_data(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
 
-fn invalid_input(msg: impl Into<String>) -> io::Error {
+pub(crate) fn invalid_input(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg.into())
 }
 

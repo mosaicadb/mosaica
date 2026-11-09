@@ -23,18 +23,19 @@
 //! them to unnamed files beside the file and `finish` appends them. A record written in pieces
 //! reserves its head, which its end writes back in place.
 //!
-//! The reader maps the file, or reads it into a buffer aligned for `i64`, and borrows the values,
-//! offsets and keys from it without copying. It refuses a file whose length is not what its trailer
-//! describes, or whose offsets do not ascend within the values, before any record is read.
+//! The reader maps the file, or reads it into a buffer aligned for `i64`, through the helpers the
+//! Arrow files use ([`crate::arrow_file`]), and borrows the values, offsets and keys from it
+//! without copying. It refuses a file whose length is not what its trailer describes, or whose
+//! offsets do not ascend within the values, before any record is read.
 
 use std::fs::File;
-use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use arrow::array::LargeBinaryArray;
-use arrow::buffer::{Buffer, MutableBuffer, OffsetBuffer, ScalarBuffer};
+use arrow::buffer::{OffsetBuffer, ScalarBuffer};
 
-use crate::arrow_file::{invalid_data, mapped_buffer};
+use crate::arrow_file::{invalid_data, invalid_input, mapped_buffer, read_buffer};
 
 // The reader borrows the offsets and keys as native integers, which are the file's little-endian
 // ones only on a little-endian target.
@@ -315,20 +316,15 @@ fn open_records(
         |name| name.to_string_lossy().into_owned(),
     );
     let damaged = |detail: String| invalid_data(format!("{what}: {detail}"));
-    let file = File::open(path)?;
-    let len = file.metadata()?.len();
-    if len < TRAILER_LEN as u64 {
-        return Err(damaged(format!(
-            "is {len} bytes, shorter than the {TRAILER_LEN}-byte trailer of a record file"
-        )));
-    }
     let buffer = match mmap {
-        true => mapped_buffer(&file)?,
-        false => read_aligned(file, len)?,
+        true => mapped_buffer(&File::open(path)?)?,
+        false => read_buffer(path)?,
     };
     let len = buffer.len();
     if len < TRAILER_LEN {
-        return Err(damaged(format!("is {len} bytes, shorter than its trailer")));
+        return Err(damaged(format!(
+            "is {len} bytes, shorter than the {TRAILER_LEN}-byte trailer of a record file"
+        )));
     }
     let trailer = &buffer[len - TRAILER_LEN..];
     let u64_at = |at: usize| u64::from_le_bytes(trailer[at..at + 8].try_into().expect("8 bytes"));
@@ -431,19 +427,6 @@ fn open_records(
         }
     }
     Ok((array, keys))
-}
-
-/// Read `file`, `len` bytes, into a buffer aligned for any integer the file holds.
-fn read_aligned(mut file: File, len: u64) -> io::Result<Buffer> {
-    let len = usize::try_from(len)
-        .map_err(|_| invalid_data("a record file is larger than memory can address"))?;
-    let mut buffer = MutableBuffer::from_len_zeroed(len);
-    file.read_exact(buffer.as_slice_mut())?;
-    Ok(buffer.into())
-}
-
-fn invalid_input(msg: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, msg.into())
 }
 
 #[cfg(test)]
