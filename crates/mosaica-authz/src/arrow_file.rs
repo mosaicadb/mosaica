@@ -22,12 +22,10 @@
 //! writer reads none of it: a null-free array's null count is a stored number, and no other field
 //! of the metadata depends on a value.
 //!
-//! `a_column_file_filled_in_place_is_byte_identical_to_one_written_whole` in `mosaica-store` and
-//! `a_streamed_column_is_byte_identical_to_the_whole_column_write` in `mosaica-filter` hold the
-//! two routes to the same bytes. They compare two routes through one `arrow`, which is why
-//! `arrow` is pinned exactly in the workspace manifest, and why the [`Recorder`] refuses an
-//! unrecognised write above [`MAX_FRAMING_WRITE`]: a version whose writer copied a batch's body
-//! into one buffer would fail there rather than lay out a wrong file.
+//! This depends on the writer handing each values buffer to the sink as the array's own bytes.
+//! An `arrow` whose writer copied them would leave a column's values unrecognised, and the layout
+//! is refused rather than made wrong: [`FileLayout::new`] checks every column's buffer was found
+//! at its full length, and keeps no framing write longer than [`MAX_FRAMING_WRITE`].
 
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
@@ -72,11 +70,24 @@ pub fn write_single_batch(
 /// Memory-map `file` whole as an Arrow buffer, without copying. Empty files map as an empty
 /// buffer.
 pub fn mapped_buffer(file: &File) -> io::Result<Buffer> {
+    map(file, false)
+}
+
+/// [`mapped_buffer`] for a file read once, front to back: the kernel is told so, and reads ahead
+/// and drops behind. A kernel that declines the hint leaves a correct mapping, so that is no error.
+pub fn mapped_buffer_streamed(file: &File) -> io::Result<Buffer> {
+    map(file, true)
+}
+
+fn map(file: &File, sequential: bool) -> io::Result<Buffer> {
     if file.metadata()?.len() == 0 {
         // memmap2 refuses a zero-length map.
         return Ok(MutableBuffer::new(0).into());
     }
     let mapping = unsafe { memmap2::Mmap::map(file) }?;
+    if sequential {
+        let _ = mapping.advise(memmap2::Advice::Sequential);
+    }
     let len = mapping.len();
     let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
     // SAFETY: `arc` owns the mapping for as long as any Buffer built from it is alive, and the
@@ -225,23 +236,13 @@ fn invalid_input(msg: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg.into())
 }
 
-/// The largest single write the framing keeps as bytes. Above it a write must be uniform, which
-/// is what the validity bitmaps are, and is kept as a [`Fill`]. Anything else that large is a
-/// values buffer the [`Recorder`] failed to recognise, so the layout would be wrong: refused
-/// rather than kept as a column-sized `Vec`.
+/// The largest write the framing keeps as bytes. Any larger write that is neither a values buffer
+/// nor a validity bitmap is a buffer the [`Recorder`] failed to recognise, so the layout is
+/// refused rather than kept as a column-sized `Vec`.
 const MAX_FRAMING_WRITE: usize = 1 << 16;
 
-/// How much of a [`Fill`] is written per call.
+/// How much of a validity bitmap is written per call.
 const FILL_CHUNK: usize = 1 << 20;
-
-/// A run of the framing that is one byte repeated: the validity bitmaps. Arrow writes one for
-/// every column, non-nullable or not, `rows / 8` bytes of `0xFF`. Held as three numbers, it costs
-/// the layout nothing to carry.
-struct Fill {
-    at: u64,
-    len: u64,
-    byte: u8,
-}
 
 /// Where every byte of a single-batch file of fixed-width columns goes, for a given schema and
 /// row count.
@@ -250,8 +251,9 @@ pub struct FileLayout {
     len: u64,
     /// Everything that is not a values buffer, at its offset: magic, messages, padding, footer.
     framing: Vec<(u64, Vec<u8>)>,
-    /// The long uniform runs of the framing.
-    fills: Vec<Fill>,
+    /// The validity bitmaps, at their offset and length: Arrow writes one for every column,
+    /// non-nullable or not, `rows / 8` bytes of `0xFF`.
+    validity: Vec<(u64, u64)>,
     /// Each column's values buffer: its offset in the file and its length. A column of no rows
     /// has an empty buffer and Arrow writes nothing for it.
     values: Vec<(u64, u64)>,
@@ -298,8 +300,9 @@ impl FileLayout {
             // SAFETY: both mappings outlive every buffer built over them: `regions` and
             // `validity` are dropped below, after the writer has finished and the batch is gone.
             let (values, nulls) = unsafe { (over(region, *bytes), over(nulls, validity_bytes)) };
-            // SAFETY: the null count is stated as zero rather than counted, which would read
-            // every byte; the bitmap's bytes are never read, only recognised by address.
+            // SAFETY: the bitmap reads as all null and the count says none. Both are what the IPC
+            // writer is meant to see: it copies the count into the metadata and never reads the
+            // bits, which the recorder recognises by address and writes as `0xFF`.
             let nulls = unsafe { NullBuffer::new_unchecked(BooleanBuffer::new(nulls, 0, rows), 0) };
             // SAFETY: the data is the right length for `rows` values of the column's type, which
             // is all an unvalidated primitive or boolean array needs.
@@ -326,7 +329,7 @@ impl FileLayout {
                 .map(|region| (region.as_ptr() as usize, validity_bytes))
                 .collect(),
             framing: Vec::new(),
-            fills: Vec::new(),
+            validity_runs: Vec::new(),
             values: vec![(0, 0); widths.len()],
             failed: None,
         };
@@ -341,26 +344,30 @@ impl FileLayout {
         drop(batch);
         drop(regions);
         drop(validity);
+        for (column, width) in widths.iter().enumerate() {
+            let bytes = buffer_bytes(*width, rows)? as u64;
+            if bytes > 0 && sink.values[column].1 != bytes {
+                sink.failed.get_or_insert_with(|| {
+                    format!(
+                        "arrow's file writer did not hand over column '{}' as its own {bytes} \
+                         bytes, so the in-place layout cannot say where its values belong. The \
+                         writer's shape has changed and `arrow_file` has to follow it",
+                        schema.field(column).name()
+                    )
+                });
+            }
+        }
         if let Some(message) = sink.failed {
             return Err(io::Error::new(io::ErrorKind::Unsupported, message));
         }
         Ok(FileLayout {
             len: sink.at,
             framing: sink.framing,
-            fills: sink.fills,
+            validity: sink.validity_runs,
             values: sink.values,
             widths,
             rows,
         })
-    }
-
-    /// The file's final length in bytes.
-    pub fn len(&self) -> u64 {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
     }
 }
 
@@ -396,7 +403,7 @@ struct Recorder {
     /// null buffer.
     validity: Vec<(usize, usize)>,
     framing: Vec<(u64, Vec<u8>)>,
-    fills: Vec<Fill>,
+    validity_runs: Vec<(u64, u64)>,
     values: Vec<(u64, u64)>,
     failed: Option<String>,
 }
@@ -411,24 +418,14 @@ impl Write for Recorder {
         let validity = self.validity.iter().any(within);
         match owner {
             Some(column) => self.values[column] = (self.at, buf.len() as u64),
-            None if validity => self.fills.push(Fill {
-                at: self.at,
-                len: buf.len() as u64,
-                byte: 0xFF,
-            }),
+            None if validity => self.validity_runs.push((self.at, buf.len() as u64)),
             None if buf.len() <= MAX_FRAMING_WRITE => self.framing.push((self.at, buf.to_vec())),
-            None if buf.iter().all(|byte| *byte == buf[0]) => self.fills.push(Fill {
-                at: self.at,
-                len: buf.len() as u64,
-                byte: buf[0],
-            }),
             None => {
                 self.failed.get_or_insert_with(|| {
                     format!(
                         "arrow's file writer handed {} bytes that are neither one of the batch's \
-                         values buffers nor a uniform run, so the in-place layout cannot say \
-                         where they belong. The writer's shape has changed and `arrow_file` has \
-                         to follow it",
+                         buffers nor framing, so the in-place layout cannot say where they \
+                         belong. The writer's shape has changed and `arrow_file` has to follow it",
                         buf.len()
                     )
                 });
@@ -469,18 +466,14 @@ impl InPlaceFile {
         for (at, bytes) in &created.layout.framing {
             created.file.write_all_at(bytes, *at)?;
         }
-        // A run of zeros is what `set_len` already laid down; any other is written a chunk at a
-        // time.
-        let mut chunk: Vec<u8> = Vec::new();
-        for fill in created.layout.fills.iter().filter(|fill| fill.byte != 0) {
-            chunk.clear();
-            chunk.resize(FILL_CHUNK.min(fill.len as usize), fill.byte);
+        // Each validity bitmap is all ones, written a chunk at a time.
+        let longest = created.layout.validity.iter().map(|&(_, len)| len).max();
+        let ones = vec![0xFFu8; FILL_CHUNK.min(longest.unwrap_or(0) as usize)];
+        for &(at, len) in &created.layout.validity {
             let mut written = 0u64;
-            while written < fill.len {
-                let take = chunk.len().min((fill.len - written) as usize);
-                created
-                    .file
-                    .write_all_at(&chunk[..take], fill.at + written)?;
+            while written < len {
+                let take = ones.len().min((len - written) as usize);
+                created.file.write_all_at(&ones[..take], at + written)?;
                 written += take as u64;
             }
         }
@@ -504,7 +497,7 @@ impl InPlaceFile {
     pub fn put(&self, column: usize, at: u64, bytes: &[u8]) -> io::Result<()> {
         let (offset, len) = *self.layout.values.get(column).ok_or_else(|| {
             invalid_input(format!(
-                "{}: column {column} of {}",
+                "{}: there is no column {column}; the file has {}",
                 self.path.display(),
                 self.layout.values.len()
             ))
@@ -549,7 +542,7 @@ fn buffer_bytes(width: Option<usize>, rows: usize) -> io::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Int64Array, UInt32Array};
+    use arrow::array::{Array, Int64Array, UInt32Array};
     use arrow::datatypes::{Field, Schema};
 
     fn schema(ty: DataType) -> SchemaRef {
@@ -612,6 +605,24 @@ mod tests {
         shifted.extend(std::fs::read(&path).unwrap());
         let buffer = Buffer::from_vec(shifted).slice(1);
         decode_single_batch(&buffer, "shifted").unwrap_err();
+    }
+
+    /// A dictionary-encoded column is refused: its values would not be the file's own buffers.
+    #[test]
+    fn a_dictionary_column_is_refused() {
+        use arrow::array::DictionaryArray;
+        use arrow::datatypes::Int32Type;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dict.arrow");
+        let array: DictionaryArray<Int32Type> = vec!["a", "b", "a"].into_iter().collect();
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            array.data_type().clone(),
+            false,
+        )]));
+        write_single_batch(&path, schema, vec![Arc::new(array)]).unwrap();
+        decode_single_batch(&read_buffer(&path).unwrap(), "dict").unwrap_err();
     }
 
     #[test]

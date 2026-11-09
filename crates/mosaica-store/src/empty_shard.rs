@@ -354,7 +354,7 @@ impl Written<'_> {
 
         crate::write::SegmentWriter::create(&segment_dir, &view.render, indexed, 0)
             .and_then(|writer| writer.finish())
-            .map_err(io(&segment_dir.join("columns.arrow")))?;
+            .map_err(io(&segment_dir))?;
         for name in crate::SEGMENT_FILES {
             self.push(format!("{segment_rel}/{name}"));
         }

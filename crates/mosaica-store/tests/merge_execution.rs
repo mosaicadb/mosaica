@@ -415,7 +415,7 @@ fn a_column_declared_since_the_inputs_is_absent_in_every_row_rather_than_shiftin
 ///
 /// **Mutations this kills:** dropping the `mosaica_id` component of the heap key (ties inside one
 /// Morton cell then order by input, not by identity); reading the residual from the wrong cursor;
-/// spooling a column little-endian where arrow reads it native; emitting the extent's ordinal
+/// writing a column little-endian where arrow reads it native; emitting the extent's ordinal
 /// rather than the emission ordinal.
 #[test]
 fn the_k_way_merge_emits_exactly_what_a_concatenate_and_sort_would() {

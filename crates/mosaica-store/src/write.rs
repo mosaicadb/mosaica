@@ -256,10 +256,8 @@ impl SegmentWriter {
         rows: usize,
     ) -> io::Result<Self> {
         let schema = columns_schema(scalar_schema);
-        let columns = InPlaceFile::create(
-            &dir.join("columns.arrow"),
-            FileLayout::new(schema.clone(), rows)?,
-        )?;
+        let columns =
+            InPlaceFile::create(&dir.join("columns.arrow"), columns_layout(scalar_schema, rows)?)?;
         Ok(SegmentWriter {
             morton: BufWriter::new(File::create(dir.join("morton.u32"))?),
             cuts: CutWriter::create(dir)?,
@@ -292,8 +290,8 @@ impl SegmentWriter {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "write_segment: mosaica_id {} is a row past the {} the segment was created \
-                     for",
+                    "segment writer: mosaica_id {} is a row past the {} the segment was \
+                     created for; create it with the count of rows it will be appended",
                     row.mosaica_id.raw(),
                     self.columns.rows()
                 ),
@@ -313,7 +311,7 @@ impl SegmentWriter {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
-                        "write_segment: mosaica_id {} is missing scalar '{}' at index {}",
+                        "segment writer: mosaica_id {} is missing scalar '{}' at index {}",
                         row.mosaica_id.raw(),
                         field.name(),
                         idx - FIXED_COLUMN_COUNT
@@ -343,7 +341,8 @@ impl SegmentWriter {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "write_segment: {rows} rows were appended to a segment created for {}",
+                    "segment writer: {rows} rows were appended to a segment created for {}; \
+                     create it with the count of rows it will be appended",
                     columns.rows()
                 ),
             ));
@@ -411,7 +410,7 @@ fn append_scalar(
         (ty, got) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "write_segment: mosaica_id {} scalar '{}' expected {ty:?}, got {got:?}",
+                "segment writer: mosaica_id {} scalar '{}' expected {ty:?}, got {got:?}",
                 mosaica_id.raw(),
                 field.name()
             ),
@@ -476,8 +475,7 @@ pub(crate) fn arrow_type_of(ty: ScalarType) -> DataType {
         // place a time's meaning is decided.
         ScalarType::TimestampUs => DataType::Timestamp(TimeUnit::Microsecond, None),
         // **Unreachable.** `render` on either string type is refused at the declaration, and a
-        // `Utf8` column is refused by `columns_layout`, which every writer of the file lays it out
-        // with.
+        // `Utf8` column by `columns_layout`, which both writers of the file lay it out with.
         ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => DataType::Utf8,
     }
 }
@@ -761,7 +759,7 @@ impl PermutationWriter {
             ));
         }
         // Explicit little-endian, never a native cast: the slot array is an interchange byte
-        // format (contracts §2.6), unlike the spools above, which become in-memory Arrow buffers.
+        // format (contracts §2.6), unlike `columns.arrow`, whose buffers arrow reads natively.
         self.map[at..at + 4].copy_from_slice(&row.to_le_bytes());
         Ok(())
     }

@@ -829,14 +829,13 @@ mod tests {
         let n = MERGE_CHUNK as u32 * 2 + 7;
         let codes: Vec<u32> = (0..n).map(|e| 1 + e % 300).collect();
         let values = dir.path().join("v.arrow");
-        let mut writer =
-            ValueColumnWriter::create(
-                &values,
-                &dir.path().join("p.roaring"),
-                ColumnKind::Ordinals,
-                Some(codes.len()),
-            )
-            .expect("create");
+        let mut writer = ValueColumnWriter::create(
+            &values,
+            &dir.path().join("p.roaring"),
+            ColumnKind::Ordinals,
+            Some(codes.len()),
+        )
+        .expect("create");
         writer.push(&codes_u32(codes.clone())).expect("push");
         writer.finish(None).expect("finish");
         let column = ValueColumn::open(&values, None, mosaica_filter::Access::Read).expect("open");

@@ -133,18 +133,6 @@ impl ColumnKind {
         }
     }
 
-    /// Bytes per value as spooled. **Every value column is fixed-width**: a keyword's values are
-    /// `u32` ordinals into its layer's dictionary, and the dictionary is a separate artefact this
-    /// writer knows nothing about, so there is no variable-width case to spool an offset array for.
-    /// Codes written a block at a time are spooled at their own width.
-    fn width(self) -> usize {
-        match self {
-            ColumnKind::U8 | ColumnKind::I8 => 1,
-            ColumnKind::U16 | ColumnKind::I16 | ColumnKind::Ordinals16 => 2,
-            ColumnKind::U32 | ColumnKind::I32 | ColumnKind::F32 | ColumnKind::Ordinals => 4,
-            ColumnKind::U64 | ColumnKind::I64 | ColumnKind::F64 => 8,
-        }
-    }
 }
 
 /// Serialise a presence bitmap in the **one** encoding every producer of a value column writes.
@@ -272,8 +260,9 @@ pub fn write_value_column(
 }
 
 /// One spool file: bytes appended as they arrive, mapped back as an Arrow buffer at assembly.
+/// The file is removed however the spool ends; a mapping taken by [`Spool::map`] outlives it.
 struct Spool {
-    path: PathBuf,
+    file: SpoolFile,
     writer: BufWriter<File>,
     len: u64,
 }
@@ -289,16 +278,10 @@ impl Spool {
             .truncate(true)
             .open(&path)?;
         Ok(Spool {
-            path,
+            file: SpoolFile(path),
             writer: BufWriter::new(file),
             len: 0,
         })
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.writer.write_all(bytes)?;
-        self.len += bytes.len() as u64;
-        Ok(())
     }
 
     /// Flush and map the spool as a buffer of exactly `expect` bytes.
@@ -314,7 +297,7 @@ impl Spool {
         if self.len != expect as u64 {
             return Err(invalid(format!(
                 "value column spool {} holds {} bytes but the column accounts for {expect}",
-                self.path.display(),
+                self.file.0.display(),
                 self.len
             )));
         }
@@ -330,7 +313,7 @@ impl Spool {
         if mapping.len() != expect {
             return Err(invalid(format!(
                 "value column spool {} mapped {} bytes, not the {expect} expected",
-                self.path.display(),
+                self.file.0.display(),
                 mapping.len()
             )));
         }
@@ -350,19 +333,31 @@ impl Spool {
 enum Sink {
     /// A flat column's values buffer, written in place at `at`.
     InPlace { file: InPlaceFile, at: u64 },
-    /// Codes waiting for presence to divide them into blocks, and the guard that removes the
-    /// spool however the writer ends.
-    Spool(Spool, SpoolFile),
+    /// Codes waiting for presence to divide them into blocks.
+    Spool(Spool),
 }
 
-impl Sink {
+/// Somewhere [`spool_values`] writes bytes in order.
+trait Out {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()>;
+
     /// Write what `scratch` holds and empty it.
     fn drain(&mut self, scratch: &mut Vec<u8>) -> io::Result<()> {
         self.write(scratch)?;
         scratch.clear();
         Ok(())
     }
+}
 
+impl Out for Spool {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.writer.write_all(bytes)?;
+        self.len += bytes.len() as u64;
+        Ok(())
+    }
+}
+
+impl Out for Sink {
     fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         match self {
             Sink::InPlace { file, at } => {
@@ -370,7 +365,7 @@ impl Sink {
                 *at += bytes.len() as u64;
                 Ok(())
             }
-            Sink::Spool(spool, _) => spool.write(bytes),
+            Sink::Spool(spool) => spool.write(bytes),
         }
     }
 }
@@ -413,9 +408,7 @@ impl ValueColumnWriter {
         let sink = if kind.blocked() {
             let mut name = values_path.as_os_str().to_os_string();
             name.push(".spool");
-            let path = PathBuf::from(name);
-            let guard = SpoolFile(path.clone());
-            Sink::Spool(Spool::create(path)?, guard)
+            Sink::Spool(Spool::create(PathBuf::from(name))?)
         } else {
             let rows = rows.ok_or_else(|| {
                 io::Error::new(
@@ -545,21 +538,19 @@ impl ValueColumnWriter {
         }
         match self.sink {
             Sink::InPlace { file, .. } => file.finish()?,
-            Sink::Spool(spool, guard) => {
-                let buffer = spool.map(self.count * self.kind.width())?;
-                match self.kind.code_bytes() {
-                    Some(code_bytes @ CodeBytes::Two) => {
+            Sink::Spool(spool) => {
+                let code_bytes = self.kind.code_bytes().expect("only a blocked kind is spooled");
+                let buffer = spool.map(self.count * code_bytes.bytes() as usize)?;
+                match code_bytes {
+                    CodeBytes::Two => {
                         let pushed = ScalarBuffer::<u16>::new(buffer, 0, self.count);
                         write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
                     }
-                    Some(code_bytes @ CodeBytes::Four) => {
+                    CodeBytes::Four => {
                         let pushed = ScalarBuffer::<u32>::new(buffer, 0, self.count);
                         write_ordinal_blocks(&self.values_path, &pushed, presence, code_bytes)?;
                     }
-                    None => unreachable!("only a blocked kind is spooled"),
                 }
-                // The mapping died with `pushed`, inside the arms above.
-                drop(guard);
             }
         }
         if let Some(p) = presence {
@@ -580,9 +571,9 @@ impl Drop for SpoolFile {
 
 /// Append `values` to `sink` in native byte order, through `scratch`, which is written out
 /// whenever it is full and carries its remainder to the next call: a caller pushing many short
-/// runs costs one write a [`SCRATCH`], not one a run. [`Sink::drain`] writes the last of it.
+/// runs costs one write a [`SCRATCH`], not one a run. [`Out::drain`] writes the last of it.
 fn spool_values<T: Copy, const N: usize>(
-    spool: &mut Sink,
+    out: &mut impl Out,
     values: impl IntoIterator<Item = T>,
     bytes: impl Fn(T) -> [u8; N],
     scratch: &mut Vec<u8>,
@@ -590,7 +581,7 @@ fn spool_values<T: Copy, const N: usize>(
     for v in values {
         scratch.extend_from_slice(&bytes(v));
         if scratch.len() >= SCRATCH {
-            spool.drain(scratch)?;
+            out.drain(scratch)?;
         }
     }
     Ok(())
@@ -609,8 +600,7 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
     let counts = ordinals::block_counts(values.len(), ranks.as_ref());
     let mut name = values_path.as_os_str().to_os_string();
     name.push(".blocks.spool");
-    let path = PathBuf::from(name);
-    let mut data = Sink::Spool(Spool::create(path.clone())?, SpoolFile(path));
+    let mut data = Spool::create(PathBuf::from(name))?;
     let mut widths = Vec::with_capacity(counts.len());
     let mut dict_lens = Vec::with_capacity(counts.len());
     let mut encoder = BlockEncoder::default();
@@ -666,17 +656,12 @@ fn write_ordinal_blocks<T: Copy + Into<u32>>(
         )));
     }
     data.drain(&mut scratch)?;
-    let Sink::Spool(spooled, guard) = data else {
-        unreachable!("the block data is spooled");
-    };
     let parts = Parts {
         code_bytes,
         widths: ScalarBuffer::from(widths),
         counts: ScalarBuffer::from(counts),
         dict_lens: ScalarBuffer::from(dict_lens),
-        data: ScalarBuffer::new(spooled.map(bytes as usize)?, 0, (bytes / 4) as usize),
+        data: ScalarBuffer::new(data.map(bytes as usize)?, 0, (bytes / 4) as usize),
     };
-    write_batch(values_path, &ordinals::batch_of_parts(parts)?)?;
-    drop(guard);
-    Ok(())
+    write_batch(values_path, &ordinals::batch_of_parts(parts)?)
 }

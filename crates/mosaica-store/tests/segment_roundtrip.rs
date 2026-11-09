@@ -374,9 +374,9 @@ fn write_segment_scalars_round_trip() {
 }
 
 /// A string column has no width, so `columns.arrow` cannot be laid out for it: the write is
-/// refused, as `render` on a string type is at the declaration, and leaves no `columns.arrow`.
+/// refused, as `render` on a string type is at the declaration.
 #[test]
-fn a_string_column_is_refused_and_leaves_no_columns_file() {
+fn a_string_column_is_refused() {
     use mosaica_spatial::tiler::ScalarValue;
 
     let mut items = vec![TilerItem {
@@ -390,7 +390,34 @@ fn a_string_column_is_refused_and_leaves_no_columns_file() {
     let dir = tempfile::tempdir().expect("tempdir");
     let schema = vec![("label".to_string(), ScalarType::Utf8)];
     write_segment(dir.path(), &items, &codes, &schema, &[]).expect_err("a utf8 column is refused");
-    assert!(!dir.path().join("columns.arrow").exists());
+}
+
+/// A segment is laid out for the rows it was created for: one more is refused when it arrives,
+/// one fewer when the segment finishes, and neither leaves a `columns.arrow` behind.
+#[test]
+fn a_segment_holds_exactly_the_rows_it_was_created_for() {
+    use mosaica_store::write::{no_indexed, SegmentRow, SegmentWriter};
+
+    let row = |id: u64| SegmentRow {
+        mosaica_id: MosaicaId::new(id),
+        morton: 0,
+        residual: 0,
+        scalars: &[],
+        indexed: &no_indexed,
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let columns = dir.path().join("columns.arrow");
+
+    let mut writer = SegmentWriter::create(dir.path(), &[], &[], 1).expect("create");
+    writer.append(row(1)).expect("the one row");
+    writer.append(row(2)).expect_err("a second row is refused");
+    drop(writer);
+    assert!(!columns.exists());
+
+    let mut writer = SegmentWriter::create(dir.path(), &[], &[], 2).expect("create");
+    writer.append(row(1)).expect("the first row");
+    writer.finish().expect_err("one row of two is refused");
+    assert!(!columns.exists());
 }
 
 #[test]
@@ -809,8 +836,8 @@ fn a_column_file_filled_in_place_is_byte_identical_to_one_written_whole() {
     let dir = tempfile::tempdir().expect("tempdir");
     for scalars in [&widths[..], &[][..]] {
         // 600,000 rows puts the all-ones validity bitmap arrow writes for each non-nullable
-        // column past the size the plan keeps a write's bytes at, which is the case the
-        // 25,846,007-row `gbif-64p` fixture found and the smaller row counts here do not.
+        // column past the largest write the layout keeps as bytes, and each column past the
+        // segment writer's staging buffer.
         for rows in [0usize, 1, 7, 1000, 600_000] {
             // Ascending, so the rows arrive in the `(morton, mosaica_id)` order the writer takes
             // with every row in one cell.

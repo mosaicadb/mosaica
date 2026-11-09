@@ -20,7 +20,7 @@ use croaring::{Bitmap, BitmapView, Portable};
 
 use mosaica_types::TermId;
 
-pub(crate) use crate::arrow_file::invalid_data;
+use crate::arrow_file::invalid_data;
 use crate::arrow_file::{decode_single_batch, mapped_buffer, read_buffer, write_single_batch};
 
 const POSTING_COLUMN_NAME: &str = "posting";

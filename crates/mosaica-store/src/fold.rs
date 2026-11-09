@@ -69,11 +69,11 @@
 //! ## Peak memory does not scale with row count
 //!
 //! *k* cursors (one mapped `(morton.u32, columns.arrow)` pair per live segment) plus
-//! [`SegmentWriter`]'s staging buffers, exactly as `execute_merge`. The output is laid out before
-//! the first row for the rows the tombstones leave, which a parallel pass over the inputs' entities
-//! counts first ([`surviving_rows`]). Nothing here accumulates a
-//! corpus-sized `Vec` — the one structure that would have (an entity-span-sized extent, as
-//! `execute_merge` builds) is what the mapped permutation writer replaces.
+//! [`SegmentWriter`]'s staging buffers, exactly as `execute_merge`, and the `u32` per surviving row
+//! of the row→entity table. The output segment is laid out before its first row for the rows the
+//! tombstones leave, which [`surviving_rows`] counts first. The one structure that would have been
+//! corpus-sized beyond that (an entity-span-sized extent, as `execute_merge` builds) is what the
+//! mapped permutation writer replaces.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;

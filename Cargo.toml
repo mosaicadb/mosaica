@@ -68,12 +68,11 @@ croaring = "2.8.0"
 bitpacking = { version = "0.9.3", default-features = false, features = ["bitpacker4x"] }
 rayon = "1"
 proptest = "1"
-# **Pinned exactly.** `mosaica_store::columns` writes `columns.arrow` in place by learning the
-# file's layout from arrow's own `FileWriter` run into a recording sink, which depends on that
-# writer handing each buffer to the sink separately. A 60.x that encoded a batch contiguously
-# before writing it would materialise the whole body — ~70 GB at rung 6 — inside the layout pass.
-# The `Recorder`'s refusal above `MAX_FRAMING_WRITE` is what catches it; the pin is what stops a
-# `cargo update` from reaching it in the first place. The writer is in arrow-ipc, and arrow takes
+# **Pinned exactly.** `mosaica_authz::arrow_file` writes fixed-width files in place by learning
+# each file's layout from arrow's own `FileWriter` run into a recording sink, which depends on that
+# writer handing each buffer to the sink as the array's own bytes. A 60.x that copied a batch's
+# body before writing it would leave the values unrecognised, and the layout is refused; the pin is
+# what stops a `cargo update` from reaching that in the first place. The writer is in arrow-ipc, and arrow takes
 # its sub-crates by caret, so the arrow-ipc pin is the one that holds the writer; arrow is pinned
 # to the same version so the two move together.
 arrow = { version = "=60.0.0", default-features = false, features = ["ipc"] }

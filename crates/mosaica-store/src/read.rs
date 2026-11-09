@@ -2377,8 +2377,8 @@ impl ScalarSlice<'_> {
 }
 
 /// A zero-copy, mmap-backed view of `columns.arrow`. Validated once at [`ColumnsRef::load`]:
-/// exactly one record batch, uncompressed, 8-byte-aligned buffers (via
-/// [`FileDecoder::with_require_alignment`]), and the two fixed columns present with the
+/// exactly one record batch, uncompressed, buffers aligned for their types
+/// ([`mosaica_authz::decode_single_batch`]), and the two fixed columns present with the
 /// expected names and types (contracts §2.6; the `priority` column is cut — decision 0046 —
 /// and a pre-cut bundle carrying it is a typed error here, never a silently ignored column). Every accessor below borrows directly from the
 /// underlying `RecordBatch`'s buffers — no per-call copy.

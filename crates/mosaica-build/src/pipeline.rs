@@ -5293,7 +5293,7 @@ fn write_keyword_column(
     Ok(dict_path)
 }
 
-/// Values pushed to the column writer at a time. The writer spools each chunk as it arrives, so
+/// Values pushed to the column writer at a time. The writer writes each chunk as it arrives, so
 /// this is the whole of what the emit holds beside the attribute tail it reads from.
 const VALUE_CHUNK: usize = 1 << 16;
 
