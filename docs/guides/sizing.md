@@ -71,12 +71,12 @@ The count takes longer the more of the database the attributes admit, and a requ
 
 Plan disc space for four things:
 
-- **The bundle.** Deleted and edited rows stay in it until a compaction, which by default starts once they're a fifth of all rows. Merging segments also leaves files behind, and a compaction starts once those take as much space as the files the bundle uses. So a bundle can reach about twice its live size before a compaction reclaims it, and a little more in the day after one, since compactions are at least a day apart.
+- **The bundle.** Deleted and edited rows stay in it until a compaction, which by default starts once they're a fifth of all rows, so a bundle can reach about a quarter more than its live size before a compaction reclaims it. The files a merge replaces are deleted a few publications later, once no request is still reading them, so merging adds little to that.
 - **Room for a compaction**, which needs free space of one and a half times the size of the files the bundle uses. Without it the compaction is refused. In a bundle of several shards, each shard is compacted on its own, so the space needed is that of the largest.
 - **The cache directory**, which holds work the server can redo. The saved counts are bounded by `figures_disk_bytes`, 8 GiB by default. The copies of each distinct set of access attributes' visible items aren't bounded: they grow with the number of such sets, and with each flush, until the next compaction removes them.
 - **The write-ahead log**, which holds every change since the last flush, so it usually stays small. An annotation level that has grown or been filled holds the log until the next compaction, and `wal_pin` in `/control/status` says what is holding it.
 
-Taken together, a database that's written to and compacted on the default schedule needs about three and a half times its live bundle size, plus the cache. A database you only build and read needs the bundle and the cache. [Schedule compactions](compaction.md) explains when compactions run.
+Taken together, a database that's written to and compacted on the default schedule needs about three times its live bundle size, plus the cache. A database you only build and read needs the bundle and the cache. [Schedule compactions](compaction.md) explains when compactions run.
 
 Keep the bundle and the log on a local disc. A fast SSD matters most when the bundle doesn't fit in memory, since every read the page cache misses goes to disc.
 

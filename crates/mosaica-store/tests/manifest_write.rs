@@ -330,7 +330,9 @@ fn pruning_keeps_the_newest_manifests_and_never_the_lowest() {
         fs::write(dir.join(format!("SEGMENTS-{n}.json")), b"{}").unwrap();
     }
     assert_eq!(
-        mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default").unwrap(),
+        mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default", &Default::default())
+            .unwrap()
+            .removed,
         0
     );
     assert_eq!(names(), vec!["SEGMENTS-0.json", "SEGMENTS-1.json"]);
@@ -339,7 +341,9 @@ fn pruning_keeps_the_newest_manifests_and_never_the_lowest() {
         fs::write(dir.join(format!("SEGMENTS-{n}.json")), b"{}").unwrap();
     }
     assert_eq!(
-        mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default").unwrap(),
+        mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default", &Default::default())
+            .unwrap()
+            .removed,
         2
     );
     assert_eq!(
@@ -351,7 +355,7 @@ fn pruning_keeps_the_newest_manifests_and_never_the_lowest() {
     // A name this reader would not open is a name it will not delete around, either: the
     // directory is left as it stands.
     fs::write(dir.join("SEGMENTS-05.json"), b"{}").unwrap();
-    assert!(mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default").is_err());
+    assert!(mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default", &Default::default()).is_err());
     assert_eq!(names().len(), 4);
 }
 
@@ -459,7 +463,7 @@ fn an_orphan_shard_file_raises_the_floor_and_is_pruned() {
     )
     .unwrap();
     assert_eq!(shard_files(&prefix_dir, 0), vec![0, 1, 2]);
-    mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default").unwrap();
+    mosaica_store::prune_superseded_segments_manifests(&prefix_dir, "default", &Default::default()).unwrap();
     assert_eq!(
         shard_files(&prefix_dir, 0),
         vec![0, 2],
@@ -483,13 +487,59 @@ fn pruning_keeps_every_shard_file_a_kept_partition_file_names() {
     }
     assert_eq!(shard_files(prefix_dir, 0), vec![1, 2, 3, 4, 5]);
     assert_eq!(shard_files(prefix_dir, 1), vec![1]);
-    mosaica_store::prune_superseded_segments_manifests(prefix_dir, "default").unwrap();
+    mosaica_store::prune_superseded_segments_manifests(prefix_dir, "default", &Default::default()).unwrap();
     assert_eq!(shard_files(prefix_dir, 0), vec![3, 4, 5]);
     assert_eq!(
         shard_files(prefix_dir, 1),
         vec![1],
         "every kept partition file names shard 1's first file"
     );
+}
+
+/// **Pruning reports the data files only the removed publications named**, whether a partition
+/// file or a shard file named them, and nothing a kept publication or `MANIFEST.json` names.
+#[test]
+fn pruning_reports_the_files_only_removed_publications_name() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let prefix_dir = tmp.path();
+    let digest = || mosaica_store::manifest::FileDigest {
+        size: 1,
+        sha256: "0".repeat(64),
+    };
+    let segment = |n: u64| format!("{}/seg-{n}/rows.bin", SHARD0.segments_rel("s0"));
+    let mut previous = None;
+    for n in 1..=5u64 {
+        let mut manifest = SegmentsManifest::empty();
+        fixture::add_shard_one(&mut manifest);
+        let files = &mut manifest.partition.files;
+        for rel in ["dictionary/shared".to_string(), format!("dictionary/{n}"), segment(n)] {
+            files.insert(rel, digest());
+        }
+        if n == 1 {
+            files.insert("dictionary/build".into(), digest());
+        }
+        // Publication 3, which is kept, still names publication 2's segment.
+        if n == 3 {
+            files.insert(segment(2), digest());
+        }
+        previous = Some(
+            write_publication(prefix_dir, "default", n, &manifest, previous.as_ref()).unwrap(),
+        );
+    }
+    let build_files = [("dictionary/build".to_string(), digest())].into();
+
+    let pruned =
+        mosaica_store::prune_superseded_segments_manifests(prefix_dir, "default", &build_files)
+            .unwrap();
+    assert_eq!(
+        pruned.unnamed,
+        vec!["dictionary/1".to_string(), "dictionary/2".to_string(), segment(1)]
+    );
+
+    let again =
+        mosaica_store::prune_superseded_segments_manifests(prefix_dir, "default", &build_files)
+            .unwrap();
+    assert_eq!(again, mosaica_store::Pruned::default(), "nothing left to prune");
 }
 
 #[test]

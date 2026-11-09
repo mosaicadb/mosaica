@@ -2722,9 +2722,9 @@ impl Executor {
         drop(live);
         self.pending_reclaim.push(PendingReclaim {
             generations,
-            prefix_dir: from_prefix_dir,
+            unread: Unread::Prefix(from_prefix_dir),
         });
-        self.reclaim_superseded_prefixes();
+        self.reclaim_released();
         let cost = stairs.finish();
         if let Some(job) = job {
             job.finish();
@@ -2886,40 +2886,70 @@ impl Executor {
         .map_err(|e| format!("the swap was refused ({e})"))
     }
 
-    /// Delete every superseded prefix nothing is reading any more.
+    /// Queue `rels`, files under `prefix_dir` that no side-manifest on disc names any more, for
+    /// deletion once every generation that may name them is released: those replaced since the
+    /// last fold's publication, and `live`.
+    pub(super) fn reclaim_when_released(
+        &mut self,
+        live: &Arc<Generation>,
+        prefix_dir: &Path,
+        rels: Vec<String>,
+    ) {
+        if rels.is_empty() {
+            return;
+        }
+        let mut generations = self
+            .superseded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        generations.push(Arc::downgrade(live));
+        self.pending_reclaim.push(PendingReclaim {
+            generations,
+            unread: Unread::Files(rels.iter().map(|rel| prefix_dir.join(rel)).collect()),
+        });
+    }
+
+    /// Delete every superseded prefix and every unnamed file nothing is reading any more.
     ///
-    /// Waits for every generation published over the prefix to be released before unlinking: the
-    /// generation pointer has already moved, so no new holder can appear.
+    /// Waits for every generation that may resolve a path to it to be released before unlinking:
+    /// the generation pointer has already moved, so no new holder can appear. Files also wait
+    /// while a compaction is outstanding, since it reads by path what its plan named and holds no
+    /// generation; a merge or a coalesce reads only what the newest manifest still names.
     ///
-    /// A failure alarms once and drops the entry rather than retrying every tick; the tree stands
-    /// as an orphan.
-    pub(super) fn reclaim_superseded_prefixes(&mut self) {
+    /// A failure alarms once and drops the entry rather than retrying every tick; what it names
+    /// stands as an orphan until the next compaction's prefix removal.
+    pub(super) fn reclaim_released(&mut self) {
         if self.pending_reclaim.is_empty() {
             return;
         }
+        let compacting = self.fold_outstanding();
         let mut still_read = Vec::new();
         for pending in std::mem::take(&mut self.pending_reclaim) {
             if pending
                 .generations
                 .iter()
                 .any(|held| held.strong_count() > 0)
+                || (compacting && matches!(pending.unread, Unread::Files(_)))
             {
                 still_read.push(pending);
                 continue;
             }
-            let prefix_dir = pending.prefix_dir;
-            match mosaica_store::reclaim_prefix(&prefix_dir) {
-                Ok(()) => tracing::info!(
-                    prefix = %prefix_dir.display(),
-                    "the superseded prefix is reclaimed: the build's base, every merged-away \
-                     segment, every consumed tier and every superseded side-manifest"
-                ),
-                Err(e) => tracing::error!(
-                    error = %e,
-                    prefix = %prefix_dir.display(),
-                    "ALARM: the superseded prefix could not be reclaimed and stands as an orphan. \
-                     Nothing live was unlinked; what is lost is the disc the fold exists to free"
-                ),
+            match pending.unread {
+                Unread::Files(paths) => remove_unnamed(&paths),
+                // Its own thread: unlinking a prefix is IO in proportion to the corpus, and this
+                // thread answers every write. One cut short by an exit is the startup sweep's.
+                Unread::Prefix(prefix_dir) => {
+                    let spawned = std::thread::Builder::new()
+                        .name("mosaica-reclaim".into())
+                        .spawn({
+                            let prefix_dir = prefix_dir.clone();
+                            move || reclaim_prefix(&prefix_dir)
+                        });
+                    if spawned.is_err() {
+                        reclaim_prefix(&prefix_dir);
+                    }
+                }
             }
         }
         self.pending_reclaim = still_read;
@@ -4039,11 +4069,63 @@ pub(super) fn fold_segments(
     out
 }
 
-/// One superseded prefix awaiting reclamation, and the generations published over it, whose
-/// release says no thread can still resolve a path inside it. See [`Executor::superseded`].
+/// Delete a prefix a fold superseded and nothing reads, logging the outcome.
+fn reclaim_prefix(prefix_dir: &Path) {
+    match mosaica_store::reclaim_prefix(prefix_dir) {
+        Ok(()) => tracing::info!(
+            prefix = %prefix_dir.display(),
+            "the superseded prefix is reclaimed: the build's base, every merged-away segment, \
+             every consumed tier and every superseded side-manifest"
+        ),
+        Err(e) => tracing::error!(
+            error = %e,
+            prefix = %prefix_dir.display(),
+            "ALARM: the superseded prefix could not be reclaimed and stands as an orphan. Nothing \
+             live was unlinked; what is lost is the disc the fold exists to free"
+        ),
+    }
+}
+
+/// Delete each of `paths`, alarming once if any cannot be. One already gone was taken with its
+/// prefix. Directories are left, since a writer may be creating a file in one; the next
+/// compaction's prefix removal takes them.
+fn remove_unnamed(paths: &[PathBuf]) {
+    let mut failed = 0usize;
+    let mut first = None;
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                failed += 1;
+                first.get_or_insert((path.clone(), e));
+            }
+        }
+    }
+    if let Some((path, error)) = first {
+        tracing::error!(
+            failed,
+            path = %path.display(),
+            error = %error,
+            "ALARM: files no manifest names could not be deleted and stand as orphans until the \
+             next compaction removes the prefix"
+        );
+    }
+}
+
+/// What awaits reclamation, and the generations that may still resolve a path to it, whose
+/// release says no thread can. See [`Executor::superseded`].
 pub(in crate::write) struct PendingReclaim {
     generations: Vec<std::sync::Weak<Generation>>,
-    prefix_dir: PathBuf,
+    unread: Unread,
+}
+
+/// What a [`PendingReclaim`] deletes.
+enum Unread {
+    /// A prefix a fold superseded, deleted whole.
+    Prefix(PathBuf),
+    /// Files in the live prefix no side-manifest on disc names any more.
+    Files(Vec<PathBuf>),
 }
 
 /// Seconds since the Unix epoch, or `None` if the clock is before it.

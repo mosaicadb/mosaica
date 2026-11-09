@@ -785,6 +785,62 @@ fn a_merged_manifest_reopens_with_every_item_and_every_tier() {
     }
 }
 
+/// **A merge's consumed segments leave the disc once no side-manifest on it names them**, with no
+/// compaction, and the bundle reopens with every item.
+///
+/// Side-manifests are pruned to the newest [`mosaica_store::SIDE_MANIFESTS_KEPT`], so that many
+/// publications after the merge nothing a reopen can step down to names the consumed segments.
+#[test]
+fn a_merges_consumed_segments_leave_the_disc_without_a_compaction() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let (engine, items) = engine_with_pending_merge(&tmp, &root);
+    let entities: Vec<EntityId> = items.iter().map(|(e, _)| *e).collect();
+    let prefix = root.join(&engine.generation().prefix);
+    let segment_files = |engine: &Engine| -> BTreeSet<std::path::PathBuf> {
+        engine.generation().bundle.partitions[PARTITION]
+            .manifest
+            .files
+            .keys()
+            .filter(|rel| rel.starts_with(&SHARD.segments_rel("s0")))
+            .map(|rel| prefix.join(rel))
+            .collect()
+    };
+    let before = segment_files(&engine);
+    run_merge(&engine, &entities);
+    let after = segment_files(&engine);
+    // The consumed segments' delta tiers stay named: their entities have rows in the merged one.
+    let consumed: BTreeSet<_> = before.difference(&after).cloned().collect();
+    let merged: BTreeSet<_> = after.difference(&before).cloned().collect();
+    assert!(!consumed.is_empty() && consumed.iter().all(|path| path.exists()));
+    assert!(!merged.is_empty());
+    let mut flushed = 0;
+    for tag in 0..mosaica_store::SIDE_MANIFESTS_KEPT {
+        flushed += flush_one_segment(&engine, tag, 3).len();
+    }
+    tick_until(&engine, "the consumed segments to leave the disc", WAIT, || {
+        consumed.iter().all(|path| !path.exists())
+    });
+    assert_eq!(engine.write_executor_stats().folds, 0);
+    assert!(
+        after.iter().all(|path| path.exists()),
+        "what is still named stays: the merged segment and the consumed segments' tiers"
+    );
+
+    drop(engine);
+    let reopened = engine_at(tmp.path(), &root);
+    let session = reopened.authorise(&full_coverage_credential()).unwrap();
+    assert_eq!(
+        viewport(&reopened, &session)
+            .tiles
+            .iter()
+            .map(|t| t.visible)
+            .sum::<u64>(),
+        (64 + TIER_WIDTH * ROWS_EACH + flushed) as u64,
+        "every item survives the deletion and the restart"
+    );
+}
+
 /// **A reboot reads back a watermark no lower than the one the running process served**, across
 /// the interleaving of a merge and a flush on one write path.
 ///

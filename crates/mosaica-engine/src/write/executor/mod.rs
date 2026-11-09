@@ -62,7 +62,8 @@ pub(super) struct Executor {
     pub(super) pending_reclaim: Vec<PendingReclaim>,
     /// Every generation replaced since the last fold's publication, held weakly. A reader holding
     /// one may open a file under its prefix for the first time, a unique index's run among them,
-    /// so the next fold's reclamation waits for each to be released. Taken by that fold.
+    /// so the next fold's reclamation, and the deletion of a file no side-manifest names any more,
+    /// wait for each to be released. Taken by that fold.
     pub(super) superseded: std::sync::Mutex<Vec<std::sync::Weak<Generation>>>,
     /// So the first tick lands one period after construction, not immediately.
     pub(super) last_tick: std::time::Instant,
@@ -187,7 +188,7 @@ impl Executor {
         }
         self.sample_wal_gauge();
         // Ahead of the flush's in-flight gate: these wait on nothing this executor does.
-        self.reclaim_superseded_prefixes();
+        self.reclaim_released();
         self.dispatch_suggest_rebuild();
         self.publish_row_forms();
         // Above the in-flight gate, so a tick that publishes no geometry still publishes this.
