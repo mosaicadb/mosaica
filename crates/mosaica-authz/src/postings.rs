@@ -272,8 +272,9 @@ pub(crate) fn read_posting(array: &LargeBinaryArray, idx: usize) -> io::Result<P
         0 => Ok(PostingRef::Array(payload)),
         1 => {
             // SAFETY: every tag-1 payload was validated once, at open time, by
-            // `validate_records`, which confirms the payload is exactly the bitmap's serialised
-            // size with no truncation or trailing garbage.
+            // `validate_records`, which confirms the payload is byte for byte the portable
+            // serialisation of the bitmap it decodes to, so every offset the view follows is the
+            // offset of a container the validator read.
             let view = unsafe { BitmapView::deserialize::<Portable>(payload) };
             Ok(PostingRef::Roaring(view))
         }
@@ -292,7 +293,8 @@ pub(crate) fn validate_records(array: &LargeBinaryArray) -> io::Result<()> {
     // The first bad record in term order, whichever thread found it.
     match (0..array.len())
         .into_par_iter()
-        .filter_map(|idx| validate_record(array, idx).err())
+        .map_init(Vec::new, |scratch, idx| validate_record(array, idx, scratch).err())
+        .flatten()
         .find_first(|_| true)
     {
         Some(error) => Err(error),
@@ -300,7 +302,11 @@ pub(crate) fn validate_records(array: &LargeBinaryArray) -> io::Result<()> {
     }
 }
 
-fn validate_record(array: &LargeBinaryArray, idx: usize) -> io::Result<()> {
+/// A tag-1 payload is accepted only when serialising the bitmap it decodes to reproduces it. The
+/// safe decoder reads the containers in sequence and ignores the offset header, which the view
+/// follows; equality makes the two agree, and refuses trailing bytes too. Every writer serialises
+/// the bitmap it built, so a valid file always passes. `scratch` holds the serialisation.
+fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) -> io::Result<()> {
     let bytes = array.value(idx);
     let (tag, payload) = bytes
         .split_first()
@@ -323,14 +329,12 @@ fn validate_record(array: &LargeBinaryArray, idx: usize) -> io::Result<()> {
                      Roaring bitmap"
                 ))
             })?;
-            let consumed = bitmap.get_serialized_size_in_bytes::<Portable>();
-            if consumed != payload.len() {
+            scratch.clear();
+            if *bitmap.serialize_into_vec::<Portable>(scratch) != *payload {
                 return Err(invalid_data(format!(
-                    "postings: term {idx} tag-1 payload has {} trailing byte(s) \
-                     beyond the {consumed}-byte serialised bitmap (payload is \
-                     {} bytes) — BitmapView::deserialize requires an exact-length buffer",
-                    payload.len().saturating_sub(consumed),
-                    payload.len()
+                    "postings: term {idx} tag-1 payload is not the serialisation of the bitmap \
+                     it decodes to: its headers disagree with its containers or bytes follow \
+                     them; rebuild the file"
                 )));
             }
         }
@@ -602,6 +606,39 @@ mod tests {
 
         let err = PostingsReader::open(&truncated_path, false).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    /// A tag-1 record whose offset header points one byte off a container decodes cleanly in
+    /// sequence but would be served from the wrong bytes, so it is refused at open.
+    #[test]
+    fn open_rejects_a_tag1_record_whose_offset_header_is_wrong() {
+        let temp = TempDir::new().unwrap();
+        // Three array containers and no runs, so the payload carries an offset header: a 4-byte
+        // cookie, a 4-byte container count, 4 bytes of key and cardinality a container, then a
+        // 4-byte offset a container.
+        let entities: Vec<u32> = (0..3u32)
+            .flat_map(|c| (0..100u32).map(move |i| (c << 16) + 2 * i))
+            .collect();
+        let record = encode_posting(0, &entities, 0).unwrap();
+        assert_eq!(&record[1..5], &12346u32.to_le_bytes(), "a no-run portable cookie");
+        assert_eq!(&record[5..9], &3u32.to_le_bytes(), "three containers");
+
+        let valid_path = temp.path().join("valid");
+        write_raw_records(&valid_path, &[&record]).unwrap();
+        let reader = PostingsReader::open(&valid_path, true).unwrap();
+        let served: Vec<u32> = reader.posting(TermId::new(0)).unwrap().unwrap().iter().collect();
+        assert_eq!(served, entities);
+
+        // The second container's offset, one byte later than where it starts.
+        let mut damaged = record.clone();
+        let at = 1 + 4 + 4 + 3 * 4 + 4;
+        damaged[at] += 1;
+        let damaged_path = temp.path().join("damaged");
+        write_raw_records(&damaged_path, &[&damaged]).unwrap();
+        for mmap in [true, false] {
+            let err = PostingsReader::open(&damaged_path, mmap).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        }
     }
 
     fn write_raw_records(path: &Path, records: &[&[u8]]) -> io::Result<()> {
