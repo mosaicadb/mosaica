@@ -309,8 +309,8 @@ fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) 
                 .all(|w| u32::from_le_bytes(w[0]) < u32::from_le_bytes(w[1]))
             {
                 return Err(invalid_data(format!(
-                    "postings: term {idx}'s tag-0 entities do not ascend strictly; rebuild the \
-                     file"
+                    "postings: term {idx}'s tag-0 entities are not strictly ascending; rebuild \
+                     the file"
                 )));
             }
         }
