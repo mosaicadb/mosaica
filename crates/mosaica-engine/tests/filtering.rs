@@ -1574,6 +1574,125 @@ fn a_filter_serves_every_match_up_to_the_cap_even_with_theta_live() {
     );
 }
 
+/// **A filter's projection is kept, and the next viewport over the same filter reads it.** A
+/// viewer panning with one filter crosses the same matches into the same row space each time; the
+/// second request reads the rows the first projected rather than projecting again, wider or
+/// narrower than the first, and draws and counts exactly what an engine keeping nothing draws.
+/// A suppression accepted after the rows were kept still hides its item from the next request.
+#[test]
+fn a_filter_projected_once_is_read_back_by_the_next_viewport() {
+    let fx = fixture();
+    let paths = |name: &str| {
+        (
+            fx._dir.path().join(format!("cache-kept-{name}")),
+            fx._dir.path().join(format!("wal-kept-{name}")),
+        )
+    };
+    let (cache, wal) = paths("kept");
+    let engine = open_engine_publishing(&fx.bundle, &cache, &wal);
+    // Read only, so it can open the bundle the publishing engine holds.
+    let (cache, wal) = paths("fresh");
+    let fresh = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    fresh.set_filter_rows_cache_bytes(0);
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let fresh_session = fresh.authorise(&full_coverage_credential()).unwrap();
+    // An entity-only column, so the request crosses rather than taking the row route.
+    let any_bonus = leaf(
+        "bonus",
+        FilterOperand::Range {
+            lo: Some(Endpoint {
+                value: Scalar::Int(-10),
+                inclusive: true,
+            }),
+            hi: Some(Endpoint {
+                value: Scalar::Int(10),
+                inclusive: true,
+            }),
+        },
+    );
+    let request = |zoom: u8, window: [f64; 4]| {
+        ViewportRequest::new("s0", zoom, window, 10_000).filter(any_bonus.clone())
+    };
+    let drawn = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
+        out.points.mosaica_ids.iter().copied().collect()
+    };
+    let matched =
+        |out: &mosaica_engine::ViewportOut| -> u64 { out.tiles.iter().map(|t| t.matched).sum() };
+    let routes = |engine: &mosaica_engine::Engine| {
+        let (projected, per_tile) = engine.filter_crossing_routes();
+        (projected, per_tile, engine.filter_crossings_kept())
+    };
+
+    let before = routes(&engine);
+    let first = engine
+        .viewport(&session, request(0, FULL_VIEWPORT))
+        .expect("the full extent answers");
+    let after = routes(&engine);
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1, after.2 - before.2),
+        (1, 0, 0),
+        "the first request projects"
+    );
+
+    for (what, zoom, window) in [
+        ("the same extent", 0u8, FULL_VIEWPORT),
+        ("a narrow window", 8, [0.0, 0.0, 400.0, 400.0]),
+    ] {
+        let before = routes(&engine);
+        let again = engine
+            .viewport(&session, request(zoom, window))
+            .expect("the request answers");
+        let after = routes(&engine);
+        assert_eq!(
+            (after.0 - before.0, after.1 - before.1, after.2 - before.2),
+            (0, 0, 1),
+            "{what}: the rows the first request projected are read back"
+        );
+        let unkept = fresh
+            .viewport(&fresh_session, request(zoom, window))
+            .expect("the request answers");
+        assert_eq!(drawn(&again), drawn(&unkept), "{what}: the same marks");
+        assert_eq!(matched(&again), matched(&unkept), "{what}: the same counts");
+    }
+    assert_eq!(
+        fresh.filter_crossings_kept(),
+        0,
+        "a zero bound keeps nothing"
+    );
+
+    // An item the filter matches, suppressed after its row was kept.
+    let shown = drawn(&first);
+    let (entity, raw) = fx
+        .entity_of
+        .values()
+        .map(|&entity| {
+            let id = engine
+                .mosaica_id_of(mosaica_types::EntityId::new(entity))
+                .expect("identity is computable");
+            (entity, id.raw())
+        })
+        .find(|(_, raw)| shown.contains(raw))
+        .expect("the filter matches something");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(entity),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )
+        .expect("a suppression is accepted");
+    let after = engine
+        .viewport(&session, request(0, FULL_VIEWPORT))
+        .expect("the full extent answers");
+    assert!(
+        !drawn(&after).contains(&raw),
+        "a suppressed item is drawn through a kept crossing"
+    );
+    assert_eq!(
+        matched(&after),
+        matched(&first) - 1,
+        "a suppressed item is counted through a kept crossing"
+    );
+}
+
 /// A viewport far smaller than the filter's result crosses into row space by **testing its own
 /// rows** rather than projecting the whole result, and the two routes agree.
 ///

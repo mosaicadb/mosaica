@@ -149,6 +149,7 @@ pub fn prepare_config(config: Config) -> Result<Prepared, BoxError> {
     engine.set_max_region_cells(config.max_region_cells);
     engine.set_region_cache_bytes(config.region_cache_bytes);
     engine.set_text_filter_cache_bytes(config.text_filter_cache_bytes);
+    engine.set_filter_rows_cache_bytes(config.filter_rows_cache_bytes);
     // How long a request waits on another request's row-projection build before it is shed.
     engine.set_single_flight_wait_ms(config.single_flight_wait_ms);
     // Crossing the limit raises a counter and a log line and nothing else. Set after replay, so a

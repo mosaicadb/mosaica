@@ -33,6 +33,7 @@ Each cache has a limit you can set under `[serve]` in `mosaica.toml`:
 | `masked_count_cache_bytes` | 1 GiB | The counts, centroids and boxes of annotation levels served from a column, as each set of attributes sees them, and the tallies of number and timestamp fields. Empty without such a level |
 | `figures_disk_bytes` | 8 GiB | The same counts, kept on disc in the cache directory so that a restart reads them back |
 | `region_cache_bytes` | 256 MiB | Drawn filter regions broken into map tiles, shared between viewers |
+| `filter_rows_cache_bytes` | 256 MiB | Each filter's matching items crossed onto a map's points, for each set of access attributes, until the next flush, merge or compaction. An entry is the matches and their points, two bitmaps over a shard, and each request in flight can hold one more beside the limit |
 | `text_filter_cache_bytes` | 256 MiB | The items each `match` and `phrase` filter matches, for each set of access attributes, until the next flush, coalesce or compaction. An entry is about 12 MB at 100 million items for a phrase that half of them contain, and each request in flight can hold one more beside the limit |
 | `occupancy_cache_bytes` | 32 MiB | How many tiles at each zoom hold something a set of access attributes can see |
 

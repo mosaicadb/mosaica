@@ -30,6 +30,7 @@ mod edited;
 mod engine;
 mod error;
 pub mod filter;
+pub mod filter_rows_cache;
 mod flush;
 mod layer_read;
 pub mod gate;

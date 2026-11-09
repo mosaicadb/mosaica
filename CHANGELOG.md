@@ -6,6 +6,24 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
+## [Unreleased]
+
+### Changed
+
+- **A filtered map answers faster.** Testing each point of the map against a filter's matches
+  finds the matching item's block directly rather than searching for it, and starts reading each
+  block before it is needed: about nine times faster where the matches are many.
+- **A viewer's first map and a database's open are faster on a machine with cores to spare.**
+  Working out which points a viewer may see now runs on every core the server has free and does
+  less work on one: at 10⁹ items, measured on four cores, 0.96 s rather than 5.1 s for a viewer
+  who sees a quarter of them, and 3.0 s on one core. Opening a database checks each map's points
+  in 2.8 s rather than 19 s on four cores.
+- **A filter is kept crossed onto the map.** Where a filter's matches are few beside the map's
+  points, the points they fall on are kept for every viewer with the same access, so panning and
+  zooming with the filter does not work them out again. Deletions and suppressions still apply to
+  the next request. `serve.filter_rows_cache_bytes` bounds it (256 MiB by default, `0` keeps
+  none), and `GET /control/status` reports it as `filter_rows_cache`.
+
 ## [0.2.0] - 2026-11-05
 
 An alpha, like 0.1.0. The bundle format has changed, so 0.2.0 refuses a bundle that 0.1.0 built,

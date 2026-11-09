@@ -31,6 +31,11 @@ pub(crate) struct ServedView<'a> {
 /// One shard of a request's view.
 pub(crate) struct ServedSide<'a> {
     pub(crate) shard: &'a crate::Shard,
+    /// The view's name, which with the shard's data names `data`'s row space.
+    pub(crate) view: &'a str,
+    /// The request's grant ([`crate::Session::terms_digest`]), which confines what the side's
+    /// crossings keep to requests under it.
+    pub(crate) grant: [u8; 32],
     pub(crate) data: &'a mosaica_store::read::ViewData,
     /// Every segment of the view in this shard, each with where its rows begin in the shard's row
     /// space for the view, ascending.

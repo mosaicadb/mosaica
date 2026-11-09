@@ -113,6 +113,8 @@ impl Engine {
             };
             sides.push(ServedSide {
                 shard,
+                view,
+                grant: session.terms_digest(),
                 data,
                 segments: segments_with_row_bases(view, data)?,
                 denied: shard.denied_in(view)?,
