@@ -68,7 +68,7 @@ use mosaica_lifecycle::overlay::Overlay;
 pub use columns::successor::{
     CoalescedTextWindow, CoalescedWindow, OpenedExtent, TextExtentPaths,
 };
-pub use columns::{FilterColumns, ShardExtents, ValueLayers};
+pub use columns::{BothRoutes, FilterColumns, ShardExtents, ValueLayers};
 pub(crate) use columns::{open_entity_terms_stack, open_record_stack, record_extent_paths};
 pub(crate) use declared::{carries_live_view, scoped_visibility_of};
 pub use declared::{

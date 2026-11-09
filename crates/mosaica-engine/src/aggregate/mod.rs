@@ -563,7 +563,7 @@ impl Engine {
         }) {
             generation
                 .declared_columns()
-                .admit(expr, true, &reaches)
+                .admit(expr, &reaches)
                 .map_err(filter_refusal)?;
         }
         let prefer_row = plans.iter().any(Plan::wants_rows);

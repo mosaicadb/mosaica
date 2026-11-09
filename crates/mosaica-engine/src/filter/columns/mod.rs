@@ -2,6 +2,7 @@ mod evaluate;
 mod open;
 pub(in crate::filter) mod successor;
 
+pub use evaluate::BothRoutes;
 pub use open::ShardExtents;
 pub(crate) use open::{open_entity_terms_stack, open_record_stack, record_extent_paths};
 

@@ -650,7 +650,7 @@ impl Engine {
             }
             generation
                 .declared_columns()
-                .admit(expr, false, &|layer| self.layer_levels(session, layer))
+                .admit(expr, &|layer| self.layer_levels(session, layer))
                 .map_err(crate::viewport::filter_refusal)?;
         }
 

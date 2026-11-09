@@ -185,8 +185,8 @@ impl Engine {
 
     /// `expr` routed in `side` and, where it routes to row space, evaluated over every row of the
     /// view it can match: the rows of the drawn region that bounds it ([`bounding_region`]), and
-    /// the whole view where none does. `prefer_row` decides a column with both routes, the same in
-    /// every side of the request ([`Engine::region_prefers_rows`]).
+    /// the whole view where none does. `both` decides a column with both routes, the same in every
+    /// side of the request ([`Engine::region_routes`]).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn route_over_view(
         &self,
@@ -194,9 +194,12 @@ impl Engine {
         side: &ServedSide<'_>,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
-        route: &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
+        route: &dyn Fn(
+            &crate::filter::FilterExpr,
+            crate::filter::BothRoutes<'_>,
+        ) -> Result<crate::filter::RoutedFilter>,
         expr: &crate::filter::FilterExpr,
-        prefer_row: bool,
+        both: crate::filter::BothRoutes<'_>,
     ) -> Result<OverView> {
         let domain = match bounding_region(expr) {
             Some(leaf) => self
@@ -211,7 +214,7 @@ impl Engine {
             Some(domain) => (domain, domain.iter().map(|r| u64::from(r.end - r.start)).sum()),
             None => (std::slice::from_ref(&whole), total),
         };
-        Ok(match route(expr, prefer_row)? {
+        Ok(match route(expr, both)? {
             crate::filter::RoutedFilter::Entity(entities) => OverView::Entities(entities),
             crate::filter::RoutedFilter::Row(tree) => {
                 let region = tree.region_verdict();
@@ -225,33 +228,38 @@ impl Engine {
         })
     }
 
-    /// Whether a column with both routes takes the row route in `expr` over the whole view, decided
-    /// once for every side in `sides` as the viewport decides it for a request's tiles: inside the
-    /// drawn region that bounds `expr`, where its rows in every side are no more than `visible`,
-    /// the viewer's visible total in the view.
-    pub(crate) fn region_prefers_rows<'s>(
+    /// How a column with both routes is routed in `expr` over the whole view, decided once for
+    /// every side `mask` reads as the viewport decides it for a request's tiles: by cost over the
+    /// rows of the drawn region that bounds `expr` in every side, and the entity route where no
+    /// region bounds it. `columns` are those sides' filter columns ([`ServedView::filter_columns`]).
+    pub(crate) fn region_routes<'c>(
         &self,
         served: &ServedView<'_>,
-        sides: impl Iterator<Item = &'s ServedSide<'s>>,
+        mask: &ShardedMask,
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         expr: &crate::filter::FilterExpr,
-        visible: u64,
-    ) -> Result<bool> {
+        columns: &'c [&'c crate::filter::FilterColumns],
+    ) -> Result<crate::filter::BothRoutes<'c>> {
+        use crate::filter::BothRoutes;
         let Some(leaf) = bounding_region(expr) else {
-            return Ok(false);
+            return Ok(BothRoutes::Entity);
         };
         let mut rows = 0u64;
-        for side in sides {
+        for (_, side, _) in served.filtered_sides(mask) {
             let held = self
                 .region_rows(leaf, served, side, resolved, cancel)
                 .map_err(filter_refusal)?;
             let Some(domain) = held.domain else {
-                return Ok(false);
+                return Ok(BothRoutes::Entity);
             };
             rows += domain.iter().map(|r| u64::from(r.end - r.start)).sum::<u64>();
         }
-        Ok(row_route_pays(rows, visible))
+        Ok(BothRoutes::Cheaper {
+            rows,
+            visible: mask.visible_total(),
+            columns,
+        })
     }
 }
 
@@ -276,12 +284,6 @@ fn bounding_region(expr: &crate::filter::FilterExpr) -> Option<&crate::filter::R
         FilterExpr::AllOf(kids) => kids.iter().find_map(bounding_region),
         _ => None,
     }
-}
-
-/// Whether a column with both routes is cheaper read over `rows` rows than evaluated over the
-/// `visible` entities of the viewer's candidate: the viewport's rule, a row against an entity.
-pub(crate) fn row_route_pays(rows: u64, visible: u64) -> bool {
-    rows <= visible
 }
 
 /// How many times fewer entities a request's tiles must hold than the viewer's visible set before
@@ -1045,9 +1047,14 @@ impl Engine {
             return Ok((mask, None));
         }
         check_cancelled(&req.cancel)?;
-        // The route rule reads the request's whole extent and visible total, so a leaf takes the
-        // same space in every shard.
-        let prefer_row = row_route_pays(tiling.rows_in_ranges, v_total);
+        // The route rule reads the request's whole extent, its visible total and the postings of
+        // every shard it reads, so a leaf takes the same space in every shard.
+        let columns = served.filter_columns(&mask);
+        let both = crate::filter::BothRoutes::Cheaper {
+            rows: tiling.rows_in_ranges,
+            visible: v_total,
+            columns: &columns,
+        };
         let mut region_verdict: Option<crate::region::RegionVerdict> = None;
         let mut filters = Vec::new();
         let mut highlights = Vec::new();
@@ -1074,7 +1081,7 @@ impl Engine {
                                         per_tile_only: bool,
                                         count_matched: bool|
                      -> Result<(FilterRows, Option<crate::region::RegionVerdict>)> {
-                        let routed = route(expr, prefer_row)?;
+                        let routed = route(expr, both)?;
                         probe.lap(|t| &mut t.filter_eval_ns);
                         let mut out = self.rows_of_routed(
                             side,
@@ -1222,7 +1229,10 @@ impl Engine {
         resolved: &ResolvedLeaves<'_>,
         cancel: &Option<CancelToken>,
         body: impl FnOnce(
-            &dyn Fn(&crate::filter::FilterExpr, bool) -> Result<crate::filter::RoutedFilter>,
+            &dyn Fn(
+                &crate::filter::FilterExpr,
+                crate::filter::BothRoutes<'_>,
+            ) -> Result<crate::filter::RoutedFilter>,
         ) -> Result<T>,
     ) -> Result<T> {
         // The fragment a leaf's kept answer is taken over, where the whole candidate is known.
@@ -1290,10 +1300,10 @@ impl Engine {
             unique: &unique,
             leaves,
         };
-        body(&|expr: &crate::filter::FilterExpr, prefer_row: bool| {
+        body(&|expr: &crate::filter::FilterExpr, both: crate::filter::BothRoutes<'_>| {
             side.shard
                 .filter_columns
-                .evaluate_routed(expr, candidate, prefer_row, &resolvers, cancel)
+                .evaluate_routed(expr, candidate, both, &resolvers, cancel)
                 .map_err(filter_refusal)
         })
     }
