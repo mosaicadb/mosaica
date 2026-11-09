@@ -42,7 +42,6 @@
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::ptr::NonNull;
 use std::sync::Arc;
 
 use arrow::array::ArrayRef;
@@ -50,7 +49,7 @@ use arrow::buffer::{Buffer, ScalarBuffer};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use croaring::{Bitmap, Portable};
-use mosaica_authz::arrow_file::{write_single_batch, FileLayout, InPlaceFile};
+use mosaica_authz::arrow_file::{mapped_buffer, write_single_batch, FileLayout, InPlaceFile};
 
 use crate::values::ordinals::{self, BlockEncoder, CodeBytes, Parts, Width};
 use crate::values::Codes;
@@ -301,31 +300,16 @@ impl Spool {
                 self.len
             )));
         }
-        if expect == 0 {
-            // memmap2 rejects zero-length maps, and an empty buffer is what the one-shot path
-            // produces for an empty column anyway. Allocated rather than taken from an empty
-            // `Vec`, whose dangling pointer carries `u8`'s alignment and would be rejected by
-            // every wider `ScalarBuffer` — `MutableBuffer` is aligned for any of them.
-            return Ok(arrow::buffer::MutableBuffer::new(0).into());
-        }
         // The map reads the page cache the flush wrote to; nothing reads the spool after a crash.
-        let mapping = unsafe { memmap2::Mmap::map(&file) }?;
-        if mapping.len() != expect {
+        let buffer = mapped_buffer(&file)?;
+        if buffer.len() != expect {
             return Err(invalid(format!(
                 "value column spool {} mapped {} bytes, not the {expect} expected",
                 self.file.0.display(),
-                mapping.len()
+                buffer.len()
             )));
         }
-        let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-        // SAFETY: `arc` owns the mapping for as long as any `Buffer` built from it is alive (it
-        // is captured as the buffer's `Allocation`), the mapping is valid for `expect` bytes for
-        // its whole lifetime, and `memmap2::Mmap` never returns a null base pointer. The
-        // mapping's base is page-aligned, which satisfies the alignment every `ScalarBuffer` built
-        // over it requires.
-        let ptr = NonNull::new(arc.as_ptr() as *mut u8)
-            .expect("memmap2::Mmap never returns a null base pointer");
-        Ok(unsafe { Buffer::from_custom_allocation(ptr, expect, arc) })
+        Ok(buffer)
     }
 }
 
