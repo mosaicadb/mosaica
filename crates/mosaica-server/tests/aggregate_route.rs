@@ -1668,7 +1668,7 @@ async fn a_bool_is_counted_in_a_bin_for_false_and_one_for_true() {
         let batch = &decoded.tables[0].1[0].0;
         let edges = |name: &str| batch.column_by_name(name).unwrap().as_primitive::<UInt64Type>().clone();
         let (lower, upper) = (edges("lower"), edges("upper"));
-        let rows: Vec<(String, Option<(u64, u64)>, u64)> = aggregate_rows(batch)
+        let rows: Vec<_> = aggregate_rows(batch)
             .into_iter()
             .enumerate()
             .map(|(i, row)| {
